@@ -513,7 +513,7 @@ class YouTubeClient:
         video_id = entry.get('id', '')
         filename = f"{video_id}||{title}"  # Store video_id and title for later download
 
-        return TrackResult(
+        track_result = TrackResult(
             username="youtube",  # YouTube doesn't have users - use constant
             filename=filename,
             size=file_size,
@@ -528,6 +528,11 @@ class YouTubeClient:
             album=None,  # YouTube videos don't have album info (will be added from Spotify)
             track_number=None
         )
+        
+        # Add thumbnail for frontend (surgical addition)
+        track_result.thumbnail = entry.get('thumbnail')
+        
+        return track_result
 
     async def search(self, query: str, timeout: int = None, progress_callback=None) -> tuple[List[TrackResult], List[AlbumResult]]:
         """
@@ -564,8 +569,8 @@ class YouTubeClient:
                 }
 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    # Search YouTube (max 10 results)
-                    search_results = ydl.extract_info(f"ytsearch10:{query}", download=False)
+                    # Search YouTube (max 50 results)
+                    search_results = ydl.extract_info(f"ytsearch50:{query}", download=False)
 
                     if not search_results or 'entries' not in search_results:
                         return []

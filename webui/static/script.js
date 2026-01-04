@@ -38,7 +38,7 @@ let spotifyPlaylists = [];
 let selectedPlaylists = new Set();
 let activeSyncPollers = {}; // Key: playlist_id, Value: intervalId
 let playlistTrackCache = {}; // Key: playlist_id, Value: tracks array
-let spotifyPlaylistsLoaded = false; 
+let spotifyPlaylistsLoaded = false;
 let activeDownloadProcesses = {};
 let sequentialSyncManager = null;
 
@@ -93,39 +93,39 @@ let similarArtistsController = null; // Track ongoing similar artists stream to 
 // --- Wishlist Modal Persistence State Management ---
 const WishlistModalState = {
     // Track if wishlist modal was visible before page refresh
-    setVisible: function() {
+    setVisible: function () {
         localStorage.setItem('wishlist_modal_visible', 'true');
         console.log('📱 [Modal State] Wishlist modal marked as visible in localStorage');
     },
-    
-    setHidden: function() {
+
+    setHidden: function () {
         localStorage.setItem('wishlist_modal_visible', 'false');
         console.log('📱 [Modal State] Wishlist modal marked as hidden in localStorage');
     },
-    
-    wasVisible: function() {
+
+    wasVisible: function () {
         const visible = localStorage.getItem('wishlist_modal_visible') === 'true';
         console.log(`📱 [Modal State] Checking if wishlist modal was visible: ${visible}`);
         return visible;
     },
-    
-    clear: function() {
+
+    clear: function () {
         localStorage.removeItem('wishlist_modal_visible');
         console.log('📱 [Modal State] Cleared wishlist modal visibility state');
     },
-    
+
     // Track if user manually closed the modal during auto-processing
-    setUserClosed: function() {
+    setUserClosed: function () {
         localStorage.setItem('wishlist_modal_user_closed', 'true');
         console.log('📱 [Modal State] User manually closed wishlist modal during auto-processing');
     },
-    
-    clearUserClosed: function() {
+
+    clearUserClosed: function () {
         localStorage.removeItem('wishlist_modal_user_closed');
         console.log('📱 [Modal State] Cleared user closed state');
     },
-    
-    wasUserClosed: function() {
+
+    wasUserClosed: function () {
         const closed = localStorage.getItem('wishlist_modal_user_closed') === 'true';
         console.log(`📱 [Modal State] Checking if user closed modal: ${closed}`);
         return closed;
@@ -173,10 +173,10 @@ class SequentialSyncManager {
         try {
             // Use existing single sync function
             await startPlaylistSync(playlistId);
-            
+
             // Wait for sync to complete by monitoring the poller
             await this.waitForSyncCompletion(playlistId);
-            
+
         } catch (error) {
             console.error(`❌ Sequential sync: Failed to sync playlist ${playlistId}:`, error);
             showToast(`Failed to sync "${playlist?.name || playlistId}": ${error.message}`, 'error');
@@ -207,15 +207,15 @@ class SequentialSyncManager {
         const duration = ((Date.now() - this.startTime) / 1000).toFixed(1);
         const completedCount = this.queue.length;
         console.log(`🏁 Sequential sync completed in ${duration}s`);
-        
+
         this.isRunning = false;
         this.queue = [];
         this.currentIndex = 0;
         this.startTime = null;
-        
+
         // Re-enable playlist selection
         disablePlaylistSelection(false);
-        
+
         this.updateUI();
         updateRefreshButtonState(); // Refresh button state after completion
         showToast(`Sequential sync completed for ${completedCount} playlists in ${duration}s`, 'success');
@@ -223,16 +223,16 @@ class SequentialSyncManager {
 
     cancel() {
         if (!this.isRunning) return;
-        
+
         console.log('🛑 Cancelling sequential sync');
         this.isRunning = false;
         this.queue = [];
         this.currentIndex = 0;
         this.startTime = null;
-        
+
         // Re-enable playlist selection
         disablePlaylistSelection(false);
-        
+
         this.updateUI();
         updateRefreshButtonState(); // Refresh button state after cancellation
         showToast('Sequential sync cancelled', 'info');
@@ -241,7 +241,7 @@ class SequentialSyncManager {
     updateUI() {
         const startSyncBtn = document.getElementById('start-sync-btn');
         const selectionInfo = document.getElementById('selection-info');
-        
+
         if (!this.isRunning) {
             // Reset to normal state
             if (startSyncBtn) {
@@ -250,8 +250,8 @@ class SequentialSyncManager {
             }
             if (selectionInfo) {
                 const count = selectedPlaylists.size;
-                selectionInfo.textContent = count === 0 
-                    ? 'Select playlists to sync' 
+                selectionInfo.textContent = count === 0
+                    ? 'Select playlists to sync'
                     : `${count} playlist${count > 1 ? 's' : ''} selected`;
             }
         } else {
@@ -284,7 +284,7 @@ const API = {
     activity: '/api/activity',
     stream: {
         start: '/api/stream/start',
-        status: '/api/stream/status', 
+        status: '/api/stream/status',
         toggle: '/api/stream/toggle',
         stop: '/api/stream/stop'
     }
@@ -294,7 +294,7 @@ const API = {
 // INITIALIZATION
 // ===============================
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     console.log('SoulSync WebUI initializing...');
 
     // Initialize components
@@ -318,19 +318,19 @@ document.addEventListener('DOMContentLoaded', function() {
         initializeBeatportDJSlider();
     }
 
-    
+
     // Start global service status polling for sidebar (works on all pages)
     fetchAndUpdateServiceStatus();
     setInterval(fetchAndUpdateServiceStatus, 10000); // Every 10 seconds
-    
+
     // Start always-on download polling (batched, minimal overhead)
     startGlobalDownloadPolling();
-    
+
     // Load initial data
     loadInitialData();
-    
+
     // Handle window resize to re-check track title scrolling
-    window.addEventListener('resize', function() {
+    window.addEventListener('resize', function () {
         if (currentTrack) {
             const trackTitleElement = document.getElementById('track-title');
             const trackTitle = currentTrack.title || 'Unknown Track';
@@ -339,7 +339,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 100); // Small delay to allow layout to settle
         }
     });
-    
+
     console.log('SoulSync WebUI initialized successfully!');
 });
 
@@ -349,7 +349,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function initializeNavigation() {
     const navButtons = document.querySelectorAll('.nav-button');
-    
+
     navButtons.forEach(button => {
         button.addEventListener('click', () => {
             const page = button.getAttribute('data-page');
@@ -538,7 +538,7 @@ function initializeMediaPlayer() {
     const playButton = document.getElementById('play-button');
     const stopButton = document.getElementById('stop-button');
     const volumeSlider = document.getElementById('volume-slider');
-    
+
     // Initialize HTML5 audio player
     audioPlayer = document.getElementById('audio-player');
     if (audioPlayer) {
@@ -548,20 +548,20 @@ function initializeMediaPlayer() {
         audioPlayer.addEventListener('error', onAudioError);
         audioPlayer.addEventListener('loadstart', onAudioLoadStart);
         audioPlayer.addEventListener('canplay', onAudioCanPlay);
-        
+
         // Set initial volume
         audioPlayer.volume = 0.7; // 70%
         volumeSlider.value = 70;
     }
-    
+
     // Track title click - toggle expansion
     trackTitle.addEventListener('click', toggleMediaPlayerExpansion);
-    
+
     // Media controls
     playButton.addEventListener('click', handlePlayPause);
     stopButton.addEventListener('click', handleStop);
     volumeSlider.addEventListener('input', handleVolumeChange);
-    
+
     // Progress bar controls
     const progressBar = document.getElementById('progress-bar');
     if (progressBar) {
@@ -574,20 +574,20 @@ function initializeMediaPlayer() {
             delete progressBar.dataset.seeking;
         });
     }
-    
+
     // Update volume slider styling
     volumeSlider.addEventListener('input', updateVolumeSliderAppearance);
 }
 
 function toggleMediaPlayerExpansion() {
     if (!currentTrack) return;
-    
+
     const mediaPlayer = document.getElementById('media-player');
     const expandedContent = document.getElementById('media-expanded');
     const noTrackMessage = document.getElementById('no-track-message');
-    
+
     mediaPlayerExpanded = !mediaPlayerExpanded;
-    
+
     if (mediaPlayerExpanded) {
         mediaPlayer.style.minHeight = '145px';
         expandedContent.classList.remove('hidden');
@@ -600,13 +600,13 @@ function toggleMediaPlayerExpansion() {
 
 function extractTrackTitle(filename) {
     if (!filename) return null;
-    
+
     // Remove file extension
     let title = filename.replace(/\.[^/.]+$/, '');
-    
+
     // Remove path components, keep only the filename
     title = title.split('/').pop().split('\\').pop();
-    
+
     // Clean up common filename patterns
     title = title
         .replace(/^\d+\.?\s*/, '') // Remove track numbers at start
@@ -615,34 +615,34 @@ function extractTrackTitle(filename) {
         .replace(/\s*\[\d+kbps\].*$/, '') // Remove bitrate info
         .replace(/\s*\(.*?\)\s*$/, '') // Remove parenthetical info at end
         .trim();
-    
+
     return title || null;
 }
 
 function setTrackInfo(track) {
     currentTrack = track;
-    
+
     const trackTitleElement = document.getElementById('track-title');
     const trackTitle = track.title || 'Unknown Track';
-    
+
     // Set up the HTML structure for scrolling
     trackTitleElement.innerHTML = `<span class="title-text">${escapeHtml(trackTitle)}</span>`;
-    
+
     document.getElementById('artist-name').textContent = track.artist || 'Unknown Artist';
     document.getElementById('album-name').textContent = track.album || 'Unknown Album';
-    
+
     // Check if title needs scrolling (similar to GUI app)
     setTimeout(() => {
         checkAndEnableScrolling(trackTitleElement, trackTitle);
     }, 100); // Allow DOM to settle
-    
+
     // Enable controls
     document.getElementById('play-button').disabled = false;
     document.getElementById('stop-button').disabled = false;
-    
+
     // Hide no track message
     document.getElementById('no-track-message').classList.add('hidden');
-    
+
     // Auto-expand if collapsed
     if (!mediaPlayerExpanded) {
         toggleMediaPlayerExpansion();
@@ -653,18 +653,18 @@ function checkAndEnableScrolling(element, text) {
     // Remove any existing scrolling class and reset styles
     element.classList.remove('scrolling');
     element.style.removeProperty('--scroll-distance');
-    
+
     // Force a layout to get accurate measurements
     element.offsetWidth;
-    
+
     // Get the inner text element
     const titleTextElement = element.querySelector('.title-text');
     if (!titleTextElement) return;
-    
+
     // Check if text is wider than container
     const containerWidth = element.offsetWidth;
     const textWidth = titleTextElement.scrollWidth;
-    
+
     // Enable scrolling if text is significantly wider than container
     if (textWidth > containerWidth + 15) {
         const scrollDistance = containerWidth - textWidth;
@@ -683,26 +683,26 @@ function clearTrack() {
         mediaPlayerExpanded = false;
         const mediaPlayer = document.getElementById('media-player');
         const expandedContent = document.getElementById('media-expanded');
-        
+
         if (mediaPlayer) mediaPlayer.style.minHeight = '85px';
         if (expandedContent) expandedContent.classList.add('hidden');
     }
-    
+
     // Now clear track state
     currentTrack = null;
     isPlaying = false;
-    
+
     const trackTitleElement = document.getElementById('track-title');
     trackTitleElement.innerHTML = '<span class="title-text">No track</span>';
     trackTitleElement.classList.remove('scrolling'); // Remove scrolling animation
     trackTitleElement.style.removeProperty('--scroll-distance'); // Clear CSS variable
-    
+
     document.getElementById('artist-name').textContent = 'Unknown Artist';
     document.getElementById('album-name').textContent = 'Unknown Album';
     document.getElementById('play-button').textContent = '▷';
     document.getElementById('play-button').disabled = true;
     document.getElementById('stop-button').disabled = true;
-    
+
     // Reset progress bar and time displays
     const progressBar = document.getElementById('progress-bar');
     const progressFill = document.getElementById('progress-fill');
@@ -713,18 +713,18 @@ function clearTrack() {
     if (progressFill) {
         progressFill.style.width = '0%';
     }
-    
+
     const currentTimeElement = document.getElementById('current-time');
     const totalTimeElement = document.getElementById('total-time');
     if (currentTimeElement) currentTimeElement.textContent = '0:00';
     if (totalTimeElement) totalTimeElement.textContent = '0:00';
-    
+
     // Hide loading animation
     hideLoadingAnimation();
-    
+
     // Show no track message
     document.getElementById('no-track-message').classList.remove('hidden');
-    
+
     console.log('🧹 Track cleared and media player reset');
 }
 
@@ -748,7 +748,7 @@ async function handleStop() {
 function handleVolumeChange(event) {
     const volume = event.target.value;
     updateVolumeSliderAppearance();
-    
+
     // Update HTML5 audio player volume
     if (audioPlayer) {
         audioPlayer.volume = volume / 100;
@@ -758,21 +758,21 @@ function handleVolumeChange(event) {
 function handleProgressBarChange(event) {
     // Handle seeking in the audio track
     if (!audioPlayer || !audioPlayer.duration) return;
-    
+
     const progress = parseFloat(event.target.value);
     const newTime = (progress / 100) * audioPlayer.duration;
-    
+
     console.log(`🎯 Seeking to ${formatTime(newTime)} (${progress.toFixed(1)}%)`);
-    
+
     try {
         audioPlayer.currentTime = newTime;
-        
+
         // Update visual progress immediately
         const progressFill = document.getElementById('progress-fill');
         if (progressFill) {
             progressFill.style.width = `${progress}%`;
         }
-        
+
         // Update time displays immediately
         const currentTimeElement = document.getElementById('current-time');
         if (currentTimeElement) {
@@ -808,7 +808,7 @@ function setLoadingProgress(percentage) {
     const loadingAnimation = document.getElementById('loading-animation');
     const progressBar = loadingAnimation.querySelector('.loading-progress');
     const loadingText = loadingAnimation.querySelector('.loading-text');
-    
+
     loadingAnimation.classList.remove('hidden');
     progressBar.style.width = `${percentage}%`;
     loadingText.textContent = `${Math.round(percentage)}%`;
@@ -822,62 +822,62 @@ async function startStream(searchResult) {
     // Start streaming a track - handles same track toggle and new track streaming
     try {
         console.log(`🎮 startStream() called with data:`, searchResult);
-        
+
         // Check if this is the same track that's currently playing/loading
         const currentTrackId = currentTrack ? `${currentTrack.username}:${currentTrack.filename}` : null;
         const newTrackId = `${searchResult.username}:${searchResult.filename}`;
-        
+
         console.log(`🎮 startStream() called for: ${searchResult.filename}`);
         console.log(`🎮 Current track ID: ${currentTrackId}`);
         console.log(`🎮 New track ID: ${newTrackId}`);
-        
+
         if (currentTrackId === newTrackId && audioPlayer && !audioPlayer.paused) {
             // Same track clicked while playing - toggle pause
             console.log("🔄 Toggling playback for same track");
             togglePlayback();
             return;
         }
-        
+
         // Different track or no current track - start new stream
         console.log("🎵 Starting new stream");
-        
+
         // Stop current streaming/playback if any
         await stopStream();
-        
+
         // Set track info and show loading state
         setTrackInfo({
             title: extractTrackTitle(searchResult.filename) || searchResult.title || 'Unknown Track',
-            artist: searchResult.artist || searchResult.username || 'Unknown Artist', 
+            artist: searchResult.artist || searchResult.username || 'Unknown Artist',
             album: searchResult.album || 'Unknown Album',
             username: searchResult.username,
             filename: searchResult.filename
         });
-        
+
         showLoadingAnimation();
         setLoadingProgress(0);
-        
+
         // Start streaming request
         const response = await fetch(API.stream.start, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(searchResult)
         });
-        
+
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-        
+
         const data = await response.json();
-        
+
         if (!data.success) {
             throw new Error(data.error || 'Failed to start streaming');
         }
-        
+
         console.log("✅ Stream started successfully");
-        
+
         // Start status polling
         startStreamStatusPolling();
-        
+
     } catch (error) {
         console.error('Error starting stream:', error);
         showToast(`Failed to start stream: ${error.message}`, 'error');
@@ -891,11 +891,11 @@ function startStreamStatusPolling() {
     if (streamStatusPoller) {
         clearInterval(streamStatusPoller);
     }
-    
+
     // Reset polling state
     streamPollingRetries = 0;
     streamPollingInterval = 1000; // Reset to 1-second interval
-    
+
     console.log('🔄 Starting enhanced stream status polling');
     updateStreamStatus(); // Initial check
     streamStatusPoller = setInterval(updateStreamStatus, streamPollingInterval);
@@ -917,27 +917,27 @@ async function updateStreamStatus() {
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000); // 10-second timeout
-        
+
         const response = await fetch(API.stream.status, {
             signal: controller.signal
         });
-        
+
         clearTimeout(timeoutId);
-        
+
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-        
+
         const data = await response.json();
-        
+
         // Reset retry count on successful response
         streamPollingRetries = 0;
         streamPollingInterval = 1000; // Reset to normal interval
-        
+
         // Update current stream state
         currentStream.status = data.status;
         currentStream.progress = data.progress;
-        
+
         switch (data.status) {
             case 'loading':
                 setLoadingProgress(data.progress);
@@ -947,7 +947,7 @@ async function updateStreamStatus() {
                     loadingText.textContent = `Downloading... ${Math.round(data.progress)}%`;
                 }
                 break;
-                
+
             case 'queued':
                 // Show queue status with better messaging
                 const queueText = document.querySelector('.loading-text');
@@ -956,14 +956,14 @@ async function updateStreamStatus() {
                 }
                 setLoadingProgress(0); // Reset progress for queue state
                 break;
-                
+
             case 'ready':
                 // Stream is ready - start audio playback
                 console.log('🎵 Stream ready, starting audio playback');
                 stopStreamStatusPolling();
                 await startAudioPlayback();
                 break;
-                
+
             case 'error':
                 console.error('❌ Streaming error:', data.error_message);
                 stopStreamStatusPolling();
@@ -971,7 +971,7 @@ async function updateStreamStatus() {
                 showToast(`Streaming error: ${data.error_message || 'Unknown error'}`, 'error');
                 clearTrack();
                 break;
-                
+
             case 'stopped':
                 // Handle stopped state
                 console.log('🛑 Stream stopped');
@@ -980,11 +980,11 @@ async function updateStreamStatus() {
                 clearTrack();
                 break;
         }
-        
+
     } catch (error) {
         streamPollingRetries++;
         console.warn(`Stream status polling error (attempt ${streamPollingRetries}):`, error.message);
-        
+
         if (streamPollingRetries >= maxStreamPollingRetries) {
             // Too many consecutive failures - give up
             console.error('❌ Stream status polling failed after maximum retries');
@@ -996,7 +996,7 @@ async function updateStreamStatus() {
             // Implement exponential backoff for retries
             const backoffMultiplier = Math.min(streamPollingRetries, 5); // Max 5x backoff
             streamPollingInterval = 1000 * backoffMultiplier;
-            
+
             // Restart polling with new interval
             if (streamStatusPoller) {
                 clearInterval(streamStatusPoller);
@@ -1013,39 +1013,39 @@ async function startAudioPlayback() {
         if (!audioPlayer) {
             throw new Error('Audio player not initialized');
         }
-        
+
         // Show loading state while preparing audio
         const loadingText = document.querySelector('.loading-text');
         if (loadingText) {
             loadingText.textContent = 'Preparing playback...';
         }
-        
+
         // Set audio source with cache-busting timestamp
         const audioUrl = `/stream/audio?t=${new Date().getTime()}`;
         console.log(`🎵 Loading audio from: ${audioUrl}`);
-        
+
         // Clear any existing source first
         audioPlayer.pause();
         audioPlayer.currentTime = 0;
         audioPlayer.src = '';
-        
+
         // Set new source
         audioPlayer.src = audioUrl;
         audioPlayer.load(); // Force reload
-        
+
         // Wait for audio to be ready with promise-based approach
         await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Audio loading timeout'));
             }, 15000); // 15-second timeout
-            
+
             const onCanPlay = () => {
                 clearTimeout(timeout);
                 audioPlayer.removeEventListener('canplay', onCanPlay);
                 audioPlayer.removeEventListener('error', onError);
                 resolve();
             };
-            
+
             const onError = (event) => {
                 clearTimeout(timeout);
                 audioPlayer.removeEventListener('canplay', onCanPlay);
@@ -1053,77 +1053,77 @@ async function startAudioPlayback() {
                 const error = event.target.error || new Error('Audio loading failed');
                 reject(error);
             };
-            
+
             audioPlayer.addEventListener('canplay', onCanPlay);
             audioPlayer.addEventListener('error', onError);
-            
+
             // If already ready, resolve immediately
             if (audioPlayer.readyState >= 3) { // HAVE_FUTURE_DATA
                 onCanPlay();
             }
         });
-        
+
         console.log('✅ Audio loaded and ready for playback');
-        
+
         // Try to start playback with retry logic
         let retryCount = 0;
         const maxRetries = 3;
-        
+
         while (retryCount < maxRetries) {
             try {
                 await audioPlayer.play();
                 console.log('✅ Audio playback started successfully');
-                
+
                 // Update UI to playing state
                 hideLoadingAnimation();
                 setPlayingState(true);
-                
+
                 // Show media player if hidden
                 const noTrackMessage = document.getElementById('no-track-message');
                 if (noTrackMessage) {
                     noTrackMessage.classList.add('hidden');
                 }
-                
+
                 // Ensure media player is expanded when playback starts
                 if (!mediaPlayerExpanded) {
                     toggleMediaPlayerExpansion();
                 }
-                
+
                 // Update volume to current slider value
                 const volumeSlider = document.getElementById('volume-slider');
                 if (volumeSlider) {
                     audioPlayer.volume = volumeSlider.value / 100;
                 }
-                
+
                 // Enable play/stop buttons
                 const playButton = document.getElementById('play-button');
                 const stopButton = document.getElementById('stop-button');
                 if (playButton) playButton.disabled = false;
                 if (stopButton) stopButton.disabled = false;
-                
+
                 return; // Success!
-                
+
             } catch (playError) {
                 retryCount++;
                 console.warn(`⚠️ Audio play attempt ${retryCount} failed:`, playError.message);
-                
+
                 if (retryCount >= maxRetries) {
                     throw playError; // Re-throw after max retries
                 }
-                
+
                 // Wait before retry with exponential backoff
                 await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
             }
         }
-        
+
     } catch (error) {
         console.error('❌ Error starting audio playback:', error);
         hideLoadingAnimation();
-        
+
         // Provide user-friendly error messages
         let userMessage = 'Playback failed';
-        
-        if (error.message.includes('no supported source') || 
+
+        if (error.message.includes('no supported source') ||
             error.message.includes('Not supported') ||
             error.message.includes('MEDIA_ELEMENT_ERROR')) {
             userMessage = 'Audio format not supported by your browser. Try downloading instead.';
@@ -1136,7 +1136,7 @@ async function startAudioPlayback() {
         } else if (error.message.includes('AbortError')) {
             userMessage = 'Playback was interrupted';
         }
-        
+
         showToast(userMessage, 'error');
         clearTrack();
     }
@@ -1147,31 +1147,31 @@ async function stopStream() {
     try {
         // Stop status polling
         stopStreamStatusPolling();
-        
+
         // Stop audio playback
         if (audioPlayer) {
             audioPlayer.pause();
             audioPlayer.src = '';
         }
-        
+
         // Call backend stop endpoint
         const response = await fetch(API.stream.stop, { method: 'POST' });
         if (response.ok) {
             const data = await response.json();
             console.log('🛑 Stream stopped:', data.message);
         }
-        
+
         // Reset UI state
         hideLoadingAnimation();
         setPlayingState(false);
-        
+
         // Reset stream state
         currentStream = {
             status: 'stopped',
             progress: 0,
             track: null
         };
-        
+
     } catch (error) {
         console.error('Error stopping stream:', error);
     }
@@ -1183,7 +1183,7 @@ function togglePlayback() {
         console.log('⚠️ No audio player or track to toggle');
         return;
     }
-    
+
     if (audioPlayer.paused) {
         audioPlayer.play()
             .then(() => {
@@ -1208,9 +1208,9 @@ function togglePlayback() {
 function updateAudioProgress() {
     // Update progress bar based on audio playback time
     if (!audioPlayer || !audioPlayer.duration) return;
-    
+
     const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
-    
+
     // Update progress bar
     const progressBar = document.getElementById('progress-bar');
     const progressFill = document.getElementById('progress-fill');
@@ -1221,11 +1221,11 @@ function updateAudioProgress() {
             progressFill.style.width = `${progress}%`;
         }
     }
-    
+
     // Update time display
     const currentTimeElement = document.getElementById('current-time');
     const totalTimeElement = document.getElementById('total-time');
-    
+
     if (currentTimeElement) {
         currentTimeElement.textContent = formatTime(audioPlayer.currentTime);
     }
@@ -1238,7 +1238,7 @@ function onAudioEnded() {
     // Handle audio playback completion
     console.log('🏁 Audio playback ended');
     setPlayingState(false);
-    
+
     // Reset progress to beginning
     const progressBar = document.getElementById('progress-bar');
     const progressFill = document.getElementById('progress-fill');
@@ -1248,12 +1248,12 @@ function onAudioEnded() {
     if (progressFill) {
         progressFill.style.width = '0%';
     }
-    
+
     const currentTimeElement = document.getElementById('current-time');
     if (currentTimeElement) {
         currentTimeElement.textContent = '0:00';
     }
-    
+
     // TODO: Auto-advance to next track if queue exists
 }
 
@@ -1261,11 +1261,11 @@ function onAudioError(event) {
     // Handle audio playback errors
     const error = event.target.error;
     console.error('❌ Audio error:', error);
-    
+
     // Don't show error toast if it's just a format/codec issue and retrying
     if (error && error.code) {
         console.error(`Audio error code: ${error.code}, message: ${error.message || 'Unknown error'}`);
-        
+
         // Only show user-facing errors for serious issues
         if (error.code === 4) { // MEDIA_ELEMENT_ERROR: Media not supported
             console.warn('⚠️ Media format not supported by browser, but streaming may still work');
@@ -1273,14 +1273,14 @@ function onAudioError(event) {
             return;
         }
     }
-    
+
     hideLoadingAnimation();
-    
+
     // Only clear track after a short delay to allow for recovery
     setTimeout(() => {
         if (audioPlayer && audioPlayer.error) {
             let userMessage = 'Audio format not supported by your browser. Try downloading instead.';
-            
+
             if (error && error.code) {
                 switch (error.code) {
                     case 1: // MEDIA_ERR_ABORTED
@@ -1297,7 +1297,7 @@ function onAudioError(event) {
                         break;
                 }
             }
-            
+
             showToast(userMessage, 'error');
             clearTrack();
         }
@@ -1426,9 +1426,9 @@ function initializeDonationWidget() {
 function toggleDonationAddresses() {
     const addresses = document.getElementById('donation-addresses');
     const toggleButton = document.getElementById('donation-toggle');
-    
+
     donationAddressesVisible = !donationAddressesVisible;
-    
+
     if (donationAddressesVisible) {
         addresses.classList.remove('hidden');
         toggleButton.textContent = 'Hide';
@@ -1617,32 +1617,32 @@ async function loadSettingsData() {
     try {
         const response = await fetch(API.settings);
         const settings = await response.json();
-        
+
         // Populate Spotify settings
         document.getElementById('spotify-client-id').value = settings.spotify?.client_id || '';
         document.getElementById('spotify-client-secret').value = settings.spotify?.client_secret || '';
         document.getElementById('spotify-redirect-uri').value = settings.spotify?.redirect_uri || 'http://127.0.0.1:8888/callback';
         document.getElementById('spotify-callback-display').textContent = settings.spotify?.redirect_uri || 'http://127.0.0.1:8888/callback';
-        
+
         // Populate Tidal settings  
         document.getElementById('tidal-client-id').value = settings.tidal?.client_id || '';
         document.getElementById('tidal-client-secret').value = settings.tidal?.client_secret || '';
         document.getElementById('tidal-redirect-uri').value = settings.tidal?.redirect_uri || 'http://127.0.0.1:8889/tidal/callback';
         document.getElementById('tidal-callback-display').textContent = settings.tidal?.redirect_uri || 'http://127.0.0.1:8889/tidal/callback';
-        
+
         // Add event listeners to update display URLs when input changes
-        document.getElementById('spotify-redirect-uri').addEventListener('input', function() {
+        document.getElementById('spotify-redirect-uri').addEventListener('input', function () {
             document.getElementById('spotify-callback-display').textContent = this.value || 'http://127.0.0.1:8888/callback';
         });
-        
-        document.getElementById('tidal-redirect-uri').addEventListener('input', function() {
+
+        document.getElementById('tidal-redirect-uri').addEventListener('input', function () {
             document.getElementById('tidal-callback-display').textContent = this.value || 'http://127.0.0.1:8889/tidal/callback';
         });
-        
+
         // Populate Plex settings
         document.getElementById('plex-url').value = settings.plex?.base_url || '';
         document.getElementById('plex-token').value = settings.plex?.token || '';
-        
+
         // Populate Jellyfin settings
         document.getElementById('jellyfin-url').value = settings.jellyfin?.base_url || '';
         document.getElementById('jellyfin-api-key').value = settings.jellyfin?.api_key || '';
@@ -1689,7 +1689,7 @@ async function loadSettingsData() {
 
         // Populate Database settings
         document.getElementById('max-workers').value = settings.database?.max_workers || '5';
-        
+
         // Populate Metadata Enhancement settings
         document.getElementById('metadata-enabled').checked = settings.metadata_enhancement?.enabled !== false;
         document.getElementById('embed-album-art').checked = settings.metadata_enhancement?.embed_album_art !== false;
@@ -1702,7 +1702,7 @@ async function loadSettingsData() {
 
         // Populate Playlist Sync settings
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup !== false;
-        
+
         // Populate Logging information (read-only)
         document.getElementById('log-level-display').textContent = settings.logging?.level || 'INFO';
         document.getElementById('log-path-display').textContent = settings.logging?.path || 'logs/app.log';
@@ -1764,7 +1764,7 @@ function updateMediaServerFields() {
     const serverType = document.getElementById('media-server-type').value;
     const urlInput = document.getElementById('media-server-url');
     const tokenInput = document.getElementById('media-server-token');
-    
+
     if (serverType === 'plex') {
         urlInput.placeholder = 'http://localhost:32400';
         tokenInput.placeholder = 'Plex Token';
@@ -2097,7 +2097,7 @@ async function saveSettings() {
             create_backup: document.getElementById('create-backup').checked
         }
     };
-    
+
     try {
         showLoadingOverlay('Saving settings...');
 
@@ -2153,13 +2153,13 @@ async function saveSettings() {
 async function testConnection(service) {
     try {
         showLoadingOverlay(`Testing ${service} connection...`);
-        
+
         const response = await fetch(API.testConnection, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ service })
         });
-        
+
         const result = await response.json();
 
         if (result.success) {
@@ -2186,15 +2186,15 @@ async function testConnection(service) {
 async function testDashboardConnection(service) {
     try {
         showLoadingOverlay(`Testing ${service} service...`);
-        
+
         const response = await fetch(API.testDashboardConnection, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ service })
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             showToast(`${service} service verified`, 'success');
         } else {
@@ -2212,22 +2212,22 @@ async function testDashboardConnection(service) {
 async function autoDetectPlex() {
     try {
         showLoadingOverlay('Auto-detecting Plex server...');
-        
+
         const response = await fetch('/api/detect-media-server', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ server_type: 'plex' })
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             document.getElementById('plex-url').value = result.found_url;
             showToast(`Plex server detected: ${result.found_url}`, 'success');
         } else {
             showToast(result.error, 'error');
         }
-        
+
     } catch (error) {
         console.error('Error auto-detecting Plex:', error);
         showToast('Failed to auto-detect Plex server', 'error');
@@ -2239,22 +2239,22 @@ async function autoDetectPlex() {
 async function autoDetectJellyfin() {
     try {
         showLoadingOverlay('Auto-detecting Jellyfin server...');
-        
+
         const response = await fetch('/api/detect-media-server', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ server_type: 'jellyfin' })
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             document.getElementById('jellyfin-url').value = result.found_url;
             showToast(`Jellyfin server detected: ${result.found_url}`, 'success');
         } else {
             showToast(result.error, 'error');
         }
-        
+
     } catch (error) {
         console.error('Error auto-detecting Jellyfin:', error);
         showToast('Failed to auto-detect Jellyfin server', 'error');
@@ -2293,21 +2293,21 @@ async function autoDetectNavidrome() {
 async function autoDetectSlskd() {
     try {
         showLoadingOverlay('Auto-detecting Soulseek (slskd) server...');
-        
+
         const response = await fetch('/api/detect-soulseek', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             document.getElementById('soulseek-url').value = result.found_url;
             showToast(`Soulseek server detected: ${result.found_url}`, 'success');
         } else {
             showToast(result.error, 'error');
         }
-        
+
     } catch (error) {
         console.error('Error auto-detecting Soulseek:', error);
         showToast('Failed to auto-detect Soulseek server', 'error');
@@ -2376,7 +2376,7 @@ function initializeSearch() {
     // --- FIX: Corrected the element IDs to match the HTML ---
     const searchInput = document.getElementById('downloads-search-input');
     const searchButton = document.getElementById('downloads-search-btn');
-    
+
     // Add this line to get the cancel button
     const cancelButton = document.getElementById('downloads-cancel-btn');
 
@@ -2511,8 +2511,8 @@ function initializeSearchModeToggle() {
             if (dropdown.classList.contains('hidden')) {
                 // Check if there are results to show by looking for actual content
                 const hasResults = results &&
-                                   !results.classList.contains('hidden') &&
-                                   results.children.length > 0;
+                    !results.classList.contains('hidden') &&
+                    results.children.length > 0;
 
                 if (hasResults) {
                     showDropdown();
@@ -2574,9 +2574,9 @@ function initializeSearchModeToggle() {
 
             // Calculate total
             const total = (data.db_artists?.length || 0) +
-                         (data.spotify_artists?.length || 0) +
-                         (data.spotify_albums?.length || 0) +
-                         (data.spotify_tracks?.length || 0);
+                (data.spotify_artists?.length || 0) +
+                (data.spotify_albums?.length || 0) +
+                (data.spotify_tracks?.length || 0);
 
             // Hide loading
             loadingState.classList.add('hidden');
@@ -3141,7 +3141,7 @@ function initializeSearchModeToggle() {
 
         // Attach download handlers
         mainResultsArea.querySelectorAll('.download-result-btn').forEach(btn => {
-            btn.addEventListener('click', async function() {
+            btn.addEventListener('click', async function () {
                 const result = JSON.parse(this.dataset.result);
                 const type = this.dataset.type;
 
@@ -3223,33 +3223,33 @@ async function performSearch() {
         showToast('Please enter a search term', 'error');
         return;
     }
-    
+
     try {
         showLoadingOverlay('Searching...');
         displaySearchResults([]);  // Clear previous results
-        
+
         const response = await fetch(API.search, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query })
         });
-        
+
         const data = await response.json();
-        
+
         if (data.error) {
             showToast(`Search error: ${data.error}`, 'error');
             return;
         }
-        
+
         searchResults = data.results || [];
         displaySearchResults(searchResults);
-        
+
         if (searchResults.length === 0) {
             showToast('No results found', 'error');
         } else {
             showToast(`Found ${searchResults.length} results`, 'success');
         }
-        
+
     } catch (error) {
         console.error('Error performing search:', error);
         showToast('Search failed', 'error');
@@ -3260,18 +3260,18 @@ async function performSearch() {
 
 function displaySearchResults(results) {
     const resultsContainer = document.getElementById('search-results');
-    
+
     if (!results.length) {
         resultsContainer.innerHTML = '<div class="no-results">No search results</div>';
         return;
     }
-    
+
     resultsContainer.innerHTML = results.map((result, index) => {
         const isAlbum = result.type === 'album';
-        const sizeText = isAlbum ? 
+        const sizeText = isAlbum ?
             `${result.track_count || 0} tracks, ${(result.size_mb || 0).toFixed(1)} MB` :
             `${(result.file_size / 1024 / 1024).toFixed(1)} MB, ${result.bitrate || 0}kbps`;
-        
+
         return `
             <div class="search-result-item" onclick="selectResult(${index})">
                 <div class="result-header">
@@ -3302,7 +3302,7 @@ function displaySearchResults(results) {
 function selectResult(index) {
     const result = searchResults[index];
     if (!result) return;
-    
+
     console.log('Selected result:', result);
     // Could show detailed view or additional actions here
 }
@@ -3311,16 +3311,16 @@ function selectResult(index) {
 async function startDownload(index) {
     const result = searchResults[index];
     if (!result) return;
-    
+
     try {
         const response = await fetch('/api/downloads/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(result)
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             showToast('Download started', 'success');
         } else {
@@ -3358,7 +3358,7 @@ async function loadDashboardData() {
     try {
         const response = await fetch(API.activity);
         const data = await response.json();
-        
+
         const activityFeed = document.getElementById('activity-feed');
         if (data.activities && data.activities.length) {
             activityFeed.innerHTML = data.activities.map(activity => `
@@ -3368,14 +3368,14 @@ async function loadDashboardData() {
                 </div>
             `).join('');
         }
-        
+
         // Initialize wishlist count when dashboard loads
         await updateWishlistCount();
-        
+
         // Start periodic refresh of wishlist count (every 30 seconds, matching GUI behavior)
         stopWishlistCountPolling(); // Ensure no duplicates
         wishlistCountInterval = setInterval(updateWishlistCount, 30000);
-        
+
     } catch (error) {
         console.error('Error loading dashboard data:', error);
     }
@@ -3408,20 +3408,20 @@ async function checkForActiveProcesses() {
 
         if (processes.length > 0) {
             console.log(`🔄 Found ${processes.length} active process(es) from backend. Rehydrating UI...`);
-            
+
             // Separate download batch processes from YouTube playlist processes
             const downloadProcesses = processes.filter(p => p.type === 'batch');
             const youtubeProcesses = processes.filter(p => p.type === 'youtube_playlist');
-            
+
             console.log(`📊 Process breakdown: ${downloadProcesses.length} download batches, ${youtubeProcesses.length} YouTube playlists`);
-            
+
             // Rehydrate download modal processes (existing Spotify system)
             for (const processInfo of downloadProcesses) {
                 if (!activeDownloadProcesses[processInfo.playlist_id]) {
                     rehydrateModal(processInfo);
                 }
             }
-            
+
             // Note: YouTube playlists are handled by loadYouTubePlaylistsFromBackend() and rehydrateYouTubePlaylist()
             // in loadSyncData(), which provides more complete data than active processes and handles download modal rehydration.
             console.log(`ℹ️ Skipping ${youtubeProcesses.length} YouTube playlists - handled by full backend loading`);
@@ -3438,49 +3438,49 @@ async function rehydrateArtistAlbumModal(virtualPlaylistId, playlistName, batchI
      */
     try {
         console.log(`💧 Rehydrating artist album modal: ${virtualPlaylistId} (${playlistName})`);
-        
+
         // Extract artist_id and album_id from virtualPlaylistId format: artist_album_[artist_id]_[album_id]
         const parts = virtualPlaylistId.split('_');
         if (parts.length < 4 || parts[0] !== 'artist' || parts[1] !== 'album') {
             console.error(`❌ Invalid virtual playlist ID format: ${virtualPlaylistId}`);
             return;
         }
-        
+
         const artistId = parts[2];
         const albumId = parts.slice(3).join('_'); // Handle album IDs that might contain underscores
-        
+
         console.log(`🔍 Extracted from virtual playlist: artistId=${artistId}, albumId=${albumId}`);
-        
+
         // Fetch the album tracks to get proper artist and album data
         try {
             const response = await fetch(`/api/artist/${artistId}/album/${albumId}/tracks`);
             const data = await response.json();
-            
+
             if (!data.success || !data.album || !data.tracks) {
                 console.error('❌ Failed to fetch album data for rehydration:', data.error);
                 return;
             }
-            
+
             const album = data.album;
             const tracks = data.tracks;
-            
+
             // Extract artist info from the first track (all tracks should have same artist)
             const artist = {
                 id: artistId,
                 name: tracks[0].artists[0] // Use first artist name from first track
             };
-            
+
             console.log(`✅ Retrieved album data: "${album.name}" by ${artist.name} (${tracks.length} tracks)`);
-            
+
             // Create the modal using the same function as normal artist album downloads
             await openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, tracks, album, artist);
-            
+
             // Update the rehydrated process with batch info and hide modal for background rehydration
             const process = activeDownloadProcesses[virtualPlaylistId];
             if (process) {
                 process.status = 'running';
                 process.batchId = batchId;
-                
+
                 // Update button states to reflect running status
                 const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
                 const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
@@ -3494,16 +3494,16 @@ async function rehydrateArtistAlbumModal(virtualPlaylistId, playlistName, batchI
                     process.modalElement.style.display = 'none';
                     console.log(`🔍 Hiding rehydrated modal for background processing: ${album.name}`);
                 }
-                
+
                 console.log(`✅ Rehydrated artist album modal: ${artist.name} - ${album.name}`);
             } else {
                 console.error(`❌ Failed to find rehydrated process for ${virtualPlaylistId}`);
             }
-            
+
         } catch (error) {
             console.error(`❌ Error fetching album data for rehydration:`, error);
         }
-        
+
     } catch (error) {
         console.error(`❌ Error rehydrating artist album modal:`, error);
     }
@@ -3876,31 +3876,31 @@ async function rehydrateModal(processInfo, userRequested = false) {
     // Handle wishlist processes specially
     if (playlist_id === "wishlist") {
         console.log(`💧 [Rehydrate] Handling wishlist modal for active process: ${batch_id}`);
-        
+
         // Check if modal already exists and is visible
         const existingProcess = activeDownloadProcesses[playlist_id];
-        const modalAlreadyOpen = existingProcess && existingProcess.modalElement && 
-                                 existingProcess.modalElement.style.display === 'flex';
-        
+        const modalAlreadyOpen = existingProcess && existingProcess.modalElement &&
+            existingProcess.modalElement.style.display === 'flex';
+
         if (modalAlreadyOpen) {
             console.log(`💧 [Rehydrate] Wishlist modal already open - updating existing modal with auto-process state`);
-            
+
             // Update existing process with new batch info
             existingProcess.status = 'running';
             existingProcess.batchId = batch_id;
-            
+
             // Update UI to reflect running state
             const beginBtn = document.getElementById(`begin-analysis-btn-${playlist_id}`);
             const cancelBtn = document.getElementById(`cancel-all-btn-${playlist_id}`);
             if (beginBtn) beginBtn.style.display = 'none';
             if (cancelBtn) cancelBtn.style.display = 'inline-block';
-            
+
             // Ensure polling is active for live updates
             if (!existingProcess.intervalId) {
                 console.log(`💧 [Rehydrate] Starting polling for existing modal`);
                 startModalDownloadPolling(playlist_id);
             }
-            
+
             console.log(`✅ [Rehydrate] Successfully updated existing wishlist modal for auto-process`);
         } else {
             // Only create modal if user requested it - don't create for background auto-processing
@@ -3978,43 +3978,43 @@ async function loadYouTubePlaylistsFromBackend() {
     // Load all stored YouTube playlists from backend and recreate cards (similar to Spotify hydration)
     try {
         console.log('📋 Loading YouTube playlists from backend...');
-        
+
         const response = await fetch('/api/youtube/playlists');
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || 'Failed to fetch YouTube playlists');
         }
-        
+
         const data = await response.json();
         const playlists = data.playlists || [];
-        
+
         console.log(`🎬 Found ${playlists.length} stored YouTube playlists in backend`);
-        
+
         if (playlists.length === 0) {
             console.log('📋 No YouTube playlists to hydrate');
             return;
         }
-        
+
         const container = document.getElementById('youtube-playlist-container');
-        
+
         // Create cards for playlists that don't already exist (avoid duplicates)
         for (const playlistInfo of playlists) {
             const urlHash = playlistInfo.url_hash;
-            
+
             // Check if card already exists (from rehydration or previous loading)
-            if (youtubePlaylistStates[urlHash] && youtubePlaylistStates[urlHash].cardElement && 
+            if (youtubePlaylistStates[urlHash] && youtubePlaylistStates[urlHash].cardElement &&
                 document.body.contains(youtubePlaylistStates[urlHash].cardElement)) {
                 console.log(`⏭️ Skipping existing YouTube playlist card: ${playlistInfo.playlist.name}`);
-                
+
                 // Update existing state with backend data
                 const state = youtubePlaylistStates[urlHash];
                 state.phase = playlistInfo.phase;
                 state.discoveryProgress = playlistInfo.discovery_progress;
                 state.spotifyMatches = playlistInfo.spotify_matches;
                 state.convertedSpotifyPlaylistId = playlistInfo.converted_spotify_playlist_id;
-                
+
                 // Fetch discovery results for existing cards too if they don't have them
-                if (playlistInfo.phase !== 'fresh' && playlistInfo.phase !== 'discovering' && 
+                if (playlistInfo.phase !== 'fresh' && playlistInfo.phase !== 'discovering' &&
                     (!state.discoveryResults || state.discoveryResults.length === 0)) {
                     try {
                         console.log(`🔍 Fetching missing discovery results for existing card: ${playlistInfo.playlist.name}`);
@@ -4032,13 +4032,13 @@ async function loadYouTubePlaylistsFromBackend() {
                         console.warn(`⚠️ Error fetching discovery results for existing card:`, error.message);
                     }
                 }
-                
+
                 continue;
             }
-            
+
             console.log(`🎬 Creating YouTube playlist card: ${playlistInfo.playlist.name} (Phase: ${playlistInfo.phase})`);
             createYouTubeCardFromBackendState(playlistInfo);
-            
+
             // Fetch discovery results for non-fresh playlists (same logic as rehydrateYouTubePlaylist)
             if (playlistInfo.phase !== 'fresh' && playlistInfo.phase !== 'discovering') {
                 try {
@@ -4047,7 +4047,7 @@ async function loadYouTubePlaylistsFromBackend() {
                     if (stateResponse.ok) {
                         const fullState = await stateResponse.json();
                         console.log(`📋 Retrieved full state with ${fullState.discovery_results?.length || 0} discovery results`);
-                        
+
                         // Store discovery results in local state
                         const state = youtubePlaylistStates[urlHash];
                         if (fullState.discovery_results && state) {
@@ -4064,14 +4064,14 @@ async function loadYouTubePlaylistsFromBackend() {
                 }
             }
         }
-        
+
         // Rehydrate download modals for YouTube playlists in downloading/download_complete phases
         for (const playlistInfo of playlists) {
-            if ((playlistInfo.phase === 'downloading' || playlistInfo.phase === 'download_complete') && 
+            if ((playlistInfo.phase === 'downloading' || playlistInfo.phase === 'download_complete') &&
                 playlistInfo.converted_spotify_playlist_id && playlistInfo.download_process_id) {
-                
+
                 const convertedPlaylistId = playlistInfo.converted_spotify_playlist_id;
-                
+
                 if (!activeDownloadProcesses[convertedPlaylistId]) {
                     console.log(`💧 Rehydrating download modal for YouTube playlist: ${playlistInfo.playlist.name}`);
                     try {
@@ -4079,29 +4079,29 @@ async function loadYouTubePlaylistsFromBackend() {
                         const spotifyTracks = youtubePlaylistStates[playlistInfo.url_hash]?.discoveryResults
                             ?.filter(result => result.spotify_data)
                             ?.map(result => result.spotify_data) || [];
-                        
+
                         if (spotifyTracks.length > 0) {
                             await openDownloadMissingModalForYouTube(
-                                convertedPlaylistId, 
-                                playlistInfo.playlist.name, 
+                                convertedPlaylistId,
+                                playlistInfo.playlist.name,
                                 spotifyTracks
                             );
-                            
+
                             // Set the modal to running state with the correct batch ID
                             const process = activeDownloadProcesses[convertedPlaylistId];
                             if (process) {
                                 process.status = 'running';
                                 process.batchId = playlistInfo.download_process_id;
-                                
+
                                 // Update UI to running state
                                 const beginBtn = document.getElementById(`begin-analysis-btn-${convertedPlaylistId}`);
                                 const cancelBtn = document.getElementById(`cancel-all-btn-${convertedPlaylistId}`);
                                 if (beginBtn) beginBtn.style.display = 'none';
                                 if (cancelBtn) cancelBtn.style.display = 'inline-block';
-                                
+
                                 // Start polling for this process
                                 startModalDownloadPolling(convertedPlaylistId);
-                                
+
                                 // Hide modal since this is background rehydration
                                 process.modalElement.style.display = 'none';
                                 console.log(`✅ Rehydrated download modal for YouTube playlist: ${playlistInfo.playlist.name}`);
@@ -4115,7 +4115,7 @@ async function loadYouTubePlaylistsFromBackend() {
                 }
             }
         }
-        
+
         console.log(`✅ Successfully hydrated ${playlists.length} YouTube playlists from backend`);
 
     } catch (error) {
@@ -4617,15 +4617,15 @@ function createYouTubeCardFromBackendState(playlistInfo) {
     const urlHash = playlistInfo.url_hash;
     const playlist = playlistInfo.playlist;
     const phase = playlistInfo.phase;
-    
+
     const container = document.getElementById('youtube-playlist-container');
-    
+
     // Remove placeholder if it exists
     const placeholder = container.querySelector('.youtube-playlist-placeholder');
     if (placeholder) {
         placeholder.remove();
     }
-    
+
     // Create card HTML (using EXACT same structure as createYouTubeCard)
     const cardHtml = `
         <div class="youtube-playlist-card" id="youtube-card-${urlHash}" data-url="${playlistInfo.url}" onclick="handleYouTubeCardClick('${urlHash}')">
@@ -4643,9 +4643,9 @@ function createYouTubeCardFromBackendState(playlistInfo) {
             <button class="playlist-card-action-btn">${getActionButtonText(phase)}</button>
         </div>
     `;
-    
+
     container.insertAdjacentHTML('beforeend', cardHtml);
-    
+
     // Store state for UI management (but backend remains source of truth)
     youtubePlaylistStates[urlHash] = {
         phase: phase,
@@ -4658,7 +4658,7 @@ function createYouTubeCardFromBackendState(playlistInfo) {
         convertedSpotifyPlaylistId: playlistInfo.converted_spotify_playlist_id,
         backendSynced: true  // Flag to indicate this came from backend
     };
-    
+
     console.log(`🃏 Created YouTube card from backend state: ${playlist.name} (${phase})`);
 }
 
@@ -4708,14 +4708,14 @@ async function rehydrateYouTubePlaylist(playlistInfo, userRequested = false) {
     const urlHash = playlistInfo.url_hash;
     const playlistName = playlistInfo.playlist_name;
     const phase = playlistInfo.phase;
-    
+
     console.log(`💧 Rehydrating YouTube playlist "${playlistName}" (Phase: ${phase}) - User requested: ${userRequested}`);
-    
+
     try {
         // First, ensure the card exists (create from backend if needed)
         if (!youtubePlaylistStates[urlHash] || !youtubePlaylistStates[urlHash].cardElement) {
             console.log(`🃏 Creating missing YouTube card for rehydration: ${playlistName}`);
-            
+
             // Since playlistInfo from active processes doesn't have full playlist data,
             // we need to fetch it from the backend first
             try {
@@ -4732,7 +4732,7 @@ async function rehydrateYouTubePlaylist(playlistInfo, userRequested = false) {
                 return;
             }
         }
-        
+
         // Fetch full state from backend to get discovery results
         let fullState = null;
         if (phase !== 'fresh' && phase !== 'discovering') {
@@ -4754,14 +4754,14 @@ async function rehydrateYouTubePlaylist(playlistInfo, userRequested = false) {
         state.discoveryProgress = playlistInfo.discovery_progress;
         state.spotifyMatches = playlistInfo.spotify_matches;
         state.convertedSpotifyPlaylistId = playlistInfo.converted_spotify_playlist_id;
-        
+
         // Restore discovery results if we have them
         if (fullState && fullState.discovery_results) {
             state.discoveryResults = fullState.discovery_results;
             state.syncPlaylistId = fullState.sync_playlist_id;
             state.syncProgress = fullState.sync_progress || {};
             console.log(`✅ Restored ${state.discoveryResults.length} discovery results from backend`);
-            
+
             // Update modal if it already exists
             const existingModal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
             if (existingModal && !existingModal.classList.contains('hidden')) {
@@ -4769,11 +4769,11 @@ async function rehydrateYouTubePlaylist(playlistInfo, userRequested = false) {
                 refreshYouTubeDiscoveryModalTable(urlHash);
             }
         }
-        
+
         // Update card display
         updateYouTubeCardPhase(urlHash, phase);
         updateYouTubeCardProgress(urlHash, playlistInfo);
-        
+
         // Handle active polling resumption
         if (phase === 'discovering') {
             console.log(`🔍 Resuming discovery polling for: ${playlistName}`);
@@ -4782,7 +4782,7 @@ async function rehydrateYouTubePlaylist(playlistInfo, userRequested = false) {
             console.log(`🔄 Resuming sync polling for: ${playlistName}`);
             startYouTubeSyncPolling(urlHash);
         }
-        
+
         // Open modal if user requested
         if (userRequested) {
             switch (phase) {
@@ -4801,9 +4801,9 @@ async function rehydrateYouTubePlaylist(playlistInfo, userRequested = false) {
                     break;
             }
         }
-        
+
         console.log(`✅ Successfully rehydrated YouTube playlist: ${playlistName}`);
-        
+
     } catch (error) {
         console.error(`❌ Error rehydrating YouTube playlist "${playlistName}":`, error);
     }
@@ -4812,54 +4812,54 @@ async function rehydrateYouTubePlaylist(playlistInfo, userRequested = false) {
 async function removeYouTubePlaylistFromBackend(event, urlHash) {
     // Remove YouTube playlist from backend storage and update UI
     event.stopPropagation(); // Prevent card click
-    
+
     const state = youtubePlaylistStates[urlHash];
     if (!state) return;
-    
+
     const playlistName = state.playlist.name;
-    
+
     try {
         console.log(`🗑️ Removing YouTube playlist from backend: ${playlistName}`);
-        
+
         const response = await fetch(`/api/youtube/delete/${urlHash}`, {
             method: 'DELETE'
         });
-        
+
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || 'Failed to delete playlist');
         }
-        
+
         // Remove card from UI
         if (state.cardElement) {
             state.cardElement.remove();
         }
-        
+
         // Remove from client state
         delete youtubePlaylistStates[urlHash];
-        
+
         // Stop any active polling
         if (activeYouTubePollers[urlHash]) {
             clearInterval(activeYouTubePollers[urlHash]);
             delete activeYouTubePollers[urlHash];
         }
-        
+
         // Close discovery modal if open
         const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
         if (modal) {
             modal.remove();
         }
-        
+
         // Show placeholder if no cards left
         const container = document.getElementById('youtube-playlist-container');
         const cards = container.querySelectorAll('.youtube-playlist-card');
         if (cards.length === 0) {
             container.innerHTML = '<div class="youtube-playlist-placeholder">No YouTube playlists added yet. Parse a YouTube playlist URL above to get started!</div>';
         }
-        
+
         showToast(`Removed "${playlistName}" from backend storage`, 'success');
         console.log(`✅ Successfully removed YouTube playlist: ${playlistName}`);
-        
+
     } catch (error) {
         console.error(`❌ Error removing YouTube playlist "${playlistName}":`, error);
         showToast(`Error removing playlist: ${error.message}`, 'error');
@@ -4869,7 +4869,7 @@ async function removeYouTubePlaylistFromBackend(event, urlHash) {
 async function loadSpotifyPlaylists() {
     const container = document.getElementById('spotify-playlist-container');
     const refreshBtn = document.getElementById('spotify-refresh-btn');
-    
+
     container.innerHTML = `<div class="playlist-placeholder">🔄 Loading playlists...</div>`;
     refreshBtn.disabled = true;
     refreshBtn.textContent = '🔄 Loading...';
@@ -4957,22 +4957,22 @@ function updatePlaylistCardUI(playlistId) {
         progressBtn.style.backgroundColor = '';  // Reset any custom styling
         actionBtn.textContent = '📥 Downloading...';
         actionBtn.disabled = true;
-        
+
         // Remove completion styling from card
         if (card) card.classList.remove('download-complete');
-        
+
     } else if (process && process.status === 'complete') {
         // Process completed: show "ready for review" indicator
         progressBtn.classList.remove('hidden');
-        progressBtn.textContent = '📋 View Results';  
+        progressBtn.textContent = '📋 View Results';
         progressBtn.style.backgroundColor = '#28a745'; // Green success color
         progressBtn.style.color = 'white';
         actionBtn.textContent = '✅ Ready for Review';
         actionBtn.disabled = false; // Allow clicking to see results
-        
+
         // Add completion styling to card
         if (card) card.classList.add('download-complete');
-        
+
     } else {
         // No process or it's been cleaned up: normal state
         progressBtn.classList.add('hidden');
@@ -4980,7 +4980,7 @@ function updatePlaylistCardUI(playlistId) {
         progressBtn.style.color = '';  // Reset styling
         actionBtn.textContent = 'Sync / Download';
         actionBtn.disabled = false;
-        
+
         // Remove completion styling from card
         if (card) card.classList.remove('download-complete');
     }
@@ -4998,7 +4998,7 @@ async function cleanupDownloadProcess(playlistId) {
         clearInterval(process.poller);
         process.poller = null;
     }
-    
+
     // Mark process as no longer running
     if (process.status === 'running') {
         process.status = 'complete';
@@ -5044,7 +5044,7 @@ function togglePlaylistSelection(event) {
 
     // Don't toggle if clicking the button
     if (event.target.tagName === 'BUTTON') return;
-    
+
     const isSelected = !card.classList.contains('selected');
     card.classList.toggle('selected', isSelected);
 
@@ -5122,7 +5122,7 @@ function showPlaylistDetailsModal(playlist) {
         modal.className = 'modal-overlay';
         document.body.appendChild(modal);
     }
-    
+
     // Check if there's a completed download missing tracks process for this playlist
     const activeProcess = activeDownloadProcesses[playlist.id];
     const hasCompletedProcess = activeProcess && activeProcess.status === 'complete';
@@ -5174,9 +5174,9 @@ function showPlaylistDetailsModal(playlist) {
             <div class="playlist-modal-footer">
                 <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closePlaylistDetailsModal()">Close</button>
                 <button class="playlist-modal-btn playlist-modal-btn-tertiary" onclick="openDownloadMissingModal('${playlist.id}')">
-                    ${hasCompletedProcess 
-                        ? '📊 View Download Results' 
-                        : '📥 Download Missing Tracks'}
+                    ${hasCompletedProcess
+            ? '📊 View Download Results'
+            : '📥 Download Missing Tracks'}
                 </button>
                 <button id="sync-btn-${playlist.id}" class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlist.id}')" ${isSyncing ? 'disabled' : ''}>${isSyncing ? '⏳ Syncing...' : 'Sync Playlist'}</button>
             </div>
@@ -5338,14 +5338,14 @@ async function openDownloadMissingModal(playlistId) {
     }
 
     console.log(`📥 Opening Download Missing Tracks modal for playlist: ${playlistId}`);
-    
+
     closePlaylistDetailsModal();
     const playlist = spotifyPlaylists.find(p => p.id === playlistId);
     if (!playlist) {
         showToast('Could not find playlist data.', 'error');
         return;
     }
-    
+
     let tracks = playlistTrackCache[playlistId];
     if (!tracks) {
         try {
@@ -5359,10 +5359,10 @@ async function openDownloadMissingModal(playlistId) {
             return;
         }
     }
-    
+
     currentPlaylistTracks = tracks;
     currentModalPlaylistId = playlistId;
-    
+
     let modal = document.createElement('div');
     modal.id = `download-missing-modal-${playlistId}`; // **NEW**: Unique ID
     modal.className = 'download-missing-modal'; // **NEW**: Use class for styling
@@ -5378,7 +5378,7 @@ async function openDownloadMissingModal(playlistId) {
         playlist: playlist,
         tracks: tracks
     };
-    
+
     // Generate hero section for playlist context
     const heroContext = {
         type: 'playlist',
@@ -5715,14 +5715,14 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
 
     // Generate hero section with dynamic source detection
     const source = virtualPlaylistId.startsWith('beatport_') ? 'Beatport' :
-                   virtualPlaylistId.startsWith('tidal_') ? 'Tidal' :
-                   virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
-                   virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
-                   virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
-                   virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
-                   virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
-                   virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
-                   'YouTube';
+        virtualPlaylistId.startsWith('tidal_') ? 'Tidal' :
+            virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
+                virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
+                    virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
+                        virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
+                            virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
+                                virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
+                                    'YouTube';
 
     // Store metadata for discover download sidebar (will be added when Begin Analysis is clicked)
     if (source === 'SoulSync' || virtualPlaylistId.startsWith('discover_lb_') || virtualPlaylistId.startsWith('listenbrainz_')) {
@@ -5883,7 +5883,7 @@ async function closeDownloadMissingModal(playlistId) {
     if (process.status === 'running') {
         console.log(`Hiding active download modal for playlist ${playlistId}.`);
         process.modalElement.style.display = 'none';
-        
+
         // Track wishlist modal state changes
         if (playlistId === 'wishlist') {
             WishlistModalState.setUserClosed(); // User manually closed during processing
@@ -5891,12 +5891,12 @@ async function closeDownloadMissingModal(playlistId) {
         }
     } else {
         console.log(`Closing and cleaning up download modal for playlist ${playlistId}.`);
-        
+
         // Reset YouTube playlist phase to 'discovered' when modal is closed after completion
         if (playlistId.startsWith('youtube_')) {
             const urlHash = playlistId.replace('youtube_', '');
             updateYouTubeCardPhase(urlHash, 'discovered');
-            
+
             // Update backend state to prevent rehydration issues on page refresh (similar to Tidal fix)
             try {
                 const response = await fetch(`/api/youtube/update_phase/${urlHash}`, {
@@ -5908,7 +5908,7 @@ async function closeDownloadMissingModal(playlistId) {
                         phase: 'discovered'
                     })
                 });
-                
+
                 if (response.ok) {
                     console.log(`✅ [Modal Close] Updated backend phase for YouTube playlist ${urlHash} to 'discovered'`);
                 } else {
@@ -5918,7 +5918,7 @@ async function closeDownloadMissingModal(playlistId) {
                 console.error(`❌ [Modal Close] Error updating backend phase for YouTube playlist ${urlHash}:`, error);
             }
         }
-        
+
         // Reset Beatport chart phase to 'discovered' when modal is closed
         if (playlistId.startsWith('beatport_')) {
             const urlHash = playlistId.replace('beatport_', '');
@@ -5957,15 +5957,15 @@ async function closeDownloadMissingModal(playlistId) {
         // Enhanced Tidal playlist state management (based on GUI sync.py patterns)
         if (playlistId.startsWith('tidal_')) {
             const tidalPlaylistId = playlistId.replace('tidal_', '');
-            
+
             console.log(`🧹 [Modal Close] Processing Tidal playlist close: playlistId="${playlistId}", tidalPlaylistId="${tidalPlaylistId}"`);
             console.log(`🧹 [Modal Close] Current Tidal state:`, tidalPlaylistStates[tidalPlaylistId]);
-            
+
             // Clear download-specific state but preserve discovery results (like GUI closeEvent)
             if (tidalPlaylistStates[tidalPlaylistId]) {
                 const currentPhase = tidalPlaylistStates[tidalPlaylistId].phase;
                 console.log(`🧹 [Modal Close] Current phase before reset: ${currentPhase}`);
-                
+
                 // Preserve discovery data for future use (like GUI modal behavior)
                 const preservedData = {
                     playlist: tidalPlaylistStates[tidalPlaylistId].playlist,
@@ -5974,25 +5974,25 @@ async function closeDownloadMissingModal(playlistId) {
                     discovery_progress: tidalPlaylistStates[tidalPlaylistId].discovery_progress,
                     convertedSpotifyPlaylistId: tidalPlaylistStates[tidalPlaylistId].convertedSpotifyPlaylistId
                 };
-                
+
                 // Clear download-specific state 
                 delete tidalPlaylistStates[tidalPlaylistId].download_process_id;
                 delete tidalPlaylistStates[tidalPlaylistId].phase;
-                
+
                 // Restore preserved data and set to discovered phase
                 Object.assign(tidalPlaylistStates[tidalPlaylistId], preservedData);
                 tidalPlaylistStates[tidalPlaylistId].phase = 'discovered';
-                
+
                 console.log(`🧹 [Modal Close] Reset Tidal playlist ${tidalPlaylistId} - cleared download state, preserved discovery data`);
                 console.log(`🧹 [Modal Close] New phase after reset: ${tidalPlaylistStates[tidalPlaylistId].phase}`);
             } else {
                 console.error(`❌ [Modal Close] No Tidal state found for playlistId: ${tidalPlaylistId}`);
             }
-            
+
             updateTidalCardPhase(tidalPlaylistId, 'discovered');
             console.log(`🔄 [Modal Close] Reset Tidal playlist ${tidalPlaylistId} to discovered phase`);
             console.log(`📝 [Modal Close] Expected button text for discovered phase: "${getActionButtonText('discovered')}"`);
-            
+
             // Update backend state to prevent rehydration issues on page refresh
             try {
                 const response = await fetch(`/api/tidal/update_phase/${tidalPlaylistId}`, {
@@ -6004,7 +6004,7 @@ async function closeDownloadMissingModal(playlistId) {
                         phase: 'discovered'
                     })
                 });
-                
+
                 if (response.ok) {
                     console.log(`✅ [Modal Close] Updated backend phase for Tidal playlist ${tidalPlaylistId} to 'discovered'`);
                 } else {
@@ -6059,7 +6059,7 @@ async function closeDownloadMissingModal(playlistId) {
             WishlistModalState.clear(); // Clear all tracking since modal is fully closed
             console.log('📱 [Modal State] Cleared wishlist modal state on full close');
         }
-        
+
         // Clean up artist download if this is an artist album playlist
         if (playlistId.startsWith('artist_album_')) {
             console.log(`🧹 [MODAL CLOSE] Cleaning up artist download for completed modal: ${playlistId}`);
@@ -6929,16 +6929,16 @@ async function openDownloadMissingWishlistModal(category = null) {
         }
         const tracksData = await tracksResponse.json();
         tracks = tracksData.tracks || [];
-        
+
     } catch (error) {
         showToast(`Failed to fetch wishlist data: ${error.message}`, 'error');
         hideLoadingOverlay();
         return;
     }
-    
+
     currentPlaylistTracks = tracks;
     currentModalPlaylistId = playlistId;
-    
+
     let modal = document.createElement('div');
     modal.id = `download-missing-modal-${playlistId}`; // Unique ID
     modal.className = 'download-missing-modal'; // Use class for styling
@@ -7122,14 +7122,14 @@ async function startWishlistMissingTracksProcess(playlistId) {
 
         process.batchId = data.batch_id;
         console.log(`✅ Wishlist process started successfully. Batch ID: ${data.batch_id}`);
-        
+
         // Start polling for updates
         startModalDownloadPolling(playlistId);
-        
+
     } catch (error) {
         console.error('Error starting wishlist missing tracks process:', error);
         showToast(`Error: ${error.message}`, 'error');
-        
+
         // Reset UI state on error
         process.status = 'idle';
         // Note: Wishlist processes don't affect sync page refresh button state
@@ -7172,7 +7172,7 @@ async function startMissingTracksProcess(playlistId) {
             const urlHash = playlistId.replace('youtube_', '');
             updateYouTubeCardPhase(urlHash, 'downloading');
         }
-        
+
         // Update Tidal playlist phase to 'downloading' if this is a Tidal playlist
         if (playlistId.startsWith('tidal_')) {
             const tidalPlaylistId = playlistId.replace('tidal_', '');
@@ -7410,29 +7410,29 @@ function startGlobalDownloadPolling() {
         console.debug('🔄 [Global Polling] Already running, skipping start');
         return; // Prevent duplicate pollers
     }
-    
+
     console.log('🔄 [Global Polling] Starting batched download status polling');
-    
+
     globalDownloadStatusPoller = setInterval(async () => {
         // Get all active processes that need polling
         const activeBatchIds = [];
         const batchToPlaylistMap = {};
         let hasOpenWishlistModal = false;
-        
+
         Object.entries(activeDownloadProcesses).forEach(([playlistId, process]) => {
             if (process.batchId && process.status === 'running') {
                 activeBatchIds.push(process.batchId);
                 batchToPlaylistMap[process.batchId] = playlistId;
             }
-            
+
             // Check if there's an open wishlist modal (visible and idle/waiting)
-            if (playlistId === 'wishlist' && process.modalElement && 
+            if (playlistId === 'wishlist' && process.modalElement &&
                 process.modalElement.style.display === 'flex' &&
                 (!process.batchId || process.status !== 'running')) {
                 hasOpenWishlistModal = true;
             }
         });
-        
+
         // Special handling for open wishlist modal - check for new auto-processing
         if (hasOpenWishlistModal) {
             try {
@@ -7441,7 +7441,7 @@ function startGlobalDownloadPolling() {
                     const data = await response.json();
                     const processes = data.active_processes || [];
                     const serverWishlistProcess = processes.find(p => p.playlist_id === 'wishlist');
-                    
+
                     if (serverWishlistProcess) {
                         console.log('🔄 [Global Polling] Detected auto-processing for open wishlist modal - rehydrating');
                         await rehydrateModal(serverWishlistProcess, false); // false = not user-requested
@@ -7451,24 +7451,24 @@ function startGlobalDownloadPolling() {
                 console.debug('⚠️ [Global Polling] Failed to check for wishlist auto-processing:', error);
             }
         }
-        
+
         if (activeBatchIds.length === 0) {
             console.debug('📊 [Global Polling] No active processes, continuing polling');
             return;
         }
-        
+
         try {
             // Single batched API call for all active processes
             const queryParams = activeBatchIds.map(id => `batch_ids=${id}`).join('&');
             const response = await fetch(`/api/download_status/batch?${queryParams}`);
-            
+
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
-            
+
             const data = await response.json();
             console.debug(`📊 [Global Polling] Received batched update for ${Object.keys(data.batches).length} processes`);
-            
+
             // Process each batch's status data using existing logic
             Object.entries(data.batches).forEach(([batchId, statusData]) => {
                 const playlistId = batchToPlaylistMap[batchId];
@@ -7478,34 +7478,34 @@ function startGlobalDownloadPolling() {
                     }
                     return;
                 }
-                
+
                 // Use existing modal update logic - zero changes needed!
                 processModalStatusUpdate(playlistId, statusData);
             });
-            
+
             // ENHANCED: Reset failure count on successful polling
             globalPollingFailureCount = 0;
-            
+
         } catch (error) {
             console.error('❌ [Global Polling] Batched request failed:', error);
-            
+
             // ENHANCED: Implement exponential backoff on failure
             globalPollingFailureCount++;
-            
+
             if (globalPollingFailureCount >= 5) {
                 console.error(`🚨 [Global Polling] ${globalPollingFailureCount} consecutive failures, continuing with backoff`);
                 // Don't stop polling - just continue with exponential backoff
             }
-            
+
             // Exponential backoff: increase interval temporarily
             const backoffInterval = Math.min(globalPollingBaseInterval * Math.pow(2, globalPollingFailureCount - 1), 8000);
             console.warn(`⚠️ [Global Polling] Failure ${globalPollingFailureCount}/5, backing off to ${backoffInterval}ms`);
-            
+
             // Temporarily adjust the polling interval
             if (globalDownloadStatusPoller) {
                 clearInterval(globalDownloadStatusPoller);
                 globalDownloadStatusPoller = null;
-                
+
                 // Restart with backoff interval
                 setTimeout(() => {
                     if (Object.keys(activeDownloadProcesses).length > 0) {
@@ -7522,29 +7522,29 @@ function startGlobalDownloadPollingWithInterval(interval) {
         console.debug('🔄 [Global Polling] Already running, skipping start with interval');
         return;
     }
-    
+
     console.log(`🔄 [Global Polling] Starting with interval ${interval}ms`);
-    
+
     // Use the exact same logic as startGlobalDownloadPolling but with custom interval
     globalDownloadStatusPoller = setInterval(async () => {
         const activeBatchIds = [];
         const batchToPlaylistMap = {};
         let hasOpenWishlistModal = false;
-        
+
         Object.entries(activeDownloadProcesses).forEach(([playlistId, process]) => {
             if (process.batchId && process.status === 'running') {
                 activeBatchIds.push(process.batchId);
                 batchToPlaylistMap[process.batchId] = playlistId;
             }
-            
+
             // Check if there's an open wishlist modal (visible and idle/waiting)
-            if (playlistId === 'wishlist' && process.modalElement && 
+            if (playlistId === 'wishlist' && process.modalElement &&
                 process.modalElement.style.display === 'flex' &&
                 (!process.batchId || process.status !== 'running')) {
                 hasOpenWishlistModal = true;
             }
         });
-        
+
         // Special handling for open wishlist modal - check for new auto-processing
         if (hasOpenWishlistModal) {
             try {
@@ -7553,7 +7553,7 @@ function startGlobalDownloadPollingWithInterval(interval) {
                     const data = await response.json();
                     const processes = data.active_processes || [];
                     const serverWishlistProcess = processes.find(p => p.playlist_id === 'wishlist');
-                    
+
                     if (serverWishlistProcess) {
                         console.log('🔄 [Global Polling] Detected auto-processing for open wishlist modal - rehydrating');
                         await rehydrateModal(serverWishlistProcess, false); // false = not user-requested
@@ -7563,23 +7563,23 @@ function startGlobalDownloadPollingWithInterval(interval) {
                 console.debug('⚠️ [Global Polling] Failed to check for wishlist auto-processing:', error);
             }
         }
-        
+
         if (activeBatchIds.length === 0) {
             console.debug('📊 [Global Polling] No active processes, continuing polling');
             return;
         }
-        
+
         try {
             const queryParams = activeBatchIds.map(id => `batch_ids=${id}`).join('&');
             const response = await fetch(`/api/download_status/batch?${queryParams}`);
-            
+
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
-            
+
             const data = await response.json();
             console.debug(`📊 [Global Polling] Received batched update for ${Object.keys(data.batches).length} processes`);
-            
+
             Object.entries(data.batches).forEach(([batchId, statusData]) => {
                 const playlistId = batchToPlaylistMap[batchId];
                 if (!playlistId || statusData.error) {
@@ -7590,7 +7590,7 @@ function startGlobalDownloadPollingWithInterval(interval) {
                 }
                 processModalStatusUpdate(playlistId, statusData);
             });
-            
+
             // Success - reset to normal interval if we were backing off
             globalPollingFailureCount = 0;
             if (interval !== globalPollingBaseInterval) {
@@ -7599,11 +7599,11 @@ function startGlobalDownloadPollingWithInterval(interval) {
                 globalDownloadStatusPoller = null;
                 startGlobalDownloadPolling(); // Restart with normal interval
             }
-            
+
         } catch (error) {
             console.error('❌ [Global Polling] Request failed:', error);
             globalPollingFailureCount++;
-            
+
             if (globalPollingFailureCount >= 5) {
                 console.error(`🚨 [Global Polling] Too many failures, continuing with backoff`);
                 // Don't stop polling - just continue with exponential backoff
@@ -7628,26 +7628,26 @@ function processModalStatusUpdate(playlistId, data) {
         console.debug(`⚠️ [Status Update] No process found for ${playlistId}, skipping update`);
         return;
     }
-    
+
     if (data.error) {
         console.error(`❌ [Status Update] Error for ${playlistId}: ${data.error}`);
         return;
     }
-    
+
     // ENHANCED: Validate response data to prevent UI corruption
     if (!data || typeof data !== 'object') {
         console.error(`❌ [Status Update] Invalid data for ${playlistId}:`, data);
         return;
     }
-    
+
     // ENHANCED: Validate task data structure
     if (data.tasks && !Array.isArray(data.tasks)) {
         console.error(`❌ [Status Update] Invalid tasks data for ${playlistId} - not an array:`, data.tasks);
         return;
     }
-    
+
     console.debug(`📊 [Status Update] Processing update for ${playlistId}: phase=${data.phase}, tasks=${(data.tasks || []).length}`);
-    
+
     // Note: Wishlist modal visibility is now managed by handleWishlistButtonClick() only
     // Auto-show logic has been simplified to prevent conflicts
 
@@ -7670,17 +7670,17 @@ function processModalStatusUpdate(playlistId, data) {
         }
     } else if (data.phase === 'downloading' || data.phase === 'complete' || data.phase === 'error') {
         console.debug(`📊 [Status Update] Processing ${data.phase} phase for playlistId: ${playlistId}, tasks: ${(data.tasks || []).length}`);
-        
+
         if (document.getElementById(`analysis-progress-fill-${playlistId}`).style.width !== '100%') {
-             document.getElementById(`analysis-progress-fill-${playlistId}`).style.width = '100%';
-             document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 'Analysis complete!';
-             if(data.analysis_results) {
-                 updateTrackAnalysisResults(playlistId, data.analysis_results);
-                 const foundCount = data.analysis_results.filter(r => r.found).length;
-                 const missingCount = data.analysis_results.filter(r => !r.found).length;
-                 document.getElementById(`stat-found-${playlistId}`).textContent = foundCount;
-                 document.getElementById(`stat-missing-${playlistId}`).textContent = missingCount;
-             }
+            document.getElementById(`analysis-progress-fill-${playlistId}`).style.width = '100%';
+            document.getElementById(`analysis-progress-text-${playlistId}`).textContent = 'Analysis complete!';
+            if (data.analysis_results) {
+                updateTrackAnalysisResults(playlistId, data.analysis_results);
+                const foundCount = data.analysis_results.filter(r => r.found).length;
+                const missingCount = data.analysis_results.filter(r => !r.found).length;
+                document.getElementById(`stat-found-${playlistId}`).textContent = foundCount;
+                document.getElementById(`stat-missing-${playlistId}`).textContent = missingCount;
+            }
         }
         const missingTracks = (data.analysis_results || []).filter(r => !r.found);
         const missingCount = missingTracks.length;
@@ -7711,29 +7711,29 @@ function processModalStatusUpdate(playlistId, data) {
                 console.debug(`❌ [Status Update] Row not found for playlistId: ${playlistId}, track_index: ${task.track_index}`);
                 return;
             }
-            
+
             // V2 SYSTEM: Check for persistent cancel state from backend
             const isV2Task = task.playlist_id !== undefined; // V2 tasks have playlist_id
             const cancelRequested = task.cancel_requested || false;
             const uiState = task.ui_state || 'normal';
-            
+
             // Legacy protection for old system compatibility
             if (row.dataset.locallyCancelled === 'true' && !isV2Task) {
                 failedOrCancelledCount++;
                 return; // Only skip for legacy system tasks
             }
-            
+
             // Mark row with V2 system info
             if (isV2Task) {
                 row.dataset.useV2System = 'true';
                 row.dataset.cancelRequested = cancelRequested.toString();
                 row.dataset.uiState = uiState;
             }
-            
+
             row.dataset.taskId = task.task_id;
             const statusEl = document.getElementById(`download-${playlistId}-${task.track_index}`);
             const actionsEl = document.getElementById(`actions-${playlistId}-${task.track_index}`);
-            
+
             let statusText = '';
             // V2 SYSTEM: Handle UI state override for cancelling tasks
             if (isV2Task && uiState === 'cancelling' && task.status !== 'cancelled') {
@@ -7750,14 +7750,14 @@ function processModalStatusUpdate(playlistId, data) {
                     default: statusText = `⚪ ${task.status}`; break;
                 }
             }
-            
-            if(statusEl) {
+
+            if (statusEl) {
                 statusEl.textContent = statusText;
                 console.debug(`✅ [Status Update] Updated track ${task.track_index} to: ${statusText}${isV2Task ? ' (V2)' : ''}`);
             } else {
                 console.warn(`❌ [Status Update] Status element not found: download-${playlistId}-${task.track_index}`);
             }
-            
+
             // V2 SYSTEM: Smart button management with persistent state awareness
             if (actionsEl && !['completed', 'failed', 'cancelled', 'post_processing'].includes(task.status)) {
                 // Check if we're in a cancelling state
@@ -7776,7 +7776,7 @@ function processModalStatusUpdate(playlistId, data) {
         // ENHANCED: Validate worker counts from server data
         const serverActiveWorkers = data.active_count || 0;
         const maxWorkers = data.max_concurrent || 3;
-        
+
         // V2 SYSTEM: Simplified worker counting - backend is authoritative
         // Count active tasks, excluding locally cancelled legacy tasks only
         const clientActiveWorkers = (data.tasks || []).filter(task => {
@@ -7784,19 +7784,19 @@ function processModalStatusUpdate(playlistId, data) {
             const isLegacyCancelled = row && row.dataset.locallyCancelled === 'true' && !row.dataset.useV2System;
             return ['searching', 'downloading', 'queued'].includes(task.status) && !isLegacyCancelled;
         }).length;
-        
+
         // Log discrepancies for debugging
         if (serverActiveWorkers !== clientActiveWorkers) {
             console.warn(`🔍 [Worker Validation] ${playlistId}: server reports ${serverActiveWorkers} active, client sees ${clientActiveWorkers} active tasks`);
-            
+
             // If server reports 0 but client sees active tasks, this might indicate ghost workers were fixed
             if (serverActiveWorkers === 0 && clientActiveWorkers > 0) {
                 console.warn(`🚨 [Worker Validation] Server reports 0 workers but client sees ${clientActiveWorkers} active tasks - potential UI desync`);
             }
         }
-        
+
         console.debug(`📊 [Worker Status] ${playlistId}: ${serverActiveWorkers}/${maxWorkers} active workers, ${clientActiveWorkers} client-side active tasks`);
-        
+
         const totalFinished = completedCount + failedOrCancelledCount;
         const progressPercent = missingCount > 0 ? (totalFinished / missingCount) * 100 : 0;
         document.getElementById(`download-progress-fill-${playlistId}`).style.width = `${progressPercent}%`;
@@ -7862,40 +7862,40 @@ function processModalStatusUpdate(playlistId, data) {
             const isModalHidden = (process.modalElement && process.modalElement.style.display === 'none');
             const isAutoInitiated = data.auto_initiated || false; // Server indicates if batch was auto-started
             const isBackgroundWishlist = isWishlist && (isModalHidden || isAutoInitiated);
-            
+
             // Note: Auto-show logic removed - wishlist modal visibility managed by user interaction only
-            
+
             if (data.phase === 'cancelled') {
                 process.status = 'cancelled';
-                
+
                 // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on cancel
                 if (playlistId.startsWith('youtube_')) {
                     const urlHash = playlistId.replace('youtube_', '');
                     updateYouTubeCardPhase(urlHash, 'discovered');
                 }
-                
+
                 showToast(`Process cancelled for ${process.playlist.name}.`, 'info');
             } else if (data.phase === 'error') {
                 process.status = 'complete'; // Treat as complete to allow cleanup
                 updatePlaylistCardUI(playlistId); // Update card to show ready for review
-                
+
                 // Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist on error
                 if (playlistId.startsWith('youtube_')) {
                     const urlHash = playlistId.replace('youtube_', '');
                     updateYouTubeCardPhase(urlHash, 'discovered');
                 }
-                
+
                 showToast(`Process for ${process.playlist.name} failed!`, 'error');
             } else {
                 process.status = 'complete';
                 updatePlaylistCardUI(playlistId); // Update card to show ready for review
-                
+
                 // Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
                 if (playlistId.startsWith('youtube_')) {
                     const urlHash = playlistId.replace('youtube_', '');
                     updateYouTubeCardPhase(urlHash, 'download_complete');
                 }
-                
+
                 // Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
                 if (playlistId.startsWith('tidal_')) {
                     const tidalPlaylistId = playlistId.replace('tidal_', '');
@@ -7943,29 +7943,29 @@ function processModalStatusUpdate(playlistId, data) {
                         console.log(`✅ [Status Complete] Updated Beatport chart ${chartHash} to download_complete phase`);
                     }
                 }
-                
+
                 // Handle background wishlist processing completion specially
                 if (isBackgroundWishlist) {
                     console.log(`🎉 Background wishlist processing complete: ${completedCount} downloaded, ${failedOrCancelledCount} failed`);
-                    
+
                     // Reset modal to idle state to prevent "complete" phase disruption
                     setTimeout(() => {
                         resetWishlistModalToIdleState();
                         // Server-side auto-processing will handle next cycle automatically
                     }, 500);
-                    
+
                     return; // Skip normal completion handling
                 }
-                
+
                 // Show completion summary with wishlist stats (matching sync.py behavior)
                 let completionMessage = `Process complete for ${process.playlist.name}!`;
                 let messageType = 'success';
-                
+
                 // Check for wishlist summary from backend (added when failed/cancelled tracks are processed)
                 if (data.wishlist_summary) {
                     const summary = data.wishlist_summary;
                     completionMessage = `Download process complete! Downloaded: ${completedCount}, Failed/Cancelled: ${failedOrCancelledCount}.`;
-                    
+
                     if (summary.tracks_added > 0) {
                         completionMessage += ` Added ${summary.tracks_added} failed track${summary.tracks_added !== 1 ? 's' : ''} to wishlist for automatic retry.`;
                     } else if (summary.total_failed > 0) {
@@ -7973,16 +7973,16 @@ function processModalStatusUpdate(playlistId, data) {
                         messageType = 'warning';
                     }
                 }
-                
+
                 showToast(completionMessage, messageType);
             }
-            
+
             document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
-            
+
             // Mark process as complete and trigger cleanup check
             process.status = 'complete';
             updatePlaylistCardUI(playlistId);
-            
+
             // Check if any other processes still need polling
             checkAndCleanupGlobalPolling();
         }
@@ -7993,7 +7993,7 @@ function checkAndCleanupGlobalPolling() {
     // Check if any processes still need polling
     const hasActivePolling = Object.values(activeDownloadProcesses)
         .some(p => p.batchId && p.status === 'running');
-    
+
     if (!hasActivePolling) {
         console.debug('🧹 [Cleanup] No more active processes, continuing polling');
         // Keep polling active - no need to stop
@@ -8004,21 +8004,21 @@ function checkAndCleanupGlobalPolling() {
 function startModalDownloadPolling(playlistId) {
     const process = activeDownloadProcesses[playlistId];
     if (!process || !process.batchId) return;
-    
+
     console.log(`🔄 [Legacy Polling] Starting polling for ${playlistId}, delegating to global poller`);
-    
+
     // Clear any existing individual poller (cleanup)
     if (process.poller) {
         clearInterval(process.poller);
         process.poller = null;
     }
-    
+
     // Mark process as running to be picked up by global poller
     process.status = 'running';
-    
+
     // Start global polling if not already running
     startGlobalDownloadPolling();
-    
+
     // Create dummy poller for backward compatibility with cleanup functions
     ensureLegacyCompatibility(playlistId);
 }
@@ -8028,7 +8028,7 @@ function startModalDownloadPolling(playlistId) {
 function createLegacyPoller(playlistId) {
     const process = activeDownloadProcesses[playlistId];
     if (!process) return;
-    
+
     // Create a dummy interval that just checks if the process is still active
     // This ensures existing cleanup logic that calls clearInterval(process.poller) works
     process.poller = setInterval(() => {
@@ -8051,31 +8051,31 @@ function ensureLegacyCompatibility(playlistId) {
 async function updateModalWithLiveDownloadProgress() {
     try {
         if (!currentDownloadBatchId) return;
-        
+
         // Fetch live download data from the downloads API
         const response = await fetch('/api/downloads/status');
         const downloadData = await response.json();
-        
+
         if (downloadData.error) return;
-        
+
         // Get all active and finished downloads
-        const allDownloads = {...(downloadData.active || {}), ...(downloadData.finished || {})};
-        
+        const allDownloads = { ...(downloadData.active || {}), ...(downloadData.finished || {}) };
+
         // Update modal tracks that have active downloads
         const modalRows = document.querySelectorAll('.download-missing-modal tr[data-track-index]');
-        
+
         for (const row of modalRows) {
             const taskId = row.dataset.taskId;
             if (!taskId) continue;
-            
+
             // Find corresponding download by checking if filename/title matches
             const trackName = row.querySelector('.track-name')?.textContent?.trim();
             if (!trackName) continue;
-            
+
             // Search for matching download
             for (const [downloadId, downloadInfo] of Object.entries(allDownloads)) {
                 const downloadTitle = downloadInfo.filename ? downloadInfo.filename.split(/[\\/]/).pop() : '';
-                
+
                 // Simple matching - could be improved with better logic
                 if (downloadTitle && trackName && (
                     downloadTitle.toLowerCase().includes(trackName.toLowerCase()) ||
@@ -8085,7 +8085,7 @@ async function updateModalWithLiveDownloadProgress() {
                     const statusElement = row.querySelector('.track-download-status');
                     const progress = downloadInfo.percentComplete || 0;
                     const state = downloadInfo.state || '';
-                    
+
                     if (statusElement && state.includes('InProgress') && progress > 0) {
                         statusElement.textContent = `⏬ Downloading... ${Math.round(progress)}%`;
                         statusElement.className = 'track-download-status download-downloading';
@@ -8093,12 +8093,12 @@ async function updateModalWithLiveDownloadProgress() {
                         statusElement.textContent = '✅ Completed';
                         statusElement.className = 'track-download-status download-complete';
                     }
-                    
+
                     break; // Found a match, stop searching
                 }
             }
         }
-        
+
     } catch (error) {
         // Silent fail - don't spam console during normal operation
     }
@@ -8116,18 +8116,18 @@ async function cancelAllOperations(playlistId) {
     process.cancellingAll = true;
 
     console.log(`🚫 Cancel All clicked for playlist ${playlistId} - closing modal and cleaning up server`);
-    
+
     showToast('Cancelling all operations and closing modal...', 'info');
-    
+
     // Mark process as complete immediately so polling stops
     process.status = 'complete';
-    
+
     // Stop any active polling
     if (process.poller) {
         clearInterval(process.poller);
         process.poller = null;
     }
-    
+
     // Tell server to stop starting new downloads and clean up the batch
     if (process.batchId) {
         try {
@@ -8143,10 +8143,10 @@ async function cancelAllOperations(playlistId) {
             console.warn('Error during server batch cancel:', error);
         }
     }
-    
+
     // Close the modal immediately - this will handle cleanup
     closeDownloadMissingModal(playlistId);
-    
+
     showToast('Modal closed. Active downloads will finish in background.', 'success');
 }
 
@@ -8155,18 +8155,18 @@ function resetToInitialState() {
     document.getElementById('begin-analysis-btn').style.display = 'inline-block';
     document.getElementById('start-downloads-btn').style.display = 'none';
     document.getElementById('cancel-all-btn').style.display = 'none';
-    
+
     // Reset progress bars
     document.getElementById('analysis-progress-fill').style.width = '0%';
     document.getElementById('download-progress-fill').style.width = '0%';
     document.getElementById('analysis-progress-text').textContent = 'Ready to start';
     document.getElementById('download-progress-text').textContent = 'Waiting for analysis';
-    
+
     // Reset stats
     document.getElementById('stat-found').textContent = '-';
     document.getElementById('stat-missing').textContent = '-';
     document.getElementById('stat-downloaded').textContent = '0';
-    
+
     // Reset track table
     const tbody = document.getElementById('download-tracks-tbody');
     if (tbody) {
@@ -8175,7 +8175,7 @@ function resetToInitialState() {
             const matchElement = row.querySelector('.track-match-status');
             const downloadElement = row.querySelector('.track-download-status');
             const actionsElement = row.querySelector('.track-actions');
-            
+
             if (matchElement) {
                 matchElement.textContent = '🔍 Pending';
                 matchElement.className = 'track-match-status match-checking';
@@ -8189,7 +8189,7 @@ function resetToInitialState() {
             }
         });
     }
-    
+
     // Reset state
     activeAnalysisTaskId = null;
     analysisResults = [];
@@ -8224,51 +8224,51 @@ async function cancelTrackDownloadV2(playlistId, trackIndex) {
     // Check if already in cancelling state
     const statusEl = document.getElementById(`download-${playlistId}-${trackIndex}`);
     const currentStatus = statusEl ? statusEl.textContent : '';
-    
+
     if (currentStatus.includes('Cancelling') || currentStatus.includes('Cancelled')) {
         console.log(`⚠️ [Cancel V2] Task already being cancelled or cancelled: ${currentStatus}`);
         return;
     }
-    
+
     console.log(`🎯 [Cancel V2] Starting atomic cancel: playlist=${playlistId}, track=${trackIndex}`);
-    
+
     // V2 SYSTEM: Set temporary UI state - will be confirmed by server
     row.dataset.uiState = 'cancelling';
-    
+
     // Show loading state only - no optimistic "cancelled" state
     if (statusEl) {
         statusEl.textContent = '🔄 Cancelling...';
     }
-    
+
     // Disable the cancel button to prevent double-clicks
     const actionsEl = document.getElementById(`actions-${playlistId}-${trackIndex}`);
     if (actionsEl) {
         actionsEl.innerHTML = '<span style="color: #666;">Cancelling...</span>';
     }
-    
+
     try {
         const response = await fetch('/api/downloads/cancel_task_v2', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                playlist_id: playlistId, 
-                track_index: trackIndex 
+            body: JSON.stringify({
+                playlist_id: playlistId,
+                track_index: trackIndex
             })
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             console.log(`✅ [Cancel V2] Successfully cancelled: ${data.task_info.track_name}`);
             showToast(`Cancelled "${data.task_info.track_name}" and added to wishlist.`, 'success');
-            
+
             // Let the status polling system update the UI with server truth
             // No manual UI updates - backend is authoritative
-            
+
         } else {
             console.error(`❌ [Cancel V2] Cancel failed: ${data.error}`);
             showToast(`Cancel failed: ${data.error}`, 'error');
-            
+
             // Reset UI to previous state on failure
             row.dataset.uiState = 'normal'; // Reset UI state
             if (statusEl) {
@@ -8278,11 +8278,11 @@ async function cancelTrackDownloadV2(playlistId, trackIndex) {
                 actionsEl.innerHTML = `<button class="cancel-track-btn" title="Cancel this download" onclick="cancelTrackDownloadV2('${playlistId}', ${trackIndex})">×</button>`;
             }
         }
-        
+
     } catch (error) {
         console.error(`❌ [Cancel V2] Network/API error:`, error);
         showToast(`Cancel request failed: ${error.message}`, 'error');
-        
+
         // Reset UI on network error
         row.dataset.uiState = 'normal'; // Reset UI state
         if (statusEl) {
@@ -8315,12 +8315,12 @@ async function cancelTrackDownload(playlistId, trackIndex) {
         showToast('Task not started yet, cannot cancel.', 'warning');
         return;
     }
-    
+
     // UI update for immediate feedback - mark as cancelled FIRST to prevent race conditions
     row.dataset.locallyCancelled = 'true';
     document.getElementById(`download-${playlistId}-${trackIndex}`).textContent = '🚫 Cancelling...';
     document.getElementById(`actions-${playlistId}-${trackIndex}`).innerHTML = '-';
-    
+
     try {
         const response = await fetch('/api/downloads/cancel_task', {
             method: 'POST',
@@ -8409,13 +8409,13 @@ async function startPlaylistSync(playlistId) {
         console.log(`📡 [${new Date().toTimeString().split(' ')[0]}] API response status: ${response.status} (took ${syncRequestTime}ms)`);
         const data = await response.json();
         console.log(`📡 [${new Date().toTimeString().split(' ')[0]}] API response data:`, data);
-        
+
         if (!data.success) throw new Error(data.error);
 
         const totalTime = Date.now() - startTime;
         console.log(`✅ [${new Date().toTimeString().split(' ')[0]}] Sync started successfully for "${playlist.name}" (total time: ${totalTime}ms)`);
         showToast(`Sync started for "${playlist.name}"`, 'success');
-        
+
         // Show initial sync state in modal if open
         const modal = document.getElementById('playlist-details-modal');
         if (modal && modal.style.display !== 'none') {
@@ -8425,7 +8425,7 @@ async function startPlaylistSync(playlistId) {
                 console.log(`📊 [${new Date().toTimeString().split(' ')[0]}] Showing modal sync status for ${playlist.id}`);
             }
         }
-        
+
         updateCardToSyncing(playlist.id, 0); // Initial state
         startSyncPolling(playlist.id);
 
@@ -8458,7 +8458,7 @@ function startSyncPolling(playlistId) {
                 console.log(`📊 Sync progress:`, progress);
                 console.log(`   📊 Progress values: ${progress.progress}% | Total: ${progress.total_tracks} | Matched: ${progress.matched_tracks} | Failed: ${progress.failed_tracks}`);
                 console.log(`   📊 Current step: "${progress.current_step}" | Current track: "${progress.current_track}"`);
-                
+
                 // Use the actual progress percentage from the sync service
                 updateCardToSyncing(playlistId, progress.progress, progress);
                 // Also update the modal if it's open
@@ -8509,7 +8509,7 @@ function startSequentialSync() {
     // Get playlist order from DOM to maintain display order
     const playlistCards = document.querySelectorAll('.playlist-card');
     const orderedPlaylistIds = [];
-    
+
     playlistCards.forEach(card => {
         const playlistId = card.dataset.playlistId;
         if (selectedPlaylists.has(playlistId)) {
@@ -8518,10 +8518,10 @@ function startSequentialSync() {
     });
 
     console.log(`🚀 Starting sequential sync for ${orderedPlaylistIds.length} playlists`);
-    
+
     // Start sequential sync
     sequentialSyncManager.start(orderedPlaylistIds);
-    
+
     // Disable playlist selection during sync
     disablePlaylistSelection(true);
 }
@@ -8573,14 +8573,14 @@ function updateCardToSyncing(playlistId, percent, progress = null) {
 
     let progressText = 'Starting...';
     let actualPercent = percent || 0;
-    
+
     if (progress) {
         // Create detailed progress text like the GUI
         const matched = progress.matched_tracks || 0;
         const failed = progress.failed_tracks || 0;
         const total = progress.total_tracks || 0;
         const currentStep = progress.current_step || 'Processing';
-        
+
         // Calculate actual progress as processed/total, not just successful/total
         if (total > 0) {
             const processed = matched + failed;
@@ -8589,13 +8589,13 @@ function updateCardToSyncing(playlistId, percent, progress = null) {
         } else {
             progressText = currentStep;
         }
-        
+
         // If there's a current track being processed, show it
         if (progress.current_track) {
             progressText += ` - ${progress.current_track}`;
         }
     }
-    
+
     // Build live status counter HTML (same as modal)
     let statusCounterHTML = '';
     if (progress && progress.total_tracks > 0) {
@@ -8604,7 +8604,7 @@ function updateCardToSyncing(playlistId, percent, progress = null) {
         const total = progress.total_tracks || 0;
         const processed = matched + failed;
         const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
-        
+
         statusCounterHTML = `
             <div class="playlist-card-sync-status">
                 <span class="sync-stat total-tracks">♪ ${total}</span>
@@ -8616,7 +8616,7 @@ function updateCardToSyncing(playlistId, percent, progress = null) {
             </div>
         `;
     }
-    
+
     progressBar.innerHTML = `
         ${statusCounterHTML}
         <div class="progress-bar-sync">
@@ -8662,33 +8662,33 @@ function updateModalSyncProgress(playlistId, progress) {
     const modal = document.getElementById('playlist-details-modal');
     if (modal && modal.style.display !== 'none') {
         console.log(`📊 Updating modal sync progress for ${playlistId}:`, progress);
-        
+
         // Show sync status display
         const statusDisplay = document.getElementById(`modal-sync-status-${playlistId}`);
         if (statusDisplay) {
             statusDisplay.style.display = 'flex';
-            
+
             // Update counters (matching GUI exactly)
             const totalEl = document.getElementById(`modal-total-${playlistId}`);
             const matchedEl = document.getElementById(`modal-matched-${playlistId}`);
             const failedEl = document.getElementById(`modal-failed-${playlistId}`);
             const percentageEl = document.getElementById(`modal-percentage-${playlistId}`);
-            
+
             const total = progress.total_tracks || 0;
             const matched = progress.matched_tracks || 0;
             const failed = progress.failed_tracks || 0;
-            
+
             if (totalEl) totalEl.textContent = total;
             if (matchedEl) matchedEl.textContent = matched;
             if (failedEl) failedEl.textContent = failed;
-            
+
             // Calculate percentage like GUI
             if (total > 0) {
                 const processed = matched + failed;
                 const percentage = Math.round((processed / total) * 100);
                 if (percentageEl) percentageEl.textContent = percentage;
             }
-            
+
             console.log(`📊 Modal updated: ♪ ${total} / ✓ ${matched} / ✗ ${failed} (${Math.round((matched + failed) / total * 100)}%)`);
         } else {
             console.warn(`❌ Modal sync status display not found for ${playlistId}`);
@@ -8711,27 +8711,27 @@ async function loadDownloadsData() {
 
     // Event listeners are already set up in initializeSearch() - don't duplicate them
     const clearButton = document.querySelector('.controls-panel__clear-btn');
-    
+
     if (clearButton) {
         clearButton.addEventListener('click', clearFinishedDownloads);
     }
-    
+
     // Start sophisticated polling system (1-second interval like GUI)
     startDownloadPolling();
-    
+
     // Initialize tab management
     initializeDownloadTabs();
 }
 
 function startDownloadPolling() {
     if (isDownloadPollingActive) return;
-    
+
     console.log('Starting download status polling (1-second interval)');
     isDownloadPollingActive = true;
-    
+
     // Initial call
     updateDownloadQueues();
-    
+
     // Start 1-second polling (matching GUI's 1000ms timer)
     downloadStatusInterval = setInterval(updateDownloadQueues, 1000);
 }
@@ -8757,16 +8757,16 @@ async function updateDownloadQueues() {
 
         const newActive = {};
         const newFinished = {};
-        
+
         // Terminal states matching GUI logic
         const terminalStates = ['Completed', 'Succeeded', 'Cancelled', 'Canceled', 'Failed', 'Errored'];
 
         // Process transfers exactly like GUI
         data.transfers.forEach(item => {
-            const isTerminal = terminalStates.some(state => 
+            const isTerminal = terminalStates.some(state =>
                 item.state && item.state.includes(state)
             );
-            
+
             if (isTerminal) {
                 newFinished[item.id] = item;
             } else {
@@ -8777,14 +8777,14 @@ async function updateDownloadQueues() {
         // Update global state
         activeDownloads = newActive;
         finishedDownloads = newFinished;
-        
+
         // Render both queues
         renderQueue('active-queue', activeDownloads, true);
         renderQueue('finished-queue', finishedDownloads, false);
-        
+
         // Update tab counts
         updateTabCounts();
-        
+
         // Update stats in the side panel
         updateDownloadStats();
 
@@ -8815,7 +8815,7 @@ function renderQueue(containerId, downloads, isActiveQueue) {
         const bytesTransferred = item.bytesTransferred || 0;
         const totalBytes = item.size || 0;
         const speed = item.averageSpeed || 0;
-        
+
         // Format file size
         const formatSize = (bytes) => {
             if (!bytes) return 'Unknown size';
@@ -8828,13 +8828,13 @@ function renderQueue(containerId, downloads, isActiveQueue) {
             }
             return `${size.toFixed(1)} ${units[unitIndex]}`;
         };
-        
+
         // Format speed
         const formatSpeed = (bytesPerSecond) => {
             if (!bytesPerSecond || bytesPerSecond <= 0) return '';
             return `${formatSize(bytesPerSecond)}/s`;
         };
-        
+
         let actionButtonHTML = '';
         if (isActiveQueue) {
             // Active items get progress bar and cancel button
@@ -8857,7 +8857,7 @@ function renderQueue(containerId, downloads, isActiveQueue) {
             if (item.state.includes('Cancelled')) statusClass = 'status--cancelled';
             else if (item.state.includes('Failed') || item.state.includes('Errored')) statusClass = 'status--failed';
             else if (item.state.includes('Completed') || item.state.includes('Succeeded')) statusClass = 'status--completed';
-            
+
             actionButtonHTML = `
                 <div class="download-item__status-container">
                     <span class="download-item__status-text ${statusClass}">${item.state}</span>
@@ -8865,7 +8865,7 @@ function renderQueue(containerId, downloads, isActiveQueue) {
                 <button class="download-item__open-btn" title="Cannot open folder from web browser" disabled>📁 Open</button>
             `;
         }
-        
+
         html += `
             <div class="download-item" data-id="${item.id}">
                 <div class="download-item__header">
@@ -8884,10 +8884,10 @@ function renderQueue(containerId, downloads, isActiveQueue) {
 function updateTabCounts() {
     const activeCount = Object.keys(activeDownloads).length;
     const finishedCount = Object.keys(finishedDownloads).length;
-    
+
     const activeTabBtn = document.querySelector('.tab-btn[data-tab="active-queue"]');
     const finishedTabBtn = document.querySelector('.tab-btn[data-tab="finished-queue"]');
-    
+
     if (activeTabBtn) activeTabBtn.textContent = `Download Queue (${activeCount})`;
     if (finishedTabBtn) finishedTabBtn.textContent = `Finished (${finishedCount})`;
 }
@@ -8895,10 +8895,10 @@ function updateTabCounts() {
 function updateDownloadStats() {
     const activeCount = Object.keys(activeDownloads).length;
     const finishedCount = Object.keys(finishedDownloads).length;
-    
+
     const activeLabel = document.getElementById('active-downloads-label');
     const finishedLabel = document.getElementById('finished-downloads-label');
-    
+
     if (activeLabel) activeLabel.textContent = `• Active Downloads: ${activeCount}`;
     if (finishedLabel) finishedLabel.textContent = `• Finished Downloads: ${finishedCount}`;
 }
@@ -8912,7 +8912,7 @@ function initializeDownloadTabs() {
 
 function switchDownloadTab(button) {
     const targetTabId = button.getAttribute('data-tab');
-    
+
     // Update buttons
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     button.classList.add('active');
@@ -8931,7 +8931,7 @@ async function cancelDownloadItem(downloadId, username) {
             body: JSON.stringify({ download_id: downloadId, username: username })
         });
         const result = await response.json();
-        
+
         if (result.success) {
             showToast('Download cancelled', 'success');
         } else {
@@ -8949,13 +8949,13 @@ async function clearFinishedDownloads() {
         showToast('No finished downloads to clear', 'error');
         return;
     }
-    
+
     try {
         const response = await fetch('/api/downloads/clear-finished', {
             method: 'POST'
         });
         const result = await response.json();
-        
+
         if (result.success) {
             showToast('Finished downloads cleared', 'success');
         } else {
@@ -9021,11 +9021,11 @@ async function performDownloadsSearch() {
             showToast('No results found', 'error');
         } else {
             document.getElementById('filters-container').classList.remove('hidden');
-            
+
             // Count albums and singles like the GUI app
             let totalAlbums = 0;
             let totalTracks = 0;
-            
+
             results.forEach(result => {
                 if (result.result_type === 'album') {
                     totalAlbums++;
@@ -9033,7 +9033,7 @@ async function performDownloadsSearch() {
                     totalTracks++;
                 }
             });
-            
+
             statusText.textContent = `✨ Found ${results.length} results • ${totalAlbums} albums, ${totalTracks} singles`;
             showToast(`Found ${results.length} results`, 'success');
         }
@@ -9064,20 +9064,42 @@ async function performDownloadsSearch() {
 function displayDownloadsResults(results) {
     const resultsArea = document.getElementById('search-results-area');
     if (!resultsArea) return;
-    
+
     if (!results.length) {
         resultsArea.innerHTML = '<div class="search-results-placeholder"><p>No search results found.</p></div>';
         return;
     }
-    
+
     let html = '';
     results.forEach((result, index) => {
         const isAlbum = result.result_type === 'album';
-        
-        if (isAlbum) {
+        if (result.username === 'youtube') {
+            const thumbnail = result.thumbnail || '';
+            const durationText = result.duration ? formatDuration(result.duration) : '';
+
+            html += `
+                <div class="youtube-result-card" style="display: flex; gap: 1rem; padding: 1rem; background: rgba(255, 0, 0, 0.05); border: 1px solid rgba(255, 0, 0, 0.1); border-radius: 8px; margin-bottom: 0.5rem; align-items: center;">
+                    <div class="yt-thumb" style="width: 120px; height: 68px; flex-shrink: 0; border-radius: 4px; overflow: hidden; background: #000;">
+                        <img src="${thumbnail}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iNjgiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiMzMzMiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZmlsbD0iIzY2NiIgZm9udC1zaXplPSIxMiIgZGVtaW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+Tm8gSW1hZ2U8L3RleHQ+PC9zdmc+'">
+                    </div>
+                    <div class="yt-info" style="flex: 1;">
+                        <div class="yt-title" style="font-weight: 600; margin-bottom: 4px;">${escapeHtml(result.title)}</div>
+                        <div class="yt-channel" style="font-size: 0.9em; opacity: 0.8;">${escapeHtml(result.artist || result.username)} • ${durationText}</div>
+                    </div>
+                    <div class="yt-actions">
+                        <button onclick="streamAlbumTrack(${index}, -1)" class="track-stream-btn">Stream ▶</button>
+                        <button onclick="downloadAlbumTrack(${index}, -1)" class="track-download-btn">Download ⬇</button>
+                    </div>
+                </div>
+            `;
+            return; // Skip standard rendering for YouTube result
+        }
+
+
+        if (isAlbum && result.username !== 'youtube') {
             const trackCount = result.tracks ? result.tracks.length : 0;
             const totalSize = result.total_size ? `${(result.total_size / 1024 / 1024).toFixed(1)} MB` : 'Unknown size';
-            
+
             // Generate individual track items
             let trackListHtml = '';
             if (result.tracks && result.tracks.length > 0) {
@@ -9101,7 +9123,7 @@ function displayDownloadsResults(results) {
                     `;
                 });
             }
-            
+
             html += `
                 <div class="album-result-card" data-album-index="${index}">
                     <div class="album-card-header" onclick="toggleAlbumExpansion(${index})">
@@ -9148,7 +9170,7 @@ function displayDownloadsResults(results) {
             `;
         }
     });
-    
+
     resultsArea.innerHTML = html;
     // Store results globally for download functions
     window.currentSearchResults = results;
@@ -9157,18 +9179,18 @@ function displayDownloadsResults(results) {
 async function downloadTrack(index) {
     const results = window.currentSearchResults;
     if (!results || !results[index]) return;
-    
+
     const track = results[index];
-    
+
     try {
         const response = await fetch('/api/download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(track)
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             showToast(`Download started: ${track.title}`, 'success');
         } else {
@@ -9183,18 +9205,18 @@ async function downloadTrack(index) {
 async function downloadAlbum(index) {
     const results = window.currentSearchResults;
     if (!results || !results[index]) return;
-    
+
     const album = results[index];
-    
+
     try {
         const response = await fetch('/api/download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(album)
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             showToast(data.message, 'success');
         } else {
@@ -9210,10 +9232,10 @@ async function downloadAlbum(index) {
 function matchedDownloadTrack(index) {
     const results = window.currentSearchResults;
     if (!results || !results[index]) return;
-    
+
     const track = results[index];
     console.log('🎯 Starting matched download for single track:', track);
-    
+
     // Open matching modal for single track
     openMatchingModal(track, false, null);
 }
@@ -9221,10 +9243,10 @@ function matchedDownloadTrack(index) {
 function matchedDownloadAlbum(index) {
     const results = window.currentSearchResults;
     if (!results || !results[index]) return;
-    
+
     const album = results[index];
     console.log('🎯 Starting matched download for album:', album);
-    
+
     // Open matching modal for album download
     openMatchingModal(album, true, album);
 }
@@ -9232,19 +9254,19 @@ function matchedDownloadAlbum(index) {
 function matchedDownloadAlbumTrack(albumIndex, trackIndex) {
     const results = window.currentSearchResults;
     if (!results || !results[albumIndex]) return;
-    
+
     const album = results[albumIndex];
     if (!album.tracks || !album.tracks[trackIndex]) return;
-    
+
     const track = album.tracks[trackIndex];
-    
+
     // Ensure track has necessary properties from parent album
     track.username = album.username;
     track.artist = track.artist || album.artist;
     track.album = album.album_title || album.title;
-    
+
     console.log('🎯 Starting matched download for album track:', track);
-    
+
     // Open matching modal for single track (from album context)
     openMatchingModal(track, false, null);
 }
@@ -9252,10 +9274,10 @@ function matchedDownloadAlbumTrack(albumIndex, trackIndex) {
 function toggleAlbumExpansion(albumIndex) {
     const albumCard = document.querySelector(`[data-album-index="${albumIndex}"]`);
     if (!albumCard) return;
-    
+
     const trackList = albumCard.querySelector('.album-track-list');
     const indicator = albumCard.querySelector('.album-expand-indicator');
-    
+
     if (trackList.style.display === 'none' || !trackList.style.display) {
         // Expand
         trackList.style.display = 'block';
@@ -9272,9 +9294,9 @@ function toggleAlbumExpansion(albumIndex) {
 async function downloadAlbumTrack(albumIndex, trackIndex) {
     const results = window.currentSearchResults;
     if (!results || !results[albumIndex] || !results[albumIndex].tracks || !results[albumIndex].tracks[trackIndex]) return;
-    
+
     const track = results[albumIndex].tracks[trackIndex];
-    
+
     try {
         const response = await fetch('/api/download', {
             method: 'POST',
@@ -9284,9 +9306,9 @@ async function downloadAlbumTrack(albumIndex, trackIndex) {
                 result_type: 'track'
             })
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             showToast(`Download started: ${track.title}`, 'success');
         } else {
@@ -9307,13 +9329,13 @@ async function streamTrack(index) {
     try {
         console.log(`🎵 streamTrack called with index: ${index}`);
         console.log(`🎵 window.currentSearchResults:`, window.currentSearchResults);
-        
+
         if (!window.currentSearchResults || !window.currentSearchResults[index]) {
             console.error(`❌ No search results or invalid index. Results length: ${window.currentSearchResults ? window.currentSearchResults.length : 'undefined'}`);
             showToast('Track not found', 'error');
             return;
         }
-        
+
         const result = window.currentSearchResults[index];
         console.log(`🎵 Streaming track:`, result);
 
@@ -9331,9 +9353,9 @@ async function streamTrack(index) {
                 return;
             }
         }
-        
+
         await startStream(result);
-        
+
     } catch (error) {
         console.error('Track streaming error:', error);
         showToast('Failed to start track stream', 'error');
@@ -9346,25 +9368,25 @@ async function streamAlbumTrack(albumIndex, trackIndex) {
     try {
         console.log(`🎵 streamAlbumTrack called with albumIndex: ${albumIndex}, trackIndex: ${trackIndex}`);
         console.log(`🎵 window.currentSearchResults:`, window.currentSearchResults);
-        
+
         if (!window.currentSearchResults || !window.currentSearchResults[albumIndex]) {
             console.error(`❌ No search results or invalid album index. Results length: ${window.currentSearchResults ? window.currentSearchResults.length : 'undefined'}`);
             showToast('Album not found', 'error');
             return;
         }
-        
+
         const album = window.currentSearchResults[albumIndex];
         console.log(`🎵 Album data:`, album);
-        
+
         if (!album.tracks || !album.tracks[trackIndex]) {
             console.error(`❌ No tracks in album or invalid track index. Tracks length: ${album.tracks ? album.tracks.length : 'undefined'}`);
             showToast('Track not found in album', 'error');
             return;
         }
-        
+
         const track = album.tracks[trackIndex];
         console.log(`🎵 Streaming album track:`, track);
-        
+
         // Ensure album tracks have required fields
         const trackData = {
             ...track,
@@ -9373,7 +9395,7 @@ async function streamAlbumTrack(albumIndex, trackIndex) {
             artist: track.artist || album.artist,
             album: track.album || album.title || album.album
         };
-        
+
         console.log(`🎵 Enhanced track data:`, trackData);
 
         // Check for unsupported formats before streaming (YouTube is always MP3, so skip check)
@@ -9383,9 +9405,9 @@ async function streamAlbumTrack(albumIndex, trackIndex) {
             showToast(`Sorry, ${format.toUpperCase()} format is not supported in web browsers. Try downloading instead.`, 'error');
             return;
         }
-        
+
         await startStream(trackData);
-        
+
     } catch (error) {
         console.error('Album track streaming error:', error);
         showToast('Failed to start track stream', 'error');
@@ -9396,16 +9418,16 @@ async function loadArtistsData() {
     try {
         const response = await fetch(API.artists);
         const data = await response.json();
-        
+
         const artistsGrid = document.getElementById('artists-grid');
         if (data.artists && data.artists.length) {
             artistsGrid.innerHTML = data.artists.map(artist => `
                 <div class="artist-card">
                     <div class="artist-image">
-                        ${artist.image ? 
-                            `<img src="${artist.image}" alt="${escapeHtml(artist.name)}" />` :
-                            '<div class="artist-placeholder">🎵</div>'
-                        }
+                        ${artist.image ?
+                    `<img src="${artist.image}" alt="${escapeHtml(artist.name)}" />` :
+                    '<div class="artist-placeholder">🎵</div>'
+                }
                     </div>
                     <div class="artist-info">
                         <div class="artist-name">${escapeHtml(artist.name)}</div>
@@ -9442,11 +9464,11 @@ let recentToasts = new Map();
 
 function showToast(message, type = 'success') {
     const container = document.getElementById('toast-container');
-    
+
     // Create a unique key for this toast
     const toastKey = `${type}:${message}`;
     const now = Date.now();
-    
+
     // Check if we've shown this exact toast recently (within 5 seconds)
     if (recentToasts.has(toastKey)) {
         const lastShown = recentToasts.get(toastKey);
@@ -9455,23 +9477,23 @@ function showToast(message, type = 'success') {
             return; // Don't show duplicate
         }
     }
-    
+
     // Record this toast
     recentToasts.set(toastKey, now);
-    
+
     // Clean up old entries (older than 10 seconds)
     for (const [key, timestamp] of recentToasts.entries()) {
         if (now - timestamp > 10000) {
             recentToasts.delete(key);
         }
     }
-    
+
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     toast.textContent = message;
-    
+
     container.appendChild(toast);
-    
+
     // Auto-remove after 3 seconds
     setTimeout(() => {
         if (container.contains(toast)) {
@@ -9512,25 +9534,25 @@ function formatArtists(artists) {
 async function showVersionInfo() {
     try {
         console.log('Fetching version info...');
-        
+
         // Fetch version data from API
         const response = await fetch('/api/version-info');
         if (!response.ok) {
             throw new Error('Failed to fetch version info');
         }
-        
+
         const versionData = await response.json();
         console.log('Version data received:', versionData);
-        
+
         // Populate modal content
         populateVersionModal(versionData);
-        
+
         // Show modal
         const modalOverlay = document.getElementById('version-modal-overlay');
         modalOverlay.classList.remove('hidden');
-        
+
         console.log('Version modal opened');
-        
+
     } catch (error) {
         console.error('Error showing version info:', error);
         showToast('Failed to load version information', 'error');
@@ -9549,47 +9571,47 @@ function populateVersionModal(versionData) {
         console.error('Version content container not found');
         return;
     }
-    
+
     // Update header with dynamic data
     const titleElement = document.querySelector('.version-modal-title');
     const subtitleElement = document.querySelector('.version-modal-subtitle');
-    
+
     if (titleElement) titleElement.textContent = versionData.title;
     if (subtitleElement) subtitleElement.textContent = versionData.subtitle;
-    
+
     // Clear existing content
     container.innerHTML = '';
-    
+
     // Create sections
     versionData.sections.forEach(section => {
         const sectionDiv = document.createElement('div');
         sectionDiv.className = 'version-feature-section';
-        
+
         // Section title
         const titleDiv = document.createElement('div');
         titleDiv.className = 'version-section-title';
         titleDiv.textContent = section.title;
         sectionDiv.appendChild(titleDiv);
-        
+
         // Section description
         const descDiv = document.createElement('div');
         descDiv.className = 'version-section-description';
         descDiv.textContent = section.description;
         sectionDiv.appendChild(descDiv);
-        
+
         // Features list
         const featuresList = document.createElement('ul');
         featuresList.className = 'version-feature-list';
-        
+
         section.features.forEach(feature => {
             const featureItem = document.createElement('li');
             featureItem.className = 'version-feature-item';
             featureItem.textContent = feature;
             featuresList.appendChild(featureItem);
         });
-        
+
         sectionDiv.appendChild(featuresList);
-        
+
         // Usage note (if present)
         if (section.usage_note) {
             const usageDiv = document.createElement('div');
@@ -9597,10 +9619,10 @@ function populateVersionModal(versionData) {
             usageDiv.textContent = `💡 ${section.usage_note}`;
             sectionDiv.appendChild(usageDiv);
         }
-        
+
         container.appendChild(sectionDiv);
     });
-    
+
     console.log('Version modal content populated');
 }
 
@@ -9892,7 +9914,7 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
     }
 
     // Add new enter key handler
-    discoveryFixEnterHandler = function(e) {
+    discoveryFixEnterHandler = function (e) {
         if (e.key === 'Enter') searchDiscoveryFix();
     };
     trackInput.addEventListener('keypress', discoveryFixEnterHandler);
@@ -10834,7 +10856,7 @@ function initializeFilters() {
         // Using .onclick ensures we only ever have one click handler
         toggleBtn.onclick = () => {
             const isExpanded = container.classList.contains('expanded');
-            
+
             if (isExpanded) {
                 // Collapse the container
                 container.classList.remove('expanded');
@@ -10883,7 +10905,7 @@ function resetFilters() {
     currentFilterFormat = 'all';
     currentSortBy = 'quality_score';
     isSortReversed = false;
-    
+
     document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelector('.filter-btn[data-filter-type="type"][data-value="all"]').classList.add('active');
     document.querySelector('.filter-btn[data-filter-type="format"][data-value="all"]').classList.add('active');
@@ -10918,7 +10940,7 @@ function applyFiltersAndSort() {
             valB = calculateRelevanceScore(b, query);
             return valB - valA; // Higher score is better
         }
-        
+
         // Special handling for availability
         if (currentSortBy === 'availability') {
             valA = (a.free_upload_slots || 0) - (a.queue_length || 0) * 0.1;
@@ -10935,23 +10957,23 @@ function applyFiltersAndSort() {
             const titleB = (b.album_title || b.title || '').toLowerCase();
             return titleA.localeCompare(titleB);
         }
-        
+
         // Default numeric sort (descending)
         return valB - valA;
     });
 
     // Handle sort direction toggle
     const sortDefaults = {
-        relevance: 'desc', quality_score: 'desc', size: 'desc', bitrate: 'desc', 
+        relevance: 'desc', quality_score: 'desc', size: 'desc', bitrate: 'desc',
         upload_speed: 'desc', duration: 'desc', availability: 'desc',
         title: 'asc', username: 'asc'
     };
-    
+
     const defaultOrder = sortDefaults[currentSortBy] || 'desc';
     if ((defaultOrder === 'asc' && isSortReversed) || (defaultOrder === 'desc' && !isSortReversed)) {
         processedResults.reverse();
     }
-    
+
     displayDownloadsResults(processedResults);
 }
 
@@ -10979,7 +11001,7 @@ function calculateRelevanceScore(result, query) {
     // 4. File Completeness (Bitrate & Duration) (15%)
     const completeness = (Math.min(1, (result.bitrate || 0) / 320) * 0.5) + (result.duration > 0 ? 0.5 : 0);
     score += completeness * 0.15;
-    
+
     return score;
 }
 // APPEND THIS JAVASCRIPT SNIPPET (B)
@@ -10993,7 +11015,7 @@ function initializeFilters() {
         // Using .onclick ensures we only ever have one click handler
         toggleBtn.onclick = () => {
             const isExpanded = container.classList.contains('expanded');
-            
+
             if (isExpanded) {
                 // Collapse the container
                 container.classList.remove('expanded');
@@ -11042,7 +11064,7 @@ function resetFilters() {
     currentFilterFormat = 'all';
     currentSortBy = 'quality_score';
     isSortReversed = false;
-    
+
     document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelector('.filter-btn[data-filter-type="type"][data-value="all"]').classList.add('active');
     document.querySelector('.filter-btn[data-filter-type="format"][data-value="all"]').classList.add('active');
@@ -11077,7 +11099,7 @@ function applyFiltersAndSort() {
             valB = calculateRelevanceScore(b, query);
             return valB - valA; // Higher score is better
         }
-        
+
         // Special handling for availability
         if (currentSortBy === 'availability') {
             valA = (a.free_upload_slots || 0) - (a.queue_length || 0) * 0.1;
@@ -11094,23 +11116,23 @@ function applyFiltersAndSort() {
             const titleB = (b.album_title || b.title || '').toLowerCase();
             return titleA.localeCompare(titleB);
         }
-        
+
         // Default numeric sort (descending)
         return valB - valA;
     });
 
     // Handle sort direction toggle
     const sortDefaults = {
-        relevance: 'desc', quality_score: 'desc', size: 'desc', bitrate: 'desc', 
+        relevance: 'desc', quality_score: 'desc', size: 'desc', bitrate: 'desc',
         upload_speed: 'desc', duration: 'desc', availability: 'desc',
         title: 'asc', username: 'asc'
     };
-    
+
     const defaultOrder = sortDefaults[currentSortBy] || 'desc';
     if ((defaultOrder === 'asc' && isSortReversed) || (defaultOrder === 'desc' && !isSortReversed)) {
         processedResults.reverse();
     }
-    
+
     displayDownloadsResults(processedResults);
 }
 
@@ -11138,7 +11160,7 @@ function calculateRelevanceScore(result, query) {
     // 4. File Completeness (Bitrate & Duration) (15%)
     const completeness = (Math.min(1, (result.bitrate || 0) / 320) * 0.5) + (result.duration > 0 ? 0.5 : 0);
     score += completeness * 0.15;
-    
+
     return score;
 }
 
@@ -11166,7 +11188,7 @@ let searchTimers = {
 
 function openMatchingModal(searchResult, isAlbumDownload = false, albumResult = null) {
     console.log('🎯 Opening matching modal for:', searchResult);
-    
+
     // Store the current matching data
     currentMatchingData = {
         searchResult: searchResult,
@@ -11176,18 +11198,18 @@ function openMatchingModal(searchResult, isAlbumDownload = false, albumResult = 
         selectedAlbum: null,
         currentStage: 'artist'
     };
-    
+
     // Show modal
     const overlay = document.getElementById('matching-modal-overlay');
     overlay.classList.remove('hidden');
-    
+
     // Reset modal state
     resetModalState();
-    
+
     // Set appropriate title and stage
     const modalTitle = document.getElementById('matching-modal-title');
     const artistStageTitle = document.getElementById('artist-stage-title');
-    
+
     if (isAlbumDownload) {
         modalTitle.textContent = 'Match Album Download to Spotify';
         artistStageTitle.textContent = 'Step 1: Select the correct Artist';
@@ -11197,10 +11219,10 @@ function openMatchingModal(searchResult, isAlbumDownload = false, albumResult = 
         artistStageTitle.textContent = 'Select the correct Artist for this Single';
         document.getElementById('album-selection-stage').style.display = 'none';
     }
-    
+
     // Generate initial artist suggestions
     fetchArtistSuggestions();
-    
+
     // Setup event listeners
     setupModalEventListeners();
 }
@@ -11208,12 +11230,12 @@ function openMatchingModal(searchResult, isAlbumDownload = false, albumResult = 
 function closeMatchingModal() {
     const overlay = document.getElementById('matching-modal-overlay');
     overlay.classList.add('hidden');
-    
+
     // Clear timers
     Object.values(searchTimers).forEach(timer => {
         if (timer) clearTimeout(timer);
     });
-    
+
     // Reset state
     currentMatchingData = {
         searchResult: null,
@@ -11229,20 +11251,20 @@ function resetModalState() {
     // Show artist stage, hide album stage
     document.getElementById('artist-selection-stage').classList.remove('hidden');
     document.getElementById('album-selection-stage').classList.add('hidden');
-    
+
     // Clear all suggestion containers
     document.getElementById('artist-suggestions').innerHTML = '';
     document.getElementById('artist-manual-results').innerHTML = '';
     document.getElementById('album-suggestions').innerHTML = '';
     document.getElementById('album-manual-results').innerHTML = '';
-    
+
     // Clear search inputs
     document.getElementById('artist-search-input').value = '';
     document.getElementById('album-search-input').value = '';
-    
+
     // Reset button states
     document.getElementById('confirm-match-btn').disabled = true;
-    
+
     // Reset selections
     currentMatchingData.selectedArtist = null;
     currentMatchingData.selectedAlbum = null;
@@ -11253,18 +11275,18 @@ function setupModalEventListeners() {
     // Search input listeners
     const artistInput = document.getElementById('artist-search-input');
     const albumInput = document.getElementById('album-search-input');
-    
+
     artistInput.removeEventListener('input', handleArtistSearch);
     artistInput.addEventListener('input', handleArtistSearch);
-    
+
     albumInput.removeEventListener('input', handleAlbumSearch);
     albumInput.addEventListener('input', handleAlbumSearch);
-    
+
     // Button listeners
     const skipBtn = document.getElementById('skip-matching-btn');
     const cancelBtn = document.getElementById('cancel-match-btn');
     const confirmBtn = document.getElementById('confirm-match-btn');
-    
+
     skipBtn.onclick = skipMatching;
     cancelBtn.onclick = closeMatchingModal;
     confirmBtn.onclick = confirmMatch;
@@ -11273,7 +11295,7 @@ function setupModalEventListeners() {
 async function fetchArtistSuggestions() {
     try {
         showLoadingCards('artist-suggestions', 'Finding artist...');
-        
+
         const response = await fetch('/api/match/suggestions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -11284,7 +11306,7 @@ async function fetchArtistSuggestions() {
                 album_result: currentMatchingData.albumResult
             })
         });
-        
+
         const data = await response.json();
         if (data.suggestions) {
             renderArtistSuggestions(data.suggestions);
@@ -11299,10 +11321,10 @@ async function fetchArtistSuggestions() {
 
 async function fetchAlbumSuggestions() {
     if (!currentMatchingData.selectedArtist) return;
-    
+
     try {
         showLoadingCards('album-suggestions', 'Finding album...');
-        
+
         const response = await fetch('/api/match/suggestions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -11312,7 +11334,7 @@ async function fetchAlbumSuggestions() {
                 selected_artist: currentMatchingData.selectedArtist
             })
         });
-        
+
         const data = await response.json();
         if (data.suggestions) {
             renderAlbumSuggestions(data.suggestions);
@@ -11328,12 +11350,12 @@ async function fetchAlbumSuggestions() {
 function renderArtistSuggestions(suggestions) {
     const container = document.getElementById('artist-suggestions');
     container.innerHTML = '';
-    
+
     if (!suggestions.length) {
         showNoResultsMessage('artist-suggestions', 'No artist matches found');
         return;
     }
-    
+
     suggestions.forEach(suggestion => {
         const card = createArtistCard(suggestion.artist, suggestion.confidence);
         container.appendChild(card);
@@ -11343,12 +11365,12 @@ function renderArtistSuggestions(suggestions) {
 function renderAlbumSuggestions(suggestions) {
     const container = document.getElementById('album-suggestions');
     container.innerHTML = '';
-    
+
     if (!suggestions.length) {
         showNoResultsMessage('album-suggestions', 'No album matches found');
         return;
     }
-    
+
     suggestions.forEach(suggestion => {
         const card = createAlbumCard(suggestion.album, suggestion.confidence);
         container.appendChild(card);
@@ -11359,10 +11381,10 @@ function createArtistCard(artist, confidence) {
     const card = document.createElement('div');
     card.className = 'suggestion-card';
     card.onclick = () => selectArtist(artist);
-    
+
     const imageUrl = artist.image_url || '';
     const confidencePercent = Math.round(confidence * 100);
-    
+
     card.innerHTML = `
         <div class="suggestion-card-overlay"></div>
         <div class="suggestion-card-content">
@@ -11373,14 +11395,14 @@ function createArtistCard(artist, confidence) {
             <div class="suggestion-card-confidence">${confidencePercent}% match</div>
         </div>
     `;
-    
+
     // Set background image if available
     if (imageUrl) {
         card.style.backgroundImage = `url(${imageUrl})`;
         card.style.backgroundSize = 'cover';
         card.style.backgroundPosition = 'center';
     }
-    
+
     return card;
 }
 
@@ -11388,11 +11410,11 @@ function createAlbumCard(album, confidence) {
     const card = document.createElement('div');
     card.className = 'suggestion-card';
     card.onclick = () => selectAlbum(album);
-    
+
     const imageUrl = album.image_url || '';
     const confidencePercent = Math.round(confidence * 100);
     const year = album.release_date ? album.release_date.split('-')[0] : '';
-    
+
     card.innerHTML = `
         <div class="suggestion-card-overlay"></div>
         <div class="suggestion-card-content">
@@ -11403,14 +11425,14 @@ function createAlbumCard(album, confidence) {
             <div class="suggestion-card-confidence">${confidencePercent}% match</div>
         </div>
     `;
-    
+
     // Set background image if available
     if (imageUrl) {
         card.style.backgroundImage = `url(${imageUrl})`;
         card.style.backgroundSize = 'cover';
         card.style.backgroundPosition = 'center';
     }
-    
+
     return card;
 }
 
@@ -11422,15 +11444,15 @@ function selectArtist(artist) {
     document.querySelectorAll('#artist-manual-results .suggestion-card').forEach(card => {
         card.classList.remove('selected');
     });
-    
+
     // Mark new selection
     event.currentTarget.classList.add('selected');
-    
+
     // Store selection
     currentMatchingData.selectedArtist = artist;
-    
+
     console.log('🎯 Selected artist:', artist.name);
-    
+
     if (currentMatchingData.isAlbumDownload) {
         // Transition to album selection stage
         transitionToAlbumStage();
@@ -11448,15 +11470,15 @@ function selectAlbum(album) {
     document.querySelectorAll('#album-manual-results .suggestion-card').forEach(card => {
         card.classList.remove('selected');
     });
-    
+
     // Mark new selection
     event.currentTarget.classList.add('selected');
-    
+
     // Store selection
     currentMatchingData.selectedAlbum = album;
-    
+
     console.log('🎯 Selected album:', album.name);
-    
+
     // Enable confirm button
     document.getElementById('confirm-match-btn').disabled = false;
 }
@@ -11464,34 +11486,34 @@ function selectAlbum(album) {
 function transitionToAlbumStage() {
     // Hide artist stage
     document.getElementById('artist-selection-stage').classList.add('hidden');
-    
+
     // Show album stage
     const albumStage = document.getElementById('album-selection-stage');
     albumStage.classList.remove('hidden');
-    
+
     // Update selected artist name
     document.getElementById('selected-artist-name').textContent = currentMatchingData.selectedArtist.name;
-    
+
     // Update current stage
     currentMatchingData.currentStage = 'album';
-    
+
     // Fetch album suggestions
     fetchAlbumSuggestions();
 }
 
 function handleArtistSearch(event) {
     const query = event.target.value.trim();
-    
+
     // Clear previous timer
     if (searchTimers.artist) {
         clearTimeout(searchTimers.artist);
     }
-    
+
     if (query.length < 2) {
         document.getElementById('artist-manual-results').innerHTML = '';
         return;
     }
-    
+
     // Debounce search
     searchTimers.artist = setTimeout(() => {
         performArtistSearch(query);
@@ -11500,17 +11522,17 @@ function handleArtistSearch(event) {
 
 function handleAlbumSearch(event) {
     const query = event.target.value.trim();
-    
+
     // Clear previous timer
     if (searchTimers.album) {
         clearTimeout(searchTimers.album);
     }
-    
+
     if (query.length < 2) {
         document.getElementById('album-manual-results').innerHTML = '';
         return;
     }
-    
+
     // Debounce search
     searchTimers.album = setTimeout(() => {
         performAlbumSearch(query);
@@ -11549,10 +11571,10 @@ async function performArtistSearch(query) {
 
 async function performAlbumSearch(query) {
     if (!currentMatchingData.selectedArtist) return;
-    
+
     try {
         showLoadingCards('album-manual-results', 'Searching albums...');
-        
+
         const response = await fetch('/api/match/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -11562,7 +11584,7 @@ async function performAlbumSearch(query) {
                 artist_id: currentMatchingData.selectedArtist.id
             })
         });
-        
+
         const data = await response.json();
         if (data.results) {
             renderAlbumSearchResults(data.results);
@@ -11578,7 +11600,7 @@ async function performAlbumSearch(query) {
 function renderArtistSearchResults(results) {
     const container = document.getElementById('artist-manual-results');
     container.innerHTML = '';
-    
+
     results.forEach((result, index) => {
         console.log(`Manual search result ${index}:`, result);
         console.log(`  result.artist:`, result.artist);
@@ -11600,7 +11622,7 @@ function renderArtistSearchResults(results) {
 function renderAlbumSearchResults(results) {
     const container = document.getElementById('album-manual-results');
     container.innerHTML = '';
-    
+
     results.forEach(result => {
         const card = createAlbumCard(result.album, result.confidence);
         container.appendChild(card);
@@ -11619,10 +11641,10 @@ function showNoResultsMessage(containerId, message) {
 
 function skipMatching() {
     console.log('🎯 Skipping matching, proceeding with normal download');
-    
+
     // Close modal
     closeMatchingModal();
-    
+
     // Start normal download
     if (currentMatchingData.isAlbumDownload) {
         // For albums, we need to download each track
@@ -12723,10 +12745,10 @@ function resetWishlistModalToIdleState() {
     // Reset wishlist modal to idle state after background processing completes
     const playlistId = 'wishlist';
     const process = activeDownloadProcesses[playlistId];
-    
+
     if (process) {
         console.log('🔄 Resetting wishlist modal to idle state...');
-        
+
         // Reset button states
         const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
         const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
@@ -12744,30 +12766,30 @@ function resetWishlistModalToIdleState() {
         if (forceToggleContainer) {
             forceToggleContainer.style.display = 'flex';
         }
-        
+
         // Reset progress displays
         const analysisText = document.getElementById(`analysis-progress-text-${playlistId}`);
         const analysisBar = document.getElementById(`analysis-progress-fill-${playlistId}`);
         const downloadText = document.getElementById(`download-progress-text-${playlistId}`);
         const downloadBar = document.getElementById(`download-progress-fill-${playlistId}`);
-        
+
         if (analysisText) analysisText.textContent = 'Ready to start';
         if (analysisBar) analysisBar.style.width = '0%';
         if (downloadText) downloadText.textContent = 'Waiting for analysis';
         if (downloadBar) downloadBar.style.width = '0%';
-        
+
         // Reset all track rows to pending state
         const trackRows = document.querySelectorAll(`#download-missing-modal-${CSS.escape(playlistId)} tr[data-track-index]`);
         trackRows.forEach((row, index) => {
             const matchCell = row.querySelector(`#match-${playlistId}-${index}`);
             const downloadCell = row.querySelector(`#download-${playlistId}-${index}`);
             const actionsCell = row.querySelector(`#actions-${playlistId}-${index}`);
-            
+
             if (matchCell) matchCell.textContent = '🔍 Pending';
             if (downloadCell) downloadCell.textContent = '-';
             if (actionsCell) actionsCell.innerHTML = '-';
         });
-        
+
         // Reset stats
         const foundElement = document.getElementById(`stat-found-${playlistId}`);
         const missingElement = document.getElementById(`stat-missing-${playlistId}`);
@@ -12775,7 +12797,7 @@ function resetWishlistModalToIdleState() {
         if (foundElement) foundElement.textContent = '-';
         if (missingElement) missingElement.textContent = '-';
         if (downloadedElement) downloadedElement.textContent = '0';
-        
+
         // Reset process status
         process.status = 'idle';
         process.batchId = null;
@@ -12783,7 +12805,7 @@ function resetWishlistModalToIdleState() {
             clearInterval(process.poller);
             process.poller = null;
         }
-        
+
         console.log('✅ Wishlist modal fully reset to idle state');
     } else {
         console.log('⚠️ No wishlist process found to reset');
@@ -12802,10 +12824,10 @@ async function loadDashboardData() {
     if (metadataButton) {
         metadataButton.addEventListener('click', handleMetadataUpdateButtonClick);
     }
-    
+
     // Check active media server and hide metadata updater if not Plex
     await checkAndHideMetadataUpdaterForNonPlex();
-    
+
     // Check for ongoing metadata update and restore state
     await checkAndRestoreMetadataUpdateState();
 
@@ -12841,32 +12863,32 @@ async function loadDashboardData() {
 
     // Initial load of stats
     await fetchAndUpdateDbStats();
-    
+
     // Start periodic refresh of stats (every 30 seconds)
     stopDbStatsPolling(); // Ensure no duplicates
     dbStatsInterval = setInterval(fetchAndUpdateDbStats, 30000);
 
     // Initial load of wishlist count
     await updateWishlistCount();
-    
+
     // Start periodic refresh of wishlist count (every 30 seconds, matching GUI behavior)
     stopWishlistCountPolling(); // Ensure no duplicates
     wishlistCountInterval = setInterval(updateWishlistCount, 30000);
-    
+
     // Initial load of service status and system statistics
     await fetchAndUpdateServiceStatus();
     await fetchAndUpdateSystemStats();
-    
+
     // Service status is already polled globally (line 311)
     // System stats polling kept here (dashboard-specific)
     setInterval(fetchAndUpdateSystemStats, 10000);
-    
+
     // Initial load of activity feed
     await fetchAndUpdateActivityFeed();
-    
+
     // Start periodic refresh of activity feed (every 5 seconds for responsiveness)
     setInterval(fetchAndUpdateActivityFeed, 5000);
-    
+
     // Start periodic toast checking (every 3 seconds)
     setInterval(checkForActivityToasts, 3000);
 
@@ -12881,7 +12903,7 @@ async function loadDashboardData() {
 
     // Check for any active download processes that need rehydration
     await checkForActiveProcesses();
-    
+
     // Automatic wishlist processing now runs server-side
 }
 
@@ -12891,7 +12913,7 @@ async function fetchAndUpdateDbStats() {
     try {
         const response = await fetch('/api/database/stats');
         if (!response.ok) return;
-        
+
         const stats = await response.json();
 
         // This function updates the stat cards in the top grid
@@ -12933,7 +12955,7 @@ function updateDbUpdaterCardInfo(stats) {
     if (albumsStatEl) albumsStatEl.textContent = stats.albums.toLocaleString() || '0';
     if (tracksStatEl) tracksStatEl.textContent = stats.tracks.toLocaleString() || '0';
     if (sizeStatEl) sizeStatEl.textContent = `${stats.database_size_mb.toFixed(2)} MB`;
-    
+
     // Update the title of the tool card to show which server is active
     const toolCardTitle = document.querySelector('#db-updater-card .tool-card-title');
     if (toolCardTitle && stats.server_source) {
@@ -12948,14 +12970,14 @@ async function updateWishlistCount() {
     try {
         const response = await fetch('/api/wishlist/count');
         if (!response.ok) return;
-        
+
         const data = await response.json();
         const count = data.count || 0;
-        
+
         const wishlistButton = document.getElementById('wishlist-button');
         if (wishlistButton) {
             wishlistButton.textContent = `🎵 Wishlist (${count})`;
-            
+
             // Update button styling based on count (matching GUI behavior)
             if (count === 0) {
                 wishlistButton.classList.remove('wishlist-active');
@@ -12965,10 +12987,10 @@ async function updateWishlistCount() {
                 wishlistButton.classList.add('wishlist-active');
             }
         }
-        
+
         // Check for auto-initiated wishlist processes that user should see immediately
         await checkForAutoInitiatedWishlistProcess();
-        
+
     } catch (error) {
         console.warn('Could not fetch wishlist count:', error);
     }
@@ -12977,44 +12999,44 @@ async function updateWishlistCount() {
 async function checkForAutoInitiatedWishlistProcess() {
     try {
         const playlistId = 'wishlist';
-        
+
         // Only check if we're on the dashboard and no modal is currently visible
         if (currentPage !== 'dashboard') {
             return;
         }
-        
+
         // Don't override if user has manually closed the modal during auto-processing
         if (WishlistModalState.wasUserClosed()) {
             return;
         }
-        
+
         // Check for active wishlist processes
         const response = await fetch('/api/active-processes');
         if (!response.ok) return;
-        
+
         const data = await response.json();
         const processes = data.active_processes || [];
         const serverWishlistProcess = processes.find(p => p.playlist_id === playlistId);
         const clientWishlistProcess = activeDownloadProcesses[playlistId];
-        
+
         if (serverWishlistProcess && serverWishlistProcess.auto_initiated) {
             console.log('🤖 [Auto-Processing] Detected auto-initiated wishlist process during polling');
-            
+
             // Only sync frontend state if needed, but don't auto-show modal
-            const needsSync = !clientWishlistProcess || 
+            const needsSync = !clientWishlistProcess ||
                 clientWishlistProcess.batchId !== serverWishlistProcess.batch_id ||
                 !clientWishlistProcess.modalElement ||
                 !document.body.contains(clientWishlistProcess.modalElement);
-                
+
             if (needsSync) {
                 console.log('🔄 [Auto-Processing] Syncing frontend state for auto-processing (background mode)');
                 await rehydrateModal(serverWishlistProcess, false); // Background sync only
             }
-            
+
             // Note: Modal visibility is controlled by user interaction only
             // User must click wishlist button to see auto-processing progress
         }
-        
+
     } catch (error) {
         console.warn('Error checking for auto-initiated wishlist process:', error);
     }
@@ -13073,9 +13095,9 @@ function updateDbProgressUI(state) {
             phaseLabel.textContent = state.phase || 'Idle';
             progressBar.style.backgroundColor = '#1db954'; // Green for normal
         }
-        
+
         if (state.status === 'finished' || state.status === 'error') {
-             // Final stats refresh after completion/error
+            // Final stats refresh after completion/error
             setTimeout(fetchAndUpdateDbStats, 500);
         }
     }
@@ -13088,7 +13110,7 @@ function updateDbProgressUI(state) {
 async function loadTidalPlaylists() {
     const container = document.getElementById('tidal-playlist-container');
     const refreshBtn = document.getElementById('tidal-refresh-btn');
-    
+
     container.innerHTML = `<div class="playlist-placeholder">🔄 Loading Tidal playlists...</div>`;
     refreshBtn.disabled = true;
     refreshBtn.textContent = '🔄 Loading...';
@@ -13099,13 +13121,13 @@ async function loadTidalPlaylists() {
             const error = await response.json();
             throw new Error(error.error || 'Failed to fetch Tidal playlists');
         }
-        
+
         tidalPlaylists = await response.json();
         renderTidalPlaylists();
         tidalPlaylistsLoaded = true;
 
         console.log(`🎵 Loaded ${tidalPlaylists.length} Tidal playlists`);
-        
+
         // Load and apply saved discovery states from backend (like YouTube)
         await loadTidalPlaylistStatesFromBackend();
 
@@ -13133,10 +13155,10 @@ function renderTidalPlaylists() {
                 playlist: p
             };
         }
-        
+
         return createTidalCard(p);
     }).join('');
-    
+
     // Add click handlers to cards
     tidalPlaylists.forEach(p => {
         const card = document.getElementById(`tidal-card-${p.id}`);
@@ -13149,12 +13171,12 @@ function renderTidalPlaylists() {
 function createTidalCard(playlist) {
     const state = tidalPlaylistStates[playlist.id];
     const phase = state.phase;
-    
+
     // Get phase-specific button text (like YouTube cards)
     let buttonText = getActionButtonText(phase);
     let phaseText = getPhaseText(phase);
     let phaseColor = getPhaseColor(phase);
-    
+
     return `
         <div class="youtube-playlist-card tidal-playlist-card" id="tidal-card-${playlist.id}">
             <div class="playlist-card-icon">🎵</div>
@@ -13181,38 +13203,38 @@ async function handleTidalCardClick(playlistId) {
         showToast('Playlist state not found - try refreshing the page', 'error');
         return;
     }
-    
+
     // Validate required state data
     if (!state.playlist) {
         console.error(`❌ [Card Click] No playlist data found for Tidal playlist: ${playlistId}`);
         showToast('Playlist data missing - try refreshing the page', 'error');
         return;
     }
-    
+
     // Validate phase
     if (!state.phase) {
         console.warn(`⚠️ [Card Click] No phase set for Tidal playlist ${playlistId} - defaulting to 'fresh'`);
         state.phase = 'fresh';
     }
-    
+
     console.log(`🎵 [Card Click] Tidal card clicked: ${playlistId}, Phase: ${state.phase}`);
-    
+
     if (state.phase === 'fresh') {
         // No need to fetch data - we already have all tracks from initial load (like sync.py)
         console.log(`🎵 Using pre-loaded Tidal playlist data for: ${state.playlist.name}`);
         console.log(`🎵 Ready with ${state.playlist.tracks.length} Tidal tracks for discovery`);
-        
+
         // Open discovery modal - phase will be updated when discovery actually starts
         openTidalDiscoveryModal(playlistId, state.playlist);
-        
+
     } else if (state.phase === 'discovering' || state.phase === 'discovered' || state.phase === 'syncing' || state.phase === 'sync_complete') {
         // Reopen existing modal with preserved discovery results (like GUI sync.py)
         console.log(`🎵 [Card Click] Opening Tidal discovery modal for ${state.phase} phase`);
-        
+
         // Validate that we have discovery results to show
         if (state.phase === 'discovered' && (!state.discovery_results || state.discovery_results.length === 0)) {
             console.warn(`⚠️ [Card Click] Discovered phase but no discovery results found - attempting to reload from backend`);
-            
+
             // Try to fetch from backend as fallback
             try {
                 const stateResponse = await fetch(`/api/tidal/state/${playlistId}`);
@@ -13223,7 +13245,7 @@ async function handleTidalCardClick(playlistId) {
                         state.discovery_results = fullState.discovery_results;
                         state.spotify_matches = fullState.spotify_matches || state.spotify_matches;
                         state.discovery_progress = fullState.discovery_progress || state.discovery_progress;
-                        tidalPlaylistStates[playlistId] = {...tidalPlaylistStates[playlistId], ...state};
+                        tidalPlaylistStates[playlistId] = { ...tidalPlaylistStates[playlistId], ...state };
                         console.log(`✅ [Card Click] Restored ${fullState.discovery_results.length} discovery results from backend`);
                     }
                 }
@@ -13231,7 +13253,7 @@ async function handleTidalCardClick(playlistId) {
                 console.error(`❌ [Card Click] Failed to fetch discovery results from backend: ${error}`);
             }
         }
-        
+
         openTidalDiscoveryModal(playlistId, state.playlist);
     } else if (state.phase === 'downloading' || state.phase === 'download_complete') {
         // Open download modal if we have the converted playlist ID
@@ -13255,7 +13277,7 @@ async function handleTidalCardClick(playlistId) {
         } else {
             console.error('❌ [Card Click] No converted Spotify playlist ID found for Tidal download modal');
             console.log('📊 [Card Click] Available state data:', Object.keys(state));
-            
+
             // Fallback: try to open discovery modal if we have discovery results
             if (state.discovery_results && state.discovery_results.length > 0) {
                 console.log(`🔄 [Card Click] Fallback: Opening discovery modal with ${state.discovery_results.length} results`);
@@ -13275,9 +13297,9 @@ async function rehydrateTidalDownloadModal(playlistId, state) {
             showToast('Cannot open download modal - invalid playlist data', 'error');
             return;
         }
-        
+
         console.log(`💧 [Rehydration] Rehydrating Tidal download modal for: ${state.playlist.name}`);
-        
+
         // Get discovery results from backend if not already loaded
         if (!state.discovery_results) {
             console.log(`🔍 Fetching discovery results from backend for Tidal playlist: ${playlistId}`);
@@ -13294,7 +13316,7 @@ async function rehydrateTidalDownloadModal(playlistId, state) {
                 return;
             }
         }
-        
+
         // Extract Spotify tracks from discovery results
         const spotifyTracks = [];
         for (const result of state.discovery_results) {
@@ -13302,34 +13324,34 @@ async function rehydrateTidalDownloadModal(playlistId, state) {
                 spotifyTracks.push(result.spotify_data);
             }
         }
-        
+
         if (spotifyTracks.length === 0) {
             console.error('❌ No Spotify tracks found for download modal');
             showToast('No Spotify matches found for download', 'error');
             return;
         }
-        
+
         const virtualPlaylistId = state.convertedSpotifyPlaylistId;
         const playlistName = state.playlist.name;
 
         // Create the download modal
         await openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks);
-        
+
         // If we have a download process ID, set up the modal for the running state
         if (state.download_process_id) {
             const process = activeDownloadProcesses[virtualPlaylistId];
             if (process) {
                 process.status = state.phase === 'download_complete' ? 'complete' : 'running';
                 process.batchId = state.download_process_id;
-                
+
                 // Update UI based on phase
                 const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
                 const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
-                
+
                 if (state.phase === 'downloading') {
                     if (beginBtn) beginBtn.style.display = 'none';
                     if (cancelBtn) cancelBtn.style.display = 'inline-block';
-                    
+
                     // Start polling for live updates
                     startModalDownloadPolling(virtualPlaylistId);
                     console.log(`🔄 Started polling for active Tidal download: ${state.download_process_id}`);
@@ -13337,7 +13359,7 @@ async function rehydrateTidalDownloadModal(playlistId, state) {
                     if (beginBtn) beginBtn.style.display = 'none';
                     if (cancelBtn) cancelBtn.style.display = 'none';
                     console.log(`✅ Showing completed Tidal download results: ${state.download_process_id}`);
-                    
+
                     // For completed downloads, fetch the final results once to populate the modal
                     try {
                         const response = await fetch(`/api/playlists/${state.download_process_id}/download_status`);
@@ -13361,9 +13383,9 @@ async function rehydrateTidalDownloadModal(playlistId, state) {
                 }
             }
         }
-        
+
         console.log(`✅ Successfully rehydrated Tidal download modal for: ${state.playlist.name}`);
-        
+
     } catch (error) {
         console.error(`❌ Error rehydrating Tidal download modal:`, error);
         showToast('Error opening download modal', 'error');
@@ -13376,32 +13398,32 @@ function updateCompletedModalResults(playlistId, downloadData) {
      * This reuses the existing status polling logic but applies it once for completed state
      */
     console.log(`📊 [Completed Results] Updating modal ${playlistId} with final download results`);
-    
+
     // Validate input data
     if (!downloadData || !downloadData.tasks) {
         console.error(`❌ [Completed Results] Invalid download data for playlist ${playlistId}:`, downloadData);
         return;
     }
-    
+
     try {
         // Update analysis progress to 100%
         const analysisProgressFill = document.getElementById(`analysis-progress-fill-${playlistId}`);
         const analysisProgressText = document.getElementById(`analysis-progress-text-${playlistId}`);
         if (analysisProgressFill) analysisProgressFill.style.width = '100%';
         if (analysisProgressText) analysisProgressText.textContent = 'Analysis complete!';
-        
+
         // Update analysis results and stats
         if (downloadData.analysis_results) {
             updateTrackAnalysisResults(playlistId, downloadData.analysis_results);
             const foundCount = downloadData.analysis_results.filter(r => r.found).length;
             const missingCount = downloadData.analysis_results.filter(r => !r.found).length;
-            
+
             const statFound = document.getElementById(`stat-found-${playlistId}`);
             const statMissing = document.getElementById(`stat-missing-${playlistId}`);
             if (statFound) statFound.textContent = foundCount;
             if (statMissing) statMissing.textContent = missingCount;
         }
-        
+
         // Process completed tasks to update individual track statuses
         const missingTracks = (downloadData.analysis_results || []).filter(r => !r.found);
         let completedCount = 0;
@@ -13410,11 +13432,11 @@ function updateCompletedModalResults(playlistId, downloadData) {
         (downloadData.tasks || []).forEach(task => {
             const row = document.querySelector(`#download-missing-modal-${CSS.escape(playlistId)} tr[data-track-index="${task.track_index}"]`);
             if (!row) return;
-            
+
             row.dataset.taskId = task.task_id;
             const statusEl = document.getElementById(`download-${playlistId}-${task.track_index}`);
             const actionsEl = document.getElementById(`actions-${playlistId}-${task.track_index}`);
-            
+
             let statusText = '';
             switch (task.status) {
                 case 'pending': statusText = '⏸️ Pending'; break;
@@ -13426,7 +13448,7 @@ function updateCompletedModalResults(playlistId, downloadData) {
                 case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
                 default: statusText = `⚪ ${task.status}`; break;
             }
-            
+
             if (statusEl) statusEl.textContent = statusText;
             if (actionsEl) actionsEl.innerHTML = '-'; // Remove action buttons for completed tasks
         });
@@ -13435,17 +13457,17 @@ function updateCompletedModalResults(playlistId, downloadData) {
         const totalFinished = completedCount + failedOrCancelledCount;
         const missingCount = missingTracks.length;
         const progressPercent = missingCount > 0 ? (totalFinished / missingCount) * 100 : 100;
-        
+
         const downloadProgressFill = document.getElementById(`download-progress-fill-${playlistId}`);
         const downloadProgressText = document.getElementById(`download-progress-text-${playlistId}`);
         const statDownloaded = document.getElementById(`stat-downloaded-${playlistId}`);
-        
+
         if (downloadProgressFill) downloadProgressFill.style.width = `${progressPercent}%`;
         if (downloadProgressText) downloadProgressText.textContent = `${completedCount}/${missingCount} completed (${progressPercent.toFixed(0)}%)`;
         if (statDownloaded) statDownloaded.textContent = completedCount;
-        
+
         console.log(`✅ [Completed Results] Updated modal with ${completedCount} completed, ${failedOrCancelledCount} failed tasks`);
-        
+
     } catch (error) {
         console.error(`❌ [Completed Results] Error updating completed modal results:`, error);
     }
@@ -13454,29 +13476,29 @@ function updateCompletedModalResults(playlistId, downloadData) {
 function updateTidalCardPhase(playlistId, phase) {
     const state = tidalPlaylistStates[playlistId];
     if (!state) return;
-    
+
     state.phase = phase;
-    
+
     // Re-render the card with new phase
     const card = document.getElementById(`tidal-card-${playlistId}`);
     if (card) {
         const oldButtonText = card.querySelector('.playlist-card-action-btn')?.textContent || 'unknown';
         const newCardHtml = createTidalCard(state.playlist);
         card.outerHTML = newCardHtml;
-        
+
         // Verify the card was actually updated
         const updatedCard = document.getElementById(`tidal-card-${playlistId}`);
         const newButtonText = updatedCard?.querySelector('.playlist-card-action-btn')?.textContent || 'unknown';
-        
+
         console.log(`🔄 [Card Update] Re-rendered Tidal card ${playlistId}:`);
         console.log(`   📊 Phase: ${phase}`);
         console.log(`   🔘 Button text: "${oldButtonText}" → "${newButtonText}"`);
         console.log(`   ✅ Expected: "${getActionButtonText(phase)}"`);
-        
+
         if (newButtonText !== getActionButtonText(phase)) {
             console.error(`❌ [Card Update] Button text mismatch! Expected "${getActionButtonText(phase)}", got "${newButtonText}"`);
         }
-        
+
         // Re-attach click handler
         const newCard = document.getElementById(`tidal-card-${playlistId}`);
         if (newCard) {
@@ -13485,7 +13507,7 @@ function updateTidalCardPhase(playlistId, phase) {
         } else {
             console.error(`❌ [Card Update] Failed to find new card after rendering: tidal-card-${playlistId}`);
         }
-        
+
         // If we have sync progress and we're in sync/sync_complete phase, restore it
         if ((phase === 'syncing' || phase === 'sync_complete') && state.lastSyncProgress) {
             setTimeout(() => {
@@ -13493,21 +13515,21 @@ function updateTidalCardPhase(playlistId, phase) {
             }, 0);
         }
     }
-    
+
     console.log(`🎵 Updated Tidal card phase: ${playlistId} -> ${phase}`);
 }
 
 async function openTidalDiscoveryModal(playlistId, playlistData) {
     console.log(`🎵 Opening Tidal discovery modal (reusing YouTube modal): ${playlistData.name}`);
-    
+
     // Create a fake YouTube-style urlHash for the modal system
     const fakeUrlHash = `tidal_${playlistId}`;
-    
+
     // Get current Tidal card state to check if discovery is already done or in progress
     const tidalCardState = tidalPlaylistStates[playlistId];
     const isAlreadyDiscovered = tidalCardState && (tidalCardState.phase === 'discovered' || tidalCardState.phase === 'syncing' || tidalCardState.phase === 'sync_complete');
     const isCurrentlyDiscovering = tidalCardState && tidalCardState.phase === 'discovering';
-    
+
     // Prepare discovery results in the correct format for modal
     let transformedResults = [];
     let actualMatches = 0;
@@ -13515,10 +13537,10 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
         transformedResults = tidalCardState.discovery_results.map((result, index) => {
             // Check multiple status formats
             const isFound = result.status === 'found' ||
-                          result.status === '✅ Found' ||
-                          result.status_class === 'found' ||
-                          result.spotify_data ||
-                          result.spotify_track;
+                result.status === '✅ Found' ||
+                result.status_class === 'found' ||
+                result.spotify_data ||
+                result.spotify_track;
             if (isFound) actualMatches++;
 
             return {
@@ -13538,7 +13560,7 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
         });
         console.log(`🎵 Tidal modal: Calculated ${actualMatches} matches from ${transformedResults.length} results`);
     }
-    
+
     // Create YouTube-compatible state structure  
     const modalPhase = tidalCardState ? tidalCardState.phase : 'fresh';
     youtubePlaylistStates[fakeUrlHash] = {
@@ -13557,37 +13579,37 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
         discoveryResults: transformedResults, // Both formats for compatibility
         discoveryProgress: isAlreadyDiscovered ? 100 : 0 // Frontend format for modal progress display
     };
-    
+
     // Only start discovery if not already discovered AND not currently discovering
     if (!isAlreadyDiscovered && !isCurrentlyDiscovering) {
         // Start Tidal discovery process automatically (like sync.py)
         try {
             console.log(`🔍 Starting Tidal discovery for: ${playlistData.name}`);
-            
+
             const response = await fetch(`/api/tidal/discovery/start/${playlistId}`, {
                 method: 'POST'
             });
-            
+
             const result = await response.json();
-            
+
             if (result.error) {
                 console.error('❌ Error starting Tidal discovery:', result.error);
                 showToast(`Error starting discovery: ${result.error}`, 'error');
                 return;
             }
-            
+
             console.log('✅ Tidal discovery started, beginning polling...');
-            
+
             // Update phase to discovering now that backend discovery is actually started
             tidalPlaylistStates[playlistId].phase = 'discovering';
             updateTidalCardPhase(playlistId, 'discovering');
-            
+
             // Update modal phase to match
             youtubePlaylistStates[fakeUrlHash].phase = 'discovering';
-            
+
             // Start polling for progress
             startTidalDiscoveryPolling(fakeUrlHash, playlistId);
-            
+
         } catch (error) {
             console.error('❌ Error starting Tidal discovery:', error);
             showToast(`Error starting discovery: ${error.message}`, 'error');
@@ -13603,31 +13625,31 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
     } else {
         console.log('✅ Using existing results - no need to re-discover');
     }
-    
+
     // Reuse YouTube discovery modal (exact sync.py pattern)
     openYouTubeDiscoveryModal(fakeUrlHash);
 }
 
 function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
     console.log(`🔄 Starting Tidal discovery polling for: ${playlistId}`);
-    
+
     // Stop any existing polling
     if (activeYouTubePollers[fakeUrlHash]) {
         clearInterval(activeYouTubePollers[fakeUrlHash]);
     }
-    
+
     const pollInterval = setInterval(async () => {
         try {
             const response = await fetch(`/api/tidal/discovery/status/${playlistId}`);
             const status = await response.json();
-            
+
             if (status.error) {
                 console.error('❌ Error polling Tidal discovery status:', status.error);
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[fakeUrlHash];
                 return;
             }
-            
+
             // Transform Tidal results to YouTube modal format first
             const transformedStatus = {
                 progress: status.progress,
@@ -13635,10 +13657,10 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
                 spotify_total: status.spotify_total,
                 results: status.results.map((result, index) => {
                     const isFound = result.status === 'found' ||
-                                  result.status === '✅ Found' ||
-                                  result.status_class === 'found' ||
-                                  result.spotify_data ||
-                                  result.spotify_track;
+                        result.status === '✅ Found' ||
+                        result.status_class === 'found' ||
+                        result.spotify_data ||
+                        result.spotify_track;
 
                     return {
                         index: index,
@@ -13656,7 +13678,7 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
                     };
                 })
             };
-            
+
             // Update fake YouTube state with Tidal discovery results
             const state = youtubePlaylistStates[fakeUrlHash];
             if (state) {
@@ -13667,10 +13689,10 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
                 state.discovery_results = status.results; // Backend format
                 state.discoveryResults = transformedStatus.results; // Frontend format - for button logic  
                 state.phase = status.phase;
-                
+
                 // Update modal with transformed data (reuse YouTube modal update logic)
                 updateYouTubeDiscoveryModal(fakeUrlHash, transformedStatus);
-                
+
                 // Update Tidal card phase and save discovery results FIRST
                 if (tidalPlaylistStates[playlistId]) {
                     tidalPlaylistStates[playlistId].phase = status.phase;
@@ -13679,27 +13701,27 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
                     tidalPlaylistStates[playlistId].discovery_progress = status.progress;
                     updateTidalCardPhase(playlistId, status.phase);
                 }
-                
+
                 // Update Tidal card progress AFTER phase update to avoid being overwritten
                 updateTidalCardProgress(playlistId, status);
-                
+
                 console.log(`🔄 Tidal discovery progress: ${status.progress}% (${status.spotify_matches}/${status.spotify_total} found)`);
             }
-            
+
             // Stop polling when complete
             if (status.complete) {
                 console.log(`✅ Tidal discovery complete: ${status.spotify_matches}/${status.spotify_total} tracks found`);
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[fakeUrlHash];
             }
-            
+
         } catch (error) {
             console.error('❌ Error polling Tidal discovery:', error);
             clearInterval(pollInterval);
             delete activeYouTubePollers[fakeUrlHash];
         }
     }, 1000); // Poll every second like YouTube
-    
+
     // Store poller reference (reuse YouTube poller storage)
     activeYouTubePollers[fakeUrlHash] = pollInterval;
 }
@@ -13708,35 +13730,35 @@ async function loadTidalPlaylistStatesFromBackend() {
     // Load all stored Tidal playlist discovery states from backend (similar to YouTube hydration)
     try {
         console.log('🎵 Loading Tidal playlist states from backend...');
-        
+
         const response = await fetch('/api/tidal/playlists/states');
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || 'Failed to fetch Tidal playlist states');
         }
-        
+
         const data = await response.json();
         const states = data.states || [];
-        
+
         console.log(`🎵 Found ${states.length} stored Tidal playlist states in backend`);
-        
+
         if (states.length === 0) {
             console.log('🎵 No Tidal playlist states to hydrate');
             return;
         }
-        
+
         // Apply states to existing playlist cards
         for (const stateInfo of states) {
             await applyTidalPlaylistState(stateInfo);
         }
-        
+
         // Rehydrate download modals for Tidal playlists in downloading/download_complete phases
         for (const stateInfo of states) {
-            if ((stateInfo.phase === 'downloading' || stateInfo.phase === 'download_complete') && 
+            if ((stateInfo.phase === 'downloading' || stateInfo.phase === 'download_complete') &&
                 stateInfo.converted_spotify_playlist_id && stateInfo.download_process_id) {
-                
+
                 const convertedPlaylistId = stateInfo.converted_spotify_playlist_id;
-                
+
                 if (!activeDownloadProcesses[convertedPlaylistId]) {
                     console.log(`💧 Rehydrating download modal for Tidal playlist: ${stateInfo.playlist_id}`);
                     try {
@@ -13746,34 +13768,34 @@ async function loadTidalPlaylistStatesFromBackend() {
                             console.warn(`⚠️ Playlist data not found for rehydration: ${stateInfo.playlist_id}`);
                             continue;
                         }
-                        
+
                         // Create the download modal using the Tidal-specific function
                         const spotifyTracks = tidalPlaylistStates[stateInfo.playlist_id]?.discovery_results
                             ?.filter(result => result.spotify_data)
                             ?.map(result => result.spotify_data) || [];
-                        
+
                         if (spotifyTracks.length > 0) {
                             await openDownloadMissingModalForTidal(
                                 convertedPlaylistId,
                                 playlistData.name,
                                 spotifyTracks
                             );
-                            
+
                             // Set the modal to running state with the correct batch ID
                             const process = activeDownloadProcesses[convertedPlaylistId];
                             if (process) {
                                 process.status = 'running';
                                 process.batchId = stateInfo.download_process_id;
-                                
+
                                 // Update UI to running state
                                 const beginBtn = document.getElementById(`begin-analysis-btn-${convertedPlaylistId}`);
                                 const cancelBtn = document.getElementById(`cancel-all-btn-${convertedPlaylistId}`);
                                 if (beginBtn) beginBtn.style.display = 'none';
                                 if (cancelBtn) cancelBtn.style.display = 'inline-block';
-                                
+
                                 // Start polling for this process
                                 startModalDownloadPolling(convertedPlaylistId);
-                                
+
                                 console.log(`✅ Rehydrated Tidal download modal for batch ${stateInfo.download_process_id}`);
                             }
                         } else {
@@ -13785,9 +13807,9 @@ async function loadTidalPlaylistStatesFromBackend() {
                 }
             }
         }
-        
+
         console.log('✅ Tidal playlist states loaded and applied');
-        
+
     } catch (error) {
         console.error('❌ Error loading Tidal playlist states:', error);
     }
@@ -13795,17 +13817,17 @@ async function loadTidalPlaylistStatesFromBackend() {
 
 async function applyTidalPlaylistState(stateInfo) {
     const { playlist_id, phase, discovery_progress, spotify_matches, discovery_results, converted_spotify_playlist_id, download_process_id } = stateInfo;
-    
+
     try {
         console.log(`🎵 Applying saved state for Tidal playlist: ${playlist_id}, Phase: ${phase}`);
-        
+
         // Find the playlist data from the loaded playlists
         const playlistData = tidalPlaylists.find(p => p.id === playlist_id);
         if (!playlistData) {
             console.warn(`⚠️ Playlist data not found for state ${playlist_id} - skipping`);
             return;
         }
-        
+
         // Update local state
         if (!tidalPlaylistStates[playlist_id]) {
             // Initialize state if it doesn't exist
@@ -13814,7 +13836,7 @@ async function applyTidalPlaylistState(stateInfo) {
                 phase: 'fresh'
             };
         }
-        
+
         // Update with backend state
         tidalPlaylistStates[playlist_id].phase = phase;
         tidalPlaylistStates[playlist_id].discovery_progress = discovery_progress;
@@ -13823,7 +13845,7 @@ async function applyTidalPlaylistState(stateInfo) {
         tidalPlaylistStates[playlist_id].convertedSpotifyPlaylistId = converted_spotify_playlist_id;
         tidalPlaylistStates[playlist_id].download_process_id = download_process_id;
         tidalPlaylistStates[playlist_id].playlist = playlistData; // Ensure playlist data is set
-        
+
         // Fetch full discovery results for non-fresh playlists (matching YouTube pattern)
         if (phase !== 'fresh' && phase !== 'discovering') {
             try {
@@ -13832,7 +13854,7 @@ async function applyTidalPlaylistState(stateInfo) {
                 if (stateResponse.ok) {
                     const fullState = await stateResponse.json();
                     console.log(`📋 Retrieved full Tidal state with ${fullState.discovery_results?.length || 0} discovery results`);
-                    
+
                     // Store full discovery results in local state (matching YouTube pattern)
                     if (fullState.discovery_results && tidalPlaylistStates[playlist_id]) {
                         tidalPlaylistStates[playlist_id].discovery_results = fullState.discovery_results;
@@ -13849,10 +13871,10 @@ async function applyTidalPlaylistState(stateInfo) {
                 console.warn(`⚠️ Error fetching full discovery results for Tidal playlist ${playlistData.name}:`, error.message);
             }
         }
-        
+
         // Update the card UI to reflect the saved state
         updateTidalCardPhase(playlist_id, phase);
-        
+
         // Update card progress if we have discovery results
         if (phase === 'discovered' && tidalPlaylistStates[playlist_id]) {
             const progressInfo = {
@@ -13872,9 +13894,9 @@ async function applyTidalPlaylistState(stateInfo) {
             const fakeUrlHash = `tidal_${playlist_id}`;
             startTidalSyncPolling(fakeUrlHash);
         }
-        
+
         console.log(`✅ Applied saved state for Tidal playlist: ${playlist_id} -> ${phase}`);
-        
+
     } catch (error) {
         console.error(`❌ Error applying Tidal playlist state for ${playlist_id}:`, error);
     }
@@ -13883,21 +13905,21 @@ async function applyTidalPlaylistState(stateInfo) {
 function updateTidalCardProgress(playlistId, progress) {
     const state = tidalPlaylistStates[playlistId];
     if (!state) return;
-    
+
     const card = document.getElementById(`tidal-card-${playlistId}`);
     if (!card) return;
-    
+
     const progressElement = card.querySelector('.playlist-card-progress');
     if (!progressElement) return;
-    
+
     const total = progress.spotify_total || 0;
     const matches = progress.spotify_matches || 0;
     const failed = total - matches;
     const percentage = total > 0 ? Math.round((matches / total) * 100) : 0;
-    
+
     progressElement.textContent = `♪ ${total} / ✓ ${matches} / ✗ ${failed} / ${percentage}%`;
     progressElement.classList.remove('hidden'); // Show progress during discovery
-    
+
     console.log('🎵 Updated Tidal card progress:', playlistId, `${matches}/${total} (${percentage}%)`);
 }
 
@@ -13908,36 +13930,36 @@ function updateTidalCardProgress(playlistId, progress) {
 async function startTidalPlaylistSync(urlHash) {
     try {
         console.log('🎵 Starting Tidal playlist sync:', urlHash);
-        
+
         const state = youtubePlaylistStates[urlHash];
         if (!state || !state.is_tidal_playlist) {
             console.error('❌ Invalid Tidal playlist state for sync');
             return;
         }
-        
+
         const playlistId = state.tidal_playlist_id;
         const response = await fetch(`/api/tidal/sync/start/${playlistId}`, {
             method: 'POST'
         });
-        
+
         const result = await response.json();
-        
+
         if (result.error) {
             showToast(`Error starting sync: ${result.error}`, 'error');
             return;
         }
-        
+
         // Update card and modal to syncing phase
         updateTidalCardPhase(playlistId, 'syncing');
-        
+
         // Update modal buttons if modal is open
         updateTidalModalButtons(urlHash, 'syncing');
-        
+
         // Start sync polling
         startTidalSyncPolling(urlHash);
-        
+
         showToast('Tidal playlist sync started!', 'success');
-        
+
     } catch (error) {
         console.error('❌ Error starting Tidal sync:', error);
         showToast(`Error starting sync: ${error.message}`, 'error');
@@ -13949,7 +13971,7 @@ function startTidalSyncPolling(urlHash) {
     if (activeYouTubePollers[urlHash]) {
         clearInterval(activeYouTubePollers[urlHash]);
     }
-    
+
     const state = youtubePlaylistStates[urlHash];
     const playlistId = state.tidal_playlist_id;
 
@@ -13958,25 +13980,25 @@ function startTidalSyncPolling(urlHash) {
         try {
             const response = await fetch(`/api/tidal/sync/status/${playlistId}`);
             const status = await response.json();
-            
+
             if (status.error) {
                 console.error('❌ Error polling Tidal sync status:', status.error);
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[urlHash];
                 return;
             }
-            
+
             // Update card progress with sync stats
             updateTidalCardSyncProgress(playlistId, status.progress);
-            
+
             // Update modal sync display if open
             updateTidalModalSyncProgress(urlHash, status.progress);
-            
+
             // Check if complete
             if (status.complete) {
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[urlHash];
-                
+
                 // Update both states to sync_complete
                 if (tidalPlaylistStates[playlistId]) {
                     tidalPlaylistStates[playlistId].phase = 'sync_complete';
@@ -13984,19 +14006,19 @@ function startTidalSyncPolling(urlHash) {
                 if (youtubePlaylistStates[urlHash]) {
                     youtubePlaylistStates[urlHash].phase = 'sync_complete';
                 }
-                
+
                 // Update card phase to sync complete
                 updateTidalCardPhase(playlistId, 'sync_complete');
-                
+
                 // Update modal buttons
                 updateTidalModalButtons(urlHash, 'sync_complete');
-                
+
                 console.log('✅ Tidal sync complete:', urlHash);
                 showToast('Tidal playlist sync complete!', 'success');
             } else if (status.sync_status === 'error') {
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[urlHash];
-                
+
                 // Update both states to discovered (revert on error)
                 if (tidalPlaylistStates[playlistId]) {
                     tidalPlaylistStates[playlistId].phase = 'discovered';
@@ -14004,14 +14026,14 @@ function startTidalSyncPolling(urlHash) {
                 if (youtubePlaylistStates[urlHash]) {
                     youtubePlaylistStates[urlHash].phase = 'discovered';
                 }
-                
+
                 // Revert to discovered phase on error
                 updateTidalCardPhase(playlistId, 'discovered');
                 updateTidalModalButtons(urlHash, 'discovered');
-                
+
                 showToast(`Sync failed: ${status.error || 'Unknown error'}`, 'error');
             }
-            
+
         } catch (error) {
             console.error('❌ Error polling Tidal sync:', error);
             if (activeYouTubePollers[urlHash]) {
@@ -14032,37 +14054,37 @@ function startTidalSyncPolling(urlHash) {
 async function cancelTidalSync(urlHash) {
     try {
         console.log('❌ Cancelling Tidal sync:', urlHash);
-        
+
         const state = youtubePlaylistStates[urlHash];
         if (!state || !state.is_tidal_playlist) {
             console.error('❌ Invalid Tidal playlist state');
             return;
         }
-        
+
         const playlistId = state.tidal_playlist_id;
         const response = await fetch(`/api/tidal/sync/cancel/${playlistId}`, {
             method: 'POST'
         });
-        
+
         const result = await response.json();
-        
+
         if (result.error) {
             showToast(`Error cancelling sync: ${result.error}`, 'error');
             return;
         }
-        
+
         // Stop polling
         if (activeYouTubePollers[urlHash]) {
             clearInterval(activeYouTubePollers[urlHash]);
             delete activeYouTubePollers[urlHash];
         }
-        
+
         // Revert to discovered phase
         updateTidalCardPhase(playlistId, 'discovered');
         updateTidalModalButtons(urlHash, 'discovered');
-        
+
         showToast('Tidal sync cancelled', 'info');
-        
+
     } catch (error) {
         console.error('❌ Error cancelling Tidal sync:', error);
         showToast(`Error cancelling sync: ${error.message}`, 'error');
@@ -14072,15 +14094,15 @@ async function cancelTidalSync(urlHash) {
 function updateTidalCardSyncProgress(playlistId, progress) {
     const state = tidalPlaylistStates[playlistId];
     if (!state || !state.playlist || !progress) return;
-    
+
     // Save the progress for later restoration
     state.lastSyncProgress = progress;
-    
+
     const card = document.getElementById(`tidal-card-${playlistId}`);
     if (!card) return;
-    
+
     const progressElement = card.querySelector('.playlist-card-progress');
-    
+
     // Build clean status counter HTML exactly like YouTube cards
     let statusCounterHTML = '';
     if (progress && progress.total_tracks > 0) {
@@ -14089,7 +14111,7 @@ function updateTidalCardSyncProgress(playlistId, progress) {
         const total = progress.total_tracks || 0;
         const processed = matched + failed;
         const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
-        
+
         statusCounterHTML = `
             <div class="playlist-card-sync-status">
                 <span class="sync-stat total-tracks">♪ ${total}</span>
@@ -14101,49 +14123,49 @@ function updateTidalCardSyncProgress(playlistId, progress) {
             </div>
         `;
     }
-    
+
     // Only update if we have valid sync progress, otherwise preserve existing discovery results
     if (statusCounterHTML) {
         progressElement.innerHTML = statusCounterHTML;
     }
-    
+
     console.log(`🎵 Updated Tidal card sync progress: ♪ ${progress?.total_tracks || 0} / ✓ ${progress?.matched_tracks || 0} / ✗ ${progress?.failed_tracks || 0}`);
 }
 
 function updateTidalModalSyncProgress(urlHash, progress) {
     const statusDisplay = document.getElementById(`tidal-sync-status-${urlHash}`);
     if (!statusDisplay || !progress) return;
-    
+
     console.log(`📊 Updating Tidal modal sync progress for ${urlHash}:`, progress);
-    
+
     // Update individual counters exactly like YouTube sync
     const totalEl = document.getElementById(`tidal-total-${urlHash}`);
     const matchedEl = document.getElementById(`tidal-matched-${urlHash}`);
     const failedEl = document.getElementById(`tidal-failed-${urlHash}`);
     const percentageEl = document.getElementById(`tidal-percentage-${urlHash}`);
-    
+
     const total = progress.total_tracks || 0;
     const matched = progress.matched_tracks || 0;
     const failed = progress.failed_tracks || 0;
-    
+
     if (totalEl) totalEl.textContent = total;
     if (matchedEl) matchedEl.textContent = matched;
     if (failedEl) failedEl.textContent = failed;
-    
+
     // Calculate percentage like YouTube sync
     if (total > 0) {
         const processed = matched + failed;
         const percentage = Math.round((processed / total) * 100);
         if (percentageEl) percentageEl.textContent = percentage;
     }
-    
+
     console.log(`📊 Tidal modal updated: ♪ ${total} / ✓ ${matched} / ✗ ${failed} (${Math.round((matched + failed) / total * 100)}%)`);
 }
 
 function updateTidalModalButtons(urlHash, phase) {
     const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
     if (!modal) return;
-    
+
     const footerLeft = modal.querySelector('.modal-footer-left');
     if (footerLeft) {
         footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
@@ -14194,7 +14216,7 @@ async function startTidalDownloadMissing(urlHash) {
                 });
             }
         }
-        
+
         if (spotifyTracks.length === 0) {
             showToast('No Spotify matches found for download', 'error');
             return;
@@ -14206,19 +14228,19 @@ async function startTidalDownloadMissing(urlHash) {
 
         // Store reference for card navigation (same as YouTube)
         state.convertedSpotifyPlaylistId = virtualPlaylistId;
-        
+
         // Close the discovery modal if it's open (same as YouTube)
         const discoveryModal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
         if (discoveryModal) {
             discoveryModal.classList.add('hidden');
             console.log('🔄 Closed Tidal discovery modal to show download modal');
         }
-        
+
         // Open download missing tracks modal for Tidal playlist
         await openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks);
-        
+
         // Phase will change to 'downloading' when user clicks "Begin Analysis" button
-        
+
     } catch (error) {
         console.error('❌ Error starting download missing tracks:', error);
         showToast(`Error starting downloads: ${error.message}`, 'error');
@@ -14241,19 +14263,19 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
     }
 
     console.log(`📥 Opening Download Missing Tracks modal for Tidal playlist: ${virtualPlaylistId}`);
-    
+
     // Create virtual playlist object for compatibility with existing modal logic
     const virtualPlaylist = {
         id: virtualPlaylistId,
         name: playlistName,
         track_count: spotifyTracks.length
     };
-    
+
     // Store the tracks in the cache for the modal to use
     playlistTrackCache[virtualPlaylistId] = spotifyTracks;
     currentPlaylistTracks = spotifyTracks;
     currentModalPlaylistId = virtualPlaylistId;
-    
+
     let modal = document.createElement('div');
     modal.id = `download-missing-modal-${virtualPlaylistId}`;
     modal.className = 'download-missing-modal';
@@ -14272,14 +14294,14 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
 
     // Generate hero section with dynamic source detection (same as YouTube/Beatport)
     const source = virtualPlaylistId.startsWith('beatport_') ? 'Beatport' :
-                   virtualPlaylistId.startsWith('tidal_') ? 'Tidal' :
-                   virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
-                   virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
-                   virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
-                   virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
-                   virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
-                   virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
-                   'YouTube';
+        virtualPlaylistId.startsWith('tidal_') ? 'Tidal' :
+            virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
+                virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
+                    virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
+                        virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
+                            virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
+                                virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
+                                    'YouTube';
 
     const heroContext = {
         type: 'playlist',
@@ -14574,13 +14596,13 @@ function initializeSyncPage() {
     if (startSyncBtn) {
         startSyncBtn.addEventListener('click', startSequentialSync);
     }
-    
+
     // Logic for the YouTube parse button
     const youtubeParseBtn = document.getElementById('youtube-parse-btn');
     if (youtubeParseBtn) {
         youtubeParseBtn.addEventListener('click', parseYouTubePlaylist);
     }
-    
+
     // Logic for YouTube URL input (Enter key support)
     const youtubeUrlInput = document.getElementById('youtube-url-input');
     if (youtubeUrlInput) {
@@ -14668,19 +14690,19 @@ async function handleDbUpdateButtonClick() {
 async function handleWishlistButtonClick() {
     try {
         const playlistId = 'wishlist';
-        
+
         console.log('🎵 [Wishlist Button] User clicked wishlist button - checking server state first');
-        
+
         // STEP 1: Always check server state first to detect any active wishlist processes
         const response = await fetch('/api/active-processes');
         if (!response.ok) {
             throw new Error(`Failed to fetch active processes: ${response.status}`);
         }
-        
+
         const data = await response.json();
         const processes = data.active_processes || [];
         const serverWishlistProcess = processes.find(p => p.playlist_id === playlistId);
-        
+
         // STEP 2: Handle active server process - show current state immediately
         if (serverWishlistProcess) {
             console.log('🎯 [Wishlist Button] Server has active wishlist process:', {
@@ -14689,17 +14711,17 @@ async function handleWishlistButtonClick() {
                 auto_initiated: serverWishlistProcess.auto_initiated,
                 should_show: serverWishlistProcess.should_show_modal
             });
-            
+
             // Clear any user-closed state since user explicitly requested to see modal
             WishlistModalState.clearUserClosed();
-            
+
             // Check if we need to create/sync the frontend modal
             const clientWishlistProcess = activeDownloadProcesses[playlistId];
-            const needsRehydration = !clientWishlistProcess || 
+            const needsRehydration = !clientWishlistProcess ||
                 clientWishlistProcess.batchId !== serverWishlistProcess.batch_id ||
                 !clientWishlistProcess.modalElement ||
                 !document.body.contains(clientWishlistProcess.modalElement);
-            
+
             if (needsRehydration) {
                 console.log('🔄 [Wishlist Button] Frontend modal needs sync/creation');
                 await rehydrateModal(serverWishlistProcess, true); // user-requested = true
@@ -14710,25 +14732,25 @@ async function handleWishlistButtonClick() {
             }
             return;
         }
-        
+
         // STEP 3: No active server process - check wishlist count and create fresh modal
         console.log('📭 [Wishlist Button] No active server process, checking wishlist content');
-        
+
         const countResponse = await fetch('/api/wishlist/count');
         if (!countResponse.ok) {
             throw new Error(`Failed to fetch wishlist count: ${countResponse.status}`);
         }
-        
+
         const countData = await countResponse.json();
         if (countData.count === 0) {
             showToast('Wishlist is empty. No tracks to download.', 'info');
             return;
         }
-        
+
         // STEP 4: Open wishlist overview modal (NEW - category selection)
         console.log(`🆕 [Wishlist Button] Opening wishlist overview for ${countData.count} tracks`);
         await openWishlistOverviewModal();
-        
+
     } catch (error) {
         console.error('❌ [Wishlist Button] Error handling wishlist button click:', error);
         showToast(`Error opening wishlist: ${error.message}`, 'error');
@@ -14745,39 +14767,39 @@ async function cleanupWishlist(playlistId) {
             "This is a safe operation that only removes tracks you already have. " +
             "Continue with cleanup?"
         );
-        
+
         if (!confirmed) {
             return;
         }
-        
+
         // Disable the cleanup button during the operation
         const cleanupBtn = document.getElementById(`cleanup-wishlist-btn-${playlistId}`);
         if (cleanupBtn) {
             cleanupBtn.disabled = true;
             cleanupBtn.textContent = '🧹 Cleaning...';
         }
-        
+
         const response = await fetch('/api/wishlist/cleanup', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             }
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             const removedCount = result.removed_count || 0;
             const processedCount = result.processed_count || 0;
-            
+
             if (removedCount > 0) {
                 showToast(`Wishlist cleanup completed: ${removedCount} tracks removed (${processedCount} checked)`, 'success');
-                
+
                 // Refresh the modal content to show updated state
                 setTimeout(() => {
                     openDownloadMissingWishlistModal();
                 }, 500);
-                
+
                 // Update the wishlist count in the main dashboard
                 await updateWishlistCount();
             } else {
@@ -14786,7 +14808,7 @@ async function cleanupWishlist(playlistId) {
         } else {
             showToast(`Error cleaning wishlist: ${result.error}`, 'error');
         }
-        
+
     } catch (error) {
         console.error('Error cleaning wishlist:', error);
         showToast(`Error cleaning wishlist: ${error.message}`, 'error');
@@ -14809,18 +14831,18 @@ async function clearWishlist(playlistId) {
             "This will permanently remove all failed tracks from the wishlist. " +
             "This action cannot be undone."
         );
-        
+
         if (!confirmed) {
             return;
         }
-        
+
         // Disable the clear button during the operation
         const clearBtn = document.getElementById(`clear-wishlist-btn-${playlistId}`);
         if (clearBtn) {
             clearBtn.disabled = true;
             clearBtn.textContent = 'Clearing...';
         }
-        
+
         // Call the clear API endpoint
         const response = await fetch('/api/wishlist/clear', {
             method: 'POST',
@@ -14828,22 +14850,22 @@ async function clearWishlist(playlistId) {
                 'Content-Type': 'application/json'
             }
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             showToast('Wishlist cleared successfully', 'success');
-            
+
             // Close the modal since there are no more tracks
             closeDownloadMissingModal(playlistId);
-            
+
             // Update the wishlist count in the main dashboard
             await updateWishlistCount();
-            
+
         } else {
             showToast(`Failed to clear wishlist: ${result.error || 'Unknown error'}`, 'error');
         }
-        
+
     } catch (error) {
         console.error('Error clearing wishlist:', error);
         showToast(`Error clearing wishlist: ${error.message}`, 'error');
@@ -14991,7 +15013,7 @@ function handleBeatportCategoryClick(category) {
     console.log(`🎵 Beatport category clicked: ${category}`);
 
     // Only handle genres category now - homepage has direct chart buttons
-    switch(category) {
+    switch (category) {
         case 'genres':
             showBeatportSubView('genres');
             loadBeatportGenres(); // Load genres dynamically
@@ -15645,7 +15667,7 @@ async function getRebuildPageTrackData(trackDataKey) {
 // Hook into the loadBeatportTop10Lists function to cache track data
 const originalLoadBeatportTop10Lists = window.loadBeatportTop10Lists;
 if (originalLoadBeatportTop10Lists) {
-    window.loadBeatportTop10Lists = async function() {
+    window.loadBeatportTop10Lists = async function () {
         const result = await originalLoadBeatportTop10Lists.apply(this, arguments);
 
         // If the load was successful, we can potentially cache the track data
@@ -17471,24 +17493,24 @@ async function handleGenreChartTypeClick(genreSlug, genreId, genreName, chartTyp
 async function parseYouTubePlaylist() {
     const urlInput = document.getElementById('youtube-url-input');
     const url = urlInput.value.trim();
-    
+
     if (!url) {
         showToast('Please enter a YouTube playlist URL', 'error');
         return;
     }
-    
+
     // Validate URL format
     if (!url.includes('youtube.com/playlist') && !url.includes('music.youtube.com/playlist')) {
         showToast('Please enter a valid YouTube playlist URL', 'error');
         return;
     }
-    
+
     try {
         console.log('🎬 Parsing YouTube playlist:', url);
-        
+
         // Create card immediately in 'fresh' phase
         createYouTubeCard(url, 'fresh');
-        
+
         // Parse playlist via API
         const response = await fetch('/api/youtube/parse', {
             method: 'POST',
@@ -17497,27 +17519,27 @@ async function parseYouTubePlaylist() {
             },
             body: JSON.stringify({ url: url })
         });
-        
+
         const result = await response.json();
-        
+
         if (result.error) {
             showToast(`Error parsing YouTube playlist: ${result.error}`, 'error');
             removeYouTubeCard(url);
             return;
         }
-        
+
         console.log('✅ YouTube playlist parsed:', result.name, `(${result.tracks.length} tracks)`);
-        
+
         // Update card with parsed data and stay in 'fresh' phase
         updateYouTubeCardData(result.url_hash, result);
         updateYouTubeCardPhase(result.url_hash, 'fresh');
-        
+
         // Clear input
         urlInput.value = '';
-        
+
         // Show success message
         showToast(`YouTube playlist parsed: ${result.name} (${result.tracks.length} tracks)`, 'success');
-        
+
     } catch (error) {
         console.error('❌ Error parsing YouTube playlist:', error);
         showToast(`Error parsing YouTube playlist: ${error.message}`, 'error');
@@ -17528,15 +17550,15 @@ async function parseYouTubePlaylist() {
 function createYouTubeCard(url, phase = 'fresh') {
     const container = document.getElementById('youtube-playlist-container');
     const placeholder = container.querySelector('.playlist-placeholder');
-    
+
     // Remove placeholder if it exists
     if (placeholder) {
         placeholder.style.display = 'none';
     }
-    
+
     // Create temporary URL hash for initial card
     const tempHash = btoa(url).substring(0, 8);
-    
+
     const cardHtml = `
         <div class="youtube-playlist-card" id="youtube-card-${tempHash}" data-url="${url}">
             <div class="playlist-card-icon youtube-icon">▶</div>
@@ -17553,9 +17575,9 @@ function createYouTubeCard(url, phase = 'fresh') {
             <button class="playlist-card-action-btn" disabled>Parsing...</button>
         </div>
     `;
-    
+
     container.insertAdjacentHTML('beforeend', cardHtml);
-    
+
     // Store temporary state
     youtubePlaylistStates[tempHash] = {
         phase: phase,
@@ -17563,7 +17585,7 @@ function createYouTubeCard(url, phase = 'fresh') {
         cardElement: document.getElementById(`youtube-card-${tempHash}`),
         tempHash: tempHash
     };
-    
+
     console.log('🃏 Created YouTube card for URL:', url);
 }
 
@@ -17578,56 +17600,56 @@ function updateYouTubeCardData(urlHash, playlistData) {
             delete youtubePlaylistStates[tempState.tempHash];
             youtubePlaylistStates[urlHash] = tempState;
             state = tempState;
-            
+
             // Update card ID
             if (state.cardElement) {
                 state.cardElement.id = `youtube-card-${urlHash}`;
             }
         }
     }
-    
+
     if (!state || !state.cardElement) {
         console.error('❌ Could not find YouTube card for hash:', urlHash);
         return;
     }
-    
+
     const card = state.cardElement;
-    
+
     // Update card content
     const nameElement = card.querySelector('.playlist-card-name');
     const trackCountElement = card.querySelector('.playlist-card-track-count');
-    
+
     nameElement.textContent = playlistData.name;
     trackCountElement.textContent = `${playlistData.tracks.length} tracks`;
-    
+
     // Store playlist data
     state.playlist = playlistData;
     state.urlHash = urlHash;
-    
+
     // Add click handler for card and action button
     const handleCardClick = () => handleYouTubeCardClick(urlHash);
     const actionBtn = card.querySelector('.playlist-card-action-btn');
-    
+
     card.addEventListener('click', handleCardClick);
     actionBtn.addEventListener('click', (e) => {
         e.stopPropagation(); // Prevent card click
         handleCardClick();
     });
-    
+
     console.log('🃏 Updated YouTube card data:', playlistData.name);
 }
 
 function updateYouTubeCardPhase(urlHash, phase) {
     const state = youtubePlaylistStates[urlHash];
     if (!state || !state.cardElement) return;
-    
+
     const card = state.cardElement;
     const phaseTextElement = card.querySelector('.playlist-card-phase-text');
     const actionBtn = card.querySelector('.playlist-card-action-btn');
     const progressElement = card.querySelector('.playlist-card-progress');
-    
+
     state.phase = phase;
-    
+
     switch (phase) {
         case 'fresh':
             phaseTextElement.textContent = 'Ready to discover';
@@ -17636,7 +17658,7 @@ function updateYouTubeCardPhase(urlHash, phase) {
             actionBtn.disabled = false;
             progressElement.classList.add('hidden');
             break;
-            
+
         case 'discovering':
             phaseTextElement.textContent = 'Discovering...';
             phaseTextElement.style.color = '#ffa500'; // Orange
@@ -17644,7 +17666,7 @@ function updateYouTubeCardPhase(urlHash, phase) {
             actionBtn.disabled = false;
             progressElement.classList.remove('hidden');
             break;
-            
+
         case 'discovered':
             phaseTextElement.textContent = 'Discovery Complete';
             phaseTextElement.style.color = '#1db954'; // Green
@@ -17652,7 +17674,7 @@ function updateYouTubeCardPhase(urlHash, phase) {
             actionBtn.disabled = false;
             progressElement.classList.add('hidden');
             break;
-            
+
         case 'syncing':
             phaseTextElement.textContent = 'Syncing...';
             phaseTextElement.style.color = '#ffa500'; // Orange
@@ -17660,7 +17682,7 @@ function updateYouTubeCardPhase(urlHash, phase) {
             actionBtn.disabled = false;
             progressElement.classList.remove('hidden');
             break;
-            
+
         case 'sync_complete':
             phaseTextElement.textContent = 'Sync Complete';
             phaseTextElement.style.color = '#1db954'; // Green
@@ -17668,7 +17690,7 @@ function updateYouTubeCardPhase(urlHash, phase) {
             actionBtn.disabled = false;
             progressElement.classList.add('hidden');
             break;
-            
+
         case 'downloading':
             phaseTextElement.textContent = 'Downloading...';
             phaseTextElement.style.color = '#ffa500'; // Orange
@@ -17676,7 +17698,7 @@ function updateYouTubeCardPhase(urlHash, phase) {
             actionBtn.disabled = false;
             progressElement.classList.remove('hidden');
             break;
-            
+
         case 'download_complete':
             phaseTextElement.textContent = 'Download Complete';
             phaseTextElement.style.color = '#1db954'; // Green
@@ -17685,14 +17707,14 @@ function updateYouTubeCardPhase(urlHash, phase) {
             progressElement.classList.add('hidden');
             break;
     }
-    
+
     console.log('🃏 Updated YouTube card phase:', urlHash, phase);
 }
 
 function handleYouTubeCardClick(urlHash) {
     const state = youtubePlaylistStates[urlHash];
     if (!state) return;
-    
+
     switch (state.phase) {
         case 'fresh':
             // First click: Start discovery and open modal
@@ -17701,7 +17723,7 @@ function handleYouTubeCardClick(urlHash) {
             startYouTubeDiscovery(urlHash);
             openYouTubeDiscoveryModal(urlHash);
             break;
-            
+
         case 'discovering':
         case 'discovered':
         case 'syncing':
@@ -17710,7 +17732,7 @@ function handleYouTubeCardClick(urlHash) {
             console.log('🎬 Opening YouTube discovery modal:', urlHash);
             openYouTubeDiscoveryModal(urlHash);
             break;
-            
+
         case 'downloading':
         case 'download_complete':
             // Open download missing tracks modal
@@ -17727,7 +17749,7 @@ function handleYouTubeCardClick(urlHash) {
                             if (fullState.discovery_results) {
                                 state.discoveryResults = fullState.discovery_results;
                                 console.log(`✅ Loaded ${state.discoveryResults.length} discovery results`);
-                                
+
                                 // Now open the modal with the loaded data
                                 const playlistName = state.playlist.name;
                                 const spotifyTracks = state.discoveryResults
@@ -17762,17 +17784,17 @@ function handleYouTubeCardClick(urlHash) {
 function updateYouTubeCardProgress(urlHash, progress) {
     const state = youtubePlaylistStates[urlHash];
     if (!state || !state.cardElement) return;
-    
+
     const card = state.cardElement;
     const progressElement = card.querySelector('.playlist-card-progress');
-    
+
     const total = progress.spotify_total || 0;
     const matches = progress.spotify_matches || 0;
     const failed = total - matches;
     const percentage = total > 0 ? Math.round((matches / total) * 100) : 0;
-    
+
     progressElement.textContent = `♪ ${total} / ✓ ${matches} / ✗ ${failed} / ${percentage}%`;
-    
+
     console.log('🃏 Updated YouTube card progress:', urlHash, `${matches}/${total} (${percentage}%)`);
 }
 
@@ -17780,7 +17802,7 @@ function removeYouTubeCard(url) {
     const state = Object.values(youtubePlaylistStates).find(s => s.url === url);
     if (state && state.cardElement) {
         state.cardElement.remove();
-        
+
         // Remove from state
         if (state.urlHash) {
             delete youtubePlaylistStates[state.urlHash];
@@ -17788,12 +17810,12 @@ function removeYouTubeCard(url) {
             delete youtubePlaylistStates[state.tempHash];
         }
     }
-    
+
     // Show placeholder if no cards left
     const container = document.getElementById('youtube-playlist-container');
     const cards = container.querySelectorAll('.youtube-playlist-card');
     const placeholder = container.querySelector('.playlist-placeholder');
-    
+
     if (cards.length === 0 && placeholder) {
         placeholder.style.display = 'block';
     }
@@ -17802,24 +17824,24 @@ function removeYouTubeCard(url) {
 async function startYouTubeDiscovery(urlHash) {
     try {
         console.log('🔍 Starting YouTube Spotify discovery for:', urlHash);
-        
+
         const response = await fetch(`/api/youtube/discovery/start/${urlHash}`, {
             method: 'POST'
         });
-        
+
         const result = await response.json();
-        
+
         if (result.error) {
             showToast(`Error starting discovery: ${result.error}`, 'error');
             return;
         }
-        
+
         // Start polling for progress
         startYouTubeDiscoveryPolling(urlHash);
-        
+
         // Open discovery modal
         openYouTubeDiscoveryModal(urlHash);
-        
+
     } catch (error) {
         console.error('❌ Error starting YouTube discovery:', error);
         showToast(`Error starting discovery: ${error.message}`, 'error');
@@ -17831,22 +17853,22 @@ function startYouTubeDiscoveryPolling(urlHash) {
     if (activeYouTubePollers[urlHash]) {
         clearInterval(activeYouTubePollers[urlHash]);
     }
-    
+
     const pollInterval = setInterval(async () => {
         try {
             const response = await fetch(`/api/youtube/discovery/status/${urlHash}`);
             const status = await response.json();
-            
+
             if (status.error) {
                 console.error('❌ Error polling YouTube discovery status:', status.error);
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[urlHash];
                 return;
             }
-            
+
             // Update card progress
             updateYouTubeCardProgress(urlHash, status);
-            
+
             // Store discovery results and progress in state
             const state = youtubePlaylistStates[urlHash];
             if (state) {
@@ -17854,32 +17876,32 @@ function startYouTubeDiscoveryPolling(urlHash) {
                 state.discoveryProgress = status.progress || 0;
                 state.spotifyMatches = status.spotify_matches || 0;
             }
-            
+
             // Update modal if open
             updateYouTubeDiscoveryModal(urlHash, status);
-            
+
             // Check if complete
             if (status.complete) {
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[urlHash];
-                
+
                 // Update card phase to discovered
                 updateYouTubeCardPhase(urlHash, 'discovered');
-                
+
                 // Update modal buttons to show sync and download buttons
                 updateYouTubeModalButtons(urlHash, 'discovered');
-                
+
                 console.log('✅ YouTube discovery complete:', urlHash);
                 showToast('YouTube discovery complete!', 'success');
             }
-            
+
         } catch (error) {
             console.error('❌ Error polling YouTube discovery:', error);
             clearInterval(pollInterval);
             delete activeYouTubePollers[urlHash];
         }
     }, 1000);
-    
+
     activeYouTubePollers[urlHash] = pollInterval;
 }
 
@@ -17932,14 +17954,14 @@ function openYouTubeDiscoveryModal(urlHash) {
         const isBeatport = state.is_beatport_playlist;
         const isListenBrainz = state.is_listenbrainz_playlist;
         const modalTitle = isTidal ? '🎵 Tidal Playlist Discovery' :
-                          isBeatport ? '🎵 Beatport Chart Discovery' :
-                          isListenBrainz ? '🎵 ListenBrainz Playlist Discovery' :
-                          '🎵 YouTube Playlist Discovery';
+            isBeatport ? '🎵 Beatport Chart Discovery' :
+                isListenBrainz ? '🎵 ListenBrainz Playlist Discovery' :
+                    '🎵 YouTube Playlist Discovery';
         const sourceLabel = isTidal ? 'Tidal' :
-                           isBeatport ? 'Beatport' :
-                           isListenBrainz ? 'LB' :
-                           'YT';
-        
+            isBeatport ? 'Beatport' :
+                isListenBrainz ? 'LB' :
+                    'YT';
+
         const modalHtml = `
             <div class="modal-overlay" id="youtube-discovery-modal-${urlHash}">
                 <div class="youtube-discovery-modal">
@@ -18049,14 +18071,14 @@ function openYouTubeDiscoveryModal(urlHash) {
                 </div>
             </div>
         `;
-        
+
         // Add modal to DOM
         document.body.insertAdjacentHTML('beforeend', modalHtml);
         modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
-        
+
         // Store modal reference
         state.modalElement = modal;
-        
+
         // Set initial progress if we have discovery results
         if (state.discoveryResults && state.discoveryResults.length > 0) {
             const progressData = {
@@ -18093,12 +18115,12 @@ function getModalActionButtons(urlHash, phase, state = null) {
     const isTidal = state && state.is_tidal_playlist;
     const isBeatport = state && state.is_beatport_playlist;
     const isListenBrainz = state && state.is_listenbrainz_playlist;
-    
+
     // Validate data availability for buttons (support both naming conventions)
     const hasDiscoveryResults = state && ((state.discoveryResults && state.discoveryResults.length > 0) || (state.discovery_results && state.discovery_results.length > 0));
     const hasSpotifyMatches = state && ((state.spotifyMatches > 0) || (state.spotify_matches > 0));
     const hasConvertedPlaylistId = state && state.convertedSpotifyPlaylistId;
-    
+
     switch (phase) {
         case 'fresh':
         case 'discovering':
@@ -18123,9 +18145,9 @@ function getModalActionButtons(urlHash, phase, state = null) {
             if (!hasDiscoveryResults) {
                 return `<div class="modal-info">⚠️ No discovery results available. Try starting discovery again.</div>`;
             }
-            
+
             let buttons = '';
-            
+
             // Only show sync button if there are Spotify matches
             if (hasSpotifyMatches) {
                 if (isListenBrainz) {
@@ -18152,13 +18174,13 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 }
             }
-            
+
             if (!buttons) {
                 buttons = `<div class="modal-info">ℹ️ No Spotify matches found. Discovery complete but no tracks could be matched.</div>`;
             }
-            
+
             return buttons;
-            
+
         case 'syncing':
             if (isListenBrainz) {
                 return `
@@ -18209,7 +18231,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     </div>
                 `;
             }
-            
+
         case 'sync_complete':
             let syncCompleteButtons = '';
 
@@ -18251,7 +18273,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
             }
 
             return syncCompleteButtons;
-            
+
         default:
             return '';
     }
@@ -18360,17 +18382,17 @@ function formatDuration(durationMs) {
 function generateDiscoveryActionButton(result, identifier, platform) {
     // Show fix button for not_found, error, or any non-found status
     const isNotFound = result.status === 'not_found' ||
-                       result.status_class === 'not-found' ||
-                       result.status === '❌ Not Found' ||
-                       result.status === 'Not Found';
+        result.status_class === 'not-found' ||
+        result.status === '❌ Not Found' ||
+        result.status === 'Not Found';
 
     const isError = result.status === 'error' ||
-                    result.status_class === 'error' ||
-                    result.status === '❌ Error';
+        result.status_class === 'error' ||
+        result.status === '❌ Error';
 
     const isFound = result.status === 'found' ||
-                    result.status_class === 'found' ||
-                    result.status === '✅ Found';
+        result.status_class === 'found' ||
+        result.status === '✅ Found';
 
     if (isNotFound || isError) {
         return `<button class="fix-match-btn"
@@ -18396,21 +18418,21 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
     const progressBar = document.getElementById(`youtube-discovery-progress-${urlHash}`);
     const progressText = document.getElementById(`youtube-discovery-progress-text-${urlHash}`);
     const tableBody = document.getElementById(`youtube-discovery-table-${urlHash}`);
-    
+
     if (!progressBar || !progressText || !tableBody) {
         console.warn(`⚠️ Missing modal elements for ${urlHash}:`, {
             progressBar: !!progressBar,
-            progressText: !!progressText, 
+            progressText: !!progressText,
             tableBody: !!tableBody
         });
         return;
     }
-    
+
     // Update progress bar
     progressBar.style.width = `${status.progress}%`;
     progressText.textContent = `${status.spotify_matches} / ${status.spotify_total} tracks matched (${status.progress}%)`;
-    
-    
+
+
     // Update table rows
     status.results.forEach(result => {
         const row = document.getElementById(`discovery-row-${urlHash}-${result.index}`);
@@ -18436,7 +18458,7 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
             actionsCell.innerHTML = generateDiscoveryActionButton(result, urlHash, platform);
         }
     });
-    
+
     // Update action buttons if discovery is complete (progress = 100%)
     if (status.progress >= 100) {
         const state = youtubePlaylistStates[urlHash];
@@ -18456,9 +18478,9 @@ function refreshYouTubeDiscoveryModalTable(urlHash) {
         console.warn(`⚠️ Cannot refresh modal table: no state or modal for ${urlHash}`);
         return;
     }
-    
+
     console.log(`🔄 Refreshing modal table with ${state.discoveryResults?.length || 0} discovery results`);
-    
+
     // Update the table body with new discovery results
     const tableBody = state.modalElement.querySelector(`#youtube-discovery-table-${urlHash}`);
     if (tableBody) {
@@ -18467,7 +18489,7 @@ function refreshYouTubeDiscoveryModalTable(urlHash) {
     } else {
         console.warn(`⚠️ Could not find table body for modal ${urlHash}`);
     }
-    
+
     // Update the progress bar and footer buttons too
     if (state.discoveryResults && state.discoveryResults.length > 0) {
         const progressData = {
@@ -18583,29 +18605,29 @@ function closeYouTubeDiscoveryModal(urlHash) {
 async function startYouTubePlaylistSync(urlHash) {
     try {
         console.log('🔄 Starting YouTube playlist sync:', urlHash);
-        
+
         const response = await fetch(`/api/youtube/sync/start/${urlHash}`, {
             method: 'POST'
         });
-        
+
         const result = await response.json();
-        
+
         if (result.error) {
             showToast(`Error starting sync: ${result.error}`, 'error');
             return;
         }
-        
+
         // Update card and modal to syncing phase
         updateYouTubeCardPhase(urlHash, 'syncing');
-        
+
         // Update modal buttons if modal is open
         updateYouTubeModalButtons(urlHash, 'syncing');
-        
+
         // Start sync polling
         startYouTubeSyncPolling(urlHash);
-        
+
         showToast('YouTube playlist sync started!', 'success');
-        
+
     } catch (error) {
         console.error('❌ Error starting YouTube sync:', error);
         showToast(`Error starting sync: ${error.message}`, 'error');
@@ -18623,44 +18645,44 @@ function startYouTubeSyncPolling(urlHash) {
         try {
             const response = await fetch(`/api/youtube/sync/status/${urlHash}`);
             const status = await response.json();
-            
+
             if (status.error) {
                 console.error('❌ Error polling YouTube sync status:', status.error);
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[urlHash];
                 return;
             }
-            
+
             // Update card progress with sync stats
             updateYouTubeCardSyncProgress(urlHash, status.progress);
-            
+
             // Update modal sync display if open
             updateYouTubeModalSyncProgress(urlHash, status.progress);
-            
+
             // Check if complete
             if (status.complete) {
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[urlHash];
-                
+
                 // Update card phase to sync complete
                 updateYouTubeCardPhase(urlHash, 'sync_complete');
-                
+
                 // Update modal buttons
                 updateYouTubeModalButtons(urlHash, 'sync_complete');
-                
+
                 console.log('✅ YouTube sync complete:', urlHash);
                 showToast('YouTube playlist sync complete!', 'success');
             } else if (status.sync_status === 'error') {
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[urlHash];
-                
+
                 // Revert to discovered phase on error
                 updateYouTubeCardPhase(urlHash, 'discovered');
                 updateYouTubeModalButtons(urlHash, 'discovered');
-                
+
                 showToast(`Sync failed: ${status.error || 'Unknown error'}`, 'error');
             }
-            
+
         } catch (error) {
             console.error('❌ Error polling YouTube sync:', error);
             if (activeYouTubePollers[urlHash]) {
@@ -18681,30 +18703,30 @@ function startYouTubeSyncPolling(urlHash) {
 async function cancelYouTubeSync(urlHash) {
     try {
         console.log('❌ Cancelling YouTube sync:', urlHash);
-        
+
         const response = await fetch(`/api/youtube/sync/cancel/${urlHash}`, {
             method: 'POST'
         });
-        
+
         const result = await response.json();
-        
+
         if (result.error) {
             showToast(`Error cancelling sync: ${result.error}`, 'error');
             return;
         }
-        
+
         // Stop polling
         if (activeYouTubePollers[urlHash]) {
             clearInterval(activeYouTubePollers[urlHash]);
             delete activeYouTubePollers[urlHash];
         }
-        
+
         // Revert to discovered phase
         updateYouTubeCardPhase(urlHash, 'discovered');
         updateYouTubeModalButtons(urlHash, 'discovered');
-        
+
         showToast('YouTube sync cancelled', 'info');
-        
+
     } catch (error) {
         console.error('❌ Error cancelling YouTube sync:', error);
         showToast(`Error cancelling sync: ${error.message}`, 'error');
@@ -18714,10 +18736,10 @@ async function cancelYouTubeSync(urlHash) {
 function updateYouTubeCardSyncProgress(urlHash, progress) {
     const state = youtubePlaylistStates[urlHash];
     if (!state || !state.cardElement || !progress) return;
-    
+
     const card = state.cardElement;
     const progressElement = card.querySelector('.playlist-card-progress');
-    
+
     // Build clean status counter HTML exactly like Spotify cards
     let statusCounterHTML = '';
     if (progress && progress.total_tracks > 0) {
@@ -18726,7 +18748,7 @@ function updateYouTubeCardSyncProgress(urlHash, progress) {
         const total = progress.total_tracks || 0;
         const processed = matched + failed;
         const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
-        
+
         statusCounterHTML = `
             <div class="playlist-card-sync-status">
                 <span class="sync-stat total-tracks">♪ ${total}</span>
@@ -18738,49 +18760,49 @@ function updateYouTubeCardSyncProgress(urlHash, progress) {
             </div>
         `;
     }
-    
+
     // Only update if we have valid sync progress, otherwise preserve existing discovery results
     if (statusCounterHTML) {
         progressElement.innerHTML = statusCounterHTML;
     }
-    
+
     console.log(`🔄 Updated YouTube sync progress: ♪ ${progress?.total_tracks || 0} / ✓ ${progress?.matched_tracks || 0} / ✗ ${progress?.failed_tracks || 0}`);
 }
 
 function updateYouTubeModalSyncProgress(urlHash, progress) {
     const statusDisplay = document.getElementById(`youtube-sync-status-${urlHash}`);
     if (!statusDisplay || !progress) return;
-    
+
     console.log(`📊 Updating YouTube modal sync progress for ${urlHash}:`, progress);
-    
+
     // Update individual counters exactly like Spotify sync
     const totalEl = document.getElementById(`youtube-total-${urlHash}`);
     const matchedEl = document.getElementById(`youtube-matched-${urlHash}`);
     const failedEl = document.getElementById(`youtube-failed-${urlHash}`);
     const percentageEl = document.getElementById(`youtube-percentage-${urlHash}`);
-    
+
     const total = progress.total_tracks || 0;
     const matched = progress.matched_tracks || 0;
     const failed = progress.failed_tracks || 0;
-    
+
     if (totalEl) totalEl.textContent = total;
     if (matchedEl) matchedEl.textContent = matched;
     if (failedEl) failedEl.textContent = failed;
-    
+
     // Calculate percentage like Spotify sync
     if (total > 0) {
         const processed = matched + failed;
         const percentage = Math.round((processed / total) * 100);
         if (percentageEl) percentageEl.textContent = percentage;
     }
-    
+
     console.log(`📊 YouTube modal updated: ♪ ${total} / ✓ ${matched} / ✗ ${failed} (${Math.round((matched + failed) / total * 100)}%)`);
 }
 
 function updateYouTubeModalButtons(urlHash, phase) {
     const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
     if (!modal) return;
-    
+
     const footerLeft = modal.querySelector('.modal-footer-left');
     if (footerLeft) {
         footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
@@ -18849,19 +18871,19 @@ async function startYouTubeDownloadMissing(urlHash) {
 
         // Store reference for card navigation
         state.convertedSpotifyPlaylistId = virtualPlaylistId;
-        
+
         // Close the discovery modal if it's open
         const discoveryModal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
         if (discoveryModal) {
             discoveryModal.classList.add('hidden');
             console.log('🔄 Closed YouTube discovery modal to show download modal');
         }
-        
+
         // Open download missing tracks modal for YouTube playlist
         await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
-        
+
         // Phase will change to 'downloading' when user clicks "Begin Analysis" button
-        
+
     } catch (error) {
         console.error('❌ Error starting download missing tracks:', error);
         showToast(`Error starting downloads: ${error.message}`, 'error');
@@ -18871,26 +18893,26 @@ async function startYouTubeDownloadMissing(urlHash) {
 async function resetYouTubePlaylist(urlHash) {
     const state = youtubePlaylistStates[urlHash];
     if (!state) return;
-    
+
     try {
         console.log(`🔄 Resetting YouTube playlist to fresh state: ${state.playlist.name}`);
-        
+
         // Call backend reset endpoint
         const response = await fetch(`/api/youtube/reset/${urlHash}`, {
             method: 'POST'
         });
-        
+
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || 'Failed to reset playlist');
         }
-        
+
         // Stop any active polling
         if (activeYouTubePollers[urlHash]) {
             clearInterval(activeYouTubePollers[urlHash]);
             delete activeYouTubePollers[urlHash];
         }
-        
+
         // Update client state to match backend reset
         state.phase = 'fresh';
         state.discoveryResults = [];
@@ -18899,18 +18921,18 @@ async function resetYouTubePlaylist(urlHash) {
         state.syncPlaylistId = null;
         state.syncProgress = {};
         state.convertedSpotifyPlaylistId = null;
-        
+
         // Update card to reflect fresh state
         updateYouTubeCardPhase(urlHash, 'fresh');
-        updateYouTubeCardProgress(urlHash, { 
-            discovery_progress: 0, 
-            spotify_matches: 0, 
-            spotify_total: state.playlist.tracks.length 
+        updateYouTubeCardProgress(urlHash, {
+            discovery_progress: 0,
+            spotify_matches: 0,
+            spotify_total: state.playlist.tracks.length
         });
-        
+
         // Close modal
         closeYouTubeDiscoveryModal(urlHash);
-        
+
         showToast(`Reset "${state.playlist.name}" to fresh state`, 'success');
         console.log(`✅ Successfully reset YouTube playlist: ${state.playlist.name}`);
 
@@ -19172,7 +19194,7 @@ async function startListenBrainzDiscovery(playlistMbid) {
         // Call backend to start discovery worker
         const response = await fetch(`/api/listenbrainz/discovery/start/${playlistMbid}`, {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 playlist: state.playlist
             })
@@ -19351,39 +19373,39 @@ function startListenBrainzListingSyncPolling(playlistMbid, listingPlaylistId) {
  */
 function initializeArtistsPage() {
     console.log('🎵 Initializing Artists Page (first time)');
-    
+
     // Get DOM elements
     const searchInput = document.getElementById('artists-search-input');
     const headerSearchInput = document.getElementById('artists-header-search-input');
     const searchStatus = document.getElementById('artists-search-status');
     const backButton = document.getElementById('artists-back-button');
     const detailBackButton = document.getElementById('artist-detail-back-button');
-    
+
     // Set up event listeners (only need to do this once)
     if (searchInput) {
         searchInput.addEventListener('input', handleArtistsSearchInput);
         searchInput.addEventListener('keypress', handleArtistsSearchKeypress);
     }
-    
+
     if (headerSearchInput) {
         headerSearchInput.addEventListener('input', handleArtistsHeaderSearchInput);
         headerSearchInput.addEventListener('keypress', handleArtistsSearchKeypress);
     }
-    
+
     if (backButton) {
         backButton.addEventListener('click', () => showArtistsSearchState());
     }
-    
+
     if (detailBackButton) {
         detailBackButton.addEventListener('click', () => showArtistsResultsState());
     }
-    
+
     // Initialize tabs (only need to do this once)
     initializeArtistTabs();
-    
+
     // Mark as initialized
     artistsPageState.isInitialized = true;
-    
+
     // Restore previous state instead of always resetting to search
     restoreArtistsPageState();
     console.log('✅ Artists Page initialized successfully (ready for navigation)');
@@ -19394,20 +19416,20 @@ function initializeArtistsPage() {
  */
 function restoreArtistsPageState() {
     console.log(`🔄 Restoring artists page state: ${artistsPageState.currentView}`);
-    
+
     switch (artistsPageState.currentView) {
         case 'results':
             // Restore search results state
             if (artistsPageState.searchQuery && artistsPageState.searchResults.length > 0) {
                 console.log(`📦 Restoring search results for: "${artistsPageState.searchQuery}"`);
-                
+
                 // Restore search input values
                 const searchInput = document.getElementById('artists-search-input');
                 const headerSearchInput = document.getElementById('artists-header-search-input');
-                
+
                 if (searchInput) searchInput.value = artistsPageState.searchQuery;
                 if (headerSearchInput) headerSearchInput.value = artistsPageState.searchQuery;
-                
+
                 // Display the cached results
                 displayArtistsResults(artistsPageState.searchQuery, artistsPageState.searchResults);
             } else {
@@ -19415,27 +19437,27 @@ function restoreArtistsPageState() {
                 showArtistsSearchState();
             }
             break;
-            
+
         case 'detail':
             // Restore artist detail state
             if (artistsPageState.selectedArtist && artistsPageState.artistDiscography) {
                 console.log(`🎤 Restoring artist detail for: ${artistsPageState.selectedArtist.name}`);
-                
+
                 // First restore search results if they exist
                 if (artistsPageState.searchQuery && artistsPageState.searchResults.length > 0) {
                     const searchInput = document.getElementById('artists-search-input');
                     const headerSearchInput = document.getElementById('artists-header-search-input');
-                    
+
                     if (searchInput) searchInput.value = artistsPageState.searchQuery;
                     if (headerSearchInput) headerSearchInput.value = artistsPageState.searchQuery;
                 }
-                
+
                 // Show artist detail state
                 showArtistDetailState();
-                
+
                 // Update artist info in header
                 updateArtistDetailHeader(artistsPageState.selectedArtist);
-                
+
                 // Display cached discography
                 if (artistsPageState.artistDiscography.albums || artistsPageState.artistDiscography.singles) {
                     displayArtistDiscography(artistsPageState.artistDiscography);
@@ -19451,7 +19473,7 @@ function restoreArtistsPageState() {
                 }
             }
             break;
-            
+
         default:
         case 'search':
             // Show search state (but preserve any existing search query)
@@ -19470,22 +19492,22 @@ function restoreArtistsPageState() {
 function handleArtistsSearchInput(event) {
     const query = event.target.value.trim();
     updateArtistsSearchStatus('searching');
-    
+
     // Clear existing timeout
     if (artistsSearchTimeout) {
         clearTimeout(artistsSearchTimeout);
     }
-    
+
     // Cancel any active search
     if (artistsSearchController) {
         artistsSearchController.abort();
     }
-    
+
     if (query === '') {
         updateArtistsSearchStatus('default');
         return;
     }
-    
+
     // Set up new debounced search
     artistsSearchTimeout = setTimeout(() => {
         performArtistsSearch(query);
@@ -19497,13 +19519,13 @@ function handleArtistsSearchInput(event) {
  */
 function handleArtistsHeaderSearchInput(event) {
     const query = event.target.value.trim();
-    
+
     // Update main search input to match
     const mainInput = document.getElementById('artists-search-input');
     if (mainInput) {
         mainInput.value = query;
     }
-    
+
     // Trigger search with same debouncing logic
     handleArtistsSearchInput(event);
 }
@@ -19515,7 +19537,7 @@ function handleArtistsSearchKeypress(event) {
     if (event.key === 'Enter') {
         event.preventDefault();
         const query = event.target.value.trim();
-        
+
         if (query && query !== artistsPageState.searchQuery) {
             // Clear timeout and search immediately
             if (artistsSearchTimeout) {
@@ -19531,26 +19553,26 @@ function handleArtistsSearchKeypress(event) {
  */
 async function performArtistsSearch(query) {
     console.log(`🔍 Searching for artists: "${query}"`);
-    
+
     // Check cache first
     if (artistsPageState.cache.searches[query]) {
         console.log('📦 Using cached search results');
         displayArtistsResults(query, artistsPageState.cache.searches[query]);
         return;
     }
-    
+
     // Update status
     updateArtistsSearchStatus('searching');
-    
+
     // Show loading cards immediately if we're in results view
     if (artistsPageState.currentView === 'results') {
         showSearchLoadingCards();
     }
-    
+
     try {
         // Set up abort controller
         artistsSearchController = new AbortController();
-        
+
         const response = await fetch('/api/match/search', {
             method: 'POST',
             headers: {
@@ -19562,14 +19584,14 @@ async function performArtistsSearch(query) {
             }),
             signal: artistsSearchController.signal
         });
-        
+
         if (!response.ok) {
             throw new Error(`Search failed: ${response.status}`);
         }
-        
+
         const data = await response.json();
         console.log(`✅ Found ${data.results?.length || 0} artists`);
-        
+
         // Transform the results to flatten the nested artist data
         const transformedResults = (data.results || []).map(result => {
             // Extract artist data from the nested structure
@@ -19583,19 +19605,19 @@ async function performArtistsSearch(query) {
                 confidence: result.confidence || 0
             };
         });
-        
+
         console.log('🔧 Transformed results:', transformedResults);
-        
+
         // Cache the transformed results
         artistsPageState.cache.searches[query] = transformedResults;
-        
+
         // Display results
         displayArtistsResults(query, transformedResults);
-        
+
     } catch (error) {
         if (error.name !== 'AbortError') {
             console.error('❌ Artist search failed:', error);
-            
+
             // Provide specific error messages based on the error type
             let errorMessage = 'Search failed. Please try again.';
             if (error.message.includes('401') || error.message.includes('authentication')) {
@@ -19605,7 +19627,7 @@ async function performArtistsSearch(query) {
             } else if (error.message.includes('timeout')) {
                 errorMessage = 'Search timed out. Please try again.';
             }
-            
+
             updateArtistsSearchStatus('error', errorMessage);
         }
     } finally {
@@ -19618,25 +19640,25 @@ async function performArtistsSearch(query) {
  */
 function displayArtistsResults(query, results) {
     console.log(`📊 Displaying ${results.length} artist results`);
-    
+
     // Update state
     artistsPageState.searchQuery = query;
     artistsPageState.searchResults = results;
     artistsPageState.currentView = 'results';
-    
+
     // Update header search input if different
     const headerInput = document.getElementById('artists-header-search-input');
     if (headerInput && headerInput.value !== query) {
         headerInput.value = query;
     }
-    
+
     // Show results state
     showArtistsResultsState();
-    
+
     // Populate results
     const container = document.getElementById('artists-cards-container');
     if (!container) return;
-    
+
     if (results.length === 0) {
         container.innerHTML = `
             <div style="grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: rgba(255, 255, 255, 0.6);">
@@ -19647,14 +19669,14 @@ function displayArtistsResults(query, results) {
         `;
         return;
     }
-    
+
     // Create artist cards
     container.innerHTML = results.map(result => createArtistCardHTML(result)).join('');
-    
+
     // Add event listeners to cards
     container.querySelectorAll('.artist-card').forEach((card, index) => {
         card.addEventListener('click', () => selectArtistForDetail(results[index]));
-        
+
         // Extract colors from artist image for dynamic glow
         const artist = results[index];
         if (artist.image_url) {
@@ -19663,10 +19685,10 @@ function displayArtistsResults(query, results) {
             });
         }
     });
-    
+
     // Update watchlist status for all cards
     updateArtistCardWatchlistStatus();
-    
+
     // Add mouse wheel horizontal scrolling
     container.addEventListener('wheel', (event) => {
         if (event.deltaY !== 0) {
@@ -19684,15 +19706,15 @@ function createArtistCardHTML(artist) {
     const genres = artist.genres && artist.genres.length > 0 ?
         artist.genres.slice(0, 3).join(', ') : 'Various genres';
     const popularity = artist.popularity || 0;
-    
+
     // Create a fallback gradient if no image is available
-    const backgroundStyle = imageUrl ? 
+    const backgroundStyle = imageUrl ?
         `background-image: url('${imageUrl}');` :
         `background: linear-gradient(135deg, rgba(29, 185, 84, 0.3) 0%, rgba(24, 156, 71, 0.2) 100%);`;
-    
+
     // Format popularity as a percentage for better UX
     const popularityText = popularity > 0 ? `${popularity}% Popular` : 'Popularity Unknown';
-    
+
     return `
         <div class="artist-card" data-artist-id="${artist.id}">
             <div class="artist-card-background" style="${backgroundStyle}"></div>
@@ -19754,7 +19776,7 @@ async function selectArtistForDetail(artist) {
  */
 async function loadArtistDiscography(artistId) {
     console.log(`💿 Loading discography for artist: ${artistId}`);
-    
+
     // Check cache first
     if (artistsPageState.cache.discography[artistId]) {
         console.log('📦 Using cached discography');
@@ -19770,38 +19792,38 @@ async function loadArtistDiscography(artistId) {
         await checkDiscographyCompletion(artistId, cachedDiscography);
         return;
     }
-    
+
     try {
         // Show loading states
         showDiscographyLoading();
-        
+
         // Call the real API endpoint
         const response = await fetch(`/api/artist/${artistId}/discography`);
-        
+
         if (!response.ok) {
             if (response.status === 401) {
                 throw new Error('Spotify not authenticated. Please check your API settings.');
             }
             throw new Error(`Failed to load discography: ${response.status}`);
         }
-        
+
         const data = await response.json();
-        
+
         if (data.error) {
             throw new Error(data.error);
         }
-        
+
         const discography = {
             albums: data.albums || [],
             singles: data.singles || []
         };
-        
+
         console.log(`✅ Loaded ${discography.albums.length} albums and ${discography.singles.length} singles`);
-        
+
         // Cache the results
         artistsPageState.cache.discography[artistId] = discography;
         artistsPageState.artistDiscography = discography;
-        
+
         // Display results
         displayArtistDiscography(discography);
 
@@ -20161,13 +20183,13 @@ function createSimilarArtistBubble(artist) {
  */
 function restoreCachedCompletionData(artistId) {
     console.log(`📦 Restoring cached completion data for artist: ${artistId}`);
-    
+
     const cachedData = artistsPageState.cache.completionData[artistId];
     if (!cachedData) {
         console.log('⚠️ No cached completion data found, skipping restoration');
         return;
     }
-    
+
     // Restore album completion overlays
     if (cachedData.albums) {
         cachedData.albums.forEach(albumCompletion => {
@@ -20175,7 +20197,7 @@ function restoreCachedCompletionData(artistId) {
         });
         console.log(`✅ Restored ${cachedData.albums.length} album completion overlays`);
     }
-    
+
     // Restore singles completion overlays  
     if (cachedData.singles) {
         cachedData.singles.forEach(singleCompletion => {
@@ -20220,10 +20242,10 @@ async function checkDiscographyCompletion(artistId, discography) {
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            
+
             const chunk = decoder.decode(value);
             const lines = chunk.split('\n');
-            
+
             for (const line of lines) {
                 if (line.startsWith('data: ')) {
                     try {
@@ -20259,7 +20281,7 @@ async function checkDiscographyCompletion(artistId, discography) {
  */
 function handleStreamingCompletionUpdate(data) {
     console.log('🔄 Streaming update received:', data.type, data.name || data.artist_name);
-    
+
     switch (data.type) {
         case 'start':
             console.log(`🎤 Starting completion check for ${data.artist_name} (${data.total_items} items)`);
@@ -20272,30 +20294,30 @@ function handleStreamingCompletionUpdate(data) {
                 };
             }
             break;
-            
+
         case 'album_completion':
             updateAlbumCompletionOverlay(data, 'albums');
             // Cache the completion data
             cacheCompletionData(data, 'albums');
             console.log(`📀 Updated album: ${data.name} (${data.status})`);
             break;
-            
+
         case 'single_completion':
             updateAlbumCompletionOverlay(data, 'singles');
             // Cache the completion data
             cacheCompletionData(data, 'singles');
             console.log(`🎵 Updated single: ${data.name} (${data.status})`);
             break;
-            
+
         case 'error':
             console.error('❌ Error processing item:', data.name, data.error);
             // Could show error for specific item
             break;
-            
+
         case 'complete':
             console.log(`✅ Completion check finished (${data.processed_count} items processed)`);
             break;
-            
+
         default:
             console.log('Unknown streaming update type:', data.type);
     }
@@ -20307,7 +20329,7 @@ function handleStreamingCompletionUpdate(data) {
 function cacheCompletionData(completionData, type) {
     const artistId = artistsPageState.selectedArtist?.id;
     if (!artistId) return;
-    
+
     // Ensure cache structure exists
     if (!artistsPageState.cache.completionData[artistId]) {
         artistsPageState.cache.completionData[artistId] = {
@@ -20315,7 +20337,7 @@ function cacheCompletionData(completionData, type) {
             singles: []
         };
     }
-    
+
     // Add to appropriate cache array
     if (type === 'albums') {
         artistsPageState.cache.completionData[artistId].albums.push(completionData);
@@ -20330,49 +20352,49 @@ function cacheCompletionData(completionData, type) {
 function updateAlbumCompletionOverlay(completionData, containerType) {
     const containerId = containerType === 'albums' ? 'album-cards-container' : 'singles-cards-container';
     const container = document.getElementById(containerId);
-    
+
     if (!container) {
         console.warn(`Container ${containerId} not found`);
         return;
     }
-    
+
     // Find the album card by data-album-id
     const albumCard = container.querySelector(`[data-album-id="${completionData.id}"]`);
-    
+
     if (!albumCard) {
         console.warn(`Album card not found for ID: ${completionData.id}`);
         return;
     }
-    
+
     const overlay = albumCard.querySelector('.completion-overlay');
     if (!overlay) {
         console.warn(`Completion overlay not found for album: ${completionData.name}`);
         return;
     }
-    
+
     // Remove existing status classes
     overlay.classList.remove('checking', 'completed', 'nearly_complete', 'partial', 'missing', 'downloading', 'downloaded', 'error');
 
     // Add new status class
     overlay.classList.add(completionData.status);
-    
+
     // Update overlay text and content
     const statusText = getCompletionStatusText(completionData);
     const progressText = `${completionData.owned_tracks}/${completionData.expected_tracks}`;
-    
+
     overlay.innerHTML = `
         <span class="completion-status">${statusText}</span>
         <span class="completion-progress">${progressText}</span>
     `;
-    
+
     // Add tooltip with more details
     overlay.title = `${completionData.name}\n${statusText} (${completionData.completion_percentage}%)\nTracks: ${completionData.owned_tracks}/${completionData.expected_tracks}\nConfidence: ${completionData.confidence}`;
-    
+
     // Add brief flash animation to indicate update
     overlay.style.animation = 'none';
     overlay.offsetHeight; // Trigger reflow
     overlay.style.animation = 'completionOverlayFadeIn 0.6s cubic-bezier(0.4, 0, 0.2, 1)';
-    
+
     console.log(`📊 Updated overlay for "${completionData.name}": ${statusText} (${completionData.completion_percentage}%)`);
 }
 
@@ -20484,14 +20506,14 @@ function showCompletionError() {
 function createAlbumCardHTML(album) {
     const imageUrl = album.image_url || '';
     const year = album.release_date ? new Date(album.release_date).getFullYear() : '';
-    const type = album.album_type === 'album' ? 'Album' : 
-                 album.album_type === 'single' ? 'Single' : 'EP';
-    
+    const type = album.album_type === 'album' ? 'Album' :
+        album.album_type === 'single' ? 'Single' : 'EP';
+
     // Create a fallback gradient if no image is available
-    const backgroundStyle = imageUrl ? 
+    const backgroundStyle = imageUrl ?
         `background-image: url('${imageUrl}');` :
         `background: linear-gradient(135deg, rgba(29, 185, 84, 0.2) 0%, rgba(24, 156, 71, 0.1) 100%);`;
-    
+
     return `
         <div class="album-card" data-album-id="${album.id}" data-album-name="${escapeHtml(album.name)}" data-album-type="${album.album_type}" data-total-tracks="${album.total_tracks || 0}">
             <div class="album-card-image" style="${backgroundStyle}"></div>
@@ -20513,15 +20535,15 @@ function createAlbumCardHTML(album) {
 function initializeArtistTabs() {
     const tabButtons = document.querySelectorAll('.artist-tab');
     const tabContents = document.querySelectorAll('.tab-content');
-    
+
     tabButtons.forEach(button => {
         button.addEventListener('click', () => {
             const tabName = button.getAttribute('data-tab');
-            
+
             // Update button states
             tabButtons.forEach(btn => btn.classList.remove('active'));
             button.classList.add('active');
-            
+
             // Update content states
             tabContents.forEach(content => {
                 content.classList.remove('active');
@@ -20529,7 +20551,7 @@ function initializeArtistTabs() {
                     content.classList.add('active');
                 }
             });
-            
+
             console.log(`🔄 Switched to ${tabName} tab`);
         });
     });
@@ -20558,7 +20580,7 @@ function showArtistsSearchState() {
     const searchState = document.getElementById('artists-search-state');
     const resultsState = document.getElementById('artists-results-state');
     const detailState = document.getElementById('artist-detail-state');
-    
+
     if (searchState) {
         searchState.classList.remove('hidden', 'fade-out');
     }
@@ -20570,10 +20592,10 @@ function showArtistsSearchState() {
         detailState.classList.add('hidden');
         detailState.classList.remove('show');
     }
-    
+
     artistsPageState.currentView = 'search';
     updateArtistsSearchStatus('default');
-    
+
     // Show artist downloads section if there are active downloads
     showArtistDownloadsSection();
 }
@@ -20609,11 +20631,11 @@ function showArtistsResultsState() {
         artistsPageState.selectedArtist = null;
         artistsPageState.artistDiscography = { albums: [], singles: [] };
     }
-    
+
     const searchState = document.getElementById('artists-search-state');
     const resultsState = document.getElementById('artists-results-state');
     const detailState = document.getElementById('artist-detail-state');
-    
+
     if (searchState) {
         searchState.classList.add('fade-out');
         setTimeout(() => searchState.classList.add('hidden'), 200);
@@ -20626,17 +20648,17 @@ function showArtistsResultsState() {
         detailState.classList.add('hidden');
         detailState.classList.remove('show');
     }
-    
+
     artistsPageState.currentView = 'results';
 }
 
 function showArtistDetailState() {
     console.log('🔄 Showing detail state');
-    
+
     const searchState = document.getElementById('artists-search-state');
     const resultsState = document.getElementById('artists-results-state');
     const detailState = document.getElementById('artist-detail-state');
-    
+
     if (searchState) {
         searchState.classList.add('hidden', 'fade-out');
     }
@@ -20648,7 +20670,7 @@ function showArtistDetailState() {
         detailState.classList.remove('hidden');
         setTimeout(() => detailState.classList.add('show'), 50);
     }
-    
+
     artistsPageState.currentView = 'detail';
 }
 
@@ -20658,10 +20680,10 @@ function showArtistDetailState() {
 function updateArtistsSearchStatus(status, message = null) {
     const statusElement = document.getElementById('artists-search-status');
     if (!statusElement) return;
-    
+
     // Clear all status classes
     statusElement.classList.remove('searching', 'error');
-    
+
     switch (status) {
         case 'default':
             statusElement.textContent = 'Start typing to search for artists';
@@ -20698,10 +20720,10 @@ function updateArtistsSearchStatus(status, message = null) {
 function retryLastSearch() {
     const searchInput = document.getElementById('artists-search-input');
     const headerSearchInput = document.getElementById('artists-header-search-input');
-    
+
     // Get the last search query from either input
     const query = searchInput?.value?.trim() || headerSearchInput?.value?.trim() || artistsPageState.searchQuery;
-    
+
     if (query) {
         console.log(`🔄 Retrying search for: "${query}"`);
         performArtistsSearch(query);
@@ -20715,20 +20737,20 @@ function updateArtistDetailHeader(artist) {
     const imageElement = document.getElementById('search-artist-detail-image');
     const nameElement = document.getElementById('search-artist-detail-name');
     const genresElement = document.getElementById('search-artist-detail-genres');
-    
+
     if (imageElement && artist.image_url) {
         imageElement.style.backgroundImage = `url('${artist.image_url}')`;
     }
-    
+
     if (nameElement) {
         nameElement.textContent = artist.name;
     }
-    
+
     if (genresElement) {
         const genres = artist.genres?.slice(0, 4).join(' • ') || 'Various genres';
         genresElement.textContent = genres;
     }
-    
+
     // Initialize watchlist button
     initializeArtistDetailWatchlistButton(artist);
 }
@@ -20739,21 +20761,21 @@ function updateArtistDetailHeader(artist) {
 async function initializeArtistDetailWatchlistButton(artist) {
     const button = document.getElementById('artist-detail-watchlist-btn');
     if (!button) return;
-    
+
     console.log(`🔧 Initializing watchlist button for artist: ${artist.name} (${artist.id})`);
-    
+
     // Reset button state completely
     button.disabled = false;
     button.classList.remove('watching');
     button.style.background = '';
     button.style.cursor = '';
-    
+
     // Remove any existing click handlers to prevent duplicates
     button.onclick = null;
-    
+
     // Set up new click handler
     button.onclick = (event) => toggleArtistDetailWatchlist(event, artist.id, artist.name);
-    
+
     // Check and update current status
     await updateArtistDetailWatchlistButton(artist.id);
 }
@@ -20763,16 +20785,16 @@ async function initializeArtistDetailWatchlistButton(artist) {
  */
 async function toggleArtistDetailWatchlist(event, artistId, artistName) {
     event.preventDefault();
-    
+
     const button = document.getElementById('artist-detail-watchlist-btn');
     const icon = button.querySelector('.watchlist-icon');
     const text = button.querySelector('.watchlist-text');
-    
+
     // Show loading state
     const originalText = text.textContent;
     text.textContent = 'Loading...';
     button.disabled = true;
-    
+
     try {
         // Check current status
         const checkResponse = await fetch('/api/watchlist/check', {
@@ -20780,31 +20802,31 @@ async function toggleArtistDetailWatchlist(event, artistId, artistName) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ artist_id: artistId })
         });
-        
+
         const checkData = await checkResponse.json();
         if (!checkData.success) {
             throw new Error(checkData.error || 'Failed to check watchlist status');
         }
-        
+
         const isWatching = checkData.is_watching;
-        
+
         // Toggle watchlist status
         const endpoint = isWatching ? '/api/watchlist/remove' : '/api/watchlist/add';
-        const payload = isWatching ? 
-            { artist_id: artistId } : 
+        const payload = isWatching ?
+            { artist_id: artistId } :
             { artist_id: artistId, artist_name: artistName };
-        
+
         const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        
+
         const data = await response.json();
         if (!data.success) {
             throw new Error(data.error || 'Failed to update watchlist');
         }
-        
+
         // Update button appearance
         if (isWatching) {
             // Was watching, now removed
@@ -20819,17 +20841,17 @@ async function toggleArtistDetailWatchlist(event, artistId, artistName) {
             button.classList.add('watching');
             console.log(`✅ Added ${artistName} to watchlist`);
         }
-        
+
         // Update dashboard watchlist count
         updateWatchlistButtonCount();
-        
+
         // Update any visible artist cards
         updateArtistCardWatchlistStatus();
-        
+
     } catch (error) {
         console.error('Error toggling watchlist:', error);
         text.textContent = originalText;
-        
+
         // Show error feedback
         const originalBackground = button.style.background;
         button.style.background = 'rgba(255, 59, 48, 0.3)';
@@ -20850,26 +20872,26 @@ async function updateArtistDetailWatchlistButton(artistId) {
         console.warn('⚠️ Artist detail watchlist button not found');
         return;
     }
-    
+
     try {
         console.log(`🔍 Checking watchlist status for artist: ${artistId}`);
-        
+
         const response = await fetch('/api/watchlist/check', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ artist_id: artistId })
         });
-        
+
         const data = await response.json();
         if (data.success) {
             const icon = button.querySelector('.watchlist-icon');
             const text = button.querySelector('.watchlist-text');
-            
+
             console.log(`📊 Watchlist status for ${artistId}: ${data.is_watching ? 'WATCHING' : 'NOT WATCHING'}`);
-            
+
             // Ensure button is enabled
             button.disabled = false;
-            
+
             if (data.is_watching) {
                 icon.textContent = '👁️';
                 text.textContent = 'Remove from Watchlist';
@@ -20895,7 +20917,7 @@ async function updateArtistDetailWatchlistButton(artistId) {
 function showDiscographyLoading() {
     const albumsContainer = document.getElementById('album-cards-container');
     const singlesContainer = document.getElementById('singles-cards-container');
-    
+
     const loadingHtml = `
         <div class="album-card loading">
             <div class="album-card-image"></div>
@@ -20906,7 +20928,7 @@ function showDiscographyLoading() {
             </div>
         </div>
     `.repeat(4);
-    
+
     if (albumsContainer) albumsContainer.innerHTML = loadingHtml;
     if (singlesContainer) singlesContainer.innerHTML = loadingHtml;
 }
@@ -20917,7 +20939,7 @@ function showDiscographyLoading() {
 function showDiscographyError(message = 'Failed to load discography') {
     const albumsContainer = document.getElementById('album-cards-container');
     const singlesContainer = document.getElementById('singles-cards-container');
-    
+
     const errorHtml = `
         <div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; color: rgba(255, 65, 54, 0.8);">
             <div style="font-size: 18px; margin-bottom: 8px;">⚠️</div>
@@ -20925,7 +20947,7 @@ function showDiscographyError(message = 'Failed to load discography') {
             <div style="font-size: 12px; color: rgba(255, 65, 54, 0.6); max-width: 300px; margin: 0 auto;">${escapeHtml(message)}</div>
         </div>
     `;
-    
+
     if (albumsContainer) albumsContainer.innerHTML = errorHtml;
     if (singlesContainer) singlesContainer.innerHTML = errorHtml;
 }
@@ -20936,7 +20958,7 @@ function showDiscographyError(message = 'Failed to load discography') {
 function showSearchLoadingCards() {
     const container = document.getElementById('artists-cards-container');
     if (!container) return;
-    
+
     const loadingCardHtml = `
         <div class="artist-card loading">
             <div class="artist-card-background"></div>
@@ -20951,7 +20973,7 @@ function showSearchLoadingCards() {
             </div>
         </div>
     `;
-    
+
     // Show 6 loading cards
     container.innerHTML = loadingCardHtml.repeat(6);
 }
@@ -21077,22 +21099,22 @@ async function handleArtistAlbumClick(album, albumType) {
 async function createArtistAlbumVirtualPlaylist(album, albumType) {
     const artist = artistsPageState.selectedArtist;
     const virtualPlaylistId = `artist_album_${artist.id}_${album.id}`;
-    
+
     console.log(`🎵 Creating virtual playlist for: ${artist.name} - ${album.name}`);
-    
+
     try {
         // Loading overlay already shown by handleArtistAlbumClick
-        
+
         // Fetch album tracks from backend
         const response = await fetch(`/api/artist/${artist.id}/album/${album.id}/tracks`);
-        
+
         if (!response.ok) {
             if (response.status === 401) {
                 throw new Error('Spotify not authenticated. Please check your API settings.');
             }
             throw new Error(`Failed to load album tracks: ${response.status}`);
         }
-        
+
         const data = await response.json();
 
         if (!data.success || !data.tracks || data.tracks.length === 0) {
@@ -21111,10 +21133,10 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
         // Pass false for showLoadingOverlay since we already have one from handleArtistAlbumClick
         // Use fullAlbumData from API response instead of album parameter
         await openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, data.tracks, fullAlbumData, artist, false);
-        
+
         // Track this download for artist bubble management
         registerArtistDownload(artist, album, virtualPlaylistId, albumType);
-        
+
     } catch (error) {
         console.error('❌ Error creating virtual playlist:', error);
         showToast(`Failed to load album: ${error.message}`, 'error');
@@ -21147,19 +21169,19 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
     }
 
     console.log(`📥 Opening Download Missing Tracks modal for artist album: ${virtualPlaylistId}`);
-    
+
     // Create virtual playlist object for compatibility with existing modal logic
     const virtualPlaylist = {
         id: virtualPlaylistId,
         name: playlistName,
         track_count: spotifyTracks.length
     };
-    
+
     // Store the tracks in the cache for the modal to use
     playlistTrackCache[virtualPlaylistId] = spotifyTracks;
     currentPlaylistTracks = spotifyTracks;
     currentModalPlaylistId = virtualPlaylistId;
-    
+
     let modal = document.createElement('div');
     modal.id = `download-missing-modal-${virtualPlaylistId}`;
     modal.className = 'download-missing-modal';
@@ -21179,7 +21201,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
         album: album,
         albumType: album.album_type
     };
-    
+
     // Generate hero section for artist album context
     const heroContext = {
         type: 'artist_album',
@@ -21315,9 +21337,9 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
  */
 function registerArtistDownload(artist, album, virtualPlaylistId, albumType) {
     console.log(`📝 Registering artist download: ${artist.name} - ${album.name}`);
-    
+
     const artistId = artist.id;
-    
+
     // Initialize artist bubble if it doesn't exist
     if (!artistDownloadBubbles[artistId]) {
         artistDownloadBubbles[artistId] = {
@@ -21327,7 +21349,7 @@ function registerArtistDownload(artist, album, virtualPlaylistId, albumType) {
             hasCompletedDownloads: false
         };
     }
-    
+
     // Add this download to the artist's downloads
     const downloadInfo = {
         virtualPlaylistId: virtualPlaylistId,
@@ -21336,15 +21358,15 @@ function registerArtistDownload(artist, album, virtualPlaylistId, albumType) {
         status: 'in_progress', // 'in_progress', 'completed', 'view_results'
         startTime: new Date()
     };
-    
+
     artistDownloadBubbles[artistId].downloads.push(downloadInfo);
-    
+
     // Show/update the artist downloads section
     updateArtistDownloadsSection();
-    
+
     // Save snapshot of current state
     saveArtistBubbleSnapshot();
-    
+
     // Monitor this download for completion
     monitorArtistDownload(artistId, virtualPlaylistId);
 }
@@ -21370,25 +21392,25 @@ async function saveArtistBubbleSnapshot() {
      * Saves current artistDownloadBubbles state to backend for persistence.
      * Debounced to prevent excessive backend calls.
      */
-    
+
     // Clear any existing timeout
     if (snapshotSaveTimeout) {
         clearTimeout(snapshotSaveTimeout);
     }
-    
+
     // Debounce the actual save
     snapshotSaveTimeout = setTimeout(async () => {
         try {
             const bubbleCount = Object.keys(artistDownloadBubbles).length;
-            
+
             // Don't save empty state
             if (bubbleCount === 0) {
                 console.log('📸 Skipping snapshot save - no artist bubbles to save');
                 return;
             }
-            
+
             console.log(`📸 Saving artist bubble snapshot: ${bubbleCount} artists`);
-            
+
             // Prepare snapshot data (clean up DOM references)
             const cleanBubbles = {};
             for (const [artistId, bubbleData] of Object.entries(artistDownloadBubbles)) {
@@ -21404,7 +21426,7 @@ async function saveArtistBubbleSnapshot() {
                     hasCompletedDownloads: bubbleData.hasCompletedDownloads
                 };
             }
-            
+
             const response = await fetch('/api/artist_bubbles/snapshot', {
                 method: 'POST',
                 headers: {
@@ -21414,15 +21436,15 @@ async function saveArtistBubbleSnapshot() {
                     bubbles: cleanBubbles
                 })
             });
-            
+
             const data = await response.json();
-            
+
             if (data.success) {
                 console.log(`✅ Artist bubble snapshot saved: ${bubbleCount} artists`);
             } else {
                 console.error('❌ Failed to save artist bubble snapshot:', data.error);
             }
-            
+
         } catch (error) {
             console.error('❌ Error saving artist bubble snapshot:', error);
         }
@@ -21436,28 +21458,28 @@ async function hydrateArtistBubblesFromSnapshot() {
      */
     try {
         console.log('🔄 Loading artist bubble snapshot from backend...');
-        
+
         const response = await fetch('/api/artist_bubbles/hydrate');
         const data = await response.json();
-        
+
         if (!data.success) {
             console.error('❌ Failed to load artist bubble snapshot:', data.error);
             return;
         }
-        
+
         const bubbles = data.bubbles || {};
         const stats = data.stats || {};
-        
+
         console.log(`🔄 Loaded bubble snapshot: ${stats.total_artists || 0} artists, ${stats.active_downloads || 0} active, ${stats.completed_downloads || 0} completed`);
-        
+
         if (Object.keys(bubbles).length === 0) {
             console.log('ℹ️ No artist bubbles to hydrate');
             return;
         }
-        
+
         // Clear existing state
         artistDownloadBubbles = {};
-        
+
         // Restore artistDownloadBubbles with hydrated data
         for (const [artistId, bubbleData] of Object.entries(bubbles)) {
             artistDownloadBubbles[artistId] = {
@@ -21472,9 +21494,9 @@ async function hydrateArtistBubblesFromSnapshot() {
                 element: null, // Will be created when UI updates
                 hasCompletedDownloads: bubbleData.hasCompletedDownloads
             };
-            
+
             console.log(`🔄 Hydrated artist: ${bubbleData.artist.name} (${bubbleData.downloads.length} downloads)`);
-            
+
             // Start monitoring for any in-progress downloads
             for (const download of bubbleData.downloads) {
                 if (download.status === 'in_progress') {
@@ -21483,13 +21505,13 @@ async function hydrateArtistBubblesFromSnapshot() {
                 }
             }
         }
-        
+
         // Update UI to show hydrated bubbles
         updateArtistDownloadsSection();
-        
+
         const totalArtists = Object.keys(artistDownloadBubbles).length;
         console.log(`✅ Successfully hydrated ${totalArtists} artist download bubbles`);
-        
+
     } catch (error) {
         console.error('❌ Error hydrating artist bubbles from snapshot:', error);
     }
@@ -21813,9 +21835,9 @@ async function openSearchDownloadModal(artistName) {
                     <div class="artist-download-modal-hero-content">
                         <div class="artist-download-modal-hero-avatar">
                             ${artistBubbleData.artist.image_url
-                                ? `<img src="${escapeHtml(artistBubbleData.artist.image_url)}" alt="${escapeHtml(artistBubbleData.artist.name)}" class="artist-download-modal-hero-image" loading="lazy">`
-                                : '<div class="artist-download-modal-hero-fallback">🎵</div>'
-                            }
+            ? `<img src="${escapeHtml(artistBubbleData.artist.image_url)}" alt="${escapeHtml(artistBubbleData.artist.name)}" class="artist-download-modal-hero-image" loading="lazy">`
+            : '<div class="artist-download-modal-hero-fallback">🎵</div>'
+        }
                         </div>
                         <div class="artist-download-modal-hero-info">
                             <h2 class="artist-download-modal-hero-title">${escapeHtml(artistBubbleData.artist.name)}</h2>
@@ -21855,11 +21877,11 @@ function createSearchDownloadItem(download, index) {
         <div class="artist-download-item" data-playlist-id="${virtualPlaylistId}">
             <div class="download-item-artwork">
                 ${item.image_url
-                    ? `<img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.name)}" class="download-item-image" loading="lazy">`
-                    : `<div class="download-item-fallback">
+            ? `<img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.name)}" class="download-item-image" loading="lazy">`
+            : `<div class="download-item-fallback">
                          ${type === 'album' ? '💿' : '🎵'}
                        </div>`
-                }
+        }
             </div>
             <div class="download-item-info">
                 <div class="download-item-name">${escapeHtml(item.name)}</div>
@@ -22127,7 +22149,7 @@ function bulkCompleteSearchDownloads(artistName) {
     // Find all completed downloads
     const completedDownloads = artistBubbleData.downloads.filter(d => d.status === 'view_results');
     console.log(`📋 Found ${completedDownloads.length} completed downloads to close:`,
-                completedDownloads.map(d => d.item.name));
+        completedDownloads.map(d => d.item.name));
 
     if (completedDownloads.length === 0) {
         console.warn(`⚠️ No completed downloads found for bulk close`);
@@ -22188,44 +22210,44 @@ function cleanupSearchDownload(virtualPlaylistId) {
 function showArtistDownloadsSection() {
     console.log(`🔄 [SHOW] showArtistDownloadsSection() called - refreshing artist bubbles`);
     console.log(`🔄 [SHOW] Current view: ${artistsPageState.currentView}, artistDownloadBubbles count: ${Object.keys(artistDownloadBubbles).length}`);
-    
+
     // Only show in search state
     if (artistsPageState.currentView !== 'search') {
         console.log(`⏭️ [SHOW] Skipping - not in search state (current: ${artistsPageState.currentView})`);
         return;
     }
-    
+
     const artistsSearchState = document.getElementById('artists-search-state');
     if (!artistsSearchState) {
         console.log(`⏭️ [SHOW] Skipping - no artists-search-state element found`);
         return;
     }
-    
+
     let downloadsSection = document.getElementById('artist-downloads-section');
-    
+
     // Create section if it doesn't exist
     if (!downloadsSection) {
         downloadsSection = document.createElement('div');
         downloadsSection.id = 'artist-downloads-section';
         downloadsSection.className = 'artist-downloads-section';
-        
+
         // Insert after the search container
         const searchContainer = artistsSearchState.querySelector('.artists-search-container');
         if (searchContainer) {
             searchContainer.insertAdjacentElement('afterend', downloadsSection);
         }
     }
-    
+
     // Count active artists (those with downloads)
-    const activeArtists = Object.keys(artistDownloadBubbles).filter(artistId => 
+    const activeArtists = Object.keys(artistDownloadBubbles).filter(artistId =>
         artistDownloadBubbles[artistId].downloads.length > 0
     );
-    
+
     if (activeArtists.length === 0) {
         downloadsSection.style.display = 'none';
         return;
     }
-    
+
     // Show and populate the section
     downloadsSection.style.display = 'block';
     downloadsSection.innerHTML = `
@@ -22237,13 +22259,13 @@ function showArtistDownloadsSection() {
             ${activeArtists.map(artistId => createArtistBubbleCard(artistDownloadBubbles[artistId])).join('')}
         </div>
     `;
-    
+
     // Add event listeners to bubble cards
     activeArtists.forEach(artistId => {
         const bubbleCard = downloadsSection.querySelector(`[data-artist-id="${artistId}"]`);
         if (bubbleCard) {
             bubbleCard.addEventListener('click', () => openArtistDownloadModal(artistId));
-            
+
             // Add dynamic glow effect
             const artist = artistDownloadBubbles[artistId].artist;
             if (artist.image_url) {
@@ -22263,7 +22285,7 @@ function createArtistBubbleCard(artistBubbleData) {
     const activeCount = downloads.filter(d => d.status === 'in_progress').length;
     const completedCount = downloads.filter(d => d.status === 'view_results').length;
     const allCompleted = activeCount === 0 && completedCount > 0;
-    
+
     // Enhanced debug logging for bubble card creation and green checkmark detection
     console.log(`🔵 [BUBBLE] Creating bubble for ${artist.name}:`, {
         totalDownloads: downloads.length,
@@ -22272,7 +22294,7 @@ function createArtistBubbleCard(artistBubbleData) {
         allCompleted,
         downloadStatuses: downloads.map(d => `${d.album.name}: ${d.status}`)
     });
-    
+
     // CRITICAL: Green checkmark detection logging
     if (allCompleted) {
         console.log(`🟢 [BUBBLE] GREEN CHECKMARK DETECTED for ${artist.name} - all ${downloads.length} downloads completed`);
@@ -22282,12 +22304,12 @@ function createArtistBubbleCard(artistBubbleData) {
     } else {
         console.log(`⏳ [BUBBLE] Still waiting for completion: ${activeCount} active, ${completedCount} completed`);
     }
-    
+
     const imageUrl = artist.image_url || '';
-    const backgroundStyle = imageUrl ? 
+    const backgroundStyle = imageUrl ?
         `background-image: url('${imageUrl}');` :
         `background: linear-gradient(135deg, rgba(29, 185, 84, 0.3) 0%, rgba(24, 156, 71, 0.2) 100%);`;
-    
+
     return `
         <div class="artist-bubble-card ${allCompleted ? 'all-completed' : ''}" 
              data-artist-id="${artist.id}"
@@ -22322,23 +22344,23 @@ function monitorArtistDownload(artistId, virtualPlaylistId) {
         if (!process || !artistDownloadBubbles[artistId]) {
             return; // Process or artist bubble no longer exists
         }
-        
+
         // Find this download in the artist's downloads
         const download = artistDownloadBubbles[artistId].downloads.find(d => d.virtualPlaylistId === virtualPlaylistId);
         if (!download) return;
-        
+
         // Update download status based on process status
         if (process.status === 'complete' && download.status === 'in_progress') {
             download.status = 'view_results';
             console.log(`✅ Download completed for ${artistDownloadBubbles[artistId].artist.name} - ${download.album.name}`);
             console.log(`📊 Artist ${artistId} downloads status:`, artistDownloadBubbles[artistId].downloads.map(d => `${d.album.name}: ${d.status}`));
-            
+
             // Update the downloads section
             updateArtistDownloadsSection();
-            
+
             // Save snapshot of updated state
             saveArtistBubbleSnapshot();
-            
+
             // Check if all downloads for this artist are now completed
             const artistDownloads = artistDownloadBubbles[artistId].downloads;
             const allCompleted = artistDownloads.every(d => d.status === 'view_results');
@@ -22349,13 +22371,13 @@ function monitorArtistDownload(artistId, virtualPlaylistId) {
                 setTimeout(updateArtistDownloadsSection, 100);
             }
         }
-        
+
         // Continue monitoring if still active
         if (process.status !== 'complete') {
             setTimeout(checkStatus, 2000); // Check every 2 seconds
         }
     };
-    
+
     // Start monitoring after a brief delay
     setTimeout(checkStatus, 1000);
 }
@@ -22382,9 +22404,9 @@ function openArtistDownloadModal(artistId) {
                     <div class="artist-download-modal-hero-content">
                         <div class="artist-download-modal-hero-avatar">
                             ${artistBubbleData.artist.image_url
-                                ? `<img src="${escapeHtml(artistBubbleData.artist.image_url)}" alt="${escapeHtml(artistBubbleData.artist.name)}" class="artist-download-modal-hero-image" loading="lazy">`
-                                : '<div class="artist-download-modal-hero-fallback"><i class="fas fa-user-music"></i></div>'
-                            }
+            ? `<img src="${escapeHtml(artistBubbleData.artist.image_url)}" alt="${escapeHtml(artistBubbleData.artist.name)}" class="artist-download-modal-hero-image" loading="lazy">`
+            : '<div class="artist-download-modal-hero-fallback"><i class="fas fa-user-music"></i></div>'
+        }
                         </div>
                         <div class="artist-download-modal-hero-info">
                             <h2 class="artist-download-modal-hero-title">${escapeHtml(artistBubbleData.artist.name)}</h2>
@@ -22406,7 +22428,7 @@ function openArtistDownloadModal(artistId) {
 
     document.body.appendChild(modal);
     modal.style.display = 'flex';
-    
+
     // Monitor for real-time updates
     startArtistDownloadModalMonitoring(artistId);
 }
@@ -22426,11 +22448,11 @@ function createArtistDownloadItem(download, index) {
         <div class="artist-download-item" data-playlist-id="${virtualPlaylistId}">
             <div class="download-item-artwork">
                 ${album.image_url
-                    ? `<img src="${escapeHtml(album.image_url)}" alt="${escapeHtml(album.name)}" class="download-item-image" loading="lazy">`
-                    : `<div class="download-item-fallback">
+            ? `<img src="${escapeHtml(album.image_url)}" alt="${escapeHtml(album.name)}" class="download-item-image" loading="lazy">`
+            : `<div class="download-item-fallback">
                          <i class="fas fa-${albumType === 'album' ? 'compact-disc' : albumType === 'single' ? 'music' : 'record-vinyl'}"></i>
                        </div>`
-                }
+        }
             </div>
             <div class="download-item-info">
                 <div class="download-item-name">${escapeHtml(album.name)}</div>
@@ -22451,29 +22473,29 @@ function createArtistDownloadItem(download, index) {
  */
 function startArtistDownloadModalMonitoring(artistId) {
     if (!artistDownloadModalOpen) return;
-    
+
     const updateModal = () => {
         const modal = document.getElementById('artist-download-management-modal');
         const itemsContainer = document.getElementById(`artist-download-items-${artistId}`);
-        
+
         if (!modal || !itemsContainer || !artistDownloadBubbles[artistId]) return;
-        
+
         // Check for completed downloads that need to be removed
         const activeDownloads = artistDownloadBubbles[artistId].downloads.filter(download => {
             const process = activeDownloadProcesses[download.virtualPlaylistId];
             // Keep if process exists or if it's completed but not yet cleaned up
             return process !== undefined;
         });
-        
+
         // Update the downloads array
         artistDownloadBubbles[artistId].downloads = activeDownloads;
-        
+
         // If no downloads left, close modal
         if (activeDownloads.length === 0) {
             closeArtistDownloadModal();
             return;
         }
-        
+
         // Update modal content and synchronize with bubble state
         let statusChanged = false;
         itemsContainer.innerHTML = activeDownloads.map((download, index) => {
@@ -22488,12 +22510,12 @@ function startArtistDownloadModalMonitoring(artistId) {
             }
             return createArtistDownloadItem(download, index);
         }).join('');
-        
+
         // CRITICAL: If any status changed, immediately refresh artist bubble to show green checkmarks
         if (statusChanged) {
             console.log(`🎯 [SYNC] Status change detected in artist modal - refreshing bubble display`);
             updateArtistDownloadsSection();
-            
+
             // Check if all downloads for this artist are now completed
             const artistDownloads = artistDownloadBubbles[artistId].downloads;
             const allCompleted = artistDownloads.every(d => d.status === 'view_results');
@@ -22506,11 +22528,11 @@ function startArtistDownloadModalMonitoring(artistId) {
                 }, 200);
             }
         }
-        
+
         // Continue monitoring
         setTimeout(updateModal, 2000);
     };
-    
+
     setTimeout(updateModal, 1000);
 }
 
@@ -22522,10 +22544,10 @@ function openArtistDownloadProcess(virtualPlaylistId) {
     if (process && process.modalElement) {
         // Close artist management modal first
         closeArtistDownloadModal();
-        
+
         // Show the download process modal
         process.modalElement.style.display = 'flex';
-        
+
         if (process.status === 'complete') {
             showToast('Review download results and click "Close" to finish.', 'info');
         }
@@ -22548,24 +22570,24 @@ function closeArtistDownloadModal() {
  */
 function bulkCompleteArtistDownloads(artistId) {
     console.log(`🎯 Bulk completing downloads for artist: ${artistId}`);
-    
+
     const artistBubbleData = artistDownloadBubbles[artistId];
     if (!artistBubbleData) {
         console.warn(`❌ No artist bubble data found for ${artistId}`);
         return;
     }
-    
+
     // Find all downloads in 'view_results' state
     const completedDownloads = artistBubbleData.downloads.filter(d => d.status === 'view_results');
-    console.log(`📋 Found ${completedDownloads.length} completed downloads to close:`, 
-                completedDownloads.map(d => d.album.name));
-    
+    console.log(`📋 Found ${completedDownloads.length} completed downloads to close:`,
+        completedDownloads.map(d => d.album.name));
+
     if (completedDownloads.length === 0) {
         console.warn(`⚠️ No completed downloads found for bulk close`);
         showToast('No completed downloads to close', 'info');
         return;
     }
-    
+
     // Programmatically close all completed modals
     completedDownloads.forEach(download => {
         const process = activeDownloadProcesses[download.virtualPlaylistId];
@@ -22577,7 +22599,7 @@ function bulkCompleteArtistDownloads(artistId) {
             console.warn(`⚠️ No active process or modal found for: ${download.album.name}`);
         }
     });
-    
+
     showToast(`Completed ${completedDownloads.length} downloads for ${artistBubbleData.artist.name}`, 'success');
 }
 
@@ -22587,23 +22609,23 @@ function bulkCompleteArtistDownloads(artistId) {
 function cleanupArtistDownload(virtualPlaylistId) {
     console.log(`🔍 [CLEANUP] Looking for download to cleanup: ${virtualPlaylistId}`);
     console.log(`🔍 [CLEANUP] Current artist bubbles:`, Object.keys(artistDownloadBubbles));
-    
+
     // Find which artist this download belongs to
     for (const artistId in artistDownloadBubbles) {
         const downloads = artistDownloadBubbles[artistId].downloads;
         const downloadIndex = downloads.findIndex(d => d.virtualPlaylistId === virtualPlaylistId);
-        
+
         console.log(`🔍 [CLEANUP] Checking artist ${artistId}: ${downloads.length} downloads`);
         downloads.forEach(d => console.log(`  - ${d.album.name} (${d.virtualPlaylistId}): ${d.status}`));
-        
+
         if (downloadIndex !== -1) {
             const downloadToRemove = downloads[downloadIndex];
             console.log(`🧹 [CLEANUP] Found download to cleanup: ${downloadToRemove.album.name} (status: ${downloadToRemove.status})`);
-            
+
             // Remove this download from the artist's downloads
             downloads.splice(downloadIndex, 1);
             console.log(`✅ [CLEANUP] Removed download from artist ${artistId}. Remaining: ${downloads.length}`);
-            
+
             // If no more downloads for this artist, remove the bubble
             if (downloads.length === 0) {
                 delete artistDownloadBubbles[artistId];
@@ -22611,11 +22633,11 @@ function cleanupArtistDownload(virtualPlaylistId) {
             } else {
                 console.log(`📊 [CLEANUP] Artist ${artistId} still has ${downloads.length} downloads remaining`);
             }
-            
+
             // Update the downloads section
             console.log(`🔄 [CLEANUP] Updating artist downloads section...`);
             updateArtistDownloadsSection();
-            
+
             // Save snapshot of updated state
             saveArtistBubbleSnapshot();
             break;
@@ -22629,11 +22651,11 @@ function cleanupArtistDownload(virtualPlaylistId) {
  */
 function refreshAllArtistDownloadStatuses() {
     console.log('🔄 Force refreshing all artist download statuses...');
-    
+
     for (const artistId in artistDownloadBubbles) {
         const artistData = artistDownloadBubbles[artistId];
         let hasChanges = false;
-        
+
         artistData.downloads.forEach(download => {
             const process = activeDownloadProcesses[download.virtualPlaylistId];
             if (process) {
@@ -22645,12 +22667,12 @@ function refreshAllArtistDownloadStatuses() {
                 }
             }
         });
-        
+
         if (hasChanges) {
             console.log(`✅ Updated statuses for ${artistData.artist.name}`);
         }
     }
-    
+
     // Force update the downloads section
     showArtistDownloadsSection();
 }
@@ -22663,35 +22685,35 @@ async function extractImageColors(imageUrl, callback) {
         callback(['#1db954', '#1ed760']); // Fallback to Spotify green
         return;
     }
-    
+
     // Check cache first for performance
     if (artistsPageState.cache.colors[imageUrl]) {
         callback(artistsPageState.cache.colors[imageUrl]);
         return;
     }
-    
+
     try {
         // Create a canvas to analyze the image
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         const img = new Image();
-        
+
         img.crossOrigin = 'anonymous';
-        
-        img.onload = function() {
+
+        img.onload = function () {
             // Resize to small dimensions for faster processing
             const size = 50;
             canvas.width = size;
             canvas.height = size;
-            
+
             // Draw image to canvas
             ctx.drawImage(img, 0, 0, size, size);
-            
+
             try {
                 // Get image data
                 const imageData = ctx.getImageData(0, 0, size, size);
                 const data = imageData.data;
-                
+
                 // Extract colors (sample every few pixels for performance)
                 const colors = [];
                 for (let i = 0; i < data.length; i += 16) { // Sample every 4th pixel
@@ -22699,43 +22721,43 @@ async function extractImageColors(imageUrl, callback) {
                     const g = data[i + 1];
                     const b = data[i + 2];
                     const alpha = data[i + 3];
-                    
+
                     // Skip transparent or very dark pixels
                     if (alpha > 128 && (r + g + b) > 150) {
                         colors.push({ r, g, b });
                     }
                 }
-                
+
                 if (colors.length === 0) {
                     callback(['#1db954', '#1ed760']); // Fallback
                     return;
                 }
-                
+
                 // Find dominant colors using a simple clustering approach
                 const dominantColors = findDominantColors(colors, 2);
-                
+
                 // Convert to CSS hex colors
-                const hexColors = dominantColors.map(color => 
+                const hexColors = dominantColors.map(color =>
                     `#${((1 << 24) + (color.r << 16) + (color.g << 8) + color.b).toString(16).slice(1)}`
                 );
-                
+
                 // Cache the colors for future use
                 artistsPageState.cache.colors[imageUrl] = hexColors;
-                
+
                 callback(hexColors);
-                
+
             } catch (e) {
                 console.warn('Color extraction failed, using fallback colors:', e);
                 callback(['#1db954', '#1ed760']);
             }
         };
-        
-        img.onerror = function() {
+
+        img.onerror = function () {
             callback(['#1db954', '#1ed760']); // Fallback on error
         };
-        
+
         img.src = imageUrl;
-        
+
     } catch (error) {
         console.warn('Image color extraction error:', error);
         callback(['#1db954', '#1ed760']);
@@ -22747,58 +22769,58 @@ async function extractImageColors(imageUrl, callback) {
  */
 function findDominantColors(colors, numColors = 2) {
     if (colors.length === 0) return [{ r: 29, g: 185, b: 84 }];
-    
+
     // Simple k-means clustering
     let centroids = [];
-    
+
     // Initialize centroids randomly
     for (let i = 0; i < numColors; i++) {
         centroids.push(colors[Math.floor(Math.random() * colors.length)]);
     }
-    
+
     // Run a few iterations of k-means
     for (let iteration = 0; iteration < 5; iteration++) {
         const clusters = Array(numColors).fill().map(() => []);
-        
+
         // Assign each color to nearest centroid
         colors.forEach(color => {
             let minDistance = Infinity;
             let nearestCluster = 0;
-            
+
             centroids.forEach((centroid, i) => {
                 const distance = Math.sqrt(
                     Math.pow(color.r - centroid.r, 2) +
                     Math.pow(color.g - centroid.g, 2) +
                     Math.pow(color.b - centroid.b, 2)
                 );
-                
+
                 if (distance < minDistance) {
                     minDistance = distance;
                     nearestCluster = i;
                 }
             });
-            
+
             clusters[nearestCluster].push(color);
         });
-        
+
         // Update centroids
         centroids = clusters.map(cluster => {
             if (cluster.length === 0) return centroids[0]; // Fallback
-            
+
             const avgR = cluster.reduce((sum, c) => sum + c.r, 0) / cluster.length;
             const avgG = cluster.reduce((sum, c) => sum + c.g, 0) / cluster.length;
             const avgB = cluster.reduce((sum, c) => sum + c.b, 0) / cluster.length;
-            
+
             return { r: Math.round(avgR), g: Math.round(avgG), b: Math.round(avgB) };
         });
     }
-    
+
     // Ensure we have vibrant colors by boosting saturation
     return centroids.map(color => {
         const max = Math.max(color.r, color.g, color.b);
         const min = Math.min(color.r, color.g, color.b);
         const saturation = max === 0 ? 0 : (max - min) / max;
-        
+
         // Boost low saturation colors
         if (saturation < 0.4) {
             const factor = 1.3;
@@ -22808,7 +22830,7 @@ function findDominantColors(colors, numColors = 2) {
                 b: Math.min(255, Math.round(color.b * factor))
             };
         }
-        
+
         return color;
     });
 }
@@ -22818,17 +22840,17 @@ function findDominantColors(colors, numColors = 2) {
  */
 function applyDynamicGlow(cardElement, colors) {
     if (!cardElement || colors.length < 2) return;
-    
+
     const color1 = colors[0];
     const color2 = colors[1];
-    
+
     // Add a small delay to make the effect feel more natural
     setTimeout(() => {
         // Create CSS custom properties for the dynamic colors
         cardElement.style.setProperty('--glow-color-1', color1);
         cardElement.style.setProperty('--glow-color-2', color2);
         cardElement.classList.add('has-dynamic-glow');
-        
+
         console.log(`🎨 Applied dynamic glow: ${color1}, ${color2}`);
     }, Math.random() * 200 + 100); // Random delay between 100-300ms
 }
@@ -22848,19 +22870,19 @@ async function fetchAndUpdateServiceStatus() {
     try {
         const response = await fetch('/status');
         if (!response.ok) return;
-        
+
         const data = await response.json();
-        
+
         // Update service status indicators and text (dashboard)
         updateServiceStatus('spotify', data.spotify);
         updateServiceStatus('media-server', data.media_server);
         updateServiceStatus('soulseek', data.soulseek);
-        
+
         // Update sidebar service status indicators
         updateSidebarServiceStatus('spotify', data.spotify);
         updateSidebarServiceStatus('media-server', data.media_server);
         updateSidebarServiceStatus('soulseek', data.soulseek);
-        
+
     } catch (error) {
         console.warn('Could not fetch service status:', error);
     }
@@ -22869,7 +22891,7 @@ async function fetchAndUpdateServiceStatus() {
 function updateServiceStatus(service, statusData) {
     const indicator = document.getElementById(`${service}-status-indicator`);
     const statusText = document.getElementById(`${service}-status-text`);
-    
+
     if (indicator && statusText) {
         if (statusData.connected) {
             indicator.className = 'service-card-indicator connected';
@@ -22888,7 +22910,7 @@ function updateSidebarServiceStatus(service, statusData) {
     if (indicator) {
         const dot = indicator.querySelector('.status-dot');
         const nameElement = indicator.querySelector('.status-name');
-        
+
         if (dot) {
             if (statusData.connected) {
                 dot.className = 'status-dot connected';
@@ -22896,7 +22918,7 @@ function updateSidebarServiceStatus(service, statusData) {
                 dot.className = 'status-dot disconnected';
             }
         }
-        
+
         // Update media server name if it's the media server indicator
         if (service === 'media-server' && statusData.type) {
             const mediaServerNameElement = document.getElementById('media-server-name');
@@ -22912,9 +22934,9 @@ async function fetchAndUpdateSystemStats() {
     try {
         const response = await fetch('/api/system/stats');
         if (!response.ok) return;
-        
+
         const data = await response.json();
-        
+
         // Update all stat cards
         updateStatCard('active-downloads-card', data.active_downloads, 'Currently downloading');
         updateStatCard('finished-downloads-card', data.finished_downloads, 'Completed this session');
@@ -22922,7 +22944,7 @@ async function fetchAndUpdateSystemStats() {
         updateStatCard('active-syncs-card', data.active_syncs, 'Playlists syncing');
         updateStatCard('uptime-card', data.uptime, 'Application runtime');
         updateStatCard('memory-card', data.memory_usage, 'Current usage');
-        
+
     } catch (error) {
         console.warn('Could not fetch system stats:', error);
     }
@@ -22933,7 +22955,7 @@ function updateStatCard(cardId, value, subtitle) {
     if (card) {
         const valueElement = card.querySelector('.stat-card-value');
         const subtitleElement = card.querySelector('.stat-card-subtitle');
-        
+
         if (valueElement) {
             valueElement.textContent = value;
         }
@@ -22950,11 +22972,11 @@ async function fetchAndUpdateActivityFeed() {
             console.warn('Activity feed response not ok:', response.status, response.statusText);
             return;
         }
-        
+
         const data = await response.json();
         console.log('Activity feed data received:', data);
         updateActivityFeed(data.activities || []);
-        
+
     } catch (error) {
         console.warn('Could not fetch activity feed:', error);
     }
@@ -22966,12 +22988,12 @@ function updateActivityFeed(activities) {
         console.warn('Activity feed container not found!');
         return;
     }
-    
+
     console.log('Updating activity feed with', activities.length, 'activities:', activities);
-    
+
     // Clear existing content
     feedContainer.innerHTML = '';
-    
+
     if (activities.length === 0) {
         console.log('No activities found, showing placeholder');
         // Show placeholder if no activities
@@ -22987,7 +23009,7 @@ function updateActivityFeed(activities) {
         `;
         return;
     }
-    
+
     // Add activities (limit to 5 most recent)
     activities.slice(0, 5).forEach((activity, index) => {
         const activityElement = document.createElement('div');
@@ -23000,9 +23022,9 @@ function updateActivityFeed(activities) {
             </div>
             <p class="activity-time">${escapeHtml(activity.time)}</p>
         `;
-        
+
         feedContainer.appendChild(activityElement);
-        
+
         // Add separator between items (except after last item)
         if (index < activities.slice(0, 5).length - 1) {
             const separator = document.createElement('div');
@@ -23016,10 +23038,10 @@ async function checkForActivityToasts() {
     try {
         const response = await fetch('/api/activity/toasts');
         if (!response.ok) return;
-        
+
         const data = await response.json();
         const toasts = data.toasts || [];
-        
+
         toasts.forEach(activity => {
             // Convert activity to toast type based on icon/title
             let toastType = 'info';
@@ -23030,11 +23052,11 @@ async function checkForActivityToasts() {
             } else if (activity.icon === '🚫' || activity.title.includes('Cancelled')) {
                 toastType = 'warning';
             }
-            
+
             // Show toast with activity info
             showToast(`${activity.title}: ${activity.subtitle}`, toastType);
         });
-        
+
     } catch (error) {
         // Silently fail for toast checking to avoid spam
     }
@@ -23048,16 +23070,16 @@ async function checkForActivityToasts() {
 async function toggleWatchlist(event, artistId, artistName) {
     // Prevent event bubbling to parent card
     event.stopPropagation();
-    
+
     const button = event.currentTarget;
     const icon = button.querySelector('.watchlist-icon');
     const text = button.querySelector('.watchlist-text');
-    
+
     // Show loading state
     const originalText = text.textContent;
     text.textContent = 'Loading...';
     button.disabled = true;
-    
+
     try {
         // Check current status
         const checkResponse = await fetch('/api/watchlist/check', {
@@ -23065,31 +23087,31 @@ async function toggleWatchlist(event, artistId, artistName) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ artist_id: artistId })
         });
-        
+
         const checkData = await checkResponse.json();
         if (!checkData.success) {
             throw new Error(checkData.error || 'Failed to check watchlist status');
         }
-        
+
         const isWatching = checkData.is_watching;
-        
+
         // Toggle watchlist status
         const endpoint = isWatching ? '/api/watchlist/remove' : '/api/watchlist/add';
-        const payload = isWatching ? 
-            { artist_id: artistId } : 
+        const payload = isWatching ?
+            { artist_id: artistId } :
             { artist_id: artistId, artist_name: artistName };
-        
+
         const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        
+
         const data = await response.json();
         if (!data.success) {
             throw new Error(data.error || 'Failed to update watchlist');
         }
-        
+
         // Update button appearance
         if (isWatching) {
             // Was watching, now removed
@@ -23104,14 +23126,14 @@ async function toggleWatchlist(event, artistId, artistName) {
             button.classList.add('watching');
             console.log(`✅ Added ${artistName} to watchlist`);
         }
-        
+
         // Update dashboard watchlist count
         updateWatchlistButtonCount();
-        
+
     } catch (error) {
         console.error('Error toggling watchlist:', error);
         text.textContent = originalText;
-        
+
         // Show error feedback
         const originalBackground = button.style.background;
         button.style.background = 'rgba(255, 59, 48, 0.3)';
@@ -23152,24 +23174,24 @@ async function updateWatchlistButtonCount() {
  */
 async function updateArtistCardWatchlistStatus() {
     const artistCards = document.querySelectorAll('.artist-card');
-    
+
     for (const card of artistCards) {
         const artistId = card.dataset.artistId;
         if (!artistId) continue;
-        
+
         try {
             const response = await fetch('/api/watchlist/check', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ artist_id: artistId })
             });
-            
+
             const data = await response.json();
             if (data.success) {
                 const button = card.querySelector('.watchlist-toggle-btn');
                 const icon = button.querySelector('.watchlist-icon');
                 const text = button.querySelector('.watchlist-text');
-                
+
                 if (data.is_watching) {
                     icon.textContent = '👁️';
                     text.textContent = 'Watching...';
@@ -23194,27 +23216,27 @@ async function showWatchlistModal() {
         // Check if watchlist has any artists
         const countResponse = await fetch('/api/watchlist/count');
         const countData = await countResponse.json();
-        
+
         if (!countData.success) {
             console.error('Error getting watchlist count:', countData.error);
             return;
         }
-        
+
         if (countData.count === 0) {
             // Show empty state message
             alert('Your watchlist is empty!\n\nAdd artists to your watchlist from the Artists page to monitor them for new releases.');
             return;
         }
-        
+
         // Get watchlist artists
         const artistsResponse = await fetch('/api/watchlist/artists');
         const artistsData = await artistsResponse.json();
-        
+
         if (!artistsData.success) {
             console.error('Error getting watchlist artists:', artistsData.error);
             return;
         }
-        
+
         // Create modal if it doesn't exist
         let modal = document.getElementById('watchlist-modal');
         if (!modal) {
@@ -23223,7 +23245,7 @@ async function showWatchlistModal() {
             modal.className = 'modal-overlay';
             document.body.appendChild(modal);
         }
-        
+
         // Get scan status
         const statusResponse = await fetch('/api/watchlist/scan/status');
         const statusData = await statusResponse.json();
@@ -23488,8 +23510,8 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
                 ${artist.genres && artist.genres.length > 0 ? `
                     <div class="watchlist-artist-config-hero-genres">
                         ${artist.genres.slice(0, 3).map(genre =>
-                            `<span class="watchlist-artist-config-genre-tag">${escapeHtml(genre)}</span>`
-                        ).join('')}
+            `<span class="watchlist-artist-config-genre-tag">${escapeHtml(genre)}</span>`
+        ).join('')}
                     </div>
                 ` : ''}
             </div>
@@ -23654,17 +23676,17 @@ async function startWatchlistScan() {
         const button = document.getElementById('scan-watchlist-btn');
         button.disabled = true;
         button.textContent = 'Starting scan...';
-        
+
         const response = await fetch('/api/watchlist/scan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
-        
+
         const data = await response.json();
         if (!data.success) {
             throw new Error(data.error || 'Failed to start scan');
         }
-        
+
         button.textContent = 'Scanning...';
 
         // Show scan status
@@ -23675,7 +23697,7 @@ async function startWatchlistScan() {
 
         // Start polling for updates
         pollWatchlistScanStatus();
-        
+
     } catch (error) {
         console.error('Error starting watchlist scan:', error);
         const button = document.getElementById('scan-watchlist-btn');
@@ -23692,7 +23714,7 @@ async function pollWatchlistScanStatus() {
     try {
         const response = await fetch('/api/watchlist/scan/status');
         const data = await response.json();
-        
+
         if (data.success) {
             const button = document.getElementById('scan-watchlist-btn');
             const liveActivity = document.getElementById('watchlist-live-activity');
@@ -23751,7 +23773,7 @@ async function pollWatchlistScanStatus() {
             } else if (liveActivity && data.status !== 'scanning') {
                 liveActivity.style.display = 'none';
             }
-            
+
             if (data.status === 'completed') {
                 if (button) {
                     button.disabled = false;
@@ -23817,12 +23839,12 @@ async function pollWatchlistScanStatus() {
                 return; // Stop polling
             }
         }
-        
+
         // Continue polling if still scanning
         if (data.success && data.status === 'scanning') {
             setTimeout(pollWatchlistScanStatus, 2000); // Poll every 2 seconds
         }
-        
+
     } catch (error) {
         console.error('Error polling watchlist scan status:', error);
     }
@@ -23935,23 +23957,23 @@ async function removeFromWatchlistModal(artistId, artistName) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ artist_id: artistId })
         });
-        
+
         const data = await response.json();
         if (!data.success) {
             throw new Error(data.error || 'Failed to remove from watchlist');
         }
-        
+
         console.log(`❌ Removed ${artistName} from watchlist`);
-        
+
         // Refresh the modal
         showWatchlistModal();
-        
+
         // Update button count
         updateWatchlistButtonCount();
-        
+
         // Update any visible artist cards
         updateArtistCardWatchlistStatus();
-        
+
     } catch (error) {
         console.error('Error removing from watchlist:', error);
         alert(`Error removing ${artistName} from watchlist: ${error.message}`);
@@ -23980,7 +24002,7 @@ async function handleMetadataUpdateButtonClick() {
         try {
             button.disabled = true;
             button.textContent = 'Starting...';
-            
+
             const response = await fetch('/api/metadata/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -23993,7 +24015,7 @@ async function handleMetadataUpdateButtonClick() {
             }
 
             showToast('Metadata update started!', 'success');
-            
+
             // Start polling for status updates
             startMetadataUpdatePolling();
 
@@ -24008,7 +24030,7 @@ async function handleMetadataUpdateButtonClick() {
         try {
             button.disabled = true;
             button.textContent = 'Stopping...';
-            
+
             const response = await fetch('/api/metadata/stop', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
@@ -24031,10 +24053,10 @@ async function handleMetadataUpdateButtonClick() {
  */
 function startMetadataUpdatePolling() {
     if (metadataUpdatePolling) return; // Already polling
-    
+
     metadataUpdatePolling = true;
     metadataUpdateInterval = setInterval(checkMetadataUpdateStatus, 1000); // Poll every second
-    
+
     // Also check immediately
     checkMetadataUpdateStatus();
 }
@@ -24057,16 +24079,16 @@ async function checkMetadataUpdateStatus() {
     try {
         const response = await fetch('/api/metadata/status');
         const data = await response.json();
-        
+
         if (data.success && data.status) {
             updateMetadataProgressUI(data.status);
-            
+
             // Stop polling if completed or error
             if (data.status.status === 'completed' || data.status.status === 'error') {
                 stopMetadataUpdatePolling();
             }
         }
-        
+
     } catch (error) {
         console.warn('Could not fetch metadata update status:', error);
     }
@@ -24088,55 +24110,55 @@ function updateMetadataProgressUI(status) {
         button.textContent = 'Stop Update';
         button.disabled = false;
         refreshSelect.disabled = true;
-        
+
         // Update current artist display
         const currentArtist = status.current_artist || 'Processing...';
         phaseLabel.textContent = `Current Artist: ${currentArtist}`;
-        
+
         // Update progress
         const processed = status.processed || 0;
         const total = status.total || 0;
         const percentage = status.percentage || 0;
-        
+
         progressLabel.textContent = `${processed} / ${total} artists (${percentage.toFixed(1)}%)`;
         progressBar.style.width = `${percentage}%`;
-        
+
     } else if (status.status === 'stopping') {
         button.textContent = 'Stopping...';
         button.disabled = true;
         phaseLabel.textContent = 'Current Artist: Stopping...';
-        
+
     } else if (status.status === 'completed') {
         button.textContent = 'Begin Update';
         button.disabled = false;
         refreshSelect.disabled = false;
-        
+
         phaseLabel.textContent = 'Current Artist: Completed';
-        
+
         const processed = status.processed || 0;
         const successful = status.successful || 0;
         const failed = status.failed || 0;
-        
+
         progressLabel.textContent = `Completed: ${processed} processed, ${successful} successful, ${failed} failed`;
         progressBar.style.width = '100%';
-        
+
         showToast(`Metadata update completed: ${successful} artists updated, ${failed} failed`, 'success');
-        
+
     } else if (status.status === 'error') {
         button.textContent = 'Begin Update';
         button.disabled = false;
         refreshSelect.disabled = false;
-        
+
         phaseLabel.textContent = 'Current Artist: Error occurred';
         progressLabel.textContent = status.error || 'Unknown error';
         progressBar.style.width = '0%';
-        
+
     } else {
         // Idle state
         button.textContent = 'Begin Update';
         button.disabled = false;
         refreshSelect.disabled = false;
-        
+
         phaseLabel.textContent = 'Current Artist: Not running';
         progressLabel.textContent = '0 / 0 artists (0.0%)';
         progressBar.style.width = '0%';
@@ -24374,10 +24396,10 @@ async function checkAndRestoreMetadataUpdateState() {
     try {
         const response = await fetch('/api/metadata/status');
         const data = await response.json();
-        
+
         if (data.success && data.status) {
             const status = data.status;
-            
+
             // If metadata update is running, restore the UI state and start polling
             if (status.status === 'running') {
                 console.log('Found ongoing metadata update, restoring state...');
@@ -26331,12 +26353,12 @@ function populateBeatportHypePicksSlider(releases) {
                 <div class="beatport-hype-picks-grid">
                     ${slideReleases.map(release => createBeatportHypePickCard(release)).join('')}
                     ${slideReleases.length < releasesPerSlide ?
-                        Array(releasesPerSlide - slideReleases.length).fill(0).map(() =>
-                            `<div class="beatport-hype-pick-card beatport-hype-pick-placeholder">
+                Array(releasesPerSlide - slideReleases.length).fill(0).map(() =>
+                    `<div class="beatport-hype-pick-card beatport-hype-pick-placeholder">
                                 <div class="placeholder-icon">🔥</div>
                             </div>`
-                        ).join('') : ''
-                    }
+                ).join('') : ''
+            }
                 </div>
             </div>
         `;
@@ -27218,9 +27240,9 @@ function populateBeatportTop10List(tracks) {
                 <div class="beatport-top10-card-rank">${track.rank || index + 1}</div>
                 <div class="beatport-top10-card-artwork">
                     ${track.artwork_url ?
-                        `<img src="${track.artwork_url}" alt="${cleanTitle}" loading="lazy">` :
-                        '<div class="beatport-top10-card-placeholder">🎵</div>'
-                    }
+                `<img src="${track.artwork_url}" alt="${cleanTitle}" loading="lazy">` :
+                '<div class="beatport-top10-card-placeholder">🎵</div>'
+            }
                 </div>
                 <div class="beatport-top10-card-info">
                     <h4 class="beatport-top10-card-title">${cleanTitle}</h4>
@@ -27262,9 +27284,9 @@ function populateHypeTop10List(tracks) {
                 <div class="beatport-hype10-card-rank">${track.rank || index + 1}</div>
                 <div class="beatport-hype10-card-artwork">
                     ${track.artwork_url ?
-                        `<img src="${track.artwork_url}" alt="${cleanTitle}" loading="lazy">` :
-                        '<div class="beatport-hype10-card-placeholder">🔥</div>'
-                    }
+                `<img src="${track.artwork_url}" alt="${cleanTitle}" loading="lazy">` :
+                '<div class="beatport-hype10-card-placeholder">🔥</div>'
+            }
                 </div>
                 <div class="beatport-hype10-card-info">
                     <h4 class="beatport-hype10-card-title">${cleanTitle}</h4>
@@ -27340,9 +27362,9 @@ function populateBeatportTop10Releases(releases) {
                 <div class="beatport-releases-top10-card-rank">${release.rank || index + 1}</div>
                 <div class="beatport-releases-top10-card-artwork">
                     ${release.image_url ?
-                        `<img src="${release.image_url}" alt="${release.title}" loading="lazy">` :
-                        '<div class="beatport-releases-top10-card-placeholder">💿</div>'
-                    }
+                `<img src="${release.image_url}" alt="${release.title}" loading="lazy">` :
+                '<div class="beatport-releases-top10-card-placeholder">💿</div>'
+            }
                 </div>
                 <div class="beatport-releases-top10-card-info">
                     <h4 class="beatport-releases-top10-card-title">${release.title || 'Unknown Title'}</h4>
@@ -28778,9 +28800,9 @@ function createGenreTop10ListsHTML(data, genreName) {
                 <div class="beatport-top10-card-rank">${track.rank || index + 1}</div>
                 <div class="beatport-top10-card-artwork">
                     ${track.artwork_url ?
-                        `<img src="${track.artwork_url}" alt="${cleanTitle}" loading="lazy">` :
-                        '<div class="beatport-top10-card-placeholder">🎵</div>'
-                    }
+                `<img src="${track.artwork_url}" alt="${cleanTitle}" loading="lazy">` :
+                '<div class="beatport-top10-card-placeholder">🎵</div>'
+            }
                 </div>
                 <div class="beatport-top10-card-info">
                     <h4 class="beatport-top10-card-title">${cleanTitle}</h4>
@@ -28819,9 +28841,9 @@ function createGenreTop10ListsHTML(data, genreName) {
                     <div class="beatport-hype10-card-rank">${track.rank || index + 1}</div>
                     <div class="beatport-hype10-card-artwork">
                         ${track.artwork_url ?
-                            `<img src="${track.artwork_url}" alt="${cleanTitle}" loading="lazy">` :
-                            '<div class="beatport-hype10-card-placeholder">🔥</div>'
-                        }
+                    `<img src="${track.artwork_url}" alt="${cleanTitle}" loading="lazy">` :
+                    '<div class="beatport-hype10-card-placeholder">🔥</div>'
+                }
                     </div>
                     <div class="beatport-hype10-card-info">
                         <h4 class="beatport-hype10-card-title">${cleanTitle}</h4>
@@ -29166,9 +29188,9 @@ function createGenreTop10ReleasesCardsHTML(releases) {
                 <div class="beatport-releases-top10-card-rank">${release.rank || index + 1}</div>
                 <div class="beatport-releases-top10-card-artwork">
                     ${release.image_url ?
-                        `<img src="${release.image_url}" alt="${release.title}" loading="lazy">` :
-                        '<div class="beatport-releases-top10-card-placeholder">💿</div>'
-                    }
+                `<img src="${release.image_url}" alt="${release.title}" loading="lazy">` :
+                '<div class="beatport-releases-top10-card-placeholder">💿</div>'
+            }
                 </div>
                 <div class="beatport-releases-top10-card-info">
                     <h4 class="beatport-releases-top10-card-title">${release.title || 'Unknown Title'}</h4>
@@ -29684,7 +29706,7 @@ function displayDiscoverHeroArtist(artist) {
         // Add popularity indicator
         if (artist.popularity !== undefined && artist.popularity > 0) {
             const popularityClass = artist.popularity >= 80 ? 'high' :
-                                    artist.popularity >= 50 ? 'medium' : 'low';
+                artist.popularity >= 50 ? 'medium' : 'low';
             metaHTML += `
                 <div class="hero-meta-item hero-popularity ${popularityClass}">
                     <span class="meta-icon">⭐</span>
@@ -31615,10 +31637,10 @@ async function openListenBrainzPlaylist(playlistMbid, playlistName) {
         const spotifyTracks = tracks.map(track => ({
             id: track.recording_mbid || `listenbrainz_${track.title}_${track.creator}`.replace(/[^a-z0-9]/gi, '_'),  // Generate ID if missing
             name: track.title || 'Unknown',
-            artists: [{name: cleanArtistName(track.creator || 'Unknown')}], // Proper Spotify format
+            artists: [{ name: cleanArtistName(track.creator || 'Unknown') }], // Proper Spotify format
             album: {
                 name: track.album || 'Unknown Album',
-                images: track.album_cover_url ? [{url: track.album_cover_url}] : []
+                images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
             },
             duration_ms: track.duration_ms || 0,
             listenbrainz_metadata: track.additional_metadata
@@ -32547,7 +32569,7 @@ function checkForActiveDiscoverDownloads() {
      */
     // Check if discover page is loaded by looking for a discover-specific element
     const discoverPage = document.getElementById('release-radar-download-btn') ||
-                        document.getElementById('discovery-weekly-download-btn');
+        document.getElementById('discovery-weekly-download-btn');
 
     if (!discoverPage) return;
 
@@ -33224,7 +33246,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
             const spotifyTracks = tracks.map(track => ({
                 id: track.mbid || `listenbrainz_${track.track_name}_${track.artist_name}`.replace(/[^a-z0-9]/gi, '_'),  // Generate ID if missing
                 name: track.track_name,
-                artists: [{name: cleanArtistName(track.artist_name)}], // Proper Spotify format
+                artists: [{ name: cleanArtistName(track.artist_name) }], // Proper Spotify format
                 album: {
                     name: track.album_name,
                     images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
@@ -33279,23 +33301,23 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
                         if (track.artists && Array.isArray(track.artists)) {
                             artistsArray = track.artists.map(artist => {
                                 if (typeof artist === 'string') {
-                                    return {name: artist};
+                                    return { name: artist };
                                 } else if (artist && artist.name) {
-                                    return {name: artist.name};
+                                    return { name: artist.name };
                                 } else {
-                                    return {name: String(artist || 'Unknown Artist')};
+                                    return { name: String(artist || 'Unknown Artist') };
                                 }
                             });
                         } else if (track.artists && typeof track.artists === 'string') {
-                            artistsArray = [{name: track.artists}];
+                            artistsArray = [{ name: track.artists }];
                         } else {
-                            artistsArray = [{name: 'Unknown Artist'}];
+                            artistsArray = [{ name: 'Unknown Artist' }];
                         }
                         return {
                             id: track.id,
                             name: track.name,
                             artists: artistsArray,
-                            album: track.album || {name: 'Unknown Album', images: []},
+                            album: track.album || { name: 'Unknown Album', images: [] },
                             duration_ms: track.duration_ms || 0,
                             external_urls: track.external_urls || {}
                         };
