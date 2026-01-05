@@ -3647,14 +3647,18 @@ def start_download():
             filename = data.get('filename')
             file_size = data.get('size', 0)
 
+            logger.info(f"📥 Download request - Username: {username}, Filename: {filename[:50]}...")
+
             if not username or not filename:
                 return jsonify({"error": "Missing username or filename."}), 400
 
             download_id = asyncio.run(soulseek_client.download(username, filename, file_size))
+            logger.info(f"📥 Download ID returned: {download_id}")
 
             if download_id:
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = f"{username}::{filename}"
+                is_youtube = username == 'youtube'
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
                         'search_result': {
@@ -3670,7 +3674,7 @@ def start_download():
                         'spotify_album': None,
                         'track_info': None
                     }
-                    logger.info(f"Registered simple download for post-processing: {context_key}")
+                    logger.info(f"{'[YouTube]' if is_youtube else '[Soulseek]'} Registered simple download for post-processing: {context_key}")
 
                 # Extract track name from filename for activity
                 track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
@@ -3804,76 +3808,78 @@ def get_download_status():
         global _processed_download_ids
         transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
 
-        if not transfers_data:
-            return jsonify({"transfers": []})
-
+        # Don't return early if no Soulseek transfers - YouTube downloads need to be checked too!
         all_transfers = []
         completed_matched_downloads = []
 
-        # This logic now correctly processes the nested structure from the slskd API
-        for user_data in transfers_data:
-            username = user_data.get('username', 'Unknown')
-            if 'directories' in user_data:
-                for directory in user_data['directories']:
-                    if 'files' in directory:
-                        for file_info in directory['files']:
-                            file_info['username'] = username
-                            all_transfers.append(file_info)
-                            state = file_info.get('state', '').lower()
+        if not transfers_data:
+            # No Soulseek transfers, but continue to check YouTube downloads below
+            pass
+        else:
+            # This logic now correctly processes the nested structure from the slskd API
+            for user_data in transfers_data:
+                username = user_data.get('username', 'Unknown')
+                if 'directories' in user_data:
+                    for directory in user_data['directories']:
+                        if 'files' in directory:
+                            for file_info in directory['files']:
+                                file_info['username'] = username
+                                all_transfers.append(file_info)
+                                state = file_info.get('state', '').lower()
 
-                            # Check for completion state
-                            if ('succeeded' in state or 'completed' in state) and 'errored' not in state:
-                                filename_from_api = file_info.get('filename')
-                                if not filename_from_api: continue
-                                
-                                # Check if this completed download has a matched context
-                                context_key = f"{username}::{filename_from_api}"
-                                with matched_context_lock:
-                                    context = matched_downloads_context.get(context_key)
+                                # Check for completion state
+                                if ('succeeded' in state or 'completed' in state) and 'errored' not in state:
+                                    filename_from_api = file_info.get('filename')
+                                    if not filename_from_api: continue
 
-                                if context and context_key not in _processed_download_ids:
-                                    download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
-                                    # Use the new robust file finder (only search downloads for post-processing candidates)
-                                    found_result = _find_completed_file_robust(download_dir, filename_from_api)
-                                    found_path = found_result[0] if found_result and found_result[0] else None
-                                    
-                                    if found_path:
-                                        print(f"🎯 Found completed matched file on disk: {found_path}")
-                                        completed_matched_downloads.append((context_key, context, found_path))
-                                        # Don't add to _processed_download_ids yet - wait until thread starts successfully
+                                    # Check if this completed download has a matched context
+                                    context_key = f"{username}::{filename_from_api}"
+                                    with matched_context_lock:
+                                        context = matched_downloads_context.get(context_key)
 
-                                        # Clean up retry tracking if file was found after retries
-                                        with _download_retry_lock:
-                                            if context_key in _download_retry_attempts:
-                                                retry_count = _download_retry_attempts[context_key]['count']
-                                                elapsed = time.time() - _download_retry_attempts[context_key]['first_attempt']
-                                                print(f"✅ File found after {retry_count} retry attempt(s) ({elapsed:.1f}s): {os.path.basename(filename_from_api)}")
-                                                del _download_retry_attempts[context_key]
-                                    else:
-                                        # File not found yet - implement retry logic instead of immediate give-up
-                                        # This fixes race condition where slskd reports completion before file is written to disk
-                                        with _download_retry_lock:
-                                            if context_key not in _download_retry_attempts:
-                                                # First retry attempt
-                                                _download_retry_attempts[context_key] = {
-                                                    'count': 1,
-                                                    'first_attempt': time.time()
-                                                }
-                                                print(f"⏳ File not found yet: '{os.path.basename(filename_from_api)}' - Will retry (attempt 1/{_download_retry_max})")
-                                            else:
-                                                # Increment retry count
-                                                _download_retry_attempts[context_key]['count'] += 1
-                                                retry_count = _download_retry_attempts[context_key]['count']
-                                                elapsed = time.time() - _download_retry_attempts[context_key]['first_attempt']
+                                    if context and context_key not in _processed_download_ids:
+                                        download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
+                                        # Use the new robust file finder (only search downloads for post-processing candidates)
+                                        found_result = _find_completed_file_robust(download_dir, filename_from_api)
+                                        found_path = found_result[0] if found_result and found_result[0] else None
 
-                                                if retry_count >= _download_retry_max:
-                                                    # Max retries reached, give up
-                                                    print(f"❌ CRITICAL: Could not find '{os.path.basename(filename_from_api)}' after {retry_count} attempts over {elapsed:.1f}s. Giving up.")
-                                                    _processed_download_ids.add(context_key)
-                                                    # Clean up retry tracking
+                                        if found_path:
+                                            print(f"🎯 Found completed matched file on disk: {found_path}")
+                                            completed_matched_downloads.append((context_key, context, found_path))
+                                            # Don't add to _processed_download_ids yet - wait until thread starts successfully
+
+                                            # Clean up retry tracking if file was found after retries
+                                            with _download_retry_lock:
+                                                if context_key in _download_retry_attempts:
+                                                    retry_count = _download_retry_attempts[context_key]['count']
+                                                    elapsed = time.time() - _download_retry_attempts[context_key]['first_attempt']
+                                                    print(f"✅ File found after {retry_count} retry attempt(s) ({elapsed:.1f}s): {os.path.basename(filename_from_api)}")
                                                     del _download_retry_attempts[context_key]
+                                        else:
+                                            # File not found yet - implement retry logic instead of immediate give-up
+                                            # This fixes race condition where slskd reports completion before file is written to disk
+                                            with _download_retry_lock:
+                                                if context_key not in _download_retry_attempts:
+                                                    # First retry attempt
+                                                    _download_retry_attempts[context_key] = {
+                                                        'count': 1,
+                                                        'first_attempt': time.time()
+                                                    }
+                                                    print(f"⏳ File not found yet: '{os.path.basename(filename_from_api)}' - Will retry (attempt 1/{_download_retry_max})")
                                                 else:
-                                                    print(f"⏳ File not found yet: '{os.path.basename(filename_from_api)}' - Will retry (attempt {retry_count}/{_download_retry_max}, elapsed: {elapsed:.1f}s)")
+                                                    # Increment retry count
+                                                    _download_retry_attempts[context_key]['count'] += 1
+                                                    retry_count = _download_retry_attempts[context_key]['count']
+                                                    elapsed = time.time() - _download_retry_attempts[context_key]['first_attempt']
+
+                                                    if retry_count >= _download_retry_max:
+                                                        # Max retries reached, give up
+                                                        print(f"❌ CRITICAL: Could not find '{os.path.basename(filename_from_api)}' after {retry_count} attempts over {elapsed:.1f}s. Giving up.")
+                                                        _processed_download_ids.add(context_key)
+                                                        # Clean up retry tracking
+                                                        del _download_retry_attempts[context_key]
+                                                    else:
+                                                        print(f"⏳ File not found yet: '{os.path.basename(filename_from_api)}' - Will retry (attempt {retry_count}/{_download_retry_max}, elapsed: {elapsed:.1f}s)")
 
         # If we found completed matched downloads, start processing them in background threads
         if completed_matched_downloads:
@@ -3885,15 +3891,15 @@ def get_download_status():
                         thread = threading.Thread(target=_post_process_matched_download, args=(context_key, context, found_path))
                         thread.daemon = True
                         thread.start()
-                        
+
                         # Only mark as processed AFTER thread starts successfully
                         _processed_download_ids.add(context_key)
                         print(f"✅ Marked as processed: {context_key}")
-                        
+
                         # DON'T remove context immediately - verification worker needs it
                         # Context will be cleaned up by verification worker after both processors complete
                         print(f"💾 Keeping context for verification worker: {context_key}")
-                                
+
                     except Exception as e:
                         print(f"❌ Error starting post-processing thread for {context_key}: {e}")
                         # Don't add to processed set if thread failed to start
@@ -3903,6 +3909,70 @@ def get_download_status():
             processing_thread = threading.Thread(target=process_completed_downloads)
             processing_thread.daemon = True
             processing_thread.start()
+
+        # Also include YouTube downloads in the response
+        print(f"🔍 [Status] Starting YouTube downloads check...")
+        try:
+            all_youtube_downloads = asyncio.run(soulseek_client.get_all_downloads())
+            print(f"🔍 [Debug] Fetched {len(all_youtube_downloads)} total downloads from orchestrator")
+            youtube_count = sum(1 for d in all_youtube_downloads if d.username == 'youtube')
+            print(f"🔍 [Debug] Found {youtube_count} YouTube downloads")
+
+            for download in all_youtube_downloads:
+                if download.username == 'youtube':
+                    print(f"🔍 [Debug] Processing YouTube download: {download.id}, state: {download.state}")
+                    # Convert DownloadStatus to transfer format that frontend expects
+                    youtube_transfer = {
+                        'id': download.id,
+                        'filename': download.filename,
+                        'username': 'youtube',
+                        'state': download.state,
+                        'percentComplete': download.progress,
+                        'size': download.size,
+                        'bytesTransferred': download.transferred,
+                        'averageSpeed': download.speed,
+                        'direction': 'Download',  # Required by frontend
+                    }
+                    all_transfers.append(youtube_transfer)
+
+                    # Check if YouTube download is completed and needs post-processing
+                    if download.state and ('succeeded' in download.state.lower() or 'completed' in download.state.lower()):
+                        context_key = f"{download.username}::{extract_filename(download.filename)}"
+                        print(f"🔍 [YouTube] Checking completed download - Context key: {context_key}")
+                        print(f"🔍 [YouTube] Download state: {download.state}")
+
+                        with matched_context_lock:
+                            context = matched_downloads_context.get(context_key)
+                            print(f"🔍 [YouTube] Context found: {context is not None}")
+                            if not context:
+                                print(f"🔍 [YouTube] Available context keys: {list(matched_downloads_context.keys())}")
+
+                        if context and context_key not in _processed_download_ids:
+                            download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
+                            found_result = _find_completed_file_robust(download_dir, download.filename)
+                            found_path = found_result[0] if found_result and found_result[0] else None
+
+                            if found_path:
+                                print(f"🎯 [YouTube] Found completed matched file on disk: {found_path}")
+                                # Start post-processing thread
+                                def process_youtube_download():
+                                    try:
+                                        print(f"🚀 [YouTube] Starting post-processing thread for: {context_key}")
+                                        thread = threading.Thread(target=_post_process_matched_download, args=(context_key, context, found_path))
+                                        thread.daemon = True
+                                        thread.start()
+                                        _processed_download_ids.add(context_key)
+                                        print(f"✅ [YouTube] Marked as processed: {context_key}")
+                                    except Exception as e:
+                                        print(f"❌ [YouTube] Error starting post-processing thread for {context_key}: {e}")
+
+                                processing_thread = threading.Thread(target=process_youtube_download)
+                                processing_thread.daemon = True
+                                processing_thread.start()
+        except Exception as yt_error:
+            import traceback
+            print(f"⚠️ Could not fetch YouTube downloads for status: {yt_error}")
+            traceback.print_exc()
 
         return jsonify({"transfers": all_transfers})
 
@@ -7850,36 +7920,41 @@ def _post_process_matched_download(context_key, context, file_path):
         is_simple_download = search_result.get('is_simple_download', False)
 
         if is_simple_download:
-            # Simple transfer: move to Transfer/AlbumName/ folder, no metadata enhancement
+            # Simple transfer: move to Transfer folder, no metadata enhancement
             logger.info(f"Processing simple download (no metadata enhancement): {file_path}")
 
             transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
 
-            # Extract album name from filename path (parent directory)
-            album_name = "Unknown Album"
+            # Check if this download has album info (from path or search result)
+            album_name = None
             original_filename = search_result.get('filename', '')
+
             if '/' in original_filename or '\\' in original_filename:
                 # Get parent directory as album name
                 path_parts = original_filename.replace('\\', '/').split('/')
                 if len(path_parts) >= 2:
                     album_name = path_parts[-2]  # Parent directory
-            else:
-                # No path info, use album from search result if available
-                album_name = search_result.get('album', 'Unknown Album')
 
-            # Sanitize album name for file system
-            import re
-            album_name = re.sub(r'[<>:"/\\|?*]', '_', album_name).strip()
+            # If no album from path, check search result
             if not album_name:
-                album_name = "Unknown Album"
+                album_name = search_result.get('album')
 
-            # Create album folder structure
-            album_folder = Path(transfer_path) / album_name
-            album_folder.mkdir(parents=True, exist_ok=True)
-
-            # Move file to album folder
+            # Determine destination
             filename = Path(file_path).name
-            destination = album_folder / filename
+
+            if album_name and album_name.lower() not in ['unknown', 'unknown album', '']:
+                # Has album info - create album folder
+                import re
+                album_name = re.sub(r'[<>:"/\\|?*]', '_', album_name).strip()
+                album_folder = Path(transfer_path) / album_name
+                album_folder.mkdir(parents=True, exist_ok=True)
+                destination = album_folder / filename
+                logger.info(f"Moving to album folder: {album_name}")
+            else:
+                # No album info - move directly to Transfer root (singles)
+                Path(transfer_path).mkdir(parents=True, exist_ok=True)
+                destination = Path(transfer_path) / filename
+                logger.info(f"Moving to Transfer root (single track)")
 
             _safe_move_file(file_path, destination)
             logger.info(f"✅ Moved simple download to: {destination}")
@@ -13715,6 +13790,40 @@ def get_spotify_track(track_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route('/api/spotify/search', methods=['GET'])
+def search_spotify():
+    """Generic Spotify search endpoint - supports tracks, albums, artists"""
+    if not spotify_client or not spotify_client.is_authenticated():
+        return jsonify({"error": "Spotify not authenticated."}), 401
+
+    try:
+        query = request.args.get('q', '').strip()
+        search_type = request.args.get('type', 'track').strip()
+        limit = int(request.args.get('limit', 20))
+
+        if not query:
+            return jsonify({"error": "Query parameter 'q' is required"}), 400
+
+        # Search using spotify_client
+        tracks = spotify_client.search_tracks(query, limit=limit)
+
+        # Convert tracks to Spotify Web API format
+        # Note: t.artists and t.album are already dicts/lists in the right format
+        tracks_items = [{
+            'id': t.id,
+            'name': t.name,
+            'artists': t.artists if isinstance(t.artists, list) else [t.artists],
+            'album': t.album,
+            'duration_ms': t.duration_ms,
+            'uri': f"spotify:track:{t.id}"
+        } for t in tracks]
+
+        return jsonify({'tracks': {'items': tracks_items}})
+
+    except Exception as e:
+        print(f"❌ Error searching Spotify: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/spotify/search_tracks', methods=['GET'])
 def search_spotify_tracks():

@@ -8074,7 +8074,16 @@ async function updateModalWithLiveDownloadProgress() {
 
             // Search for matching download
             for (const [downloadId, downloadInfo] of Object.entries(allDownloads)) {
-                const downloadTitle = downloadInfo.filename ? downloadInfo.filename.split(/[\\/]/).pop() : '';
+                // Extract display title from filename (handle YouTube encoding)
+                let downloadTitle = '';
+                if (downloadInfo.filename) {
+                    if (downloadInfo.username === 'youtube' && downloadInfo.filename.includes('||')) {
+                        const parts = downloadInfo.filename.split('||');
+                        downloadTitle = parts[1] || parts[0];
+                    } else {
+                        downloadTitle = downloadInfo.filename.split(/[\\/]/).pop();
+                    }
+                }
 
                 // Simple matching - could be improved with better logic
                 if (downloadTitle && trackName && (
@@ -8810,7 +8819,20 @@ function renderQueue(containerId, downloads, isActiveQueue) {
     let html = '';
     for (const id of downloadIds) {
         const item = downloads[id];
-        const title = item.filename ? item.filename.split(/[\\/]/).pop() : 'Unknown File';
+
+        // Extract display title from filename
+        let title = 'Unknown File';
+        if (item.filename) {
+            // YouTube filenames are encoded as "video_id||title"
+            if (item.username === 'youtube' && item.filename.includes('||')) {
+                const parts = item.filename.split('||');
+                title = parts[1] || parts[0];  // Use title part, fallback to video_id
+            } else {
+                // Regular Soulseek filename - extract last part of path
+                title = item.filename.split(/[\\/]/).pop();
+            }
+        }
+
         const progress = item.percentComplete || 0;
         const bytesTransferred = item.bytesTransferred || 0;
         const totalBytes = item.size || 0;
@@ -9073,30 +9095,8 @@ function displayDownloadsResults(results) {
     let html = '';
     results.forEach((result, index) => {
         const isAlbum = result.result_type === 'album';
-        if (result.username === 'youtube') {
-            const thumbnail = result.thumbnail || '';
-            const durationText = result.duration ? formatDuration(result.duration) : '';
 
-            html += `
-                <div class="youtube-result-card" style="display: flex; gap: 1rem; padding: 1rem; background: rgba(255, 0, 0, 0.05); border: 1px solid rgba(255, 0, 0, 0.1); border-radius: 8px; margin-bottom: 0.5rem; align-items: center;">
-                    <div class="yt-thumb" style="width: 120px; height: 68px; flex-shrink: 0; border-radius: 4px; overflow: hidden; background: #000;">
-                        <img src="${thumbnail}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iNjgiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiMzMzMiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZmlsbD0iIzY2NiIgZm9udC1zaXplPSIxMiIgZGVtaW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+Tm8gSW1hZ2U8L3RleHQ+PC9zdmc+'">
-                    </div>
-                    <div class="yt-info" style="flex: 1;">
-                        <div class="yt-title" style="font-weight: 600; margin-bottom: 4px;">${escapeHtml(result.title)}</div>
-                        <div class="yt-channel" style="font-size: 0.9em; opacity: 0.8;">${escapeHtml(result.artist || result.username)} • ${durationText}</div>
-                    </div>
-                    <div class="yt-actions">
-                        <button onclick="streamAlbumTrack(${index}, -1)" class="track-stream-btn">Stream ▶</button>
-                        <button onclick="downloadAlbumTrack(${index}, -1)" class="track-download-btn">Download ⬇</button>
-                    </div>
-                </div>
-            `;
-            return; // Skip standard rendering for YouTube result
-        }
-
-
-        if (isAlbum && result.username !== 'youtube') {
+        if (isAlbum) {
             const trackCount = result.tracks ? result.tracks.length : 0;
             const totalSize = result.total_size ? `${(result.total_size / 1024 / 1024).toFixed(1)} MB` : 'Unknown size';
 
@@ -11748,7 +11748,20 @@ function parseTrackFilename(filename) {
      * - "01. Title.flac"
      * - "Artist - Title.flac"
      * - "Title.flac"
+     * - YouTube: "video_id||title" (extract title part)
      */
+    // YouTube special handling: Extract title from encoded format
+    if (filename && filename.includes('||')) {
+        const parts = filename.split('||');
+        const youtubeTitle = parts[1] || parts[0];  // Use title part, fallback to video_id
+        // Remove common YouTube suffixes
+        const cleanTitle = youtubeTitle
+            .replace(/\s*\[.*?\]\s*/g, '')  // Remove [Official Video], [Lyrics], etc.
+            .replace(/\s*\(.*?\)\s*/g, '')  // Remove (Official), (Audio), etc.
+            .trim();
+        return { title: cleanTitle, trackNumber: null };
+    }
+
     // Remove file extension and path
     let basename = filename.split('/').pop().split('\\').pop();
     basename = basename.replace(/\.(flac|mp3|m4a|ogg|wav)$/i, '');
