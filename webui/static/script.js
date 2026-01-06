@@ -32853,9 +32853,7 @@ async function openDownloadModalForRecentAlbum(albumIndex) {
                 artists: artists,
                 album: {
                     name: album.album_name,
-                    images: album.album_cover_url ? [{ url: album.album_cover_url }] : [],
-                    total_tracks: albumData.total_tracks || albumData.tracks.length,
-                    album_type: albumData.album_type || 'album'
+                    images: album.album_cover_url ? [{ url: album.album_cover_url }] : []
                 },
                 duration_ms: track.duration_ms || 0
             };
