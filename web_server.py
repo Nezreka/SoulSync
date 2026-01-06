@@ -2627,6 +2627,10 @@ def auth_spotify():
             host = request.host.split(':')[0]
             is_remote = host not in ['127.0.0.1', 'localhost']
             is_docker = os.path.exists('/.dockerenv')
+            
+            # If in Docker and accessing via 127.0.0.1, recommend localhost
+            if is_docker and host == '127.0.0.1':
+                host = 'localhost'
 
             if is_remote or is_docker:
                 # Show instructions for remote/docker access
