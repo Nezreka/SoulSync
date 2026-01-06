@@ -572,13 +572,21 @@ class MusicMatchingEngine:
         is_short_title = len(spotify_cleaned_title) <= 5 or len(title_words) == 1
 
         # --- Final Weighted Score ---
-        # Rebalanced weights: Artist matching is now more important to prevent false positives
-        final_confidence = (title_score * 0.45) + (artist_score * 0.40) + (duration_score * 0.15)
+        is_youtube = slskd_track.username == 'youtube'
+        
+        if is_youtube:
+            # For YouTube, rely more on Title and Duration since Artist is often missing from video titles
+            # and the search query already filtered by artist to some extent.
+            # New weights: Title 70%, Artist 10%, Duration 20%
+            final_confidence = (title_score * 0.70) + (artist_score * 0.10) + (duration_score * 0.20)
+        else:
+            # Standard weights for Soulseek (Artist is critical for correctness)
+            # Rebalanced weights: Artist matching is now more important to prevent false positives
+            final_confidence = (title_score * 0.45) + (artist_score * 0.40) + (duration_score * 0.15)
 
         # Apply short title penalty AFTER calculating base confidence
         # This allows perfect matches to still pass, but penalizes weak artist matches
         # For YouTube, skip penalty since artist matching is less reliable (searches are track-name-only)
-        is_youtube = slskd_track.username == 'youtube'
         if is_short_title and artist_score < 0.5 and not is_youtube:
             # Heavy penalty but not complete rejection
             # Multiply by 0.4 (60% penalty) - still possible to pass if title+duration are perfect
@@ -596,13 +604,13 @@ class MusicMatchingEngine:
         # Debug logging to track matching decisions
         if final_confidence > 0.3:  # Only log potential matches
             logger.debug(
-                f"Match scoring: '{spotify_track.name}' by {spotify_track.artists[0] if spotify_track.artists else 'Unknown'} "
+                f"Match scoring ({'YT' if is_youtube else 'SLSK'}): '{spotify_track.name}' by {spotify_track.artists[0] if spotify_track.artists else 'Unknown'} "
                 f"vs '{slskd_track.filename[:60]}...' | "
                 f"Title: {title_score:.2f} (ratio: {title_ratio:.2f}, boundary: {has_word_boundary}), "
                 f"Artist: {artist_score:.2f}, Duration: {duration_score:.2f}, "
-                f"Final: {final_confidence:.2f} {'✅ PASS' if final_confidence > 0.58 else '❌ FAIL'}"
+                f"Final: {final_confidence:.2f} {'✅ PASS' if final_confidence > 0.63 else '❌ FAIL'}"
             )
-
+        
         # Ensure the final score doesn't exceed 1.0
         return min(final_confidence, 1.0)
 
