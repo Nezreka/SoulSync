@@ -8836,32 +8836,64 @@ def is_watchlist_actually_scanning():
 
     return True
 
+wishlist_scheduler_thread = None
+wishlist_stop_event = threading.Event()
+
+def _wishlist_heartbeat_loop():
+    """
+    Background heartbeat loop that triggers wishlist processing every 30 minutes.
+    This replaces the fragile daisy-chained logic to ensure the timer never dies.
+    """
+    print("💓 [Auto-Wishlist] Heartbeat scheduler started")
+    
+    # Initial delay of 1 minute
+    if wishlist_stop_event.wait(60):
+        return
+
+    while not wishlist_stop_event.is_set():
+        try:
+             # Run the processing logic
+             _process_wishlist_automatically()
+        except Exception as e:
+             print(f"❌ [Auto-Wishlist] Error in heartbeat loop: {e}")
+        
+        # Wait for 30 minutes (1800 seconds) or until stopped
+        if wishlist_stop_event.wait(1800):
+            break
+
 def start_wishlist_auto_processing():
-    """Start automatic wishlist processing with 1-minute initial delay."""
-    global wishlist_auto_timer, wishlist_next_run_time
+    """Start automatic wishlist processing with robust heartbeat scheduler."""
+    global wishlist_scheduler_thread, wishlist_next_run_time
+    
+    # Reset stop event
+    wishlist_stop_event.clear()
 
     print("🚀 [Auto-Wishlist] Initializing automatic wishlist processing...")
 
     with wishlist_timer_lock:
-        # Stop any existing timer to prevent duplicates
-        if wishlist_auto_timer is not None:
-            wishlist_auto_timer.cancel()
+        # Stop any existing thread/timer
+        if wishlist_scheduler_thread is not None and wishlist_scheduler_thread.is_alive():
+            print("⚠️ Wishlist scheduler already running")
+            return
 
-        print("🔄 Starting automatic wishlist processing system (1 minute initial delay)")
+        print("🔄 Starting automatic wishlist heartbeat system (1 minute initial delay)")
         wishlist_next_run_time = time.time() + 60.0  # Set timestamp for countdown display
-        wishlist_auto_timer = threading.Timer(60.0, _process_wishlist_automatically)  # 1 minute
-        wishlist_auto_timer.daemon = True
-        wishlist_auto_timer.start()
-        print(f"✅ [Debug] Timer started successfully - will trigger in 60 seconds")
+        
+        wishlist_scheduler_thread = threading.Thread(target=_wishlist_heartbeat_loop, daemon=True, name="WishlistHeartbeat")
+        wishlist_scheduler_thread.start()
+        print(f"✅ [Debug] Heartbeat thread started successfully")
 
 def stop_wishlist_auto_processing():
-    """Stop automatic wishlist processing and cleanup timer."""
-    global wishlist_auto_timer, wishlist_auto_processing, wishlist_auto_processing_timestamp, wishlist_next_run_time
+    """Stop automatic wishlist processing and cleanup thread."""
+    global wishlist_scheduler_thread, wishlist_auto_processing, wishlist_auto_processing_timestamp, wishlist_next_run_time
 
     with wishlist_timer_lock:
-        if wishlist_auto_timer is not None:
-            wishlist_auto_timer.cancel()
-            wishlist_auto_timer = None
+        # Signal thread to stop
+        wishlist_stop_event.set()
+        
+        if wishlist_scheduler_thread is not None:
+            # We don't join() here to avoid blocking the UI, the thread will exit on next wake
+            wishlist_scheduler_thread = None
             print("⏹️ Stopped automatic wishlist processing")
 
         wishlist_auto_processing = False
@@ -8869,15 +8901,17 @@ def stop_wishlist_auto_processing():
         wishlist_next_run_time = 0  # Clear countdown timer
 
 def schedule_next_wishlist_processing():
-    """Schedule next automatic wishlist processing in 30 minutes."""
-    global wishlist_auto_timer, wishlist_next_run_time
+    """
+    Update the UI timestamp for the next run.
+    NOTE: The actual scheduling is now handled by _wishlist_heartbeat_loop.
+    This function exists to maintain compatibility with existing call sites
+    and ensure the UI countdown is accurate.
+    """
+    global wishlist_next_run_time
 
     with wishlist_timer_lock:
-        print("⏰ Scheduling next automatic wishlist processing in 30 minutes")
+        print("⏰ [UI Update] Updating next run timestamp (handled by heartbeat)")
         wishlist_next_run_time = time.time() + 1800.0  # Set timestamp for countdown display
-        wishlist_auto_timer = threading.Timer(1800.0, _process_wishlist_automatically)  # 30 minutes (1800 seconds)
-        wishlist_auto_timer.daemon = True
-        wishlist_auto_timer.start()
 
 def _process_wishlist_automatically():
     """Main automatic processing logic that runs in background thread."""
