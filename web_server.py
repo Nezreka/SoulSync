@@ -9331,6 +9331,9 @@ def get_wishlist_stats():
                 # Use track count (most accurate)
                 if total_tracks >= 6:
                     albums_count += 1
+                elif album_type == 'album' and total_tracks > 1:
+                    # Respect explicit 'album' type for multi-track releases even if short
+                    albums_count += 1
                 else:
                     singles_count += 1
             else:
