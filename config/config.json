@@ -30,7 +30,9 @@
     "slskd_url": "http://host.docker.internal:5030",
     "api_key": "SoulseekAPIKey",
     "download_path": "/app/downloads",
-    "transfer_path": "/app/Transfer"
+    "transfer_path": "/app/Transfer",
+    "search_timeout": 60,
+    "search_timeout_buffer": 15
   },
   "logging": {
     "path": "logs/app.log",
@@ -43,6 +45,16 @@
   "metadata_enhancement": {
     "enabled": true,
     "embed_album_art": true
+  },
+  "file_organization": {
+    "enabled": true,
+    "_template_variables": "Available: $artist, $albumartist, $album, $title, $track, $year, $playlist",
+    "templates": {
+      "album_path": "$albumartist/$albumartist - $album/$track - $title",
+      "single_path": "$artist/$artist - $title/$title",
+      "compilation_path": "Compilations/$album/$track - $artist - $title",
+      "playlist_path": "$playlist/$artist - $title"
+    }
   },
   "playlist_sync": {
     "create_backup": true
