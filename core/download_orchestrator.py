@@ -139,6 +139,50 @@ class DownloadOrchestrator:
         # Fallback: empty results
         return ([], [])
 
+    async def search_and_download_best(self, query: str) -> Optional[str]:
+        """
+        Search and automatically download the best result.
+        Supports Hybrid mode (uses configured source priority).
+        
+        Args:
+            query: Search query string
+            
+        Returns:
+            Download ID (str) or None if failed
+        """
+        # 1. Search using configured mode/hybrid logic
+        results = await self.search(query)
+        
+        # Unpack tuple (tracks, albums) - defensive handling
+        if isinstance(results, tuple):
+            tracks = results[0]
+        else:
+            tracks = results # Should not happen based on search() return type, but safe
+            
+        if not tracks:
+            logger.warning(f"No results found for: {query}")
+            return None
+
+        # 2. Filter using Soulseek's quality preferences 
+        # (Works for both YouTube and Soulseek TrackResult objects)
+        filtered_results = self.soulseek.filter_results_by_quality_preference(tracks)
+
+        if not filtered_results:
+            logger.warning(f"No suitable quality results found for: {query}")
+            return None
+
+        # 3. Download the best match
+        best_result = filtered_results[0]
+        
+        quality_info = f"{best_result.quality.upper()}"
+        if best_result.bitrate:
+            quality_info += f" {best_result.bitrate}kbps"
+
+        logger.info(f"Downloading best match: {best_result.filename} ({quality_info}) from {best_result.username}")
+        
+        # Use orchestrator's download method to route correctly
+        return await self.download(best_result.username, best_result.filename, best_result.size)
+
     async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
         """
         Download a track using the appropriate client.
