@@ -251,7 +251,8 @@ wishlist_timer_lock = threading.Lock()  # Thread safety for timer operations
 
 # --- Automatic Watchlist Scanning Infrastructure ---
 # Server-side timer system for automatic watchlist scanning (mirrors wishlist pattern for consistency)
-watchlist_auto_timer = None  # threading.Timer for scheduling next auto-scanning
+watchlist_scheduler_thread = None  # background thread
+watchlist_stop_event = threading.Event()
 watchlist_auto_scanning = False  # Flag to prevent concurrent auto-scanning
 watchlist_auto_scanning_timestamp = 0  # Timestamp when scanning started (for stuck detection)
 watchlist_next_run_time = 0  # Timestamp when next auto-scanning is scheduled (for countdown display)
@@ -17458,47 +17459,99 @@ watchlist_scan_state = {
     'error': None
 }
 
+def _watchlist_heartbeat_loop():
+    """
+    Background heartbeat loop that triggers watchlist scanning every 24 hours.
+    Allows for robust retry logic when conflicts occur with the wishlist processor.
+    """
+    print("💓 [Auto-Watchlist] Heartbeat scheduler started")
+
+    # Initial delay of 5 minutes
+    if watchlist_stop_event.wait(300):
+        return
+
+    while not watchlist_stop_event.is_set():
+        try:
+             # Run the processing logic
+             # Returns: 'completed', 'skipped_conflict', 'skipped_idle', 'skipped_active'
+             result = _process_watchlist_scan_automatically()
+             
+             if result == 'skipped_conflict':
+                 # If conflict with wishlist, wait 10 minutes and retry
+                 print("⏳ [Auto-Watchlist] Pausing 10 minutes before retry due to wishlist conflict")
+                 
+                 # Update UI timer
+                 with watchlist_timer_lock:
+                     watchlist_next_run_time = time.time() + 600.0
+
+                 if watchlist_stop_event.wait(600):
+                     break
+             else:
+                 # Standard 24 hour cycle for success or other skips
+                 with watchlist_timer_lock:
+                     watchlist_next_run_time = time.time() + 86400.0
+
+                 if watchlist_stop_event.wait(86400):
+                     break
+
+        except Exception as e:
+             print(f"❌ [Auto-Watchlist] Error in heartbeat loop: {e}")
+             # Wait 10 minutes on error before retrying to avoid spamming
+             with watchlist_timer_lock:
+                 watchlist_next_run_time = time.time() + 600.0
+                 
+             if watchlist_stop_event.wait(600):
+                 break
+
 def start_watchlist_auto_scanning():
-    """Start automatic watchlist scanning with 5-minute initial delay (Timer-based like wishlist)"""
-    global watchlist_auto_timer, watchlist_next_run_time
+    """Start automatic watchlist scanning with robust heartbeat scheduler."""
+    global watchlist_scheduler_thread, watchlist_next_run_time
+
+    # Reset stop event
+    watchlist_stop_event.clear()
 
     print("🚀 [Auto-Watchlist] Initializing automatic watchlist scanning...")
 
     with watchlist_timer_lock:
-        # Stop any existing timer to prevent duplicates
-        if watchlist_auto_timer is not None:
-            watchlist_auto_timer.cancel()
+        # Stop any existing thread
+        if watchlist_scheduler_thread is not None and watchlist_scheduler_thread.is_alive():
+            print("⚠️ Watchlist scheduler already running")
+            return
 
-        print("🔄 Starting automatic watchlist scanning system (5 minute initial delay)")
+        print("🔄 Starting automatic watchlist heartbeat system (5 minute initial delay)")
         watchlist_next_run_time = time.time() + 300.0  # Set timestamp for countdown display
-        watchlist_auto_timer = threading.Timer(300.0, _process_watchlist_scan_automatically)  # 5 minutes
-        watchlist_auto_timer.daemon = True
-        watchlist_auto_timer.start()
-        print(f"✅ [Auto-Watchlist] Timer started successfully - will trigger in 5 minutes")
+        
+        watchlist_scheduler_thread = threading.Thread(target=_watchlist_heartbeat_loop, daemon=True, name="WatchlistHeartbeat")
+        watchlist_scheduler_thread.start()
+        print(f"✅ [Auto-Watchlist] Heartbeat thread started successfully")
 
 def stop_watchlist_auto_scanning():
-    """Stop automatic watchlist scanning and cleanup timer."""
-    global watchlist_auto_timer, watchlist_auto_scanning
+    """Stop automatic watchlist scanning and cleanup thread."""
+    global watchlist_scheduler_thread, watchlist_auto_scanning, watchlist_auto_scanning_timestamp, watchlist_next_run_time
 
     with watchlist_timer_lock:
-        if watchlist_auto_timer is not None:
-            watchlist_auto_timer.cancel()
-            watchlist_auto_timer = None
+        # Signal thread to stop
+        watchlist_stop_event.set()
+        
+        if watchlist_scheduler_thread is not None:
+            watchlist_scheduler_thread = None
             print("⏹️ Stopped automatic watchlist scanning")
 
         watchlist_auto_scanning = False
         watchlist_auto_scanning_timestamp = 0
+        watchlist_next_run_time = 0
 
 def schedule_next_watchlist_scan():
-    """Schedule next automatic watchlist scan in 24 hours."""
-    global watchlist_auto_timer, watchlist_next_run_time
+    """
+    Update the UI timestamp for the next run.
+    NOTE: The actual scheduling is now handled by _watchlist_heartbeat_loop.
+    This function exists to update the UI countdown.
+    """
+    global watchlist_next_run_time
 
     with watchlist_timer_lock:
-        print("⏰ Scheduling next automatic watchlist scan in 24 hours")
+        print("⏰ [UI Update] Updating next watchlist scan timestamp (handled by heartbeat)")
         watchlist_next_run_time = time.time() + 86400.0  # Set timestamp for countdown display
-        watchlist_auto_timer = threading.Timer(86400.0, _process_watchlist_scan_automatically)  # 24 hours
-        watchlist_auto_timer.daemon = True
-        watchlist_auto_timer.start()
 
 def _process_watchlist_scan_automatically():
     """Main automatic scanning logic that runs in background thread."""
@@ -17510,19 +17563,19 @@ def _process_watchlist_scan_automatically():
         with watchlist_timer_lock:
             if watchlist_auto_scanning:
                 print("⚠️ Watchlist auto-scanning already running, skipping.")
-                schedule_next_watchlist_scan()
-                return
+                # We return 'skipped_active' so heartbeat knows we're busy but alive
+                # Heartbeat will wait 24h as per normal cycle since it's already running
+                schedule_next_watchlist_scan() 
+                return 'skipped_active'
 
             # Check if wishlist processing is currently running (using smart detection)
             if is_wishlist_actually_processing():
                 print("🎵 Wishlist processing in progress, rescheduling watchlist scan for 10 minutes from now")
-                # Smart retry: don't wait 24 hours, just wait 10 minutes and try again
-                global watchlist_auto_timer, watchlist_next_run_time
-                watchlist_next_run_time = time.time() + 600.0  # Set timestamp for countdown display
-                watchlist_auto_timer = threading.Timer(600.0, _process_watchlist_scan_automatically)  # 10 minutes
-                watchlist_auto_timer.daemon = True
-                watchlist_auto_timer.start()
-                return
+                # Just update UI timer. Heartbeat loop will handle the 10m wait and retry.
+                global watchlist_next_run_time
+                with watchlist_timer_lock:
+                    watchlist_next_run_time = time.time() + 600.0
+                return 'skipped_conflict'
 
             # Set flag and timestamp
             import time
@@ -17546,7 +17599,7 @@ def _process_watchlist_scan_automatically():
                     watchlist_auto_scanning = False
                     watchlist_auto_scanning_timestamp = 0
                 schedule_next_watchlist_scan()
-                return
+                return 'skipped_idle'
 
             if not spotify_client or not spotify_client.is_authenticated():
                 print("ℹ️ [Auto-Watchlist] Spotify client not available or not authenticated.")
@@ -17804,6 +17857,8 @@ def _process_watchlist_scan_automatically():
             if total_added_to_wishlist > 0:
                 add_activity_item("👁️", "Watchlist Scan Complete", f"{total_added_to_wishlist} new tracks added to wishlist", "Now")
 
+        return 'completed'
+
     except Exception as e:
         print(f"❌ Error in automatic watchlist scan: {e}")
         import traceback
@@ -17813,11 +17868,10 @@ def _process_watchlist_scan_automatically():
         watchlist_scan_state['error'] = str(e)
 
     finally:
-        # Always reset flag and schedule next scan
+        # Always reset flag
         with watchlist_timer_lock:
             watchlist_auto_scanning = False
             watchlist_auto_scanning_timestamp = 0
-        schedule_next_watchlist_scan()
 
     print("✅ Automatic watchlist scanning initialized")
 
