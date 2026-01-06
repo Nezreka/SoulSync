@@ -4,9 +4,11 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from unidecode import unidecode
 from utils.logging_config import get_logger
+from config.settings import config_manager
+
 from core.spotify_client import Track as SpotifyTrack
 from core.plex_client import PlexTrackInfo
-from core.soulseek_client import TrackResult
+from core.soulseek_client import TrackResult, AlbumResult
 
 
 logger = get_logger("matching_engine")
@@ -409,6 +411,17 @@ class MusicMatchingEngine:
             if album_name:
                 break
         
+        # PRIORITY 0: Try exact Artist + Album + Title (Best for OSTs)
+        # Often YouTube videos are titled "Artist - Album - Title" or similar
+        # Only include if mode is youtube or hybrid (safe for Soulseek default)
+        download_mode = config_manager.get('download_source.mode', 'soulseek')
+        if download_mode in ['youtube', 'hybrid'] and album_name and album_name.lower() not in ['single', 'ep', 'greatest hits']:
+             album_clean = self.clean_album_name(album_name)
+             if album_clean:
+                 # Standard query: Artist Album Title
+                 queries.append(f"{artist} {album_clean} {self.clean_title(original_title)}".strip())
+                 logger.debug(f"PRIORITY 0: Artist + Album + Title query: '{artist} {album_clean} {self.clean_title(original_title)}'")
+
         # PRIORITY 1: Try removing potential album from title FIRST
         cleaned_title, album_detected = self.detect_album_in_title(original_title, album_name)
         if album_detected and cleaned_title != original_title:
