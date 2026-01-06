@@ -58,19 +58,9 @@ else:
 
 if os.path.exists(config_path):
     print(f"Found config file at: {config_path}")
-    # Assuming your config_manager has a method to load from a specific path
-    if hasattr(config_manager, 'load_config'):
-        config_manager.load_config(config_path)
-        print("✅ Web server configuration loaded successfully.")
-    else:
-        # Fallback if no load_config method, try re-initializing with path
-        print("🔴 WARNING: config_manager does not have a 'load_config' method. Attempting re-init.")
-        try:
-            from config.settings import ConfigManager
-            config_manager = ConfigManager(config_path)
-            print("✅ Web server configuration re-initialized successfully.")
-        except Exception as e:
-            print(f"🔴 FAILED to re-initialize config_manager: {e}")
+    # Load configuration into the existing singleton instance
+    config_manager.load_config(config_path)
+    print("✅ Web server configuration loaded successfully.")
 else:
     print(f"🔴 WARNING: config.json not found at {config_path}. Using default settings.")
 # Correctly point to the 'webui' directory for templates and static files
@@ -2242,7 +2232,9 @@ def handle_settings():
             services_text = ", ".join(changed_services)
             add_activity_item("⚙️", "Settings Updated", f"{services_text} configuration saved", "Now")
             
-            spotify_client._setup_client()
+            add_activity_item("⚙️", "Settings Updated", f"{services_text} configuration saved", "Now")
+            
+            spotify_client.reload_config()
             plex_client.server = None
             jellyfin_client.server = None
             # Reload orchestrator settings (download source mode, hybrid_primary, etc.)

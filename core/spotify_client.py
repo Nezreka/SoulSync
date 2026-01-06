@@ -170,6 +170,10 @@ class SpotifyClient:
         self.sp: Optional[spotipy.Spotify] = None
         self.user_id: Optional[str] = None
         self._setup_client()
+
+    def reload_config(self):
+        """Reload configuration and re-initialize client"""
+        self._setup_client()
     
     def _setup_client(self):
         config = config_manager.get_spotify_config()

@@ -14,6 +14,16 @@ class ConfigManager:
         import os
         db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
         self.database_path = Path(db_path)
+        self.load_config(config_path)
+
+    def load_config(self, config_path: str = None):
+        """
+        Load configuration from database or file.
+        Can be called to reload settings into the existing instance.
+        """
+        if config_path:
+            self.config_path = Path(config_path)
+        
         self._load_config()
 
     def _get_encryption_key(self) -> bytes:
