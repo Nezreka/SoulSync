@@ -1029,6 +1029,33 @@ class YouTubeClient:
                 file_path=download_info.get('file_path')
             )
 
+
+    async def clear_all_completed_downloads(self) -> bool:
+        """
+        Clear all terminal (completed, cancelled, errored) downloads from the list.
+        Matches Soulseek interface.
+        """
+        try:
+            with self._download_lock:
+                # Identify IDs to remove
+                ids_to_remove = []
+                for download_id, info in self.active_downloads.items():
+                    state = info.get('state', '')
+                    # Check for terminal states
+                    # Note: We check exact strings used in _download_thread_worker and cancel_download
+                    if state in ['Completed, Succeeded', 'Cancelled', 'Errored', 'Aborted']:
+                        ids_to_remove.append(download_id)
+                
+                # Remove them
+                for download_id in ids_to_remove:
+                    del self.active_downloads[download_id]
+                    logger.debug(f"🗑️  Cleared finished download {download_id}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error clearing downloads: {e}")
+            return False
+
     async def cancel_download(self, download_id: str, username: str = None, remove: bool = False) -> bool:
         """
         Cancel an active download (matches Soulseek interface).
