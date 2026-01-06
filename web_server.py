@@ -2626,9 +2626,13 @@ def auth_spotify():
             # Detect if accessing remotely
             host = request.host.split(':')[0]
             is_remote = host not in ['127.0.0.1', 'localhost']
+            is_docker = os.path.exists('/.dockerenv')
 
-            if is_remote:
-                # Show instructions for remote access
+            if is_remote or is_docker:
+                # Show instructions for remote/docker access
+                page_title = "🔐 Spotify Authentication (Remote/Docker)"
+                step_1_text = "Click the link below to authenticate with Spotify"
+                
                 return f'''
                 <html>
                 <head>
@@ -2651,8 +2655,8 @@ def auth_spotify():
                     </style>
                 </head>
                 <body>
-                    <h1>🔐 Spotify Authentication (Remote Access)</h1>
-                    <p><strong>Step 1:</strong> Click the link below to authenticate with Spotify</p>
+                    <h1>{page_title}</h1>
+                    <p><strong>Step 1:</strong> {step_1_text}</p>
                     <p><a href="{auth_url}" target="_blank" style="font-size: 18px; color: #1DB954;">{auth_url}</a></p>
                     <hr>
                     <p><strong>Step 2:</strong> After authorizing, you'll see a blank page. The URL will look like:</p>
