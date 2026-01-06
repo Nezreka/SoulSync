@@ -198,6 +198,7 @@ class DownloadStatus:
     transferred: int
     speed: int
     time_remaining: Optional[int] = None
+    file_path: Optional[str] = None
 
 class SoulseekClient:
     def __init__(self):
@@ -330,8 +331,9 @@ class SoulseekClient:
                     error_detail = response_text if response_text.strip() else "No error details provided"
                     
                     # Reduce noise for expected 404s during search cleanup
-                    if response.status == 404 and 'searches/' in url and method == 'DELETE':
-                        logger.debug(f"Search not found for deletion (expected): {url}")
+                    # Reduce noise for expected 404s (e.g. status checks for YouTube downloads)
+                    if response.status == 404:
+                        logger.debug(f"API request returned 404 (Not Found) for {url}")
                     else:
                         logger.error(f"API request failed: HTTP {response.status} ({response.reason}) - {error_detail}")
                         logger.debug(f"Failed request: {method} {url}")

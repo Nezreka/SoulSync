@@ -108,6 +108,13 @@ class YouTubeClient:
 
         logger.info(f"📁 YouTube client using download path: {self.download_path}")
 
+        # Callback for shutdown check (avoids circular imports)
+        self.shutdown_check = None
+
+    def set_shutdown_check(self, check_callable):
+        """Set a callback function to check for system shutdown"""
+        self.shutdown_check = check_callable
+
         # Initialize production matching engine for parity with Soulseek
         self.matching_engine = MusicMatchingEngine()
         logger.info("✅ Initialized production MusicMatchingEngine")
@@ -893,21 +900,35 @@ class YouTubeClient:
             File path if successful, None otherwise
         """
         try:
-            max_retries = 2
+            max_retries = 3
             for attempt in range(max_retries):
+                # Check for server shutdown using callback
+                if self.shutdown_check and self.shutdown_check():
+                    logger.info(f"🛑 Server shutting down, aborting download attempt {attempt + 1}")
+                    return None
+
                 try:
                     # Use default download options
                     download_opts = self.download_opts.copy()
+                    
+                    # Force best audio format to prevent 'Requested format not available' errors
+                    download_opts['format'] = 'bestaudio/best'
+                    download_opts['noplaylist'] = True
 
                     # On retry, try different player client
-                    if attempt > 0:
-                        logger.info(f"🔄 Retry {attempt + 1}/{max_retries} with different settings")
+                    if attempt == 1:
+                        logger.info(f"🔄 Retry {attempt + 1}/{max_retries} with different player client")
                         download_opts['extractor_args'] = {
                             'youtube': {
                                 'player_client': ['web'],  # Try web-only on retry
                                 'skip': ['hls', 'dash'],
                             }
                         }
+                    elif attempt >= 2:
+                        logger.info(f"🔄 Retry {attempt + 1}/{max_retries} with 'best' format (video fallback)")
+                        download_opts['format'] = 'best'  # Fallback to best available (including video)
+                        download_opts.pop('extractor_args', None) # Reset extractor args
+
 
                     # Perform download
                     with yt_dlp.YoutubeDL(download_opts) as ydl:
@@ -1004,7 +1025,8 @@ class YouTubeClient:
                 size=download_info['size'],
                 transferred=download_info['transferred'],
                 speed=download_info['speed'],
-                time_remaining=download_info.get('time_remaining')
+                time_remaining=download_info.get('time_remaining'),
+                file_path=download_info.get('file_path')
             )
 
     async def cancel_download(self, download_id: str, username: str = None, remove: bool = False) -> bool:

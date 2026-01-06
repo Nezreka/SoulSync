@@ -120,6 +120,12 @@ try:
     tidal_client = TidalClient()
     matching_engine = MusicMatchingEngine()
     sync_service = PlaylistSyncService(spotify_client, plex_client, soulseek_client, jellyfin_client, navidrome_client)
+    
+    # Inject shutdown check callback into YouTube client (avoids circular imports)
+    # The callback uses the global IS_SHUTTING_DOWN flag from this module
+    if hasattr(soulseek_client, 'youtube'):
+         soulseek_client.youtube.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
+         print("✅ Configured YouTube client shutdown callback")
 
     # Initialize web scan manager for automatic post-download scanning
     media_clients = {
@@ -499,6 +505,22 @@ class WebUIDownloadMonitor:
                         
                     # Check for timeouts and errors - retries handled directly in _should_retry_task
                     self._should_retry_task(task_id, task, live_transfers_lookup, current_time)
+
+                    # ENHANCED: Check for successful completions (especially YouTube)
+                    task_filename = task.get('filename') or task.get('track_info', {}).get('filename')
+                    task_username = task.get('username') or task.get('track_info', {}).get('username')
+                    
+                    if task_filename and task_username:
+                        lookup_key = f"{task_username}::{extract_filename(task_filename)}"
+                        live_info = live_transfers_lookup.get(lookup_key)
+                        
+                        if live_info:
+                            state = live_info.get('state', '')
+                            # Trigger post-processing if download is completed but still marked as downloading locally
+                            # 'Completed' is used by YouTubeClient, 'Succeeded' by Soulseek
+                            if state in ['Completed', 'Succeeded'] and task['status'] == 'downloading':
+                                print(f"✅ Monitor detected completed download for {task_id} ({state}) - triggering post-processing")
+                                _on_download_completed(task_id, success=True)
                 
         # ENHANCED: Add worker count validation to detect ghost workers
         self._validate_worker_counts()
@@ -1008,10 +1030,23 @@ def cleanup_monitor():
         batch_locks.clear()
         print("🧹 Cleaned up batch locks")
 
+# Global shutdown flag
+IS_SHUTTING_DOWN = False
+
 def signal_handler(signum, frame):
     """Handle SIGINT (Ctrl+C) and SIGTERM"""
+    global IS_SHUTTING_DOWN
     print(f"🛑 Signal {signum} received, cleaning up...")
+    IS_SHUTTING_DOWN = True
     cleanup_monitor()
+    
+    # Shutdown executor to prevent new tasks
+    try:
+        print("🛑 Shutting down missing_download_executor...")
+        missing_download_executor.shutdown(wait=False, cancel_futures=True)
+    except Exception as e:
+        print(f"⚠️ Error shutting down executor: {e}")
+
     sys.exit(0)
 
 # Register cleanup handlers
@@ -8212,14 +8247,26 @@ def _post_process_matched_download(context_key, context, file_path):
                 if has_metadata:
                     print(f"⚠️ [Protection] Existing file already has metadata enhancement - skipping overwrite: {os.path.basename(final_path)}")
                     print(f"🗑️ [Protection] Removing redundant download file: {os.path.basename(file_path)}")
-                    os.remove(file_path)  # Remove the redundant file
+                    try:
+                        os.remove(file_path)  # Remove the redundant file
+                    except FileNotFoundError:
+                        print(f"⚠️ [Protection] Could not remove redundant file (already gone): {file_path}")
+                    except Exception as e:
+                        print(f"⚠️ [Protection] Error removing redundant file: {e}")
                     return  # Don't overwrite the good file
                 else:
                     print(f"🔄 [Protection] Existing file lacks metadata - safe to overwrite: {os.path.basename(final_path)}")
-                    os.remove(final_path)
+                    try:
+                        os.remove(final_path)
+                    except FileNotFoundError:
+                        pass # It was just there, but now gone?
             except Exception as check_error:
                 print(f"⚠️ [Protection] Error checking existing file metadata, proceeding with overwrite: {check_error}")
-                os.remove(final_path)
+                try:
+                    if os.path.exists(final_path):
+                        os.remove(final_path)
+                except Exception as e:
+                    print(f"⚠️ [Protection] Failed to remove existing file for overwrite: {e}")
 
         _safe_move_file(file_path, final_path)
 
@@ -10684,6 +10731,11 @@ def get_valid_candidates(results, spotify_track, query):
     normalized_spotify_artist = re.sub(r'[^a-zA-Z0-9]', '', spotify_artist_name).lower()
 
     for candidate in quality_filtered_candidates:
+        # Skip artist check for YouTube results (title matching is sufficient as processed by matching engine)
+        if is_youtube_source:
+            verified_candidates.append(candidate)
+            continue
+            
         # This check is critical: it ensures the artist's name is in the file path,
         # preventing downloads from the wrong artist.
         normalized_slskd_path = re.sub(r'[^a-zA-Z0-9]', '', candidate.filename).lower()
@@ -10757,6 +10809,11 @@ def _start_next_batch_of_downloads(batch_id):
     batch_lock = _get_batch_lock(batch_id)
     
     with batch_lock:
+        # Prevent starting new tasks if shutting down
+        if IS_SHUTTING_DOWN:
+            print(f"🛑 [Batch Manager] Server shutting down - skipping new tasks for batch {batch_id}")
+            return
+
         with tasks_lock:
             if batch_id not in download_batches:
                 return
@@ -11640,7 +11697,58 @@ def _run_post_processing_worker(task_id, batch_id):
         # RESILIENT FILE-FINDING LOOP: Try up to 3 times with delays
         found_file = None
         file_location = None
+
+        # CRITICAL FIX: For YouTube downloads, the filename in task is 'id||title' (metadata),
+        # but the actual file on disk is 'Title.mp3'. We must ask the client for the real path.
+        if (task.get('username') == 'youtube' or '||' in str(task_filename)) and not found_file:
+            logger.info(f"🔧 [Post-Processing] Detected YouTube download task: {task_id}")
+            try:
+                # Query the download orchestrator for the status which contains the real file path
+                # CRITICAL FIX: Use the actual download_id designated by the client, not the internal task_id
+                actual_download_id = task.get('download_id') or task_id
+                status = asyncio.run(soulseek_client.get_download_status(actual_download_id))
+                if status and status.file_path:
+                    real_path = status.file_path
+                    if os.path.exists(real_path):
+                        # Determine if it's in download or transfer directory
+                        real_path_obj = Path(real_path)
+                        download_dir_obj = Path(download_dir)
+                        transfer_dir_obj = Path(transfer_dir)
+                        
+                        # Use absolute path comparison
+                        try:
+                            if download_dir_obj.resolve() in real_path_obj.resolve().parents:
+                                file_location = 'download'
+                            elif transfer_dir_obj.resolve() in real_path_obj.resolve().parents:
+                                file_location = 'transfer'
+                            else:
+                                file_location = 'absolute'
+                        except:
+                            # Fallback if resolve fails (e.g. permission or path issues)
+                            file_location = 'absolute'
+
+                        if file_location:
+                            # We found the file! Use the absolute path if it confuses the joining logic,
+                            # but usually we want just the filename if location is 'download'/'transfer'
+                            # CRITICAL FIX: Always use the absolute real_path.
+                            # Stripping to basename causes FileNotFoundError because post-processing
+                            # runs with CWD as project root, not download dir.
+                            found_file = real_path
+
+                            logger.info(f"✅ [Post-Processing] Resolved actual YouTube filename: {found_file} (Location: {file_location})")
+                    else:
+                        logger.warning(f"⚠️ [Post-Processing] YouTube status reported path but file missing: {real_path}")
+                else:
+                    logger.warning(f"⚠️ [Post-Processing] YouTube status returned no file_path for task {task_id}")
+            except Exception as e:
+                logger.error(f"⚠️ [Post-Processing] Failed to retrieve YouTube task status: {e}")
+
         for retry_count in range(3):
+            # If we already resolved the file (e.g. via YouTube status), skip searching
+            if found_file:
+                print(f"🎯 [Post-Processing] Skipping search loop, file already resolved: {found_file}")
+                break
+
             print(f"🔍 [Post-Processing] Attempt {retry_count + 1}/3 to find file")
             print(f"🔍 [Post-Processing] Original filename: {task_basename}")
             if expected_final_filename:
