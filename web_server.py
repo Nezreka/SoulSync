@@ -22373,7 +22373,15 @@ def merge_discography_data(owned_releases, spotify_discography):
         def normalize_title(title):
             """Normalize title for comparison"""
             import re
-            normalized = title.lower().strip()
+            import unicodedata
+            
+            # Normalize unicode characters to decomposed form (NFD)
+            normalized = unicodedata.normalize('NFD', title)
+            # Filter out non-spacing mark characters (accents)
+            normalized = "".join(c for c in normalized if unicodedata.category(c) != 'Mn')
+            
+            # Standard normalization
+            normalized = normalized.lower().strip()
             normalized = re.sub(r'[^\w\s]', '', normalized)
             normalized = re.sub(r'\s+', ' ', normalized)
             return normalized.strip()
