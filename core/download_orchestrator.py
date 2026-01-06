@@ -244,7 +244,8 @@ class DownloadOrchestrator:
             True if successful
         """
         soulseek_cleared = await self.soulseek.clear_all_completed_downloads()
-        youtube_cleared = True  # YouTube auto-removes completed downloads
+        # YouTube downloads must also be cleared from memory
+        youtube_cleared = await self.youtube.clear_all_completed_downloads()
 
         return soulseek_cleared and youtube_cleared
 
