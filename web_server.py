@@ -47,7 +47,14 @@ from beatport_unified_scraper import BeatportUnifiedScraper
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
 project_root = os.path.dirname(base_dir) # Go up one level to the project root
-config_path = os.path.join(project_root, 'config', 'config.json')
+
+# Check for environment variable first (Docker support), then fallback to calculated path
+env_config_path = os.environ.get('SOULSYNC_CONFIG_PATH')
+if env_config_path:
+    config_path = env_config_path
+    print(f"🔧 Using config path from environment: {config_path}")
+else:
+    config_path = os.path.join(project_root, 'config', 'config.json')
 
 if os.path.exists(config_path):
     print(f"Found config file at: {config_path}")

@@ -50,7 +50,7 @@ open http://localhost:8008
 SoulSync requires persistent storage for:
 
 - **`./config`** → `/app/config` - Configuration files
-- **`./database`** → `/app/database` - SQLite database files  
+- **`./data`** → `/app/data` - SQLite database files  
 - **`./logs`** → `/app/logs` - Application logs
 - **`./downloads`** → `/app/downloads` - Downloaded music files
 - **`./Transfer`** → `/app/Transfer` - Processed/matched music files
@@ -229,7 +229,7 @@ services:
       - "8888:8888"
     volumes:
       - ./config:/app/config
-      - ./database:/app/database  
+      - ./data:/app/data  
       - ./logs:/app/logs
       - ./downloads:/app/downloads
       - ./Transfer:/app/Transfer
