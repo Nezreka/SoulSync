@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <title>SoulSync - Music Sync & Manager</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
+
 <body>
     <div class="main-container">
         <!-- Sidebar - Always Visible -->
@@ -14,7 +16,7 @@
                 <h1 class="app-name">SoulSync</h1>
                 <p class="app-subtitle">Music Sync & Manager</p>
             </div>
-            
+
             <!-- Navigation Section -->
             <nav class="sidebar-nav">
                 <button class="nav-button active" data-page="dashboard">
@@ -46,10 +48,10 @@
                     <span class="nav-text">Settings</span>
                 </button>
             </nav>
-            
+
             <!-- Spacer -->
             <div class="sidebar-spacer"></div>
-            
+
             <!-- Media Player Section -->
             <div class="media-player" id="media-player">
                 <!-- Loading Animation -->
@@ -59,7 +61,7 @@
                     </div>
                     <div class="loading-text">0%</div>
                 </div>
-                
+
                 <!-- Header (always visible) -->
                 <div class="media-header">
                     <div class="media-info">
@@ -68,11 +70,11 @@
                     </div>
                     <button class="play-button" id="play-button" disabled>▷</button>
                 </div>
-                
+
                 <!-- Expanded Content (hidden initially) -->
                 <div class="media-expanded hidden" id="media-expanded">
                     <div class="album-name" id="album-name">Unknown Album</div>
-                    
+
                     <!-- Progress Bar and Time Display -->
                     <div class="progress-section">
                         <div class="time-display">
@@ -84,10 +86,11 @@
                             <div class="progress-track">
                                 <div class="progress-fill" id="progress-fill"></div>
                             </div>
-                            <input type="range" class="progress-bar" id="progress-bar" min="0" max="100" value="0" step="0.1">
+                            <input type="range" class="progress-bar" id="progress-bar" min="0" max="100" value="0"
+                                step="0.1">
                         </div>
                     </div>
-                    
+
                     <div class="media-controls">
                         <div class="volume-control">
                             <span class="volume-icon">🔊</span>
@@ -96,13 +99,13 @@
                         <button class="stop-button" id="stop-button" disabled>⏹</button>
                     </div>
                 </div>
-                
+
                 <!-- No Track Message -->
                 <div class="no-track-message" id="no-track-message">
                     Start playing music to see controls
                 </div>
             </div>
-            
+
             <!-- Crypto Donation Section -->
             <div class="crypto-donation">
                 <div class="donation-header">
@@ -118,18 +121,19 @@
                         <span class="donation-name">Bitcoin</span>
                         <span class="donation-address">3JVWrR...dPTqdS</span>
                     </div>
-                    <div class="donation-item" onclick="copyAddress('0x343fC48c2cd1C6332b0df9a58F86e6520a026AC5', 'Ethereum')">
+                    <div class="donation-item"
+                        onclick="copyAddress('0x343fC48c2cd1C6332b0df9a58F86e6520a026AC5', 'Ethereum')">
                         <span class="donation-name">Ethereum</span>
                         <span class="donation-address">0x343f...026AC5</span>
                     </div>
                 </div>
             </div>
-            
+
             <!-- Version Section -->
             <div class="version-section">
-                <button class="version-button" onclick="showVersionInfo()">v1.2</button>
+                <button class="version-button" onclick="showVersionInfo()">v1.3</button>
             </div>
-            
+
             <!-- Status Section -->
             <div class="status-section">
                 <h4 class="status-title">Service Status</h4>
@@ -147,7 +151,7 @@
                 </div>
             </div>
         </div>
-        
+
         <!-- Main Content Area -->
         <div class="main-content">
             <!-- Dashboard Page -->
@@ -160,7 +164,8 @@
                         </div>
                         <div class="header-spacer"></div>
                         <div class="header-actions">
-                            <button class="header-button watchlist-button" id="watchlist-button">👁️ Watchlist (0)</button>
+                            <button class="header-button watchlist-button" id="watchlist-button">👁️ Watchlist
+                                (0)</button>
                             <button class="header-button wishlist-button" id="wishlist-button">🎵 Wishlist (0)</button>
                         </div>
                     </div>
@@ -171,34 +176,40 @@
                             <div class="service-card" id="spotify-service-card">
                                 <div class="service-card-header">
                                     <span class="service-card-title">Spotify</span>
-                                    <span class="service-card-indicator disconnected" id="spotify-status-indicator">●</span>
+                                    <span class="service-card-indicator disconnected"
+                                        id="spotify-status-indicator">●</span>
                                 </div>
                                 <p class="service-card-status-text" id="spotify-status-text">Disconnected</p>
                                 <p class="service-card-response-time" id="spotify-response-time">Response: --</p>
                                 <div class="service-card-footer">
-                                    <button class="service-card-button" onclick="testDashboardConnection('spotify')">Test Connection</button>
+                                    <button class="service-card-button"
+                                        onclick="testDashboardConnection('spotify')">Test Connection</button>
                                 </div>
                             </div>
                             <div class="service-card" id="media-server-service-card">
                                 <div class="service-card-header">
                                     <span class="service-card-title" id="media-server-service-name">Server</span>
-                                    <span class="service-card-indicator disconnected" id="media-server-status-indicator">●</span>
+                                    <span class="service-card-indicator disconnected"
+                                        id="media-server-status-indicator">●</span>
                                 </div>
                                 <p class="service-card-status-text" id="media-server-status-text">Disconnected</p>
                                 <p class="service-card-response-time" id="media-server-response-time">Response: --</p>
                                 <div class="service-card-footer">
-                                    <button class="service-card-button" onclick="testDashboardConnection('server')">Test Connection</button>
+                                    <button class="service-card-button" onclick="testDashboardConnection('server')">Test
+                                        Connection</button>
                                 </div>
                             </div>
                             <div class="service-card" id="soulseek-service-card">
                                 <div class="service-card-header">
                                     <span class="service-card-title">Soulseek</span>
-                                    <span class="service-card-indicator disconnected" id="soulseek-status-indicator">●</span>
+                                    <span class="service-card-indicator disconnected"
+                                        id="soulseek-status-indicator">●</span>
                                 </div>
                                 <p class="service-card-status-text" id="soulseek-status-text">Disconnected</p>
                                 <p class="service-card-response-time" id="soulseek-response-time">Response: --</p>
                                 <div class="service-card-footer">
-                                    <button class="service-card-button" onclick="testDashboardConnection('soulseek')">Test Connection</button>
+                                    <button class="service-card-button"
+                                        onclick="testDashboardConnection('soulseek')">Test Connection</button>
                                 </div>
                             </div>
                         </div>
@@ -239,14 +250,15 @@
                             </div>
                         </div>
                     </div>
-                    
+
                     <div class="dashboard-section">
                         <h3 class="section-title">Tools & Operations</h3>
                         <div class="tools-grid">
                             <div class="tool-card" id="db-updater-card">
                                 <div class="tool-card-header">
                                     <h4 class="tool-card-title">Database Updater</h4>
-                                    <button class="tool-help-button" data-tool="db-updater" title="Learn more about this tool">?</button>
+                                    <button class="tool-help-button" data-tool="db-updater"
+                                        title="Learn more about this tool">?</button>
                                 </div>
                                 <p class="tool-card-info">Last Full Refresh: <span id="db-last-refresh">Never</span></p>
                                 <div class="tool-card-stats">
@@ -277,7 +289,7 @@
                                 <div class="tool-card-progress-section">
                                     <p class="progress-phase-label" id="db-phase-label">Idle</p>
                                     <div class="progress-bar-container">
-                                         <div class="progress-bar-fill" id="db-progress-bar" style="width: 0%;"></div>
+                                        <div class="progress-bar-fill" id="db-progress-bar" style="width: 0%;"></div>
                                     </div>
                                     <p class="progress-details-label" id="db-progress-label">0 / 0 artists (0.0%)</p>
                                 </div>
@@ -286,10 +298,12 @@
                             <div class="tool-card" id="metadata-updater-card">
                                 <div class="tool-card-header">
                                     <h4 class="tool-card-title">Metadata Updater</h4>
-                                    <button class="tool-help-button" data-tool="metadata-updater" title="Learn more about this tool">?</button>
+                                    <button class="tool-help-button" data-tool="metadata-updater"
+                                        title="Learn more about this tool">?</button>
                                 </div>
-                                <p class="metadata-updater-description tool-card-info">Updates artist photos, genres, and album art from Spotify.</p>
-                                 <div class="tool-card-controls">
+                                <p class="metadata-updater-description tool-card-info">Updates artist photos, genres,
+                                    and album art from Spotify.</p>
+                                <div class="tool-card-controls">
                                     <select id="metadata-refresh-interval">
                                         <option value="180">6 months</option>
                                         <option value="90">3 months</option>
@@ -300,19 +314,23 @@
                                     </select>
                                     <button id="metadata-update-button">Begin Update</button>
                                 </div>
-                                 <div class="tool-card-progress-section">
-                                    <p class="progress-phase-label" id="metadata-phase-label">Current Artist: Not running</p>
+                                <div class="tool-card-progress-section">
+                                    <p class="progress-phase-label" id="metadata-phase-label">Current Artist: Not
+                                        running</p>
                                     <div class="progress-bar-container">
-                                         <div class="progress-bar-fill" id="metadata-progress-bar" style="width: 0%;"></div>
+                                        <div class="progress-bar-fill" id="metadata-progress-bar" style="width: 0%;">
+                                        </div>
                                     </div>
-                                    <p class="progress-details-label" id="metadata-progress-label">0 / 0 artists (0.0%)</p>
+                                    <p class="progress-details-label" id="metadata-progress-label">0 / 0 artists (0.0%)
+                                    </p>
                                 </div>
                             </div>
 
                             <div class="tool-card" id="quality-scanner-card">
                                 <div class="tool-card-header">
                                     <h4 class="tool-card-title">Quality Scanner</h4>
-                                    <button class="tool-help-button" data-tool="quality-scanner" title="Learn more about this tool">?</button>
+                                    <button class="tool-help-button" data-tool="quality-scanner"
+                                        title="Learn more about this tool">?</button>
                                 </div>
                                 <p class="tool-card-info">Scan library for tracks below quality preferences</p>
                                 <div class="tool-card-stats">
@@ -343,16 +361,19 @@
                                 <div class="tool-card-progress-section">
                                     <p class="progress-phase-label" id="quality-phase-label">Ready to scan</p>
                                     <div class="progress-bar-container">
-                                         <div class="progress-bar-fill" id="quality-progress-bar" style="width: 0%;"></div>
+                                        <div class="progress-bar-fill" id="quality-progress-bar" style="width: 0%;">
+                                        </div>
                                     </div>
-                                    <p class="progress-details-label" id="quality-progress-label">0 / 0 tracks scanned (0.0%)</p>
+                                    <p class="progress-details-label" id="quality-progress-label">0 / 0 tracks scanned
+                                        (0.0%)</p>
                                 </div>
                             </div>
 
                             <div class="tool-card" id="duplicate-cleaner-card">
                                 <div class="tool-card-header">
                                     <h4 class="tool-card-title">Duplicate Cleaner</h4>
-                                    <button class="tool-help-button" data-tool="duplicate-cleaner" title="Learn more about this tool">?</button>
+                                    <button class="tool-help-button" data-tool="duplicate-cleaner"
+                                        title="Learn more about this tool">?</button>
                                 </div>
                                 <p class="tool-card-info">Detect and remove duplicate tracks in Transfer folder</p>
                                 <div class="tool-card-stats">
@@ -379,16 +400,19 @@
                                 <div class="tool-card-progress-section">
                                     <p class="progress-phase-label" id="duplicate-phase-label">Ready to scan</p>
                                     <div class="progress-bar-container">
-                                         <div class="progress-bar-fill" id="duplicate-progress-bar" style="width: 0%;"></div>
+                                        <div class="progress-bar-fill" id="duplicate-progress-bar" style="width: 0%;">
+                                        </div>
                                     </div>
-                                    <p class="progress-details-label" id="duplicate-progress-label">0 files scanned (0.0%)</p>
+                                    <p class="progress-details-label" id="duplicate-progress-label">0 files scanned
+                                        (0.0%)</p>
                                 </div>
                             </div>
 
                             <div class="tool-card" id="media-scan-card" style="display: none;">
                                 <div class="tool-card-header">
                                     <h4 class="tool-card-title">Media Server Scan</h4>
-                                    <button class="tool-help-button" data-tool="media-scan" title="Learn more about this tool">?</button>
+                                    <button class="tool-help-button" data-tool="media-scan"
+                                        title="Learn more about this tool">?</button>
                                 </div>
                                 <p class="tool-card-info">Manually trigger Plex media library scan for music</p>
                                 <div class="tool-card-stats">
@@ -410,9 +434,11 @@
                                 <div class="tool-card-progress-section">
                                     <p class="progress-phase-label" id="media-scan-phase-label">Ready to scan</p>
                                     <div class="progress-bar-container">
-                                         <div class="progress-bar-fill" id="media-scan-progress-bar" style="width: 0%;"></div>
+                                        <div class="progress-bar-fill" id="media-scan-progress-bar" style="width: 0%;">
+                                        </div>
                                     </div>
-                                    <p class="progress-details-label" id="media-scan-progress-label">Waiting for scan request</p>
+                                    <p class="progress-details-label" id="media-scan-progress-label">Waiting for scan
+                                        request</p>
                                 </div>
                             </div>
                         </div>
@@ -433,13 +459,14 @@
                     </div>
                 </div>
             </div>
-            
+
             <!-- Main container for the Sync page -->
             <div class="page" id="sync-page">
                 <!-- Header -->
                 <div class="sync-header">
                     <h2 class="sync-title">Playlist Sync</h2>
-                    <p class="sync-subtitle">Synchronize your Spotify, Tidal, and YouTube playlists with your media server</p>
+                    <p class="sync-subtitle">Synchronize your Spotify, Tidal, and YouTube playlists with your media
+                        server</p>
                 </div>
 
                 <!-- Main two-column content area -->
@@ -486,7 +513,8 @@
                         <!-- YouTube Tab Content -->
                         <div class="sync-tab-content" id="youtube-tab-content">
                             <div class="youtube-input-section">
-                                <input type="text" id="youtube-url-input" placeholder="Paste YouTube Music Playlist URL...">
+                                <input type="text" id="youtube-url-input"
+                                    placeholder="Paste YouTube Music Playlist URL...">
                                 <button id="youtube-parse-btn">Parse Playlist</button>
                             </div>
                             <div class="playlist-scroll-container" id="youtube-playlist-container">
@@ -511,7 +539,7 @@
 
                             <!-- Browse Charts Tab Content -->
                             <div class="beatport-tab-content" id="beatport-browse-content">
-                                
+
 
                                 <div class="beatport-navigation">
                                     <!-- New Homepage Main View -->
@@ -549,7 +577,8 @@
                                         <div class="homepage-main-charts-section">
                                             <h3 class="section-title">📊 Main Charts</h3>
                                             <div class="genre-chart-types-grid">
-                                                <div class="genre-chart-type-card" data-chart-type="top-10" data-chart-endpoint="/api/beatport/top-100">
+                                                <div class="genre-chart-type-card" data-chart-type="top-10"
+                                                    data-chart-endpoint="/api/beatport/top-100">
                                                     <div class="chart-type-icon">🔥</div>
                                                     <div class="chart-type-info">
                                                         <h3>Beatport Top 10</h3>
@@ -557,7 +586,8 @@
                                                         <span class="track-count">10 tracks</span>
                                                     </div>
                                                 </div>
-                                                <div class="genre-chart-type-card" data-chart-type="top-100" data-chart-endpoint="/api/beatport/top-100">
+                                                <div class="genre-chart-type-card" data-chart-type="top-100"
+                                                    data-chart-endpoint="/api/beatport/top-100">
                                                     <div class="chart-type-icon">💯</div>
                                                     <div class="chart-type-info">
                                                         <h3>Beatport Top 100</h3>
@@ -572,7 +602,8 @@
                                         <div class="homepage-releases-section">
                                             <h3 class="section-title">🎵 Releases</h3>
                                             <div class="genre-chart-types-grid">
-                                                <div class="genre-chart-type-card" data-chart-type="releases-top-10" data-chart-endpoint="/api/beatport/homepage/top-10-releases">
+                                                <div class="genre-chart-type-card" data-chart-type="releases-top-10"
+                                                    data-chart-endpoint="/api/beatport/homepage/top-10-releases">
                                                     <div class="chart-type-icon">🆕</div>
                                                     <div class="chart-type-info">
                                                         <h3>Top 10 Releases</h3>
@@ -580,7 +611,8 @@
                                                         <span class="track-count">10 releases</span>
                                                     </div>
                                                 </div>
-                                                <div class="genre-chart-type-card" data-chart-type="releases-top-100" data-chart-endpoint="/api/beatport/top-100-releases">
+                                                <div class="genre-chart-type-card" data-chart-type="releases-top-100"
+                                                    data-chart-endpoint="/api/beatport/top-100-releases">
                                                     <div class="chart-type-icon">📊</div>
                                                     <div class="chart-type-info">
                                                         <h3>Top 100 Releases</h3>
@@ -588,7 +620,8 @@
                                                         <span class="track-count">100 releases</span>
                                                     </div>
                                                 </div>
-                                                <div class="genre-chart-type-card" data-chart-type="latest-releases" data-chart-endpoint="/api/beatport/homepage/new-releases">
+                                                <div class="genre-chart-type-card" data-chart-type="latest-releases"
+                                                    data-chart-endpoint="/api/beatport/homepage/new-releases">
                                                     <div class="chart-type-icon">🕒</div>
                                                     <div class="chart-type-info">
                                                         <h3>Latest Releases</h3>
@@ -603,7 +636,8 @@
                                         <div class="homepage-hype-section">
                                             <h3 class="section-title">🔥 Hype</h3>
                                             <div class="genre-chart-types-grid">
-                                                <div class="genre-chart-type-card" data-chart-type="hype-top-10" data-chart-endpoint="/api/beatport/hype-top-100">
+                                                <div class="genre-chart-type-card" data-chart-type="hype-top-10"
+                                                    data-chart-endpoint="/api/beatport/hype-top-100">
                                                     <div class="chart-type-icon">🚀</div>
                                                     <div class="chart-type-info">
                                                         <h3>Hype Top 10</h3>
@@ -611,7 +645,8 @@
                                                         <span class="track-count">10 tracks</span>
                                                     </div>
                                                 </div>
-                                                <div class="genre-chart-type-card" data-chart-type="hype-top-100" data-chart-endpoint="/api/beatport/hype-top-100">
+                                                <div class="genre-chart-type-card" data-chart-type="hype-top-100"
+                                                    data-chart-endpoint="/api/beatport/hype-top-100">
                                                     <div class="chart-type-icon">🔥</div>
                                                     <div class="chart-type-info">
                                                         <h3>Hype Top 100</h3>
@@ -619,7 +654,8 @@
                                                         <span class="track-count">100 tracks</span>
                                                     </div>
                                                 </div>
-                                                <div class="genre-chart-type-card" data-chart-type="hype-picks" data-chart-endpoint="/api/beatport/homepage/hype-picks">
+                                                <div class="genre-chart-type-card" data-chart-type="hype-picks"
+                                                    data-chart-endpoint="/api/beatport/homepage/hype-picks">
                                                     <div class="chart-type-icon">⚡</div>
                                                     <div class="chart-type-info">
                                                         <h3>Hype Picks</h3>
@@ -669,7 +705,8 @@
                                                 <h3>House</h3>
                                                 <span class="genre-track-count">Top 100</span>
                                             </div>
-                                            <div class="beatport-genre-item" data-genre-slug="tech-house" data-genre-id="11">
+                                            <div class="beatport-genre-item" data-genre-slug="tech-house"
+                                                data-genre-id="11">
                                                 <div class="genre-icon">🔧</div>
                                                 <h3>Tech House</h3>
                                                 <span class="genre-track-count">Top 100</span>
@@ -679,7 +716,8 @@
                                                 <h3>Techno</h3>
                                                 <span class="genre-track-count">Top 100</span>
                                             </div>
-                                            <div class="beatport-genre-item" data-genre-slug="deep-house" data-genre-id="12">
+                                            <div class="beatport-genre-item" data-genre-slug="deep-house"
+                                                data-genre-id="12">
                                                 <div class="genre-icon">🌊</div>
                                                 <h3>Deep House</h3>
                                                 <span class="genre-track-count">Top 100</span>
@@ -689,37 +727,44 @@
                                                 <h3>Trance</h3>
                                                 <span class="genre-track-count">Top 100</span>
                                             </div>
-                                            <div class="beatport-genre-item" data-genre-slug="drum-and-bass" data-genre-id="1">
+                                            <div class="beatport-genre-item" data-genre-slug="drum-and-bass"
+                                                data-genre-id="1">
                                                 <div class="genre-icon">🥁</div>
                                                 <h3>Drum & Bass</h3>
                                                 <span class="genre-track-count">Top 100</span>
                                             </div>
-                                            <div class="beatport-genre-item" data-genre-slug="dubstep" data-genre-id="18">
+                                            <div class="beatport-genre-item" data-genre-slug="dubstep"
+                                                data-genre-id="18">
                                                 <div class="genre-icon">🎵</div>
                                                 <h3>Dubstep</h3>
                                                 <span class="genre-track-count">Top 100</span>
                                             </div>
-                                            <div class="beatport-genre-item" data-genre-slug="progressive-house" data-genre-id="15">
+                                            <div class="beatport-genre-item" data-genre-slug="progressive-house"
+                                                data-genre-id="15">
                                                 <div class="genre-icon">📈</div>
                                                 <h3>Progressive House</h3>
                                                 <span class="genre-track-count">Top 100</span>
                                             </div>
-                                            <div class="beatport-genre-item" data-genre-slug="melodic-house-and-techno" data-genre-id="90">
+                                            <div class="beatport-genre-item" data-genre-slug="melodic-house-and-techno"
+                                                data-genre-id="90">
                                                 <div class="genre-icon">🎼</div>
                                                 <h3>Melodic House & Techno</h3>
                                                 <span class="genre-track-count">Top 100</span>
                                             </div>
-                                            <div class="beatport-genre-item" data-genre-slug="afro-house" data-genre-id="89">
+                                            <div class="beatport-genre-item" data-genre-slug="afro-house"
+                                                data-genre-id="89">
                                                 <div class="genre-icon">🌍</div>
                                                 <h3>Afro House</h3>
                                                 <span class="genre-track-count">Top 100</span>
                                             </div>
-                                            <div class="beatport-genre-item" data-genre-slug="minimal" data-genre-id="14">
+                                            <div class="beatport-genre-item" data-genre-slug="minimal"
+                                                data-genre-id="14">
                                                 <div class="genre-icon">⚫</div>
                                                 <h3>Minimal</h3>
                                                 <span class="genre-track-count">Top 100</span>
                                             </div>
-                                            <div class="beatport-genre-item" data-genre-slug="nu-disco" data-genre-id="50">
+                                            <div class="beatport-genre-item" data-genre-slug="nu-disco"
+                                                data-genre-id="50">
                                                 <div class="genre-icon">✨</div>
                                                 <h3>Nu Disco</h3>
                                                 <span class="genre-track-count">Top 100</span>
@@ -730,13 +775,16 @@
                                     <!-- Genre Detail Sub-View -->
                                     <div class="beatport-sub-view" id="beatport-genre-detail-view">
                                         <div class="beatport-breadcrumb">
-                                            <button class="breadcrumb-back" id="genre-detail-back">← Back to Genre Explorer</button>
-                                            <span class="breadcrumb-path" id="genre-detail-breadcrumb">Browse Charts > Genre Explorer > Loading...</span>
+                                            <button class="breadcrumb-back" id="genre-detail-back">← Back to Genre
+                                                Explorer</button>
+                                            <span class="breadcrumb-path" id="genre-detail-breadcrumb">Browse Charts >
+                                                Genre Explorer > Loading...</span>
                                         </div>
                                         <div class="genre-detail-header">
                                             <div class="genre-detail-info">
                                                 <h2 id="genre-detail-title">Loading Genre...</h2>
-                                                <p id="genre-detail-description">Explore all chart types for this genre</p>
+                                                <p id="genre-detail-description">Explore all chart types for this genre
+                                                </p>
                                             </div>
                                         </div>
                                         <!-- Main Chart Types Section -->
@@ -860,13 +908,16 @@
                                     <!-- Genre Charts List Sub-View -->
                                     <div class="beatport-sub-view" id="beatport-genre-charts-list-view">
                                         <div class="beatport-breadcrumb">
-                                            <button class="breadcrumb-back" id="genre-charts-list-back">← Back to Genre Charts</button>
-                                            <span class="breadcrumb-path" id="genre-charts-list-breadcrumb">Browse Charts > Genre Explorer > Genre Charts > New Charts</span>
+                                            <button class="breadcrumb-back" id="genre-charts-list-back">← Back to Genre
+                                                Charts</button>
+                                            <span class="breadcrumb-path" id="genre-charts-list-breadcrumb">Browse
+                                                Charts > Genre Explorer > Genre Charts > New Charts</span>
                                         </div>
                                         <div class="genre-charts-list-header">
                                             <div class="genre-charts-list-info">
                                                 <h2 id="genre-charts-list-title">Loading Charts...</h2>
-                                                <p id="genre-charts-list-description">Browse all available chart collections for this genre</p>
+                                                <p id="genre-charts-list-description">Browse all available chart
+                                                    collections for this genre</p>
                                             </div>
                                         </div>
                                         <div class="genre-charts-list-container">
@@ -890,7 +941,8 @@
                                     <button class="refresh-button beatport" id="beatport-clear-btn">🗑️ Clear</button>
                                 </div>
                                 <div class="playlist-scroll-container" id="beatport-playlist-container">
-                                    <div class="playlist-placeholder">Your created Beatport playlists will appear here.</div>
+                                    <div class="playlist-placeholder">Your created Beatport playlists will appear here.
+                                    </div>
                                 </div>
                             </div>
 
@@ -910,8 +962,10 @@
 
                                         <!-- Slider Navigation -->
                                         <div class="beatport-rebuild-slider-nav">
-                                            <button class="beatport-rebuild-nav-btn beatport-rebuild-prev-btn" id="beatport-rebuild-prev-btn">‹</button>
-                                            <button class="beatport-rebuild-nav-btn beatport-rebuild-next-btn" id="beatport-rebuild-next-btn">›</button>
+                                            <button class="beatport-rebuild-nav-btn beatport-rebuild-prev-btn"
+                                                id="beatport-rebuild-prev-btn">‹</button>
+                                            <button class="beatport-rebuild-nav-btn beatport-rebuild-next-btn"
+                                                id="beatport-rebuild-next-btn">›</button>
                                         </div>
 
                                         <!-- Slider Indicators -->
@@ -943,7 +997,8 @@
                                 <div class="beatport-top10-section">
                                     <div class="beatport-top10-header">
                                         <h2 class="beatport-top10-title">🏆 Top 10 Lists</h2>
-                                        <p class="beatport-top10-subtitle">Current trending tracks from Beatport charts</p>
+                                        <p class="beatport-top10-subtitle">Current trending tracks from Beatport charts
+                                        </p>
                                     </div>
 
                                     <div class="beatport-top10-container">
@@ -951,7 +1006,8 @@
                                         <div class="beatport-top10-list" id="beatport-top10-list">
                                             <div class="beatport-top10-list-header">
                                                 <h3 class="beatport-top10-list-title">🎵 Beatport Top 10</h3>
-                                                <p class="beatport-top10-list-subtitle">Most popular tracks on Beatport</p>
+                                                <p class="beatport-top10-list-subtitle">Most popular tracks on Beatport
+                                                </p>
                                             </div>
                                             <div class="beatport-top10-tracks" id="beatport-top10-tracks">
                                                 <!-- Loading placeholder -->
@@ -968,7 +1024,8 @@
                                         <div class="beatport-hype10-list" id="beatport-hype10-list">
                                             <div class="beatport-hype10-list-header">
                                                 <h3 class="beatport-hype10-list-title">🔥 Hype Top 10</h3>
-                                                <p class="beatport-hype10-list-subtitle">Editor's hottest trending picks</p>
+                                                <p class="beatport-hype10-list-subtitle">Editor's hottest trending picks
+                                                </p>
                                             </div>
                                             <div class="beatport-hype10-tracks" id="beatport-hype10-tracks">
                                                 <!-- Loading placeholder -->
@@ -987,7 +1044,8 @@
                                 <div class="beatport-releases-top10-section">
                                     <div class="beatport-releases-top10-header">
                                         <h2 class="beatport-releases-top10-title">💿 Top 10 Releases</h2>
-                                        <p class="beatport-releases-top10-subtitle">Most popular albums and EPs on Beatport</p>
+                                        <p class="beatport-releases-top10-subtitle">Most popular albums and EPs on
+                                            Beatport</p>
                                     </div>
 
                                     <div class="beatport-releases-top10-container">
@@ -1012,7 +1070,8 @@
 
                                     <div class="beatport-releases-slider-container">
                                         <div class="beatport-releases-slider" id="beatport-releases-slider">
-                                            <div class="beatport-releases-slider-track" id="beatport-releases-slider-track">
+                                            <div class="beatport-releases-slider-track"
+                                                id="beatport-releases-slider-track">
                                                 <!-- Loading placeholder -->
                                                 <div class="beatport-releases-loading">
                                                     <div class="beatport-releases-loading-content">
@@ -1024,12 +1083,15 @@
 
                                             <!-- Slider Navigation -->
                                             <div class="beatport-releases-slider-nav">
-                                                <button class="beatport-releases-nav-btn beatport-releases-prev-btn" id="beatport-releases-prev-btn">‹</button>
-                                                <button class="beatport-releases-nav-btn beatport-releases-next-btn" id="beatport-releases-next-btn">›</button>
+                                                <button class="beatport-releases-nav-btn beatport-releases-prev-btn"
+                                                    id="beatport-releases-prev-btn">‹</button>
+                                                <button class="beatport-releases-nav-btn beatport-releases-next-btn"
+                                                    id="beatport-releases-next-btn">›</button>
                                             </div>
 
                                             <!-- Slider Indicators -->
-                                            <div class="beatport-releases-slider-indicators" id="beatport-releases-slider-indicators">
+                                            <div class="beatport-releases-slider-indicators"
+                                                id="beatport-releases-slider-indicators">
                                                 <!-- Indicators will be dynamically generated -->
                                             </div>
                                         </div>
@@ -1040,12 +1102,14 @@
                                 <div class="beatport-hype-picks-section">
                                     <div class="beatport-hype-picks-header">
                                         <h2 class="beatport-hype-picks-title">🔥 Hype Picks</h2>
-                                        <p class="beatport-hype-picks-subtitle">Editor selected trending tracks from Beatport</p>
+                                        <p class="beatport-hype-picks-subtitle">Editor selected trending tracks from
+                                            Beatport</p>
                                     </div>
 
                                     <div class="beatport-hype-picks-slider-container">
                                         <div class="beatport-hype-picks-slider" id="beatport-hype-picks-slider">
-                                            <div class="beatport-hype-picks-slider-track" id="beatport-hype-picks-slider-track">
+                                            <div class="beatport-hype-picks-slider-track"
+                                                id="beatport-hype-picks-slider-track">
                                                 <!-- Loading placeholder -->
                                                 <div class="beatport-hype-picks-loading">
                                                     <div class="beatport-hype-picks-loading-content">
@@ -1057,12 +1121,15 @@
 
                                             <!-- Slider Navigation -->
                                             <div class="beatport-hype-picks-slider-nav">
-                                                <button class="beatport-hype-picks-nav-btn beatport-hype-picks-prev-btn" id="beatport-hype-picks-prev-btn">‹</button>
-                                                <button class="beatport-hype-picks-nav-btn beatport-hype-picks-next-btn" id="beatport-hype-picks-next-btn">›</button>
+                                                <button class="beatport-hype-picks-nav-btn beatport-hype-picks-prev-btn"
+                                                    id="beatport-hype-picks-prev-btn">‹</button>
+                                                <button class="beatport-hype-picks-nav-btn beatport-hype-picks-next-btn"
+                                                    id="beatport-hype-picks-next-btn">›</button>
                                             </div>
 
                                             <!-- Slider Indicators -->
-                                            <div class="beatport-hype-picks-slider-indicators" id="beatport-hype-picks-slider-indicators">
+                                            <div class="beatport-hype-picks-slider-indicators"
+                                                id="beatport-hype-picks-slider-indicators">
                                                 <!-- Indicators will be dynamically generated -->
                                             </div>
                                         </div>
@@ -1073,7 +1140,8 @@
                                 <div class="beatport-charts-section">
                                     <div class="beatport-charts-header">
                                         <h2 class="beatport-charts-title">🔥 Featured Charts</h2>
-                                        <p class="beatport-charts-subtitle">Top chart collections from Beatport creators</p>
+                                        <p class="beatport-charts-subtitle">Top chart collections from Beatport creators
+                                        </p>
                                     </div>
 
                                     <div class="beatport-charts-slider-container">
@@ -1090,12 +1158,15 @@
 
                                             <!-- Slider Navigation -->
                                             <div class="beatport-charts-slider-nav">
-                                                <button class="beatport-charts-nav-btn beatport-charts-prev-btn" id="beatport-charts-prev-btn">‹</button>
-                                                <button class="beatport-charts-nav-btn beatport-charts-next-btn" id="beatport-charts-next-btn">›</button>
+                                                <button class="beatport-charts-nav-btn beatport-charts-prev-btn"
+                                                    id="beatport-charts-prev-btn">‹</button>
+                                                <button class="beatport-charts-nav-btn beatport-charts-next-btn"
+                                                    id="beatport-charts-next-btn">›</button>
                                             </div>
 
                                             <!-- Slider Indicators -->
-                                            <div class="beatport-charts-slider-indicators" id="beatport-charts-slider-indicators">
+                                            <div class="beatport-charts-slider-indicators"
+                                                id="beatport-charts-slider-indicators">
                                                 <!-- Indicators will be dynamically generated -->
                                             </div>
                                         </div>
@@ -1123,12 +1194,15 @@
 
                                             <!-- Slider Navigation -->
                                             <div class="beatport-dj-slider-nav">
-                                                <button class="beatport-dj-nav-btn beatport-dj-prev-btn" id="beatport-dj-prev-btn">‹</button>
-                                                <button class="beatport-dj-nav-btn beatport-dj-next-btn" id="beatport-dj-next-btn">›</button>
+                                                <button class="beatport-dj-nav-btn beatport-dj-prev-btn"
+                                                    id="beatport-dj-prev-btn">‹</button>
+                                                <button class="beatport-dj-nav-btn beatport-dj-next-btn"
+                                                    id="beatport-dj-next-btn">›</button>
                                             </div>
 
                                             <!-- Slider Indicators -->
-                                            <div class="beatport-dj-slider-indicators" id="beatport-dj-slider-indicators">
+                                            <div class="beatport-dj-slider-indicators"
+                                                id="beatport-dj-slider-indicators">
                                                 <!-- Indicators will be dynamically generated -->
                                             </div>
                                         </div>
@@ -1156,7 +1230,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <!-- Downloads Page -->
             <div class="page" id="downloads-page">
                 <!-- 
@@ -1164,12 +1238,12 @@
                 creating the two-panel layout for the page.
                 -->
                 <div class="downloads-content">
-                    
+
                     <!-- ======================================================= -->
                     <!-- == LEFT PANEL: Search, Filters, and Results          == -->
                     <!-- ======================================================= -->
                     <div class="downloads-main-panel">
-                        
+
                         <!-- Header: Replicates create_elegant_header() -->
                         <div class="downloads-header">
                             <div class="downloads-header-content">
@@ -1177,7 +1251,8 @@
                                     <h2 class="downloads-title">🎵 Music Downloads</h2>
                                     <p class="downloads-subtitle">Search, discover, and download high-quality music</p>
                                 </div>
-                                <button id="toggle-download-manager-btn" class="toggle-manager-btn" title="Toggle Download Manager">
+                                <button id="toggle-download-manager-btn" class="toggle-manager-btn"
+                                    title="Toggle Download Manager">
                                     <span class="toggle-icon">›</span>
                                 </button>
                             </div>
@@ -1202,79 +1277,99 @@
                         <div id="basic-search-section" class="search-section">
                             <!-- Search Bar: Replicates create_elegant_search_bar() -->
                             <div class="search-bar-container">
-                            <input type="text" id="downloads-search-input" placeholder="Search for music... (e.g., 'Virtual Mage', 'Queen Bohemian Rhapsody')">
-                            <button id="downloads-cancel-btn" class="hidden">✕ Cancel</button>
-                            <button id="downloads-search-btn">🔍 Search</button>
-                        </div>
-
-                       
-                        <div id="filters-container" class="filters-container hidden">
-                            <div class="filter-toggle-header">
-                                <button id="filter-toggle-btn" class="filter-toggle-btn">⏷ Filters</button>
+                                <input type="text" id="downloads-search-input"
+                                    placeholder="Search for music... (e.g., 'Virtual Mage', 'Queen Bohemian Rhapsody')">
+                                <button id="downloads-cancel-btn" class="hidden">✕ Cancel</button>
+                                <button id="downloads-search-btn">🔍 Search</button>
                             </div>
 
-                            <div id="filter-content" class="filter-content hidden">
-                                <!-- Filter by Type -->
-                                <div class="filter-group">
-                                    <label class="filter-label">Type:</label>
-                                    <button class="filter-btn active" data-filter-type="type" data-value="all">All</button>
-                                    <button class="filter-btn" data-filter-type="type" data-value="album">Albums</button>
-                                    <button class="filter-btn" data-filter-type="type" data-value="track">Singles</button>
+
+                            <div id="filters-container" class="filters-container hidden">
+                                <div class="filter-toggle-header">
+                                    <button id="filter-toggle-btn" class="filter-toggle-btn">⏷ Filters</button>
                                 </div>
 
-                                <!-- Filter by Format -->
-                                <div class="filter-group">
-                                    <label class="filter-label">Format:</label>
-                                    <button class="filter-btn active" data-filter-type="format" data-value="all">All</button>
-                                    <button class="filter-btn" data-filter-type="format" data-value="flac">FLAC</button>
-                                    <button class="filter-btn" data-filter-type="format" data-value="mp3">MP3</button>
-                                    <!-- Added missing format buttons -->
-                                    <button class="filter-btn" data-filter-type="format" data-value="ogg">OGG</button>
-                                    <button class="filter-btn" data-filter-type="format" data-value="aac">AAC</button>
-                                    <button class="filter-btn" data-filter-type="format" data-value="wma">WMA</button>
-                                </div>
+                                <div id="filter-content" class="filter-content hidden">
+                                    <!-- Filter by Type -->
+                                    <div class="filter-group">
+                                        <label class="filter-label">Type:</label>
+                                        <button class="filter-btn active" data-filter-type="type"
+                                            data-value="all">All</button>
+                                        <button class="filter-btn" data-filter-type="type"
+                                            data-value="album">Albums</button>
+                                        <button class="filter-btn" data-filter-type="type"
+                                            data-value="track">Singles</button>
+                                    </div>
 
-                                <!-- Sort Controls -->
-                                <div class="filter-group">
-                                    <label class="filter-label">Sort by:</label>
-                                    <button id="sort-order-btn" class="filter-btn sort-order-btn" data-order="desc">↓</button>
-                                    <!-- Added all sort options from the GUI -->
-                                    <button class="filter-btn active" data-filter-type="sort" data-value="relevance">Relevance</button>
-                                    <button class="filter-btn" data-filter-type="sort" data-value="quality_score">Quality</button>
-                                    <button class="filter-btn" data-filter-type="sort" data-value="size">Size</button>
-                                    <button class="filter-btn" data-filter-type="sort" data-value="title">Name</button>
-                                    <button class="filter-btn" data-filter-type="sort" data-value="username">Uploader</button>
-                                    <button class="filter-btn" data-filter-type="sort" data-value="bitrate">Bitrate</button>
-                                    <button class="filter-btn" data-filter-type="sort" data-value="duration">Duration</button>
-                                    <button class="filter-btn" data-filter-type="sort" data-value="availability">Available</button>
-                                    <button class="filter-btn" data-filter-type="sort" data-value="upload_speed">Speed</button>
+                                    <!-- Filter by Format -->
+                                    <div class="filter-group">
+                                        <label class="filter-label">Format:</label>
+                                        <button class="filter-btn active" data-filter-type="format"
+                                            data-value="all">All</button>
+                                        <button class="filter-btn" data-filter-type="format"
+                                            data-value="flac">FLAC</button>
+                                        <button class="filter-btn" data-filter-type="format"
+                                            data-value="mp3">MP3</button>
+                                        <!-- Added missing format buttons -->
+                                        <button class="filter-btn" data-filter-type="format"
+                                            data-value="ogg">OGG</button>
+                                        <button class="filter-btn" data-filter-type="format"
+                                            data-value="aac">AAC</button>
+                                        <button class="filter-btn" data-filter-type="format"
+                                            data-value="wma">WMA</button>
+                                    </div>
+
+                                    <!-- Sort Controls -->
+                                    <div class="filter-group">
+                                        <label class="filter-label">Sort by:</label>
+                                        <button id="sort-order-btn" class="filter-btn sort-order-btn"
+                                            data-order="desc">↓</button>
+                                        <!-- Added all sort options from the GUI -->
+                                        <button class="filter-btn active" data-filter-type="sort"
+                                            data-value="relevance">Relevance</button>
+                                        <button class="filter-btn" data-filter-type="sort"
+                                            data-value="quality_score">Quality</button>
+                                        <button class="filter-btn" data-filter-type="sort"
+                                            data-value="size">Size</button>
+                                        <button class="filter-btn" data-filter-type="sort"
+                                            data-value="title">Name</button>
+                                        <button class="filter-btn" data-filter-type="sort"
+                                            data-value="username">Uploader</button>
+                                        <button class="filter-btn" data-filter-type="sort"
+                                            data-value="bitrate">Bitrate</button>
+                                        <button class="filter-btn" data-filter-type="sort"
+                                            data-value="duration">Duration</button>
+                                        <button class="filter-btn" data-filter-type="sort"
+                                            data-value="availability">Available</button>
+                                        <button class="filter-btn" data-filter-type="sort"
+                                            data-value="upload_speed">Speed</button>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
 
-                        <!-- Search Status Bar -->
-                        <div class="search-status-container">
-                            <div class="spinner-animation hidden"></div>
-                            <p id="search-status-text">Ready to search • Enter artist, song, or album name</p>
-                            <div class="dots-animation hidden"></div>
-                        </div>
-
-                        <!-- Search Results Area: Replicates the QScrollArea -->
-                        <div class="search-results-container">
-                            <div class="search-results-header">
-                                <h3>Search Results</h3>
+                            <!-- Search Status Bar -->
+                            <div class="search-status-container">
+                                <div class="spinner-animation hidden"></div>
+                                <p id="search-status-text">Ready to search • Enter artist, song, or album name</p>
+                                <div class="dots-animation hidden"></div>
                             </div>
-                            <div class="search-results-scroll-area" id="search-results-area">
-                                <!-- 
+
+                            <!-- Search Results Area: Replicates the QScrollArea -->
+                            <div class="search-results-container">
+                                <div class="search-results-header">
+                                    <h3>Search Results</h3>
+                                </div>
+                                <div class="search-results-scroll-area" id="search-results-area">
+                                    <!-- 
                                 The placeholder search results have been removed.
                                 This area will now be populated by JavaScript based on API responses.
                                 -->
-                                <div class="search-results-placeholder">
-                                    <p>Your search results will appear here.</p>
+                                    <div class="search-results-placeholder">
+                                        <p>Your search results will appear here.</p>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
                         </div>
                         <!-- End Basic Search Section -->
 
@@ -1285,7 +1380,8 @@
                                 <div class="enhanced-search-bar-container">
                                     <div class="enhanced-search-wrapper">
                                         <div class="enhanced-search-icon">✨</div>
-                                        <input type="text" id="enhanced-search-input" placeholder="Search for artists, albums, or tracks...">
+                                        <input type="text" id="enhanced-search-input"
+                                            placeholder="Search for artists, albums, or tracks...">
                                         <button id="enhanced-cancel-btn" class="enhanced-cancel-btn hidden">✕</button>
                                     </div>
                                     <button id="enhanced-search-btn" class="enhanced-search-btn">
@@ -1315,21 +1411,25 @@
                                             <!-- Artists Container (Side by Side) -->
                                             <div class="enh-artists-wrapper">
                                                 <!-- DB Artists -->
-                                                <div id="enh-db-artists-section" class="enh-dropdown-section enh-artist-section hidden">
+                                                <div id="enh-db-artists-section"
+                                                    class="enh-dropdown-section enh-artist-section hidden">
                                                     <div class="enh-section-header">
                                                         <span class="enh-section-icon">📚</span>
                                                         <h4 class="enh-section-title">In Your Library</h4>
-                                                        <span class="enh-section-count" id="enh-db-artists-count">0</span>
+                                                        <span class="enh-section-count"
+                                                            id="enh-db-artists-count">0</span>
                                                     </div>
                                                     <div class="enh-compact-list" id="enh-db-artists-list"></div>
                                                 </div>
 
                                                 <!-- Spotify Artists -->
-                                                <div id="enh-spotify-artists-section" class="enh-dropdown-section enh-artist-section hidden">
+                                                <div id="enh-spotify-artists-section"
+                                                    class="enh-dropdown-section enh-artist-section hidden">
                                                     <div class="enh-section-header">
                                                         <span class="enh-section-icon">🎤</span>
                                                         <h4 class="enh-section-title">Artists</h4>
-                                                        <span class="enh-section-count" id="enh-spotify-artists-count">0</span>
+                                                        <span class="enh-section-count"
+                                                            id="enh-spotify-artists-count">0</span>
                                                     </div>
                                                     <div class="enh-compact-list" id="enh-spotify-artists-list"></div>
                                                 </div>
@@ -1379,7 +1479,7 @@
                     <!-- == RIGHT PANEL: Controls and Download Queue          == -->
                     <!-- ======================================================= -->
                     <div class="downloads-side-panel">
-                        
+
                         <!-- Controls Panel: Replicates create_collapsible_controls_panel() -->
                         <div class="controls-panel">
                             <h3 class="controls-panel__header">Download Manager</h3>
@@ -1399,12 +1499,12 @@
                                 <button class="tab-btn" data-tab="finished-queue">Finished (0)</button>
                             </div>
                             <div class="download-manager__content">
-                                
+
                                 <!-- Active Queue -->
                                 <div class="download-queue active" id="active-queue">
                                     <div class="download-queue__empty-message">No active downloads.</div>
                                 </div>
-                                
+
                                 <!-- Finished Queue -->
                                 <div class="download-queue" id="finished-queue">
                                     <div class="download-queue__empty-message">No finished downloads.</div>
@@ -1422,23 +1522,22 @@
                     <div class="artists-search-container">
                         <div class="artists-welcome-section">
                             <h2 class="artists-welcome-title">🎵 Discover Artists</h2>
-                            <p class="artists-welcome-subtitle">Search for your favorite artists and explore their complete discography</p>
+                            <p class="artists-welcome-subtitle">Search for your favorite artists and explore their
+                                complete discography</p>
                         </div>
-                        
+
                         <div class="artists-search-input-container">
-                            <input type="text" 
-                                   id="artists-search-input" 
-                                   class="artists-search-input" 
-                                   placeholder="Search for an artist...">
+                            <input type="text" id="artists-search-input" class="artists-search-input"
+                                placeholder="Search for an artist...">
                             <div class="artists-search-icon">🔍</div>
                         </div>
-                        
+
                         <div class="artists-search-status" id="artists-search-status">
                             Start typing to search for artists
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Search Results State -->
                 <div class="artists-results-state hidden" id="artists-results-state">
                     <div class="artists-results-header">
@@ -1446,15 +1545,13 @@
                             <span class="back-icon">←</span>
                             <span>Back to Search</span>
                         </button>
-                        
+
                         <div class="artists-search-header">
-                            <input type="text" 
-                                   id="artists-header-search-input" 
-                                   class="artists-header-search-input" 
-                                   placeholder="Search for an artist...">
+                            <input type="text" id="artists-header-search-input" class="artists-header-search-input"
+                                placeholder="Search for an artist...">
                         </div>
                     </div>
-                    
+
                     <div class="artists-results-content">
                         <div class="artists-results-title">Search Results</div>
                         <div class="artists-cards-container" id="artists-cards-container">
@@ -1462,7 +1559,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Artist Detail State -->
                 <div class="artist-detail-state hidden" id="artist-detail-state">
                     <div class="artist-detail-header">
@@ -1471,7 +1568,7 @@
                                 <span class="back-icon">←</span>
                                 <span>Back to Results</span>
                             </button>
-                            
+
                             <div class="artist-detail-info">
                                 <div class="artist-detail-image" id="search-artist-detail-image"></div>
                                 <div class="artist-detail-text">
@@ -1480,13 +1577,13 @@
                                 </div>
                             </div>
                         </div>
-                        
+
                         <button class="artist-detail-watchlist-btn" id="artist-detail-watchlist-btn">
                             <span class="watchlist-icon">👁️</span>
                             <span class="watchlist-text">Add to Watchlist</span>
                         </button>
                     </div>
-                    
+
                     <div class="artist-detail-content">
                         <div class="artist-detail-tabs">
                             <button class="artist-tab active" data-tab="albums" id="albums-tab">
@@ -1498,7 +1595,7 @@
                                 <span>Singles & EPs</span>
                             </button>
                         </div>
-                        
+
                         <div class="artist-detail-discography">
                             <div class="tab-content active" id="albums-content">
                                 <div class="album-cards-container" id="album-cards-container">
@@ -1561,10 +1658,8 @@
                     <!-- Search and Filters -->
                     <div class="library-controls">
                         <div class="library-search-container">
-                            <input type="text"
-                                   id="library-search-input"
-                                   class="library-search-input"
-                                   placeholder="Search artists...">
+                            <input type="text" id="library-search-input" class="library-search-input"
+                                placeholder="Search artists...">
                             <div class="library-search-icon">🔍</div>
                         </div>
 
@@ -1672,7 +1767,8 @@
                                     </div>
                                     <div class="completion-section">
                                         <div class="completion-bar">
-                                            <div class="completion-fill" id="albums-completion-fill" style="width: 0%"></div>
+                                            <div class="completion-fill" id="albums-completion-fill" style="width: 0%">
+                                            </div>
                                         </div>
                                         <span class="completion-text" id="albums-completion-text">0%</span>
                                     </div>
@@ -1685,7 +1781,8 @@
                                     </div>
                                     <div class="completion-section">
                                         <div class="completion-bar">
-                                            <div class="completion-fill" id="eps-completion-fill" style="width: 0%"></div>
+                                            <div class="completion-fill" id="eps-completion-fill" style="width: 0%">
+                                            </div>
                                         </div>
                                         <span class="completion-text" id="eps-completion-text">0%</span>
                                     </div>
@@ -1698,7 +1795,8 @@
                                     </div>
                                     <div class="completion-section">
                                         <div class="completion-bar">
-                                            <div class="completion-fill" id="singles-completion-fill" style="width: 0%"></div>
+                                            <div class="completion-fill" id="singles-completion-fill" style="width: 0%">
+                                            </div>
                                         </div>
                                         <span class="completion-text" id="singles-completion-text">0%</span>
                                     </div>
@@ -1719,7 +1817,8 @@
                     <div class="artist-detail-error hidden" id="artist-detail-error">
                         <div class="error-icon">⚠️</div>
                         <h3>Failed to load artist details</h3>
-                        <p id="artist-detail-error-message">An error occurred while loading the artist's discography.</p>
+                        <p id="artist-detail-error-message">An error occurred while loading the artist's discography.
+                        </p>
                         <button class="retry-btn" id="artist-detail-retry-btn">Retry</button>
                     </div>
 
@@ -1783,30 +1882,36 @@
                         <div class="discover-hero-overlay"></div>
 
                         <!-- Navigation Arrows -->
-                        <button class="discover-hero-nav discover-hero-nav-prev" onclick="navigateDiscoverHero(-1)" aria-label="Previous artist">
+                        <button class="discover-hero-nav discover-hero-nav-prev" onclick="navigateDiscoverHero(-1)"
+                            aria-label="Previous artist">
                             <span>‹</span>
                         </button>
-                        <button class="discover-hero-nav discover-hero-nav-next" onclick="navigateDiscoverHero(1)" aria-label="Next artist">
+                        <button class="discover-hero-nav discover-hero-nav-next" onclick="navigateDiscoverHero(1)"
+                            aria-label="Next artist">
                             <span>›</span>
                         </button>
 
                         <!-- Discover Page Help Button -->
-                        <button class="tool-help-button discover-page-help-button" data-tool="discover-page" title="Learn about the Discover page">?</button>
+                        <button class="tool-help-button discover-page-help-button" data-tool="discover-page"
+                            title="Learn about the Discover page">?</button>
 
                         <div class="discover-hero-content">
                             <div class="discover-hero-info">
                                 <div class="discover-hero-label">FEATURED ARTIST</div>
                                 <h1 class="discover-hero-title" id="discover-hero-title">Loading...</h1>
-                                <p class="discover-hero-subtitle" id="discover-hero-subtitle">Discover new music tailored to your taste</p>
+                                <p class="discover-hero-subtitle" id="discover-hero-subtitle">Discover new music
+                                    tailored to your taste</p>
                                 <div class="discover-hero-meta" id="discover-hero-meta">
                                     <!-- Popularity and genres will be populated here -->
                                 </div>
                                 <div class="discover-hero-actions">
-                                    <button class="discover-hero-button secondary" id="discover-hero-discography" onclick="viewDiscoverHeroDiscography()">
+                                    <button class="discover-hero-button secondary" id="discover-hero-discography"
+                                        onclick="viewDiscoverHeroDiscography()">
                                         <span class="button-icon">📀</span>
                                         <span class="button-text">View Discography</span>
                                     </button>
-                                    <button class="discover-hero-button primary watchlist-toggle-btn" id="discover-hero-add" onclick="toggleDiscoverHeroWatchlist(event)">
+                                    <button class="discover-hero-button primary watchlist-toggle-btn"
+                                        id="discover-hero-add" onclick="toggleDiscoverHeroWatchlist(event)">
                                         <span class="watchlist-icon">👁️</span>
                                         <span class="watchlist-text">Add to Watchlist</span>
                                     </button>
@@ -1852,14 +1957,19 @@
                         <div class="discover-section-header">
                             <div>
                                 <h2 class="discover-section-title" id="seasonal-playlist-title">Seasonal Mix</h2>
-                                <p class="discover-section-subtitle" id="seasonal-playlist-subtitle">Curated seasonal playlist</p>
+                                <p class="discover-section-subtitle" id="seasonal-playlist-subtitle">Curated seasonal
+                                    playlist</p>
                             </div>
                             <div class="discover-section-actions">
-                                <button class="action-button secondary" onclick="openDownloadModalForDiscoverPlaylist('seasonal_playlist', 'Seasonal Mix')" title="Download missing tracks">
+                                <button class="action-button secondary"
+                                    onclick="openDownloadModalForDiscoverPlaylist('seasonal_playlist', 'Seasonal Mix')"
+                                    title="Download missing tracks">
                                     <span class="button-icon">↓</span>
                                     <span class="button-text">Download</span>
                                 </button>
-                                <button class="action-button primary" id="seasonal-playlist-sync-btn" onclick="startDiscoverPlaylistSync('seasonal_playlist', 'Seasonal Mix')" title="Sync to media server">
+                                <button class="action-button primary" id="seasonal-playlist-sync-btn"
+                                    onclick="startDiscoverPlaylistSync('seasonal_playlist', 'Seasonal Mix')"
+                                    title="Sync to media server">
                                     <span class="button-icon">⟳</span>
                                     <span class="button-text">Sync</span>
                                 </button>
@@ -1873,10 +1983,12 @@
                                     <span>Syncing to media server...</span>
                                 </div>
                                 <div class="sync-status-stats">
-                                    <span class="sync-stat">✓ <span id="seasonal-playlist-sync-completed">0</span></span>
+                                    <span class="sync-stat">✓ <span
+                                            id="seasonal-playlist-sync-completed">0</span></span>
                                     <span class="sync-stat">⏳ <span id="seasonal-playlist-sync-pending">0</span></span>
                                     <span class="sync-stat">✗ <span id="seasonal-playlist-sync-failed">0</span></span>
-                                    <span class="sync-stat">(<span id="seasonal-playlist-sync-percentage">0</span>%)</span>
+                                    <span class="sync-stat">(<span
+                                            id="seasonal-playlist-sync-percentage">0</span>%)</span>
                                 </div>
                             </div>
                         </div>
@@ -1915,11 +2027,15 @@
                                 <p class="discover-section-subtitle">New drops from recent releases</p>
                             </div>
                             <div class="discover-section-actions">
-                                <button class="action-button secondary" onclick="openDownloadModalForDiscoverPlaylist('release_radar', 'Fresh Tape')" title="Download missing tracks">
+                                <button class="action-button secondary"
+                                    onclick="openDownloadModalForDiscoverPlaylist('release_radar', 'Fresh Tape')"
+                                    title="Download missing tracks">
                                     <span class="button-icon">↓</span>
                                     <span class="button-text">Download</span>
                                 </button>
-                                <button class="action-button primary" id="release-radar-sync-btn" onclick="startDiscoverPlaylistSync('release_radar', 'Fresh Tape')" title="Sync to media server">
+                                <button class="action-button primary" id="release-radar-sync-btn"
+                                    onclick="startDiscoverPlaylistSync('release_radar', 'Fresh Tape')"
+                                    title="Sync to media server">
                                     <span class="button-icon">⟳</span>
                                     <span class="button-text">Sync</span>
                                 </button>
@@ -1959,11 +2075,15 @@
                                 <p class="discover-section-subtitle">Curated from your collection</p>
                             </div>
                             <div class="discover-section-actions">
-                                <button class="action-button secondary" onclick="openDownloadModalForDiscoverPlaylist('discovery_weekly', 'The Archives')" title="Download missing tracks">
+                                <button class="action-button secondary"
+                                    onclick="openDownloadModalForDiscoverPlaylist('discovery_weekly', 'The Archives')"
+                                    title="Download missing tracks">
                                     <span class="button-icon">↓</span>
                                     <span class="button-text">Download</span>
                                 </button>
-                                <button class="action-button primary" id="discovery-weekly-sync-btn" onclick="startDiscoverPlaylistSync('discovery_weekly', 'The Archives')" title="Sync to media server">
+                                <button class="action-button primary" id="discovery-weekly-sync-btn"
+                                    onclick="startDiscoverPlaylistSync('discovery_weekly', 'The Archives')"
+                                    title="Sync to media server">
                                     <span class="button-icon">⟳</span>
                                     <span class="button-text">Sync</span>
                                 </button>
@@ -1982,7 +2102,8 @@
                                     <span class="sync-stat">✓ <span id="discovery-weekly-sync-matched">0</span></span>
                                     <span class="sync-separator">/</span>
                                     <span class="sync-stat">✗ <span id="discovery-weekly-sync-failed">0</span></span>
-                                    <span class="sync-stat">(<span id="discovery-weekly-sync-percentage">0</span>%)</span>
+                                    <span class="sync-stat">(<span
+                                            id="discovery-weekly-sync-percentage">0</span>%)</span>
                                 </div>
                             </div>
                         </div>
@@ -2003,11 +2124,15 @@
                                 <p class="discover-section-subtitle">Trending tracks from new discoveries</p>
                             </div>
                             <div class="discover-section-actions">
-                                <button class="action-button secondary" onclick="openDownloadModalForDiscoverPlaylist('popular_picks', 'Popular Picks')" title="Download missing tracks">
+                                <button class="action-button secondary"
+                                    onclick="openDownloadModalForDiscoverPlaylist('popular_picks', 'Popular Picks')"
+                                    title="Download missing tracks">
                                     <span class="button-icon">↓</span>
                                     <span class="button-text">Download</span>
                                 </button>
-                                <button class="action-button primary" id="popular-picks-sync-btn" onclick="startDiscoverPlaylistSync('popular_picks', 'Popular Picks')" title="Sync to media server">
+                                <button class="action-button primary" id="popular-picks-sync-btn"
+                                    onclick="startDiscoverPlaylistSync('popular_picks', 'Popular Picks')"
+                                    title="Sync to media server">
                                     <span class="button-icon">⟳</span>
                                     <span class="button-text">Sync</span>
                                 </button>
@@ -2041,11 +2166,15 @@
                                 <p class="discover-section-subtitle">Underground discoveries waiting for you</p>
                             </div>
                             <div class="discover-section-actions">
-                                <button class="action-button secondary" onclick="openDownloadModalForDiscoverPlaylist('hidden_gems', 'Hidden Gems')" title="Download missing tracks">
+                                <button class="action-button secondary"
+                                    onclick="openDownloadModalForDiscoverPlaylist('hidden_gems', 'Hidden Gems')"
+                                    title="Download missing tracks">
                                     <span class="button-icon">↓</span>
                                     <span class="button-text">Download</span>
                                 </button>
-                                <button class="action-button primary" id="hidden-gems-sync-btn" onclick="startDiscoverPlaylistSync('hidden_gems', 'Hidden Gems')" title="Sync to media server">
+                                <button class="action-button primary" id="hidden-gems-sync-btn"
+                                    onclick="startDiscoverPlaylistSync('hidden_gems', 'Hidden Gems')"
+                                    title="Sync to media server">
                                     <span class="button-icon">⟳</span>
                                     <span class="button-text">Sync</span>
                                 </button>
@@ -2098,14 +2227,19 @@
                         <div class="discover-section-header">
                             <div>
                                 <h2 class="discover-section-title">🔀 Discovery Shuffle</h2>
-                                <p class="discover-section-subtitle">Random tracks from your discovery pool - different every time</p>
+                                <p class="discover-section-subtitle">Random tracks from your discovery pool - different
+                                    every time</p>
                             </div>
                             <div class="discover-section-actions">
-                                <button class="action-button secondary" onclick="openDownloadModalForDiscoverPlaylist('discovery_shuffle', 'Discovery Shuffle')" title="Download missing tracks">
+                                <button class="action-button secondary"
+                                    onclick="openDownloadModalForDiscoverPlaylist('discovery_shuffle', 'Discovery Shuffle')"
+                                    title="Download missing tracks">
                                     <span class="button-icon">↓</span>
                                     <span class="button-text">Download</span>
                                 </button>
-                                <button class="action-button primary" id="discovery-shuffle-sync-btn" onclick="startDiscoverPlaylistSync('discovery_shuffle', 'Discovery Shuffle')" title="Sync to media server">
+                                <button class="action-button primary" id="discovery-shuffle-sync-btn"
+                                    onclick="startDiscoverPlaylistSync('discovery_shuffle', 'Discovery Shuffle')"
+                                    title="Sync to media server">
                                     <span class="button-icon">⟳</span>
                                     <span class="button-text">Sync</span>
                                 </button>
@@ -2119,10 +2253,12 @@
                                     <span>Syncing to media server...</span>
                                 </div>
                                 <div class="sync-status-stats">
-                                    <span class="sync-stat">✓ <span id="discovery-shuffle-sync-completed">0</span></span>
+                                    <span class="sync-stat">✓ <span
+                                            id="discovery-shuffle-sync-completed">0</span></span>
                                     <span class="sync-stat">⏳ <span id="discovery-shuffle-sync-pending">0</span></span>
                                     <span class="sync-stat">✗ <span id="discovery-shuffle-sync-failed">0</span></span>
-                                    <span class="sync-stat">(<span id="discovery-shuffle-sync-percentage">0</span>%)</span>
+                                    <span class="sync-stat">(<span
+                                            id="discovery-shuffle-sync-percentage">0</span>%)</span>
                                 </div>
                             </div>
                         </div>
@@ -2139,11 +2275,15 @@
                                 <p class="discover-section-subtitle">Your reliable go-to tracks</p>
                             </div>
                             <div class="discover-section-actions">
-                                <button class="action-button secondary" onclick="openDownloadModalForDiscoverPlaylist('familiar_favorites', 'Familiar Favorites')" title="Download missing tracks">
+                                <button class="action-button secondary"
+                                    onclick="openDownloadModalForDiscoverPlaylist('familiar_favorites', 'Familiar Favorites')"
+                                    title="Download missing tracks">
                                     <span class="button-icon">↓</span>
                                     <span class="button-text">Download</span>
                                 </button>
-                                <button class="action-button primary" id="familiar-favorites-sync-btn" onclick="startDiscoverPlaylistSync('familiar_favorites', 'Familiar Favorites')" title="Sync to media server">
+                                <button class="action-button primary" id="familiar-favorites-sync-btn"
+                                    onclick="startDiscoverPlaylistSync('familiar_favorites', 'Familiar Favorites')"
+                                    title="Sync to media server">
                                     <span class="button-icon">⟳</span>
                                     <span class="button-text">Sync</span>
                                 </button>
@@ -2157,10 +2297,12 @@
                                     <span>Syncing to media server...</span>
                                 </div>
                                 <div class="sync-status-stats">
-                                    <span class="sync-stat">✓ <span id="familiar-favorites-sync-completed">0</span></span>
+                                    <span class="sync-stat">✓ <span
+                                            id="familiar-favorites-sync-completed">0</span></span>
                                     <span class="sync-stat">⏳ <span id="familiar-favorites-sync-pending">0</span></span>
                                     <span class="sync-stat">✗ <span id="familiar-favorites-sync-failed">0</span></span>
-                                    <span class="sync-stat">(<span id="familiar-favorites-sync-percentage">0</span>%)</span>
+                                    <span class="sync-stat">(<span
+                                            id="familiar-favorites-sync-percentage">0</span>%)</span>
                                 </div>
                             </div>
                         </div>
@@ -2178,12 +2320,9 @@
                         <div class="build-playlist-container">
                             <!-- Artist Search -->
                             <div class="build-playlist-search-section">
-                                <input
-                                    type="text"
-                                    id="build-playlist-search"
+                                <input type="text" id="build-playlist-search"
                                     placeholder="Search for artists (1-5 artists)..."
-                                    oninput="searchBuildPlaylistArtists()"
-                                />
+                                    oninput="searchBuildPlaylistArtists()" />
                                 <div id="build-playlist-search-results" class="build-playlist-search-results"></div>
                             </div>
 
@@ -2191,19 +2330,15 @@
                             <div class="build-playlist-selected-section">
                                 <h3>Selected Artists:</h3>
                                 <div id="build-playlist-selected-artists" class="build-playlist-selected-artists">
-                                    <div class="build-playlist-no-selection">No artists selected. Search and select 1-5 artists.</div>
+                                    <div class="build-playlist-no-selection">No artists selected. Search and select 1-5
+                                        artists.</div>
                                 </div>
                             </div>
 
                             <!-- Generate Button -->
                             <div class="build-playlist-actions">
-                                <button
-                                    id="build-playlist-generate-btn"
-                                    class="build-playlist-generate-btn"
-                                    onclick="generateBuildPlaylist()"
-                                    disabled
-                                    style="opacity: 0.5;"
-                                >
+                                <button id="build-playlist-generate-btn" class="build-playlist-generate-btn"
+                                    onclick="generateBuildPlaylist()" disabled style="opacity: 0.5;">
                                     Generate Playlist (50 tracks)
                                 </button>
                                 <div id="build-playlist-loading" class="build-playlist-loading" style="display: none;">
@@ -2217,15 +2352,21 @@
                                 <!-- Playlist Header with Actions -->
                                 <div class="discover-section-header" style="margin-top: 20px;">
                                     <div>
-                                        <h3 id="build-playlist-results-title" style="margin: 0; color: #fff; font-size: 18px;">Generated Playlist</h3>
-                                        <p id="build-playlist-results-subtitle" style="margin: 4px 0 0 0; color: #999; font-size: 13px;"></p>
+                                        <h3 id="build-playlist-results-title"
+                                            style="margin: 0; color: #fff; font-size: 18px;">Generated Playlist</h3>
+                                        <p id="build-playlist-results-subtitle"
+                                            style="margin: 4px 0 0 0; color: #999; font-size: 13px;"></p>
                                     </div>
                                     <div class="discover-section-actions">
-                                        <button class="action-button secondary" onclick="openDownloadModalForBuildPlaylist()" title="Download missing tracks">
+                                        <button class="action-button secondary"
+                                            onclick="openDownloadModalForBuildPlaylist()"
+                                            title="Download missing tracks">
                                             <span class="button-icon">↓</span>
                                             <span class="button-text">Download</span>
                                         </button>
-                                        <button class="action-button primary" id="build-playlist-sync-btn" onclick="startDiscoverPlaylistSync('build_playlist', 'Custom Playlist')" title="Sync to media server">
+                                        <button class="action-button primary" id="build-playlist-sync-btn"
+                                            onclick="startDiscoverPlaylistSync('build_playlist', 'Custom Playlist')"
+                                            title="Sync to media server">
                                             <span class="button-icon">⟳</span>
                                             <span class="button-text">Sync</span>
                                         </button>
@@ -2233,17 +2374,22 @@
                                 </div>
 
                                 <!-- Sync Status Display -->
-                                <div class="discover-sync-status" id="build-playlist-sync-status" style="display: none;">
+                                <div class="discover-sync-status" id="build-playlist-sync-status"
+                                    style="display: none;">
                                     <div class="sync-status-content">
                                         <div class="sync-status-label">
                                             <span class="sync-icon">⟳</span>
                                             <span>Syncing to media server...</span>
                                         </div>
                                         <div class="sync-status-stats">
-                                            <span class="sync-stat">✓ <span id="build-playlist-sync-completed">0</span></span>
-                                            <span class="sync-stat">⏳ <span id="build-playlist-sync-pending">0</span></span>
-                                            <span class="sync-stat">✗ <span id="build-playlist-sync-failed">0</span></span>
-                                            <span class="sync-stat">(<span id="build-playlist-sync-percentage">0</span>%)</span>
+                                            <span class="sync-stat">✓ <span
+                                                    id="build-playlist-sync-completed">0</span></span>
+                                            <span class="sync-stat">⏳ <span
+                                                    id="build-playlist-sync-pending">0</span></span>
+                                            <span class="sync-stat">✗ <span
+                                                    id="build-playlist-sync-failed">0</span></span>
+                                            <span class="sync-stat">(<span
+                                                    id="build-playlist-sync-percentage">0</span>%)</span>
                                         </div>
                                     </div>
                                 </div>
@@ -2267,7 +2413,9 @@
                                 <p class="discover-section-subtitle">Playlists from ListenBrainz</p>
                             </div>
                             <div class="discover-section-actions">
-                                <button class="action-button primary" id="listenbrainz-refresh-btn" onclick="refreshListenBrainzPlaylists()" title="Refresh playlists from ListenBrainz">
+                                <button class="action-button primary" id="listenbrainz-refresh-btn"
+                                    onclick="refreshListenBrainzPlaylists()"
+                                    title="Refresh playlists from ListenBrainz">
                                     <span class="button-icon">🔄</span>
                                     <span class="button-text">Refresh</span>
                                 </button>
@@ -2276,7 +2424,10 @@
 
                         <!-- ListenBrainz Tabs -->
                         <div class="listenbrainz-tabs" id="listenbrainz-tabs">
-                            <div class="discover-loading"><div class="loading-spinner"></div><p>Loading playlists...</p></div>
+                            <div class="discover-loading">
+                                <div class="loading-spinner"></div>
+                                <p>Loading playlists...</p>
+                            </div>
                         </div>
 
                         <!-- ListenBrainz Tab Content -->
@@ -2294,7 +2445,10 @@
 
                         <!-- Decade Tabs (will be populated dynamically) -->
                         <div class="decade-tabs" id="decade-tabs">
-                            <div class="discover-loading"><div class="loading-spinner"></div><p>Loading decades...</p></div>
+                            <div class="discover-loading">
+                                <div class="loading-spinner"></div>
+                                <p>Loading decades...</p>
+                            </div>
                         </div>
 
                         <!-- Decade Tab Contents (will be populated dynamically) -->
@@ -2310,7 +2464,10 @@
 
                         <!-- Genre Tabs (will be populated dynamically) -->
                         <div class="genre-tabs" id="genre-tabs">
-                            <div class="discover-loading"><div class="loading-spinner"></div><p>Loading genres...</p></div>
+                            <div class="discover-loading">
+                                <div class="loading-spinner"></div>
+                                <p>Loading genres...</p>
+                            </div>
                         </div>
 
                         <!-- Genre Tab Contents (will be populated dynamically) -->
@@ -2323,7 +2480,8 @@
             <div class="page" id="settings-page">
                 <div class="page-header">
                     <h2>Settings</h2>
-                    <button class="save-button" onclick="document.getElementById('save-settings').click()">💾 Save Settings</button>
+                    <button class="save-button" onclick="document.getElementById('save-settings').click()">💾 Save
+                        Settings</button>
                 </div>
                 <div class="settings-content">
                     <!-- Two Column Layout -->
@@ -2333,7 +2491,7 @@
                             <!-- API Configuration -->
                             <div class="settings-group">
                                 <h3>API Configuration</h3>
-                                
+
                                 <!-- Spotify Settings -->
                                 <div class="api-service-frame">
                                     <h4 class="service-title spotify-title">Spotify</h4>
@@ -2343,22 +2501,27 @@
                                     </div>
                                     <div class="form-group">
                                         <label>Client Secret:</label>
-                                        <input type="password" id="spotify-client-secret" placeholder="Spotify Client Secret">
+                                        <input type="password" id="spotify-client-secret"
+                                            placeholder="Spotify Client Secret">
                                     </div>
                                     <div class="form-group">
                                         <label>Redirect URI:</label>
-                                        <input type="text" id="spotify-redirect-uri" placeholder="http://127.0.0.1:8888/callback">
+                                        <input type="text" id="spotify-redirect-uri"
+                                            placeholder="http://127.0.0.1:8888/callback">
                                     </div>
                                     <div class="callback-info">
                                         <div class="callback-label">Current Redirect URI:</div>
-                                        <div class="callback-url" id="spotify-callback-display">http://127.0.0.1:8888/callback</div>
-                                        <div class="callback-help">Add this URL to your Spotify app's 'Redirect URIs' in the Spotify Developer Dashboard</div>
+                                        <div class="callback-url" id="spotify-callback-display">
+                                            http://127.0.0.1:8888/callback</div>
+                                        <div class="callback-help">Add this URL to your Spotify app's 'Redirect URIs' in
+                                            the Spotify Developer Dashboard</div>
                                     </div>
                                     <div class="form-actions">
-                                        <button class="auth-button" onclick="authenticateSpotify()">🔐 Authenticate</button>
+                                        <button class="auth-button" onclick="authenticateSpotify()">🔐
+                                            Authenticate</button>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Tidal Settings -->
                                 <div class="api-service-frame">
                                     <h4 class="service-title tidal-title">Tidal</h4>
@@ -2368,22 +2531,26 @@
                                     </div>
                                     <div class="form-group">
                                         <label>Client Secret:</label>
-                                        <input type="password" id="tidal-client-secret" placeholder="Tidal Client Secret">
+                                        <input type="password" id="tidal-client-secret"
+                                            placeholder="Tidal Client Secret">
                                     </div>
                                     <div class="form-group">
                                         <label>Redirect URI:</label>
-                                        <input type="text" id="tidal-redirect-uri" placeholder="http://127.0.0.1:8889/tidal/callback">
+                                        <input type="text" id="tidal-redirect-uri"
+                                            placeholder="http://127.0.0.1:8889/tidal/callback">
                                     </div>
                                     <div class="callback-info">
                                         <div class="callback-label">Current Redirect URI:</div>
-                                        <div class="callback-url" id="tidal-callback-display">http://127.0.0.1:8889/tidal/callback</div>
+                                        <div class="callback-url" id="tidal-callback-display">
+                                            http://127.0.0.1:8889/tidal/callback</div>
                                         <div class="callback-help">Add this URL to your Tidal app configuration</div>
                                     </div>
                                     <div class="form-actions">
-                                        <button class="auth-button" onclick="authenticateTidal()">🔐 Authenticate</button>
+                                        <button class="auth-button" onclick="authenticateTidal()">🔐
+                                            Authenticate</button>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Soulseek Settings -->
                                 <div class="api-service-frame">
                                     <h4 class="service-title soulseek-title">Soulseek</h4>
@@ -2391,7 +2558,8 @@
                                         <label>slskd URL:</label>
                                         <div class="path-input-group">
                                             <input type="url" id="soulseek-url" placeholder="http://localhost:5030">
-                                            <button class="detect-button" onclick="autoDetectSlskd()">Auto-detect</button>
+                                            <button class="detect-button"
+                                                onclick="autoDetectSlskd()">Auto-detect</button>
                                         </div>
                                     </div>
                                     <div class="form-group">
@@ -2400,13 +2568,17 @@
                                     </div>
                                     <div class="form-group">
                                         <label>Search Timeout (seconds):</label>
-                                        <input type="number" id="soulseek-search-timeout" placeholder="60" min="15" max="300" value="60">
-                                        <small style="color: #888; display: block; margin-top: 5px;">How long to search for tracks (15-300 seconds)</small>
+                                        <input type="number" id="soulseek-search-timeout" placeholder="60" min="15"
+                                            max="300" value="60">
+                                        <small style="color: #888; display: block; margin-top: 5px;">How long to search
+                                            for tracks (15-300 seconds)</small>
                                     </div>
                                     <div class="form-group">
                                         <label>Search Timeout Buffer (seconds):</label>
-                                        <input type="number" id="soulseek-search-timeout-buffer" placeholder="15" min="5" max="60" value="15">
-                                        <small style="color: #888; display: block; margin-top: 5px;">Extra time to wait for late results (5-60 seconds)</small>
+                                        <input type="number" id="soulseek-search-timeout-buffer" placeholder="15"
+                                            min="5" max="60" value="15">
+                                        <small style="color: #888; display: block; margin-top: 5px;">Extra time to wait
+                                            for late results (5-60 seconds)</small>
                                     </div>
                                 </div>
 
@@ -2415,40 +2587,52 @@
                                     <h4 class="service-title listenbrainz-title">ListenBrainz</h4>
                                     <div class="form-group">
                                         <label>User Token:</label>
-                                        <input type="password" id="listenbrainz-token" placeholder="ListenBrainz User Token">
+                                        <input type="password" id="listenbrainz-token"
+                                            placeholder="ListenBrainz User Token">
                                     </div>
                                     <div class="callback-info">
-                                        <div class="callback-help">Get your token from <a href="https://listenbrainz.org/profile/" target="_blank" style="color: #eb743b;">ListenBrainz Settings</a></div>
+                                        <div class="callback-help">Get your token from <a
+                                                href="https://listenbrainz.org/profile/" target="_blank"
+                                                style="color: #eb743b;">ListenBrainz Settings</a></div>
                                     </div>
                                 </div>
 
                                 <!-- Test Connection Buttons -->
                                 <div class="api-test-buttons">
-                                    <button class="test-button" onclick="testConnection('spotify')">Test Spotify</button>
+                                    <button class="test-button" onclick="testConnection('spotify')">Test
+                                        Spotify</button>
                                     <button class="test-button" onclick="testConnection('tidal')">Test Tidal</button>
-                                    <button class="test-button" onclick="testConnection('soulseek')">Test Soulseek</button>
-                                    <button class="test-button" onclick="testConnection('listenbrainz')">Test ListenBrainz</button>
+                                    <button class="test-button" onclick="testConnection('soulseek')">Test
+                                        Soulseek</button>
+                                    <button class="test-button" onclick="testConnection('listenbrainz')">Test
+                                        ListenBrainz</button>
                                 </div>
                             </div>
-                            
+
                             <!-- Server Connections -->
                             <div class="settings-group">
                                 <h3>Server Connections</h3>
-                                
+
                                 <!-- Server Toggle Buttons -->
                                 <div class="server-toggle-container">
-                                    <button class="server-toggle-btn active" id="plex-toggle" onclick="toggleServer('plex')">
-                                        <img src="https://www.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg" alt="Plex" class="server-logo">
+                                    <button class="server-toggle-btn active" id="plex-toggle"
+                                        onclick="toggleServer('plex')">
+                                        <img src="https://www.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg"
+                                            alt="Plex" class="server-logo">
                                     </button>
-                                    <button class="server-toggle-btn" id="jellyfin-toggle" onclick="toggleServer('jellyfin')">
-                                        <img src="https://jellyfin.org/images/logo.svg" alt="Jellyfin" class="server-logo">
+                                    <button class="server-toggle-btn" id="jellyfin-toggle"
+                                        onclick="toggleServer('jellyfin')">
+                                        <img src="https://jellyfin.org/images/logo.svg" alt="Jellyfin"
+                                            class="server-logo">
                                     </button>
-                                    <button class="server-toggle-btn" id="navidrome-toggle" onclick="toggleServer('navidrome')">
-                                        <img src="https://tweakers.net/ext/i/2007323764.png" alt="Navidrome" class="server-logo">
+                                    <button class="server-toggle-btn" id="navidrome-toggle"
+                                        onclick="toggleServer('navidrome')">
+                                        <img src="https://tweakers.net/ext/i/2007323764.png" alt="Navidrome"
+                                            class="server-logo">
                                         Navidrome
                                     </button>
                                 </div>
-                                
+
                                 <!-- Plex Settings -->
                                 <div class="server-config-container" id="plex-container">
                                     <div class="form-group">
@@ -2473,7 +2657,7 @@
                                         <button class="test-button" onclick="testConnection('plex')">Test</button>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Jellyfin Settings -->
                                 <div class="server-config-container hidden" id="jellyfin-container">
                                     <div class="form-group">
@@ -2485,11 +2669,13 @@
                                         <input type="password" id="jellyfin-api-key" placeholder="Jellyfin API Key">
                                     </div>
                                     <div class="form-actions">
-                                        <button class="detect-button" onclick="autoDetectJellyfin()">Auto-detect</button>
+                                        <button class="detect-button"
+                                            onclick="autoDetectJellyfin()">Auto-detect</button>
                                         <button class="test-button" onclick="testConnection('jellyfin')">Test</button>
                                     </div>
 
-                                    <div class="form-group" id="jellyfin-library-selector-container" style="display: none;">
+                                    <div class="form-group" id="jellyfin-library-selector-container"
+                                        style="display: none;">
                                         <label>Music Library</label>
                                         <select id="jellyfin-music-library" onchange="selectJellyfinLibrary()">
                                             <option value="">Select Library</option>
@@ -2513,18 +2699,20 @@
                                         <input type="password" id="navidrome-password" placeholder="Password">
                                     </div>
                                     <div class="form-actions">
-                                        <button class="detect-button" onclick="autoDetectNavidrome()">Auto-detect</button>
+                                        <button class="detect-button"
+                                            onclick="autoDetectNavidrome()">Auto-detect</button>
                                         <button class="test-button" onclick="testConnection('navidrome')">Test</button>
                                     </div>
                                 </div>
 
                                 <!-- Server Test Button -->
                                 <div class="server-test-section">
-                                    <button class="test-button server-test-btn" onclick="testConnection('server')">Test Server</button>
+                                    <button class="test-button server-test-btn" onclick="testConnection('server')">Test
+                                        Server</button>
                                 </div>
                             </div>
                         </div>
-                        
+
                         <!-- Right Column - Download Settings, Database, Metadata, Logging -->
                         <div class="settings-right-column">
                             <!-- Download Settings -->
@@ -2538,7 +2726,7 @@
                                         <button class="browse-button" onclick="browsePath('download')">Browse</button>
                                     </div>
                                 </div>
-                                
+
                                 <div class="form-group">
                                     <label>Matched Transfer Dir (Plex Music Dir?):</label>
                                     <div class="path-input-group">
@@ -2549,13 +2737,15 @@
 
                                 <div class="form-group">
                                     <label>Download Source:</label>
-                                    <select id="download-source-mode" class="form-select" onchange="updateDownloadSourceUI()">
+                                    <select id="download-source-mode" class="form-select"
+                                        onchange="updateDownloadSourceUI()">
                                         <option value="soulseek">Soulseek Only</option>
                                         <option value="youtube">YouTube Only</option>
                                         <option value="hybrid">Hybrid (Try both with fallback)</option>
                                     </select>
                                     <div class="setting-help-text">
-                                        Choose where to download music from. Hybrid mode tries primary source first, then falls back to secondary if it fails.
+                                        Choose where to download music from. Hybrid mode tries primary source first,
+                                        then falls back to secondary if it fails.
                                     </div>
                                 </div>
 
@@ -2574,9 +2764,11 @@
 
                                     <div class="form-group">
                                         <label>YouTube Min Confidence:</label>
-                                        <input type="number" id="youtube-min-confidence" min="0.5" max="1.0" step="0.05" value="0.65" placeholder="0.65">
+                                        <input type="number" id="youtube-min-confidence" min="0.5" max="1.0" step="0.05"
+                                            value="0.65" placeholder="0.65">
                                         <div class="setting-help-text">
-                                            Minimum match confidence for YouTube downloads (0.5-1.0). Higher = stricter matching.
+                                            Minimum match confidence for YouTube downloads (0.5-1.0). Higher = stricter
+                                            matching.
                                         </div>
                                     </div>
                                 </div>
@@ -2590,7 +2782,8 @@
                                         <option value="ERROR">ERROR (Critical Only)</option>
                                     </select>
                                     <div class="setting-help-text">
-                                        Controls the level of detail in application logs. DEBUG shows all details, INFO shows general operations, WARNING and ERROR show only issues.
+                                        Controls the level of detail in application logs. DEBUG shows all details, INFO
+                                        shows general operations, WARNING and ERROR show only issues.
                                     </div>
                                 </div>
                             </div>
@@ -2609,7 +2802,8 @@
                                         <option value="all">Entire discography</option>
                                     </select>
                                     <div class="setting-help-text">
-                                        Controls how far back to scan when adding new artists or refreshing discovery pool.
+                                        Controls how far back to scan when adding new artists or refreshing discovery
+                                        pool.
                                         Once scanned, artists are kept updated with new releases only.
                                     </div>
                                 </div>
@@ -2623,13 +2817,16 @@
                                 <div class="quality-presets">
                                     <label>Quick Presets:</label>
                                     <div class="preset-buttons">
-                                        <button class="preset-button" onclick="applyQualityPreset('audiophile')" title="FLAC only, strict size constraints">
+                                        <button class="preset-button" onclick="applyQualityPreset('audiophile')"
+                                            title="FLAC only, strict size constraints">
                                             🎧 Audiophile
                                         </button>
-                                        <button class="preset-button active" onclick="applyQualityPreset('balanced')" title="FLAC preferred, MP3 fallback">
+                                        <button class="preset-button active" onclick="applyQualityPreset('balanced')"
+                                            title="FLAC preferred, MP3 fallback">
                                             ⚖️ Balanced
                                         </button>
-                                        <button class="preset-button" onclick="applyQualityPreset('space_saver')" title="MP3 preferred, smaller sizes">
+                                        <button class="preset-button" onclick="applyQualityPreset('space_saver')"
+                                            title="MP3 preferred, smaller sizes">
                                             💾 Space Saver
                                         </button>
                                     </div>
@@ -2639,7 +2836,8 @@
                                 <div class="quality-tier">
                                     <div class="quality-tier-header">
                                         <label class="checkbox-label">
-                                            <input type="checkbox" id="quality-flac-enabled" checked onchange="toggleQuality('flac')">
+                                            <input type="checkbox" id="quality-flac-enabled" checked
+                                                onchange="toggleQuality('flac')">
                                             <span class="quality-tier-name">FLAC (Lossless)</span>
                                         </label>
                                         <span class="quality-tier-priority" id="priority-flac">Priority: 1</span>
@@ -2648,8 +2846,12 @@
                                         <div class="slider-group">
                                             <label>File Size Range:</label>
                                             <div class="dual-slider-container">
-                                                <input type="range" class="range-slider range-slider-min" id="flac-min" min="0" max="200" value="0" step="5" oninput="updateQualityRange('flac')">
-                                                <input type="range" class="range-slider range-slider-max" id="flac-max" min="0" max="200" value="150" step="5" oninput="updateQualityRange('flac')">
+                                                <input type="range" class="range-slider range-slider-min" id="flac-min"
+                                                    min="0" max="200" value="0" step="5"
+                                                    oninput="updateQualityRange('flac')">
+                                                <input type="range" class="range-slider range-slider-max" id="flac-max"
+                                                    min="0" max="200" value="150" step="5"
+                                                    oninput="updateQualityRange('flac')">
                                                 <div class="range-slider-track"></div>
                                             </div>
                                             <div class="slider-values">
@@ -2665,7 +2867,8 @@
                                 <div class="quality-tier">
                                     <div class="quality-tier-header">
                                         <label class="checkbox-label">
-                                            <input type="checkbox" id="quality-mp3_320-enabled" checked onchange="toggleQuality('mp3_320')">
+                                            <input type="checkbox" id="quality-mp3_320-enabled" checked
+                                                onchange="toggleQuality('mp3_320')">
                                             <span class="quality-tier-name">MP3 320 kbps</span>
                                         </label>
                                         <span class="quality-tier-priority" id="priority-mp3_320">Priority: 2</span>
@@ -2674,8 +2877,12 @@
                                         <div class="slider-group">
                                             <label>File Size Range:</label>
                                             <div class="dual-slider-container">
-                                                <input type="range" class="range-slider range-slider-min" id="mp3_320-min" min="0" max="50" value="0" step="1" oninput="updateQualityRange('mp3_320')">
-                                                <input type="range" class="range-slider range-slider-max" id="mp3_320-max" min="0" max="50" value="20" step="1" oninput="updateQualityRange('mp3_320')">
+                                                <input type="range" class="range-slider range-slider-min"
+                                                    id="mp3_320-min" min="0" max="50" value="0" step="1"
+                                                    oninput="updateQualityRange('mp3_320')">
+                                                <input type="range" class="range-slider range-slider-max"
+                                                    id="mp3_320-max" min="0" max="50" value="20" step="1"
+                                                    oninput="updateQualityRange('mp3_320')">
                                                 <div class="range-slider-track"></div>
                                             </div>
                                             <div class="slider-values">
@@ -2691,7 +2898,8 @@
                                 <div class="quality-tier">
                                     <div class="quality-tier-header">
                                         <label class="checkbox-label">
-                                            <input type="checkbox" id="quality-mp3_256-enabled" checked onchange="toggleQuality('mp3_256')">
+                                            <input type="checkbox" id="quality-mp3_256-enabled" checked
+                                                onchange="toggleQuality('mp3_256')">
                                             <span class="quality-tier-name">MP3 256 kbps</span>
                                         </label>
                                         <span class="quality-tier-priority" id="priority-mp3_256">Priority: 3</span>
@@ -2700,8 +2908,12 @@
                                         <div class="slider-group">
                                             <label>File Size Range:</label>
                                             <div class="dual-slider-container">
-                                                <input type="range" class="range-slider range-slider-min" id="mp3_256-min" min="0" max="40" value="0" step="1" oninput="updateQualityRange('mp3_256')">
-                                                <input type="range" class="range-slider range-slider-max" id="mp3_256-max" min="0" max="40" value="15" step="1" oninput="updateQualityRange('mp3_256')">
+                                                <input type="range" class="range-slider range-slider-min"
+                                                    id="mp3_256-min" min="0" max="40" value="0" step="1"
+                                                    oninput="updateQualityRange('mp3_256')">
+                                                <input type="range" class="range-slider range-slider-max"
+                                                    id="mp3_256-max" min="0" max="40" value="15" step="1"
+                                                    oninput="updateQualityRange('mp3_256')">
                                                 <div class="range-slider-track"></div>
                                             </div>
                                             <div class="slider-values">
@@ -2717,7 +2929,8 @@
                                 <div class="quality-tier">
                                     <div class="quality-tier-header">
                                         <label class="checkbox-label">
-                                            <input type="checkbox" id="quality-mp3_192-enabled" onchange="toggleQuality('mp3_192')">
+                                            <input type="checkbox" id="quality-mp3_192-enabled"
+                                                onchange="toggleQuality('mp3_192')">
                                             <span class="quality-tier-name">MP3 192 kbps</span>
                                         </label>
                                         <span class="quality-tier-priority" id="priority-mp3_192">Priority: 4</span>
@@ -2726,8 +2939,12 @@
                                         <div class="slider-group">
                                             <label>File Size Range:</label>
                                             <div class="dual-slider-container">
-                                                <input type="range" class="range-slider range-slider-min" id="mp3_192-min" min="0" max="30" value="0" step="1" oninput="updateQualityRange('mp3_192')">
-                                                <input type="range" class="range-slider range-slider-max" id="mp3_192-max" min="0" max="30" value="12" step="1" oninput="updateQualityRange('mp3_192')">
+                                                <input type="range" class="range-slider range-slider-min"
+                                                    id="mp3_192-min" min="0" max="30" value="0" step="1"
+                                                    oninput="updateQualityRange('mp3_192')">
+                                                <input type="range" class="range-slider range-slider-max"
+                                                    id="mp3_192-max" min="0" max="30" value="12" step="1"
+                                                    oninput="updateQualityRange('mp3_192')">
                                                 <div class="range-slider-track"></div>
                                             </div>
                                             <div class="slider-values">
@@ -2748,8 +2965,10 @@
                                 </div>
 
                                 <div class="help-text">
-                                    <strong>How it works:</strong> Downloads try each enabled quality in priority order (1 = highest).
-                                    File size constraints filter out outliers - MAX limits catch fake files (500MB "FLACs"), MIN limits (optional) can enforce minimum quality.
+                                    <strong>How it works:</strong> Downloads try each enabled quality in priority order
+                                    (1 = highest).
+                                    File size constraints filter out outliers - MAX limits catch fake files (500MB
+                                    "FLACs"), MIN limits (optional) can enforce minimum quality.
                                     Set MIN to 0 to accept all file sizes (recommended for most users).
                                 </div>
                             </div>
@@ -2760,7 +2979,7 @@
                             <!-- Database Settings -->
                             <div class="settings-group">
                                 <h3>Database Settings</h3>
-                                
+
                                 <div class="form-group">
                                     <label>Concurrent Workers:</label>
                                     <select id="max-workers">
@@ -2774,10 +2993,11 @@
                                         <option value="10">10</option>
                                     </select>
                                 </div>
-                                
-                                <div class="help-text">Number of parallel threads for database updates. Higher values = faster updates but more server load.</div>
+
+                                <div class="help-text">Number of parallel threads for database updates. Higher values =
+                                    faster updates but more server load.</div>
                             </div>
-                            
+
                             <!-- Metadata Enhancement Settings -->
                             <div class="settings-group">
                                 <h3>🎵 Metadata Enhancement</h3>
@@ -2815,24 +3035,29 @@
 
                                 <div class="form-group">
                                     <label>Album Path Template:</label>
-                                    <input type="text" id="template-album-path" placeholder="$albumartist/$albumartist - $album/$track - $title">
-                                    <small style="color: #888;">Variables: $albumartist, $artist, $album, $title, $track, $year</small>
+                                    <input type="text" id="template-album-path"
+                                        placeholder="$albumartist/$albumartist - $album/$track - $title">
+                                    <small style="color: #888;">Variables: $albumartist, $artist, $album, $title,
+                                        $track, $year</small>
                                 </div>
 
                                 <div class="form-group">
                                     <label>Single Path Template:</label>
-                                    <input type="text" id="template-single-path" placeholder="$artist/$artist - $title/$title">
+                                    <input type="text" id="template-single-path"
+                                        placeholder="$artist/$artist - $title/$title">
                                     <small style="color: #888;">Variables: $artist, $title, $album, $year</small>
                                 </div>
 
                                 <div class="form-group">
                                     <label>Playlist Path Template:</label>
-                                    <input type="text" id="template-playlist-path" placeholder="$playlist/$artist - $title">
+                                    <input type="text" id="template-playlist-path"
+                                        placeholder="$playlist/$artist - $title">
                                     <small style="color: #888;">Variables: $playlist, $artist, $title, $year</small>
                                 </div>
 
                                 <div class="form-group">
-                                    <button class="test-button" onclick="resetFileOrganizationTemplates()" style="background: #666;">
+                                    <button class="test-button" onclick="resetFileOrganizationTemplates()"
+                                        style="background: #666;">
                                         🔄 Reset to Defaults
                                     </button>
                                     <small style="color: #888; display: block; margin-top: 8px;">
@@ -2844,7 +3069,7 @@
                             <!-- Playlist Sync Settings -->
                             <div class="settings-group">
                                 <h3>Playlist Sync Settings</h3>
-                                
+
                                 <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="create-backup" checked>
@@ -2852,16 +3077,16 @@
                                     </label>
                                 </div>
                             </div>
-                            
+
                             <!-- Logging Information (Read-only) -->
                             <div class="settings-group">
                                 <h3>Logging Information</h3>
-                                
+
                                 <div class="form-group">
                                     <label>Log Level:</label>
                                     <div class="readonly-field" id="log-level-display">DEBUG</div>
                                 </div>
-                                
+
                                 <div class="form-group">
                                     <label>Log Path:</label>
                                     <div class="readonly-field" id="log-path-display">logs/app.log</div>
@@ -2869,7 +3094,7 @@
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Save Button -->
                     <div class="settings-actions">
                         <button class="save-button" id="save-settings">💾 Save Settings</button>
@@ -2878,19 +3103,19 @@
             </div>
         </div>
     </div>
-    
+
     <!-- Loading Overlay -->
     <div class="loading-overlay hidden" id="loading-overlay">
         <div class="loading-spinner"></div>
         <div class="loading-message">Processing...</div>
     </div>
-    
+
     <!-- Toast Notifications -->
     <div class="toast-container" id="toast-container"></div>
-    
+
     <!-- Hidden HTML5 Audio Player for Streaming -->
     <audio id="audio-player" style="display: none;"></audio>
-    
+
     <!-- Matched Download Modal -->
     <div class="modal-overlay hidden" id="matching-modal-overlay">
         <div class="matching-modal" id="matching-modal">
@@ -2898,7 +3123,7 @@
                 <h2 id="matching-modal-title">Match Download to Spotify</h2>
                 <button class="matching-modal-close" onclick="closeMatchingModal()">✕</button>
             </div>
-            
+
             <div class="matching-modal-content">
                 <!-- Artist Selection Stage -->
                 <div id="artist-selection-stage" class="selection-stage">
@@ -2906,51 +3131,55 @@
                         <h3 id="artist-stage-title">Step 1: Select the correct Artist</h3>
                         <p class="stage-subtitle">Choose the artist that best matches your download</p>
                     </div>
-                    
+
                     <div class="suggestions-section">
                         <h4 class="suggestions-title">Top Suggestions</h4>
                         <div class="suggestions-container" id="artist-suggestions">
                             <!-- Artist suggestion cards will be populated here -->
                         </div>
                     </div>
-                    
+
                     <div class="manual-search-section">
                         <h4 class="suggestions-title">Or, Search Manually</h4>
-                        <input type="text" id="artist-search-input" class="search-input" placeholder="Search for an artist...">
+                        <input type="text" id="artist-search-input" class="search-input"
+                            placeholder="Search for an artist...">
                         <div class="suggestions-container" id="artist-manual-results">
                             <!-- Manual search results will be populated here -->
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Album Selection Stage (for album downloads) -->
                 <div id="album-selection-stage" class="selection-stage hidden">
                     <div class="stage-header">
                         <h3 id="album-stage-title">Step 2: Select the correct Album</h3>
-                        <p class="stage-subtitle">Choose the album that best matches your download for <span id="selected-artist-name"></span></p>
+                        <p class="stage-subtitle">Choose the album that best matches your download for <span
+                                id="selected-artist-name"></span></p>
                     </div>
-                    
+
                     <div class="suggestions-section">
                         <h4 class="suggestions-title">Top Suggestions</h4>
                         <div class="suggestions-container" id="album-suggestions">
                             <!-- Album suggestion cards will be populated here -->
                         </div>
                     </div>
-                    
+
                     <div class="manual-search-section">
                         <h4 class="suggestions-title">Or, Search Manually</h4>
-                        <input type="text" id="album-search-input" class="search-input" placeholder="Search for an album...">
+                        <input type="text" id="album-search-input" class="search-input"
+                            placeholder="Search for an album...">
                         <div class="suggestions-container" id="album-manual-results">
                             <!-- Manual search results will be populated here -->
                         </div>
                     </div>
                 </div>
             </div>
-            
+
             <div class="matching-modal-actions">
                 <button id="skip-matching-btn" class="modal-button modal-button--secondary">Skip Matching</button>
                 <button id="cancel-match-btn" class="modal-button modal-button--cancel">Cancel</button>
-                <button id="confirm-match-btn" class="modal-button modal-button--primary" disabled>Confirm Selection</button>
+                <button id="confirm-match-btn" class="modal-button modal-button--primary" disabled>Confirm
+                    Selection</button>
             </div>
         </div>
     </div>
@@ -2964,14 +3193,14 @@
                 <h2 class="version-modal-title">What's New in SoulSync</h2>
                 <div class="version-modal-subtitle">Version 1.2 - Enhanced Search & Matching Engine Overhaul</div>
             </div>
-            
+
             <!-- Content Area with Scroll -->
             <div class="version-modal-content">
                 <div class="version-content-container" id="version-content-container">
                     <!-- Content will be populated by JavaScript -->
                 </div>
             </div>
-            
+
             <!-- Footer -->
             <div class="version-modal-footer">
                 <button class="version-modal-close" onclick="closeVersionModal()">Close</button>
@@ -2996,7 +3225,8 @@
                     <div class="wishlist-track-list-container">
                         <div class="wishlist-track-list-header">
                             <h3>Tracks to Add to Wishlist</h3>
-                            <p class="wishlist-track-list-subtitle">All tracks from this release will be added to your wishlist</p>
+                            <p class="wishlist-track-list-subtitle">All tracks from this release will be added to your
+                                wishlist</p>
                         </div>
 
                         <div class="wishlist-track-list" id="wishlist-track-list">
@@ -3007,7 +3237,8 @@
 
                 <div class="add-to-wishlist-modal-footer">
                     <div class="wishlist-modal-actions">
-                        <button class="wishlist-modal-btn wishlist-modal-btn-secondary" onclick="closeAddToWishlistModal()">
+                        <button class="wishlist-modal-btn wishlist-modal-btn-secondary"
+                            onclick="closeAddToWishlistModal()">
                             Close
                         </button>
                         <button class="wishlist-modal-btn wishlist-modal-btn-primary" id="confirm-add-to-wishlist-btn">
@@ -3064,7 +3295,8 @@
                                     <div class="config-option-icon">🎶</div>
                                     <div class="config-option-text">
                                         <span class="config-option-title">Singles</span>
-                                        <span class="config-option-description">Single tracks and 2-3 track releases</span>
+                                        <span class="config-option-description">Single tracks and 2-3 track
+                                            releases</span>
                                     </div>
                                 </div>
                             </label>
@@ -3074,7 +3306,8 @@
 
                 <div class="watchlist-artist-config-footer">
                     <div class="config-modal-actions">
-                        <button class="config-modal-btn config-modal-btn-secondary" onclick="closeWatchlistArtistConfigModal()">
+                        <button class="config-modal-btn config-modal-btn-secondary"
+                            onclick="closeWatchlistArtistConfigModal()">
                             Cancel
                         </button>
                         <button class="config-modal-btn config-modal-btn-primary" id="save-artist-config-btn">
@@ -3099,7 +3332,8 @@
             <div class="genre-browser-modal-content">
                 <div class="genre-browser-search-section">
                     <div class="genre-browser-search-container">
-                        <input type="text" class="genre-browser-search-input" placeholder="Search genres..." id="genre-browser-search">
+                        <input type="text" class="genre-browser-search-input" placeholder="Search genres..."
+                            id="genre-browser-search">
                         <span class="genre-browser-search-icon">🔍</span>
                     </div>
                 </div>
@@ -3144,4 +3378,5 @@
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
+
 </html>

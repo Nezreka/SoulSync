@@ -8636,77 +8636,43 @@ def get_version_info():
     This provides the same data that the GUI version modal displays.
     """
     version_data = {
-        "version": "1.2",
+        "version": "1.3",
         "title": "What's New in SoulSync",
-        "subtitle": "Version 1.2 - Enhanced Search & Matching Engine Overhaul",
+        "subtitle": "Version 1.3 - New YouTube Engine, Docker Fixes & More",
         "sections": [
             {
-                "title": "🔍 Enhanced Search - Unified Multi-Source Discovery",
-                "description": "Powerful new search system that queries Spotify, your library, and Soulseek simultaneously with intelligent categorization",
+                "title": "📺 New YouTube Download Source",
+                "description": "Major overhaul of the YouTube download engine, making it a first-class citizen alongside Soulseek",
                 "features": [
-                    "• Unified Search - Single search across Spotify, your music library, and Soulseek in real-time",
-                    "• Smart Categorization - Results organized by Artists, Albums, and Tracks with visual indicators",
-                    "• Source Identification - Clear badges showing whether content is from Spotify, your library (DB), or both",
-                    "• Instant Actions - Stream, download, or add to wishlist directly from search results",
-                    "• Artist Deep Dive - Click any artist to view full discography, similar artists, and statistics",
-                    "• Album Preview - Expand albums to see complete track listings with metadata",
-                    "• Library Integration - Highlights tracks you already own to prevent duplicate downloads",
-                    "• Performance Optimized - Fast parallel queries with streaming results"
+                    "• First-Class Support - YouTube is now a primary download source, fully integrated into the app's core",
+                    "• Hybrid Mode - Automatically fallback to YouTube if Soulseek downloads fail (or vice-versa)",
+                    "• Reliable Downloads - Completely rewritten post-processing engine to eliminate 'file not found' errors",
+                    "• Batch Processing - YouTube downloads now support batch operations and queue management",
+                    "• High Quality - Automatic selection of highest quality audio streams (up to 320kbps opus/aac)",
+                    "• Metadata Matching - Intelligent matching of YouTube videos to correct Spotify metadata"
                 ],
-                "usage_note": "Access Enhanced Search from the main navigation - searches across all your music sources instantly!"
+                "usage_note": "Configure your preferred download sources in Settings > Download Settings!"
             },
+
             {
-                "title": "🎯 Matching Engine 2.0 - Precision & Accuracy",
-                "description": "Complete overhaul of matching algorithms to drastically reduce false positives while maintaining high match rates",
+                "title": "🐳 Docker & System Reliability",
+                "description": "Critical fixes for Docker environments and general system stability",
                 "features": [
-                    "• 80-90% False Positive Reduction - Down from 10%+ to 1-2% through strict matching logic",
-                    "• Intelligent Version Detection - Distinguishes between remasters (accepted) vs remixes/live versions (rejected)",
-                    "• Short Title Protection - Extra validation for common titles like 'Run', 'Love', 'Girls' to prevent wrong matches",
-                    "• Full-String Similarity - Replaced permissive substring matching with precise sequence matching",
-                    "• Rebalanced Scoring - Artist matching now weighted 40% (up from 35%), duration 15% (up from 5%)",
-                    "• Artist Name Normalization - Handles variations like 'AC/DC' vs 'AC-DC' correctly",
-                    "• Higher Confidence Thresholds - Standard: 0.63 (was 0.60), Enhanced: 0.58 (was 0.45)",
-                    "• Quality Bonus Adjustment - Reduced bonuses to prevent bad matches from passing threshold"
-                ],
-                "usage_note": "Matching engine changes apply automatically to all searches, syncs, and downloads!"
-            },
-            {
-                "title": "⭐ Wishlist Improvements",
-                "description": "Critical bug fixes and enhancements to wishlist functionality",
-                "features": [
-                    "• Album Cover Art Fix - Failed tracks from artist page downloads now preserve album artwork",
-                    "• Album Removal Fix - 'Remove Album' button now works correctly for tracks without Spotify IDs",
-                    "• Special Character Handling - Albums with parentheses, apostrophes work correctly (e.g., 'Live (Collector's Edition)')",
-                    "• Missing Image Placeholders - Beautiful gradient placeholders for albums without cover art",
-                    "• Granular Management - Remove individual tracks, singles, or entire albums with confidence",
-                    "• Better ID Generation - Frontend/backend album ID generation now perfectly synchronized"
+                    "• Docker Streaming Fix - Resolved issues with path resolution when streaming in Docker containers",
+                    "• Volume Mapping - Improved handling of mapped volumes and permissions",
+                    "• Settings Persistence - Fixed an issue where Spotify settings wouldn't save correctly",
+                    "• Soulseek Connection - Better connection stability and compatibility checks",
+                    "• Background Workers - More robust background task handling for long-running operations"
                 ]
             },
             {
-                "title": "🎧 Discovery Page - Your Personal Music Explorer",
-                "description": "Intelligent music discovery system that learns from your library and helps you find your next favorite tracks",
+                "title": "🛠️ Fixes & Improvements",
+                "description": "General bug fixes and quality of life improvements",
                 "features": [
-                    "• Smart Discovery Pool - Automatically populated from watchlist artists and similar artists",
-                    "• Personalized Playlists - Popular Picks, Hidden Gems, Discovery Shuffle, and more",
-                    "• Genre & Decade Playlists - Browse music by mood, style, or era",
-                    "• Seasonal Playlists - Curated collections for holidays and seasons (Christmas, Halloween, Summer, etc.)",
-                    "• Configurable Lookback Period - Control how far back to scan artist discographies (7 days to full catalog)",
-                    "• Smart Album Categorization - Accurate track count-based classification (Singles/EPs vs Albums)",
-                    "• One-Click Wishlist Integration - Add any discovered track to wishlist for automatic downloading"
-                ],
-                "usage_note": "Discovery pool automatically populates during watchlist scans. Configure lookback period in Settings!"
-            },
-            {
-                "title": "🔧 Quality of Life & Bug Fixes",
-                "description": "Additional improvements and stability enhancements",
-                "features": [
-                    "• Navigation Highlighting - Enhanced search properly highlights active navigation tabs",
-                    "• Playlist Sync Fix - Database-only fallback now correctly extracts artist names from Spotify objects",
-                    "• Improved Metadata Handling - Better album type detection using track counts",
-                    "• Enhanced Discovery Pool Management - Configurable artist scan depth with intelligent fallback",
-                    "• Better Error Handling - More informative messages and automatic recovery mechanisms",
-                    "• UI Polish - Refined modals, better button layouts, and improved visual feedback",
-                    "• Performance Optimizations - Faster database queries and more efficient data processing"
+                    "• Diacritics Support - Fixed album/artist matching for names with special characters (e.g., 'Pielea de găină')",
+                    "• Search Timing - Optimized search scheduling to prevent rate limiting",
+                    "• Library Scanning - Faster and more accurate matching against existing library tracks",
+                    "• Mobile Layout - Improved responsiveness for sidebar and modals on mobile devices"
                 ]
             }
         ]
