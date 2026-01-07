@@ -1372,6 +1372,9 @@ def _find_streaming_download_in_all_downloads(all_downloads, track_data):
 
 def _find_downloaded_file(download_path, track_data):
     """Find the downloaded audio file in the downloads directory tree (works for Soulseek and YouTube)"""
+    # Ensure path is accessible in Docker (handles E:/ -> /host/mnt/e/)
+    download_path = docker_resolve_path(download_path)
+    
     audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
     target_filename = extract_filename(track_data.get('filename', ''))
 
