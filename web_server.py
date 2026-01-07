@@ -59,7 +59,13 @@ else:
 if os.path.exists(config_path):
     print(f"Found config file at: {config_path}")
     # Load configuration into the existing singleton instance
-    config_manager.load_config(config_path)
+    if hasattr(config_manager, 'load_config'):
+        config_manager.load_config(config_path)
+    else:
+        # Fallback for older settings.py in Docker volumes
+        print("⚠️ Legacy configuration detected: using fallback loading method")
+        config_manager.config_path = Path(config_path)
+        config_manager._load_config()
     print("✅ Web server configuration loaded successfully.")
 else:
     print(f"🔴 WARNING: config.json not found at {config_path}. Using default settings.")
