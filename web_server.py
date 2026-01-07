@@ -8778,6 +8778,13 @@ def check_and_recover_stuck_flags():
             with wishlist_timer_lock:
                 wishlist_auto_processing = False
                 wishlist_auto_processing_timestamp = 0
+
+            # CRITICAL FIX: Reschedule timer after recovery to maintain continuity
+            print("🔄 [Stuck Recovery] Rescheduling wishlist processing in 30 minutes")
+            try:
+                schedule_next_wishlist_processing()
+            except Exception as e:
+                print(f"❌ [Stuck Recovery] Failed to reschedule wishlist processing: {e}")
             return True
 
     # Check watchlist flag
@@ -8788,6 +8795,13 @@ def check_and_recover_stuck_flags():
             with watchlist_timer_lock:
                 watchlist_auto_scanning = False
                 watchlist_auto_scanning_timestamp = 0
+
+            # CRITICAL FIX: Reschedule timer after recovery to maintain continuity
+            print("🔄 [Stuck Recovery] Rescheduling watchlist scan in 24 hours")
+            try:
+                schedule_next_watchlist_scan()
+            except Exception as e:
+                print(f"❌ [Stuck Recovery] Failed to reschedule watchlist scan: {e}")
             return True
 
     return False
@@ -8886,13 +8900,21 @@ def _process_wishlist_automatically():
     print("🤖 [Auto-Wishlist] Timer triggered - starting automatic wishlist processing...")
 
     try:
+        # CRITICAL FIX: Use smart stuck detection BEFORE acquiring lock
+        # This prevents deadlock and handles stuck flags (2-hour timeout)
+        if is_wishlist_actually_processing():
+            print("⚠️ [Auto-Wishlist] Already processing (verified with stuck detection), skipping.")
+            schedule_next_wishlist_processing()
+            return
+
         # Check conditions and set flag
         should_skip_already_running = False
         should_skip_watchlist_conflict = False
 
         with wishlist_timer_lock:
+            # Re-check inside lock to handle race conditions
             if wishlist_auto_processing:
-                print("⚠️ Wishlist auto-processing already running, skipping.")
+                print("⚠️ [Auto-Wishlist] Already processing (race condition check), skipping.")
                 should_skip_already_running = True
 
             # Check if watchlist scan is currently running (using smart detection)
@@ -9053,19 +9075,25 @@ def _process_wishlist_automatically():
                 total_tracks = album_data.get('total_tracks')
                 album_type = album_data.get('album_type', 'album').lower()
 
-                # Categorize by track count if available, otherwise use album_type
-                # Single: 1 track, EP: 2-5 tracks, Album: 6+ tracks
+                # CRITICAL FIX: Prioritize Spotify's album_type (most accurate source)
+                # Only fall back to track count heuristic if album_type is missing
                 is_single_or_ep = False
                 is_album = False
 
-                if total_tracks is not None and total_tracks > 0:
-                    # Use track count (most accurate)
+                # Use Spotify's album_type classification first
+                if album_type and album_type in ['single', 'ep', 'album', 'compilation']:
+                    # Spotify's classification is authoritative
+                    is_single_or_ep = album_type in ['single', 'ep']
+                    is_album = album_type in ['album', 'compilation']
+                elif total_tracks is not None and total_tracks > 0:
+                    # Fallback: Use track count heuristic only if album_type unavailable
+                    # Single: 1 track, EP: 2-5 tracks, Album: 6+ tracks
                     is_single_or_ep = total_tracks < 6
                     is_album = total_tracks >= 6
                 else:
-                    # Fall back to Spotify's album_type
-                    is_single_or_ep = album_type in ['single', 'ep']
-                    is_album = album_type == 'album'
+                    # No classification data available - default to album
+                    is_album = True
+                    is_single_or_ep = False
 
                 if current_cycle == 'singles' and is_single_or_ep:
                     filtered_tracks.append(track)
@@ -13883,6 +13911,7 @@ def get_album_tracks(album_id):
             'artists': album_data.get('artists', []),
             'release_date': album_data.get('release_date', ''),
             'total_tracks': album_data.get('total_tracks', 0),
+            'album_type': album_data.get('album_type', 'album'),  # CRITICAL FIX: Include album_type for correct classification
             'images': album_data.get('images', []),
             'tracks': tracks
         }
@@ -17470,9 +17499,17 @@ def _process_watchlist_scan_automatically():
     print("🤖 [Auto-Watchlist] Timer triggered - starting automatic watchlist scan...")
 
     try:
+        # CRITICAL FIX: Use smart stuck detection BEFORE acquiring lock
+        # This prevents deadlock and handles stuck flags (2-hour timeout)
+        if is_watchlist_actually_scanning():
+            print("⚠️ [Auto-Watchlist] Already scanning (verified with stuck detection), skipping.")
+            schedule_next_watchlist_scan()
+            return
+
         with watchlist_timer_lock:
+            # Re-check inside lock to handle race conditions
             if watchlist_auto_scanning:
-                print("⚠️ Watchlist auto-scanning already running, skipping.")
+                print("⚠️ [Auto-Watchlist] Already scanning (race condition check), skipping.")
                 schedule_next_watchlist_scan()
                 return
 

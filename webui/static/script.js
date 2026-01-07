@@ -5667,7 +5667,7 @@ function exportPlaylistAsM3U(playlistId) {
     console.log(`✅ Exported M3U - Total: ${process.tracks.length}, Available: ${availableCount}, Missing: ${missingCount}`);
 }
 
-async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks) {
+async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks, artist = null, album = null) {
     showLoadingOverlay('Loading YouTube playlist...');
     // Check if a process is already active for this virtual playlist
     if (activeDownloadProcesses[virtualPlaylistId]) {
@@ -5710,7 +5710,9 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
         poller: null,
         batchId: null,
         playlist: virtualPlaylist,
-        tracks: spotifyTracks
+        tracks: spotifyTracks,
+        artist: artist,  // ✅ Store artist context
+        album: album     // ✅ Store album context
     };
 
     // Generate hero section with dynamic source detection
@@ -5726,9 +5728,11 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
 
     // Store metadata for discover download sidebar (will be added when Begin Analysis is clicked)
     if (source === 'SoulSync' || virtualPlaylistId.startsWith('discover_lb_') || virtualPlaylistId.startsWith('listenbrainz_')) {
-        // Extract image URL from first track's album cover
+        // Extract image URL from album context or first track's album cover
         let imageUrl = null;
-        if (spotifyTracks && spotifyTracks.length > 0) {
+        if (album && album.images && album.images.length > 0) {
+            imageUrl = album.images[0].url;
+        } else if (spotifyTracks && spotifyTracks.length > 0) {
             const firstTrack = spotifyTracks[0];
             if (firstTrack.album && firstTrack.album.images && firstTrack.album.images.length > 0) {
                 imageUrl = firstTrack.album.images[0].url;
@@ -5737,11 +5741,22 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
         // Store in process for later use when Begin Analysis is clicked
         activeDownloadProcesses[virtualPlaylistId].discoverMetadata = {
             imageUrl: imageUrl,
-            type: 'album'
+            type: album ? 'album' : 'playlist'  // ✅ Use 'album' if album context provided
         };
     }
 
-    const heroContext = {
+    // CRITICAL FIX: Use album context for discover_album playlists
+    const isDiscoverAlbum = virtualPlaylistId.startsWith('discover_album_');
+    const heroContext = isDiscoverAlbum && album && artist ? {
+        type: 'album',  // ✅ Show as album, not playlist
+        album: {
+            name: album.name,
+            artist: artist.name,  // ✅ Use actual artist name, not 'SoulSync'
+            images: album.images || []
+        },
+        trackCount: spotifyTracks.length,
+        playlistId: virtualPlaylistId
+    } : {
         type: 'playlist',
         playlist: { name: playlistName, owner: source },
         trackCount: spotifyTracks.length,
@@ -32839,10 +32854,10 @@ async function openDownloadModalForRecentAlbum(albumIndex) {
             throw new Error('No tracks found in album');
         }
 
-        // Convert to expected format
+        // Convert to expected format - CRITICAL FIX: Use fresh albumData from Spotify, not cached album
         const spotifyTracks = albumData.tracks.map(track => {
             // Normalize artists to array of strings
-            let artists = track.artists || [{ name: album.artist_name }];
+            let artists = track.artists || albumData.artists || [{ name: album.artist_name }];
             if (Array.isArray(artists)) {
                 artists = artists.map(a => a.name || a);
             }
@@ -32852,19 +32867,38 @@ async function openDownloadModalForRecentAlbum(albumIndex) {
                 name: track.name,
                 artists: artists,
                 album: {
-                    name: album.album_name,
-                    images: album.album_cover_url ? [{ url: album.album_cover_url }] : []
+                    id: albumData.id,                              // ✅ Album ID for proper tracking
+                    name: albumData.name,                          // ✅ Use fresh data, not cached
+                    album_type: albumData.album_type || 'album',   // ✅ Critical: Album type for classification
+                    total_tracks: albumData.total_tracks || 0,     // ✅ Total tracks for context
+                    release_date: albumData.release_date || '',    // ✅ Release date
+                    images: albumData.images || []                 // ✅ Use Spotify images
                 },
-                duration_ms: track.duration_ms || 0
+                duration_ms: track.duration_ms || 0,
+                track_number: track.track_number || 0
             };
         });
 
         // Create virtual playlist ID
         const virtualPlaylistId = `discover_album_${album.album_spotify_id}`;
-        const playlistName = `${album.album_name} - ${album.artist_name}`;
 
-        // Open download modal
-        await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
+        // CRITICAL FIX: Pass proper artist/album context for modal display
+        const artistContext = {
+            id: album.artist_spotify_id,
+            name: album.artist_name
+        };
+
+        const albumContext = {
+            id: albumData.id,
+            name: albumData.name,
+            album_type: albumData.album_type || 'album',
+            total_tracks: albumData.total_tracks || 0,
+            release_date: albumData.release_date || '',
+            images: albumData.images || []
+        };
+
+        // Open download modal with artist/album context
+        await openDownloadMissingModalForYouTube(virtualPlaylistId, albumData.name, spotifyTracks, artistContext, albumContext);
 
         hideLoadingOverlay();
 
