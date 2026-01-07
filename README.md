@@ -50,7 +50,7 @@ SoulSync bridges streaming services to your media server with automated discover
 
 ### Multi-Source Downloads
 
-**Sources**: Soulseek (FLAC priority), Beatport charts, Spotify/Tidal/YouTube playlists
+**Sources**: Soulseek (FLAC priority), YouTube (Audio), Beatport charts, Spotify/Tidal playlists
 
 **Features**
 - Quality profiles: Audiophile, Balanced, Mobile
@@ -174,7 +174,7 @@ python web_server.py
 
 **Scale**: 83,000+ lines Python, 120+ API endpoints, handles 10,000+ album libraries
 
-**Integrations**: Spotify, Tidal, Plex, Jellyfin, Navidrome, Slskd, ListenBrainz, LRClib, music-map.com, Beatport
+**Integrations**: Spotify, Tidal, YouTube, Plex, Jellyfin, Navidrome, Slskd, ListenBrainz, LRClib, music-map.com, Beatport
 
 **Stack**: Python 3.8+, Flask, SQLite, PyQt6 (desktop GUI in maintenance mode)
 
