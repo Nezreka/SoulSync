@@ -99,7 +99,7 @@ docker-compose up -d
 ```bash
 git clone https://github.com/Nezreka/SoulSync
 cd SoulSync
-pip install -r requirements.txt
+pip install -r requirements-webui.txt
 python web_server.py
 # Open http://localhost:8008
 ```
