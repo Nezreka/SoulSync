@@ -2070,55 +2070,52 @@ class MusicDatabase:
         cleaned = re.sub(r'\s*[\]\)]\s*', ' ', cleaned)  # Convert closing brackets/parens to space
         cleaned = re.sub(r'\s*-\s*', ' ', cleaned)       # Convert dashes to spaces too
 
-        # STEP 2: Remove version markers and noise patterns for better matching
-        # This allows "I Want You Back - Radio Edit" to match "I Want You Back"
+        # STEP 2: Remove metadata noise for better matching
+        # IMPORTANT: Only remove markers that describe the SAME recording with different metadata
+        # DO NOT remove markers that indicate DIFFERENT versions (live, remix, acoustic, etc.)
+        # Those are handled by the matching engine's version detection system
         patterns_to_remove = [
-            # Basic markers
+            # Basic markers (content/parental ratings)
             r'\s*explicit\s*',      # Remove explicit markers
             r'\s*clean\s*',         # Remove clean markers
 
-            # Featuring/collaboration
+            # Featuring/collaboration (metadata, not different version)
             r'\s*feat\..*',         # Remove featuring
             r'\s*featuring.*',      # Remove featuring
             r'\s*ft\..*',           # Remove ft.
             r'\s*with\s+.*',        # Remove "with Artist"
 
-            # Edit versions
-            r'\s*radio\s+edit.*',   # Remove "radio edit"
+            # Edit versions (same recording, different edit for format)
+            r'\s*radio\s+edit.*',   # Remove "radio edit" - same song, radio format
+            r'\s*single\s+edit.*',  # Remove "single edit" - same song, single format
+            r'\s*album\s+edit.*',   # Remove "album edit" - same song, album format
             r'\s*edit\s*$',         # Remove trailing "edit"
-            r'\s*single\s+edit.*',  # Remove "single edit"
-            r'\s*album\s+edit.*',   # Remove "album edit"
 
-            # Live versions
-            r'\s*live\s+at.*',      # Remove "live at..."
-            r'\s*live\s+from.*',    # Remove "live from..."
-            r'\s*live\s+unplugged.*', # Remove "live unplugged"
-            r'\s*live\s*',          # Remove standalone "live"
-            r'\s*unplugged.*',      # Remove "unplugged"
-
-            # Remasters
+            # Remasters (same recording, different mastering)
             r'\s*\d{4}\s*remaster.*',  # Remove "2015 remaster"
             r'\s*remaster.*',       # Remove "remaster/remastered"
             r'\s*remastered.*',     # Remove "remastered"
 
-            # Version types
-            r'\s*original\s+version.*',  # Remove "original version"
-            r'\s*album\s+version.*',     # Remove "album version"
-            r'\s*single\s+version.*',    # Remove "single version"
-            r'\s*extended\s+version.*',  # Remove "extended version"
+            # Version clarifications (metadata, not different recordings)
+            r'\s*original\s+version.*',  # Remove "original version" - clarification
+            r'\s*album\s+version.*',     # Remove "album version" - clarification
+            r'\s*single\s+version.*',    # Remove "single version" - clarification
             r'\s*version\s*$',           # Remove trailing "version"
 
-            # Soundtrack/source
+            # Soundtrack/source info (metadata about source)
             r'\s*from\s+.*soundtrack.*', # Remove "from ... soundtrack"
             r'\s*from\s+".*".*',         # Remove "from 'Movie Title'"
             r'\s*soundtrack.*',          # Remove "soundtrack"
-
-            # Other common markers
-            r'\s*acoustic.*',       # Remove "acoustic"
-            r'\s*instrumental.*',   # Remove "instrumental"
-            r'\s*remix.*',          # Remove "remix"
-            r'\s*demo.*',           # Remove "demo"
         ]
+
+        # NOTE: We do NOT remove these - they indicate DIFFERENT recordings:
+        # - live, live at, live from, unplugged (different performance)
+        # - remix, mix (different mix)
+        # - acoustic (different arrangement)
+        # - instrumental (different version)
+        # - demo (different recording)
+        # - extended (different length/content)
+        # These are handled by matching_engine.similarity_score() which applies penalties
 
         for pattern in patterns_to_remove:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE).strip()
