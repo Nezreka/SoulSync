@@ -1877,14 +1877,23 @@ class MusicDatabase:
             # Simple confidence based on string similarity
             title_similarity = self._string_similarity(search_title.lower(), db_album.title.lower())
             artist_similarity = self._string_similarity(search_artist.lower(), db_album.artist_name.lower())
-            
+
             # Also try with cleaned versions (removing edition markers)
             clean_search_title = self._clean_album_title_for_comparison(search_title)
             clean_db_title = self._clean_album_title_for_comparison(db_album.title)
             clean_title_similarity = self._string_similarity(clean_search_title, clean_db_title)
-            
+
+            # Also try with normalized versions (handling diacritics) - fixes #101
+            normalized_search_title = self._normalize_for_comparison(search_title)
+            normalized_db_title = self._normalize_for_comparison(db_album.title)
+            normalized_title_similarity = self._string_similarity(normalized_search_title, normalized_db_title)
+
             # Use the best title similarity
-            best_title_similarity = max(title_similarity, clean_title_similarity)
+            best_title_similarity = max(title_similarity, clean_title_similarity, normalized_title_similarity)
+
+            # Log when normalized matching helps (only if it's the best score and better than others)
+            if normalized_title_similarity == best_title_similarity and normalized_title_similarity > max(title_similarity, clean_title_similarity):
+                logger.debug(f"  🌍 Diacritic normalization improved match: '{search_title}' -> '{db_album.title}' (normalized: {normalized_title_similarity:.3f} vs raw: {title_similarity:.3f})")
             
             # Weight: 50% title, 50% artist (equal weight to prevent false positives)
             # Also require minimum artist similarity to prevent matching wrong artists
