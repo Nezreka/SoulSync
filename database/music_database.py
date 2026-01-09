@@ -1271,8 +1271,12 @@ class MusicDatabase:
         from unidecode import unidecode
         
         # Normalize search terms
-        title_norm = unidecode(title).lower() if title else ""
-        artist_norm = unidecode(artist).lower() if artist else ""
+        if _matching_engine:
+            title_norm = _matching_engine.normalize_string(title) if title else ""
+            artist_norm = _matching_engine.normalize_string(artist) if artist else ""
+        else:
+            title_norm = unidecode(title).lower() if title else ""
+            artist_norm = unidecode(artist).lower() if artist else ""
         
         # Try searching with normalized versions
         where_conditions = []
@@ -1312,8 +1316,13 @@ class MusicDatabase:
         # Filter results with proper Unicode normalization
         filtered_tracks = []
         for row in rows:
-            db_title_norm = unidecode(row['title'].lower()) if row['title'] else ""
-            db_artist_norm = unidecode(row['artist_name'].lower()) if row['artist_name'] else ""
+
+            if _matching_engine:
+                db_title_norm = _matching_engine.normalize_string(row['title']) if row['title'] else ""
+                db_artist_norm = _matching_engine.normalize_string(row['artist_name']) if row['artist_name'] else ""
+            else:
+                db_title_norm = unidecode(row['title'].lower()) if row['title'] else ""
+                db_artist_norm = unidecode(row['artist_name'].lower()) if row['artist_name'] else ""
             
             title_matches = not title or title_norm in db_title_norm
             artist_matches = not artist or artist_norm in db_artist_norm
@@ -1707,7 +1716,16 @@ class MusicDatabase:
             
             for variation in title_variations:
                 # Search for this variation
-                albums = self.search_albums(title=variation, artist=artist, limit=10, server_source=server_source)
+                albums = []
+                artist_variations = self._get_artist_variations(artist)
+                for artist_variation in artist_variations:
+                    found = self.search_albums(title=variation, artist=artist_variation, limit=10, server_source=server_source)
+                    # Deduplicate by ID
+                    existing_ids = {a.id for a in albums}
+                    for album in found:
+                        if album.id not in existing_ids:
+                            albums.append(album)
+                            existing_ids.add(album.id)
                 
                 if albums:
                     logger.debug(f"📀 Found {len(albums)} albums for variation '{variation}'")
@@ -1728,9 +1746,44 @@ class MusicDatabase:
             if best_match and best_confidence >= confidence_threshold:
                 logger.debug(f"✅ Edition match found: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
                 return best_match, best_confidence
-            else:
-                logger.debug(f"❌ No confident edition match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
-                return None, best_confidence
+            
+            # Fallback: Check ALL albums by this artist (resolves SQL accent sensitivity issues #101)
+            # If we haven't found a match yet, fetch broader list from artist and double check
+            if best_confidence < confidence_threshold:
+                logger.debug(f"⚠️ specific title search failed, trying broad artist search fallback for '{artist}'")
+                try:
+                    # Get ALL albums by this artist (limit 100 to be safe)
+                    # This bypasses SQL 'LIKE' limitations for diacritics (e.g. 'ă' vs 'a')
+                    # And relies on Python-side normalization in _calculate_album_confidence
+                    artist_albums = []
+                    artist_variations = self._get_artist_variations(artist)
+                    for artist_var in artist_variations:
+                        found_albums = self.search_albums(title="", artist=artist_var, limit=100, server_source=server_source)
+                        # Deduplicate
+                        existing_ids = {a.id for a in artist_albums}
+                        for album in found_albums:
+                            if album.id not in existing_ids:
+                                artist_albums.append(album)
+                                existing_ids.add(album.id)
+                    
+                    if artist_albums:
+                        logger.debug(f"  Found {len(artist_albums)} total albums for artist fallback")
+                    
+                    for album in artist_albums:
+                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
+                        if confidence > best_confidence:
+                            best_confidence = confidence
+                            best_match = album
+                            logger.debug(f"  🎯 Fallback match: '{album.title}' confidence: {confidence:.3f}")
+                except Exception as fallback_error:
+                     logger.warning(f"Fallback artist search failed: {fallback_error}")
+
+            if best_match and best_confidence >= confidence_threshold:
+                 logger.debug(f"✅ Fallback match succeeded: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
+                 return best_match, best_confidence
+
+            logger.debug(f"❌ No confident edition match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
+            return None, best_confidence
                 
         except Exception as e:
             logger.error(f"Error in edition-aware album matching for '{title}' by '{artist}': {e}")
