@@ -2063,29 +2063,69 @@ class MusicDatabase:
     def _clean_track_title_for_comparison(self, title: str) -> str:
         """Clean track title for comparison by normalizing brackets/dashes and removing noise"""
         cleaned = title.lower().strip()
-        
+
         # STEP 1: Normalize bracket/dash styles for consistent matching
         # Convert all bracket styles to spaces for better matching
         cleaned = re.sub(r'\s*[\[\(]\s*', ' ', cleaned)  # Convert opening brackets/parens to space
         cleaned = re.sub(r'\s*[\]\)]\s*', ' ', cleaned)  # Convert closing brackets/parens to space
         cleaned = re.sub(r'\s*-\s*', ' ', cleaned)       # Convert dashes to spaces too
-        
-        # STEP 2: Remove clear noise patterns - very conservative approach
+
+        # STEP 2: Remove version markers and noise patterns for better matching
+        # This allows "I Want You Back - Radio Edit" to match "I Want You Back"
         patterns_to_remove = [
-            r'\s*explicit\s*',      # Remove explicit markers (now without brackets)
-            r'\s*clean\s*',         # Remove clean markers (now without brackets)  
-            r'\s*feat\..*',         # Remove featuring (now without brackets)
-            r'\s*featuring.*',      # Remove featuring (now without brackets)
-            r'\s*ft\..*',           # Remove ft. (now without brackets)
-            r'\s*edit\s*$',         # Remove "- edit" suffix only (specific case: "Reborn - edit" → "Reborn")
+            # Basic markers
+            r'\s*explicit\s*',      # Remove explicit markers
+            r'\s*clean\s*',         # Remove clean markers
+
+            # Featuring/collaboration
+            r'\s*feat\..*',         # Remove featuring
+            r'\s*featuring.*',      # Remove featuring
+            r'\s*ft\..*',           # Remove ft.
+            r'\s*with\s+.*',        # Remove "with Artist"
+
+            # Edit versions
+            r'\s*radio\s+edit.*',   # Remove "radio edit"
+            r'\s*edit\s*$',         # Remove trailing "edit"
+            r'\s*single\s+edit.*',  # Remove "single edit"
+            r'\s*album\s+edit.*',   # Remove "album edit"
+
+            # Live versions
+            r'\s*live\s+at.*',      # Remove "live at..."
+            r'\s*live\s+from.*',    # Remove "live from..."
+            r'\s*live\s+unplugged.*', # Remove "live unplugged"
+            r'\s*live\s*',          # Remove standalone "live"
+            r'\s*unplugged.*',      # Remove "unplugged"
+
+            # Remasters
+            r'\s*\d{4}\s*remaster.*',  # Remove "2015 remaster"
+            r'\s*remaster.*',       # Remove "remaster/remastered"
+            r'\s*remastered.*',     # Remove "remastered"
+
+            # Version types
+            r'\s*original\s+version.*',  # Remove "original version"
+            r'\s*album\s+version.*',     # Remove "album version"
+            r'\s*single\s+version.*',    # Remove "single version"
+            r'\s*extended\s+version.*',  # Remove "extended version"
+            r'\s*version\s*$',           # Remove trailing "version"
+
+            # Soundtrack/source
+            r'\s*from\s+.*soundtrack.*', # Remove "from ... soundtrack"
+            r'\s*from\s+".*".*',         # Remove "from 'Movie Title'"
+            r'\s*soundtrack.*',          # Remove "soundtrack"
+
+            # Other common markers
+            r'\s*acoustic.*',       # Remove "acoustic"
+            r'\s*instrumental.*',   # Remove "instrumental"
+            r'\s*remix.*',          # Remove "remix"
+            r'\s*demo.*',           # Remove "demo"
         ]
-        
+
         for pattern in patterns_to_remove:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE).strip()
-        
+
         # STEP 3: Clean up extra spaces
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-        
+
         return cleaned
     
     def _clean_album_title_for_comparison(self, title: str) -> str:
