@@ -1492,13 +1492,22 @@ class MusicDatabase:
             variations = [artist_name]
             name_lower = artist_name.lower()
 
+            # Add diacritic-normalized variation (fixes #101)
+            # This allows "Subcarpaţi" to match "Subcarpati" in SQL LIKE queries
+            normalized_name = self._normalize_for_comparison(artist_name)
+            # Only add if it's different from original (avoid duplicates)
+            if normalized_name != artist_name.lower():
+                # Add with original casing style if possible
+                variations.append(normalized_name.title())
+                variations.append(normalized_name)
+
             # Add more aliases here in the future
             if "korn" in name_lower:
                 if "KoЯn" not in variations:
                     variations.append("KoЯn")
                 if "Korn" not in variations:
                     variations.append("Korn")
-            
+
             # Return unique variations
             return list(set(variations))
 
