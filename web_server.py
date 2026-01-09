@@ -6389,6 +6389,27 @@ def _sanitize_filename(filename: str) -> str:
     sanitized = re.sub(r'\s+', ' ', sanitized).strip()
     return sanitized[:200]
 
+def _sanitize_context_values(context: dict) -> dict:
+    """
+    Sanitize all string values in context dict for path safety.
+
+    Prevents characters like '/' in artist names (e.g., 'AC/DC')
+    from being interpreted as path separators during template substitution.
+
+    Args:
+        context: Dictionary with metadata values
+
+    Returns:
+        New dictionary with sanitized string values
+    """
+    sanitized = {}
+    for key, value in context.items():
+        if isinstance(value, str):
+            sanitized[key] = _sanitize_filename(value)
+        else:
+            sanitized[key] = value
+    return sanitized
+
 def _clean_track_title(track_title: str, artist_name: str) -> str:
     """Clean up track title by removing artist prefix and other noise."""
     import re
@@ -7417,21 +7438,25 @@ def _apply_path_template(template: str, context: dict) -> str:
     Returns:
         Processed path string
     """
+    # Sanitize context values BEFORE template substitution
+    # This prevents '/' in metadata from creating unintended path components
+    clean_context = _sanitize_context_values(context)
+
     result = template
 
     # Replace variables in order from longest to shortest to avoid partial replacements
     # (e.g., $albumartist must be replaced before $album to prevent "Scorpionartist" from typo "$albumartis")
 
     # Longest variables first
-    result = result.replace('$albumartist', context.get('albumartist', context.get('artist', 'Unknown Artist')))
-    result = result.replace('$playlist', context.get('playlist_name', ''))
+    result = result.replace('$albumartist', clean_context.get('albumartist', clean_context.get('artist', 'Unknown Artist')))
+    result = result.replace('$playlist', clean_context.get('playlist_name', ''))
 
     # Medium length variables
-    result = result.replace('$artist', context.get('artist', 'Unknown Artist'))
-    result = result.replace('$album', context.get('album', 'Unknown Album'))
-    result = result.replace('$title', context.get('title', 'Unknown Track'))
-    result = result.replace('$track', f"{context.get('track_number', 1):02d}")
-    result = result.replace('$year', str(context.get('year', '')))  # Empty string instead of 'Unknown'
+    result = result.replace('$artist', clean_context.get('artist', 'Unknown Artist'))
+    result = result.replace('$album', clean_context.get('album', 'Unknown Album'))
+    result = result.replace('$title', clean_context.get('title', 'Unknown Track'))
+    result = result.replace('$track', f"{clean_context.get('track_number', 1):02d}")
+    result = result.replace('$year', str(clean_context.get('year', '')))  # Empty string instead of 'Unknown'
 
     # Clean up extra spaces that might result from empty variables
     import re
