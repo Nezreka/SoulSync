@@ -219,6 +219,18 @@ db_update_lock = threading.Lock()
 matched_downloads_context = {}
 matched_context_lock = threading.Lock()
 
+# --- File-Level Metadata Write Locking ---
+# Prevents concurrent threads from writing metadata to the same file simultaneously
+_metadata_write_locks = {}  # file_path -> threading.Lock()
+_metadata_locks_lock = threading.Lock()  # Lock for the locks dict
+
+def _get_file_lock(file_path):
+    """Get or create a lock for a specific file path to prevent concurrent metadata writes."""
+    with _metadata_locks_lock:
+        if file_path not in _metadata_write_locks:
+            _metadata_write_locks[file_path] = threading.Lock()
+        return _metadata_write_locks[file_path]
+
 # --- Download Missing Tracks Modal State Management ---
 # Thread-safe state tracking for modal download functionality with batch management
 missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="MissingTrackWorker")
@@ -3727,7 +3739,7 @@ def start_download():
                     ))
                     if download_id:
                         # Register download for post-processing (simple transfer to /Transfer)
-                        context_key = f"{username}::{filename}"
+                        context_key = f"{username}::{extract_filename(filename)}"
                         with matched_context_lock:
                             matched_downloads_context[context_key] = {
                                 'search_result': {
@@ -3774,7 +3786,7 @@ def start_download():
 
             if download_id:
                 # Register download for post-processing (simple transfer to /Transfer)
-                context_key = f"{username}::{filename}"
+                context_key = f"{username}::{extract_filename(filename)}"
                 is_youtube = username == 'youtube'
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
@@ -3882,9 +3894,9 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
 
     # First search in downloads directory
     best_downloads_path, downloads_similarity = search_in_directory(download_dir, 'downloads')
-    
-    # Use a reasonable confidence threshold for fuzzy matches  
-    if downloads_similarity > 0.60:
+
+    # Use a high confidence threshold for fuzzy matches to prevent false positives
+    if downloads_similarity > 0.85:
         location = 'downloads'
         if downloads_similarity == 1.0:
             print(f"✅ Found exact match in downloads: {best_downloads_path}")
@@ -3897,8 +3909,8 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
     if transfer_dir and os.path.exists(transfer_dir):
         print(f"🔍 File not found in downloads, checking transfer folder...")
         best_transfer_path, transfer_similarity = search_in_directory(transfer_dir, 'transfer')
-        
-        if transfer_similarity > 0.60:
+
+        if transfer_similarity > 0.85:
             location = 'transfer'
             if transfer_similarity == 1.0:
                 print(f"✅ Found exact match in transfer: {best_transfer_path}")
@@ -3950,9 +3962,15 @@ def get_download_status():
                                     if not filename_from_api: continue
 
                                     # Check if this completed download has a matched context
-                                    context_key = f"{username}::{filename_from_api}"
+                                    # CRITICAL FIX: Use extract_filename() to match storage key format
+                                    context_key = f"{username}::{extract_filename(filename_from_api)}"
                                     with matched_context_lock:
                                         context = matched_downloads_context.get(context_key)
+                                        if context:
+                                            print(f"✅ [Context Lookup] Found context for key: {context_key}")
+                                        else:
+                                            print(f"⚠️ [Context Lookup] No context found for key: {context_key}")
+                                            print(f"   Available keys: {list(matched_downloads_context.keys())[:5]}...")  # Show first 5 keys
 
                                     if context and context_key not in _processed_download_ids:
                                         download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
@@ -6037,7 +6055,7 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
             download_id = asyncio.run(soulseek_client.download(username, filename, size))
 
             if download_id:
-                context_key = f"{username}::{filename}"
+                context_key = f"{username}::{extract_filename(filename)}"
                 with matched_context_lock:
                     # Create context with FULL Spotify track metadata (like Download Missing Tracks modal)
                     matched_downloads_context[context_key] = {
@@ -6080,7 +6098,7 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
             download_id = asyncio.run(soulseek_client.download(username, filename, size))
 
             if download_id:
-                context_key = f"{username}::{filename}"
+                context_key = f"{username}::{extract_filename(filename)}"
                 with matched_context_lock:
                     # Basic context for unmatched tracks (simple cleanup)
                     matched_downloads_context[context_key] = {
@@ -6157,7 +6175,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
             download_id = asyncio.run(soulseek_client.download(username, filename, size))
 
             if download_id:
-                context_key = f"{username}::{filename}"
+                context_key = f"{username}::{extract_filename(filename)}"
                 with matched_context_lock:
                     # Enhanced context storage with Spotify clean titles (GUI parity)
                     enhanced_context = individual_track_context.copy()
@@ -6218,7 +6236,7 @@ def start_matched_download():
             download_id = asyncio.run(soulseek_client.download(username, filename, size))
 
             if download_id:
-                context_key = f"{username}::{filename}"
+                context_key = f"{username}::{extract_filename(filename)}"
                 with matched_context_lock:
                     # Create context with FULL Spotify track metadata (like Download Missing Tracks modal)
                     matched_downloads_context[context_key] = {
@@ -6278,7 +6296,7 @@ def start_matched_download():
             download_id = asyncio.run(soulseek_client.download(username, filename, size))
 
             if download_id:
-                context_key = f"{username}::{filename}"
+                context_key = f"{username}::{extract_filename(filename)}"
                 with matched_context_lock:
                     # THE FIX: We preserve the spotify_album context if it was provided.
                     # For a regular single, spotify_album will be None.
@@ -7529,55 +7547,59 @@ import urllib.request
 def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
     """
     Core function to enhance audio file metadata using Spotify data.
+    Thread-safe with per-file locking to prevent concurrent metadata writes.
     """
     if not config_manager.get('metadata_enhancement.enabled', True):
         print("🎵 Metadata enhancement disabled in config.")
         return True
 
-    print(f"🎵 Enhancing metadata for: {os.path.basename(file_path)}")
-    try:
-        audio_file = MutagenFile(file_path, easy=True)
-        if audio_file is None:
-            audio_file = MutagenFile(file_path) # Try non-easy mode
+    # Acquire per-file lock to prevent concurrent metadata writes to the same file
+    file_lock = _get_file_lock(file_path)
+    with file_lock:
+        print(f"🎵 Enhancing metadata for: {os.path.basename(file_path)}")
+        try:
+            audio_file = MutagenFile(file_path, easy=True)
             if audio_file is None:
-                print(f"❌ Could not load audio file with Mutagen: {file_path}")
-                return False
+                audio_file = MutagenFile(file_path) # Try non-easy mode
+                if audio_file is None:
+                    print(f"❌ Could not load audio file with Mutagen: {file_path}")
+                    return False
 
-        metadata = _extract_spotify_metadata(context, artist, album_info)
-        if not metadata:
-            print("⚠️ Could not extract Spotify metadata, preserving original tags.")
+            metadata = _extract_spotify_metadata(context, artist, album_info)
+            if not metadata:
+                print("⚠️ Could not extract Spotify metadata, preserving original tags.")
+                return True
+
+            # Use 'easy' tags for broad compatibility first
+            audio_file['title'] = metadata.get('title', '')
+            audio_file['artist'] = metadata.get('artist', '')
+            audio_file['albumartist'] = metadata.get('album_artist', '')
+            audio_file['album'] = metadata.get('album', '')
+            if metadata.get('date'):
+                audio_file['date'] = metadata['date']
+            if metadata.get('genre'):
+                audio_file['genre'] = metadata['genre']
+
+            track_num_str = f"{metadata.get('track_number', 1)}/{metadata.get('total_tracks', 1)}"
+            audio_file['tracknumber'] = track_num_str
+
+            if metadata.get('disc_number'):
+                audio_file['discnumber'] = str(metadata.get('disc_number'))
+
+            audio_file.save()
+
+            # Embed album art if enabled
+            if config_manager.get('metadata_enhancement.embed_album_art', True):
+                # Re-open in non-easy mode for embedding art
+                audio_file_art = MutagenFile(file_path)
+                _embed_album_art_metadata(audio_file_art, metadata)
+                audio_file_art.save()
+
+            print("✅ Metadata enhanced successfully.")
             return True
-
-        # Use 'easy' tags for broad compatibility first
-        audio_file['title'] = metadata.get('title', '')
-        audio_file['artist'] = metadata.get('artist', '')
-        audio_file['albumartist'] = metadata.get('album_artist', '')
-        audio_file['album'] = metadata.get('album', '')
-        if metadata.get('date'):
-            audio_file['date'] = metadata['date']
-        if metadata.get('genre'):
-            audio_file['genre'] = metadata['genre']
-        
-        track_num_str = f"{metadata.get('track_number', 1)}/{metadata.get('total_tracks', 1)}"
-        audio_file['tracknumber'] = track_num_str
-        
-        if metadata.get('disc_number'):
-            audio_file['discnumber'] = str(metadata.get('disc_number'))
-
-        audio_file.save()
-
-        # Embed album art if enabled
-        if config_manager.get('metadata_enhancement.embed_album_art', True):
-            # Re-open in non-easy mode for embedding art
-            audio_file_art = MutagenFile(file_path)
-            _embed_album_art_metadata(audio_file_art, metadata)
-            audio_file_art.save()
-
-        print("✅ Metadata enhanced successfully.")
-        return True
-    except Exception as e:
-        print(f"❌ Error enhancing metadata for {file_path}: {e}")
-        return False
+        except Exception as e:
+            print(f"❌ Error enhancing metadata for {file_path}: {e}")
+            return False
 
 def _generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
     """
@@ -12381,7 +12403,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
 
             if download_id:
                 # Store context for post-processing with complete Spotify metadata (GUI PARITY)
-                context_key = f"{username}::{filename}"
+                context_key = f"{username}::{extract_filename(filename)}"
                 with matched_context_lock:
                     # Create WebUI equivalent of GUI's SpotifyBasedSearchResult data structure
                     enhanced_payload = download_payload.copy()
