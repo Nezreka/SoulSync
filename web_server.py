@@ -9035,6 +9035,7 @@ def _process_wishlist_automatically():
                 with wishlist_timer_lock:
                     wishlist_auto_processing = False
                     wishlist_auto_processing_timestamp = 0
+                    wishlist_next_run_time = 0  # Clear old timer before rescheduling
                 schedule_next_wishlist_processing()
                 return
 
@@ -9124,10 +9125,23 @@ def _process_wishlist_automatically():
             
             # SANITIZE: Ensure consistent data format from wishlist service
             wishlist_tracks = []
+            seen_track_ids_sanitation = set()  # Deduplicate during sanitization
+            duplicates_found = 0
             for track in raw_wishlist_tracks:
                 sanitized_track = _sanitize_track_data_for_processing(track)
-                wishlist_tracks.append(sanitized_track)
+                spotify_track_id = sanitized_track.get('spotify_track_id') or sanitized_track.get('id')
 
+                # Skip duplicates during sanitization
+                if spotify_track_id and spotify_track_id in seen_track_ids_sanitation:
+                    duplicates_found += 1
+                    continue
+
+                wishlist_tracks.append(sanitized_track)
+                if spotify_track_id:
+                    seen_track_ids_sanitation.add(spotify_track_id)
+
+            if duplicates_found > 0:
+                print(f"⚠️ [Auto-Wishlist] Found and removed {duplicates_found} duplicate tracks during sanitization")
             print(f"🔧 [Auto-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
 
             # CYCLE FILTERING: Get current cycle and filter tracks by category
@@ -9150,6 +9164,7 @@ def _process_wishlist_automatically():
             # Filter tracks by current cycle category
             import json
             filtered_tracks = []
+            seen_track_ids_filtering = set()  # Deduplicate during filtering
             for track in wishlist_tracks:
                 # Extract track count from spotify_data JSON (after sanitization)
                 spotify_data = track.get('spotify_data', {})
@@ -9183,10 +9198,19 @@ def _process_wishlist_automatically():
                     is_album = True
                     is_single_or_ep = False
 
-                if current_cycle == 'singles' and is_single_or_ep:
-                    filtered_tracks.append(track)
-                elif current_cycle == 'albums' and is_album:
-                    filtered_tracks.append(track)
+                spotify_track_id = track.get('spotify_track_id') or track.get('id')
+                matches_category = (current_cycle == 'singles' and is_single_or_ep) or (current_cycle == 'albums' and is_album)
+
+                # Only add if matches category AND not a duplicate
+                if matches_category:
+                    # Only deduplicate if track has a valid ID
+                    if spotify_track_id:
+                        if spotify_track_id not in seen_track_ids_filtering:
+                            filtered_tracks.append(track)
+                            seen_track_ids_filtering.add(spotify_track_id)
+                    else:
+                        # No ID - can't deduplicate safely, always add
+                        filtered_tracks.append(track)
 
             print(f"🔄 [Auto-Wishlist] Current cycle: {current_cycle}")
             print(f"📊 [Auto-Wishlist] Filtered {len(filtered_tracks)}/{len(wishlist_tracks)} tracks for '{current_cycle}' category")
@@ -9257,6 +9281,7 @@ def _process_wishlist_automatically():
         with wishlist_timer_lock:
             wishlist_auto_processing = False
             wishlist_auto_processing_timestamp = 0
+            wishlist_next_run_time = 0  # Clear old timer before rescheduling
 
         # CRITICAL: Wrap rescheduling in try/except to prevent timer thread death
         try:
@@ -9757,10 +9782,23 @@ def start_wishlist_missing_downloads():
 
         # SANITIZE: Ensure consistent data format from wishlist service
         wishlist_tracks = []
+        seen_track_ids_sanitation = set()  # Deduplicate during sanitization
+        duplicates_found = 0
         for track in raw_wishlist_tracks:
             sanitized_track = _sanitize_track_data_for_processing(track)
-            wishlist_tracks.append(sanitized_track)
+            spotify_track_id = sanitized_track.get('spotify_track_id') or sanitized_track.get('id')
 
+            # Skip duplicates during sanitization
+            if spotify_track_id and spotify_track_id in seen_track_ids_sanitation:
+                duplicates_found += 1
+                continue
+
+            wishlist_tracks.append(sanitized_track)
+            if spotify_track_id:
+                seen_track_ids_sanitation.add(spotify_track_id)
+
+        if duplicates_found > 0:
+            print(f"⚠️ [Manual-Wishlist] Found and removed {duplicates_found} duplicate tracks during sanitization")
         print(f"🔧 [Manual-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
 
         # FILTER BY TRACK IDs if specified (prioritized - prevents race conditions)
@@ -9768,10 +9806,12 @@ def start_wishlist_missing_downloads():
             # Convert to set for O(1) lookup
             track_id_set = set(track_ids)
             filtered_tracks = []
+            seen_track_ids = set()  # Track IDs we've already added to prevent duplicates
             for track in wishlist_tracks:
                 spotify_track_id = track.get('spotify_track_id') or track.get('id')
-                if spotify_track_id in track_id_set:
+                if spotify_track_id in track_id_set and spotify_track_id not in seen_track_ids:
                     filtered_tracks.append(track)
+                    seen_track_ids.add(spotify_track_id)
 
             wishlist_tracks = filtered_tracks
             print(f"🎯 [Manual-Wishlist] Filtered to {len(wishlist_tracks)} specific tracks by ID (preventing race condition)")
@@ -9780,6 +9820,7 @@ def start_wishlist_missing_downloads():
         elif category:
             import json
             filtered_tracks = []
+            seen_track_ids = set()  # Track IDs we've already added to prevent duplicates
             for track in wishlist_tracks:
                 # Extract track count from spotify_data
                 spotify_data = track.get('spotify_data', {})
@@ -9807,10 +9848,19 @@ def start_wishlist_missing_downloads():
                     is_single_or_ep = album_type in ['single', 'ep']
                     is_album = album_type == 'album'
 
-                if category == 'singles' and is_single_or_ep:
-                    filtered_tracks.append(track)
-                elif category == 'albums' and is_album:
-                    filtered_tracks.append(track)
+                spotify_track_id = track.get('spotify_track_id') or track.get('id')
+                matches_category = (category == 'singles' and is_single_or_ep) or (category == 'albums' and is_album)
+
+                # Only add if matches category AND not a duplicate
+                if matches_category:
+                    # Only deduplicate if track has a valid ID
+                    if spotify_track_id:
+                        if spotify_track_id not in seen_track_ids:
+                            filtered_tracks.append(track)
+                            seen_track_ids.add(spotify_track_id)
+                    else:
+                        # No ID - can't deduplicate safely, always add
+                        filtered_tracks.append(track)
 
             wishlist_tracks = filtered_tracks
             print(f"🔍 [Manual-Wishlist] Filtered to {len(wishlist_tracks)} tracks for category: {category}")
@@ -11304,6 +11354,7 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
         with wishlist_timer_lock:
             wishlist_auto_processing = False
             wishlist_auto_processing_timestamp = 0
+            wishlist_next_run_time = 0  # Clear old timer before rescheduling
 
         # Schedule next automatic processing cycle
         print("⏰ [Auto-Wishlist] Scheduling next automatic cycle in 30 minutes")
@@ -11325,6 +11376,7 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
         with wishlist_timer_lock:
             wishlist_auto_processing = False
             wishlist_auto_processing_timestamp = 0
+            wishlist_next_run_time = 0  # Clear old timer before rescheduling
 
         # Schedule next cycle even after error to maintain continuity
         print("⏰ [Auto-Wishlist] Scheduling next cycle after error (30 minutes)")
@@ -17012,6 +17064,7 @@ def start_watchlist_scan():
                     with watchlist_timer_lock:
                         watchlist_auto_scanning = False
                         watchlist_auto_scanning_timestamp = 0
+                        watchlist_next_run_time = 0  # Clear timer for consistency
                     return
 
                 scanner = get_watchlist_scanner(spotify_client)
@@ -17260,6 +17313,7 @@ def start_watchlist_scan():
                 with watchlist_timer_lock:
                     watchlist_auto_scanning = False
                     watchlist_auto_scanning_timestamp = 0
+                    watchlist_next_run_time = 0  # Clear timer for consistency
                     print("🔓 [Manual Watchlist Scan] Flag reset - scan complete")
         
         # Initialize scan state
@@ -17651,6 +17705,7 @@ def _process_watchlist_scan_automatically():
                 with watchlist_timer_lock:
                     watchlist_auto_scanning = False
                     watchlist_auto_scanning_timestamp = 0
+                    watchlist_next_run_time = 0  # Clear old timer before rescheduling
                 schedule_next_watchlist_scan()
                 return
 
@@ -17659,6 +17714,7 @@ def _process_watchlist_scan_automatically():
                 with watchlist_timer_lock:
                     watchlist_auto_scanning = False
                     watchlist_auto_scanning_timestamp = 0
+                    watchlist_next_run_time = 0  # Clear old timer before rescheduling
                 schedule_next_watchlist_scan()
                 return
 
@@ -17923,6 +17979,7 @@ def _process_watchlist_scan_automatically():
         with watchlist_timer_lock:
             watchlist_auto_scanning = False
             watchlist_auto_scanning_timestamp = 0
+            watchlist_next_run_time = 0  # Clear old timer before rescheduling
         schedule_next_watchlist_scan()
 
     print("✅ Automatic watchlist scanning initialized")

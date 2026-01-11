@@ -1325,7 +1325,8 @@ function formatTime(seconds) {
 
 function formatCountdownTime(seconds) {
     // Format seconds as countdown timer (e.g., "24m 13s", "2h 15m", "23h 59m")
-    if (!seconds || seconds <= 0) return '';
+    if (seconds === null || seconds === undefined || seconds < 0) return '';
+    if (seconds === 0) return '0s';  // Show "0s" instead of hiding timer
 
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
