@@ -74,6 +74,150 @@ def clean_track_name_for_search(track_name):
     
     return cleaned_name
 
+def is_live_version(track_name: str, album_name: str = "") -> bool:
+    """
+    Detect if a track or album is a live version.
+
+    Args:
+        track_name: Track name to check
+        album_name: Album name to check (optional)
+
+    Returns:
+        True if this is a live version, False otherwise
+    """
+    if not track_name:
+        return False
+
+    # Combine track and album names for comprehensive checking
+    text_to_check = f"{track_name} {album_name}".lower()
+
+    # Live version patterns
+    live_patterns = [
+        r'\blive\b',                    # (Live), Live at, etc.
+        r'\blive at\b',                 # Live at Madison Square Garden
+        r'\bconcert\b',                 # Concert, Live Concert
+        r'\bin concert\b',              # In Concert
+        r'\bunplugged\b',               # MTV Unplugged (usually live)
+        r'\blive session\b',            # Live Session
+        r'\blive from\b',               # Live from...
+        r'\blive recording\b',          # Live Recording
+        r'\bon stage\b',                # On Stage
+    ]
+
+    for pattern in live_patterns:
+        if re.search(pattern, text_to_check, re.IGNORECASE):
+            return True
+
+    return False
+
+def is_remix_version(track_name: str, album_name: str = "") -> bool:
+    """
+    Detect if a track is a remix.
+
+    Args:
+        track_name: Track name to check
+        album_name: Album name to check (optional)
+
+    Returns:
+        True if this is a remix, False otherwise
+    """
+    if not track_name:
+        return False
+
+    # Combine track and album names for comprehensive checking
+    text_to_check = f"{track_name} {album_name}".lower()
+
+    # Remix patterns (but NOT remaster/remastered)
+    remix_patterns = [
+        r'\bremix\b',                   # Remix, Remixed
+        r'\bmix\b(?!.*\bremaster)',     # Mix (but not if followed by remaster)
+        r'\bedit\b',                    # Radio Edit, Extended Edit
+        r'\bversion\b(?=.*\bmix\b)',    # Version with Mix (e.g., "Dance Version Mix")
+        r'\bclub mix\b',                # Club Mix
+        r'\bdance mix\b',               # Dance Mix
+        r'\bradio edit\b',              # Radio Edit
+        r'\bextended\b(?=.*\bmix\b)',   # Extended Mix
+        r'\bdub\b',                     # Dub version
+        r'\bvip mix\b',                 # VIP Mix
+    ]
+
+    # But exclude remaster/remastered - those are originals
+    if re.search(r'\bremaster(ed)?\b', text_to_check, re.IGNORECASE):
+        return False
+
+    for pattern in remix_patterns:
+        if re.search(pattern, text_to_check, re.IGNORECASE):
+            return True
+
+    return False
+
+def is_acoustic_version(track_name: str, album_name: str = "") -> bool:
+    """
+    Detect if a track is an acoustic version.
+
+    Args:
+        track_name: Track name to check
+        album_name: Album name to check (optional)
+
+    Returns:
+        True if this is an acoustic version, False otherwise
+    """
+    if not track_name:
+        return False
+
+    # Combine track and album names for comprehensive checking
+    text_to_check = f"{track_name} {album_name}".lower()
+
+    # Acoustic version patterns
+    acoustic_patterns = [
+        r'\bacoustic\b',                # Acoustic, Acoustic Version
+        r'\bstripped\b',                # Stripped version
+        r'\bpiano version\b',           # Piano Version
+        r'\bunplugged\b',               # MTV Unplugged (can be acoustic)
+    ]
+
+    for pattern in acoustic_patterns:
+        if re.search(pattern, text_to_check, re.IGNORECASE):
+            return True
+
+    return False
+
+def is_compilation_album(album_name: str) -> bool:
+    """
+    Detect if an album is a compilation/greatest hits album.
+
+    Args:
+        album_name: Album name to check
+
+    Returns:
+        True if this is a compilation album, False otherwise
+    """
+    if not album_name:
+        return False
+
+    album_lower = album_name.lower()
+
+    # Compilation album patterns
+    compilation_patterns = [
+        r'\bgreatest hits\b',           # Greatest Hits
+        r'\bbest of\b',                 # Best Of
+        r'\banthology\b',               # Anthology
+        r'\bcollection\b',              # Collection
+        r'\bcompilation\b',             # Compilation
+        r'\bthe essential\b',           # The Essential...
+        r'\bcomplete\b',                # Complete Collection
+        r'\bhits\b',                    # Hits (standalone or at end)
+        r'\btop\s+\d+\b',               # Top 10, Top 40, etc.
+        r'\bvery best\b',               # Very Best Of
+        r'\bdefinitive\b',              # Definitive Collection
+    ]
+
+    for pattern in compilation_patterns:
+        if re.search(pattern, album_lower, re.IGNORECASE):
+            return True
+
+    return False
+
 @dataclass
 class ScanResult:
     """Result of scanning a single artist"""
@@ -308,9 +452,13 @@ class WatchlistScanner:
 
                     # Check each track
                     for track in tracks:
+                        # Check content type filters (live, remix, acoustic, compilation)
+                        if not self._should_include_track(track, album_data, watchlist_artist):
+                            continue  # Skip this track based on content type preferences
+
                         if self.is_track_missing_from_library(track):
                             new_tracks_found += 1
-                            
+
                             # Add to wishlist
                             if self.add_track_to_wishlist(track, album_data, watchlist_artist):
                                 tracks_added_to_wishlist += 1
@@ -500,6 +648,71 @@ class WatchlistScanner:
 
         except Exception as e:
             logger.warning(f"Error checking release inclusion: {e}")
+            return True  # Default to including on error
+
+    def _should_include_track(self, track, album_data, watchlist_artist: WatchlistArtist) -> bool:
+        """
+        Check if a track should be included based on content type filters.
+
+        Filters:
+        - Live versions
+        - Remixes
+        - Acoustic versions
+        - Compilation albums
+
+        Args:
+            track: Track object or dict
+            album_data: Album data object or dict
+            watchlist_artist: WatchlistArtist object with user preferences
+
+        Returns:
+            True if track should be included, False if should be skipped
+        """
+        try:
+            # Get track name and album name
+            if isinstance(track, dict):
+                track_name = track.get('name', '')
+            else:
+                track_name = getattr(track, 'name', '')
+
+            if isinstance(album_data, dict):
+                album_name = album_data.get('name', '')
+            else:
+                album_name = getattr(album_data, 'name', '')
+
+            # Get user preferences (default to False = exclude by default)
+            include_live = getattr(watchlist_artist, 'include_live', False)
+            include_remixes = getattr(watchlist_artist, 'include_remixes', False)
+            include_acoustic = getattr(watchlist_artist, 'include_acoustic', False)
+            include_compilations = getattr(watchlist_artist, 'include_compilations', False)
+
+            # Check compilation albums (album-level filter)
+            if not include_compilations:
+                if is_compilation_album(album_name):
+                    logger.debug(f"Skipping compilation album: {album_name}")
+                    return False
+
+            # Check track content type filters
+            if not include_live:
+                if is_live_version(track_name, album_name):
+                    logger.debug(f"Skipping live version: {track_name}")
+                    return False
+
+            if not include_remixes:
+                if is_remix_version(track_name, album_name):
+                    logger.debug(f"Skipping remix: {track_name}")
+                    return False
+
+            if not include_acoustic:
+                if is_acoustic_version(track_name, album_name):
+                    logger.debug(f"Skipping acoustic version: {track_name}")
+                    return False
+
+            # Track passes all filters
+            return True
+
+        except Exception as e:
+            logger.warning(f"Error checking track content type inclusion: {e}")
             return True  # Default to including on error
 
     def is_track_missing_from_library(self, track) -> bool:

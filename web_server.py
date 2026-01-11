@@ -17376,7 +17376,9 @@ def watchlist_artist_config(artist_id):
             conn = sqlite3.connect(str(database.database_path))
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT include_albums, include_eps, include_singles, artist_name, image_url
+                SELECT include_albums, include_eps, include_singles,
+                       include_live, include_remixes, include_acoustic, include_compilations,
+                       artist_name, image_url
                 FROM watchlist_artists
                 WHERE spotify_artist_id = ?
             """, (artist_id,))
@@ -17407,8 +17409,8 @@ def watchlist_artist_config(artist_id):
             if not artist_info:
                 artist_info = {
                     'id': artist_id,
-                    'name': result[3],  # artist_name
-                    'image_url': result[4],  # image_url
+                    'name': result[7],  # artist_name
+                    'image_url': result[8],  # image_url
                     'followers': 0,
                     'popularity': 0,
                     'genres': []
@@ -17417,7 +17419,11 @@ def watchlist_artist_config(artist_id):
             config = {
                 'include_albums': bool(result[0]),  # Convert INTEGER to boolean
                 'include_eps': bool(result[1]),
-                'include_singles': bool(result[2])
+                'include_singles': bool(result[2]),
+                'include_live': bool(result[3]),
+                'include_remixes': bool(result[4]),
+                'include_acoustic': bool(result[5]),
+                'include_compilations': bool(result[6])
             }
 
             return jsonify({
@@ -17434,8 +17440,12 @@ def watchlist_artist_config(artist_id):
             include_albums = data.get('include_albums', True)
             include_eps = data.get('include_eps', True)
             include_singles = data.get('include_singles', True)
+            include_live = data.get('include_live', False)
+            include_remixes = data.get('include_remixes', False)
+            include_acoustic = data.get('include_acoustic', False)
+            include_compilations = data.get('include_compilations', False)
 
-            # Validate at least one is selected
+            # Validate at least one release type is selected
             if not (include_albums or include_eps or include_singles):
                 return jsonify({"success": False, "error": "At least one release type must be selected"}), 400
 
@@ -17444,9 +17454,13 @@ def watchlist_artist_config(artist_id):
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE watchlist_artists
-                SET include_albums = ?, include_eps = ?, include_singles = ?, updated_at = CURRENT_TIMESTAMP
+                SET include_albums = ?, include_eps = ?, include_singles = ?,
+                    include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE spotify_artist_id = ?
-            """, (int(include_albums), int(include_eps), int(include_singles), artist_id))
+            """, (int(include_albums), int(include_eps), int(include_singles),
+                  int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
+                  artist_id))
             conn.commit()
 
             if cursor.rowcount == 0:
@@ -17455,7 +17469,7 @@ def watchlist_artist_config(artist_id):
 
             conn.close()
 
-            print(f"✅ Updated watchlist config for artist {artist_id}: albums={include_albums}, eps={include_eps}, singles={include_singles}")
+            print(f"✅ Updated watchlist config for artist {artist_id}: albums={include_albums}, eps={include_eps}, singles={include_singles}, live={include_live}, remixes={include_remixes}, acoustic={include_acoustic}, compilations={include_compilations}")
 
             return jsonify({
                 "success": True,
@@ -17463,7 +17477,11 @@ def watchlist_artist_config(artist_id):
                 "config": {
                     'include_albums': include_albums,
                     'include_eps': include_eps,
-                    'include_singles': include_singles
+                    'include_singles': include_singles,
+                    'include_live': include_live,
+                    'include_remixes': include_remixes,
+                    'include_acoustic': include_acoustic,
+                    'include_compilations': include_compilations
                 }
             })
 
