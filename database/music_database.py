@@ -89,6 +89,10 @@ class WatchlistArtist:
     include_albums: bool = True
     include_eps: bool = True
     include_singles: bool = True
+    include_live: bool = False
+    include_remixes: bool = False
+    include_acoustic: bool = False
+    include_compilations: bool = False
 
 @dataclass
 class SimilarArtist:
@@ -272,6 +276,9 @@ class MusicDatabase:
 
             # Add album type filter columns to watchlist_artists (migration)
             self._add_watchlist_album_type_filters(cursor)
+
+            # Add content type filter columns to watchlist_artists (migration)
+            self._add_watchlist_content_type_filters(cursor)
 
             conn.commit()
             logger.info("Database initialized successfully")
@@ -621,6 +628,28 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding album type filter columns to watchlist_artists: {e}")
+            # Don't raise - this is a migration, database can still function
+
+    def _add_watchlist_content_type_filters(self, cursor):
+        """Add content type filter columns to watchlist_artists table"""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = [column[1] for column in cursor.fetchall()]
+
+            columns_to_add = {
+                'include_live': ('INTEGER', '0'),           # 0 = False (exclude live versions by default)
+                'include_remixes': ('INTEGER', '0'),        # 0 = False (exclude remixes by default)
+                'include_acoustic': ('INTEGER', '0'),       # 0 = False (exclude acoustic by default)
+                'include_compilations': ('INTEGER', '0')    # 0 = False (exclude compilations by default)
+            }
+
+            for column_name, (column_type, default_value) in columns_to_add.items():
+                if column_name not in columns:
+                    cursor.execute(f"ALTER TABLE watchlist_artists ADD COLUMN {column_name} {column_type} DEFAULT {default_value}")
+                    logger.info(f"Added {column_name} column to watchlist_artists table")
+
+        except Exception as e:
+            logger.error(f"Error adding content type filter columns to watchlist_artists: {e}")
             # Don't raise - this is a migration, database can still function
 
     def close(self):
@@ -2726,7 +2755,8 @@ class MusicDatabase:
                 # Build SELECT query based on existing columns
                 base_columns = ['id', 'spotify_artist_id', 'artist_name', 'date_added',
                                'last_scan_timestamp', 'created_at', 'updated_at']
-                optional_columns = ['image_url', 'include_albums', 'include_eps', 'include_singles']
+                optional_columns = ['image_url', 'include_albums', 'include_eps', 'include_singles',
+                                   'include_live', 'include_remixes', 'include_acoustic', 'include_compilations']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
@@ -2745,6 +2775,10 @@ class MusicDatabase:
                     include_albums = bool(row['include_albums']) if 'include_albums' in existing_columns else True
                     include_eps = bool(row['include_eps']) if 'include_eps' in existing_columns else True
                     include_singles = bool(row['include_singles']) if 'include_singles' in existing_columns else True
+                    include_live = bool(row['include_live']) if 'include_live' in existing_columns else False
+                    include_remixes = bool(row['include_remixes']) if 'include_remixes' in existing_columns else False
+                    include_acoustic = bool(row['include_acoustic']) if 'include_acoustic' in existing_columns else False
+                    include_compilations = bool(row['include_compilations']) if 'include_compilations' in existing_columns else False
 
                     watchlist_artists.append(WatchlistArtist(
                         id=row['id'],
@@ -2757,7 +2791,11 @@ class MusicDatabase:
                         image_url=image_url,
                         include_albums=include_albums,
                         include_eps=include_eps,
-                        include_singles=include_singles
+                        include_singles=include_singles,
+                        include_live=include_live,
+                        include_remixes=include_remixes,
+                        include_acoustic=include_acoustic,
+                        include_compilations=include_compilations
                     ))
 
                 return watchlist_artists

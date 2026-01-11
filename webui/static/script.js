@@ -23572,6 +23572,10 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
         document.getElementById('config-include-albums').checked = config.include_albums;
         document.getElementById('config-include-eps').checked = config.include_eps;
         document.getElementById('config-include-singles').checked = config.include_singles;
+        document.getElementById('config-include-live').checked = config.include_live || false;
+        document.getElementById('config-include-remixes').checked = config.include_remixes || false;
+        document.getElementById('config-include-acoustic').checked = config.include_acoustic || false;
+        document.getElementById('config-include-compilations').checked = config.include_compilations || false;
 
         // Store artist ID for saving
         const modal = document.getElementById('watchlist-artist-config-modal');
@@ -23627,8 +23631,12 @@ async function saveWatchlistArtistConfig(artistId) {
         const includeAlbums = document.getElementById('config-include-albums').checked;
         const includeEps = document.getElementById('config-include-eps').checked;
         const includeSingles = document.getElementById('config-include-singles').checked;
+        const includeLive = document.getElementById('config-include-live').checked;
+        const includeRemixes = document.getElementById('config-include-remixes').checked;
+        const includeAcoustic = document.getElementById('config-include-acoustic').checked;
+        const includeCompilations = document.getElementById('config-include-compilations').checked;
 
-        // Validate at least one is selected
+        // Validate at least one release type is selected
         if (!includeAlbums && !includeEps && !includeSingles) {
             showToast('Please select at least one release type', 'error');
             return;
@@ -23648,7 +23656,11 @@ async function saveWatchlistArtistConfig(artistId) {
             body: JSON.stringify({
                 include_albums: includeAlbums,
                 include_eps: includeEps,
-                include_singles: includeSingles
+                include_singles: includeSingles,
+                include_live: includeLive,
+                include_remixes: includeRemixes,
+                include_acoustic: includeAcoustic,
+                include_compilations: includeCompilations
             })
         });
 

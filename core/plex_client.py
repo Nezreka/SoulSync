@@ -85,20 +85,40 @@ class PlexClient:
     
     def ensure_connection(self) -> bool:
         """Ensure connection to Plex server with lazy initialization."""
-        if self._connection_attempted:
-            return self.server is not None
-        
+        # If we've successfully connected before and server object exists, return immediately
+        if self._connection_attempted and self.server is not None:
+            return True
+
+        # Prevent concurrent connection attempts
         if self._is_connecting:
             return False
-        
+
         self._is_connecting = True
         try:
             self._setup_client()
-            return self.server is not None
+            connection_successful = self.server is not None
+
+            # Only mark as attempted if connection succeeded
+            # This allows retries if connection fails
+            if connection_successful:
+                self._connection_attempted = True
+            else:
+                # Reset flag to allow retry on next call
+                self._connection_attempted = False
+
+            return connection_successful
         finally:
             self._is_connecting = False
-            self._connection_attempted = True
-    
+
+    def reset_connection(self):
+        """Reset connection state to force reconnection on next ensure_connection() call.
+        Useful when config changes or connection needs to be refreshed."""
+        logger.info("Resetting Plex connection state")
+        self.server = None
+        self.music_library = None
+        self._connection_attempted = False
+        self._last_connection_check = 0
+
     def _setup_client(self):
         config = config_manager.get_plex_config()
         
@@ -226,13 +246,17 @@ class PlexClient:
 
         current_time = time.time()
 
-        # Only check connection if enough time has passed or never attempted
-        if (not self._connection_attempted or
-            current_time - self._last_connection_check > self._connection_check_interval):
+        # Always attempt connection if not connected OR cache expired
+        # This ensures we retry failed connections and detect disconnections
+        should_check = (
+            self.server is None or  # Not connected - always try
+            current_time - self._last_connection_check > self._connection_check_interval  # Cache expired
+        )
 
+        if should_check:
             self._last_connection_check = current_time
 
-            # Try to connect on first call, but don't block if already connecting
+            # Try to connect, but don't block if already connecting
             if not self._is_connecting:
                 self.ensure_connection()
 
