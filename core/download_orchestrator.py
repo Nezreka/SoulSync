@@ -48,6 +48,10 @@ class DownloadOrchestrator:
         self.hybrid_primary = config_manager.get('download_source.hybrid_primary', 'soulseek')
         self.youtube_min_confidence = config_manager.get('download_source.youtube_min_confidence', 0.65)
 
+        # Reload underlying client configs (SLSKD URL, API key, etc.)
+        self.soulseek._setup_client()
+        logger.info(f"🔄 Soulseek client config reloaded")
+
         logger.info(f"🔄 Download Orchestrator settings reloaded - Mode: {self.mode}")
 
     def is_configured(self) -> bool:
