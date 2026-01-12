@@ -9646,14 +9646,29 @@ def get_wishlist_tracks():
 
         # SANITIZE: Ensure consistent data format for frontend
         sanitized_tracks = []
+        seen_track_ids_sanitation = set()  # Deduplicate during sanitization
+        duplicates_found = 0
         for track in raw_tracks:
             sanitized_track = _sanitize_track_data_for_processing(track)
+            spotify_track_id = sanitized_track.get('spotify_track_id') or sanitized_track.get('id')
+
+            # Skip duplicates during sanitization
+            if spotify_track_id and spotify_track_id in seen_track_ids_sanitation:
+                duplicates_found += 1
+                continue
+
             sanitized_tracks.append(sanitized_track)
+            if spotify_track_id:
+                seen_track_ids_sanitation.add(spotify_track_id)
+
+        if duplicates_found > 0:
+            print(f"⚠️ [API-Wishlist-Tracks] Found and removed {duplicates_found} duplicate tracks during sanitization")
 
         # FILTER by category if specified
         if category:
             import json
             filtered_tracks = []
+            seen_track_ids_filtering = set()  # Deduplicate during filtering
             for track in sanitized_tracks:
                 # Extract track count from spotify_data JSON (same as stats endpoint)
                 spotify_data = track.get('spotify_data', {})
@@ -9681,10 +9696,19 @@ def get_wishlist_tracks():
                     is_single_or_ep = album_type in ['single', 'ep']
                     is_album = album_type == 'album'
 
-                if category == 'singles' and is_single_or_ep:
-                    filtered_tracks.append(track)
-                elif category == 'albums' and is_album:
-                    filtered_tracks.append(track)
+                spotify_track_id = track.get('spotify_track_id') or track.get('id')
+                matches_category = (category == 'singles' and is_single_or_ep) or (category == 'albums' and is_album)
+
+                # Only add if matches category AND not a duplicate
+                if matches_category:
+                    # Only deduplicate if track has a valid ID
+                    if spotify_track_id:
+                        if spotify_track_id not in seen_track_ids_filtering:
+                            filtered_tracks.append(track)
+                            seen_track_ids_filtering.add(spotify_track_id)
+                    else:
+                        # No ID - can't deduplicate safely, always add
+                        filtered_tracks.append(track)
 
                 # Apply limit early for performance
                 if limit and len(filtered_tracks) >= limit:
