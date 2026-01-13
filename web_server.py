@@ -9466,17 +9466,33 @@ def get_wishlist_stats():
 
         total_count = singles_count + albums_count
 
-        # Calculate time until next auto-processing
+        # Calculate time until next auto-processing and get processing state
         next_run_in_seconds = 0
+        is_processing = False
         with wishlist_timer_lock:
             if wishlist_next_run_time > 0:
                 next_run_in_seconds = max(0, int(wishlist_next_run_time - time.time()))
+            is_processing = wishlist_auto_processing
+
+        # Get current cycle (albums or singles)
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        try:
+            with db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT value FROM metadata WHERE key = 'wishlist_cycle'")
+                row = cursor.fetchone()
+                current_cycle = row['value'] if row else 'albums'
+        except Exception:
+            current_cycle = 'albums'  # Safe fallback
 
         return jsonify({
             "singles": singles_count,
             "albums": albums_count,
             "total": total_count,
-            "next_run_in_seconds": next_run_in_seconds
+            "next_run_in_seconds": next_run_in_seconds,
+            "is_auto_processing": is_processing,
+            "current_cycle": current_cycle
         })
 
     except Exception as e:

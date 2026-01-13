@@ -6352,34 +6352,44 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
     wishlistCountdownInterval = setInterval(async () => {
         remainingSeconds--;
 
-        if (remainingSeconds <= 0) {
-            // Timer expired, fetch fresh data
+        // Check if auto-processing has started (every 2 seconds to avoid overwhelming backend)
+        if (remainingSeconds % 2 === 0 || remainingSeconds <= 0) {
             try {
                 const response = await fetch('/api/wishlist/stats');
                 const data = await response.json();
-                remainingSeconds = data.next_run_in_seconds || 0;
 
-                // Also update cycle in case it changed
-                const cycleResponse = await fetch('/api/wishlist/cycle');
-                const cycleData = await cycleResponse.json();
-                const newCycle = cycleData.cycle || 'albums';
-                const newCycleText = newCycle === 'albums' ? 'Albums/EPs' : 'Singles';
+                // AUTO-CLOSE DETECTION: If auto-processing started, close modal and notify user
+                if (data.is_auto_processing) {
+                    console.log('🤖 [Wishlist] Auto-processing detected, closing overview modal');
+                    closeWishlistOverviewModal();
+                    showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
+                    return; // Exit interval
+                }
 
-                const timerElement = document.getElementById('wishlist-next-auto-timer');
-                if (timerElement) {
-                    const countdownText = formatCountdownTime(remainingSeconds);
-                    timerElement.textContent = `Next Auto: ${newCycleText}${countdownText ? ' in ' + countdownText : ''}`;
+                // Update remaining seconds if timer expired
+                if (remainingSeconds <= 0) {
+                    remainingSeconds = data.next_run_in_seconds || 0;
+
+                    // Also update cycle in case it changed
+                    const newCycle = data.current_cycle || 'albums';
+                    const newCycleText = newCycle === 'albums' ? 'Albums/EPs' : 'Singles';
+
+                    const timerElement = document.getElementById('wishlist-next-auto-timer');
+                    if (timerElement) {
+                        const countdownText = formatCountdownTime(remainingSeconds);
+                        timerElement.textContent = `Next Auto: ${newCycleText}${countdownText ? ' in ' + countdownText : ''}`;
+                    }
                 }
             } catch (error) {
                 console.debug('Error updating wishlist countdown:', error);
             }
-        } else {
-            // Update the display
-            const timerElement = document.getElementById('wishlist-next-auto-timer');
-            if (timerElement) {
-                const countdownText = formatCountdownTime(remainingSeconds);
-                timerElement.textContent = `Next Auto: ${nextCycleText}${countdownText ? ' in ' + countdownText : ''}`;
-            }
+        }
+
+        // Always update the display countdown
+        const timerElement = document.getElementById('wishlist-next-auto-timer');
+        if (timerElement) {
+            const countdownText = formatCountdownTime(remainingSeconds);
+            timerElement.textContent = `Next Auto: ${nextCycleText}${countdownText ? ' in ' + countdownText : ''}`;
         }
     }, 1000); // Update every second
 }
@@ -7129,6 +7139,29 @@ async function startWishlistMissingTracksProcess(playlistId) {
 
         const data = await response.json();
         if (!data.success) {
+            // Special handling for auto-processing conflict
+            if (response.status === 409) {
+                console.log('🤖 [Wishlist] Auto-processing is running, redirecting to download manager');
+                showToast('Wishlist auto-processing is already running. Opening Download Manager...', 'info');
+
+                // Close wishlist modal and show download manager
+                const wishlistModal = document.getElementById('download-modal-wishlist');
+                if (wishlistModal) {
+                    wishlistModal.remove();
+                }
+                delete activeDownloadProcesses[playlistId];
+
+                // Open download manager to show active batch
+                setTimeout(() => {
+                    const downloadManager = document.getElementById('download-manager-modal');
+                    if (downloadManager) {
+                        downloadManager.style.display = 'flex';
+                    } else {
+                        openDownloadManagerModal();
+                    }
+                }, 300);
+                return;
+            }
             // Special handling for rate limit
             if (response.status === 429) {
                 throw new Error(`${data.error} Try closing some other download processes first.`);
