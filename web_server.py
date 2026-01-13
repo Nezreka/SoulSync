@@ -8837,13 +8837,14 @@ def check_and_recover_stuck_flags():
 
     import time
     current_time = time.time()
-    stuck_timeout = 7200  # 2 hours in seconds
+    stuck_timeout = 900  # 15 minutes in seconds (reduced from 2 hours for faster recovery)
 
     # Check wishlist flag
     if wishlist_auto_processing:
         time_stuck = current_time - wishlist_auto_processing_timestamp
         if time_stuck > stuck_timeout:
-            print(f"⚠️ [Stuck Detection] Wishlist auto-processing flag has been stuck for {time_stuck/3600:.1f} hours - RESETTING")
+            stuck_minutes = time_stuck / 60
+            print(f"⚠️ [Stuck Detection] Wishlist auto-processing flag has been stuck for {stuck_minutes:.1f} minutes - RESETTING")
             with wishlist_timer_lock:
                 wishlist_auto_processing = False
                 wishlist_auto_processing_timestamp = 0
@@ -8860,7 +8861,8 @@ def check_and_recover_stuck_flags():
     if watchlist_auto_scanning:
         time_stuck = current_time - watchlist_auto_scanning_timestamp
         if time_stuck > stuck_timeout:
-            print(f"⚠️ [Stuck Detection] Watchlist auto-scanning flag has been stuck for {time_stuck/3600:.1f} hours - RESETTING")
+            stuck_minutes = time_stuck / 60
+            print(f"⚠️ [Stuck Detection] Watchlist auto-scanning flag has been stuck for {stuck_minutes:.1f} minutes - RESETTING")
             with watchlist_timer_lock:
                 watchlist_auto_scanning = False
                 watchlist_auto_scanning_timestamp = 0
@@ -8878,7 +8880,7 @@ def check_and_recover_stuck_flags():
 def is_wishlist_actually_processing():
     """
     Check if wishlist is truly processing (not just flag stuck).
-    Returns True only if flag is set AND timestamp is recent (< 2 hours).
+    Returns True only if flag is set AND timestamp is recent (< 15 minutes).
     """
     global wishlist_auto_processing, wishlist_auto_processing_timestamp
 
@@ -8889,9 +8891,10 @@ def is_wishlist_actually_processing():
     current_time = time.time()
     time_since_start = current_time - wishlist_auto_processing_timestamp
 
-    # If more than 2 hours, flag is stuck - auto-recover and return False
-    if time_since_start > 7200:
-        print(f"⚠️ [Stuck Detection] Wishlist flag stuck for {time_since_start/3600:.1f} hours - auto-recovering")
+    # If more than 15 minutes, flag is stuck - auto-recover and return False
+    if time_since_start > 900:  # 15 minutes
+        stuck_minutes = time_since_start / 60
+        print(f"⚠️ [Stuck Detection] Wishlist flag stuck for {stuck_minutes:.1f} minutes - auto-recovering")
         check_and_recover_stuck_flags()
         return False
 
@@ -8900,7 +8903,7 @@ def is_wishlist_actually_processing():
 def is_watchlist_actually_scanning():
     """
     Check if watchlist is truly scanning (not just flag stuck).
-    Returns True only if flag is set AND timestamp is recent (< 2 hours).
+    Returns True only if flag is set AND timestamp is recent (< 15 minutes).
     """
     global watchlist_auto_scanning, watchlist_auto_scanning_timestamp
 
@@ -8911,9 +8914,10 @@ def is_watchlist_actually_scanning():
     current_time = time.time()
     time_since_start = current_time - watchlist_auto_scanning_timestamp
 
-    # If more than 2 hours, flag is stuck - auto-recover and return False
-    if time_since_start > 7200:
-        print(f"⚠️ [Stuck Detection] Watchlist flag stuck for {time_since_start/3600:.1f} hours - auto-recovering")
+    # If more than 15 minutes, flag is stuck - auto-recover and return False
+    if time_since_start > 900:  # 15 minutes
+        stuck_minutes = time_since_start / 60
+        print(f"⚠️ [Stuck Detection] Watchlist flag stuck for {stuck_minutes:.1f} minutes - auto-recovering")
         check_and_recover_stuck_flags()
         return False
 
@@ -9468,11 +9472,12 @@ def get_wishlist_stats():
 
         # Calculate time until next auto-processing and get processing state
         next_run_in_seconds = 0
-        is_processing = False
         with wishlist_timer_lock:
             if wishlist_next_run_time > 0:
                 next_run_in_seconds = max(0, int(wishlist_next_run_time - time.time()))
-            is_processing = wishlist_auto_processing
+
+        # Use smart function with stuck detection (not raw flag)
+        is_processing = is_wishlist_actually_processing()
 
         # Get current cycle (albums or singles)
         from database.music_database import MusicDatabase
