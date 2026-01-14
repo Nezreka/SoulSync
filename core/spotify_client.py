@@ -243,11 +243,11 @@ class SpotifyClient:
             
             while results:
                 for playlist_data in results['items']:
-                    if playlist_data['owner']['id'] == self.user_id or playlist_data['collaborative']:
-                        logger.info(f"Fetching tracks for playlist: {playlist_data['name']}")
-                        tracks = self._get_playlist_tracks(playlist_data['id'])
-                        playlist = Playlist.from_spotify_playlist(playlist_data, tracks)
-                        playlists.append(playlist)
+                    # Include ALL playlists (owned, collaborative, AND followed)
+                    logger.info(f"Fetching tracks for playlist: {playlist_data['name']}")
+                    tracks = self._get_playlist_tracks(playlist_data['id'])
+                    playlist = Playlist.from_spotify_playlist(playlist_data, tracks)
+                    playlists.append(playlist)
                 
                 results = self.sp.next(results) if results['next'] else None
             
@@ -285,11 +285,11 @@ class SpotifyClient:
                 
                 batch_count = 0
                 for playlist_data in results['items']:
-                    if playlist_data['owner']['id'] == self.user_id or playlist_data['collaborative']:
-                        # Create playlist with empty tracks list for now
-                        playlist = Playlist.from_spotify_playlist(playlist_data, [])
-                        playlists.append(playlist)
-                        batch_count += 1
+                    # Include ALL playlists (owned, collaborative, AND followed)
+                    # Create playlist with empty tracks list for now
+                    playlist = Playlist.from_spotify_playlist(playlist_data, [])
+                    playlists.append(playlist)
+                    batch_count += 1
                 
                 total_fetched += batch_count
                 logger.info(f"Retrieved {batch_count} playlists in batch (offset {offset}), total: {total_fetched}")
