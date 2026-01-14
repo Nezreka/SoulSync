@@ -1,5 +1,6 @@
 import requests
 import time
+import re
 import threading
 from typing import Dict, List, Optional, Any
 from functools import wraps
@@ -26,30 +27,37 @@ def rate_limited(func):
     """Decorator to enforce rate limiting on Tidal API calls"""
     @wraps(func)
     def wrapper(*args, **kwargs):
-        global _last_api_call_time
-        
-        with _api_call_lock:
-            current_time = time.time()
-            time_since_last_call = current_time - _last_api_call_time
+        max_retries = 3
+        last_exception = None
+        for attempt in range(max_retries):
+            global _last_api_call_time
             
-            if time_since_last_call < MIN_API_INTERVAL:
-                sleep_time = MIN_API_INTERVAL - time_since_last_call
-                time.sleep(sleep_time)
+            with _api_call_lock:
+                current_time = time.time()
+                time_since_last_call = current_time - _last_api_call_time
+                
+                if time_since_last_call < MIN_API_INTERVAL:
+                    sleep_time = MIN_API_INTERVAL - time_since_last_call
+                    time.sleep(sleep_time)
+                
+                _last_api_call_time = time.time()
+                
+            try:
+                result = func(*args, **kwargs)
+                return result
+            except Exception as e:
+                last_exception = e
+                # Implement exponential backoff for API errors
+                if "rate limit" in str(e).lower() or "429" in str(e):
+                    logger.warning(f"Rate limit hit, implementing backoff: {e}")
+                    time.sleep(3.0)  # Wait 3 seconds before retrying
+                    continue
+                elif "503" in str(e) or "502" in str(e):
+                    logger.warning(f"Tidal service error, backing off: {e}")
+                    time.sleep(2.0)  # Wait 2 seconds for service errors
+                    continue
             
-            _last_api_call_time = time.time()
-            
-        try:
-            result = func(*args, **kwargs)
-            return result
-        except Exception as e:
-            # Implement exponential backoff for API errors
-            if "rate limit" in str(e).lower() or "429" in str(e):
-                logger.warning(f"Rate limit hit, implementing backoff: {e}")
-                time.sleep(3.0)  # Wait 3 seconds before retrying
-            elif "503" in str(e) or "502" in str(e):
-                logger.warning(f"Tidal service error, backing off: {e}")
-                time.sleep(2.0)  # Wait 2 seconds for service errors
-            raise
+        raise last_exception
     return wrapper
 
 @dataclass
@@ -163,7 +171,7 @@ class TidalClient:
             logger.info("Saved Tidal tokens")
         except Exception as e:
             logger.error(f"Error saving Tidal tokens: {e}")
-    
+
     def _parse_json_api_track(self, track_data: Dict[str, Any], artist_details_map: Dict[str, Any] = None) -> Optional[Track]:
         """Parse a track from a JSON:API 'included' object with artist details."""
         try:
@@ -550,7 +558,7 @@ class TidalClient:
             endpoint = f"{self.base_url}/playlists"
             params = {
                 'countryCode': 'US',
-                'filter[r.owners.id]': user_id
+                'filter[owners.id]': user_id
             }
 
             headers = self.session.headers.copy()
@@ -688,6 +696,7 @@ class TidalClient:
     @rate_limited
     def get_playlist(self, playlist_id: str) -> Optional[Playlist]:
         """Get playlist details including tracks"""
+       
         try:
             if not self._ensure_valid_token():
                 logger.error("Not authenticated with Tidal")
@@ -697,78 +706,66 @@ class TidalClient:
             response = self.session.get(
                 f"{self.base_url}/playlists/{playlist_id}",
                 params={'countryCode': 'US'},
+                headers= {'accept':'application/vnd.api+json'},
                 timeout=10
             )
             
+            response.raise_for_status()
+
             if response.status_code != 200:
                 logger.error(f"Failed to get Tidal playlist {playlist_id}: {response.status_code} - {response.text}")
                 return None
             
-            playlist_data = response.json()
+            playlist_data = response.json().get("data", {})
 
             # Get playlist tracks with pagination to handle large playlists
             tracks = []
-            offset = 0
-            limit = 100
+            cursor = ""
             total_fetched = 0
 
             while True:
-                logger.info(f"Fetching tracks for playlist {playlist_id}: offset={offset}, limit={limit}")
+                track_ids = []
 
-                tracks_response = self.session.get(
-                    f"{self.base_url}/playlists/{playlist_id}/items",
-                    params={'countryCode': 'US', 'limit': limit, 'offset': offset},
-                    timeout=10
-                )
-
-                if tracks_response.status_code != 200:
-                    logger.error(f"Failed to get Tidal playlist tracks at offset {offset}: {tracks_response.status_code} - {tracks_response.text}")
-                    break
-
-                tracks_data = tracks_response.json()
-
-                if 'items' not in tracks_data:
-                    logger.warning(f"No items found in playlist {playlist_id} response at offset {offset}")
-                    break
-
-                items = tracks_data['items']
-                if len(items) == 0:
-                    logger.info(f"No more tracks found at offset {offset}, stopping pagination")
+                tracks_data=self.get_playlist_tracks(cursor, playlist_id)
+                
+                if not tracks_data.get("data"):
+                    logger.warning(f"No items found in playlist {playlist_id} response at cursor {cursor}")
                     break
 
                 # Process this batch of tracks
                 batch_count = 0
-                for item in items:
-                    # Handle different item structures
-                    track_data = item
-                    if 'item' in item and item.get('type') == 'track':
-                        track_data = item['item']
-                    elif 'resource' in item:
-                        track_data = item['resource']
-
-                    track = self._parse_track_data(track_data)
-                    if track:
-                        tracks.append(track)
+                for item in tracks_data.get("data",[]):
+                    # we can do a batch call with the tracks to get the artist data
+                    if item.get("type"):
+                        track_ids.append(item.get("id"))
                         batch_count += 1
+
 
                 total_fetched += batch_count
                 logger.info(f"Fetched {batch_count} tracks in this batch, {total_fetched} total so far")
 
-                # If we got fewer items than the limit, we've reached the end
-                if len(items) < limit:
-                    logger.info(f"Received {len(items)} items (less than limit {limit}), pagination complete")
-                    break
+                # now we have a page of tracks we can hydrate some of the data
+
+                tracks.extend(self._get_playlist_track_data(track_ids))
 
                 # Move to next page
-                offset += limit
+                cursor = tracks_data.get("links", {}).get("meta", {}).get("nextCursor")
+                
+                # Tidal uses cursor based pagination so if no next cursor exists we can finish
+                if not cursor:
+                    break
             
+            # now we have a list of track ids but not hydrated track data
+            
+            playlist_attrs = playlist_data.get("attributes", {})
+
             playlist = Playlist(
                 id=playlist_data.get('id', playlist_id),
-                name=playlist_data.get('title', 'Unknown Playlist'),
-                description=playlist_data.get('description', ''),
+                name=playlist_attrs.get('name', 'Unknown Playlist'),
+                description=playlist_attrs.get('description', ''),
                 tracks=tracks,
                 external_urls={'tidal': f"https://tidal.com/browse/playlist/{playlist_id}"},
-                public=not playlist_data.get('publicPlaylist', True)  # Tidal uses 'publicPlaylist' field
+                public = playlist_attrs.get('accessType', '') == "PUBLIC"
             )
             
             logger.info(f"Retrieved Tidal playlist '{playlist.name}' with {len(tracks)} tracks")
@@ -778,6 +775,109 @@ class TidalClient:
             logger.error(f"Error getting Tidal playlist {playlist_id}: {e}")
             return None
     
+    @rate_limited
+    def get_playlist_tracks(self, cursor: str, playlist_id: str) -> Optional[dict]:
+        logger.info(f"Fetching tracks for playlist {playlist_id}: cursor={cursor}")
+        params = {"countryCode": "US"}
+        if cursor:
+            params["page[cursor]"] = cursor
+        tracks_response = self.session.get(
+            f"{self.base_url}/playlists/{playlist_id}/relationships/items",
+            params=params,
+            headers= {'accept':'application/vnd.api+json'},
+            timeout=10
+        )
+        
+        tracks_response.raise_for_status()
+
+        return tracks_response.json()
+
+    def parse_duration(self, duration: str) -> int:
+        """Convert ISO-8601 duration string (like 'PT3M36S') to milliseconds.
+            Only supports minutes and seconds.
+        """
+        if not duration.startswith("PT"):
+            return 0
+
+        minutes = 0
+        seconds = 0
+
+        # Extract minutes and seconds using regex
+        m = re.search(r"(\d+)M", duration)
+        s = re.search(r"(\d+)S", duration)
+
+        if m:
+            minutes = int(m.group(1))
+        if s:
+            seconds = int(s.group(1))
+
+        return (minutes * 60 + seconds) * 1000
+
+    @rate_limited
+    def _get_playlist_track_data(self, track_ids: list[str]) -> list[Track]:
+        try:
+            params = {"countryCode": "US", "include":"artists,albums", "filter[id]": ",".join(track_ids)}
+            resp = self.session.get(
+                f"{self.base_url}/tracks",
+                params=params,
+                headers= {'accept':'application/vnd.api+json'},
+                timeout=10
+            )
+
+            resp.raise_for_status()
+            
+            if resp.status_code != 200:
+                logger.error(f"Failed to get Tidal playlist tracks data: {resp.status_code} - {resp.text}")#
+            
+            tracks_data = resp.json()
+
+            albumCache: dict[str,str] = {}
+            artistCache: dict[str,str] = {}
+
+            # first scan through the included albums and artists so we can link ids to names
+
+            for item in tracks_data.get("included", []):
+                item_id = item.get("id")
+                if item.get("type") == "albums":
+                    albumCache.setdefault(item_id, item.get("attributes", {}).get("title", "Unknown Album"))
+                if item.get("type") == "artists":
+                    artistCache.setdefault(item_id, item.get("attributes", {}).get("name", "Unknown Artist"))
+                    
+            # now go through the tracks and hydrate with the artist and album data
+            hydratedTracks: list[Track] = []
+            for trackData in tracks_data.get("data"):
+                attrs = trackData.get("attributes", {})
+                track_id = trackData.get("id")
+                relateds = trackData.get("relationships")
+               
+                album_data = relateds.get("albums", {}).get("data", [])
+                album_id = album_data[0].get("id") if album_data else None
+                album = albumCache.get(album_id, "Unknown Album")
+
+                
+                artists = [
+                    artistCache.get(a.get("id"), "Unknown Artist")
+                    for a in relateds.get("artists", {}).get("data", [])
+                    if a.get("id")
+                ]
+
+                hydratedTracks.append(Track(
+                    id=str(track_id),
+                    name=attrs.get('title', 'Unknown Track'),
+                    artists=artists,
+                    album=album,
+                    duration_ms=self.parse_duration(attrs.get('duration')),
+                    external_urls={'tidal': f"https://tidal.com/browse/track/{track_id}"},
+                    explicit=attrs.get('explicit', False)
+                ))
+            
+        except Exception as e:
+            logger.error(f"Error getting playlist tracks: {e}")
+            return []
+
+        return hydratedTracks
+
+
     def _parse_track_data(self, item: Dict[str, Any]) -> Optional[Track]:
         """Parse Tidal track data into Track object"""
         try:
