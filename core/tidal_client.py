@@ -706,14 +706,17 @@ class TidalClient:
             response = self.session.get(
                 f"{self.base_url}/playlists/{playlist_id}",
                 params={'countryCode': 'US'},
+                headers= {'accept':'application/vnd.api+json'},
                 timeout=10
             )
             
+            response.raise_for_status()
+
             if response.status_code != 200:
                 logger.error(f"Failed to get Tidal playlist {playlist_id}: {response.status_code} - {response.text}")
                 return None
             
-            playlist_data = response.json()
+            playlist_data = response.json().get("data", {})
 
             # Get playlist tracks with pagination to handle large playlists
             tracks = []
@@ -722,22 +725,9 @@ class TidalClient:
 
             while True:
                 track_ids = []
-                logger.info(f"Fetching tracks for playlist {playlist_id}: cursor={cursor}")
-                params = {"countryCode": "US"}
-                if cursor:
-                    params["page[cursor]"] = cursor
-                tracks_response = self.session.get(
-                    f"{self.base_url}/playlists/{playlist_id}/relationships/items",
-                    params=params,
-                    timeout=10
-                )
 
-                if tracks_response.status_code != 200:
-                    logger.error(f"Failed to get Tidal playlist tracks at cursor {cursor}: {tracks_response.status_code} - {tracks_response.text}")
-                    break
-
-                tracks_data = tracks_response.json()
-
+                tracks_data=self.get_playlist_tracks(cursor, playlist_id)
+                
                 if not tracks_data.get("data"):
                     logger.warning(f"No items found in playlist {playlist_id} response at cursor {cursor}")
                     break
@@ -756,7 +746,7 @@ class TidalClient:
 
                 # now we have a page of tracks we can hydrate some of the data
 
-                tracks.extend(self._get_track_playlist(track_ids))
+                tracks.extend(self._get_playlist_track_data(track_ids))
 
                 # Move to next page
                 cursor = tracks_data.get("links", {}).get("meta", {}).get("nextCursor")
@@ -785,6 +775,22 @@ class TidalClient:
             logger.error(f"Error getting Tidal playlist {playlist_id}: {e}")
             return None
     
+    @rate_limited
+    def get_playlist_tracks(self, cursor: str, playlist_id: str) -> Optional[dict]:
+        logger.info(f"Fetching tracks for playlist {playlist_id}: cursor={cursor}")
+        params = {"countryCode": "US"}
+        if cursor:
+            params["page[cursor]"] = cursor
+        tracks_response = self.session.get(
+            f"{self.base_url}/playlists/{playlist_id}/relationships/items",
+            params=params,
+            headers= {'accept':'application/vnd.api+json'},
+            timeout=10
+        )
+        
+        tracks_response.raise_for_status()
+
+        return tracks_response.json()
 
     def parse_duration(self, duration: str) -> int:
         """Convert ISO-8601 duration string (like 'PT3M36S') to milliseconds.
@@ -807,26 +813,30 @@ class TidalClient:
 
         return (minutes * 60 + seconds) * 1000
 
+    @rate_limited
     def _get_playlist_track_data(self, track_ids: list[str]) -> list[Track]:
         try:
             params = {"countryCode": "US", "include":"artists,albums", "filter[id]": ",".join(track_ids)}
             resp = self.session.get(
                 f"{self.base_url}/tracks",
                 params=params,
+                headers= {'accept':'application/vnd.api+json'},
                 timeout=10
             )
 
+            resp.raise_for_status()
+            
             if resp.status_code != 200:
-                logger.error(f"Failed to get Tidal playlist tracks data: {resp.status_code} - {resp.text}")
-
+                logger.error(f"Failed to get Tidal playlist tracks data: {resp.status_code} - {resp.text}")#
+            
             tracks_data = resp.json()
 
-            albumCache = Dict[str,str] = {}
-            artistCache = Dict[str,str] = {}
+            albumCache: dict[str,str] = {}
+            artistCache: dict[str,str] = {}
 
             # first scan through the included albums and artists so we can link ids to names
 
-            for item in tracks_data.get("included"):
+            for item in tracks_data.get("included", []):
                 item_id = item.get("id")
                 if item.get("type") == "albums":
                     albumCache.setdefault(item_id, item.get("attributes", {}).get("title", "Unknown Album"))
