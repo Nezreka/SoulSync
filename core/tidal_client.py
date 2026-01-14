@@ -27,30 +27,37 @@ def rate_limited(func):
     """Decorator to enforce rate limiting on Tidal API calls"""
     @wraps(func)
     def wrapper(*args, **kwargs):
-        global _last_api_call_time
-        
-        with _api_call_lock:
-            current_time = time.time()
-            time_since_last_call = current_time - _last_api_call_time
+        max_retries = 3
+        last_exception = None
+        for attempt in range(max_retries):
+            global _last_api_call_time
             
-            if time_since_last_call < MIN_API_INTERVAL:
-                sleep_time = MIN_API_INTERVAL - time_since_last_call
-                time.sleep(sleep_time)
+            with _api_call_lock:
+                current_time = time.time()
+                time_since_last_call = current_time - _last_api_call_time
+                
+                if time_since_last_call < MIN_API_INTERVAL:
+                    sleep_time = MIN_API_INTERVAL - time_since_last_call
+                    time.sleep(sleep_time)
+                
+                _last_api_call_time = time.time()
+                
+            try:
+                result = func(*args, **kwargs)
+                return result
+            except Exception as e:
+                last_exception = e
+                # Implement exponential backoff for API errors
+                if "rate limit" in str(e).lower() or "429" in str(e):
+                    logger.warning(f"Rate limit hit, implementing backoff: {e}")
+                    time.sleep(3.0)  # Wait 3 seconds before retrying
+                    continue
+                elif "503" in str(e) or "502" in str(e):
+                    logger.warning(f"Tidal service error, backing off: {e}")
+                    time.sleep(2.0)  # Wait 2 seconds for service errors
+                    continue
             
-            _last_api_call_time = time.time()
-            
-        try:
-            result = func(*args, **kwargs)
-            return result
-        except Exception as e:
-            # Implement exponential backoff for API errors
-            if "rate limit" in str(e).lower() or "429" in str(e):
-                logger.warning(f"Rate limit hit, implementing backoff: {e}")
-                time.sleep(3.0)  # Wait 3 seconds before retrying
-            elif "503" in str(e) or "502" in str(e):
-                logger.warning(f"Tidal service error, backing off: {e}")
-                time.sleep(2.0)  # Wait 2 seconds for service errors
-            raise
+        raise last_exception
     return wrapper
 
 @dataclass
