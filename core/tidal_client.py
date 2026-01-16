@@ -757,10 +757,10 @@ class TidalClient:
                     total_fetched += len(batch_tracks)
                     logger.info(f"Fetched {len(batch_tracks)} tracks in this batch, {total_fetched} total so far")
 
-                # Get next cursor from meta (not nested in links)
-                cursor = tracks_page.get("meta", {}).get("nextCursor")
+                # Get next cursor using PR #113's approach (confirmed working)
+                cursor = tracks_page.get("links", {}).get("meta", {}).get("nextCursor")
 
-                # If no next cursor exists, we're done
+                # If no cursor found, we're done paginating
                 if not cursor:
                     logger.info("No next cursor found, pagination complete")
                     break
