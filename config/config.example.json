@@ -3,7 +3,11 @@
   "spotify": {
     "client_id": "SpotifyClientID",
     "client_secret": "SpotifyClientSecret",
-    "redirect_uri": "http://127.0.0.1:8888/callback"
+    "redirect_uri": "http://127.0.0.1:8888/callback",
+    "friend_profiles": [
+      "userID1",
+      "userID2"
+    ]
   },
   "tidal": {
     "client_id": "TidalClientID",
