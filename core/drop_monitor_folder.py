@@ -51,6 +51,7 @@ class DropFolderProcessor:
         self._running = False
         self._spotify_client = None
         self._processor_thread = None
+        self._seen_files = set()
 
     def _get_spotify_client(self):
         """Lazy load Spotify client only when needed"""
@@ -132,11 +133,17 @@ class DropFolderProcessor:
         """Start the async queue processor in a background thread.
         Call this after start() returns True."""
         def run_async_loop():
-            asyncio.run(self.process_queue())
+            asyncio.run(self._run_async_tasks())
 
         self._processor_thread = threading.Thread(target=run_async_loop, daemon=True)
         self._processor_thread.start()
         logger.info("Background queue processor started")
+    
+    async def _run_async_tasks(self):
+        await asyncio.gather(
+            self.process_queue(),
+            self.poll_folder(interval=15)
+        )
 
     def _scan_existing_files(self):
         """Scan for existing files in the drop folder"""
@@ -154,7 +161,30 @@ class DropFolderProcessor:
         with self._queue_lock:
             if file_path not in self.processing_queue:
                 self.processing_queue.append(file_path)
+                self._seen_files.add(file_path)
                 logger.debug(f"Queued for processing: {file_path.name}")
+    
+    async def poll_folder(self, interval: int = 15):
+        """"Fallback polling for docker mounts (watchdog not deterministic)"""
+        supported_formats = config_manager.get(
+            'drop_folder.supported_formats',
+            ['.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a']
+        )
+
+        while self._running:
+            try:
+                for file_path in self.watch_path.glob('*'):
+                    if (
+                        file_path.is_file()
+                        and file_path.suffix.lower() in supported_formats
+                        and file_path not in self._seen_files
+                    ):
+                        logger.info(f"[Polling] Detected new file: {file_path.name}")
+                        self.queue_file(file_path)
+            except Exception as e:
+                logger.warning(f"Drop folder polling error: {e}")
+        
+            await asyncio.sleep(interval)
 
     async def process_queue(self):
         """Process queued files"""
@@ -259,7 +289,7 @@ class DropFolderProcessor:
         # Limit length to avoid filesystem issues
         return sanitized[:200] if len(sanitized) > 200 else sanitized
 
-    async def _wait_for_file_stable(self, file_path: Path, timeout: int = 30) -> bool:
+    async def _wait_for_file_stable(self, file_path: Path, timeout: int = 60) -> bool:
         """Wait for file to finish being written (size stops changing)"""
         if not file_path.exists():
             return False
