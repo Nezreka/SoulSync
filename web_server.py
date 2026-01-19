@@ -57,16 +57,27 @@ else:
     config_path = os.path.join(project_root, 'config', 'config.json')
 
 if os.path.exists(config_path):
-    print(f"Found config file at: {config_path}")
-    # Load configuration into the existing singleton instance
-    if hasattr(config_manager, 'load_config'):
-        config_manager.load_config(config_path)
+    # Check if we need to reload or if settings.py already handled it
+    current_loaded_path = getattr(config_manager, 'config_path', None)
+    target_path = Path(config_path).resolve()
+
+    # Resolve current loaded path if it's a Path object
+    if isinstance(current_loaded_path, Path):
+        current_loaded_path = current_loaded_path.resolve()
+
+    if current_loaded_path == target_path and config_manager.config_data:
+        print(f"✅ Web server configuration already loaded from: {config_path}")
     else:
-        # Fallback for older settings.py in Docker volumes
-        print("⚠️ Legacy configuration detected: using fallback loading method")
-        config_manager.config_path = Path(config_path)
-        config_manager._load_config()
-    print("✅ Web server configuration loaded successfully.")
+        print(f"Found config file at: {config_path}")
+        # Load configuration into the existing singleton instance
+        if hasattr(config_manager, 'load_config'):
+            config_manager.load_config(config_path)
+        else:
+            # Fallback for older settings.py in Docker volumes
+            print("⚠️ Legacy configuration detected: using fallback loading method")
+            config_manager.config_path = Path(config_path)
+            config_manager._load_config()
+        print("✅ Web server configuration loaded successfully.")
 else:
     print(f"🔴 WARNING: config.json not found at {config_path}. Using default settings.")
 # Correctly point to the 'webui' directory for templates and static files
