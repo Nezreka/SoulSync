@@ -46,6 +46,9 @@ services:
       # Add additional drive mounts as needed for your specific setup
       # Optional: Mount your music library for Plex/Jellyfin access
       - /path/to/your/music:/music:ro
+      # Optional: Drop-in folder for manually adding music
+      # Files placed here will be automatically imported into the music library
+      - ./dropin:/app/dropin
     extra_hosts:
       # Allow container to reach host services
       - "host.docker.internal:host-gateway"
