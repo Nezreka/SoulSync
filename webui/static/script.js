@@ -1704,6 +1704,10 @@ async function loadSettingsData() {
         // Populate Playlist Sync settings
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup !== false;
 
+        // Populate Drop Folder settings
+        document.getElementById('drop-folder-enabled').checked = settings.drop_folder?.enabled === true;
+        document.getElementById('drop-folder-path').value = settings.drop_folder?.watch_path || '';
+
         // Populate Logging information (read-only)
         document.getElementById('log-level-display').textContent = settings.logging?.level || 'INFO';
         document.getElementById('log-path-display').textContent = settings.logging?.path || 'logs/app.log';
@@ -2096,6 +2100,10 @@ async function saveSettings() {
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked
+        },
+        drop_folder: {
+            enabled: document.getElementById('drop-folder-enabled').checked,
+            watch_path: document.getElementById('drop-folder-path').value
         }
     };
 

@@ -16,6 +16,7 @@ from core.plex_client import PlexClient
 from core.jellyfin_client import JellyfinClient
 from core.navidrome_client import NavidromeClient
 from core.soulseek_client import SoulseekClient
+from core.drop_monitor_folder import DropFolderProcessor
 
 from ui.sidebar import ModernSidebar
 from ui.pages.dashboard import DashboardPage
@@ -91,6 +92,9 @@ class MainWindow(QMainWindow):
         self.jellyfin_client = JellyfinClient()
         self.navidrome_client = NavidromeClient()
         self.soulseek_client = SoulseekClient()
+        self.drop_folder_processor = DropFolderProcessor()
+        if self.drop_folder_processor.start():
+            self.drop_folder_processor.start_background_processing()
         
         self.status_thread = None
         self.init_ui()
@@ -397,6 +401,9 @@ class MainWindow(QMainWindow):
                     asyncio.run(self.soulseek_client.close())
             except Exception as e:
                 logger.error(f"Error closing Soulseek client: {e}")
+            
+            if hasattr(self, 'drop_folder_processor'):
+                self.drop_folder_processor.stop()
             
             # Close database connection
             try:

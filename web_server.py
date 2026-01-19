@@ -37,6 +37,7 @@ from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
 from core.web_scan_manager import WebScanManager
 from core.lyrics_client import lyrics_client
+from core.drop_monitor_folder import DropFolderProcessor
 from database.music_database import get_database
 from services.sync_service import PlaylistSyncService
 from datetime import datetime
@@ -148,10 +149,13 @@ try:
         'navidrome_client': navidrome_client
     }
     web_scan_manager = WebScanManager(media_clients, delay_seconds=60)
+
+    # Initialize drop folder processor (will be started in __main__ if enabled)
+    drop_folder_processor = DropFolderProcessor()
     print("✅ Core service clients and scan manager initialized.")
 except Exception as e:
     print(f"🔴 FATAL: Error initializing service clients: {e}")
-    spotify_client = plex_client = jellyfin_client = navidrome_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
+    spotify_client = plex_client = jellyfin_client = navidrome_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = drop_folder_processor = None
 
 # --- Global Streaming State Management ---
 # Thread-safe state tracking for streaming functionality
@@ -2252,7 +2256,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'listenbrainz']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'listenbrainz', 'drop_folder']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -2273,6 +2277,9 @@ def handle_settings():
             soulseek_client.reload_settings()
             # FIX: Re-instantiate the global tidal_client to pick up new settings
             tidal_client = TidalClient()
+            # Reload drop folder processor settings (start/stop based on enabled flag)
+            if drop_folder_processor:
+                drop_folder_processor.reload_config()
             print("✅ Service clients re-initialized with new settings.")
             return jsonify({"success": True, "message": "Settings saved successfully."})
         except Exception as e:
@@ -22881,7 +22888,15 @@ if __name__ == '__main__':
     print("🔧 Starting automatic watchlist scanning...")
     start_watchlist_auto_scanning()
     print("✅ Automatic watchlist scanning started (5 minute initial delay, 24 hour cycles)")
-    
+
+    # Start drop folder monitoring if enabled
+    print("🔧 Checking drop folder monitoring...")
+    if drop_folder_processor and drop_folder_processor.start():
+        drop_folder_processor.start_background_processing()
+        print("✅ Drop folder monitoring started")
+    else:
+        print("ℹ️ Drop folder monitoring not enabled or not configured")
+
     # Initialize app start time for uptime tracking
     import time
     app.start_time = time.time()
