@@ -7,14 +7,46 @@ from pathlib import Path
 
 class ConfigManager:
     def __init__(self, config_path: str = "config/config.json"):
-        self.config_path = Path(config_path)
+        # Determine strict absolute path to settings.py directory to help resolve config.json
+        # This handles cases where CWD is different (e.g. running from /Users vs /Users/project)
+        self.base_dir = Path(__file__).parent.parent.absolute()
+        
+        # Check for environment variable override first (Unified logic with web_server.py)
+        env_config_path = os.environ.get('SOULSYNC_CONFIG_PATH')
+        if env_config_path:
+            config_path = env_config_path
+        
+        # Resolve config path
+        if os.path.isabs(config_path):
+            self.config_path = Path(config_path)
+        else:
+            # Try to resolve relative to CWD first (legacy behavior), then relative to project root
+            cwd_path = Path(config_path)
+            project_path = self.base_dir / config_path
+            
+            if cwd_path.exists():
+                self.config_path = cwd_path.absolute()
+            elif project_path.exists():
+                self.config_path = project_path
+            else:
+                # Default to project path even if it doesn't exist yet (for creation/fallback)
+                self.config_path = project_path
+
+        print(f"🔧 ConfigManager initialized with path: {self.config_path}")
+        
         self.config_data: Dict[str, Any] = {}
         self.encryption_key: Optional[bytes] = None
+        
         # Use DATABASE_PATH env var, fallback to database/music_library.db
-        import os
-        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
-        self.database_path = Path(db_path)
-        self.load_config(config_path)
+        db_path_env = os.environ.get('DATABASE_PATH')
+        if db_path_env:
+             self.database_path = Path(db_path_env)
+        else:
+             self.database_path = self.base_dir / "database" / "music_library.db"
+             
+        print(f"💾 Database path set to: {self.database_path}")
+             
+        self.load_config(str(self.config_path))
 
     def load_config(self, config_path: str = None):
         """
@@ -190,6 +222,8 @@ class ConfigManager:
         2. config.json (migration from file-based config)
         3. Defaults (fresh install)
         """
+        print(f"📥 Loading configuration...")
+        
         # Try loading from database first
         config_data = self._load_from_database()
 
@@ -199,29 +233,30 @@ class ConfigManager:
             return
 
         # Database is empty - try migration from config.json
+        print(f"⚠️ Configuration not found in database. Attempting migration from: {self.config_path}")
         config_data = self._load_from_config_file()
 
         if config_data:
             # Migrate from config.json to database
-            print("[MIGRATE] Migrating configuration from config.json to database...")
+            print("[MIGRATE] 🚀 Migrating configuration from config.json to database...")
             if self._save_to_database(config_data):
-                print("[OK] Configuration migrated successfully")
+                print("[OK] ✅ Configuration migrated successfully to database.")
                 self.config_data = config_data
                 return
             else:
-                print("[WARN] Migration failed - using file-based config")
+                print("[WARN] ⚠️ Migration failed - using file-based config temporarily.")
                 self.config_data = config_data
                 return
 
         # No config.json either - use defaults
-        print("[INFO] No existing configuration found - using defaults")
+        print("[INFO] ℹ️ No existing configuration found (DB or File) - using defaults")
         config_data = self._get_default_config()
 
         # Try to save defaults to database
         if self._save_to_database(config_data):
-            print("[OK] Default configuration saved to database")
+            print("[OK] ✅ Default configuration saved to database")
         else:
-            print("[WARN] Could not save defaults to database - using in-memory config")
+            print("[WARN] ⚠️ Could not save defaults to database - using in-memory config")
 
         self.config_data = config_data
 
