@@ -347,34 +347,83 @@ class iTunesClient:
         return albums
     
     def get_album(self, album_id: str) -> Optional[Dict[str, Any]]:
-        """Get album information"""
+        """Get album information - normalized to Spotify format"""
         results = self._lookup(id=album_id)
-        
+
         for album_data in results:
             if album_data.get('wrapperType') == 'collection':
-                return album_data
-        
+                # Normalize to Spotify-compatible format
+                image_url = None
+                if album_data.get('artworkUrl100'):
+                    image_url = album_data['artworkUrl100'].replace('100x100bb', '600x600bb')
+
+                # Build images array like Spotify (multiple sizes)
+                images = []
+                if image_url:
+                    images = [
+                        {'url': image_url, 'height': 600, 'width': 600},
+                        {'url': album_data['artworkUrl100'].replace('100x100bb', '300x300bb'), 'height': 300, 'width': 300},
+                        {'url': album_data['artworkUrl100'], 'height': 100, 'width': 100}
+                    ]
+
+                # Determine album type
+                track_count = album_data.get('trackCount', 0)
+                if track_count <= 3:
+                    album_type = 'single'
+                elif track_count <= 6:
+                    album_type = 'single'  # EP treated as single
+                else:
+                    album_type = 'album'
+
+                return {
+                    'id': str(album_data.get('collectionId', '')),
+                    'name': album_data.get('collectionName', ''),
+                    'images': images,
+                    'artists': [{'name': album_data.get('artistName', 'Unknown Artist'), 'id': str(album_data.get('artistId', ''))}],
+                    'release_date': album_data.get('releaseDate', '')[:10] if album_data.get('releaseDate') else '',  # YYYY-MM-DD format
+                    'total_tracks': track_count,
+                    'album_type': album_type,
+                    'external_urls': {'itunes': album_data.get('collectionViewUrl', '')},
+                    'uri': f"itunes:album:{album_data.get('collectionId', '')}",
+                    '_source': 'itunes',
+                    '_raw_data': album_data
+                }
+
         return None
     
     def get_album_tracks(self, album_id: str) -> Optional[Dict[str, Any]]:
-        """Get album tracks with all tracks included"""
+        """Get album tracks - normalized to Spotify format"""
         results = self._lookup(id=album_id, entity='song')
-        
+
         if not results:
             return None
-        
+
         # First result is usually the album/collection info
         # Remaining results are tracks
         tracks = []
         for item in results:
             if item.get('wrapperType') == 'track' and item.get('kind') == 'song':
-                tracks.append(item)
-        
+                # Normalize each track to Spotify-compatible format
+                normalized_track = {
+                    'id': str(item.get('trackId', '')),
+                    'name': item.get('trackName', ''),
+                    'artists': [{'name': item.get('artistName', 'Unknown Artist')}],  # List of dicts like Spotify
+                    'duration_ms': item.get('trackTimeMillis', 0),
+                    'track_number': item.get('trackNumber', 0),
+                    'disc_number': item.get('discNumber', 1),
+                    'explicit': item.get('trackExplicitness') == 'explicit',
+                    'preview_url': item.get('previewUrl'),
+                    'uri': f"itunes:track:{item.get('trackId', '')}",  # Synthetic URI
+                    'external_urls': {'itunes': item.get('trackViewUrl', '')},
+                    '_source': 'itunes'
+                }
+                tracks.append(normalized_track)
+
         # Sort by disc and track number
-        tracks.sort(key=lambda t: (t.get('discNumber', 1), t.get('trackNumber', 0)))
-        
+        tracks.sort(key=lambda t: (t.get('disc_number', 1), t.get('track_number', 0)))
+
         logger.info(f"Retrieved {len(tracks)} tracks for album {album_id}")
-        
+
         return {
             'items': tracks,
             'total': len(tracks),
@@ -399,20 +448,47 @@ class iTunesClient:
     
     def get_artist(self, artist_id: str) -> Optional[Dict[str, Any]]:
         """
-        Get full artist details from iTunes API.
-        
+        Get full artist details - normalized to Spotify format.
+
         Args:
             artist_id: iTunes artist ID
-            
+
         Returns:
-            Dictionary with artist data
+            Dictionary with artist data matching Spotify's format
         """
         results = self._lookup(id=artist_id)
-        
+
         for artist_data in results:
             if artist_data.get('wrapperType') == 'artist':
-                return artist_data
-        
+                # Build images array - iTunes artist search doesn't reliably return images
+                # but we include the structure for compatibility
+                images = []
+                if artist_data.get('artworkUrl100'):
+                    artwork_base = artist_data['artworkUrl100']
+                    images = [
+                        {'url': artwork_base.replace('100x100bb', '600x600bb'), 'height': 600, 'width': 600},
+                        {'url': artwork_base.replace('100x100bb', '300x300bb'), 'height': 300, 'width': 300},
+                        {'url': artwork_base, 'height': 100, 'width': 100}
+                    ]
+
+                # Get genre
+                genres = []
+                if artist_data.get('primaryGenreName'):
+                    genres = [artist_data['primaryGenreName']]
+
+                return {
+                    'id': str(artist_data.get('artistId', '')),
+                    'name': artist_data.get('artistName', ''),
+                    'images': images,
+                    'genres': genres,
+                    'popularity': 0,  # iTunes doesn't provide this
+                    'followers': {'total': 0},  # iTunes doesn't provide this
+                    'external_urls': {'itunes': artist_data.get('artistViewUrl', '')},
+                    'uri': f"itunes:artist:{artist_data.get('artistId', '')}",
+                    '_source': 'itunes',
+                    '_raw_data': artist_data
+                }
+
         return None
     
     def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
