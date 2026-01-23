@@ -2700,64 +2700,89 @@ class MusicDatabase:
             return 0
 
     # Watchlist operations
-    def add_artist_to_watchlist(self, spotify_artist_id: str, artist_name: str) -> bool:
-        """Add an artist to the watchlist for monitoring new releases"""
+    def add_artist_to_watchlist(self, artist_id: str, artist_name: str) -> bool:
+        """Add an artist to the watchlist for monitoring new releases.
+
+        Automatically detects if artist_id is a Spotify ID (alphanumeric) or iTunes ID (numeric).
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
-                cursor.execute("""
-                    INSERT OR REPLACE INTO watchlist_artists 
-                    (spotify_artist_id, artist_name, date_added, updated_at)
-                    VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """, (spotify_artist_id, artist_name))
-                
+
+                # Detect ID type: iTunes IDs are purely numeric, Spotify IDs are alphanumeric
+                is_itunes_id = artist_id.isdigit()
+
+                if is_itunes_id:
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO watchlist_artists
+                        (itunes_artist_id, artist_name, date_added, updated_at)
+                        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, (artist_id, artist_name))
+                    logger.info(f"Added artist '{artist_name}' to watchlist (iTunes ID: {artist_id})")
+                else:
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO watchlist_artists
+                        (spotify_artist_id, artist_name, date_added, updated_at)
+                        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, (artist_id, artist_name))
+                    logger.info(f"Added artist '{artist_name}' to watchlist (Spotify ID: {artist_id})")
+
                 conn.commit()
-                logger.info(f"Added artist '{artist_name}' to watchlist (Spotify ID: {spotify_artist_id})")
                 return True
-                
+
         except Exception as e:
             logger.error(f"Error adding artist '{artist_name}' to watchlist: {e}")
             return False
 
-    def remove_artist_from_watchlist(self, spotify_artist_id: str) -> bool:
-        """Remove an artist from the watchlist"""
+    def remove_artist_from_watchlist(self, artist_id: str) -> bool:
+        """Remove an artist from the watchlist (checks both Spotify and iTunes IDs)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
-                # Get artist name for logging
-                cursor.execute("SELECT artist_name FROM watchlist_artists WHERE spotify_artist_id = ?", (spotify_artist_id,))
+
+                # Get artist name for logging (check both ID columns)
+                cursor.execute("""
+                    SELECT artist_name FROM watchlist_artists
+                    WHERE spotify_artist_id = ? OR itunes_artist_id = ?
+                """, (artist_id, artist_id))
                 result = cursor.fetchone()
                 artist_name = result['artist_name'] if result else "Unknown"
-                
-                cursor.execute("DELETE FROM watchlist_artists WHERE spotify_artist_id = ?", (spotify_artist_id,))
-                
+
+                cursor.execute("""
+                    DELETE FROM watchlist_artists
+                    WHERE spotify_artist_id = ? OR itunes_artist_id = ?
+                """, (artist_id, artist_id))
+
                 if cursor.rowcount > 0:
                     conn.commit()
-                    logger.info(f"Removed artist '{artist_name}' from watchlist (Spotify ID: {spotify_artist_id})")
+                    logger.info(f"Removed artist '{artist_name}' from watchlist (ID: {artist_id})")
                     return True
                 else:
-                    logger.warning(f"Artist with Spotify ID {spotify_artist_id} not found in watchlist")
+                    logger.warning(f"Artist with ID {artist_id} not found in watchlist")
                     return False
-                
+
         except Exception as e:
-            logger.error(f"Error removing artist from watchlist (Spotify ID: {spotify_artist_id}): {e}")
+            logger.error(f"Error removing artist from watchlist (ID: {artist_id}): {e}")
             return False
 
-    def is_artist_in_watchlist(self, spotify_artist_id: str) -> bool:
-        """Check if an artist is currently in the watchlist"""
+    def is_artist_in_watchlist(self, artist_id: str) -> bool:
+        """Check if an artist is currently in the watchlist (checks both Spotify and iTunes IDs)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
-                cursor.execute("SELECT 1 FROM watchlist_artists WHERE spotify_artist_id = ? LIMIT 1", (spotify_artist_id,))
+
+                # Check both spotify_artist_id and itunes_artist_id columns
+                cursor.execute("""
+                    SELECT 1 FROM watchlist_artists
+                    WHERE spotify_artist_id = ? OR itunes_artist_id = ?
+                    LIMIT 1
+                """, (artist_id, artist_id))
                 result = cursor.fetchone()
-                
+
                 return result is not None
-                
+
         except Exception as e:
-            logger.error(f"Error checking if artist is in watchlist (Spotify ID: {spotify_artist_id}): {e}")
+            logger.error(f"Error checking if artist is in watchlist (ID: {artist_id}): {e}")
             return False
 
     def get_watchlist_artists(self) -> List[WatchlistArtist]:
@@ -2839,8 +2864,8 @@ class MusicDatabase:
             logger.error(f"Error getting watchlist count: {e}")
             return 0
 
-    def update_watchlist_artist_image(self, spotify_artist_id: str, image_url: str) -> bool:
-        """Update the image URL for a watchlist artist"""
+    def update_watchlist_artist_image(self, artist_id: str, image_url: str) -> bool:
+        """Update the image URL for a watchlist artist (checks both Spotify and iTunes IDs)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -2856,8 +2881,8 @@ class MusicDatabase:
                 cursor.execute("""
                     UPDATE watchlist_artists
                     SET image_url = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE spotify_artist_id = ?
-                """, (image_url, spotify_artist_id))
+                    WHERE spotify_artist_id = ? OR itunes_artist_id = ?
+                """, (image_url, artist_id, artist_id))
 
                 conn.commit()
                 return cursor.rowcount > 0

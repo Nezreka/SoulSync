@@ -169,7 +169,17 @@ class SpotifyClient:
     def __init__(self):
         self.sp: Optional[spotipy.Spotify] = None
         self.user_id: Optional[str] = None
+        self._itunes_client = None  # Lazy-loaded iTunes fallback
         self._setup_client()
+
+    @property
+    def _itunes(self):
+        """Lazy-load iTunes client for fallback when Spotify not authenticated"""
+        if self._itunes_client is None:
+            from core.itunes_client import iTunesClient
+            self._itunes_client = iTunesClient()
+            logger.info("iTunes fallback client initialized")
+        return self._itunes_client
 
     def reload_config(self):
         """Reload configuration and re-initialize client"""
@@ -201,10 +211,23 @@ class SpotifyClient:
             self.sp = None
     
     def is_authenticated(self) -> bool:
-        """Check if Spotify client is authenticated and working"""
+        """
+        Check if client can service metadata requests.
+        Returns True if Spotify is authenticated OR iTunes fallback is available.
+        For Spotify-specific auth check, use is_spotify_authenticated().
+        """
+        # If Spotify is authenticated, we're good
+        if self.is_spotify_authenticated():
+            return True
+
+        # iTunes fallback is always available
+        return True
+
+    def is_spotify_authenticated(self) -> bool:
+        """Check if Spotify client is specifically authenticated (not just iTunes fallback)"""
         if self.sp is None:
             return False
-        
+
         try:
             # Make a simple API call to verify authentication
             self.sp.current_user()
@@ -228,7 +251,7 @@ class SpotifyClient:
     
     @rate_limited
     def get_user_playlists(self) -> List[Playlist]:
-        if not self.is_authenticated():
+        if not self.is_spotify_authenticated():
             logger.error("Not authenticated with Spotify")
             return []
         
@@ -262,7 +285,7 @@ class SpotifyClient:
     @rate_limited
     def get_user_playlists_metadata_only(self) -> List[Playlist]:
         """Get playlists without fetching all track details for faster loading"""
-        if not self.is_authenticated():
+        if not self.is_spotify_authenticated():
             logger.error("Not authenticated with Spotify")
             return []
         
@@ -312,7 +335,7 @@ class SpotifyClient:
     @rate_limited
     def get_saved_tracks_count(self) -> int:
         """Get the total count of user's saved/liked songs without fetching all tracks"""
-        if not self.is_authenticated():
+        if not self.is_spotify_authenticated():
             logger.error("Not authenticated with Spotify")
             return 0
 
@@ -331,7 +354,7 @@ class SpotifyClient:
     @rate_limited
     def get_saved_tracks(self) -> List[Track]:
         """Fetch all user's saved/liked songs from Spotify"""
-        if not self.is_authenticated():
+        if not self.is_spotify_authenticated():
             logger.error("Not authenticated with Spotify")
             return []
 
@@ -373,7 +396,7 @@ class SpotifyClient:
 
     @rate_limited
     def _get_playlist_tracks(self, playlist_id: str) -> List[Track]:
-        if not self.is_authenticated():
+        if not self.is_spotify_authenticated():
             return []
         
         tracks = []
@@ -397,7 +420,7 @@ class SpotifyClient:
     
     @rate_limited
     def get_playlist_by_id(self, playlist_id: str) -> Optional[Playlist]:
-        if not self.is_authenticated():
+        if not self.is_spotify_authenticated():
             return None
         
         try:
@@ -411,104 +434,113 @@ class SpotifyClient:
     
     @rate_limited
     def search_tracks(self, query: str, limit: int = 20) -> List[Track]:
-        if not self.is_authenticated():
-            return []
-        
-        try:
-            results = self.sp.search(q=query, type='track', limit=limit)
-            tracks = []
-            
-            for track_data in results['tracks']['items']:
-                track = Track.from_spotify_track(track_data)
-                tracks.append(track)
-            
-            return tracks
-            
-        except Exception as e:
-            logger.error(f"Error searching tracks: {e}")
-            return []
-    
+        """Search for tracks - falls back to iTunes if Spotify not authenticated"""
+        if self.is_spotify_authenticated():
+            try:
+                results = self.sp.search(q=query, type='track', limit=limit)
+                tracks = []
+
+                for track_data in results['tracks']['items']:
+                    track = Track.from_spotify_track(track_data)
+                    tracks.append(track)
+
+                return tracks
+
+            except Exception as e:
+                logger.error(f"Error searching tracks via Spotify: {e}")
+                # Fall through to iTunes fallback
+
+        # iTunes fallback
+        logger.debug(f"Using iTunes fallback for track search: {query}")
+        return self._itunes.search_tracks(query, limit)
+
     @rate_limited
     def search_artists(self, query: str, limit: int = 20) -> List[Artist]:
-        """Search for artists using Spotify API"""
-        if not self.is_authenticated():
-            return []
-        
-        try:
-            results = self.sp.search(q=query, type='artist', limit=limit)
-            artists = []
-            
-            for artist_data in results['artists']['items']:
-                artist = Artist.from_spotify_artist(artist_data)
-                artists.append(artist)
-            
-            return artists
-            
-        except Exception as e:
-            logger.error(f"Error searching artists: {e}")
-            return []
-    
+        """Search for artists - falls back to iTunes if Spotify not authenticated"""
+        if self.is_spotify_authenticated():
+            try:
+                results = self.sp.search(q=query, type='artist', limit=limit)
+                artists = []
+
+                for artist_data in results['artists']['items']:
+                    artist = Artist.from_spotify_artist(artist_data)
+                    artists.append(artist)
+
+                return artists
+
+            except Exception as e:
+                logger.error(f"Error searching artists via Spotify: {e}")
+                # Fall through to iTunes fallback
+
+        # iTunes fallback
+        logger.debug(f"Using iTunes fallback for artist search: {query}")
+        return self._itunes.search_artists(query, limit)
+
     @rate_limited
     def search_albums(self, query: str, limit: int = 20) -> List[Album]:
-        """Search for albums using Spotify API"""
-        if not self.is_authenticated():
-            return []
-        
-        try:
-            results = self.sp.search(q=query, type='album', limit=limit)
-            albums = []
-            
-            for album_data in results['albums']['items']:
-                album = Album.from_spotify_album(album_data)
-                albums.append(album)
-            
-            return albums
-            
-        except Exception as e:
-            logger.error(f"Error searching albums: {e}")
-            return []
+        """Search for albums - falls back to iTunes if Spotify not authenticated"""
+        if self.is_spotify_authenticated():
+            try:
+                results = self.sp.search(q=query, type='album', limit=limit)
+                albums = []
+
+                for album_data in results['albums']['items']:
+                    album = Album.from_spotify_album(album_data)
+                    albums.append(album)
+
+                return albums
+
+            except Exception as e:
+                logger.error(f"Error searching albums via Spotify: {e}")
+                # Fall through to iTunes fallback
+
+        # iTunes fallback
+        logger.debug(f"Using iTunes fallback for album search: {query}")
+        return self._itunes.search_albums(query, limit)
     
     @rate_limited
     def get_track_details(self, track_id: str) -> Optional[Dict[str, Any]]:
-        """Get detailed track information including album data and track number"""
-        if not self.is_authenticated():
-            return None
-        
-        try:
-            track_data = self.sp.track(track_id)
-            
-            # Enhance with additional useful metadata for our purposes
-            if track_data:
-                enhanced_data = {
-                    'id': track_data['id'],
-                    'name': track_data['name'],
-                    'track_number': track_data['track_number'],
-                    'disc_number': track_data['disc_number'],
-                    'duration_ms': track_data['duration_ms'],
-                    'explicit': track_data['explicit'],
-                    'artists': [artist['name'] for artist in track_data['artists']],
-                    'primary_artist': track_data['artists'][0]['name'] if track_data['artists'] else None,
-                    'album': {
-                        'id': track_data['album']['id'],
-                        'name': track_data['album']['name'],
-                        'total_tracks': track_data['album']['total_tracks'],
-                        'release_date': track_data['album']['release_date'],
-                        'album_type': track_data['album']['album_type'],
-                        'artists': [artist['name'] for artist in track_data['album']['artists']]
-                    },
-                    'is_album_track': track_data['album']['total_tracks'] > 1,
-                    'raw_data': track_data  # Keep original for fallback
-                }
-                return enhanced_data
-            return track_data
-            
-        except Exception as e:
-            logger.error(f"Error fetching track details: {e}")
-            return None
+        """Get detailed track information - falls back to iTunes if Spotify not authenticated"""
+        if self.is_spotify_authenticated():
+            try:
+                track_data = self.sp.track(track_id)
+
+                # Enhance with additional useful metadata for our purposes
+                if track_data:
+                    enhanced_data = {
+                        'id': track_data['id'],
+                        'name': track_data['name'],
+                        'track_number': track_data['track_number'],
+                        'disc_number': track_data['disc_number'],
+                        'duration_ms': track_data['duration_ms'],
+                        'explicit': track_data['explicit'],
+                        'artists': [artist['name'] for artist in track_data['artists']],
+                        'primary_artist': track_data['artists'][0]['name'] if track_data['artists'] else None,
+                        'album': {
+                            'id': track_data['album']['id'],
+                            'name': track_data['album']['name'],
+                            'total_tracks': track_data['album']['total_tracks'],
+                            'release_date': track_data['album']['release_date'],
+                            'album_type': track_data['album']['album_type'],
+                            'artists': [artist['name'] for artist in track_data['album']['artists']]
+                        },
+                        'is_album_track': track_data['album']['total_tracks'] > 1,
+                        'raw_data': track_data  # Keep original for fallback
+                    }
+                    return enhanced_data
+                return track_data
+
+            except Exception as e:
+                logger.error(f"Error fetching track details via Spotify: {e}")
+                # Fall through to iTunes fallback
+
+        # iTunes fallback
+        logger.debug(f"Using iTunes fallback for track details: {track_id}")
+        return self._itunes.get_track_details(track_id)
     
     @rate_limited
     def get_track_features(self, track_id: str) -> Optional[Dict[str, Any]]:
-        if not self.is_authenticated():
+        if not self.is_spotify_authenticated():
             return None
         
         try:
@@ -521,83 +553,89 @@ class SpotifyClient:
     
     @rate_limited
     def get_album(self, album_id: str) -> Optional[Dict[str, Any]]:
-        """Get album information including tracks"""
-        if not self.is_authenticated():
-            return None
-        
-        try:
-            album_data = self.sp.album(album_id)
-            return album_data
-            
-        except Exception as e:
-            logger.error(f"Error fetching album: {e}")
-            return None
+        """Get album information - falls back to iTunes if Spotify not authenticated"""
+        if self.is_spotify_authenticated():
+            try:
+                album_data = self.sp.album(album_id)
+                return album_data
+
+            except Exception as e:
+                logger.error(f"Error fetching album via Spotify: {e}")
+                # Fall through to iTunes fallback
+
+        # iTunes fallback
+        logger.debug(f"Using iTunes fallback for album: {album_id}")
+        return self._itunes.get_album(album_id)
     
     @rate_limited
     def get_album_tracks(self, album_id: str) -> Optional[Dict[str, Any]]:
-        """Get album tracks with pagination to fetch all tracks"""
-        if not self.is_authenticated():
-            return None
+        """Get album tracks - falls back to iTunes if Spotify not authenticated"""
+        if self.is_spotify_authenticated():
+            try:
+                # Get first page of tracks
+                first_page = self.sp.album_tracks(album_id)
+                if not first_page or 'items' not in first_page:
+                    return None
 
-        try:
-            # Get first page of tracks
-            first_page = self.sp.album_tracks(album_id)
-            if not first_page or 'items' not in first_page:
-                return None
+                # Collect all tracks starting with first page
+                all_tracks = first_page['items'][:]
 
-            # Collect all tracks starting with first page
-            all_tracks = first_page['items'][:]
+                # Fetch remaining pages if they exist
+                next_page = first_page
+                while next_page.get('next'):
+                    next_page = self.sp.next(next_page)
+                    if next_page and 'items' in next_page:
+                        all_tracks.extend(next_page['items'])
 
-            # Fetch remaining pages if they exist
-            next_page = first_page
-            while next_page.get('next'):
-                next_page = self.sp.next(next_page)
-                if next_page and 'items' in next_page:
-                    all_tracks.extend(next_page['items'])
+                # Log success
+                logger.info(f"Retrieved {len(all_tracks)} tracks for album {album_id}")
 
-            # Log success
-            logger.info(f"Retrieved {len(all_tracks)} tracks for album {album_id}")
+                # Return structure with all tracks
+                result = first_page.copy()
+                result['items'] = all_tracks
+                result['next'] = None  # No more pages
+                result['limit'] = len(all_tracks)  # Update to reflect all tracks fetched
 
-            # Return structure with all tracks
-            result = first_page.copy()
-            result['items'] = all_tracks
-            result['next'] = None  # No more pages
-            result['limit'] = len(all_tracks)  # Update to reflect all tracks fetched
+                return result
 
-            return result
+            except Exception as e:
+                logger.error(f"Error fetching album tracks via Spotify: {e}")
+                # Fall through to iTunes fallback
 
-        except Exception as e:
-            logger.error(f"Error fetching album tracks: {e}")
-            return None
+        # iTunes fallback
+        logger.debug(f"Using iTunes fallback for album tracks: {album_id}")
+        return self._itunes.get_album_tracks(album_id)
     
     @rate_limited
     def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
-        """Get albums by artist ID"""
-        if not self.is_authenticated():
-            return []
-        
-        try:
-            albums = []
-            results = self.sp.artist_albums(artist_id, album_type=album_type, limit=limit)
-            
-            while results:
-                for album_data in results['items']:
-                    album = Album.from_spotify_album(album_data)
-                    albums.append(album)
-                
-                # Get next batch if available
-                results = self.sp.next(results) if results['next'] else None
-            
-            logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}")
-            return albums
-            
-        except Exception as e:
-            logger.error(f"Error fetching artist albums: {e}")
-            return []
+        """Get albums by artist ID - falls back to iTunes if Spotify not authenticated"""
+        if self.is_spotify_authenticated():
+            try:
+                albums = []
+                results = self.sp.artist_albums(artist_id, album_type=album_type, limit=limit)
+
+                while results:
+                    for album_data in results['items']:
+                        album = Album.from_spotify_album(album_data)
+                        albums.append(album)
+
+                    # Get next batch if available
+                    results = self.sp.next(results) if results['next'] else None
+
+                logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}")
+                return albums
+
+            except Exception as e:
+                logger.error(f"Error fetching artist albums via Spotify: {e}")
+                # Fall through to iTunes fallback
+
+        # iTunes fallback
+        logger.debug(f"Using iTunes fallback for artist albums: {artist_id}")
+        return self._itunes.get_artist_albums(artist_id, album_type, limit)
 
     @rate_limited
     def get_user_info(self) -> Optional[Dict[str, Any]]:
-        if not self.is_authenticated():
+        if not self.is_spotify_authenticated():
             return None
 
         try:
@@ -609,19 +647,21 @@ class SpotifyClient:
     @rate_limited
     def get_artist(self, artist_id: str) -> Optional[Dict[str, Any]]:
         """
-        Get full artist details from Spotify API.
+        Get full artist details - falls back to iTunes if Spotify not authenticated.
 
         Args:
-            artist_id: Spotify artist ID
+            artist_id: Artist ID (Spotify or iTunes depending on authentication)
 
         Returns:
             Dictionary with artist data including images, genres, popularity
         """
-        if not self.is_authenticated():
-            return None
+        if self.is_spotify_authenticated():
+            try:
+                return self.sp.artist(artist_id)
+            except Exception as e:
+                logger.error(f"Error fetching artist via Spotify: {e}")
+                # Fall through to iTunes fallback
 
-        try:
-            return self.sp.artist(artist_id)
-        except Exception as e:
-            logger.error(f"Error fetching artist {artist_id}: {e}")
-            return None
+        # iTunes fallback
+        logger.debug(f"Using iTunes fallback for artist: {artist_id}")
+        return self._itunes.get_artist(artist_id)
