@@ -79,13 +79,14 @@ class DatabaseTrackWithMetadata:
 class WatchlistArtist:
     """Artist being monitored for new releases"""
     id: int
-    spotify_artist_id: str
+    spotify_artist_id: Optional[str]  # Can be None if added via iTunes
     artist_name: str
     date_added: datetime
     last_scan_timestamp: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     image_url: Optional[str] = None
+    itunes_artist_id: Optional[str] = None  # Cross-provider support
     include_albums: bool = True
     include_eps: bool = True
     include_singles: bool = True
@@ -279,6 +280,9 @@ class MusicDatabase:
 
             # Add content type filter columns to watchlist_artists (migration)
             self._add_watchlist_content_type_filters(cursor)
+
+            # Add iTunes artist ID column to watchlist_artists (migration)
+            self._add_watchlist_itunes_id_column(cursor)
 
             conn.commit()
             logger.info("Database initialized successfully")
@@ -637,7 +641,7 @@ class MusicDatabase:
             columns = [column[1] for column in cursor.fetchall()]
 
             columns_to_add = {
-                'include_live': ('INTEGER', '0'),           # 0 = False (exclude live versions by default)
+                'include_live': ('INTEGER', '0'),          # 0 = False (exclude live versions by default)
                 'include_remixes': ('INTEGER', '0'),        # 0 = False (exclude remixes by default)
                 'include_acoustic': ('INTEGER', '0'),       # 0 = False (exclude acoustic by default)
                 'include_compilations': ('INTEGER', '0')    # 0 = False (exclude compilations by default)
@@ -650,6 +654,20 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding content type filter columns to watchlist_artists: {e}")
+            # Don't raise - this is a migration, database can still function
+
+    def _add_watchlist_itunes_id_column(self, cursor):
+        """Add iTunes artist ID column to watchlist_artists table for cross-provider support"""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = [column[1] for column in cursor.fetchall()]
+
+            if 'itunes_artist_id' not in columns:
+                cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN itunes_artist_id TEXT")
+                logger.info("Added itunes_artist_id column to watchlist_artists table for cross-provider support")
+
+        except Exception as e:
+            logger.error(f"Error adding itunes_artist_id column to watchlist_artists: {e}")
             # Don't raise - this is a migration, database can still function
 
     def close(self):
@@ -2755,7 +2773,7 @@ class MusicDatabase:
                 # Build SELECT query based on existing columns
                 base_columns = ['id', 'spotify_artist_id', 'artist_name', 'date_added',
                                'last_scan_timestamp', 'created_at', 'updated_at']
-                optional_columns = ['image_url', 'include_albums', 'include_eps', 'include_singles',
+                optional_columns = ['image_url', 'itunes_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
@@ -2772,6 +2790,7 @@ class MusicDatabase:
                 for row in rows:
                     # Safely get optional columns with defaults (sqlite3.Row uses dict-style access)
                     image_url = row['image_url'] if 'image_url' in existing_columns else None
+                    itunes_artist_id = row['itunes_artist_id'] if 'itunes_artist_id' in existing_columns else None
                     include_albums = bool(row['include_albums']) if 'include_albums' in existing_columns else True
                     include_eps = bool(row['include_eps']) if 'include_eps' in existing_columns else True
                     include_singles = bool(row['include_singles']) if 'include_singles' in existing_columns else True
@@ -2789,6 +2808,7 @@ class MusicDatabase:
                         created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
                         updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None,
                         image_url=image_url,
+                        itunes_artist_id=itunes_artist_id,
                         include_albums=include_albums,
                         include_eps=include_eps,
                         include_singles=include_singles,
@@ -2844,6 +2864,46 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error updating watchlist artist image: {e}")
+            return False
+
+    def update_watchlist_spotify_id(self, watchlist_id: int, spotify_id: str) -> bool:
+        """Update the Spotify artist ID for a watchlist artist (cross-provider support)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    UPDATE watchlist_artists
+                    SET spotify_artist_id = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (spotify_id, watchlist_id))
+
+                conn.commit()
+                logger.info(f"Updated Spotify ID for watchlist artist {watchlist_id}: {spotify_id}")
+                return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Error updating watchlist Spotify ID: {e}")
+            return False
+
+    def update_watchlist_itunes_id(self, watchlist_id: int, itunes_id: str) -> bool:
+        """Update the iTunes artist ID for a watchlist artist (cross-provider support)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    UPDATE watchlist_artists
+                    SET itunes_artist_id = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (itunes_id, watchlist_id))
+
+                conn.commit()
+                logger.info(f"Updated iTunes ID for watchlist artist {watchlist_id}: {itunes_id}")
+                return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Error updating watchlist iTunes ID: {e}")
             return False
 
     # === Discovery Feature Methods ===

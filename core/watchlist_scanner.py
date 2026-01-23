@@ -232,12 +232,21 @@ class ScanResult:
 class WatchlistScanner:
     """Service for scanning watched artists for new releases"""
     
-    def __init__(self, spotify_client: SpotifyClient, database_path: str = "database/music_library.db"):
-        self.spotify_client = spotify_client
+    def __init__(self, spotify_client: SpotifyClient = None, metadata_service=None, database_path: str = "database/music_library.db"):
+        # Support both old (spotify_client) and new (metadata_service) initialization
         self.database_path = database_path
         self._database = None
         self._wishlist_service = None
         self._matching_engine = None
+        
+        if metadata_service:
+            self._metadata_service = metadata_service
+            self.spotify_client = metadata_service.spotify  # For backward compatibility
+        elif spotify_client:
+            self.spotify_client = spotify_client
+            self._metadata_service = None  # Lazy load if needed
+        else:
+            raise ValueError("Must provide either spotify_client or metadata_service")
     
     @property
     def database(self):
@@ -259,6 +268,14 @@ class WatchlistScanner:
         if self._matching_engine is None:
             self._matching_engine = MusicMatchingEngine()
         return self._matching_engine
+    
+    @property
+    def metadata_service(self):
+        """Get or create MetadataService instance (lazy loading)"""
+        if self._metadata_service is None:
+            from core.metadata_service import MetadataService
+            self._metadata_service = MetadataService()
+        return self._metadata_service
     
     def scan_all_watchlist_artists(self) -> List[ScanResult]:
         """
@@ -325,6 +342,22 @@ class WatchlistScanner:
                 logger.info(f"Skipping {len(all_watchlist_artists) - len(artists_to_scan)} artists (will be scanned in future runs)")
 
             watchlist_artists = artists_to_scan
+            
+            # PROACTIVE ID BACKFILLING (cross-provider support)
+            # Before scanning, ensure all artists have IDs for the current provider
+            logger.info(f"DEBUG: About to check backfilling. _metadata_service = {getattr(self, '_metadata_service', 'ATTRIBUTE MISSING')}")
+            if self._metadata_service is not None:
+                try:
+                    active_provider = self._metadata_service.get_active_provider()
+                    logger.info(f"🔍 Checking for missing {active_provider} IDs in watchlist...")
+                    self._backfill_missing_ids(all_watchlist_artists, active_provider)
+                except Exception as backfill_error:
+                    logger.warning(f"Error during ID backfilling: {backfill_error}")
+                    import traceback
+                    traceback.print_exc()
+                    # Continue with scan even if backfilling fails
+            else:
+                logger.warning(f"⚠️ Backfilling SKIPPED - _metadata_service is None")
             
             scan_results = []
             for i, artist in enumerate(watchlist_artists):
@@ -558,6 +591,86 @@ class WatchlistScanner:
         except Exception as e:
             logger.error(f"Error getting discography for artist {spotify_artist_id}: {e}")
             return None
+
+    def _backfill_missing_ids(self, artists: List[WatchlistArtist], provider: str):
+        """
+        Proactively match ALL artists missing IDs for the current provider.
+        
+        Example: User has 50 artists with only Spotify IDs.
+        When iTunes becomes active, this matches ALL 50 to iTunes in one batch.
+        """
+        artists_to_match = []
+        
+        if provider == 'spotify':
+            # Find all artists missing Spotify IDs
+            artists_to_match = [a for a in artists if not a.spotify_artist_id and a.itunes_artist_id]
+        elif provider == 'itunes':
+            # Find all artists missing iTunes IDs
+            artists_to_match = [a for a in artists if not a.itunes_artist_id and a.spotify_artist_id]
+        
+        if not artists_to_match:
+            logger.info(f"✅ All artists already have {provider} IDs")
+            return
+        
+        logger.info(f"🔄 Backfilling {len(artists_to_match)} artists with {provider} IDs...")
+        
+        matched_count = 0
+        for artist in artists_to_match:
+            try:
+                if provider == 'spotify':
+                    new_id = self._match_to_spotify(artist.artist_name)
+                    if new_id:
+                        self.database.update_watchlist_spotify_id(artist.id, new_id)
+                        artist.spotify_artist_id = new_id  # Update in memory
+                        matched_count += 1
+                        logger.info(f"✅ Matched '{artist.artist_name}' to Spotify: {new_id}")
+                
+                elif provider == 'itunes':
+                    new_id = self._match_to_itunes(artist.artist_name)
+                    if new_id:
+                        self.database.update_watchlist_itunes_id(artist.id, new_id)
+                        artist.itunes_artist_id = new_id  # Update in memory
+                        matched_count += 1
+                        logger.info(f"✅ Matched '{artist.artist_name}' to iTunes: {new_id}")
+                
+                # Small delay to avoid API rate limits
+                time.sleep(0.3)
+                
+            except Exception as e:
+                logger.warning(f"Could not match '{artist.artist_name}' to {provider}: {e}")
+                continue
+        
+        logger.info(f"✅ Backfilled {matched_count}/{len(artists_to_match)} artists with {provider} IDs")
+
+    def _match_to_spotify(self, artist_name: str) -> Optional[str]:
+        """Match artist name to Spotify ID"""
+        try:
+            # Use metadata service if available, fallback to spotify_client
+            if hasattr(self, '_metadata_service') and self._metadata_service:
+                results = self._metadata_service.spotify.search_artists(artist_name, limit=1)
+            else:
+                results = self.spotify_client.search_artists(artist_name, limit=1)
+            
+            if results:
+                return results[0].id
+        except Exception as e:
+            logger.warning(f"Could not match {artist_name} to Spotify: {e}")
+        return None
+    
+    def _match_to_itunes(self, artist_name: str) -> Optional[str]:
+        """Match artist name to iTunes ID"""
+        try:
+            # Use metadata service's iTunes client
+            if hasattr(self, '_metadata_service') and self._metadata_service:
+                results = self._metadata_service.itunes.search_artists(artist_name, limit=1)
+                if results:
+                    return results[0].id
+            else:
+                # iTunes client not available without metadata service
+                logger.warning(f"Cannot match to iTunes - MetadataService not available")
+        except Exception as e:
+            logger.warning(f"Could not match {artist_name} to iTunes: {e}")
+        return None
 
     def _get_lookback_period_setting(self) -> str:
         """
