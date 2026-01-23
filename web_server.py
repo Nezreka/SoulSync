@@ -17093,8 +17093,22 @@ def check_watchlist_status():
 def start_watchlist_scan():
     """Start a watchlist scan for new releases"""
     try:
-        if not spotify_client or not spotify_client.is_authenticated():
-            return jsonify({"success": False, "error": "Spotify client not available or not authenticated"}), 400
+        # Check if MetadataService can provide a working client (Spotify OR iTunes)
+        from core.metadata_service import MetadataService
+        metadata_service = MetadataService()
+        
+        # Get active provider - will be either spotify or itunes
+        active_provider = metadata_service.get_active_provider()
+        provider_info = metadata_service.get_provider_info()
+        
+        # Verify we have at least one working provider
+        if not provider_info['spotify_authenticated'] and not provider_info['itunes_available']:
+            return jsonify({
+                "success": False, 
+                "error": "No music provider available. Please authenticate Spotify or ensure iTunes is accessible."
+            }), 400
+        
+        logger.info(f"Starting watchlist scan with {active_provider} provider")
 
         # Check if wishlist auto-processing is currently running (using smart detection)
         if is_wishlist_actually_processing():
@@ -17108,7 +17122,7 @@ def start_watchlist_scan():
         def run_scan():
             try:
                 global watchlist_scan_state, watchlist_auto_scanning, watchlist_auto_scanning_timestamp
-                from core.watchlist_scanner import get_watchlist_scanner
+                from core.watchlist_scanner import WatchlistScanner
                 from database.music_database import get_database
 
                 # Set flag and timestamp for manual scan
@@ -17137,7 +17151,20 @@ def start_watchlist_scan():
                         watchlist_next_run_time = 0  # Clear timer for consistency
                     return
 
-                scanner = get_watchlist_scanner(spotify_client)
+                # Initialize scanner with MetadataService for cross-provider support
+                scanner = WatchlistScanner(metadata_service=metadata_service)
+                
+                # PROACTIVE ID BACKFILLING (cross-provider support)
+                # Before scanning, ensure all artists have IDs for the current provider
+                try:
+                    active_provider = metadata_service.get_active_provider()
+                    print(f"🔍 Checking for missing {active_provider} IDs in watchlist...")
+                    scanner._backfill_missing_ids(watchlist_artists, active_provider)
+                except Exception as backfill_error:
+                    print(f"⚠️ Error during ID backfilling: {backfill_error}")
+                    import traceback
+                    traceback.print_exc()
+                    # Continue with scan even if backfilling fails
                 
                 # Initialize detailed progress tracking
                 watchlist_scan_state.update({
