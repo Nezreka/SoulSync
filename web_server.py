@@ -5046,19 +5046,73 @@ def get_artist_image(artist_id):
 def get_artist_discography(artist_id):
     """Get an artist's complete discography (albums and singles)"""
     try:
-        if not spotify_client or not spotify_client.is_authenticated():
-            return jsonify({"error": "Spotify not authenticated"}), 401
-        
-        print(f"🎤 Fetching discography for artist: {artist_id}")
-        
-        # Get artist's albums and singles (temporarily include appears_on for debugging)
-        albums = spotify_client.get_artist_albums(artist_id, album_type='album,single', limit=50)
-        print(f"📊 Raw albums returned from Spotify: {len(albums)}")
+        # Get optional artist name for fallback searches
+        artist_name = request.args.get('artist_name', '')
+
+        # Determine which source to use
+        spotify_available = spotify_client and spotify_client.is_spotify_authenticated()
+
+        # Import iTunes client for fallback
+        from core.itunes_client import iTunesClient
+        itunes_client = iTunesClient()
+
+        print(f"🎤 Fetching discography for artist: {artist_id} (name: {artist_name}, spotify: {spotify_available})")
+
+        albums = []
+        active_source = None
+
+        # Try to get albums from the appropriate source
+        # Check if the ID looks like Spotify (alphanumeric) or iTunes (numeric only)
+        is_numeric_id = artist_id.isdigit()
+
+        if spotify_available and not is_numeric_id:
+            # Try Spotify first for alphanumeric IDs
+            try:
+                albums = spotify_client.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                if albums:
+                    active_source = 'spotify'
+                    print(f"📊 Got {len(albums)} albums from Spotify")
+            except Exception as e:
+                print(f"Spotify lookup failed: {e}")
+
+        # Try iTunes if Spotify didn't work or if it's a numeric ID
+        if not albums:
+            try:
+                if is_numeric_id:
+                    # It's an iTunes ID, use directly
+                    albums = itunes_client.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                    if albums:
+                        active_source = 'itunes'
+                        print(f"📊 Got {len(albums)} albums from iTunes (direct ID)")
+                elif artist_name:
+                    # Search iTunes by name
+                    print(f"🔄 Trying iTunes search by name: '{artist_name}'")
+                    itunes_artists = itunes_client.search_artists(artist_name, limit=5)
+                    if itunes_artists:
+                        # Find best match
+                        best_match = None
+                        for artist in itunes_artists:
+                            if artist.name.lower() == artist_name.lower():
+                                best_match = artist
+                                break
+                        if not best_match:
+                            best_match = itunes_artists[0]
+
+                        print(f"✅ Found iTunes artist: {best_match.name} (ID: {best_match.id})")
+                        albums = itunes_client.get_artist_albums(best_match.id, album_type='album,single', limit=50)
+                        if albums:
+                            active_source = 'itunes'
+                            print(f"📊 Got {len(albums)} albums from iTunes (name search)")
+            except Exception as e:
+                print(f"iTunes lookup failed: {e}")
+
+        print(f"📊 Total albums returned: {len(albums)} (source: {active_source})")
         
         if not albums:
             return jsonify({
                 "albums": [],
-                "singles": []
+                "singles": [],
+                "source": active_source or "unknown"
             })
         
         # Separate albums from singles/EPs
@@ -5073,23 +5127,18 @@ def get_artist_discography(artist_id):
             if album.id in seen_albums:
                 continue
             seen_albums.add(album.id)
-            
-            # Debug: Check artist information
-            print(f"🔍 Checking album: {album.name}")
+
+            # Handle artist matching for both Spotify (objects) and iTunes (strings) formats
             if hasattr(album, 'artists') and album.artists:
-                primary_artist_id = album.artists[0].id if hasattr(album.artists[0], 'id') else None
-                primary_artist_name = album.artists[0].name if hasattr(album.artists[0], 'name') else None
-                print(f"   Primary artist: {primary_artist_name} (ID: {primary_artist_id})")
-                print(f"   Requested artist ID: {artist_id}")
-                
-                # Skip if the primary artist doesn't match our requested artist
-                if primary_artist_id and primary_artist_id != artist_id:
-                    print(f"🚫 Skipping '{album.name}' - primary artist mismatch")
-                    continue
-                elif not primary_artist_id:
-                    print(f"⚠️ No primary artist ID found for '{album.name}' - including anyway")
-            else:
-                print(f"⚠️ No artists found for '{album.name}' - including anyway")
+                first_artist = album.artists[0]
+                # Check if artists are objects (Spotify) or strings (iTunes)
+                if hasattr(first_artist, 'id'):
+                    # Spotify format: artist is an object with .id and .name
+                    primary_artist_id = first_artist.id
+                    # Skip if the primary artist doesn't match our requested artist
+                    if primary_artist_id and primary_artist_id != artist_id:
+                        continue
+                # iTunes format: artist is a string, can't verify ID match so include all
             
             album_data = {
                 "id": album.id,
@@ -5138,9 +5187,10 @@ def get_artist_discography(artist_id):
         
         return jsonify({
             "albums": album_list,
-            "singles": singles_list
+            "singles": singles_list,
+            "source": active_source or "spotify"
         })
-        
+
     except Exception as e:
         print(f"❌ Error fetching artist discography: {e}")
         import traceback
@@ -18178,52 +18228,98 @@ metadata_update_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=
 # == DISCOVER PAGE ENDPOINTS   ==
 # ===============================
 
+def _get_active_discovery_source():
+    """
+    Determine which music source is active for discovery.
+    Returns 'spotify' if Spotify is authenticated, 'itunes' otherwise.
+    """
+    if spotify_client and spotify_client.is_spotify_authenticated():
+        return 'spotify'
+    return 'itunes'
+
+
 @app.route('/api/discover/hero', methods=['GET'])
 def get_discover_hero():
     """Get featured similar artists for hero slideshow"""
     try:
         database = get_database()
 
+        # Determine active source
+        active_source = _get_active_discovery_source()
+        print(f"🎵 Discover hero using source: {active_source}")
+
         # Get top similar artists (by occurrence count) - get 20 for variety
         similar_artists = database.get_top_similar_artists(limit=20)
 
         if not similar_artists:
-            return jsonify({"success": True, "artists": []})
+            return jsonify({"success": True, "artists": [], "source": active_source})
+
+        # Filter to artists that have the appropriate ID for the active source
+        valid_artists = []
+        for artist in similar_artists:
+            if active_source == 'spotify' and artist.similar_artist_spotify_id:
+                valid_artists.append(artist)
+            elif active_source == 'itunes' and artist.similar_artist_itunes_id:
+                valid_artists.append(artist)
+            # If we have both IDs, include regardless of source
+            elif artist.similar_artist_spotify_id and artist.similar_artist_itunes_id:
+                valid_artists.append(artist)
 
         # Shuffle for variety and take top 10
         import random
-        shuffled = list(similar_artists)
+        shuffled = list(valid_artists)
         random.shuffle(shuffled)
         similar_artists = shuffled[:10]
 
-        # Convert to JSON format with Spotify data enrichment
+        # Import iTunes client for fallback
+        from core.itunes_client import iTunesClient
+        itunes_client = iTunesClient()
+
+        # Convert to JSON format with data enrichment from appropriate source
         hero_artists = []
         for artist in similar_artists:
+            # Use the ID for the active source, falling back to the other if needed
+            if active_source == 'spotify':
+                artist_id = artist.similar_artist_spotify_id or artist.similar_artist_itunes_id
+            else:
+                artist_id = artist.similar_artist_itunes_id or artist.similar_artist_spotify_id
+
             artist_data = {
                 "spotify_artist_id": artist.similar_artist_spotify_id,
+                "itunes_artist_id": artist.similar_artist_itunes_id,
+                "artist_id": artist_id,  # The ID for the current active source
                 "artist_name": artist.similar_artist_name,
                 "occurrence_count": artist.occurrence_count,
-                "similarity_rank": artist.similarity_rank
+                "similarity_rank": artist.similarity_rank,
+                "source": active_source
             }
 
-            # Try to get artist image from Spotify
+            # Try to get artist image from the active source
             try:
-                if spotify_client and spotify_client.is_authenticated():
-                    sp_artist = spotify_client.get_artist(artist.similar_artist_spotify_id)
-                    if sp_artist and sp_artist.get('images'):
-                        artist_data['image_url'] = sp_artist['images'][0]['url'] if sp_artist['images'] else None
-                        artist_data['genres'] = sp_artist.get('genres', [])
-                        artist_data['popularity'] = sp_artist.get('popularity', 0)
-            except:
-                pass
+                if active_source == 'spotify' and artist.similar_artist_spotify_id:
+                    if spotify_client and spotify_client.is_authenticated():
+                        sp_artist = spotify_client.get_artist(artist.similar_artist_spotify_id)
+                        if sp_artist and sp_artist.get('images'):
+                            artist_data['image_url'] = sp_artist['images'][0]['url'] if sp_artist['images'] else None
+                            artist_data['genres'] = sp_artist.get('genres', [])
+                            artist_data['popularity'] = sp_artist.get('popularity', 0)
+                elif active_source == 'itunes' and artist.similar_artist_itunes_id:
+                    itunes_artist = itunes_client.get_artist(artist.similar_artist_itunes_id)
+                    if itunes_artist:
+                        artist_data['image_url'] = itunes_artist.get('images', [{}])[0].get('url') if itunes_artist.get('images') else None
+                        artist_data['genres'] = itunes_artist.get('genres', [])
+                        artist_data['popularity'] = itunes_artist.get('popularity', 0)
+            except Exception as img_err:
+                print(f"Could not fetch artist image: {img_err}")
 
             hero_artists.append(artist_data)
 
-        return jsonify({"success": True, "artists": hero_artists})
+        return jsonify({"success": True, "artists": hero_artists, "source": active_source})
 
     except Exception as e:
         print(f"Error getting discover hero: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/api/discover/recent-releases', methods=['GET'])
 def get_discover_recent_releases():
@@ -18231,14 +18327,18 @@ def get_discover_recent_releases():
     try:
         database = get_database()
 
-        # Get cached recent albums (max 20)
-        albums = database.get_discovery_recent_albums(limit=20)
+        # Determine active source
+        active_source = _get_active_discovery_source()
 
-        return jsonify({"success": True, "albums": albums})
+        # Get cached recent albums filtered by source (max 20)
+        albums = database.get_discovery_recent_albums(limit=20, source=active_source)
+
+        return jsonify({"success": True, "albums": albums, "source": active_source})
 
     except Exception as e:
         print(f"Error getting recent releases: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/api/discover/release-radar', methods=['GET'])
 def get_discover_release_radar():
@@ -18246,16 +18346,23 @@ def get_discover_release_radar():
     try:
         database = get_database()
 
-        if not spotify_client or not spotify_client.is_authenticated():
-            return jsonify({"success": True, "tracks": []})
+        # Determine active source - release radar works with any source now
+        active_source = _get_active_discovery_source()
 
         # Try to get curated playlist first
         curated_track_ids = database.get_curated_playlist('release_radar')
 
         if curated_track_ids:
-            # Use curated selection - fetch track data from discovery pool (same as Discovery Weekly)
-            discovery_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False)
-            tracks_by_id = {track.spotify_track_id: track for track in discovery_tracks}
+            # Use curated selection - fetch track data from discovery pool filtered by source
+            discovery_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False, source=active_source)
+
+            # Build lookup dict with source-appropriate IDs
+            tracks_by_id = {}
+            for track in discovery_tracks:
+                if active_source == 'spotify' and track.spotify_track_id:
+                    tracks_by_id[track.spotify_track_id] = track
+                elif active_source == 'itunes' and track.itunes_track_id:
+                    tracks_by_id[track.itunes_track_id] = track
 
             selected_tracks = []
             for track_id in curated_track_ids:
@@ -18271,19 +18378,22 @@ def get_discover_release_radar():
                             track_data = None
 
                     selected_tracks.append({
+                        "track_id": track.spotify_track_id or track.itunes_track_id,
                         "spotify_track_id": track.spotify_track_id,
+                        "itunes_track_id": track.itunes_track_id,
                         "track_name": track.track_name,
                         "artist_name": track.artist_name,
                         "album_name": track.album_name,
                         "album_cover_url": track.album_cover_url,
                         "duration_ms": track.duration_ms,
-                        "track_data_json": track_data  # Now properly parsed
+                        "track_data_json": track_data,
+                        "source": track.source
                     })
 
-            return jsonify({"success": True, "tracks": selected_tracks})
+            return jsonify({"success": True, "tracks": selected_tracks, "source": active_source})
 
         # Fallback: no curated playlist exists (shouldn't happen after first scan)
-        return jsonify({"success": True, "tracks": []})
+        return jsonify({"success": True, "tracks": [], "source": active_source})
 
     except Exception as e:
         print(f"Error getting release radar: {e}")
@@ -18297,13 +18407,23 @@ def get_discover_weekly():
     try:
         database = get_database()
 
+        # Determine active source
+        active_source = _get_active_discovery_source()
+
         # Try to get curated playlist first
         curated_track_ids = database.get_curated_playlist('discovery_weekly')
 
         if curated_track_ids:
-            # Use curated selection - fetch track data from discovery pool
-            discovery_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False)
-            tracks_by_id = {track.spotify_track_id: track for track in discovery_tracks}
+            # Use curated selection - fetch track data from discovery pool filtered by source
+            discovery_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False, source=active_source)
+
+            # Build lookup dict with source-appropriate IDs
+            tracks_by_id = {}
+            for track in discovery_tracks:
+                if active_source == 'spotify' and track.spotify_track_id:
+                    tracks_by_id[track.spotify_track_id] = track
+                elif active_source == 'itunes' and track.itunes_track_id:
+                    tracks_by_id[track.itunes_track_id] = track
 
             selected_tracks = []
             for track_id in curated_track_ids:
@@ -18319,19 +18439,22 @@ def get_discover_weekly():
                             track_data = None
 
                     selected_tracks.append({
+                        "track_id": track.spotify_track_id or track.itunes_track_id,
                         "spotify_track_id": track.spotify_track_id,
+                        "itunes_track_id": track.itunes_track_id,
                         "track_name": track.track_name,
                         "artist_name": track.artist_name,
                         "album_name": track.album_name,
                         "album_cover_url": track.album_cover_url,
                         "duration_ms": track.duration_ms,
-                        "track_data_json": track_data  # Now properly parsed
+                        "track_data_json": track_data,
+                        "source": track.source
                     })
 
-            return jsonify({"success": True, "tracks": selected_tracks})
+            return jsonify({"success": True, "tracks": selected_tracks, "source": active_source})
 
         # Fallback: no curated playlist exists (shouldn't happen after first scan)
-        return jsonify({"success": True, "tracks": []})
+        return jsonify({"success": True, "tracks": [], "source": active_source})
 
     except Exception as e:
         print(f"Error getting discovery weekly: {e}")

@@ -20000,15 +20000,17 @@ async function selectArtistForDetail(artist) {
     // Update artist info in header
     updateArtistDetailHeader(artist);
 
-    // Load discography
-    await loadArtistDiscography(artist.id);
+    // Load discography (pass artist name for cross-source fallback)
+    await loadArtistDiscography(artist.id, artist.name);
 }
 
 /**
- * Load artist's discography from Spotify
+ * Load artist's discography from Spotify or iTunes
+ * @param {string} artistId - Artist ID (Spotify or iTunes format)
+ * @param {string} [artistName] - Optional artist name for fallback searches
  */
-async function loadArtistDiscography(artistId) {
-    console.log(`💿 Loading discography for artist: ${artistId}`);
+async function loadArtistDiscography(artistId, artistName = null) {
+    console.log(`💿 Loading discography for artist: ${artistId} (name: ${artistName})`);
 
     // Check cache first
     if (artistsPageState.cache.discography[artistId]) {
@@ -20030,8 +20032,14 @@ async function loadArtistDiscography(artistId) {
         // Show loading states
         showDiscographyLoading();
 
+        // Build URL with optional artist name for fallback
+        let url = `/api/artist/${artistId}/discography`;
+        if (artistName) {
+            url += `?artist_name=${encodeURIComponent(artistName)}`;
+        }
+
         // Call the real API endpoint
-        const response = await fetch(`/api/artist/${artistId}/discography`);
+        const response = await fetch(url);
 
         if (!response.ok) {
             if (response.status === 401) {
