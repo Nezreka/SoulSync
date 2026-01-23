@@ -5017,6 +5017,31 @@ def get_similar_artists(artist_name):
             "error": str(e)
         }), 500
 
+@app.route('/api/artist/<artist_id>/image', methods=['GET'])
+def get_artist_image(artist_id):
+    """Get artist image URL - used for lazy loading in search results.
+
+    For iTunes, this fetches the artist's first album artwork as a fallback.
+    For Spotify, returns the artist's image directly.
+    """
+    try:
+        if spotify_client and spotify_client.is_spotify_authenticated():
+            # Use Spotify directly
+            artist_data = spotify_client.sp.artist(artist_id)
+            if artist_data and artist_data.get('images'):
+                image_url = artist_data['images'][0]['url'] if artist_data['images'] else None
+                return jsonify({"success": True, "image_url": image_url})
+            return jsonify({"success": True, "image_url": None})
+        else:
+            # Use iTunes fallback - fetch album art
+            from core.itunes_client import iTunesClient
+            itunes = iTunesClient()
+            image_url = itunes._get_artist_image_from_albums(artist_id)
+            return jsonify({"success": True, "image_url": image_url})
+    except Exception as e:
+        print(f"Error fetching artist image: {e}")
+        return jsonify({"success": False, "image_url": None, "error": str(e)})
+
 @app.route('/api/artist/<artist_id>/discography', methods=['GET'])
 def get_artist_discography(artist_id):
     """Get an artist's complete discography (albums and singles)"""
@@ -14111,8 +14136,14 @@ def get_album_tracks(album_id):
         if not album_data:
             return jsonify({"error": "Album not found"}), 404
 
-        # Extract tracks from album data
+        # Extract tracks from album data (Spotify format)
         tracks = album_data.get('tracks', {}).get('items', [])
+
+        # If no tracks in album data (iTunes format), fetch them separately
+        if not tracks:
+            tracks_data = spotify_client.get_album_tracks(album_id)
+            if tracks_data and 'items' in tracks_data:
+                tracks = tracks_data['items']
 
         # Format response
         album_dict = {
@@ -14121,12 +14152,13 @@ def get_album_tracks(album_id):
             'artists': album_data.get('artists', []),
             'release_date': album_data.get('release_date', ''),
             'total_tracks': album_data.get('total_tracks', 0),
-            'album_type': album_data.get('album_type', 'album'),  # CRITICAL FIX: Include album_type for correct classification
+            'album_type': album_data.get('album_type', 'album'),
             'images': album_data.get('images', []),
             'tracks': tracks
         }
         return jsonify(album_dict)
     except Exception as e:
+        logger.error(f"Error fetching album tracks: {e}")
         return jsonify({"error": str(e)}), 500
 
 

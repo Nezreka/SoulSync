@@ -2681,6 +2681,57 @@ function initializeSearchModeToggle() {
                 };
             }
         );
+
+        // Lazy load artist images that are missing
+        lazyLoadEnhancedSearchArtistImages();
+    }
+
+    // Lazy load artist images for enhanced search results
+    async function lazyLoadEnhancedSearchArtistImages() {
+        const artistLists = [
+            document.getElementById('enh-db-artists-list'),
+            document.getElementById('enh-spotify-artists-list')
+        ];
+
+        for (const list of artistLists) {
+            if (!list) continue;
+
+            const cardsNeedingImages = list.querySelectorAll('[data-needs-image="true"]');
+            if (cardsNeedingImages.length === 0) continue;
+
+            console.log(`🖼️ Lazy loading ${cardsNeedingImages.length} artist images in enhanced search`);
+
+            for (const card of cardsNeedingImages) {
+                const artistId = card.dataset.artistId;
+                if (!artistId) continue;
+
+                try {
+                    const response = await fetch(`/api/artist/${artistId}/image`);
+                    const data = await response.json();
+
+                    if (data.success && data.image_url) {
+                        // Find the placeholder and replace with image
+                        const placeholder = card.querySelector('.enh-item-image-placeholder');
+                        if (placeholder) {
+                            const img = document.createElement('img');
+                            img.src = data.image_url;
+                            img.className = 'enh-item-image artist-image';
+                            img.alt = card.querySelector('.enh-item-name')?.textContent || 'Artist';
+                            placeholder.replaceWith(img);
+
+                            // Apply dynamic glow
+                            extractImageColors(data.image_url, (colors) => {
+                                applyDynamicGlow(card, colors);
+                            });
+                        }
+                        card.dataset.needsImage = 'false';
+                        console.log(`✅ Loaded image for artist ${artistId}`);
+                    }
+                } catch (error) {
+                    console.warn(`⚠️ Failed to load image for artist ${artistId}:`, error);
+                }
+            }
+        }
     }
 
     function formatDuration(durationMs) {
@@ -2729,6 +2780,11 @@ function initializeSearchModeToggle() {
             // Add appropriate card class
             if (isArtist) {
                 elem.className = 'enh-compact-item artist-card';
+                // Add data attributes for lazy loading
+                if (item.id) {
+                    elem.dataset.artistId = item.id;
+                    elem.dataset.needsImage = config.image ? 'false' : 'true';
+                }
             } else if (isAlbum) {
                 elem.className = 'enh-compact-item album-card';
             } else if (isTrack) {
@@ -2752,7 +2808,7 @@ function initializeSearchModeToggle() {
 
             const imageHtml = config.image
                 ? `<img src="${escapeHtml(config.image)}" class="${imageClass}" alt="${escapeHtml(config.name)}">`
-                : `<div class="${placeholderClass}">${config.placeholder}</div>`;
+                : `<div class="${placeholderClass}" data-lazy-image="true">${config.placeholder}</div>`;
 
             const badgeHtml = config.badge
                 ? `<div class="enh-item-badge ${config.badge.class}">${config.badge.text}</div>`
@@ -11451,6 +11507,10 @@ function createArtistCard(artist, confidence) {
     const imageUrl = artist.image_url || '';
     const confidencePercent = Math.round(confidence * 100);
 
+    // Add data attribute for lazy loading
+    card.dataset.artistId = artist.id;
+    card.dataset.needsImage = imageUrl ? 'false' : 'true';
+
     card.innerHTML = `
         <div class="suggestion-card-overlay"></div>
         <div class="suggestion-card-content">
@@ -11683,6 +11743,16 @@ function renderArtistSearchResults(results) {
             console.error(`Error calling createArtistCard for result ${index}:`, error);
         }
     });
+
+    // Lazy load missing artist images
+    console.log('🖼️ Starting lazy load for artist images in matching modal...');
+    if (typeof lazyLoadArtistImages === 'function') {
+        lazyLoadArtistImages(container);
+    } else if (typeof window.lazyLoadArtistImages === 'function') {
+        window.lazyLoadArtistImages(container);
+    } else {
+        console.error('❌ lazyLoadArtistImages function not found!');
+    }
 }
 
 function renderAlbumSearchResults(results) {
@@ -19768,6 +19838,16 @@ function displayArtistsResults(query, results) {
     // Update watchlist status for all cards
     updateArtistCardWatchlistStatus();
 
+    // Lazy load missing artist images
+    console.log('🖼️ Starting lazy load for artist images on Artists page...');
+    if (typeof lazyLoadArtistImages === 'function') {
+        lazyLoadArtistImages(container);
+    } else if (typeof window.lazyLoadArtistImages === 'function') {
+        window.lazyLoadArtistImages(container);
+    } else {
+        console.error('❌ lazyLoadArtistImages function not found!');
+    }
+
     // Add mouse wheel horizontal scrolling
     container.addEventListener('wheel', (event) => {
         if (event.deltaY !== 0) {
@@ -19776,6 +19856,77 @@ function displayArtistsResults(query, results) {
         }
     });
 }
+
+/**
+ * Lazy load artist images for cards that don't have images yet.
+ * Fetches images asynchronously so search results appear immediately.
+ */
+async function lazyLoadArtistImages(container) {
+    if (!container) {
+        console.error('❌ lazyLoadArtistImages: container is null');
+        return;
+    }
+
+    // Find all cards that need images
+    const cardsNeedingImages = container.querySelectorAll('[data-needs-image="true"]');
+
+    if (cardsNeedingImages.length === 0) {
+        console.log('✅ All artist cards have images');
+        return;
+    }
+
+    console.log(`🖼️ Lazy loading images for ${cardsNeedingImages.length} artist cards`);
+
+    // Load images in parallel (but with a small batch to avoid overwhelming the server)
+    const batchSize = 5;
+    const cards = Array.from(cardsNeedingImages);
+
+    for (let i = 0; i < cards.length; i += batchSize) {
+        const batch = cards.slice(i, i + batchSize);
+
+        await Promise.all(batch.map(async (card) => {
+            const artistId = card.dataset.artistId;
+            if (!artistId) {
+                console.warn('⚠️ Card missing artistId:', card);
+                return;
+            }
+
+            try {
+                console.log(`🔄 Fetching image for artist ${artistId}...`);
+                const response = await fetch(`/api/artist/${artistId}/image`);
+                const data = await response.json();
+
+                console.log(`📥 Got response for ${artistId}:`, data);
+
+                if (data.success && data.image_url) {
+                    // Update the card's background image
+                    // Handle both card types (suggestion-card and artist-card)
+                    if (card.classList.contains('suggestion-card')) {
+                        card.style.backgroundImage = `url(${data.image_url})`;
+                        card.style.backgroundSize = 'cover';
+                        card.style.backgroundPosition = 'center';
+                    } else if (card.classList.contains('artist-card')) {
+                        const bgElement = card.querySelector('.artist-card-background');
+                        if (bgElement) {
+                            // Clear the gradient first, then set the image
+                            bgElement.style.cssText = `background-image: url('${data.image_url}'); background-size: cover; background-position: center;`;
+                        }
+                    }
+
+                    card.dataset.needsImage = 'false';
+                    console.log(`✅ Loaded image for artist ${artistId}`);
+                }
+            } catch (error) {
+                console.error(`❌ Failed to load image for artist ${artistId}:`, error);
+            }
+        }));
+    }
+
+    console.log('✅ Finished lazy loading artist images');
+}
+
+// Make function globally accessible
+window.lazyLoadArtistImages = lazyLoadArtistImages;
 
 /**
  * Create HTML for an artist card
@@ -19794,8 +19945,11 @@ function createArtistCardHTML(artist) {
     // Format popularity as a percentage for better UX
     const popularityText = popularity > 0 ? `${popularity}% Popular` : 'Popularity Unknown';
 
+    // Track if image needs to be lazy loaded
+    const needsImage = imageUrl ? 'false' : 'true';
+
     return `
-        <div class="artist-card" data-artist-id="${artist.id}">
+        <div class="artist-card" data-artist-id="${artist.id}" data-needs-image="${needsImage}">
             <div class="artist-card-background" style="${backgroundStyle}"></div>
             <div class="artist-card-overlay"></div>
             <div class="artist-card-content">
@@ -20107,6 +20261,9 @@ async function loadSimilarArtists(artistName) {
                                     <div style="font-size: 14px;">No similar artists found</div>
                                 </div>
                             `;
+                        } else {
+                            // Lazy load images for similar artists that don't have them
+                            lazyLoadSimilarArtistImages(container);
                         }
                     }
                 } catch (parseError) {
@@ -20143,6 +20300,54 @@ async function loadSimilarArtists(artistName) {
         // Always clear the controller
         similarArtistsController = null;
     }
+}
+
+/**
+ * Lazy load images for similar artist bubbles that don't have images
+ */
+async function lazyLoadSimilarArtistImages(container) {
+    if (!container) return;
+
+    const bubblesNeedingImages = container.querySelectorAll('.similar-artist-bubble[data-needs-image="true"]');
+
+    if (bubblesNeedingImages.length === 0) {
+        console.log('✅ All similar artist bubbles have images');
+        return;
+    }
+
+    console.log(`🖼️ Lazy loading images for ${bubblesNeedingImages.length} similar artists`);
+
+    // Load images in parallel batches
+    const batchSize = 5;
+    const bubbles = Array.from(bubblesNeedingImages);
+
+    for (let i = 0; i < bubbles.length; i += batchSize) {
+        const batch = bubbles.slice(i, i + batchSize);
+
+        await Promise.all(batch.map(async (bubble) => {
+            const artistId = bubble.getAttribute('data-artist-id');
+            if (!artistId) return;
+
+            try {
+                const response = await fetch(`/api/artist/${artistId}/image`);
+                const data = await response.json();
+
+                if (data.success && data.image_url) {
+                    const imageContainer = bubble.querySelector('.similar-artist-bubble-image');
+                    if (imageContainer) {
+                        const artistName = bubble.querySelector('.similar-artist-bubble-name')?.textContent || 'Artist';
+                        imageContainer.innerHTML = `<img src="${data.image_url}" alt="${artistName}">`;
+                        bubble.setAttribute('data-needs-image', 'false');
+                        console.log(`✅ Loaded image for similar artist ${artistId}`);
+                    }
+                }
+            } catch (error) {
+                console.warn(`⚠️ Failed to load image for similar artist ${artistId}:`, error);
+            }
+        }));
+    }
+
+    console.log('✅ Finished lazy loading similar artist images');
 }
 
 /**
@@ -20206,11 +20411,15 @@ function createSimilarArtistBubble(artist) {
     bubble.className = 'similar-artist-bubble';
     bubble.setAttribute('data-artist-id', artist.id);
 
+    // Track if image needs lazy loading
+    const hasImage = artist.image_url && artist.image_url.trim() !== '';
+    bubble.setAttribute('data-needs-image', hasImage ? 'false' : 'true');
+
     // Create image container
     const imageContainer = document.createElement('div');
     imageContainer.className = 'similar-artist-bubble-image';
 
-    if (artist.image_url && artist.image_url.trim() !== '') {
+    if (hasImage) {
         const img = document.createElement('img');
         img.src = artist.image_url;
         img.alt = artist.name;
@@ -20219,11 +20428,12 @@ function createSimilarArtistBubble(artist) {
         img.onerror = () => {
             console.log(`Failed to load image for ${artist.name}`);
             imageContainer.innerHTML = `<div class="similar-artist-bubble-image-fallback">🎵</div>`;
+            bubble.setAttribute('data-needs-image', 'true');
         };
 
         imageContainer.appendChild(img);
     } else {
-        // No image - show fallback
+        // No image - show fallback (will be lazy loaded)
         imageContainer.innerHTML = `<div class="similar-artist-bubble-image-fallback">🎵</div>`;
     }
 

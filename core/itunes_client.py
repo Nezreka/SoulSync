@@ -228,7 +228,8 @@ class iTunesClient:
                 'country': self.country,
                 'media': 'music',
                 'entity': entity,
-                'limit': min(limit, 200)  # iTunes max is 200
+                'limit': min(limit, 200),  # iTunes max is 200
+                'explicit': 'Yes'  # Include explicit content (prefer over clean versions)
             }
             
             response = self.session.get(
@@ -335,16 +336,40 @@ class iTunesClient:
     
     @rate_limited
     def search_albums(self, query: str, limit: int = 20) -> List[Album]:
-        """Search for albums using iTunes API"""
-        results = self._search(query, 'album', limit)
+        """Search for albums using iTunes API.
+
+        Filters out clean versions when explicit versions are available.
+        """
+        results = self._search(query, 'album', limit * 2)  # Fetch more to account for filtering
         albums = []
-        
+        seen_albums = {}  # Track albums by normalized name to prefer explicit versions
+
         for album_data in results:
-            if album_data.get('wrapperType') == 'collection':
-                album = Album.from_itunes_album(album_data)
-                albums.append(album)
-        
-        return albums
+            if album_data.get('wrapperType') != 'collection':
+                continue
+
+            # Get album name and explicitness
+            album_name = album_data.get('collectionName', '').lower().strip()
+            artist_name = album_data.get('artistName', '').lower().strip()
+            is_explicit = album_data.get('collectionExplicitness') == 'explicit'
+
+            # Create a key for deduplication (album name + artist)
+            key = f"{album_name}|{artist_name}"
+
+            # If we've seen this album before
+            if key in seen_albums:
+                # Only replace if current one is explicit and previous was clean
+                if is_explicit and not seen_albums[key]['is_explicit']:
+                    seen_albums[key] = {'data': album_data, 'is_explicit': is_explicit}
+            else:
+                seen_albums[key] = {'data': album_data, 'is_explicit': is_explicit}
+
+        # Convert to Album objects
+        for item in seen_albums.values():
+            album = Album.from_itunes_album(item['data'])
+            albums.append(album)
+
+        return albums[:limit]
     
     def get_album(self, album_id: str) -> Optional[Dict[str, Any]]:
         """Get album information - normalized to Spotify format"""
@@ -453,20 +478,17 @@ class iTunesClient:
 
     @rate_limited
     def search_artists(self, query: str, limit: int = 20) -> List[Artist]:
-        """Search for artists using iTunes API - includes album art fallback for images"""
+        """Search for artists using iTunes API.
+
+        Note: Artist images are not fetched during search to keep it fast.
+        Images are fetched when viewing artist details (get_artist method).
+        """
         results = self._search(query, 'musicArtist', limit)
         artists = []
 
         for artist_data in results:
             if artist_data.get('wrapperType') == 'artist':
                 artist = Artist.from_itunes_artist(artist_data)
-
-                # If no artist image, try to get their first album's artwork
-                if not artist.image_url:
-                    album_art = self._get_artist_image_from_albums(str(artist_data.get('artistId', '')))
-                    if album_art:
-                        artist.image_url = album_art
-
                 artists.append(artist)
 
         return artists
@@ -530,12 +552,12 @@ class iTunesClient:
 
         Note: iTunes doesn't support filtering by album_type in the same way as Spotify,
         so we fetch all albums and can filter client-side if needed.
+        Prefers explicit versions over clean versions when both exist.
         """
         import re
 
         results = self._lookup(id=artist_id, entity='album', limit=min(limit, 200))
-        albums = []
-        seen_albums = set()  # Track normalized names to prevent duplicates
+        seen_albums = {}  # Track albums by normalized name, prefer explicit versions
 
         def normalize_album_name(name: str) -> str:
             """Normalize album name for deduplication (removes edition suffixes, etc.)"""
@@ -549,25 +571,38 @@ class iTunesClient:
             return normalized
 
         for album_data in results:
-            if album_data.get('wrapperType') == 'collection':
-                album = Album.from_itunes_album(album_data)
+            if album_data.get('wrapperType') != 'collection':
+                continue
 
-                # Filter by album_type if specified (now includes 'ep')
-                if album_type != 'album,single':
-                    requested_types = [t.strip() for t in album_type.split(',')]
-                    # Also accept 'ep' when 'single' is requested (for backward compat)
-                    if album.album_type not in requested_types:
-                        if not (album.album_type == 'ep' and 'single' in requested_types):
-                            continue
+            # Check if explicit
+            is_explicit = album_data.get('collectionExplicitness') == 'explicit'
 
-                # Deduplicate by normalized name
-                normalized_name = normalize_album_name(album.name)
-                if normalized_name in seen_albums:
+            # Create album object
+            album = Album.from_itunes_album(album_data)
+
+            # Filter by album_type if specified (now includes 'ep')
+            if album_type != 'album,single':
+                requested_types = [t.strip() for t in album_type.split(',')]
+                # Also accept 'ep' when 'single' is requested (for backward compat)
+                if album.album_type not in requested_types:
+                    if not (album.album_type == 'ep' and 'single' in requested_types):
+                        continue
+
+            # Deduplicate by normalized name, prefer explicit versions
+            normalized_name = normalize_album_name(album.name)
+
+            if normalized_name in seen_albums:
+                # Only replace if current one is explicit and previous was clean
+                if is_explicit and not seen_albums[normalized_name]['is_explicit']:
+                    logger.debug(f"Replacing clean version with explicit: {album.name}")
+                    seen_albums[normalized_name] = {'album': album, 'is_explicit': is_explicit}
+                else:
                     logger.debug(f"Skipping duplicate album: {album.name} (normalized: {normalized_name})")
-                    continue
+            else:
+                seen_albums[normalized_name] = {'album': album, 'is_explicit': is_explicit}
 
-                seen_albums.add(normalized_name)
-                albums.append(album)
+        # Extract albums from dict
+        albums = [item['album'] for item in seen_albums.values()]
 
         logger.info(f"Retrieved {len(albums)} unique albums for artist {artist_id} (filtered from {len(results)} results)")
         return albums[:limit]
