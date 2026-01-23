@@ -97,10 +97,11 @@ class WatchlistArtist:
 
 @dataclass
 class SimilarArtist:
-    """Similar artist recommendation from Spotify"""
+    """Similar artist recommendation from Spotify/iTunes"""
     id: int
     source_artist_id: str  # Watchlist artist's database ID
-    similar_artist_spotify_id: str
+    similar_artist_spotify_id: Optional[str]  # Spotify artist ID (may be None if iTunes-only)
+    similar_artist_itunes_id: Optional[str]  # iTunes artist ID (may be None if Spotify-only)
     similar_artist_name: str
     similarity_rank: int  # 1-10, where 1 is most similar
     occurrence_count: int  # How many watchlist artists share this similar artist
@@ -110,9 +111,13 @@ class SimilarArtist:
 class DiscoveryTrack:
     """Track in the discovery pool for recommendations"""
     id: int
-    spotify_track_id: str
-    spotify_album_id: str
-    spotify_artist_id: str
+    spotify_track_id: Optional[str]  # Spotify track ID (None if iTunes source)
+    spotify_album_id: Optional[str]  # Spotify album ID (None if iTunes source)
+    spotify_artist_id: Optional[str]  # Spotify artist ID (None if iTunes source)
+    itunes_track_id: Optional[str]  # iTunes track ID (None if Spotify source)
+    itunes_album_id: Optional[str]  # iTunes album ID (None if Spotify source)
+    itunes_artist_id: Optional[str]  # iTunes artist ID (None if Spotify source)
+    source: str  # 'spotify' or 'itunes'
     track_name: str
     artist_name: str
     album_name: str
@@ -121,7 +126,7 @@ class DiscoveryTrack:
     popularity: int
     release_date: str
     is_new_release: bool  # Released within last 30 days
-    track_data_json: str  # Full Spotify track object for modal
+    track_data_json: str  # Full track object for modal (Spotify or iTunes format)
     added_date: datetime
 
 @dataclass
@@ -129,7 +134,9 @@ class RecentRelease:
     """Recent album release from watchlist artist"""
     id: int
     watchlist_artist_id: int
-    album_spotify_id: str
+    album_spotify_id: Optional[str]  # Spotify album ID (None if iTunes source)
+    album_itunes_id: Optional[str]  # iTunes album ID (None if Spotify source)
+    source: str  # 'spotify' or 'itunes'
     album_name: str
     release_date: str
     album_cover_url: Optional[str]
@@ -450,26 +457,33 @@ class MusicDatabase:
         """Add tables for discovery feature: similar artists, discovery pool, and recent releases"""
         try:
             # Similar Artists table - stores similar artists for each watchlist artist
+            # Supports both Spotify and iTunes IDs for dual-source discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS similar_artists (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     source_artist_id TEXT NOT NULL,
-                    similar_artist_spotify_id TEXT NOT NULL,
+                    similar_artist_spotify_id TEXT,
+                    similar_artist_itunes_id TEXT,
                     similar_artist_name TEXT NOT NULL,
                     similarity_rank INTEGER DEFAULT 1,
                     occurrence_count INTEGER DEFAULT 1,
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(source_artist_id, similar_artist_spotify_id)
+                    UNIQUE(source_artist_id, similar_artist_name)
                 )
             """)
 
             # Discovery Pool table - rotating pool of 1000-2000 tracks for recommendations
+            # Supports both Spotify and iTunes sources for dual-source discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS discovery_pool (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    spotify_track_id TEXT UNIQUE NOT NULL,
-                    spotify_album_id TEXT NOT NULL,
-                    spotify_artist_id TEXT NOT NULL,
+                    spotify_track_id TEXT,
+                    spotify_album_id TEXT,
+                    spotify_artist_id TEXT,
+                    itunes_track_id TEXT,
+                    itunes_album_id TEXT,
+                    itunes_artist_id TEXT,
+                    source TEXT NOT NULL DEFAULT 'spotify',
                     track_name TEXT NOT NULL,
                     artist_name TEXT NOT NULL,
                     album_name TEXT NOT NULL,
@@ -479,38 +493,47 @@ class MusicDatabase:
                     release_date TEXT,
                     is_new_release BOOLEAN DEFAULT 0,
                     track_data_json TEXT NOT NULL,
-                    added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(spotify_track_id, itunes_track_id, source)
                 )
             """)
 
             # Recent Releases table - tracks new releases from watchlist artists
+            # Supports both Spotify and iTunes sources for dual-source discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS recent_releases (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     watchlist_artist_id INTEGER NOT NULL,
-                    album_spotify_id TEXT NOT NULL,
+                    album_spotify_id TEXT,
+                    album_itunes_id TEXT,
+                    source TEXT NOT NULL DEFAULT 'spotify',
                     album_name TEXT NOT NULL,
                     release_date TEXT NOT NULL,
                     album_cover_url TEXT,
                     track_count INTEGER DEFAULT 0,
                     added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(watchlist_artist_id, album_spotify_id),
+                    UNIQUE(watchlist_artist_id, album_spotify_id, album_itunes_id),
                     FOREIGN KEY (watchlist_artist_id) REFERENCES watchlist_artists (id) ON DELETE CASCADE
                 )
             """)
 
             # Discovery Recent Albums cache - for discover page recent releases section
+            # Supports both Spotify and iTunes sources for dual-source discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS discovery_recent_albums (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    album_spotify_id TEXT NOT NULL UNIQUE,
+                    album_spotify_id TEXT,
+                    album_itunes_id TEXT,
+                    artist_spotify_id TEXT,
+                    artist_itunes_id TEXT,
+                    source TEXT NOT NULL DEFAULT 'spotify',
                     album_name TEXT NOT NULL,
                     artist_name TEXT NOT NULL,
-                    artist_spotify_id TEXT NOT NULL,
                     album_cover_url TEXT,
                     release_date TEXT NOT NULL,
                     album_type TEXT DEFAULT 'album',
-                    cached_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    cached_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(album_spotify_id, album_itunes_id, source)
                 )
             """)
 
@@ -571,13 +594,20 @@ class MusicDatabase:
             # Create indexes for performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_source ON similar_artists (source_artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_spotify ON similar_artists (similar_artist_spotify_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_itunes ON similar_artists (similar_artist_itunes_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_occurrence ON similar_artists (occurrence_count)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_name ON similar_artists (similar_artist_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_spotify_track ON discovery_pool (spotify_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_itunes_track ON discovery_pool (itunes_track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_artist ON discovery_pool (spotify_artist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_itunes_artist ON discovery_pool (itunes_artist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_source ON discovery_pool (source)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_added_date ON discovery_pool (added_date)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_is_new ON discovery_pool (is_new_release)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_watchlist ON recent_releases (watchlist_artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_date ON recent_releases (release_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_source ON recent_releases (source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_source ON discovery_recent_albums (source)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_date ON discovery_recent_albums (release_date)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_playlists_type ON listenbrainz_playlists (playlist_type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_playlists_mbid ON listenbrainz_playlists (playlist_mbid)")
@@ -592,6 +622,41 @@ class MusicDatabase:
             if 'artist_genres' not in discovery_pool_columns:
                 cursor.execute("ALTER TABLE discovery_pool ADD COLUMN artist_genres TEXT")
                 logger.info("Added artist_genres column to discovery_pool table")
+
+            # Migration: Add iTunes columns to discovery_pool for dual-source discovery
+            if 'itunes_track_id' not in discovery_pool_columns:
+                cursor.execute("ALTER TABLE discovery_pool ADD COLUMN itunes_track_id TEXT")
+                cursor.execute("ALTER TABLE discovery_pool ADD COLUMN itunes_album_id TEXT")
+                cursor.execute("ALTER TABLE discovery_pool ADD COLUMN itunes_artist_id TEXT")
+                cursor.execute("ALTER TABLE discovery_pool ADD COLUMN source TEXT DEFAULT 'spotify'")
+                logger.info("Added iTunes columns to discovery_pool table for dual-source discovery")
+
+            # Migration: Add iTunes ID to similar_artists for dual-source discovery
+            cursor.execute("PRAGMA table_info(similar_artists)")
+            similar_artists_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'similar_artist_itunes_id' not in similar_artists_columns:
+                cursor.execute("ALTER TABLE similar_artists ADD COLUMN similar_artist_itunes_id TEXT")
+                logger.info("Added similar_artist_itunes_id column to similar_artists table")
+
+            # Migration: Add iTunes columns to recent_releases for dual-source discovery
+            cursor.execute("PRAGMA table_info(recent_releases)")
+            recent_releases_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'album_itunes_id' not in recent_releases_columns:
+                cursor.execute("ALTER TABLE recent_releases ADD COLUMN album_itunes_id TEXT")
+                cursor.execute("ALTER TABLE recent_releases ADD COLUMN source TEXT DEFAULT 'spotify'")
+                logger.info("Added iTunes columns to recent_releases table for dual-source discovery")
+
+            # Migration: Add iTunes columns to discovery_recent_albums for dual-source discovery
+            cursor.execute("PRAGMA table_info(discovery_recent_albums)")
+            discovery_recent_albums_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'album_itunes_id' not in discovery_recent_albums_columns:
+                cursor.execute("ALTER TABLE discovery_recent_albums ADD COLUMN album_itunes_id TEXT")
+                cursor.execute("ALTER TABLE discovery_recent_albums ADD COLUMN artist_itunes_id TEXT")
+                cursor.execute("ALTER TABLE discovery_recent_albums ADD COLUMN source TEXT DEFAULT 'spotify'")
+                logger.info("Added iTunes columns to discovery_recent_albums table for dual-source discovery")
 
             logger.info("Discovery tables created successfully")
 
@@ -2933,23 +2998,28 @@ class MusicDatabase:
 
     # === Discovery Feature Methods ===
 
-    def add_or_update_similar_artist(self, source_artist_id: str, similar_artist_spotify_id: str,
-                                      similar_artist_name: str, similarity_rank: int = 1) -> bool:
-        """Add or update a similar artist recommendation"""
+    def add_or_update_similar_artist(self, source_artist_id: str, similar_artist_name: str,
+                                      similar_artist_spotify_id: Optional[str] = None,
+                                      similar_artist_itunes_id: Optional[str] = None,
+                                      similarity_rank: int = 1) -> bool:
+        """Add or update a similar artist recommendation (supports both Spotify and iTunes IDs)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
+                # Use artist name as the unique key (allows storing both IDs for same artist)
                 cursor.execute("""
                     INSERT INTO similar_artists
-                    (source_artist_id, similar_artist_spotify_id, similar_artist_name, similarity_rank, occurrence_count, last_updated)
-                    VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
-                    ON CONFLICT(source_artist_id, similar_artist_spotify_id)
+                    (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_name, similarity_rank, occurrence_count, last_updated)
+                    VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+                    ON CONFLICT(source_artist_id, similar_artist_name)
                     DO UPDATE SET
+                        similar_artist_spotify_id = COALESCE(excluded.similar_artist_spotify_id, similar_artist_spotify_id),
+                        similar_artist_itunes_id = COALESCE(excluded.similar_artist_itunes_id, similar_artist_itunes_id),
                         similarity_rank = excluded.similarity_rank,
                         occurrence_count = occurrence_count + 1,
                         last_updated = CURRENT_TIMESTAMP
-                """, (source_artist_id, similar_artist_spotify_id, similar_artist_name, similarity_rank))
+                """, (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_name, similarity_rank))
 
                 conn.commit()
                 return True
@@ -2975,6 +3045,7 @@ class MusicDatabase:
                     id=row['id'],
                     source_artist_id=row['source_artist_id'],
                     similar_artist_spotify_id=row['similar_artist_spotify_id'],
+                    similar_artist_itunes_id=row['similar_artist_itunes_id'] if 'similar_artist_itunes_id' in row.keys() else None,
                     similar_artist_name=row['similar_artist_name'],
                     similarity_rank=row['similarity_rank'],
                     occurrence_count=row['occurrence_count'],
@@ -3026,13 +3097,14 @@ class MusicDatabase:
                     SELECT
                         MAX(id) as id,
                         MAX(source_artist_id) as source_artist_id,
-                        similar_artist_spotify_id,
+                        MAX(similar_artist_spotify_id) as similar_artist_spotify_id,
+                        MAX(similar_artist_itunes_id) as similar_artist_itunes_id,
                         similar_artist_name,
                         AVG(similarity_rank) as similarity_rank,
                         SUM(occurrence_count) as occurrence_count,
                         MAX(last_updated) as last_updated
                     FROM similar_artists
-                    GROUP BY similar_artist_spotify_id, similar_artist_name
+                    GROUP BY similar_artist_name
                     ORDER BY occurrence_count DESC, similarity_rank ASC
                     LIMIT ?
                 """, (limit,))
@@ -3042,6 +3114,7 @@ class MusicDatabase:
                     id=row['id'],
                     source_artist_id=row['source_artist_id'],
                     similar_artist_spotify_id=row['similar_artist_spotify_id'],
+                    similar_artist_itunes_id=row['similar_artist_itunes_id'] if 'similar_artist_itunes_id' in row.keys() else None,
                     similar_artist_name=row['similar_artist_name'],
                     similarity_rank=int(row['similarity_rank']),
                     occurrence_count=row['occurrence_count'],
@@ -3052,15 +3125,24 @@ class MusicDatabase:
             logger.error(f"Error getting top similar artists: {e}")
             return []
 
-    def add_to_discovery_pool(self, track_data: Dict[str, Any]) -> bool:
-        """Add a track to the discovery pool"""
+    def add_to_discovery_pool(self, track_data: Dict[str, Any], source: str = 'spotify') -> bool:
+        """Add a track to the discovery pool (supports both Spotify and iTunes sources)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Check if track already exists
-                cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE spotify_track_id = ?",
-                              (track_data['spotify_track_id'],))
+                # Check if track already exists based on source
+                if source == 'spotify' and track_data.get('spotify_track_id'):
+                    cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE spotify_track_id = ? AND source = 'spotify'",
+                                  (track_data['spotify_track_id'],))
+                elif source == 'itunes' and track_data.get('itunes_track_id'):
+                    cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE itunes_track_id = ? AND source = 'itunes'",
+                                  (track_data['itunes_track_id'],))
+                else:
+                    # Fallback check by track name and artist
+                    cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE track_name = ? AND artist_name = ? AND source = ?",
+                                  (track_data['track_name'], track_data['artist_name'], source))
+
                 if cursor.fetchone()['count'] > 0:
                     return True  # Already in pool
 
@@ -3070,14 +3152,19 @@ class MusicDatabase:
 
                 cursor.execute("""
                     INSERT INTO discovery_pool
-                    (spotify_track_id, spotify_album_id, spotify_artist_id, track_name, artist_name,
-                     album_name, album_cover_url, duration_ms, popularity, release_date,
-                     is_new_release, track_data_json, artist_genres, added_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    (spotify_track_id, spotify_album_id, spotify_artist_id,
+                     itunes_track_id, itunes_album_id, itunes_artist_id,
+                     source, track_name, artist_name, album_name, album_cover_url,
+                     duration_ms, popularity, release_date, is_new_release, track_data_json, artist_genres, added_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, (
-                    track_data['spotify_track_id'],
-                    track_data['spotify_album_id'],
-                    track_data['spotify_artist_id'],
+                    track_data.get('spotify_track_id'),
+                    track_data.get('spotify_album_id'),
+                    track_data.get('spotify_artist_id'),
+                    track_data.get('itunes_track_id'),
+                    track_data.get('itunes_album_id'),
+                    track_data.get('itunes_artist_id'),
+                    source,
                     track_data['track_name'],
                     track_data['artist_name'],
                     track_data['album_name'],
@@ -3124,32 +3211,45 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error rotating discovery pool: {e}")
 
-    def get_discovery_pool_tracks(self, limit: int = 100, new_releases_only: bool = False) -> List[DiscoveryTrack]:
-        """Get tracks from discovery pool"""
+    def get_discovery_pool_tracks(self, limit: int = 100, new_releases_only: bool = False, source: Optional[str] = None) -> List[DiscoveryTrack]:
+        """Get tracks from discovery pool, optionally filtered by source ('spotify' or 'itunes')"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
+                # Build query with optional source filter
+                where_clauses = []
+                params = []
+
                 if new_releases_only:
-                    cursor.execute("""
-                        SELECT * FROM discovery_pool
-                        WHERE is_new_release = 1
-                        ORDER BY added_date DESC
-                        LIMIT ?
-                    """, (limit,))
-                else:
-                    cursor.execute("""
-                        SELECT * FROM discovery_pool
-                        ORDER BY added_date DESC
-                        LIMIT ?
-                    """, (limit,))
+                    where_clauses.append("is_new_release = 1")
+
+                if source:
+                    where_clauses.append("source = ?")
+                    params.append(source)
+
+                where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+                params.append(limit)
+
+                cursor.execute(f"""
+                    SELECT * FROM discovery_pool
+                    {where_sql}
+                    ORDER BY added_date DESC
+                    LIMIT ?
+                """, params)
 
                 rows = cursor.fetchall()
+                row_keys = rows[0].keys() if rows else []
+
                 return [DiscoveryTrack(
                     id=row['id'],
                     spotify_track_id=row['spotify_track_id'],
                     spotify_album_id=row['spotify_album_id'],
                     spotify_artist_id=row['spotify_artist_id'],
+                    itunes_track_id=row['itunes_track_id'] if 'itunes_track_id' in row_keys else None,
+                    itunes_album_id=row['itunes_album_id'] if 'itunes_album_id' in row_keys else None,
+                    itunes_artist_id=row['itunes_artist_id'] if 'itunes_artist_id' in row_keys else None,
+                    source=row['source'] if 'source' in row_keys else 'spotify',
                     track_name=row['track_name'],
                     artist_name=row['artist_name'],
                     album_name=row['album_name'],
@@ -3166,21 +3266,25 @@ class MusicDatabase:
             logger.error(f"Error getting discovery pool tracks: {e}")
             return []
 
-    def cache_discovery_recent_album(self, album_data: Dict[str, Any]) -> bool:
-        """Cache a recent album for the discover page (from watchlist or similar artists)"""
+    def cache_discovery_recent_album(self, album_data: Dict[str, Any], source: str = 'spotify') -> bool:
+        """Cache a recent album for the discover page (supports both Spotify and iTunes sources)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
                 cursor.execute("""
                     INSERT OR REPLACE INTO discovery_recent_albums
-                    (album_spotify_id, album_name, artist_name, artist_spotify_id, album_cover_url, release_date, album_type, cached_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    (album_spotify_id, album_itunes_id, artist_spotify_id, artist_itunes_id, source,
+                     album_name, artist_name, album_cover_url, release_date, album_type, cached_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, (
-                    album_data['album_spotify_id'],
+                    album_data.get('album_spotify_id'),
+                    album_data.get('album_itunes_id'),
+                    album_data.get('artist_spotify_id'),
+                    album_data.get('artist_itunes_id'),
+                    source,
                     album_data['album_name'],
                     album_data['artist_name'],
-                    album_data['artist_spotify_id'],
                     album_data.get('album_cover_url'),
                     album_data['release_date'],
                     album_data.get('album_type', 'album')
@@ -3193,27 +3297,40 @@ class MusicDatabase:
             logger.error(f"Error caching discovery recent album: {e}")
             return False
 
-    def get_discovery_recent_albums(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get cached recent albums for discover page"""
+    def get_discovery_recent_albums(self, limit: int = 10, source: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get cached recent albums for discover page, optionally filtered by source"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                cursor.execute("""
-                    SELECT * FROM discovery_recent_albums
-                    ORDER BY release_date DESC
-                    LIMIT ?
-                """, (limit,))
+                if source:
+                    cursor.execute("""
+                        SELECT * FROM discovery_recent_albums
+                        WHERE source = ?
+                        ORDER BY release_date DESC
+                        LIMIT ?
+                    """, (source, limit))
+                else:
+                    cursor.execute("""
+                        SELECT * FROM discovery_recent_albums
+                        ORDER BY release_date DESC
+                        LIMIT ?
+                    """, (limit,))
 
                 rows = cursor.fetchall()
+                row_keys = rows[0].keys() if rows else []
+
                 return [{
                     'album_spotify_id': row['album_spotify_id'],
+                    'album_itunes_id': row['album_itunes_id'] if 'album_itunes_id' in row_keys else None,
                     'album_name': row['album_name'],
                     'artist_name': row['artist_name'],
                     'artist_spotify_id': row['artist_spotify_id'],
+                    'artist_itunes_id': row['artist_itunes_id'] if 'artist_itunes_id' in row_keys else None,
                     'album_cover_url': row['album_cover_url'],
                     'release_date': row['release_date'],
-                    'album_type': row['album_type']
+                    'album_type': row['album_type'],
+                    'source': row['source'] if 'source' in row_keys else 'spotify'
                 } for row in rows]
 
         except Exception as e:
