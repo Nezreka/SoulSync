@@ -276,6 +276,28 @@ class WatchlistScanner:
             from core.metadata_service import MetadataService
             self._metadata_service = MetadataService()
         return self._metadata_service
+
+    def _get_active_client_and_artist_id(self, watchlist_artist: WatchlistArtist):
+        """
+        Get the appropriate client and artist ID based on active provider.
+
+        Returns:
+            Tuple of (client, artist_id, provider_name) or (None, None, None) if no valid ID
+        """
+        provider = self.metadata_service.get_active_provider()
+
+        if provider == 'spotify':
+            if watchlist_artist.spotify_artist_id:
+                return (self.metadata_service.spotify, watchlist_artist.spotify_artist_id, 'spotify')
+            else:
+                logger.warning(f"No Spotify ID for {watchlist_artist.artist_name}, cannot scan with Spotify")
+                return (None, None, None)
+        else:  # itunes
+            if watchlist_artist.itunes_artist_id:
+                return (self.metadata_service.itunes, watchlist_artist.itunes_artist_id, 'itunes')
+            else:
+                logger.warning(f"No iTunes ID for {watchlist_artist.artist_name}, cannot scan with iTunes")
+                return (None, None, None)
     
     def scan_all_watchlist_artists(self) -> List[ScanResult]:
         """
@@ -414,13 +436,30 @@ class WatchlistScanner:
         """
         Scan a single artist for new releases.
         Only checks releases after the last scan timestamp.
+        Uses the active provider (Spotify if authenticated, otherwise iTunes).
         """
         try:
             logger.info(f"Scanning artist: {watchlist_artist.artist_name}")
 
-            # Update artist image from Spotify (cached for performance)
+            # Get the active client and artist ID based on provider
+            client, artist_id, provider = self._get_active_client_and_artist_id(watchlist_artist)
+
+            if client is None or artist_id is None:
+                return ScanResult(
+                    artist_name=watchlist_artist.artist_name,
+                    spotify_artist_id=watchlist_artist.spotify_artist_id or '',
+                    albums_checked=0,
+                    new_tracks_found=0,
+                    tracks_added_to_wishlist=0,
+                    success=False,
+                    error_message=f"No {self.metadata_service.get_active_provider()} ID available for this artist"
+                )
+
+            logger.info(f"Using {provider} provider for {watchlist_artist.artist_name} (ID: {artist_id})")
+
+            # Update artist image (cached for performance)
             try:
-                artist_data = self.spotify_client.get_artist(watchlist_artist.spotify_artist_id)
+                artist_data = client.get_artist(artist_id)
                 if artist_data and 'images' in artist_data and artist_data['images']:
                     # Get medium-sized image (usually the second one, or first if only one)
                     image_url = None
@@ -429,52 +468,59 @@ class WatchlistScanner:
                     else:
                         image_url = artist_data['images'][0]['url']
 
-                    # Update in database
+                    # Update in database (use spotify_artist_id as the key for consistency)
                     if image_url:
-                        self.database.update_watchlist_artist_image(watchlist_artist.spotify_artist_id, image_url)
+                        db_artist_id = watchlist_artist.spotify_artist_id or artist_id
+                        self.database.update_watchlist_artist_image(db_artist_id, image_url)
                         logger.info(f"Updated artist image for {watchlist_artist.artist_name}")
                     else:
                         logger.warning(f"No image URL found for {watchlist_artist.artist_name}")
                 else:
-                    logger.warning(f"No images in Spotify data for {watchlist_artist.artist_name}")
+                    logger.warning(f"No images in {provider} data for {watchlist_artist.artist_name}")
             except Exception as img_error:
                 logger.warning(f"Could not update artist image for {watchlist_artist.artist_name}: {img_error}")
 
-            # Get artist discography from Spotify
-            albums = self.get_artist_discography(watchlist_artist.spotify_artist_id, watchlist_artist.last_scan_timestamp)
+            # Get artist discography using active provider
+            albums = self._get_artist_discography_with_client(client, artist_id, watchlist_artist.last_scan_timestamp)
 
             if albums is None:
                 return ScanResult(
                     artist_name=watchlist_artist.artist_name,
-                    spotify_artist_id=watchlist_artist.spotify_artist_id,
+                    spotify_artist_id=watchlist_artist.spotify_artist_id or '',
                     albums_checked=0,
                     new_tracks_found=0,
                     tracks_added_to_wishlist=0,
                     success=False,
-                    error_message="Failed to get artist discography from Spotify"
+                    error_message=f"Failed to get artist discography from {provider}"
                 )
-            
+
             logger.info(f"Found {len(albums)} albums/singles to check for {watchlist_artist.artist_name}")
-            
+
             # Safety check: Limit number of albums to scan to prevent extremely long sessions
             MAX_ALBUMS_PER_ARTIST = 50  # Reasonable limit to prevent API abuse
             if len(albums) > MAX_ALBUMS_PER_ARTIST:
                 logger.warning(f"Artist {watchlist_artist.artist_name} has {len(albums)} albums, limiting to {MAX_ALBUMS_PER_ARTIST} most recent")
                 albums = albums[:MAX_ALBUMS_PER_ARTIST]  # Most recent albums are first
-            
+
             # Check each album/single for missing tracks
             new_tracks_found = 0
             tracks_added_to_wishlist = 0
-            
+
             for album_index, album in enumerate(albums):
                 try:
-                    # Get full album data with tracks
+                    # Get full album data
                     logger.info(f"Checking album {album_index + 1}/{len(albums)}: {album.name}")
-                    album_data = self.spotify_client.get_album(album.id)
-                    if not album_data or 'tracks' not in album_data or not album_data['tracks'].get('items'):
+                    album_data = client.get_album(album.id)
+                    if not album_data:
                         continue
-                    
-                    tracks = album_data['tracks']['items']
+
+                    # Get album tracks (works for both Spotify and iTunes)
+                    # Spotify's get_album() includes tracks, but we use get_album_tracks() for consistency
+                    tracks_data = client.get_album_tracks(album.id)
+                    if not tracks_data or not tracks_data.get('items'):
+                        continue
+
+                    tracks = tracks_data['items']
                     logger.debug(f"Checking album: {album_data.get('name', 'Unknown')} ({len(tracks)} tracks)")
 
                     # Check if user wants this type of release
@@ -506,24 +552,29 @@ class WatchlistScanner:
                     logger.warning(f"Error checking album {album.name}: {e}")
                     continue
             
-            # Update last scan timestamp for this artist
-            self.update_artist_scan_timestamp(watchlist_artist.spotify_artist_id)
+            # Update last scan timestamp for this artist (use spotify_artist_id as DB key for consistency)
+            db_artist_id = watchlist_artist.spotify_artist_id or artist_id
+            self.update_artist_scan_timestamp(db_artist_id)
 
             # Fetch and store similar artists for discovery feature (with caching to avoid over-polling)
-            try:
-                # Check if we have fresh similar artists cached (< 30 days old)
-                if self.database.has_fresh_similar_artists(watchlist_artist.spotify_artist_id, days_threshold=30):
-                    logger.info(f"Similar artists for {watchlist_artist.artist_name} are cached and fresh, skipping fetch")
-                else:
-                    logger.info(f"Fetching similar artists for {watchlist_artist.artist_name}...")
-                    self.update_similar_artists(watchlist_artist)
-                    logger.info(f"Similar artists updated for {watchlist_artist.artist_name}")
-            except Exception as similar_error:
-                logger.warning(f"Failed to update similar artists for {watchlist_artist.artist_name}: {similar_error}")
+            # Note: Similar artists feature only works with Spotify
+            if provider == 'spotify' and watchlist_artist.spotify_artist_id:
+                try:
+                    # Check if we have fresh similar artists cached (< 30 days old)
+                    if self.database.has_fresh_similar_artists(watchlist_artist.spotify_artist_id, days_threshold=30):
+                        logger.info(f"Similar artists for {watchlist_artist.artist_name} are cached and fresh, skipping fetch")
+                    else:
+                        logger.info(f"Fetching similar artists for {watchlist_artist.artist_name}...")
+                        self.update_similar_artists(watchlist_artist)
+                        logger.info(f"Similar artists updated for {watchlist_artist.artist_name}")
+                except Exception as similar_error:
+                    logger.warning(f"Failed to update similar artists for {watchlist_artist.artist_name}: {similar_error}")
+            else:
+                logger.debug(f"Skipping similar artists for {watchlist_artist.artist_name} (iTunes doesn't support this feature)")
 
             return ScanResult(
                 artist_name=watchlist_artist.artist_name,
-                spotify_artist_id=watchlist_artist.spotify_artist_id,
+                spotify_artist_id=watchlist_artist.spotify_artist_id or '',
                 albums_checked=len(albums),
                 new_tracks_found=new_tracks_found,
                 tracks_added_to_wishlist=tracks_added_to_wishlist,
@@ -534,7 +585,7 @@ class WatchlistScanner:
             logger.error(f"Error scanning artist {watchlist_artist.artist_name}: {e}")
             return ScanResult(
                 artist_name=watchlist_artist.artist_name,
-                spotify_artist_id=watchlist_artist.spotify_artist_id,
+                spotify_artist_id=watchlist_artist.spotify_artist_id or '',
                 albums_checked=0,
                 new_tracks_found=0,
                 tracks_added_to_wishlist=0,
@@ -590,6 +641,57 @@ class WatchlistScanner:
             
         except Exception as e:
             logger.error(f"Error getting discography for artist {spotify_artist_id}: {e}")
+            return None
+
+    def _get_artist_discography_with_client(self, client, artist_id: str, last_scan_timestamp: Optional[datetime] = None) -> Optional[List]:
+        """
+        Get artist's discography using the specified client, optionally filtered by release date.
+
+        Args:
+            client: The metadata client to use (spotify or itunes)
+            artist_id: Artist ID for the given client
+            last_scan_timestamp: Only return releases after this date (for incremental scans)
+                                If None, uses lookback period setting from database
+        """
+        try:
+            # Get all artist albums (albums + singles)
+            logger.debug(f"Fetching discography for artist {artist_id}")
+            albums = client.get_artist_albums(artist_id, album_type='album,single', limit=50)
+
+            if not albums:
+                logger.warning(f"No albums found for artist {artist_id}")
+                return []
+
+            # Add small delay after fetching artist discography to be extra safe
+            time.sleep(0.3)  # 300ms breathing room
+
+            # Determine cutoff date for filtering
+            cutoff_timestamp = last_scan_timestamp
+
+            # If no last scan timestamp, use lookback period setting
+            if cutoff_timestamp is None:
+                lookback_period = self._get_lookback_period_setting()
+                if lookback_period != 'all':
+                    # Convert period to days and create cutoff date (use UTC)
+                    days = int(lookback_period)
+                    cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=days)
+                    logger.info(f"Using lookback period: {lookback_period} days (cutoff: {cutoff_timestamp})")
+
+            # Filter by release date if we have a cutoff timestamp
+            if cutoff_timestamp:
+                filtered_albums = []
+                for album in albums:
+                    if self.is_album_after_timestamp(album, cutoff_timestamp):
+                        filtered_albums.append(album)
+
+                logger.info(f"Filtered {len(albums)} albums to {len(filtered_albums)} released after {cutoff_timestamp}")
+                return filtered_albums
+
+            # Return all albums if no cutoff (lookback_period = 'all')
+            return albums
+
+        except Exception as e:
+            logger.error(f"Error getting discography for artist {artist_id}: {e}")
             return None
 
     def _backfill_missing_ids(self, artists: List[WatchlistArtist], provider: str):
