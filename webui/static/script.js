@@ -25411,7 +25411,7 @@ function createReleaseCard(release) {
                 name: release.title,
                 image_url: release.image_url,
                 release_date: release.year ? `${release.year}-01-01` : '',
-                album_type: release.type || 'album',
+                album_type: release.album_type || release.type || 'album',
                 total_tracks: (release.track_completion && typeof release.track_completion === 'object')
                     ? release.track_completion.total_tracks : 1
             };
@@ -25440,8 +25440,8 @@ function createReleaseCard(release) {
                 throw new Error('No tracks found for this release');
             }
 
-            // Determine album type based on release data
-            const albumType = release.type === 'single' ? 'singles' : 'albums';
+            // Use the actual album type from release data
+            const albumType = release.album_type || release.type || 'album';
 
             // Open the Add to Wishlist modal
             // Note: openAddToWishlistModal has its own loading overlay

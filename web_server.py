@@ -22684,8 +22684,11 @@ def get_spotify_artist_discography(artist_name):
 
             if album_type == 'single' or track_count <= 3:
                 singles.append(release_data)
-            elif album_type == 'compilation' or (track_count <= 8 and track_count > 3):
+            elif album_type == 'ep' or (track_count >= 4 and track_count <= 6):
                 eps.append(release_data)
+            elif album_type == 'compilation':
+                # Compilations go with albums
+                albums.append(release_data)
             else:
                 albums.append(release_data)
 

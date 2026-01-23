@@ -141,13 +141,13 @@ class Album:
         
         # Determine album type from collection type
         track_count = album_data.get('trackCount', 0)
-        
+
         # iTunes doesn't clearly distinguish EPs, but we can infer:
         # Singles typically have 1-3 tracks, EPs have 4-6, Albums have 7+
         if track_count <= 3:
             album_type = 'single'
         elif track_count <= 6:
-            album_type = 'single'  # iTunes calls EPs "albums" but we can mark shorter ones
+            album_type = 'ep'  # 4-6 tracks = EP
         else:
             album_type = 'album'
         
@@ -371,7 +371,7 @@ class iTunesClient:
                 if track_count <= 3:
                     album_type = 'single'
                 elif track_count <= 6:
-                    album_type = 'single'  # EP treated as single
+                    album_type = 'ep'  # 4-6 tracks = EP
                 else:
                     album_type = 'album'
 
@@ -433,17 +433,42 @@ class iTunesClient:
     
     # ==================== Artist Methods ====================
     
+    def _get_artist_image_from_albums(self, artist_id: str) -> Optional[str]:
+        """
+        Get artist image by fetching their first album's artwork.
+        iTunes doesn't reliably return artist images, so we use album art as fallback.
+        """
+        try:
+            # Lookup is not rate-limited, so this is fast
+            results = self._lookup(id=artist_id, entity='album', limit=1)
+
+            for item in results:
+                if item.get('wrapperType') == 'collection' and item.get('artworkUrl100'):
+                    # Return high-res version
+                    return item['artworkUrl100'].replace('100x100bb', '600x600bb')
+        except Exception as e:
+            logger.debug(f"Could not fetch album art for artist {artist_id}: {e}")
+
+        return None
+
     @rate_limited
     def search_artists(self, query: str, limit: int = 20) -> List[Artist]:
-        """Search for artists using iTunes API"""
+        """Search for artists using iTunes API - includes album art fallback for images"""
         results = self._search(query, 'musicArtist', limit)
         artists = []
-        
+
         for artist_data in results:
             if artist_data.get('wrapperType') == 'artist':
                 artist = Artist.from_itunes_artist(artist_data)
+
+                # If no artist image, try to get their first album's artwork
+                if not artist.image_url:
+                    album_art = self._get_artist_image_from_albums(str(artist_data.get('artistId', '')))
+                    if album_art:
+                        artist.image_url = album_art
+
                 artists.append(artist)
-        
+
         return artists
     
     def get_artist(self, artist_id: str) -> Optional[Dict[str, Any]]:
@@ -461,14 +486,22 @@ class iTunesClient:
         for artist_data in results:
             if artist_data.get('wrapperType') == 'artist':
                 # Build images array - iTunes artist search doesn't reliably return images
-                # but we include the structure for compatibility
+                # Use album art as fallback
                 images = []
-                if artist_data.get('artworkUrl100'):
-                    artwork_base = artist_data['artworkUrl100']
+                artwork_url = artist_data.get('artworkUrl100')
+
+                # If no artist artwork, try to get from their first album
+                if not artwork_url:
+                    album_art = self._get_artist_image_from_albums(str(artist_data.get('artistId', '')))
+                    if album_art:
+                        # Convert back to base URL format for building array
+                        artwork_url = album_art.replace('600x600bb', '100x100bb')
+
+                if artwork_url:
                     images = [
-                        {'url': artwork_base.replace('100x100bb', '600x600bb'), 'height': 600, 'width': 600},
-                        {'url': artwork_base.replace('100x100bb', '300x300bb'), 'height': 300, 'width': 300},
-                        {'url': artwork_base, 'height': 100, 'width': 100}
+                        {'url': artwork_url.replace('100x100bb', '600x600bb'), 'height': 600, 'width': 600},
+                        {'url': artwork_url.replace('100x100bb', '300x300bb'), 'height': 300, 'width': 300},
+                        {'url': artwork_url, 'height': 100, 'width': 100}
                     ]
 
                 # Get genre
@@ -494,26 +527,49 @@ class iTunesClient:
     def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
         """
         Get albums by artist ID
-        
+
         Note: iTunes doesn't support filtering by album_type in the same way as Spotify,
         so we fetch all albums and can filter client-side if needed.
         """
+        import re
+
         results = self._lookup(id=artist_id, entity='album', limit=min(limit, 200))
         albums = []
-        
+        seen_albums = set()  # Track normalized names to prevent duplicates
+
+        def normalize_album_name(name: str) -> str:
+            """Normalize album name for deduplication (removes edition suffixes, etc.)"""
+            normalized = name.lower().strip()
+            # Remove common edition suffixes
+            normalized = re.sub(r'\s*[\(\[]\s*(deluxe|explicit|clean|remaster|expanded|anniversary|edition|version|bonus|special|standard).*?[\)\]]', '', normalized, flags=re.IGNORECASE)
+            # Remove trailing edition keywords without brackets
+            normalized = re.sub(r'\s*[-–—]\s*(deluxe|explicit|clean|remaster|expanded|anniversary|edition|version).*$', '', normalized, flags=re.IGNORECASE)
+            # Normalize whitespace
+            normalized = re.sub(r'\s+', ' ', normalized).strip()
+            return normalized
+
         for album_data in results:
             if album_data.get('wrapperType') == 'collection':
                 album = Album.from_itunes_album(album_data)
-                
-                # Filter by album_type if specified
+
+                # Filter by album_type if specified (now includes 'ep')
                 if album_type != 'album,single':
-                    requested_types = album_type.split(',')
+                    requested_types = [t.strip() for t in album_type.split(',')]
+                    # Also accept 'ep' when 'single' is requested (for backward compat)
                     if album.album_type not in requested_types:
-                        continue
-                
+                        if not (album.album_type == 'ep' and 'single' in requested_types):
+                            continue
+
+                # Deduplicate by normalized name
+                normalized_name = normalize_album_name(album.name)
+                if normalized_name in seen_albums:
+                    logger.debug(f"Skipping duplicate album: {album.name} (normalized: {normalized_name})")
+                    continue
+
+                seen_albums.add(normalized_name)
                 albums.append(album)
-        
-        logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}")
+
+        logger.info(f"Retrieved {len(albums)} unique albums for artist {artist_id} (filtered from {len(results)} results)")
         return albums[:limit]
     
     # ==================== Playlist Methods ====================
