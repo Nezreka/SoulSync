@@ -21934,9 +21934,11 @@ def _run_beatport_discovery_worker(url_hash):
                     if use_spotify:
                         print(f"✅ Final Spotify match selected: {found_track.artists[0]} - {found_track.name} (confidence: {best_confidence:.3f})")
                     else:
-                        result_artist = found_track.artist if hasattr(found_track, 'artist') else found_track.get('artist', 'Unknown')
-                        result_name = found_track.name if hasattr(found_track, 'name') else found_track.get('name', 'Unknown')
-                        print(f"✅ Final iTunes match selected: {result_artist} - {result_name} (confidence: {best_confidence:.3f})")
+                        # iTunes Track has 'artists' (list), not 'artist'
+                        found_artists = found_track.artists if hasattr(found_track, 'artists') else []
+                        found_artist = found_artists[0] if found_artists else 'Unknown'
+                        found_name = found_track.name if hasattr(found_track, 'name') else 'Unknown'
+                        print(f"✅ Final iTunes match selected: {found_artist} - {found_name} (confidence: {best_confidence:.3f})")
                 else:
                     print(f"❌ No suitable match found (best confidence was {best_confidence:.3f}, required {min_confidence:.3f})")
 
