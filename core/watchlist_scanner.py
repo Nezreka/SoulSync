@@ -1990,112 +1990,148 @@ class WatchlistScanner:
         """
         Cache recent albums from watchlist and similar artists for discover page.
 
-        IMPROVED: Checks ALL watchlist artists + top similar artists with 14-day window
-        (like Spotify's Release Radar) for more comprehensive and fresh content.
+        Supports both Spotify and iTunes sources - iTunes is always processed (baseline),
+        Spotify is added when authenticated. Same pattern as discovery pool.
         """
         try:
             from datetime import datetime, timedelta
-            import random
 
             logger.info("Caching recent albums for discover page...")
 
             # Clear existing cache
             self.database.clear_discovery_recent_albums()
 
-            # IMPROVED: 30-day window for better content variety while staying recent
+            # 30-day window for recent releases
             cutoff_date = datetime.now() - timedelta(days=30)
-            cached_count = 0
+            cached_count = {'spotify': 0, 'itunes': 0}
             albums_checked = 0
 
-            # IMPROVED: Check ALL watchlist artists (not random 10)
-            watchlist_artists = self.database.get_watchlist_artists()
+            # Determine available sources
+            spotify_available = self.spotify_client and self.spotify_client.is_spotify_authenticated()
 
-            # IMPROVED: Check top 50 similar artists (not random 10 from 30)
+            # Get iTunes client
+            from core.itunes_client import iTunesClient
+            itunes_client = iTunesClient()
+
+            # Get artists to check
+            watchlist_artists = self.database.get_watchlist_artists()
             similar_artists = self.database.get_top_similar_artists(limit=50)
 
-            logger.info(f"Checking albums from {len(watchlist_artists)} watchlist + {len(similar_artists)} similar artists for recent releases (last 14 days)")
+            logger.info(f"Checking albums from {len(watchlist_artists)} watchlist + {len(similar_artists)} similar artists")
+            logger.info(f"Sources: Spotify={spotify_available}, iTunes=True")
+
+            def process_album(album, artist_name, artist_spotify_id, artist_itunes_id, source):
+                """Helper to process and cache a single album"""
+                nonlocal albums_checked
+                try:
+                    albums_checked += 1
+                    release_str = album.release_date if hasattr(album, 'release_date') else None
+
+                    if not release_str:
+                        return False
+
+                    # Handle iTunes ISO format (2017-12-08T08:00:00Z)
+                    if 'T' in release_str:
+                        release_str = release_str.split('T')[0]
+
+                    if len(release_str) >= 10:
+                        release_date = datetime.strptime(release_str[:10], "%Y-%m-%d")
+                        if release_date >= cutoff_date:
+                            album_data = {
+                                'album_spotify_id': album.id if source == 'spotify' else None,
+                                'album_itunes_id': album.id if source == 'itunes' else None,
+                                'album_name': album.name,
+                                'artist_name': artist_name,
+                                'artist_spotify_id': artist_spotify_id,
+                                'artist_itunes_id': artist_itunes_id,
+                                'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
+                                'release_date': release_str[:10],
+                                'album_type': album.album_type if hasattr(album, 'album_type') else 'album'
+                            }
+                            if self.database.cache_discovery_recent_album(album_data, source=source):
+                                cached_count[source] += 1
+                                logger.debug(f"Cached [{source}] recent album: {album.name} by {artist_name} ({release_str})")
+                                return True
+                except Exception as e:
+                    logger.debug(f"Error processing album: {e}")
+                return False
 
             # Process watchlist artists
             for artist in watchlist_artists:
-                try:
-                    albums = self.spotify_client.get_artist_albums(
-                        artist.spotify_artist_id,
-                        album_type='album,single,ep',  # Include EPs for comprehensive coverage
-                        limit=20
-                    )
+                # Always process iTunes (baseline)
+                itunes_id = artist.itunes_artist_id
+                if not itunes_id:
+                    # Try to resolve iTunes ID on-the-fly
+                    try:
+                        results = itunes_client.search_artists(artist.artist_name, limit=1)
+                        if results and len(results) > 0:
+                            itunes_id = results[0].id
+                    except:
+                        pass
 
-                    for album in albums:
-                        try:
-                            albums_checked += 1
-                            if hasattr(album, 'release_date') and album.release_date:
-                                release_str = album.release_date
-                                if len(release_str) >= 10:
-                                    release_date = datetime.strptime(release_str[:10], "%Y-%m-%d")
-                                    if release_date >= cutoff_date:
-                                        album_data = {
-                                            'album_spotify_id': album.id,
-                                            'album_name': album.name,
-                                            'artist_name': artist.artist_name,
-                                            'artist_spotify_id': artist.spotify_artist_id,
-                                            'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
-                                            'release_date': release_str,
-                                            'album_type': album.album_type if hasattr(album, 'album_type') else 'album'
-                                        }
-                                        if self.database.cache_discovery_recent_album(album_data):
-                                            cached_count += 1
-                                            logger.debug(f"Cached recent album: {album.name} by {artist.artist_name} ({release_str})")
-                        except Exception as e:
-                            logger.warning(f"Error checking album for recent releases: {e}")
-                            continue
+                if itunes_id:
+                    try:
+                        albums = itunes_client.get_artist_albums(itunes_id, album_type='album,single', limit=20)
+                        for album in albums or []:
+                            process_album(album, artist.artist_name, artist.spotify_artist_id, itunes_id, 'itunes')
+                    except Exception as e:
+                        logger.debug(f"Error fetching iTunes albums for {artist.artist_name}: {e}")
 
-                except Exception as e:
-                    logger.debug(f"Error fetching albums for watchlist artist {artist.artist_name}: {e}")
-                    continue
+                # Process Spotify if authenticated
+                if spotify_available and artist.spotify_artist_id:
+                    try:
+                        albums = self.spotify_client.get_artist_albums(
+                            artist.spotify_artist_id,
+                            album_type='album,single,ep',
+                            limit=20
+                        )
+                        for album in albums or []:
+                            process_album(album, artist.artist_name, artist.spotify_artist_id, itunes_id, 'spotify')
+                    except Exception as e:
+                        logger.debug(f"Error fetching Spotify albums for {artist.artist_name}: {e}")
 
-                # Rate limiting between artists
                 time.sleep(DELAY_BETWEEN_ARTISTS)
 
             # Process similar artists
             for artist in similar_artists:
-                try:
-                    albums = self.spotify_client.get_artist_albums(
-                        artist.similar_artist_spotify_id,
-                        album_type='album,single,ep',  # Include EPs for comprehensive coverage
-                        limit=20
-                    )
+                # Always process iTunes (baseline)
+                itunes_id = artist.similar_artist_itunes_id
+                if not itunes_id:
+                    # Try to resolve iTunes ID on-the-fly
+                    try:
+                        results = itunes_client.search_artists(artist.similar_artist_name, limit=1)
+                        if results and len(results) > 0:
+                            itunes_id = results[0].id
+                            # Cache for future
+                            self.database.update_similar_artist_itunes_id(artist.id, itunes_id)
+                    except:
+                        pass
 
-                    for album in albums:
-                        try:
-                            albums_checked += 1
-                            if hasattr(album, 'release_date') and album.release_date:
-                                release_str = album.release_date
-                                if len(release_str) >= 10:
-                                    release_date = datetime.strptime(release_str[:10], "%Y-%m-%d")
-                                    if release_date >= cutoff_date:
-                                        album_data = {
-                                            'album_spotify_id': album.id,
-                                            'album_name': album.name,
-                                            'artist_name': artist.similar_artist_name,
-                                            'artist_spotify_id': artist.similar_artist_spotify_id,
-                                            'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
-                                            'release_date': release_str,
-                                            'album_type': album.album_type if hasattr(album, 'album_type') else 'album'
-                                        }
-                                        if self.database.cache_discovery_recent_album(album_data):
-                                            cached_count += 1
-                                            logger.debug(f"Cached recent album: {album.name} by {artist.similar_artist_name} ({release_str})")
-                        except Exception as e:
-                            logger.warning(f"Error checking album for recent releases: {e}")
-                            continue
+                if itunes_id:
+                    try:
+                        albums = itunes_client.get_artist_albums(itunes_id, album_type='album,single', limit=20)
+                        for album in albums or []:
+                            process_album(album, artist.similar_artist_name, artist.similar_artist_spotify_id, itunes_id, 'itunes')
+                    except Exception as e:
+                        logger.debug(f"Error fetching iTunes albums for {artist.similar_artist_name}: {e}")
 
-                except Exception as e:
-                    logger.debug(f"Error fetching albums for similar artist {artist.similar_artist_name}: {e}")
-                    continue
+                # Process Spotify if authenticated
+                if spotify_available and artist.similar_artist_spotify_id:
+                    try:
+                        albums = self.spotify_client.get_artist_albums(
+                            artist.similar_artist_spotify_id,
+                            album_type='album,single,ep',
+                            limit=20
+                        )
+                        for album in albums or []:
+                            process_album(album, artist.similar_artist_name, artist.similar_artist_spotify_id, itunes_id, 'spotify')
+                    except Exception as e:
+                        logger.debug(f"Error fetching Spotify albums for {artist.similar_artist_name}: {e}")
 
-                # Rate limiting between artists
                 time.sleep(DELAY_BETWEEN_ARTISTS)
 
-            logger.info(f"Cached {cached_count} recent albums from {albums_checked} albums checked (cutoff: {cutoff_date.strftime('%Y-%m-%d')})")
+            total_cached = cached_count['spotify'] + cached_count['itunes']
+            logger.info(f"Cached {total_cached} recent albums (Spotify: {cached_count['spotify']}, iTunes: {cached_count['itunes']}) from {albums_checked} albums checked")
 
         except Exception as e:
             logger.error(f"Error caching discovery recent albums: {e}")
@@ -2106,45 +2142,67 @@ class WatchlistScanner:
         """
         Curate consistent playlist selections that stay the same until next discovery pool update.
 
-        IMPROVED: Spotify-quality curation with popularity scoring and smart algorithms
+        Supports both Spotify and iTunes sources - creates separate curated playlists for each.
         - Release Radar: Prioritizes freshness + popularity from recent releases
         - Discovery Weekly: Balanced mix of popular picks, deep cuts, and mid-tier tracks
         """
         try:
             import random
             from datetime import datetime
+            from core.itunes_client import iTunesClient
 
-            logger.info("Curating Release Radar playlist...")
+            logger.info("Curating discovery playlists...")
 
-            # 1. Curate Release Radar - 50 tracks from recent albums
-            # IMPROVED: Get more albums (50 instead of 20) for better selection
-            recent_albums = self.database.get_discovery_recent_albums(limit=50)
-            release_radar_tracks = []
+            # Determine available sources
+            spotify_available = self.spotify_client and self.spotify_client.is_spotify_authenticated()
+            itunes_client = iTunesClient()
 
-            if recent_albums:
-                # Group albums by artist for variety
-                albums_by_artist = {}
-                for album in recent_albums:
-                    artist = album['artist_name']
-                    if artist not in albums_by_artist:
-                        albums_by_artist[artist] = []
-                    albums_by_artist[artist].append(album)
+            # Process each available source
+            sources_to_process = ['itunes']  # iTunes always available
+            if spotify_available:
+                sources_to_process.append('spotify')
 
-                # Get tracks from each album, grouped by artist
-                # IMPROVED: Add popularity scoring for smarter selection
-                artist_tracks = {}
-                artist_track_data = {}  # Store full track data with scores
+            logger.info(f"Curating playlists for sources: {sources_to_process}")
 
-                for artist, albums in albums_by_artist.items():
-                    artist_tracks[artist] = []
-                    artist_track_data[artist] = []
+            for source in sources_to_process:
+                logger.info(f"Curating Release Radar for {source}...")
 
-                    for album in albums:
-                        try:
-                            album_data = self.spotify_client.get_album(album['album_spotify_id'])
-                            if album_data and 'tracks' in album_data:
+                # 1. Curate Release Radar - 50 tracks from recent albums
+                recent_albums = self.database.get_discovery_recent_albums(limit=50, source=source)
+                release_radar_tracks = []
+
+                if recent_albums:
+                    # Group albums by artist for variety
+                    albums_by_artist = {}
+                    for album in recent_albums:
+                        artist = album['artist_name']
+                        if artist not in albums_by_artist:
+                            albums_by_artist[artist] = []
+                        albums_by_artist[artist].append(album)
+
+                    # Get tracks from each album
+                    artist_track_data = {}
+
+                    for artist, albums in albums_by_artist.items():
+                        artist_track_data[artist] = []
+
+                        for album in albums:
+                            try:
+                                # Get album data from appropriate source
+                                album_id = album.get('album_spotify_id') if source == 'spotify' else album.get('album_itunes_id')
+                                if not album_id:
+                                    continue
+
+                                if source == 'spotify':
+                                    album_data = self.spotify_client.get_album(album_id)
+                                else:
+                                    album_data = itunes_client.get_album(album_id)
+
+                                if not album_data or 'tracks' not in album_data:
+                                    continue
+
                                 # Calculate days since release for recency score
-                                days_old = 14  # Default
+                                days_old = 14
                                 try:
                                     release_date_str = album.get('release_date', '')
                                     if release_date_str and len(release_date_str) >= 10:
@@ -2153,166 +2211,140 @@ class WatchlistScanner:
                                 except:
                                     pass
 
-                                for track in album_data['tracks']['items']:
-                                    track_id = track['id']
+                                for track in album_data['tracks'].get('items', []):
+                                    track_id = track.get('id')
+                                    if not track_id:
+                                        continue
 
-                                    # Calculate track score (Spotify-style)
-                                    # Score factors: recency (50%), popularity (30%), singles bonus (20%)
-                                    recency_score = max(0, 100 - (days_old * 7))  # Newer = higher
+                                    # Calculate track score
+                                    recency_score = max(0, 100 - (days_old * 7))
                                     popularity_score = track.get('popularity', album_data.get('popularity', 50))
                                     is_single = album.get('album_type', 'album') == 'single'
                                     single_bonus = 20 if is_single else 0
-
                                     total_score = (recency_score * 0.5) + (popularity_score * 0.3) + single_bonus
 
-                                    artist_tracks[artist].append(track_id)
-
-                                    # Store full track data with score for sorting
-                                    # Only include album metadata (not full album with all tracks)
                                     full_track = {
                                         'id': track_id,
-                                        'name': track['name'],
-                                        'artists': track.get('artists', []),
+                                        'name': track.get('name', 'Unknown'),
+                                        'artists': track.get('artists', [{'name': artist}]),
                                         'album': {
-                                            'id': album_data['id'],
+                                            'id': album_data.get('id', ''),
                                             'name': album_data.get('name', 'Unknown Album'),
                                             'images': album_data.get('images', []),
                                             'release_date': album_data.get('release_date', ''),
                                             'album_type': album_data.get('album_type', 'album'),
-                                            'total_tracks': album_data.get('total_tracks', 0)
                                         },
                                         'duration_ms': track.get('duration_ms', 0),
                                         'popularity': popularity_score,
                                         'score': total_score,
-                                        'days_old': days_old
+                                        'source': source
                                     }
                                     artist_track_data[artist].append(full_track)
 
+                            except Exception as e:
+                                logger.debug(f"Error processing album for {artist}: {e}")
+                                continue
+
+                    # Balance by artist - max 6 tracks per artist
+                    balanced_track_data = []
+                    for artist, tracks in artist_track_data.items():
+                        sorted_tracks = sorted(tracks, key=lambda t: t['score'], reverse=True)
+                        balanced_track_data.extend(sorted_tracks[:6])
+
+                    # Sort by score and shuffle
+                    balanced_track_data.sort(key=lambda t: t['score'], reverse=True)
+                    top_tracks = balanced_track_data[:75]
+                    random.shuffle(top_tracks)
+
+                    # Take final 50 tracks
+                    release_radar_tracks = [track['id'] for track in top_tracks[:50]]
+
+                    # Add tracks to discovery pool
+                    for track_data in top_tracks[:50]:
+                        try:
+                            artist_name = track_data['artists'][0].get('name', 'Unknown') if track_data['artists'] else 'Unknown'
+                            formatted_track = {
+                                'track_name': track_data['name'],
+                                'artist_name': artist_name,
+                                'album_name': track_data['album'].get('name', 'Unknown'),
+                                'album_cover_url': track_data['album']['images'][0]['url'] if track_data['album'].get('images') else None,
+                                'duration_ms': track_data.get('duration_ms', 0),
+                                'popularity': track_data.get('popularity', 0),
+                                'release_date': track_data['album'].get('release_date', ''),
+                                'is_new_release': True,
+                                'track_data_json': track_data,
+                                'artist_genres': []
+                            }
+                            if source == 'spotify':
+                                formatted_track['spotify_track_id'] = track_data['id']
+                                formatted_track['spotify_album_id'] = track_data['album'].get('id', '')
+                            else:
+                                formatted_track['itunes_track_id'] = track_data['id']
+                                formatted_track['itunes_album_id'] = track_data['album'].get('id', '')
+
+                            self.database.add_to_discovery_pool(formatted_track, source=source)
                         except Exception as e:
                             continue
 
-                # IMPROVED: Balance by artist with popularity weighting - max 6 tracks per artist
-                balanced_tracks = []
-                balanced_track_data = []
+                # Save with source suffix for multi-source support
+                playlist_key = f'release_radar_{source}'
+                self.database.save_curated_playlist(playlist_key, release_radar_tracks)
+                logger.info(f"Release Radar ({source}) curated: {len(release_radar_tracks)} tracks")
 
-                for artist, track_data in artist_track_data.items():
-                    # Sort by score and take top 6 (not random)
-                    sorted_tracks = sorted(track_data, key=lambda t: t['score'], reverse=True)
-                    selected_tracks = sorted_tracks[:6]
+                # 2. Curate Discovery Weekly - 50 tracks from discovery pool
+                logger.info(f"Curating Discovery Weekly for {source}...")
+                discovery_tracks = self.database.get_discovery_pool_tracks(limit=2000, new_releases_only=False, source=source)
 
-                    # Add selected tracks
+                discovery_weekly_tracks = []
+                if discovery_tracks:
+                    # Separate tracks by popularity tiers
+                    popular_picks = []
+                    balanced_mix = []
+                    deep_cuts = []
+
+                    for track in discovery_tracks:
+                        popularity = track.popularity if hasattr(track, 'popularity') else 50
+                        if popularity >= 60:
+                            popular_picks.append(track)
+                        elif popularity >= 40:
+                            balanced_mix.append(track)
+                        else:
+                            deep_cuts.append(track)
+
+                    logger.info(f"Discovery pool ({source}): {len(popular_picks)} popular, {len(balanced_mix)} mid-tier, {len(deep_cuts)} deep cuts")
+
+                    # Balanced selection
+                    random.shuffle(popular_picks)
+                    random.shuffle(balanced_mix)
+                    random.shuffle(deep_cuts)
+
+                    selected_tracks = []
+                    selected_tracks.extend(popular_picks[:20])
+                    selected_tracks.extend(balanced_mix[:20])
+                    selected_tracks.extend(deep_cuts[:10])
+                    random.shuffle(selected_tracks)
+
+                    # Extract appropriate track IDs based on source
                     for track in selected_tracks:
-                        balanced_tracks.append(track['id'])
-                        balanced_track_data.append(track)
+                        if source == 'spotify' and track.spotify_track_id:
+                            discovery_weekly_tracks.append(track.spotify_track_id)
+                        elif source == 'itunes' and track.itunes_track_id:
+                            discovery_weekly_tracks.append(track.itunes_track_id)
 
-                # IMPROVED: Sort by score first, then shuffle for variety
-                balanced_track_data.sort(key=lambda t: t['score'], reverse=True)
+                playlist_key = f'discovery_weekly_{source}'
+                self.database.save_curated_playlist(playlist_key, discovery_weekly_tracks)
+                logger.info(f"Discovery Weekly ({source}) curated: {len(discovery_weekly_tracks)} tracks")
 
-                # Take top 75, then shuffle for final randomization (prevents album grouping)
-                top_tracks = balanced_track_data[:75]
-                random.shuffle(top_tracks)
+            # Also save without suffix for backward compatibility (use active source)
+            active_source = 'spotify' if spotify_available else 'itunes'
+            release_radar_key = f'release_radar_{active_source}'
+            discovery_weekly_key = f'discovery_weekly_{active_source}'
 
-                # Take final 50 tracks
-                release_radar_tracks = [track['id'] for track in top_tracks[:50]]
-                release_radar_track_data = top_tracks[:50]
-
-                # Add Release Radar tracks to discovery pool so they're available for fast lookup
-                logger.info(f"Adding {len(release_radar_track_data)} Release Radar tracks to discovery pool...")
-
-                # Cache genres by artist_id to avoid duplicate API calls
-                artist_genres_cache = {}
-
-                for track_data in release_radar_track_data:
-                    try:
-                        # Fetch artist genres (with caching)
-                        artist_genres = []
-                        if track_data['artists'] and len(track_data['artists']) > 0:
-                            artist_id = track_data['artists'][0]['id']
-
-                            if artist_id in artist_genres_cache:
-                                artist_genres = artist_genres_cache[artist_id]
-                            else:
-                                try:
-                                    artist_data = self.spotify_client.get_artist(artist_id)
-                                    if artist_data and 'genres' in artist_data:
-                                        artist_genres = artist_data['genres']
-                                        artist_genres_cache[artist_id] = artist_genres
-                                except Exception as e:
-                                    logger.debug(f"Could not fetch genres for artist {artist_id}: {e}")
-
-                        # Format track data for discovery pool (expects specific structure)
-                        formatted_track = {
-                            'spotify_track_id': track_data['id'],
-                            'spotify_album_id': track_data['album'].get('id', ''),
-                            'spotify_artist_id': track_data['artists'][0]['id'] if track_data['artists'] else '',
-                            'track_name': track_data['name'],
-                            'artist_name': track_data['artists'][0]['name'] if track_data['artists'] else 'Unknown',
-                            'album_name': track_data['album'].get('name', 'Unknown'),
-                            'album_cover_url': track_data['album']['images'][0]['url'] if track_data['album'].get('images') else None,
-                            'duration_ms': track_data.get('duration_ms', 0),
-                            'popularity': track_data.get('popularity', 0),
-                            'release_date': track_data['album'].get('release_date', ''),
-                            'is_new_release': True,
-                            'track_data_json': track_data,
-                            'artist_genres': artist_genres
-                        }
-                        self.database.add_to_discovery_pool(formatted_track)
-                    except Exception as e:
-                        logger.warning(f"Failed to add track {track_data['name']} to discovery pool: {e}")
-                        continue
-
-            self.database.save_curated_playlist('release_radar', release_radar_tracks)
-            logger.info(f"Release Radar curated: {len(release_radar_tracks)} tracks")
-
-            # 2. Curate Discovery Weekly - 50 tracks from full discovery pool
-            # IMPROVED: Spotify-style algorithm with balanced mix of popular, mid-tier, and deep cuts
-            logger.info("Curating Discovery Weekly playlist...")
-            discovery_tracks = self.database.get_discovery_pool_tracks(limit=2000, new_releases_only=False)
-
-            discovery_weekly_tracks = []
-            if discovery_tracks:
-                # Separate tracks by popularity tiers for balanced selection
-                popular_picks = []    # popularity >= 60
-                balanced_mix = []     # 40 <= popularity < 60
-                deep_cuts = []        # popularity < 40
-
-                for track in discovery_tracks:
-                    popularity = track.popularity if hasattr(track, 'popularity') else 50
-
-                    if popularity >= 60:
-                        popular_picks.append(track)
-                    elif popularity >= 40:
-                        balanced_mix.append(track)
-                    else:
-                        deep_cuts.append(track)
-
-                logger.info(f"Discovery pool breakdown: {len(popular_picks)} popular, {len(balanced_mix)} mid-tier, {len(deep_cuts)} deep cuts")
-
-                # Create balanced playlist (Spotify-style distribution)
-                # 40% popular picks (20 tracks)
-                # 40% balanced mid-tier (20 tracks)
-                # 20% deep cuts (10 tracks)
-                selected_tracks = []
-
-                # Randomly select from each tier
-                random.shuffle(popular_picks)
-                random.shuffle(balanced_mix)
-                random.shuffle(deep_cuts)
-
-                selected_tracks.extend(popular_picks[:20])   # 20 popular
-                selected_tracks.extend(balanced_mix[:20])    # 20 mid-tier
-                selected_tracks.extend(deep_cuts[:10])       # 10 deep cuts
-
-                # Shuffle final selection for variety
-                random.shuffle(selected_tracks)
-
-                # Extract track IDs
-                discovery_weekly_tracks = [track.spotify_track_id for track in selected_tracks]
-
-                logger.info(f"Discovery Weekly composition: {len(popular_picks[:20])} popular + {len(balanced_mix[:20])} mid-tier + {len(deep_cuts[:10])} deep cuts = {len(discovery_weekly_tracks)} total")
-
-            self.database.save_curated_playlist('discovery_weekly', discovery_weekly_tracks)
-            logger.info(f"Discovery Weekly curated: {len(discovery_weekly_tracks)} tracks")
+            # Copy active source playlists to non-suffixed keys
+            release_radar_ids = self.database.get_curated_playlist(release_radar_key) or []
+            discovery_weekly_ids = self.database.get_curated_playlist(discovery_weekly_key) or []
+            self.database.save_curated_playlist('release_radar', release_radar_ids)
+            self.database.save_curated_playlist('discovery_weekly', discovery_weekly_ids)
 
             logger.info("Playlist curation complete")
 

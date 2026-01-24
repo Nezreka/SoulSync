@@ -18337,8 +18337,10 @@ def get_discover_release_radar():
         # Determine active source - release radar works with any source now
         active_source = _get_active_discovery_source()
 
-        # Try to get curated playlist first
-        curated_track_ids = database.get_curated_playlist('release_radar')
+        # Try source-specific playlist first, then fall back to generic
+        curated_track_ids = database.get_curated_playlist(f'release_radar_{active_source}')
+        if not curated_track_ids:
+            curated_track_ids = database.get_curated_playlist('release_radar')
 
         if curated_track_ids:
             # Use curated selection - fetch track data from discovery pool filtered by source
@@ -18398,8 +18400,10 @@ def get_discover_weekly():
         # Determine active source
         active_source = _get_active_discovery_source()
 
-        # Try to get curated playlist first
-        curated_track_ids = database.get_curated_playlist('discovery_weekly')
+        # Try source-specific playlist first, then fall back to generic
+        curated_track_ids = database.get_curated_playlist(f'discovery_weekly_{active_source}')
+        if not curated_track_ids:
+            curated_track_ids = database.get_curated_playlist('discovery_weekly')
 
         if curated_track_ids:
             # Use curated selection - fetch track data from discovery pool filtered by source
