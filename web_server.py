@@ -17269,14 +17269,8 @@ def start_watchlist_scan():
                 
                 for i, artist in enumerate(watchlist_artists):
                     try:
-                        # Fetch artist image
-                        artist_image_url = ''
-                        try:
-                            artist_data = spotify_client.get_artist(artist.spotify_artist_id)
-                            if artist_data and 'images' in artist_data and artist_data['images']:
-                                artist_image_url = artist_data['images'][0]['url']
-                        except:
-                            pass
+                        # Fetch artist image using provider-aware method
+                        artist_image_url = scanner.get_artist_image_url(artist) or ''
 
                         # Update progress
                         watchlist_scan_state.update({
@@ -17290,9 +17284,9 @@ def start_watchlist_scan():
                             'current_album_image_url': '',
                             'current_track_name': ''
                         })
-                        
-                        # Get artist discography
-                        albums = scanner.get_artist_discography(artist.spotify_artist_id, artist.last_scan_timestamp)
+
+                        # Get artist discography using provider-aware method
+                        albums = scanner.get_artist_discography_for_watchlist(artist, artist.last_scan_timestamp)
                         
                         if albums is None:
                             scan_results.append(type('ScanResult', (), {
@@ -17320,8 +17314,8 @@ def start_watchlist_scan():
                         # Scan each album
                         for album_index, album in enumerate(albums):
                             try:
-                                # Get album tracks
-                                album_data = scanner.spotify_client.get_album(album.id)
+                                # Get album tracks using provider-aware method
+                                album_data = scanner.metadata_service.get_album(album.id)
                                 if not album_data or 'tracks' not in album_data:
                                     continue
 
@@ -17969,14 +17963,8 @@ def _process_watchlist_scan_automatically():
             # Scan each artist with detailed tracking
             for i, artist in enumerate(watchlist_artists):
                 try:
-                    # Fetch artist image
-                    artist_image_url = ''
-                    try:
-                        artist_data = spotify_client.get_artist(artist.spotify_artist_id)
-                        if artist_data and 'images' in artist_data and artist_data['images']:
-                            artist_image_url = artist_data['images'][0]['url']
-                    except:
-                        pass
+                    # Fetch artist image using provider-aware method
+                    artist_image_url = scanner.get_artist_image_url(artist) or ''
 
                     # Update progress
                     watchlist_scan_state.update({
@@ -17991,8 +17979,8 @@ def _process_watchlist_scan_automatically():
                         'current_track_name': ''
                     })
 
-                    # Get artist discography
-                    albums = scanner.get_artist_discography(artist.spotify_artist_id, artist.last_scan_timestamp)
+                    # Get artist discography using provider-aware method
+                    albums = scanner.get_artist_discography_for_watchlist(artist, artist.last_scan_timestamp)
 
                     if albums is None:
                         scan_results.append(type('ScanResult', (), {
@@ -18020,8 +18008,8 @@ def _process_watchlist_scan_automatically():
                     # Scan each album
                     for album_index, album in enumerate(albums):
                         try:
-                            # Get album tracks
-                            album_data = scanner.spotify_client.get_album(album.id)
+                            # Get album tracks using provider-aware method
+                            album_data = scanner.metadata_service.get_album(album.id)
                             if not album_data or 'tracks' not in album_data:
                                 continue
 

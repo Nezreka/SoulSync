@@ -591,29 +591,7 @@ class MusicDatabase:
                 )
             """)
 
-            # Create indexes for performance
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_source ON similar_artists (source_artist_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_spotify ON similar_artists (similar_artist_spotify_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_itunes ON similar_artists (similar_artist_itunes_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_occurrence ON similar_artists (occurrence_count)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_name ON similar_artists (similar_artist_name)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_spotify_track ON discovery_pool (spotify_track_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_itunes_track ON discovery_pool (itunes_track_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_artist ON discovery_pool (spotify_artist_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_itunes_artist ON discovery_pool (itunes_artist_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_source ON discovery_pool (source)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_added_date ON discovery_pool (added_date)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_is_new ON discovery_pool (is_new_release)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_watchlist ON recent_releases (watchlist_artist_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_date ON recent_releases (release_date)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_source ON recent_releases (source)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_source ON discovery_recent_albums (source)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_date ON discovery_recent_albums (release_date)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_playlists_type ON listenbrainz_playlists (playlist_type)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_playlists_mbid ON listenbrainz_playlists (playlist_mbid)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_tracks_playlist ON listenbrainz_tracks (playlist_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_tracks_position ON listenbrainz_tracks (playlist_id, position)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_artist ON discovery_recent_albums (artist_spotify_id)")
+            # ============== MIGRATIONS (must run BEFORE index creation on new columns) ==============
 
             # Add genres column to discovery_pool if it doesn't exist (migration)
             cursor.execute("PRAGMA table_info(discovery_pool)")
@@ -657,6 +635,30 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE discovery_recent_albums ADD COLUMN artist_itunes_id TEXT")
                 cursor.execute("ALTER TABLE discovery_recent_albums ADD COLUMN source TEXT DEFAULT 'spotify'")
                 logger.info("Added iTunes columns to discovery_recent_albums table for dual-source discovery")
+
+            # ============== INDEXES (after migrations to ensure columns exist) ==============
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_source ON similar_artists (source_artist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_spotify ON similar_artists (similar_artist_spotify_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_itunes ON similar_artists (similar_artist_itunes_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_occurrence ON similar_artists (occurrence_count)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_name ON similar_artists (similar_artist_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_spotify_track ON discovery_pool (spotify_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_itunes_track ON discovery_pool (itunes_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_artist ON discovery_pool (spotify_artist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_itunes_artist ON discovery_pool (itunes_artist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_source ON discovery_pool (source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_added_date ON discovery_pool (added_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_is_new ON discovery_pool (is_new_release)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_watchlist ON recent_releases (watchlist_artist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_date ON recent_releases (release_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_source ON recent_releases (source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_source ON discovery_recent_albums (source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_date ON discovery_recent_albums (release_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_playlists_type ON listenbrainz_playlists (playlist_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_playlists_mbid ON listenbrainz_playlists (playlist_mbid)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_tracks_playlist ON listenbrainz_tracks (playlist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_tracks_position ON listenbrainz_tracks (playlist_id, position)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_artist ON discovery_recent_albums (artist_spotify_id)")
 
             logger.info("Discovery tables created successfully")
 
@@ -2996,6 +2998,27 @@ class MusicDatabase:
             logger.error(f"Error updating watchlist iTunes ID: {e}")
             return False
 
+    def update_watchlist_artist_itunes_id(self, spotify_artist_id: str, itunes_id: str) -> bool:
+        """Update the iTunes artist ID for a watchlist artist by Spotify ID (for cross-provider caching)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    UPDATE watchlist_artists
+                    SET itunes_artist_id = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE spotify_artist_id = ?
+                """, (itunes_id, spotify_artist_id))
+
+                conn.commit()
+                if cursor.rowcount > 0:
+                    logger.info(f"Cached iTunes ID {itunes_id} for Spotify artist {spotify_artist_id}")
+                return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Error caching watchlist iTunes ID: {e}")
+            return False
+
     # === Discovery Feature Methods ===
 
     def add_or_update_similar_artist(self, source_artist_id: str, similar_artist_name: str,
@@ -3056,10 +3079,66 @@ class MusicDatabase:
             logger.error(f"Error getting similar artists: {e}")
             return []
 
-    def has_fresh_similar_artists(self, source_artist_id: str, days_threshold: int = 30) -> bool:
+    def get_similar_artists_missing_itunes_ids(self, source_artist_id: str) -> List[SimilarArtist]:
+        """Get similar artists for a source that are missing iTunes IDs (for backfill)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT * FROM similar_artists
+                    WHERE source_artist_id = ?
+                    AND (similar_artist_itunes_id IS NULL OR similar_artist_itunes_id = '')
+                    ORDER BY occurrence_count DESC
+                    LIMIT 50
+                """, (source_artist_id,))
+
+                rows = cursor.fetchall()
+                return [SimilarArtist(
+                    id=row['id'],
+                    source_artist_id=row['source_artist_id'],
+                    similar_artist_spotify_id=row['similar_artist_spotify_id'],
+                    similar_artist_itunes_id=None,
+                    similar_artist_name=row['similar_artist_name'],
+                    similarity_rank=row['similarity_rank'],
+                    occurrence_count=row['occurrence_count'],
+                    last_updated=datetime.fromisoformat(row['last_updated'])
+                ) for row in rows]
+
+        except Exception as e:
+            logger.error(f"Error getting similar artists missing iTunes IDs: {e}")
+            return []
+
+    def update_similar_artist_itunes_id(self, similar_artist_id: int, itunes_id: str) -> bool:
+        """Update a similar artist's iTunes ID (for backfill)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    UPDATE similar_artists
+                    SET similar_artist_itunes_id = ?
+                    WHERE id = ?
+                """, (itunes_id, similar_artist_id))
+
+                conn.commit()
+                return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Error updating similar artist iTunes ID: {e}")
+            return False
+
+    def has_fresh_similar_artists(self, source_artist_id: str, days_threshold: int = 30, require_itunes: bool = True) -> bool:
         """
         Check if we have cached similar artists that are still fresh (< days_threshold old).
-        Returns True if we have recent data, False if data is stale or missing.
+        Also checks that similar artists have the required provider IDs.
+
+        Args:
+            source_artist_id: The source artist ID to check
+            days_threshold: Maximum age in days to consider fresh
+            require_itunes: If True, also requires iTunes IDs to be present (for seamless provider switching)
+
+        Returns True if we have recent data with required IDs, False if data is stale, missing, or incomplete.
         """
         try:
             with self._get_connection() as conn:
@@ -3081,7 +3160,27 @@ class MusicDatabase:
                 last_updated = datetime.fromisoformat(row['last_updated'])
                 days_since_update = (datetime.now() - last_updated).total_seconds() / 86400  # seconds to days
 
-                return days_since_update < days_threshold
+                if days_since_update >= days_threshold:
+                    return False
+
+                # Check if we have iTunes IDs (for seamless provider switching)
+                if require_itunes:
+                    cursor.execute("""
+                        SELECT COUNT(*) as total,
+                               SUM(CASE WHEN similar_artist_itunes_id IS NOT NULL AND similar_artist_itunes_id != '' THEN 1 ELSE 0 END) as has_itunes
+                        FROM similar_artists
+                        WHERE source_artist_id = ?
+                    """, (source_artist_id,))
+                    id_row = cursor.fetchone()
+
+                    if id_row and id_row['total'] > 0:
+                        # If less than 50% have iTunes IDs, consider stale and refetch
+                        itunes_ratio = id_row['has_itunes'] / id_row['total']
+                        if itunes_ratio < 0.5:
+                            logger.debug(f"Similar artists for {source_artist_id} missing iTunes IDs ({id_row['has_itunes']}/{id_row['total']}), will refetch")
+                            return False
+
+                return True
 
         except Exception as e:
             logger.error(f"Error checking similar artists freshness: {e}")

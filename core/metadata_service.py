@@ -43,7 +43,7 @@ class MetadataService:
     
     def _log_initialization(self):
         """Log initialization status"""
-        spotify_status = "✅ Authenticated" if self.spotify.is_authenticated() else "❌ Not authenticated"
+        spotify_status = "✅ Authenticated" if self.spotify.is_spotify_authenticated() else "❌ Not authenticated"
         itunes_status = "✅ Available" if self.itunes.is_authenticated() else "❌ Not available"
         
         logger.info(f"MetadataService initialized - Spotify: {spotify_status}, iTunes: {itunes_status}")
@@ -52,7 +52,7 @@ class MetadataService:
     def get_active_provider(self) -> str:
         """
         Get the currently active metadata provider.
-        
+
         Returns:
             "spotify" or "itunes"
         """
@@ -61,14 +61,16 @@ class MetadataService:
         elif self.preferred_provider == "itunes":
             return "itunes"
         else:  # auto
-            return "spotify" if self.spotify.is_authenticated() else "itunes"
+            # Use is_spotify_authenticated() to check actual Spotify auth status
+            # (is_authenticated() always returns True due to iTunes fallback)
+            return "spotify" if self.spotify.is_spotify_authenticated() else "itunes"
     
     def _get_client(self):
         """Get the appropriate client based on provider selection"""
         provider = self.get_active_provider()
-        
+
         if provider == "spotify":
-            if not self.spotify.is_authenticated():
+            if not self.spotify.is_spotify_authenticated():
                 logger.warning("Spotify requested but not authenticated, falling back to iTunes")
                 return self.itunes
             return self.spotify
@@ -168,38 +170,38 @@ class MetadataService:
     
     def get_user_playlists(self) -> List:
         """Get user playlists (Spotify only)"""
-        if self.get_active_provider() == "spotify" and self.spotify.is_authenticated():
+        if self.spotify.is_spotify_authenticated():
             return self.spotify.get_user_playlists()
         logger.warning("User playlists only available with Spotify authentication")
         return []
-    
+
     def get_saved_tracks(self) -> List:
         """Get user's saved/liked tracks (Spotify only)"""
-        if self.get_active_provider() == "spotify" and self.spotify.is_authenticated():
+        if self.spotify.is_spotify_authenticated():
             return self.spotify.get_saved_tracks()
         logger.warning("Saved tracks only available with Spotify authentication")
         return []
-    
+
     def get_saved_tracks_count(self) -> int:
         """Get count of user's saved tracks (Spotify only)"""
-        if self.get_active_provider() == "spotify" and self.spotify.is_authenticated():
+        if self.spotify.is_spotify_authenticated():
             return self.spotify.get_saved_tracks_count()
         return 0
-    
+
     # ==================== Utility Methods ====================
-    
+
     def is_authenticated(self) -> bool:
         """Check if any provider is available"""
-        return self.spotify.is_authenticated() or self.itunes.is_authenticated()
-    
+        return self.spotify.is_spotify_authenticated() or self.itunes.is_authenticated()
+
     def get_provider_info(self) -> Dict[str, Any]:
         """Get information about available providers"""
         return {
             "active_provider": self.get_active_provider(),
-            "spotify_authenticated": self.spotify.is_authenticated(),
+            "spotify_authenticated": self.spotify.is_spotify_authenticated(),
             "itunes_available": self.itunes.is_authenticated(),
             "preferred_provider": self.preferred_provider,
-            "can_access_user_data": self.spotify.is_authenticated(),
+            "can_access_user_data": self.spotify.is_spotify_authenticated(),
         }
     
     def reload_config(self):
