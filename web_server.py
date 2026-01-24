@@ -15025,12 +15025,15 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                         continue
 
                     # Score each iTunes result
+                    # Note: iTunes returns Track dataclass objects with 'artists' (list), not 'artist'
                     for result in itunes_results:
                         try:
                             # Calculate confidence using matching engine
                             try:
                                 artist_confidence = 0.0
-                                result_artist = result.artist if hasattr(result, 'artist') else result.get('artist', '')
+                                # iTunes Track has 'artists' as a list
+                                result_artists = result.artists if hasattr(result, 'artists') else []
+                                result_artist = result_artists[0] if result_artists else ''
                                 if result_artist:
                                     artist_sim = matching_engine.similarity_score(
                                         matching_engine.normalize_string(artist_name),
@@ -15039,7 +15042,7 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                                     artist_confidence = artist_sim
 
                                 # Calculate title confidence
-                                result_name = result.name if hasattr(result, 'name') else result.get('name', '')
+                                result_name = result.name if hasattr(result, 'name') else ''
                                 title_confidence = matching_engine.similarity_score(
                                     matching_engine.normalize_string(track_name),
                                     matching_engine.normalize_string(result_name)
@@ -15052,8 +15055,8 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                                 best_match = result
                                 break
 
-                            result_artist_display = result.artist if hasattr(result, 'artist') else result.get('artist', 'Unknown')
-                            result_name_display = result.name if hasattr(result, 'name') else result.get('name', 'Unknown')
+                            result_artist_display = result_artists[0] if result_artists else 'Unknown'
+                            result_name_display = result.name if hasattr(result, 'name') else 'Unknown'
                             print(f"🔍 iTunes Tidal candidate: '{result_artist_display}' - '{result_name_display}' (confidence: {combined_confidence:.3f})")
 
                             if combined_confidence > best_confidence and combined_confidence >= min_confidence:
@@ -15080,15 +15083,17 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                 return (best_match, best_match_raw)  # Return both Track object and raw data
             else:
                 # For iTunes, return a dict with normalized data
-                result_artist = best_match.artist if hasattr(best_match, 'artist') else best_match.get('artist', 'Unknown')
-                result_name = best_match.name if hasattr(best_match, 'name') else best_match.get('name', 'Unknown')
+                # Note: iTunes Track dataclass has 'artists' (list) and 'image_url', not 'artist' and 'artwork_url'
+                result_artists = best_match.artists if hasattr(best_match, 'artists') else []
+                result_artist = result_artists[0] if result_artists else 'Unknown'
+                result_name = best_match.name if hasattr(best_match, 'name') else 'Unknown'
                 print(f"✅ Final Tidal iTunes match: {result_artist} - {result_name} (confidence: {best_confidence:.3f})")
 
                 # Build iTunes result dict with album info
-                album_name = best_match.album if hasattr(best_match, 'album') else best_match.get('album', 'Unknown Album')
-                artwork_url = best_match.artwork_url if hasattr(best_match, 'artwork_url') else best_match.get('artwork_url', '')
-                track_id = best_match.id if hasattr(best_match, 'id') else best_match.get('id', '')
-                duration_ms = best_match.duration_ms if hasattr(best_match, 'duration_ms') else best_match.get('duration_ms', 0)
+                album_name = best_match.album if hasattr(best_match, 'album') else 'Unknown Album'
+                image_url = best_match.image_url if hasattr(best_match, 'image_url') else ''
+                track_id = best_match.id if hasattr(best_match, 'id') else ''
+                duration_ms = best_match.duration_ms if hasattr(best_match, 'duration_ms') else 0
 
                 return {
                     'id': track_id,
@@ -15097,7 +15102,7 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                     'album': {
                         'name': album_name,
                         'album_type': 'album',
-                        'images': [{'url': artwork_url, 'height': 300, 'width': 300}] if artwork_url else []
+                        'images': [{'url': image_url, 'height': 300, 'width': 300}] if image_url else []
                     },
                     'duration_ms': duration_ms,
                     'source': 'itunes'
@@ -21872,12 +21877,15 @@ def _run_beatport_discovery_worker(url_hash):
                                 continue
 
                             # Score each iTunes result
+                            # Note: iTunes returns Track dataclass objects with 'artists' (list), not 'artist'
                             for result in itunes_results:
                                 try:
                                     # Calculate confidence using matching engine
                                     try:
                                         artist_confidence = 0.0
-                                        result_artist = result.artist if hasattr(result, 'artist') else result.get('artist', '')
+                                        # iTunes Track has 'artists' as a list
+                                        result_artists = result.artists if hasattr(result, 'artists') else []
+                                        result_artist = result_artists[0] if result_artists else ''
                                         if result_artist:
                                             artist_sim = matching_engine.similarity_score(
                                                 matching_engine.normalize_string(track_artist),
@@ -21886,7 +21894,7 @@ def _run_beatport_discovery_worker(url_hash):
                                             artist_confidence = artist_sim
 
                                         # Calculate title confidence
-                                        result_name = result.name if hasattr(result, 'name') else result.get('name', '')
+                                        result_name = result.name if hasattr(result, 'name') else ''
                                         title_confidence = matching_engine.similarity_score(
                                             matching_engine.normalize_string(track_title),
                                             matching_engine.normalize_string(result_name)
@@ -21899,8 +21907,8 @@ def _run_beatport_discovery_worker(url_hash):
                                         best_match = result
                                         break
 
-                                    result_artist_display = result.artist if hasattr(result, 'artist') else result.get('artist', 'Unknown')
-                                    result_name_display = result.name if hasattr(result, 'name') else result.get('name', 'Unknown')
+                                    result_artist_display = result_artists[0] if result_artists else 'Unknown'
+                                    result_name_display = result.name if hasattr(result, 'name') else 'Unknown'
                                     print(f"🔍 iTunes Beatport candidate: '{result_artist_display}' - '{result_name_display}' (confidence: {combined_confidence:.3f})")
 
                                     if combined_confidence > best_confidence and combined_confidence >= min_confidence:
@@ -21979,11 +21987,13 @@ def _run_beatport_discovery_worker(url_hash):
                         }
                     else:
                         # ITUNES result formatting
-                        result_artist = found_track.artist if hasattr(found_track, 'artist') else found_track.get('artist', 'Unknown')
-                        result_name = found_track.name if hasattr(found_track, 'name') else found_track.get('name', 'Unknown')
-                        album_name = found_track.album if hasattr(found_track, 'album') else found_track.get('album', 'Unknown Album')
-                        artwork_url = found_track.artwork_url if hasattr(found_track, 'artwork_url') else found_track.get('artwork_url', '')
-                        track_id = found_track.id if hasattr(found_track, 'id') else found_track.get('id', '')
+                        # Note: iTunes Track dataclass has 'artists' (list) and 'image_url', not 'artist' and 'artwork_url'
+                        result_artists = found_track.artists if hasattr(found_track, 'artists') else []
+                        result_artist = result_artists[0] if result_artists else 'Unknown'
+                        result_name = found_track.name if hasattr(found_track, 'name') else 'Unknown'
+                        album_name = found_track.album if hasattr(found_track, 'album') else 'Unknown Album'
+                        image_url = found_track.image_url if hasattr(found_track, 'image_url') else ''
+                        track_id = found_track.id if hasattr(found_track, 'id') else ''
 
                         # Format artists as list of objects for frontend compatibility
                         formatted_artists = [{'name': result_artist}]
@@ -21992,7 +22002,7 @@ def _run_beatport_discovery_worker(url_hash):
                         album_data = {
                             'name': album_name,
                             'album_type': 'album',
-                            'images': [{'url': artwork_url, 'height': 300, 'width': 300}] if artwork_url else []
+                            'images': [{'url': image_url, 'height': 300, 'width': 300}] if image_url else []
                         }
 
                         result_entry['spotify_data'] = {  # Use same key for frontend compatibility
