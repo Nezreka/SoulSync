@@ -9946,7 +9946,8 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
     // Note: Beatport, Tidal, and ListenBrainz have their own states, but reuse YouTube modal infrastructure
     let state, result;
     if (platform === 'youtube') {
-        state = youtubePlaylistStates[identifier];
+        // Check both states - ListenBrainz also uses YouTube modal infrastructure
+        state = listenbrainzPlaylistStates[identifier] || youtubePlaylistStates[identifier];
     } else if (platform === 'tidal') {
         state = youtubePlaylistStates[identifier]; // Tidal uses YouTube state infrastructure
     } else if (platform === 'beatport') {
@@ -10099,15 +10100,23 @@ async function searchDiscoveryFix() {
         return;
     }
 
+    // Determine discovery source from state
+    const identifier = currentDiscoveryFix.identifier;
+    const state = listenbrainzPlaylistStates[identifier] || youtubePlaylistStates[identifier];
+    const discoverySource = state?.discovery_source || state?.discoverySource || 'spotify';
+    const useItunes = discoverySource === 'itunes';
+
     const resultsContainer = fixModalOverlay.querySelector('#fix-modal-results');
-    resultsContainer.innerHTML = '<div class="loading">🔍 Searching Spotify...</div>';
+    const sourceLabel = useItunes ? 'iTunes' : 'Spotify';
+    resultsContainer.innerHTML = `<div class="loading">🔍 Searching ${sourceLabel}...</div>`;
 
     try {
         // Build search query
         const query = `${artistInput} ${trackInput}`.trim();
 
-        // Call Spotify search API
-        const response = await fetch(`/api/spotify/search_tracks?query=${encodeURIComponent(query)}&limit=20`);
+        // Call appropriate search API based on discovery source
+        const searchEndpoint = useItunes ? '/api/itunes/search_tracks' : '/api/spotify/search_tracks';
+        const response = await fetch(`${searchEndpoint}?query=${encodeURIComponent(query)}&limit=20`);
         const data = await response.json();
 
         if (data.error) {
@@ -10120,7 +10129,7 @@ async function searchDiscoveryFix() {
             return;
         }
 
-        // Render results
+        // Render results (same format for both Spotify and iTunes)
         renderDiscoveryFixResults(data.tracks, fixModalOverlay);
 
     } catch (error) {
@@ -10216,13 +10225,16 @@ async function selectDiscoveryFixTrack(track) {
 
         // Update frontend state
         // Note: Beatport and Tidal reuse youtubePlaylistStates for discovery results
+        // ListenBrainz uses its own state but may also be accessed via YouTube
         let state;
         if (platform === 'youtube') {
-            state = youtubePlaylistStates[identifier];
+            state = listenbrainzPlaylistStates[identifier] || youtubePlaylistStates[identifier];
         } else if (platform === 'tidal') {
             state = youtubePlaylistStates[identifier];
         } else if (platform === 'beatport') {
             state = youtubePlaylistStates[identifier];
+        } else if (platform === 'listenbrainz') {
+            state = listenbrainzPlaylistStates[identifier];
         }
 
         // Support both camelCase and snake_case
@@ -18602,15 +18614,17 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
 
         // Update actions cell with appropriate button
         if (actionsCell) {
-            const state = youtubePlaylistStates[urlHash];
-            const platform = state?.is_tidal_playlist ? 'tidal' : (state?.is_beatport_playlist ? 'beatport' : 'youtube');
+            const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
+            const platform = state?.is_listenbrainz_playlist ? 'listenbrainz' :
+                           (state?.is_tidal_playlist ? 'tidal' :
+                           (state?.is_beatport_playlist ? 'beatport' : 'youtube'));
             actionsCell.innerHTML = generateDiscoveryActionButton(result, urlHash, platform);
         }
     });
 
     // Update action buttons if discovery is complete (progress = 100%)
     if (status.progress >= 100) {
-        const state = youtubePlaylistStates[urlHash];
+        const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
         if (state && state.phase === 'discovered') {
             const actionButtonsContainer = document.querySelector(`#youtube-discovery-modal-${urlHash} .modal-footer-left`);
             if (actionButtonsContainer) {
