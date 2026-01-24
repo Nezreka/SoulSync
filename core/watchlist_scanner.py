@@ -280,6 +280,7 @@ class WatchlistScanner:
     def _get_active_client_and_artist_id(self, watchlist_artist: WatchlistArtist):
         """
         Get the appropriate client and artist ID based on active provider.
+        If iTunes ID is missing, searches by artist name to find and cache it.
 
         Returns:
             Tuple of (client, artist_id, provider_name) or (None, None, None) if no valid ID
@@ -296,9 +297,80 @@ class WatchlistScanner:
             if watchlist_artist.itunes_artist_id:
                 return (self.metadata_service.itunes, watchlist_artist.itunes_artist_id, 'itunes')
             else:
-                logger.warning(f"No iTunes ID for {watchlist_artist.artist_name}, cannot scan with iTunes")
-                return (None, None, None)
-    
+                # No iTunes ID stored - search by name and cache it
+                logger.info(f"No iTunes ID for {watchlist_artist.artist_name}, searching by name...")
+                try:
+                    itunes_client = self.metadata_service.itunes
+                    search_results = itunes_client.search_artists(watchlist_artist.artist_name, limit=1)
+                    if search_results and len(search_results) > 0:
+                        itunes_id = search_results[0].id
+                        logger.info(f"Found iTunes ID {itunes_id} for {watchlist_artist.artist_name}")
+                        # Cache the iTunes ID in the database for future use
+                        self.database.update_watchlist_artist_itunes_id(
+                            watchlist_artist.spotify_artist_id or str(watchlist_artist.id),
+                            itunes_id
+                        )
+                        return (itunes_client, itunes_id, 'itunes')
+                    else:
+                        logger.warning(f"Could not find {watchlist_artist.artist_name} on iTunes")
+                        return (None, None, None)
+                except Exception as e:
+                    logger.error(f"Error searching iTunes for {watchlist_artist.artist_name}: {e}")
+                    return (None, None, None)
+
+    def get_active_client_and_artist_id(self, watchlist_artist: WatchlistArtist):
+        """
+        Public wrapper for _get_active_client_and_artist_id.
+        Gets the appropriate client and artist ID based on active provider.
+
+        Returns:
+            Tuple of (client, artist_id, provider_name) or (None, None, None) if no valid ID
+        """
+        return self._get_active_client_and_artist_id(watchlist_artist)
+
+    def get_artist_image_url(self, watchlist_artist: WatchlistArtist) -> Optional[str]:
+        """
+        Get artist image URL using the active provider.
+
+        Returns:
+            Image URL string or None if not available
+        """
+        client, artist_id, provider = self._get_active_client_and_artist_id(watchlist_artist)
+        if not client or not artist_id:
+            return None
+
+        try:
+            artist_data = client.get_artist(artist_id)
+            if artist_data:
+                # Handle both Spotify and iTunes response formats
+                if 'images' in artist_data and artist_data['images']:
+                    return artist_data['images'][0].get('url')
+                elif 'image_url' in artist_data:
+                    return artist_data['image_url']
+        except Exception as e:
+            logger.debug(f"Could not fetch artist image for {watchlist_artist.artist_name}: {e}")
+
+        return None
+
+    def get_artist_discography_for_watchlist(self, watchlist_artist: WatchlistArtist, last_scan_timestamp: Optional[datetime] = None) -> Optional[List]:
+        """
+        Get artist's discography using the active provider, with proper ID resolution.
+        This is the provider-aware version of get_artist_discography.
+
+        Args:
+            watchlist_artist: WatchlistArtist object (has both spotify and itunes IDs)
+            last_scan_timestamp: Only return releases after this date (for incremental scans)
+
+        Returns:
+            List of albums or None on error
+        """
+        client, artist_id, provider = self._get_active_client_and_artist_id(watchlist_artist)
+        if not client or not artist_id:
+            logger.warning(f"No valid client/ID for {watchlist_artist.artist_name}")
+            return None
+
+        return self._get_artist_discography_with_client(client, artist_id, last_scan_timestamp)
+
     def scan_all_watchlist_artists(self) -> List[ScanResult]:
         """
         Scan artists in the watchlist for new releases.
@@ -562,7 +634,9 @@ class WatchlistScanner:
             try:
                 # Check if we have fresh similar artists cached (< 30 days old)
                 if self.database.has_fresh_similar_artists(source_artist_id, days_threshold=30):
-                    logger.info(f"Similar artists for {watchlist_artist.artist_name} are cached and fresh, skipping fetch")
+                    logger.info(f"Similar artists for {watchlist_artist.artist_name} are cached and fresh, skipping MusicMap fetch")
+                    # Even if cached, backfill missing iTunes IDs (seamless dual-source support)
+                    self._backfill_similar_artists_itunes_ids(source_artist_id)
                 else:
                     logger.info(f"Fetching similar artists for {watchlist_artist.artist_name}...")
                     self.update_similar_artists(watchlist_artist)
@@ -812,6 +886,10 @@ class WatchlistScanner:
                 album_date = datetime(int(year), int(month), 1, tzinfo=timezone.utc)
             elif len(release_date_str) == 10:  # Full date (e.g., "2023-10-15")
                 album_date = datetime.strptime(release_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            elif 'T' in release_date_str:  # ISO 8601 with time (e.g., "2017-12-08T08:00:00Z" from iTunes)
+                # Strip the time portion and parse just the date
+                date_part = release_date_str.split('T')[0]
+                album_date = datetime.strptime(date_part, "%Y-%m-%d").replace(tzinfo=timezone.utc)
             else:
                 logger.warning(f"Unknown release date format: {release_date_str}")
                 return True  # Include if we can't parse
@@ -1246,6 +1324,54 @@ class WatchlistScanner:
             logger.error(f"Error fetching similar artists from MusicMap: {e}")
             return []
 
+    def _backfill_similar_artists_itunes_ids(self, source_artist_id: str) -> int:
+        """
+        Backfill missing iTunes IDs for cached similar artists.
+        This ensures seamless dual-source support without clearing cached data.
+
+        Args:
+            source_artist_id: The source artist ID to backfill similar artists for
+
+        Returns:
+            Number of similar artists updated with iTunes IDs
+        """
+        try:
+            # Get similar artists that are missing iTunes IDs
+            similar_artists = self.database.get_similar_artists_missing_itunes_ids(source_artist_id)
+
+            if not similar_artists:
+                return 0
+
+            logger.info(f"Backfilling iTunes IDs for {len(similar_artists)} similar artists")
+
+            # Get iTunes client
+            from core.itunes_client import iTunesClient
+            itunes_client = iTunesClient()
+
+            updated_count = 0
+            for similar_artist in similar_artists:
+                try:
+                    # Search iTunes by artist name
+                    itunes_results = itunes_client.search_artists(similar_artist.similar_artist_name, limit=1)
+                    if itunes_results and len(itunes_results) > 0:
+                        itunes_id = itunes_results[0].id
+                        # Update the similar artist with the iTunes ID
+                        if self.database.update_similar_artist_itunes_id(similar_artist.id, itunes_id):
+                            updated_count += 1
+                            logger.debug(f"  Backfilled iTunes ID {itunes_id} for {similar_artist.similar_artist_name}")
+                except Exception as e:
+                    logger.debug(f"  Could not backfill iTunes ID for {similar_artist.similar_artist_name}: {e}")
+                    continue
+
+            if updated_count > 0:
+                logger.info(f"Backfilled {updated_count} similar artists with iTunes IDs")
+
+            return updated_count
+
+        except Exception as e:
+            logger.error(f"Error backfilling similar artists iTunes IDs: {e}")
+            return 0
+
     def update_similar_artists(self, watchlist_artist: WatchlistArtist, limit: int = 10) -> bool:
         """
         Fetch and store similar artists for a watchlist artist.
@@ -1351,8 +1477,21 @@ class WatchlistScanner:
                     sources_to_process = []
 
                     # Always add iTunes first (baseline source)
-                    if similar_artist.similar_artist_itunes_id:
-                        sources_to_process.append(('itunes', similar_artist.similar_artist_itunes_id))
+                    itunes_id = similar_artist.similar_artist_itunes_id
+                    if not itunes_id:
+                        # On-the-fly lookup for missing iTunes ID (seamless provider switching)
+                        try:
+                            itunes_results = itunes_client.search_artists(similar_artist.similar_artist_name, limit=1)
+                            if itunes_results and len(itunes_results) > 0:
+                                itunes_id = itunes_results[0].id
+                                # Cache it for future use
+                                self.database.update_similar_artist_itunes_id(similar_artist.id, itunes_id)
+                                logger.debug(f"  Resolved iTunes ID {itunes_id} for {similar_artist.similar_artist_name}")
+                        except Exception as e:
+                            logger.debug(f"  Could not resolve iTunes ID for {similar_artist.similar_artist_name}: {e}")
+
+                    if itunes_id:
+                        sources_to_process.append(('itunes', itunes_id))
 
                     # Add Spotify if authenticated and we have an ID
                     if spotify_available and similar_artist.similar_artist_spotify_id:

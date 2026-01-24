@@ -371,8 +371,13 @@ class iTunesClient:
 
         return albums[:limit]
     
-    def get_album(self, album_id: str) -> Optional[Dict[str, Any]]:
-        """Get album information - normalized to Spotify format"""
+    def get_album(self, album_id: str, include_tracks: bool = True) -> Optional[Dict[str, Any]]:
+        """Get album information with tracks - normalized to Spotify format.
+
+        Args:
+            album_id: iTunes album/collection ID
+            include_tracks: If True, also fetches and includes tracks (default True for Spotify compatibility)
+        """
         results = self._lookup(id=album_id)
 
         for album_data in results:
@@ -400,7 +405,7 @@ class iTunesClient:
                 else:
                     album_type = 'album'
 
-                return {
+                album_result = {
                     'id': str(album_data.get('collectionId', '')),
                     'name': album_data.get('collectionName', ''),
                     'images': images,
@@ -413,6 +418,16 @@ class iTunesClient:
                     '_source': 'itunes',
                     '_raw_data': album_data
                 }
+
+                # Include tracks to match Spotify's get_album format
+                if include_tracks:
+                    tracks_data = self.get_album_tracks(album_id)
+                    if tracks_data and 'items' in tracks_data:
+                        album_result['tracks'] = tracks_data
+                    else:
+                        album_result['tracks'] = {'items': [], 'total': 0}
+
+                return album_result
 
         return None
     

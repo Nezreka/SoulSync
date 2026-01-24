@@ -172,6 +172,19 @@ class SpotifyClient:
         self._itunes_client = None  # Lazy-loaded iTunes fallback
         self._setup_client()
 
+    def _is_spotify_id(self, id_str: str) -> bool:
+        """Check if an ID is a Spotify ID (alphanumeric) vs iTunes ID (numeric only)"""
+        if not id_str:
+            return False
+        # Spotify IDs contain letters and numbers, iTunes IDs are purely numeric
+        return not id_str.isdigit()
+
+    def _is_itunes_id(self, id_str: str) -> bool:
+        """Check if an ID is an iTunes ID (numeric only)"""
+        if not id_str:
+            return False
+        return id_str.isdigit()
+
     @property
     def _itunes(self):
         """Lazy-load iTunes client for fallback when Spotify not authenticated"""
@@ -534,9 +547,13 @@ class SpotifyClient:
                 logger.error(f"Error fetching track details via Spotify: {e}")
                 # Fall through to iTunes fallback
 
-        # iTunes fallback
-        logger.debug(f"Using iTunes fallback for track details: {track_id}")
-        return self._itunes.get_track_details(track_id)
+        # iTunes fallback - only if ID is numeric (iTunes format)
+        if self._is_itunes_id(track_id):
+            logger.debug(f"Using iTunes fallback for track details: {track_id}")
+            return self._itunes.get_track_details(track_id)
+        else:
+            logger.debug(f"Cannot use iTunes fallback for Spotify track ID: {track_id}")
+            return None
     
     @rate_limited
     def get_track_features(self, track_id: str) -> Optional[Dict[str, Any]]:
@@ -563,9 +580,13 @@ class SpotifyClient:
                 logger.error(f"Error fetching album via Spotify: {e}")
                 # Fall through to iTunes fallback
 
-        # iTunes fallback
-        logger.debug(f"Using iTunes fallback for album: {album_id}")
-        return self._itunes.get_album(album_id)
+        # iTunes fallback - only if ID is numeric (iTunes format)
+        if self._is_itunes_id(album_id):
+            logger.debug(f"Using iTunes fallback for album: {album_id}")
+            return self._itunes.get_album(album_id)
+        else:
+            logger.debug(f"Cannot use iTunes fallback for Spotify album ID: {album_id}")
+            return None
     
     @rate_limited
     def get_album_tracks(self, album_id: str) -> Optional[Dict[str, Any]]:
@@ -602,9 +623,13 @@ class SpotifyClient:
                 logger.error(f"Error fetching album tracks via Spotify: {e}")
                 # Fall through to iTunes fallback
 
-        # iTunes fallback
-        logger.debug(f"Using iTunes fallback for album tracks: {album_id}")
-        return self._itunes.get_album_tracks(album_id)
+        # iTunes fallback - only if ID is numeric (iTunes format)
+        if self._is_itunes_id(album_id):
+            logger.debug(f"Using iTunes fallback for album tracks: {album_id}")
+            return self._itunes.get_album_tracks(album_id)
+        else:
+            logger.debug(f"Cannot use iTunes fallback for Spotify album ID: {album_id}")
+            return None
     
     @rate_limited
     def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
@@ -629,9 +654,13 @@ class SpotifyClient:
                 logger.error(f"Error fetching artist albums via Spotify: {e}")
                 # Fall through to iTunes fallback
 
-        # iTunes fallback
-        logger.debug(f"Using iTunes fallback for artist albums: {artist_id}")
-        return self._itunes.get_artist_albums(artist_id, album_type, limit)
+        # iTunes fallback - only if ID is numeric (iTunes format)
+        if self._is_itunes_id(artist_id):
+            logger.debug(f"Using iTunes fallback for artist albums: {artist_id}")
+            return self._itunes.get_artist_albums(artist_id, album_type, limit)
+        else:
+            logger.debug(f"Cannot use iTunes fallback for Spotify artist ID: {artist_id}")
+            return []
 
     @rate_limited
     def get_user_info(self) -> Optional[Dict[str, Any]]:
@@ -662,6 +691,10 @@ class SpotifyClient:
                 logger.error(f"Error fetching artist via Spotify: {e}")
                 # Fall through to iTunes fallback
 
-        # iTunes fallback
-        logger.debug(f"Using iTunes fallback for artist: {artist_id}")
-        return self._itunes.get_artist(artist_id)
+        # iTunes fallback - only if ID is numeric (iTunes format)
+        if self._is_itunes_id(artist_id):
+            logger.debug(f"Using iTunes fallback for artist: {artist_id}")
+            return self._itunes.get_artist(artist_id)
+        else:
+            logger.debug(f"Cannot use iTunes fallback for Spotify artist ID: {artist_id}")
+            return None

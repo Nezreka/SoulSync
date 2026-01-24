@@ -112,7 +112,11 @@ class PersonalizedPlaylistsService:
 
     def _build_track_dict(self, row, source: str) -> Dict:
         """Build a standardized track dictionary from a database row."""
-        track_data = row['track_data_json']
+        # Convert sqlite3.Row to dict if needed (Row objects don't support .get())
+        if hasattr(row, 'keys'):
+            row = dict(row)
+
+        track_data = row.get('track_data_json')
         if isinstance(track_data, str):
             try:
                 track_data = json.loads(track_data)
@@ -123,11 +127,11 @@ class PersonalizedPlaylistsService:
             'track_id': row.get('spotify_track_id') or row.get('itunes_track_id'),
             'spotify_track_id': row.get('spotify_track_id'),
             'itunes_track_id': row.get('itunes_track_id'),
-            'track_name': row['track_name'],
-            'artist_name': row['artist_name'],
-            'album_name': row['album_name'],
-            'album_cover_url': row['album_cover_url'],
-            'duration_ms': row['duration_ms'],
+            'track_name': row.get('track_name', 'Unknown'),
+            'artist_name': row.get('artist_name', 'Unknown'),
+            'album_name': row.get('album_name', 'Unknown'),
+            'album_cover_url': row.get('album_cover_url'),
+            'duration_ms': row.get('duration_ms', 0),
             'popularity': row.get('popularity', 0),
             'track_data_json': track_data,
             'source': source
