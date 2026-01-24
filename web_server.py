@@ -14293,6 +14293,40 @@ def search_spotify_tracks():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/itunes/search_tracks', methods=['GET'])
+def search_itunes_tracks():
+    """Search for tracks on iTunes - used by discovery fix modal when iTunes is the source"""
+    try:
+        from core.itunes_client import iTunesClient
+
+        query = request.args.get('query', '').strip()
+        limit = int(request.args.get('limit', 20))
+
+        if not query:
+            return jsonify({"error": "Query parameter is required"}), 400
+
+        # Search using iTunes client
+        itunes_client = iTunesClient()
+        tracks = itunes_client.search_tracks(query, limit=limit)
+
+        # Convert tracks to dict format matching Spotify structure for frontend compatibility
+        tracks_dict = [{
+            'id': t.id,
+            'name': t.name,
+            'artists': t.artists,  # Already a list
+            'album': t.album,
+            'duration_ms': t.duration_ms,
+            'image_url': t.image_url,
+            'source': 'itunes'
+        } for t in tracks]
+
+        return jsonify({'tracks': tracks_dict})
+
+    except Exception as e:
+        print(f"❌ Error searching iTunes tracks: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ===================================================================
 # TIDAL PLAYLIST API ENDPOINTS
 # ===================================================================
