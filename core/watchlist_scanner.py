@@ -685,7 +685,9 @@ class WatchlistScanner:
             source_artist_id = watchlist_artist.spotify_artist_id or watchlist_artist.itunes_artist_id or str(watchlist_artist.id)
             try:
                 # Check if we have fresh similar artists cached (< 30 days old)
-                if self.database.has_fresh_similar_artists(source_artist_id, days_threshold=30):
+                # If Spotify is authenticated, also require Spotify IDs to be present
+                spotify_authenticated = self.spotify_client and self.spotify_client.is_spotify_authenticated()
+                if self.database.has_fresh_similar_artists(source_artist_id, days_threshold=30, require_spotify=spotify_authenticated):
                     logger.info(f"Similar artists for {watchlist_artist.artist_name} are cached and fresh, skipping MusicMap fetch")
                     # Even if cached, backfill missing iTunes IDs (seamless dual-source support)
                     self._backfill_similar_artists_itunes_ids(source_artist_id)

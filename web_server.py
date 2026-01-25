@@ -17724,7 +17724,9 @@ def start_watchlist_scan():
                             watchlist_scan_state['current_phase'] = 'fetching_similar_artists'
                             source_artist_id = artist.spotify_artist_id or artist.itunes_artist_id or str(artist.id)
 
-                            if database.has_fresh_similar_artists(source_artist_id, days_threshold=30):
+                            # If Spotify is authenticated, also require Spotify IDs to be present
+                            spotify_authenticated = spotify_client and spotify_client.is_spotify_authenticated()
+                            if database.has_fresh_similar_artists(source_artist_id, days_threshold=30, require_spotify=spotify_authenticated):
                                 print(f"  Similar artists for {artist.artist_name} are cached and fresh")
                                 # Still backfill missing iTunes IDs
                                 scanner._backfill_similar_artists_itunes_ids(source_artist_id)
