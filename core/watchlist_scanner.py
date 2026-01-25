@@ -21,8 +21,60 @@ logger = get_logger("watchlist_scanner")
 
 # Rate limiting constants for watchlist operations
 DELAY_BETWEEN_ARTISTS = 2.0      # 2 seconds between different artists
-DELAY_BETWEEN_ALBUMS = 0.5       # 500ms between albums for same artist  
+DELAY_BETWEEN_ALBUMS = 0.5       # 500ms between albums for same artist
 DELAY_BETWEEN_API_BATCHES = 1.0  # 1 second between API batch operations
+
+# iTunes API retry configuration
+ITUNES_MAX_RETRIES = 3
+ITUNES_BASE_DELAY = 1.0  # Base delay in seconds for exponential backoff
+
+
+def itunes_api_call_with_retry(func, *args, max_retries=ITUNES_MAX_RETRIES, **kwargs):
+    """
+    Execute an iTunes API call with exponential backoff retry logic.
+
+    Args:
+        func: The function to call
+        *args: Arguments to pass to the function
+        max_retries: Maximum number of retry attempts
+        **kwargs: Keyword arguments to pass to the function
+
+    Returns:
+        The result of the function call, or None if all retries failed
+    """
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            result = func(*args, **kwargs)
+            return result
+        except requests.exceptions.HTTPError as e:
+            # Handle rate limiting (429) and server errors (5xx)
+            if e.response is not None and e.response.status_code == 429:
+                delay = ITUNES_BASE_DELAY * (2 ** attempt)
+                logger.warning(f"[iTunes] Rate limited, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(delay)
+                last_error = e
+            elif e.response is not None and e.response.status_code >= 500:
+                delay = ITUNES_BASE_DELAY * (2 ** attempt)
+                logger.warning(f"[iTunes] Server error {e.response.status_code}, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(delay)
+                last_error = e
+            else:
+                raise  # Don't retry on client errors (4xx except 429)
+        except requests.exceptions.RequestException as e:
+            # Retry on connection errors
+            delay = ITUNES_BASE_DELAY * (2 ** attempt)
+            logger.warning(f"[iTunes] Connection error, retrying in {delay}s (attempt {attempt + 1}/{max_retries}): {e}")
+            time.sleep(delay)
+            last_error = e
+        except Exception as e:
+            # Don't retry on other exceptions
+            raise
+
+    if last_error:
+        logger.error(f"[iTunes] All {max_retries} retry attempts failed: {last_error}")
+    return None
+
 
 def clean_track_name_for_search(track_name):
     """
@@ -232,12 +284,21 @@ class ScanResult:
 class WatchlistScanner:
     """Service for scanning watched artists for new releases"""
     
-    def __init__(self, spotify_client: SpotifyClient, database_path: str = "database/music_library.db"):
-        self.spotify_client = spotify_client
+    def __init__(self, spotify_client: SpotifyClient = None, metadata_service=None, database_path: str = "database/music_library.db"):
+        # Support both old (spotify_client) and new (metadata_service) initialization
         self.database_path = database_path
         self._database = None
         self._wishlist_service = None
         self._matching_engine = None
+        
+        if metadata_service:
+            self._metadata_service = metadata_service
+            self.spotify_client = metadata_service.spotify  # For backward compatibility
+        elif spotify_client:
+            self.spotify_client = spotify_client
+            self._metadata_service = None  # Lazy load if needed
+        else:
+            raise ValueError("Must provide either spotify_client or metadata_service")
     
     @property
     def database(self):
@@ -260,6 +321,108 @@ class WatchlistScanner:
             self._matching_engine = MusicMatchingEngine()
         return self._matching_engine
     
+    @property
+    def metadata_service(self):
+        """Get or create MetadataService instance (lazy loading)"""
+        if self._metadata_service is None:
+            from core.metadata_service import MetadataService
+            self._metadata_service = MetadataService()
+        return self._metadata_service
+
+    def _get_active_client_and_artist_id(self, watchlist_artist: WatchlistArtist):
+        """
+        Get the appropriate client and artist ID based on active provider.
+        If iTunes ID is missing, searches by artist name to find and cache it.
+
+        Returns:
+            Tuple of (client, artist_id, provider_name) or (None, None, None) if no valid ID
+        """
+        provider = self.metadata_service.get_active_provider()
+
+        if provider == 'spotify':
+            if watchlist_artist.spotify_artist_id:
+                return (self.metadata_service.spotify, watchlist_artist.spotify_artist_id, 'spotify')
+            else:
+                logger.warning(f"No Spotify ID for {watchlist_artist.artist_name}, cannot scan with Spotify")
+                return (None, None, None)
+        else:  # itunes
+            if watchlist_artist.itunes_artist_id:
+                return (self.metadata_service.itunes, watchlist_artist.itunes_artist_id, 'itunes')
+            else:
+                # No iTunes ID stored - search by name and cache it
+                logger.info(f"No iTunes ID for {watchlist_artist.artist_name}, searching by name...")
+                try:
+                    itunes_client = self.metadata_service.itunes
+                    search_results = itunes_client.search_artists(watchlist_artist.artist_name, limit=1)
+                    if search_results and len(search_results) > 0:
+                        itunes_id = search_results[0].id
+                        logger.info(f"Found iTunes ID {itunes_id} for {watchlist_artist.artist_name}")
+                        # Cache the iTunes ID in the database for future use
+                        self.database.update_watchlist_artist_itunes_id(
+                            watchlist_artist.spotify_artist_id or str(watchlist_artist.id),
+                            itunes_id
+                        )
+                        return (itunes_client, itunes_id, 'itunes')
+                    else:
+                        logger.warning(f"Could not find {watchlist_artist.artist_name} on iTunes")
+                        return (None, None, None)
+                except Exception as e:
+                    logger.error(f"Error searching iTunes for {watchlist_artist.artist_name}: {e}")
+                    return (None, None, None)
+
+    def get_active_client_and_artist_id(self, watchlist_artist: WatchlistArtist):
+        """
+        Public wrapper for _get_active_client_and_artist_id.
+        Gets the appropriate client and artist ID based on active provider.
+
+        Returns:
+            Tuple of (client, artist_id, provider_name) or (None, None, None) if no valid ID
+        """
+        return self._get_active_client_and_artist_id(watchlist_artist)
+
+    def get_artist_image_url(self, watchlist_artist: WatchlistArtist) -> Optional[str]:
+        """
+        Get artist image URL using the active provider.
+
+        Returns:
+            Image URL string or None if not available
+        """
+        client, artist_id, provider = self._get_active_client_and_artist_id(watchlist_artist)
+        if not client or not artist_id:
+            return None
+
+        try:
+            artist_data = client.get_artist(artist_id)
+            if artist_data:
+                # Handle both Spotify and iTunes response formats
+                if 'images' in artist_data and artist_data['images']:
+                    return artist_data['images'][0].get('url')
+                elif 'image_url' in artist_data:
+                    return artist_data['image_url']
+        except Exception as e:
+            logger.debug(f"Could not fetch artist image for {watchlist_artist.artist_name}: {e}")
+
+        return None
+
+    def get_artist_discography_for_watchlist(self, watchlist_artist: WatchlistArtist, last_scan_timestamp: Optional[datetime] = None) -> Optional[List]:
+        """
+        Get artist's discography using the active provider, with proper ID resolution.
+        This is the provider-aware version of get_artist_discography.
+
+        Args:
+            watchlist_artist: WatchlistArtist object (has both spotify and itunes IDs)
+            last_scan_timestamp: Only return releases after this date (for incremental scans)
+
+        Returns:
+            List of albums or None on error
+        """
+        client, artist_id, provider = self._get_active_client_and_artist_id(watchlist_artist)
+        if not client or not artist_id:
+            logger.warning(f"No valid client/ID for {watchlist_artist.artist_name}")
+            return None
+
+        return self._get_artist_discography_with_client(client, artist_id, last_scan_timestamp)
+
     def scan_all_watchlist_artists(self) -> List[ScanResult]:
         """
         Scan artists in the watchlist for new releases.
@@ -326,6 +489,22 @@ class WatchlistScanner:
 
             watchlist_artists = artists_to_scan
             
+            # PROACTIVE ID BACKFILLING (cross-provider support)
+            # Before scanning, ensure all artists have IDs for the current provider
+            logger.info(f"DEBUG: About to check backfilling. _metadata_service = {getattr(self, '_metadata_service', 'ATTRIBUTE MISSING')}")
+            if self._metadata_service is not None:
+                try:
+                    active_provider = self._metadata_service.get_active_provider()
+                    logger.info(f"🔍 Checking for missing {active_provider} IDs in watchlist...")
+                    self._backfill_missing_ids(all_watchlist_artists, active_provider)
+                except Exception as backfill_error:
+                    logger.warning(f"Error during ID backfilling: {backfill_error}")
+                    import traceback
+                    traceback.print_exc()
+                    # Continue with scan even if backfilling fails
+            else:
+                logger.warning(f"⚠️ Backfilling SKIPPED - _metadata_service is None")
+            
             scan_results = []
             for i, artist in enumerate(watchlist_artists):
                 try:
@@ -381,13 +560,30 @@ class WatchlistScanner:
         """
         Scan a single artist for new releases.
         Only checks releases after the last scan timestamp.
+        Uses the active provider (Spotify if authenticated, otherwise iTunes).
         """
         try:
             logger.info(f"Scanning artist: {watchlist_artist.artist_name}")
 
-            # Update artist image from Spotify (cached for performance)
+            # Get the active client and artist ID based on provider
+            client, artist_id, provider = self._get_active_client_and_artist_id(watchlist_artist)
+
+            if client is None or artist_id is None:
+                return ScanResult(
+                    artist_name=watchlist_artist.artist_name,
+                    spotify_artist_id=watchlist_artist.spotify_artist_id or '',
+                    albums_checked=0,
+                    new_tracks_found=0,
+                    tracks_added_to_wishlist=0,
+                    success=False,
+                    error_message=f"No {self.metadata_service.get_active_provider()} ID available for this artist"
+                )
+
+            logger.info(f"Using {provider} provider for {watchlist_artist.artist_name} (ID: {artist_id})")
+
+            # Update artist image (cached for performance)
             try:
-                artist_data = self.spotify_client.get_artist(watchlist_artist.spotify_artist_id)
+                artist_data = client.get_artist(artist_id)
                 if artist_data and 'images' in artist_data and artist_data['images']:
                     # Get medium-sized image (usually the second one, or first if only one)
                     image_url = None
@@ -396,52 +592,59 @@ class WatchlistScanner:
                     else:
                         image_url = artist_data['images'][0]['url']
 
-                    # Update in database
+                    # Update in database (use spotify_artist_id as the key for consistency)
                     if image_url:
-                        self.database.update_watchlist_artist_image(watchlist_artist.spotify_artist_id, image_url)
+                        db_artist_id = watchlist_artist.spotify_artist_id or artist_id
+                        self.database.update_watchlist_artist_image(db_artist_id, image_url)
                         logger.info(f"Updated artist image for {watchlist_artist.artist_name}")
                     else:
                         logger.warning(f"No image URL found for {watchlist_artist.artist_name}")
                 else:
-                    logger.warning(f"No images in Spotify data for {watchlist_artist.artist_name}")
+                    logger.warning(f"No images in {provider} data for {watchlist_artist.artist_name}")
             except Exception as img_error:
                 logger.warning(f"Could not update artist image for {watchlist_artist.artist_name}: {img_error}")
 
-            # Get artist discography from Spotify
-            albums = self.get_artist_discography(watchlist_artist.spotify_artist_id, watchlist_artist.last_scan_timestamp)
+            # Get artist discography using active provider
+            albums = self._get_artist_discography_with_client(client, artist_id, watchlist_artist.last_scan_timestamp)
 
             if albums is None:
                 return ScanResult(
                     artist_name=watchlist_artist.artist_name,
-                    spotify_artist_id=watchlist_artist.spotify_artist_id,
+                    spotify_artist_id=watchlist_artist.spotify_artist_id or '',
                     albums_checked=0,
                     new_tracks_found=0,
                     tracks_added_to_wishlist=0,
                     success=False,
-                    error_message="Failed to get artist discography from Spotify"
+                    error_message=f"Failed to get artist discography from {provider}"
                 )
-            
+
             logger.info(f"Found {len(albums)} albums/singles to check for {watchlist_artist.artist_name}")
-            
+
             # Safety check: Limit number of albums to scan to prevent extremely long sessions
             MAX_ALBUMS_PER_ARTIST = 50  # Reasonable limit to prevent API abuse
             if len(albums) > MAX_ALBUMS_PER_ARTIST:
                 logger.warning(f"Artist {watchlist_artist.artist_name} has {len(albums)} albums, limiting to {MAX_ALBUMS_PER_ARTIST} most recent")
                 albums = albums[:MAX_ALBUMS_PER_ARTIST]  # Most recent albums are first
-            
+
             # Check each album/single for missing tracks
             new_tracks_found = 0
             tracks_added_to_wishlist = 0
-            
+
             for album_index, album in enumerate(albums):
                 try:
-                    # Get full album data with tracks
+                    # Get full album data
                     logger.info(f"Checking album {album_index + 1}/{len(albums)}: {album.name}")
-                    album_data = self.spotify_client.get_album(album.id)
-                    if not album_data or 'tracks' not in album_data or not album_data['tracks'].get('items'):
+                    album_data = client.get_album(album.id)
+                    if not album_data:
                         continue
-                    
-                    tracks = album_data['tracks']['items']
+
+                    # Get album tracks (works for both Spotify and iTunes)
+                    # Spotify's get_album() includes tracks, but we use get_album_tracks() for consistency
+                    tracks_data = client.get_album_tracks(album.id)
+                    if not tracks_data or not tracks_data.get('items'):
+                        continue
+
+                    tracks = tracks_data['items']
                     logger.debug(f"Checking album: {album_data.get('name', 'Unknown')} ({len(tracks)} tracks)")
 
                     # Check if user wants this type of release
@@ -473,14 +676,21 @@ class WatchlistScanner:
                     logger.warning(f"Error checking album {album.name}: {e}")
                     continue
             
-            # Update last scan timestamp for this artist
-            self.update_artist_scan_timestamp(watchlist_artist.spotify_artist_id)
+            # Update last scan timestamp for this artist (use spotify_artist_id as DB key for consistency)
+            db_artist_id = watchlist_artist.spotify_artist_id or artist_id
+            self.update_artist_scan_timestamp(db_artist_id)
 
             # Fetch and store similar artists for discovery feature (with caching to avoid over-polling)
+            # Similar artists are fetched from MusicMap (works with any source) and matched to both Spotify and iTunes
+            source_artist_id = watchlist_artist.spotify_artist_id or watchlist_artist.itunes_artist_id or str(watchlist_artist.id)
             try:
                 # Check if we have fresh similar artists cached (< 30 days old)
-                if self.database.has_fresh_similar_artists(watchlist_artist.spotify_artist_id, days_threshold=30):
-                    logger.info(f"Similar artists for {watchlist_artist.artist_name} are cached and fresh, skipping fetch")
+                # If Spotify is authenticated, also require Spotify IDs to be present
+                spotify_authenticated = self.spotify_client and self.spotify_client.is_spotify_authenticated()
+                if self.database.has_fresh_similar_artists(source_artist_id, days_threshold=30, require_spotify=spotify_authenticated):
+                    logger.info(f"Similar artists for {watchlist_artist.artist_name} are cached and fresh, skipping MusicMap fetch")
+                    # Even if cached, backfill missing iTunes IDs (seamless dual-source support)
+                    self._backfill_similar_artists_itunes_ids(source_artist_id)
                 else:
                     logger.info(f"Fetching similar artists for {watchlist_artist.artist_name}...")
                     self.update_similar_artists(watchlist_artist)
@@ -490,7 +700,7 @@ class WatchlistScanner:
 
             return ScanResult(
                 artist_name=watchlist_artist.artist_name,
-                spotify_artist_id=watchlist_artist.spotify_artist_id,
+                spotify_artist_id=watchlist_artist.spotify_artist_id or '',
                 albums_checked=len(albums),
                 new_tracks_found=new_tracks_found,
                 tracks_added_to_wishlist=tracks_added_to_wishlist,
@@ -501,7 +711,7 @@ class WatchlistScanner:
             logger.error(f"Error scanning artist {watchlist_artist.artist_name}: {e}")
             return ScanResult(
                 artist_name=watchlist_artist.artist_name,
-                spotify_artist_id=watchlist_artist.spotify_artist_id,
+                spotify_artist_id=watchlist_artist.spotify_artist_id or '',
                 albums_checked=0,
                 new_tracks_found=0,
                 tracks_added_to_wishlist=0,
@@ -559,6 +769,137 @@ class WatchlistScanner:
             logger.error(f"Error getting discography for artist {spotify_artist_id}: {e}")
             return None
 
+    def _get_artist_discography_with_client(self, client, artist_id: str, last_scan_timestamp: Optional[datetime] = None) -> Optional[List]:
+        """
+        Get artist's discography using the specified client, optionally filtered by release date.
+
+        Args:
+            client: The metadata client to use (spotify or itunes)
+            artist_id: Artist ID for the given client
+            last_scan_timestamp: Only return releases after this date (for incremental scans)
+                                If None, uses lookback period setting from database
+        """
+        try:
+            # Get all artist albums (albums + singles)
+            logger.debug(f"Fetching discography for artist {artist_id}")
+            albums = client.get_artist_albums(artist_id, album_type='album,single', limit=50)
+
+            if not albums:
+                logger.warning(f"No albums found for artist {artist_id}")
+                return []
+
+            # Add small delay after fetching artist discography to be extra safe
+            time.sleep(0.3)  # 300ms breathing room
+
+            # Determine cutoff date for filtering
+            cutoff_timestamp = last_scan_timestamp
+
+            # If no last scan timestamp, use lookback period setting
+            if cutoff_timestamp is None:
+                lookback_period = self._get_lookback_period_setting()
+                if lookback_period != 'all':
+                    # Convert period to days and create cutoff date (use UTC)
+                    days = int(lookback_period)
+                    cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=days)
+                    logger.info(f"Using lookback period: {lookback_period} days (cutoff: {cutoff_timestamp})")
+
+            # Filter by release date if we have a cutoff timestamp
+            if cutoff_timestamp:
+                filtered_albums = []
+                for album in albums:
+                    if self.is_album_after_timestamp(album, cutoff_timestamp):
+                        filtered_albums.append(album)
+
+                logger.info(f"Filtered {len(albums)} albums to {len(filtered_albums)} released after {cutoff_timestamp}")
+                return filtered_albums
+
+            # Return all albums if no cutoff (lookback_period = 'all')
+            return albums
+
+        except Exception as e:
+            logger.error(f"Error getting discography for artist {artist_id}: {e}")
+            return None
+
+    def _backfill_missing_ids(self, artists: List[WatchlistArtist], provider: str):
+        """
+        Proactively match ALL artists missing IDs for the current provider.
+        
+        Example: User has 50 artists with only Spotify IDs.
+        When iTunes becomes active, this matches ALL 50 to iTunes in one batch.
+        """
+        artists_to_match = []
+        
+        if provider == 'spotify':
+            # Find all artists missing Spotify IDs
+            artists_to_match = [a for a in artists if not a.spotify_artist_id and a.itunes_artist_id]
+        elif provider == 'itunes':
+            # Find all artists missing iTunes IDs
+            artists_to_match = [a for a in artists if not a.itunes_artist_id and a.spotify_artist_id]
+        
+        if not artists_to_match:
+            logger.info(f"✅ All artists already have {provider} IDs")
+            return
+        
+        logger.info(f"🔄 Backfilling {len(artists_to_match)} artists with {provider} IDs...")
+        
+        matched_count = 0
+        for artist in artists_to_match:
+            try:
+                if provider == 'spotify':
+                    new_id = self._match_to_spotify(artist.artist_name)
+                    if new_id:
+                        self.database.update_watchlist_spotify_id(artist.id, new_id)
+                        artist.spotify_artist_id = new_id  # Update in memory
+                        matched_count += 1
+                        logger.info(f"✅ Matched '{artist.artist_name}' to Spotify: {new_id}")
+                
+                elif provider == 'itunes':
+                    new_id = self._match_to_itunes(artist.artist_name)
+                    if new_id:
+                        self.database.update_watchlist_itunes_id(artist.id, new_id)
+                        artist.itunes_artist_id = new_id  # Update in memory
+                        matched_count += 1
+                        logger.info(f"✅ Matched '{artist.artist_name}' to iTunes: {new_id}")
+                
+                # Small delay to avoid API rate limits
+                time.sleep(0.3)
+                
+            except Exception as e:
+                logger.warning(f"Could not match '{artist.artist_name}' to {provider}: {e}")
+                continue
+        
+        logger.info(f"✅ Backfilled {matched_count}/{len(artists_to_match)} artists with {provider} IDs")
+
+    def _match_to_spotify(self, artist_name: str) -> Optional[str]:
+        """Match artist name to Spotify ID"""
+        try:
+            # Use metadata service if available, fallback to spotify_client
+            if hasattr(self, '_metadata_service') and self._metadata_service:
+                results = self._metadata_service.spotify.search_artists(artist_name, limit=1)
+            else:
+                results = self.spotify_client.search_artists(artist_name, limit=1)
+            
+            if results:
+                return results[0].id
+        except Exception as e:
+            logger.warning(f"Could not match {artist_name} to Spotify: {e}")
+        return None
+    
+    def _match_to_itunes(self, artist_name: str) -> Optional[str]:
+        """Match artist name to iTunes ID"""
+        try:
+            # Use metadata service's iTunes client
+            if hasattr(self, '_metadata_service') and self._metadata_service:
+                results = self._metadata_service.itunes.search_artists(artist_name, limit=1)
+                if results:
+                    return results[0].id
+            else:
+                # iTunes client not available without metadata service
+                logger.warning(f"Cannot match to iTunes - MetadataService not available")
+        except Exception as e:
+            logger.warning(f"Could not match {artist_name} to iTunes: {e}")
+        return None
+
     def _get_lookback_period_setting(self) -> str:
         """
         Get the discovery lookback period setting from database.
@@ -599,6 +940,10 @@ class WatchlistScanner:
                 album_date = datetime(int(year), int(month), 1, tzinfo=timezone.utc)
             elif len(release_date_str) == 10:  # Full date (e.g., "2023-10-15")
                 album_date = datetime.strptime(release_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            elif 'T' in release_date_str:  # ISO 8601 with time (e.g., "2017-12-08T08:00:00Z" from iTunes)
+                # Strip the time portion and parse just the date
+                date_part = release_date_str.split('T')[0]
+                album_date = datetime.strptime(date_part, "%Y-%m-%d").replace(tzinfo=timezone.utc)
             else:
                 logger.warning(f"Unknown release date format: {release_date_str}")
                 return True  # Include if we can't parse
@@ -885,14 +1230,14 @@ class WatchlistScanner:
 
     def _fetch_similar_artists_from_musicmap(self, artist_name: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
-        Fetch similar artists from MusicMap and match them to Spotify.
+        Fetch similar artists from MusicMap and match them to both Spotify and iTunes.
 
         Args:
             artist_name: The artist name to find similar artists for
             limit: Maximum number of similar artists to return (default: 20)
 
         Returns:
-            List of matched artist dictionaries with Spotify data
+            List of matched artist dictionaries with both Spotify and iTunes IDs when available
         """
         try:
             logger.info(f"Fetching similar artists from MusicMap for: {artist_name}")
@@ -936,52 +1281,102 @@ class WatchlistScanner:
 
             logger.info(f"Found {len(similar_artist_names)} similar artists from MusicMap")
 
-            # Get the searched artist's Spotify ID to exclude them
-            searched_artist_id = None
-            try:
-                searched_results = self.spotify_client.search_artists(artist_name, limit=1)
-                if searched_results and len(searched_results) > 0:
-                    searched_artist_id = searched_results[0].id
-            except Exception as e:
-                logger.warning(f"Could not get searched artist ID: {e}")
+            # Get iTunes client for matching
+            from core.itunes_client import iTunesClient
+            itunes_client = iTunesClient()
 
-            # Match each artist to Spotify
+            # Get the searched artist's IDs to exclude them
+            searched_spotify_id = None
+            searched_itunes_id = None
+            try:
+                # Try Spotify search
+                if self.spotify_client and self.spotify_client.is_spotify_authenticated():
+                    searched_results = self.spotify_client.search_artists(artist_name, limit=1)
+                    if searched_results and len(searched_results) > 0:
+                        searched_spotify_id = searched_results[0].id
+            except Exception as e:
+                logger.debug(f"Could not get searched artist Spotify ID: {e}")
+
+            try:
+                # Try iTunes search
+                itunes_results = itunes_client.search_artists(artist_name, limit=1)
+                if itunes_results and len(itunes_results) > 0:
+                    searched_itunes_id = itunes_results[0].id
+            except Exception as e:
+                logger.debug(f"Could not get searched artist iTunes ID: {e}")
+
+            # Match each artist to both Spotify and iTunes
             matched_artists = []
-            seen_artist_ids = set()  # Track seen artist IDs to prevent duplicates
+            seen_names = set()  # Track seen artist names to prevent duplicates
 
             for artist_name_to_match in similar_artist_names[:limit]:
                 try:
-                    # Search Spotify for the artist
-                    results = self.spotify_client.search_artists(artist_name_to_match, limit=1)
+                    # Skip if we've already matched this artist name
+                    name_lower = artist_name_to_match.lower().strip()
+                    if name_lower in seen_names:
+                        continue
 
-                    if results and len(results) > 0:
-                        spotify_artist = results[0]
+                    artist_data = {
+                        'name': artist_name_to_match,
+                        'spotify_id': None,
+                        'itunes_id': None,
+                        'image_url': None,
+                        'genres': [],
+                        'popularity': 0
+                    }
 
-                        # Skip if this is the searched artist
-                        if spotify_artist.id == searched_artist_id:
-                            continue
+                    # Try to match on Spotify
+                    if self.spotify_client and self.spotify_client.is_spotify_authenticated():
+                        try:
+                            spotify_results = self.spotify_client.search_artists(artist_name_to_match, limit=1)
+                            if spotify_results and len(spotify_results) > 0:
+                                spotify_artist = spotify_results[0]
+                                # Skip if this is the searched artist
+                                if spotify_artist.id != searched_spotify_id:
+                                    artist_data['spotify_id'] = spotify_artist.id
+                                    artist_data['name'] = spotify_artist.name  # Use canonical name
+                                    artist_data['image_url'] = spotify_artist.image_url if hasattr(spotify_artist, 'image_url') else None
+                                    artist_data['genres'] = spotify_artist.genres if hasattr(spotify_artist, 'genres') else []
+                                    artist_data['popularity'] = spotify_artist.popularity if hasattr(spotify_artist, 'popularity') else 0
+                        except Exception as e:
+                            logger.debug(f"Spotify match failed for {artist_name_to_match}: {e}")
 
-                        # Skip if we've already seen this artist ID (deduplication)
-                        if spotify_artist.id in seen_artist_ids:
-                            continue
+                    # Try to match on iTunes (with retry for rate limiting)
+                    try:
+                        itunes_results = itunes_api_call_with_retry(
+                            itunes_client.search_artists, artist_name_to_match, limit=1
+                        )
+                        if itunes_results and len(itunes_results) > 0:
+                            itunes_artist = itunes_results[0]
+                            # Skip if this is the searched artist
+                            if itunes_artist.id != searched_itunes_id:
+                                artist_data['itunes_id'] = itunes_artist.id
+                                # Use iTunes name if we don't have Spotify
+                                if not artist_data['spotify_id']:
+                                    artist_data['name'] = itunes_artist.name
+                                # Use iTunes genres if we don't have Spotify genres
+                                if not artist_data['genres'] and hasattr(itunes_artist, 'genres'):
+                                    artist_data['genres'] = itunes_artist.genres
+                        else:
+                            logger.info(f"  [iTunes] No match found for: {artist_name_to_match}")
+                    except Exception as e:
+                        logger.info(f"  [iTunes] Match failed for {artist_name_to_match}: {e}")
 
-                        seen_artist_ids.add(spotify_artist.id)
-
-                        matched_artists.append({
-                            'id': spotify_artist.id,
-                            'name': spotify_artist.name,
-                            'image_url': spotify_artist.image_url if hasattr(spotify_artist, 'image_url') else None,
-                            'genres': spotify_artist.genres if hasattr(spotify_artist, 'genres') else [],
-                            'popularity': spotify_artist.popularity if hasattr(spotify_artist, 'popularity') else 0
-                        })
-
-                        logger.debug(f"  Matched: {spotify_artist.name}")
+                    # Only add if we got at least one ID
+                    if artist_data['spotify_id'] or artist_data['itunes_id']:
+                        seen_names.add(name_lower)
+                        matched_artists.append(artist_data)
+                        logger.debug(f"  Matched: {artist_data['name']} (Spotify: {artist_data['spotify_id']}, iTunes: {artist_data['itunes_id']})")
 
                 except Exception as match_error:
                     logger.debug(f"Error matching {artist_name_to_match}: {match_error}")
                     continue
 
-            logger.info(f"Matched {len(matched_artists)} similar artists to Spotify")
+            # Log detailed matching statistics
+            itunes_matched = sum(1 for a in matched_artists if a.get('itunes_id'))
+            spotify_matched = sum(1 for a in matched_artists if a.get('spotify_id'))
+            both_matched = sum(1 for a in matched_artists if a.get('itunes_id') and a.get('spotify_id'))
+            logger.info(f"Matched {len(matched_artists)} similar artists - iTunes: {itunes_matched}, Spotify: {spotify_matched}, Both: {both_matched}")
             return matched_artists
 
         except requests.exceptions.RequestException as e:
@@ -991,16 +1386,64 @@ class WatchlistScanner:
             logger.error(f"Error fetching similar artists from MusicMap: {e}")
             return []
 
+    def _backfill_similar_artists_itunes_ids(self, source_artist_id: str) -> int:
+        """
+        Backfill missing iTunes IDs for cached similar artists.
+        This ensures seamless dual-source support without clearing cached data.
+
+        Args:
+            source_artist_id: The source artist ID to backfill similar artists for
+
+        Returns:
+            Number of similar artists updated with iTunes IDs
+        """
+        try:
+            # Get similar artists that are missing iTunes IDs
+            similar_artists = self.database.get_similar_artists_missing_itunes_ids(source_artist_id)
+
+            if not similar_artists:
+                return 0
+
+            logger.info(f"Backfilling iTunes IDs for {len(similar_artists)} similar artists")
+
+            # Get iTunes client
+            from core.itunes_client import iTunesClient
+            itunes_client = iTunesClient()
+
+            updated_count = 0
+            for similar_artist in similar_artists:
+                try:
+                    # Search iTunes by artist name
+                    itunes_results = itunes_client.search_artists(similar_artist.similar_artist_name, limit=1)
+                    if itunes_results and len(itunes_results) > 0:
+                        itunes_id = itunes_results[0].id
+                        # Update the similar artist with the iTunes ID
+                        if self.database.update_similar_artist_itunes_id(similar_artist.id, itunes_id):
+                            updated_count += 1
+                            logger.debug(f"  Backfilled iTunes ID {itunes_id} for {similar_artist.similar_artist_name}")
+                except Exception as e:
+                    logger.debug(f"  Could not backfill iTunes ID for {similar_artist.similar_artist_name}: {e}")
+                    continue
+
+            if updated_count > 0:
+                logger.info(f"Backfilled {updated_count} similar artists with iTunes IDs")
+
+            return updated_count
+
+        except Exception as e:
+            logger.error(f"Error backfilling similar artists iTunes IDs: {e}")
+            return 0
+
     def update_similar_artists(self, watchlist_artist: WatchlistArtist, limit: int = 10) -> bool:
         """
         Fetch and store similar artists for a watchlist artist.
         Called after each artist scan to build discovery pool.
-        Uses MusicMap to find similar artists and matches them to Spotify.
+        Uses MusicMap to find similar artists and matches them to both Spotify and iTunes.
         """
         try:
             logger.info(f"Fetching similar artists for {watchlist_artist.artist_name}")
 
-            # Get similar artists from MusicMap (returns list of artist dicts)
+            # Get similar artists from MusicMap (returns list of artist dicts with both IDs)
             similar_artists = self._fetch_similar_artists_from_musicmap(watchlist_artist.artist_name, limit=limit)
 
             if not similar_artists:
@@ -1009,21 +1452,25 @@ class WatchlistScanner:
 
             logger.info(f"Found {len(similar_artists)} similar artists for {watchlist_artist.artist_name}")
 
+            # Use consistent source artist ID (prefer Spotify, fall back to iTunes or internal ID)
+            source_artist_id = watchlist_artist.spotify_artist_id or watchlist_artist.itunes_artist_id or str(watchlist_artist.id)
+
             # Store each similar artist in database
             stored_count = 0
             for rank, similar_artist in enumerate(similar_artists, 1):
                 try:
-                    # similar_artist is a dict with 'id' and 'name' keys
+                    # similar_artist has 'name', 'spotify_id', and 'itunes_id' keys
                     success = self.database.add_or_update_similar_artist(
-                        source_artist_id=watchlist_artist.spotify_artist_id,
-                        similar_artist_spotify_id=similar_artist['id'],
+                        source_artist_id=source_artist_id,
                         similar_artist_name=similar_artist['name'],
+                        similar_artist_spotify_id=similar_artist.get('spotify_id'),
+                        similar_artist_itunes_id=similar_artist.get('itunes_id'),
                         similarity_rank=rank
                     )
 
                     if success:
                         stored_count += 1
-                        logger.debug(f"  #{rank}: {similar_artist['name']} (Spotify ID: {similar_artist['id']})")
+                        logger.debug(f"  #{rank}: {similar_artist['name']} (Spotify: {similar_artist.get('spotify_id')}, iTunes: {similar_artist.get('itunes_id')})")
 
                 except Exception as e:
                     logger.warning(f"Error storing similar artist {similar_artist.get('name', 'Unknown')}: {e}")
@@ -1041,8 +1488,8 @@ class WatchlistScanner:
         Populate discovery pool with tracks from top similar artists.
         Called after watchlist scan completes.
 
-        IMPROVED: Larger pool for better discovery (50 artists x 10 releases = ~500 releases)
-        - Checks if pool was updated in last 24 hours (prevents over-polling Spotify)
+        Supports both Spotify and iTunes sources - populates for whichever is available.
+        - Checks if pool was updated in last 24 hours (prevents over-polling)
         - Includes albums, singles, and EPs for comprehensive coverage
         - Appends to existing pool instead of replacing it
         - Cleans up tracks older than 365 days (maintains 1 year rolling window)
@@ -1051,18 +1498,42 @@ class WatchlistScanner:
             from datetime import datetime, timedelta
             import random
 
-            # Check if we should run (prevents over-polling Spotify)
-            if not self.database.should_populate_discovery_pool(hours_threshold=24):
-                logger.info("Discovery pool was populated recently (< 24 hours ago). Skipping to avoid over-polling Spotify.")
+            # Check if we should run discovery pool population (prevents over-polling)
+            skip_pool_population = not self.database.should_populate_discovery_pool(hours_threshold=24)
+
+            if skip_pool_population:
+                logger.info("Discovery pool was populated recently (< 24 hours ago). Skipping pool population.")
+                logger.info("But still refreshing recent albums cache and curated playlists...")
+                # Still run these even when skipping main pool population
+                self.cache_discovery_recent_albums()
+                self.curate_discovery_playlists()
                 return
 
             logger.info("Populating discovery pool from similar artists...")
+
+            # Determine which sources are available
+            spotify_available = self.spotify_client and self.spotify_client.is_spotify_authenticated()
+
+            # Import iTunes client for fallback
+            from core.itunes_client import iTunesClient
+            itunes_client = iTunesClient()
+            itunes_available = True  # iTunes is always available (no auth needed)
+
+            if not spotify_available and not itunes_available:
+                logger.warning("No music sources available to populate discovery pool")
+                return
+
+            logger.info(f"Sources available - Spotify: {spotify_available}, iTunes: {itunes_available}")
 
             # Get top similar artists across all watchlist (ordered by occurrence_count)
             similar_artists = self.database.get_top_similar_artists(limit=top_artists_limit)
 
             if not similar_artists:
-                logger.info("No similar artists found to populate discovery pool")
+                logger.info("No similar artists found to populate discovery pool from similar artists")
+                logger.info("But still caching recent albums from watchlist artists and curating playlists...")
+                # Still run these even without similar artists - they use watchlist artists
+                self.cache_discovery_recent_albums()
+                self.curate_discovery_playlists()
                 return
 
             logger.info(f"Processing {len(similar_artists)} top similar artists for discovery pool")
@@ -1073,129 +1544,195 @@ class WatchlistScanner:
                 try:
                     logger.info(f"[{artist_idx}/{len(similar_artists)}] Processing {similar_artist.similar_artist_name} (occurrence: {similar_artist.occurrence_count})")
 
-                    # Get artist's albums from Spotify
-                    all_albums = self.spotify_client.get_artist_albums(
-                        similar_artist.similar_artist_spotify_id,
-                        album_type='album,single,ep',  # Include albums, singles, and EPs for comprehensive discovery
-                        limit=50
-                    )
+                    # Build list of sources to process for this artist
+                    # iTunes is ALWAYS processed (baseline), Spotify is added if authenticated
+                    sources_to_process = []
 
-                    if not all_albums:
-                        logger.debug(f"No albums found for {similar_artist.similar_artist_name}")
+                    # Always add iTunes first (baseline source)
+                    itunes_id = similar_artist.similar_artist_itunes_id
+                    if not itunes_id:
+                        # On-the-fly lookup for missing iTunes ID (seamless provider switching)
+                        try:
+                            itunes_results = itunes_client.search_artists(similar_artist.similar_artist_name, limit=1)
+                            if itunes_results and len(itunes_results) > 0:
+                                itunes_id = itunes_results[0].id
+                                # Cache it for future use
+                                self.database.update_similar_artist_itunes_id(similar_artist.id, itunes_id)
+                                logger.debug(f"  Resolved iTunes ID {itunes_id} for {similar_artist.similar_artist_name}")
+                        except Exception as e:
+                            logger.debug(f"  Could not resolve iTunes ID for {similar_artist.similar_artist_name}: {e}")
+
+                    if itunes_id:
+                        sources_to_process.append(('itunes', itunes_id))
+
+                    # Add Spotify if authenticated and we have an ID
+                    if spotify_available and similar_artist.similar_artist_spotify_id:
+                        sources_to_process.append(('spotify', similar_artist.similar_artist_spotify_id))
+
+                    if not sources_to_process:
+                        logger.debug(f"No valid IDs for {similar_artist.similar_artist_name}, skipping")
                         continue
 
-                    # Fetch artist genres once for all tracks of this artist
-                    artist_genres = []
-                    try:
-                        artist_data = self.spotify_client.get_artist(similar_artist.similar_artist_spotify_id)
-                        if artist_data and 'genres' in artist_data:
-                            artist_genres = artist_data['genres']
-                    except Exception as e:
-                        logger.debug(f"Could not fetch genres for {similar_artist.similar_artist_name}: {e}")
+                    logger.debug(f"  Processing {len(sources_to_process)} source(s): {[s[0] for s in sources_to_process]}")
 
-                    # IMPROVED: Smart selection mixing albums, singles, and EPs
-                    # Prioritize recent releases and popular content
-
-                    # Separate by type for balanced selection
-                    albums = [a for a in all_albums if hasattr(a, 'album_type') and a.album_type == 'album']
-                    singles_eps = [a for a in all_albums if hasattr(a, 'album_type') and a.album_type in ['single', 'ep']]
-                    other = [a for a in all_albums if not hasattr(a, 'album_type')]
-
-                    # Select albums: latest releases + popular older content
-                    selected_albums = []
-
-                    # Always include 3 most recent releases (any type) - this captures new singles/EPs
-                    latest_releases = all_albums[:3]
-                    selected_albums.extend(latest_releases)
-
-                    # Add remaining slots with balanced mix
-                    remaining_slots = albums_per_artist - len(selected_albums)
-                    if remaining_slots > 0:
-                        # Combine remaining albums and singles
-                        remaining_content = all_albums[3:]
-
-                        if len(remaining_content) > remaining_slots:
-                            # Randomly select from remaining content
-                            random_selection = random.sample(remaining_content, remaining_slots)
-                            selected_albums.extend(random_selection)
-                        else:
-                            selected_albums.extend(remaining_content)
-
-                    logger.info(f"  Selected {len(selected_albums)} releases from {len(all_albums)} available (albums: {len(albums)}, singles/EPs: {len(singles_eps)})")
-
-                    # Process each selected album
-                    for album_idx, album in enumerate(selected_albums, 1):
+                    # Process each source for this artist
+                    for source, artist_id in sources_to_process:
                         try:
-                            # Get full album data with tracks
-                            album_data = self.spotify_client.get_album(album.id)
+                            # Get artist's albums from this source
+                            if source == 'spotify':
+                                all_albums = self.spotify_client.get_artist_albums(
+                                    artist_id,
+                                    album_type='album,single,ep',
+                                    limit=50
+                                )
+                            else:  # itunes
+                                all_albums = itunes_client.get_artist_albums(
+                                    artist_id,
+                                    album_type='album,single',
+                                    limit=50
+                                )
 
-                            if not album_data or 'tracks' not in album_data:
+                            if not all_albums:
+                                logger.debug(f"No albums found for {similar_artist.similar_artist_name} on {source}")
                                 continue
 
-                            tracks = album_data['tracks'].get('items', [])
-                            logger.debug(f"    Album {album_idx}: {album_data.get('name', 'Unknown')} ({len(tracks)} tracks)")
-
-                            # Determine if this is a new release (within last 30 days)
-                            is_new = False
+                            # Fetch artist genres for this source
+                            artist_genres = []
                             try:
-                                release_date_str = album_data.get('release_date', '')
-                                if release_date_str:
-                                    if len(release_date_str) == 10:  # Full date
-                                        release_date = datetime.strptime(release_date_str, "%Y-%m-%d")
-                                        days_old = (datetime.now() - release_date).days
-                                        is_new = days_old <= 30
-                            except:
-                                pass
+                                if source == 'spotify':
+                                    artist_data = self.spotify_client.get_artist(artist_id)
+                                    if artist_data and 'genres' in artist_data:
+                                        artist_genres = artist_data['genres']
+                                else:  # iTunes - genres from artist lookup
+                                    artist_data = itunes_client.get_artist(artist_id)
+                                    if artist_data and 'genres' in artist_data:
+                                        artist_genres = artist_data['genres']
+                            except Exception as e:
+                                logger.debug(f"Could not fetch genres for {similar_artist.similar_artist_name} on {source}: {e}")
 
-                            # Add each track to discovery pool
-                            for track in tracks:
+                            # IMPROVED: Smart selection mixing albums, singles, and EPs
+                            # Prioritize recent releases and popular content
+
+                            # Separate by type for balanced selection
+                            albums = [a for a in all_albums if hasattr(a, 'album_type') and a.album_type == 'album']
+                            singles_eps = [a for a in all_albums if hasattr(a, 'album_type') and a.album_type in ['single', 'ep']]
+                            other = [a for a in all_albums if not hasattr(a, 'album_type')]
+
+                            # Select albums: latest releases + popular older content
+                            selected_albums = []
+
+                            # Always include 3 most recent releases (any type) - this captures new singles/EPs
+                            latest_releases = all_albums[:3]
+                            selected_albums.extend(latest_releases)
+
+                            # Add remaining slots with balanced mix
+                            remaining_slots = albums_per_artist - len(selected_albums)
+                            if remaining_slots > 0:
+                                # Combine remaining albums and singles
+                                remaining_content = all_albums[3:]
+
+                                if len(remaining_content) > remaining_slots:
+                                    # Randomly select from remaining content
+                                    random_selection = random.sample(remaining_content, remaining_slots)
+                                    selected_albums.extend(random_selection)
+                                else:
+                                    selected_albums.extend(remaining_content)
+
+                            logger.info(f"  [{source}] Selected {len(selected_albums)} releases from {len(all_albums)} available (albums: {len(albums)}, singles/EPs: {len(singles_eps)})")
+
+                            # Process each selected album
+                            for album_idx, album in enumerate(selected_albums, 1):
                                 try:
-                                    # Enhance track object with full album data (including album_type)
-                                    enhanced_track = {
-                                        **track,
-                                        'album': {
-                                            'id': album_data['id'],
-                                            'name': album_data.get('name', 'Unknown Album'),
-                                            'images': album_data.get('images', []),
-                                            'release_date': album_data.get('release_date', ''),
-                                            'album_type': album_data.get('album_type', 'album'),
-                                            'total_tracks': album_data.get('total_tracks', 0)
-                                        }
-                                    }
+                                    # Get full album data with tracks from appropriate source
+                                    if source == 'spotify':
+                                        album_data = self.spotify_client.get_album(album.id)
+                                        if not album_data or 'tracks' not in album_data:
+                                            continue
+                                        tracks = album_data['tracks'].get('items', [])
+                                    else:  # itunes
+                                        album_data = itunes_client.get_album(album.id)
+                                        if not album_data:
+                                            continue
+                                        # iTunes get_album doesn't include tracks inline, need separate call
+                                        tracks_data = itunes_client.get_album_tracks(album.id)
+                                        tracks = tracks_data.get('items', []) if tracks_data else []
 
-                                    # Build track data for discovery pool
-                                    track_data = {
-                                        'spotify_track_id': track['id'],
-                                        'spotify_album_id': album_data['id'],
-                                        'spotify_artist_id': similar_artist.similar_artist_spotify_id,
-                                        'track_name': track['name'],
-                                        'artist_name': similar_artist.similar_artist_name,
-                                        'album_name': album_data.get('name', 'Unknown Album'),
-                                        'album_cover_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
-                                        'duration_ms': track.get('duration_ms', 0),
-                                        'popularity': album_data.get('popularity', 0),
-                                        'release_date': album_data.get('release_date', ''),
-                                        'is_new_release': is_new,
-                                        'track_data_json': enhanced_track,  # Store enhanced track with full album data
-                                        'artist_genres': artist_genres  # Add cached genres
-                                    }
+                                    logger.debug(f"    Album {album_idx}: {album_data.get('name', 'Unknown')} ({len(tracks)} tracks)")
 
-                                    # Add to discovery pool
-                                    if self.database.add_to_discovery_pool(track_data):
-                                        total_tracks_added += 1
+                                    # Determine if this is a new release (within last 30 days)
+                                    is_new = False
+                                    try:
+                                        release_date_str = album_data.get('release_date', '')
+                                        if release_date_str:
+                                            # Handle full date or year-only
+                                            if len(release_date_str) >= 10:
+                                                release_date = datetime.strptime(release_date_str[:10], "%Y-%m-%d")
+                                                days_old = (datetime.now() - release_date).days
+                                                is_new = days_old <= 30
+                                    except:
+                                        pass
 
-                                except Exception as track_error:
-                                    logger.debug(f"Error adding track to discovery pool: {track_error}")
+                                    # Add each track to discovery pool
+                                    for track in tracks:
+                                        try:
+                                            # Enhance track object with full album data (including album_type)
+                                            enhanced_track = {
+                                                **track,
+                                                'album': {
+                                                    'id': album_data['id'],
+                                                    'name': album_data.get('name', 'Unknown Album'),
+                                                    'images': album_data.get('images', []),
+                                                    'release_date': album_data.get('release_date', ''),
+                                                    'album_type': album_data.get('album_type', 'album'),
+                                                    'total_tracks': album_data.get('total_tracks', 0)
+                                                },
+                                                '_source': source
+                                            }
+
+                                            # Build track data for discovery pool with source-specific IDs
+                                            track_data = {
+                                                'track_name': track.get('name', 'Unknown Track'),
+                                                'artist_name': similar_artist.similar_artist_name,
+                                                'album_name': album_data.get('name', 'Unknown Album'),
+                                                'album_cover_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
+                                                'duration_ms': track.get('duration_ms', 0),
+                                                'popularity': album_data.get('popularity', 0),
+                                                'release_date': album_data.get('release_date', ''),
+                                                'is_new_release': is_new,
+                                                'track_data_json': enhanced_track,
+                                                'artist_genres': artist_genres
+                                            }
+
+                                            # Add source-specific IDs
+                                            if source == 'spotify':
+                                                track_data['spotify_track_id'] = track.get('id')
+                                                track_data['spotify_album_id'] = album_data.get('id')
+                                                track_data['spotify_artist_id'] = similar_artist.similar_artist_spotify_id
+                                            else:  # itunes
+                                                track_data['itunes_track_id'] = track.get('id')
+                                                track_data['itunes_album_id'] = album_data.get('id')
+                                                track_data['itunes_artist_id'] = similar_artist.similar_artist_itunes_id
+
+                                            # Add to discovery pool with source
+                                            if self.database.add_to_discovery_pool(track_data, source=source):
+                                                total_tracks_added += 1
+
+                                        except Exception as track_error:
+                                            logger.debug(f"Error adding track to discovery pool: {track_error}")
+                                            continue
+
+                                    # Small delay between albums
+                                    time.sleep(DELAY_BETWEEN_ALBUMS)
+
+                                except Exception as album_error:
+                                    logger.warning(f"Error processing album on {source}: {album_error}")
                                     continue
 
-                            # Small delay between albums
-                            time.sleep(DELAY_BETWEEN_ALBUMS)
-
-                        except Exception as album_error:
-                            logger.warning(f"Error processing album: {album_error}")
+                        except Exception as source_error:
+                            logger.warning(f"Error processing {source} source for {similar_artist.similar_artist_name}: {source_error}")
                             continue
 
-                    # Delay between artists
+                    # Delay between artists (after processing all sources for this artist)
                     if artist_idx < len(similar_artists):
                         time.sleep(DELAY_BETWEEN_ARTISTS)
 
@@ -1226,76 +1763,115 @@ class WatchlistScanner:
 
                     for db_idx, album_row in enumerate(db_albums, 1):
                         try:
-                            # Search for album on Spotify
-                            query = f"album:{album_row['title']} artist:{album_row['artist_name']}"
-                            search_results = self.spotify_client.search_albums(query, limit=1)
+                            query = f"{album_row['title']} {album_row['artist_name']}"
+                            album_data = None
+                            tracks = []
+                            db_source = None
+                            artist_id_for_genres = None
 
-                            if search_results and len(search_results) > 0:
-                                spotify_album = search_results[0]
-                                album_data = self.spotify_client.get_album(spotify_album.id)
+                            # Try Spotify first if available
+                            if spotify_available:
+                                try:
+                                    search_results = self.spotify_client.search_albums(f"album:{album_row['title']} artist:{album_row['artist_name']}", limit=1)
+                                    if search_results and len(search_results) > 0:
+                                        spotify_album = search_results[0]
+                                        album_data = self.spotify_client.get_album(spotify_album.id)
+                                        if album_data and 'tracks' in album_data:
+                                            tracks = album_data['tracks'].get('items', [])
+                                            db_source = 'spotify'
+                                            if album_data.get('artists'):
+                                                artist_id_for_genres = album_data['artists'][0]['id']
+                                except Exception as e:
+                                    logger.debug(f"Spotify search failed for {album_row['title']}: {e}")
 
-                                if album_data and 'tracks' in album_data:
-                                    tracks = album_data['tracks'].get('items', [])
+                            # Fall back to iTunes if Spotify didn't work
+                            if not tracks and itunes_available:
+                                try:
+                                    search_results = itunes_client.search_albums(query, limit=1)
+                                    if search_results and len(search_results) > 0:
+                                        itunes_album = search_results[0]
+                                        album_data = itunes_client.get_album(itunes_album.id)
+                                        if album_data:
+                                            tracks_data = itunes_client.get_album_tracks(itunes_album.id)
+                                            tracks = tracks_data.get('items', []) if tracks_data else []
+                                            db_source = 'itunes'
+                                            # For iTunes, artist ID is in the album data
+                                            if album_data.get('artists'):
+                                                artist_id_for_genres = album_data['artists'][0].get('id')
+                                except Exception as e:
+                                    logger.debug(f"iTunes search failed for {album_row['title']}: {e}")
 
-                                    # Fetch artist genres
-                                    artist_genres = []
-                                    try:
-                                        if album_data.get('artists') and len(album_data['artists']) > 0:
-                                            artist_id = album_data['artists'][0]['id']
-                                            artist_data = self.spotify_client.get_artist(artist_id)
-                                            if artist_data and 'genres' in artist_data:
-                                                artist_genres = artist_data['genres']
-                                    except Exception as e:
-                                        logger.debug(f"Could not fetch genres for album artist: {e}")
+                            if not tracks or not album_data:
+                                continue
 
-                                    # Check if new release
-                                    is_new = False
-                                    try:
-                                        release_date_str = album_data.get('release_date', '')
-                                        if release_date_str and len(release_date_str) == 10:
-                                            release_date = datetime.strptime(release_date_str, "%Y-%m-%d")
-                                            days_old = (datetime.now() - release_date).days
-                                            is_new = days_old <= 30
-                                    except:
-                                        pass
+                            # Fetch artist genres
+                            artist_genres = []
+                            try:
+                                if artist_id_for_genres:
+                                    if db_source == 'spotify':
+                                        artist_data = self.spotify_client.get_artist(artist_id_for_genres)
+                                    else:
+                                        artist_data = itunes_client.get_artist(artist_id_for_genres)
+                                    if artist_data and 'genres' in artist_data:
+                                        artist_genres = artist_data['genres']
+                            except Exception as e:
+                                logger.debug(f"Could not fetch genres for album artist: {e}")
 
-                                    for track in tracks:
-                                        try:
-                                            # Enhance track object with full album data (including album_type)
-                                            enhanced_track = {
-                                                **track,
-                                                'album': {
-                                                    'id': album_data['id'],
-                                                    'name': album_row['title'],
-                                                    'images': album_data.get('images', []),
-                                                    'release_date': album_data.get('release_date', ''),
-                                                    'album_type': album_data.get('album_type', 'album'),
-                                                    'total_tracks': album_data.get('total_tracks', 0)
-                                                }
-                                            }
+                            # Check if new release
+                            is_new = False
+                            try:
+                                release_date_str = album_data.get('release_date', '')
+                                if release_date_str and len(release_date_str) >= 10:
+                                    release_date = datetime.strptime(release_date_str[:10], "%Y-%m-%d")
+                                    days_old = (datetime.now() - release_date).days
+                                    is_new = days_old <= 30
+                            except:
+                                pass
 
-                                            track_data = {
-                                                'spotify_track_id': track['id'],
-                                                'spotify_album_id': album_data['id'],
-                                                'spotify_artist_id': album_data['artists'][0]['id'] if album_data.get('artists') else '',
-                                                'track_name': track['name'],
-                                                'artist_name': album_row['artist_name'],
-                                                'album_name': album_row['title'],
-                                                'album_cover_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
-                                                'duration_ms': track.get('duration_ms', 0),
-                                                'popularity': album_data.get('popularity', 0),
-                                                'release_date': album_data.get('release_date', ''),
-                                                'is_new_release': is_new,
-                                                'track_data_json': enhanced_track,  # Store enhanced track with full album data
-                                                'artist_genres': artist_genres
-                                            }
+                            for track in tracks:
+                                try:
+                                    enhanced_track = {
+                                        **track,
+                                        'album': {
+                                            'id': album_data['id'],
+                                            'name': album_row['title'],
+                                            'images': album_data.get('images', []),
+                                            'release_date': album_data.get('release_date', ''),
+                                            'album_type': album_data.get('album_type', 'album'),
+                                            'total_tracks': album_data.get('total_tracks', 0)
+                                        },
+                                        '_source': db_source
+                                    }
 
-                                            if self.database.add_to_discovery_pool(track_data):
-                                                total_tracks_added += 1
-                                        except Exception as track_error:
-                                            continue
+                                    track_data = {
+                                        'track_name': track.get('name', 'Unknown Track'),
+                                        'artist_name': album_row['artist_name'],
+                                        'album_name': album_row['title'],
+                                        'album_cover_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
+                                        'duration_ms': track.get('duration_ms', 0),
+                                        'popularity': album_data.get('popularity', 0),
+                                        'release_date': album_data.get('release_date', ''),
+                                        'is_new_release': is_new,
+                                        'track_data_json': enhanced_track,
+                                        'artist_genres': artist_genres
+                                    }
 
-                                time.sleep(DELAY_BETWEEN_ALBUMS)
+                                    # Add source-specific IDs
+                                    if db_source == 'spotify':
+                                        track_data['spotify_track_id'] = track.get('id')
+                                        track_data['spotify_album_id'] = album_data.get('id')
+                                        track_data['spotify_artist_id'] = artist_id_for_genres or ''
+                                    else:  # itunes
+                                        track_data['itunes_track_id'] = track.get('id')
+                                        track_data['itunes_album_id'] = album_data.get('id')
+                                        track_data['itunes_artist_id'] = artist_id_for_genres or ''
+
+                                    if self.database.add_to_discovery_pool(track_data, source=db_source):
+                                        total_tracks_added += 1
+                                except Exception as track_error:
+                                    continue
+
+                            time.sleep(DELAY_BETWEEN_ALBUMS)
                         except Exception as album_error:
                             logger.debug(f"Error processing database album {album_row['title']}: {album_error}")
                             continue
@@ -1486,112 +2062,173 @@ class WatchlistScanner:
         """
         Cache recent albums from watchlist and similar artists for discover page.
 
-        IMPROVED: Checks ALL watchlist artists + top similar artists with 14-day window
-        (like Spotify's Release Radar) for more comprehensive and fresh content.
+        Supports both Spotify and iTunes sources - iTunes is always processed (baseline),
+        Spotify is added when authenticated. Same pattern as discovery pool.
         """
         try:
             from datetime import datetime, timedelta
-            import random
 
             logger.info("Caching recent albums for discover page...")
 
             # Clear existing cache
             self.database.clear_discovery_recent_albums()
 
-            # IMPROVED: 30-day window for better content variety while staying recent
+            # 30-day window for recent releases
             cutoff_date = datetime.now() - timedelta(days=30)
-            cached_count = 0
+            cached_count = {'spotify': 0, 'itunes': 0}
             albums_checked = 0
 
-            # IMPROVED: Check ALL watchlist artists (not random 10)
-            watchlist_artists = self.database.get_watchlist_artists()
+            # Determine available sources
+            spotify_available = self.spotify_client and self.spotify_client.is_spotify_authenticated()
 
-            # IMPROVED: Check top 50 similar artists (not random 10 from 30)
+            # Get iTunes client
+            from core.itunes_client import iTunesClient
+            itunes_client = iTunesClient()
+
+            # Get artists to check
+            watchlist_artists = self.database.get_watchlist_artists()
             similar_artists = self.database.get_top_similar_artists(limit=50)
 
-            logger.info(f"Checking albums from {len(watchlist_artists)} watchlist + {len(similar_artists)} similar artists for recent releases (last 14 days)")
+            logger.info(f"Checking albums from {len(watchlist_artists)} watchlist + {len(similar_artists)} similar artists")
+            logger.info(f"Sources: Spotify={spotify_available}, iTunes=True")
+
+            def process_album(album, artist_name, artist_spotify_id, artist_itunes_id, source):
+                """Helper to process and cache a single album"""
+                nonlocal albums_checked
+                try:
+                    albums_checked += 1
+                    release_str = album.release_date if hasattr(album, 'release_date') else None
+
+                    if not release_str:
+                        return False
+
+                    # Handle iTunes ISO format (2017-12-08T08:00:00Z)
+                    if 'T' in release_str:
+                        release_str = release_str.split('T')[0]
+
+                    if len(release_str) >= 10:
+                        release_date = datetime.strptime(release_str[:10], "%Y-%m-%d")
+                        if release_date >= cutoff_date:
+                            album_data = {
+                                'album_spotify_id': album.id if source == 'spotify' else None,
+                                'album_itunes_id': album.id if source == 'itunes' else None,
+                                'album_name': album.name,
+                                'artist_name': artist_name,
+                                'artist_spotify_id': artist_spotify_id,
+                                'artist_itunes_id': artist_itunes_id,
+                                'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
+                                'release_date': release_str[:10],
+                                'album_type': album.album_type if hasattr(album, 'album_type') else 'album'
+                            }
+                            if self.database.cache_discovery_recent_album(album_data, source=source):
+                                cached_count[source] += 1
+                                logger.debug(f"Cached [{source}] recent album: {album.name} by {artist_name} ({release_str})")
+                                return True
+                except Exception as e:
+                    logger.debug(f"Error processing album: {e}")
+                return False
+
+            # Track resolution stats
+            itunes_resolved = 0
+            itunes_failed_resolve = 0
 
             # Process watchlist artists
             for artist in watchlist_artists:
-                try:
-                    albums = self.spotify_client.get_artist_albums(
-                        artist.spotify_artist_id,
-                        album_type='album,single,ep',  # Include EPs for comprehensive coverage
-                        limit=20
-                    )
+                # Always process iTunes (baseline)
+                itunes_id = artist.itunes_artist_id
+                if not itunes_id:
+                    # Try to resolve iTunes ID on-the-fly (with retry for rate limiting)
+                    try:
+                        results = itunes_api_call_with_retry(
+                            itunes_client.search_artists, artist.artist_name, limit=1
+                        )
+                        if results and len(results) > 0:
+                            itunes_id = results[0].id
+                            itunes_resolved += 1
+                            logger.debug(f"[iTunes] Resolved ID for {artist.artist_name}: {itunes_id}")
+                        else:
+                            itunes_failed_resolve += 1
+                            logger.info(f"[iTunes] No artist found for: {artist.artist_name}")
+                    except Exception as e:
+                        itunes_failed_resolve += 1
+                        logger.info(f"[iTunes] Failed to resolve {artist.artist_name}: {e}")
 
-                    for album in albums:
-                        try:
-                            albums_checked += 1
-                            if hasattr(album, 'release_date') and album.release_date:
-                                release_str = album.release_date
-                                if len(release_str) >= 10:
-                                    release_date = datetime.strptime(release_str[:10], "%Y-%m-%d")
-                                    if release_date >= cutoff_date:
-                                        album_data = {
-                                            'album_spotify_id': album.id,
-                                            'album_name': album.name,
-                                            'artist_name': artist.artist_name,
-                                            'artist_spotify_id': artist.spotify_artist_id,
-                                            'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
-                                            'release_date': release_str,
-                                            'album_type': album.album_type if hasattr(album, 'album_type') else 'album'
-                                        }
-                                        if self.database.cache_discovery_recent_album(album_data):
-                                            cached_count += 1
-                                            logger.debug(f"Cached recent album: {album.name} by {artist.artist_name} ({release_str})")
-                        except Exception as e:
-                            logger.warning(f"Error checking album for recent releases: {e}")
-                            continue
+                if itunes_id:
+                    try:
+                        albums = itunes_api_call_with_retry(
+                            itunes_client.get_artist_albums, itunes_id, album_type='album,single', limit=20
+                        )
+                        for album in albums or []:
+                            process_album(album, artist.artist_name, artist.spotify_artist_id, itunes_id, 'itunes')
+                    except Exception as e:
+                        logger.info(f"[iTunes] Error fetching albums for {artist.artist_name}: {e}")
 
-                except Exception as e:
-                    logger.debug(f"Error fetching albums for watchlist artist {artist.artist_name}: {e}")
-                    continue
+                # Process Spotify if authenticated
+                if spotify_available and artist.spotify_artist_id:
+                    try:
+                        albums = self.spotify_client.get_artist_albums(
+                            artist.spotify_artist_id,
+                            album_type='album,single,ep',
+                            limit=20
+                        )
+                        for album in albums or []:
+                            process_album(album, artist.artist_name, artist.spotify_artist_id, itunes_id, 'spotify')
+                    except Exception as e:
+                        logger.debug(f"Error fetching Spotify albums for {artist.artist_name}: {e}")
 
-                # Rate limiting between artists
                 time.sleep(DELAY_BETWEEN_ARTISTS)
 
             # Process similar artists
             for artist in similar_artists:
-                try:
-                    albums = self.spotify_client.get_artist_albums(
-                        artist.similar_artist_spotify_id,
-                        album_type='album,single,ep',  # Include EPs for comprehensive coverage
-                        limit=20
-                    )
+                # Always process iTunes (baseline)
+                itunes_id = artist.similar_artist_itunes_id
+                if not itunes_id:
+                    # Try to resolve iTunes ID on-the-fly (with retry for rate limiting)
+                    try:
+                        results = itunes_api_call_with_retry(
+                            itunes_client.search_artists, artist.similar_artist_name, limit=1
+                        )
+                        if results and len(results) > 0:
+                            itunes_id = results[0].id
+                            # Cache for future
+                            self.database.update_similar_artist_itunes_id(artist.id, itunes_id)
+                            itunes_resolved += 1
+                            logger.debug(f"[iTunes] Resolved ID for similar artist {artist.similar_artist_name}: {itunes_id}")
+                        else:
+                            itunes_failed_resolve += 1
+                            logger.info(f"[iTunes] No artist found for similar: {artist.similar_artist_name}")
+                    except Exception as e:
+                        itunes_failed_resolve += 1
+                        logger.info(f"[iTunes] Failed to resolve similar {artist.similar_artist_name}: {e}")
 
-                    for album in albums:
-                        try:
-                            albums_checked += 1
-                            if hasattr(album, 'release_date') and album.release_date:
-                                release_str = album.release_date
-                                if len(release_str) >= 10:
-                                    release_date = datetime.strptime(release_str[:10], "%Y-%m-%d")
-                                    if release_date >= cutoff_date:
-                                        album_data = {
-                                            'album_spotify_id': album.id,
-                                            'album_name': album.name,
-                                            'artist_name': artist.similar_artist_name,
-                                            'artist_spotify_id': artist.similar_artist_spotify_id,
-                                            'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
-                                            'release_date': release_str,
-                                            'album_type': album.album_type if hasattr(album, 'album_type') else 'album'
-                                        }
-                                        if self.database.cache_discovery_recent_album(album_data):
-                                            cached_count += 1
-                                            logger.debug(f"Cached recent album: {album.name} by {artist.similar_artist_name} ({release_str})")
-                        except Exception as e:
-                            logger.warning(f"Error checking album for recent releases: {e}")
-                            continue
+                if itunes_id:
+                    try:
+                        albums = itunes_api_call_with_retry(
+                            itunes_client.get_artist_albums, itunes_id, album_type='album,single', limit=20
+                        )
+                        for album in albums or []:
+                            process_album(album, artist.similar_artist_name, artist.similar_artist_spotify_id, itunes_id, 'itunes')
+                    except Exception as e:
+                        logger.info(f"[iTunes] Error fetching albums for similar {artist.similar_artist_name}: {e}")
 
-                except Exception as e:
-                    logger.debug(f"Error fetching albums for similar artist {artist.similar_artist_name}: {e}")
-                    continue
+                # Process Spotify if authenticated
+                if spotify_available and artist.similar_artist_spotify_id:
+                    try:
+                        albums = self.spotify_client.get_artist_albums(
+                            artist.similar_artist_spotify_id,
+                            album_type='album,single,ep',
+                            limit=20
+                        )
+                        for album in albums or []:
+                            process_album(album, artist.similar_artist_name, artist.similar_artist_spotify_id, itunes_id, 'spotify')
+                    except Exception as e:
+                        logger.debug(f"Error fetching Spotify albums for {artist.similar_artist_name}: {e}")
 
-                # Rate limiting between artists
                 time.sleep(DELAY_BETWEEN_ARTISTS)
 
-            logger.info(f"Cached {cached_count} recent albums from {albums_checked} albums checked (cutoff: {cutoff_date.strftime('%Y-%m-%d')})")
+            total_cached = cached_count['spotify'] + cached_count['itunes']
+            logger.info(f"Cached {total_cached} recent albums (Spotify: {cached_count['spotify']}, iTunes: {cached_count['itunes']}) from {albums_checked} albums checked")
+            logger.info(f"[iTunes] ID resolution stats: {itunes_resolved} resolved, {itunes_failed_resolve} failed")
 
         except Exception as e:
             logger.error(f"Error caching discovery recent albums: {e}")
@@ -1602,45 +2239,72 @@ class WatchlistScanner:
         """
         Curate consistent playlist selections that stay the same until next discovery pool update.
 
-        IMPROVED: Spotify-quality curation with popularity scoring and smart algorithms
+        Supports both Spotify and iTunes sources - creates separate curated playlists for each.
         - Release Radar: Prioritizes freshness + popularity from recent releases
         - Discovery Weekly: Balanced mix of popular picks, deep cuts, and mid-tier tracks
         """
         try:
             import random
             from datetime import datetime
+            from core.itunes_client import iTunesClient
 
-            logger.info("Curating Release Radar playlist...")
+            logger.info("Curating discovery playlists...")
 
-            # 1. Curate Release Radar - 50 tracks from recent albums
-            # IMPROVED: Get more albums (50 instead of 20) for better selection
-            recent_albums = self.database.get_discovery_recent_albums(limit=50)
-            release_radar_tracks = []
+            # Determine available sources
+            spotify_available = self.spotify_client and self.spotify_client.is_spotify_authenticated()
+            itunes_client = iTunesClient()
 
-            if recent_albums:
-                # Group albums by artist for variety
-                albums_by_artist = {}
-                for album in recent_albums:
-                    artist = album['artist_name']
-                    if artist not in albums_by_artist:
-                        albums_by_artist[artist] = []
-                    albums_by_artist[artist].append(album)
+            # Process each available source
+            sources_to_process = ['itunes']  # iTunes always available
+            if spotify_available:
+                sources_to_process.append('spotify')
 
-                # Get tracks from each album, grouped by artist
-                # IMPROVED: Add popularity scoring for smarter selection
-                artist_tracks = {}
-                artist_track_data = {}  # Store full track data with scores
+            logger.info(f"Curating playlists for sources: {sources_to_process}")
 
-                for artist, albums in albums_by_artist.items():
-                    artist_tracks[artist] = []
-                    artist_track_data[artist] = []
+            for source in sources_to_process:
+                logger.info(f"Curating Release Radar for {source}...")
 
-                    for album in albums:
-                        try:
-                            album_data = self.spotify_client.get_album(album['album_spotify_id'])
-                            if album_data and 'tracks' in album_data:
+                # 1. Curate Release Radar - 50 tracks from recent albums
+                recent_albums = self.database.get_discovery_recent_albums(limit=50, source=source)
+                release_radar_tracks = []
+
+                if not recent_albums:
+                    logger.warning(f"[{source.upper()}] No recent albums found for Release Radar - check cache_discovery_recent_albums()")
+
+                if recent_albums:
+                    # Group albums by artist for variety
+                    albums_by_artist = {}
+                    for album in recent_albums:
+                        artist = album['artist_name']
+                        if artist not in albums_by_artist:
+                            albums_by_artist[artist] = []
+                        albums_by_artist[artist].append(album)
+
+                    # Get tracks from each album
+                    artist_track_data = {}
+
+                    for artist, albums in albums_by_artist.items():
+                        artist_track_data[artist] = []
+
+                        for album in albums:
+                            try:
+                                # Get album data from appropriate source
+                                album_id = album.get('album_spotify_id') if source == 'spotify' else album.get('album_itunes_id')
+                                if not album_id:
+                                    continue
+
+                                if source == 'spotify':
+                                    album_data = self.spotify_client.get_album(album_id)
+                                else:
+                                    album_data = itunes_api_call_with_retry(
+                                        itunes_client.get_album, album_id
+                                    )
+
+                                if not album_data or 'tracks' not in album_data:
+                                    continue
+
                                 # Calculate days since release for recency score
-                                days_old = 14  # Default
+                                days_old = 14
                                 try:
                                     release_date_str = album.get('release_date', '')
                                     if release_date_str and len(release_date_str) >= 10:
@@ -1649,166 +2313,143 @@ class WatchlistScanner:
                                 except:
                                     pass
 
-                                for track in album_data['tracks']['items']:
-                                    track_id = track['id']
+                                for track in album_data['tracks'].get('items', []):
+                                    track_id = track.get('id')
+                                    if not track_id:
+                                        continue
 
-                                    # Calculate track score (Spotify-style)
-                                    # Score factors: recency (50%), popularity (30%), singles bonus (20%)
-                                    recency_score = max(0, 100 - (days_old * 7))  # Newer = higher
+                                    # Calculate track score
+                                    recency_score = max(0, 100 - (days_old * 7))
                                     popularity_score = track.get('popularity', album_data.get('popularity', 50))
                                     is_single = album.get('album_type', 'album') == 'single'
                                     single_bonus = 20 if is_single else 0
-
                                     total_score = (recency_score * 0.5) + (popularity_score * 0.3) + single_bonus
 
-                                    artist_tracks[artist].append(track_id)
-
-                                    # Store full track data with score for sorting
-                                    # Only include album metadata (not full album with all tracks)
                                     full_track = {
                                         'id': track_id,
-                                        'name': track['name'],
-                                        'artists': track.get('artists', []),
+                                        'name': track.get('name', 'Unknown'),
+                                        'artists': track.get('artists', [{'name': artist}]),
                                         'album': {
-                                            'id': album_data['id'],
+                                            'id': album_data.get('id', ''),
                                             'name': album_data.get('name', 'Unknown Album'),
                                             'images': album_data.get('images', []),
                                             'release_date': album_data.get('release_date', ''),
                                             'album_type': album_data.get('album_type', 'album'),
-                                            'total_tracks': album_data.get('total_tracks', 0)
                                         },
                                         'duration_ms': track.get('duration_ms', 0),
                                         'popularity': popularity_score,
                                         'score': total_score,
-                                        'days_old': days_old
+                                        'source': source
                                     }
                                     artist_track_data[artist].append(full_track)
 
+                            except Exception as e:
+                                logger.debug(f"Error processing album for {artist}: {e}")
+                                continue
+
+                    # Balance by artist - max 6 tracks per artist
+                    balanced_track_data = []
+                    for artist, tracks in artist_track_data.items():
+                        sorted_tracks = sorted(tracks, key=lambda t: t['score'], reverse=True)
+                        balanced_track_data.extend(sorted_tracks[:6])
+
+                    # Sort by score and shuffle
+                    balanced_track_data.sort(key=lambda t: t['score'], reverse=True)
+                    top_tracks = balanced_track_data[:75]
+                    random.shuffle(top_tracks)
+
+                    # Take final 50 tracks
+                    release_radar_tracks = [track['id'] for track in top_tracks[:50]]
+
+                    # Add tracks to discovery pool
+                    for track_data in top_tracks[:50]:
+                        try:
+                            artist_name = track_data['artists'][0].get('name', 'Unknown') if track_data['artists'] else 'Unknown'
+                            formatted_track = {
+                                'track_name': track_data['name'],
+                                'artist_name': artist_name,
+                                'album_name': track_data['album'].get('name', 'Unknown'),
+                                'album_cover_url': track_data['album']['images'][0]['url'] if track_data['album'].get('images') else None,
+                                'duration_ms': track_data.get('duration_ms', 0),
+                                'popularity': track_data.get('popularity', 0),
+                                'release_date': track_data['album'].get('release_date', ''),
+                                'is_new_release': True,
+                                'track_data_json': track_data,
+                                'artist_genres': []
+                            }
+                            if source == 'spotify':
+                                formatted_track['spotify_track_id'] = track_data['id']
+                                formatted_track['spotify_album_id'] = track_data['album'].get('id', '')
+                            else:
+                                formatted_track['itunes_track_id'] = track_data['id']
+                                formatted_track['itunes_album_id'] = track_data['album'].get('id', '')
+
+                            self.database.add_to_discovery_pool(formatted_track, source=source)
                         except Exception as e:
                             continue
 
-                # IMPROVED: Balance by artist with popularity weighting - max 6 tracks per artist
-                balanced_tracks = []
-                balanced_track_data = []
+                # Save with source suffix for multi-source support
+                playlist_key = f'release_radar_{source}'
+                self.database.save_curated_playlist(playlist_key, release_radar_tracks)
+                logger.info(f"Release Radar ({source}) curated: {len(release_radar_tracks)} tracks")
 
-                for artist, track_data in artist_track_data.items():
-                    # Sort by score and take top 6 (not random)
-                    sorted_tracks = sorted(track_data, key=lambda t: t['score'], reverse=True)
-                    selected_tracks = sorted_tracks[:6]
+                # 2. Curate Discovery Weekly - 50 tracks from discovery pool
+                logger.info(f"Curating Discovery Weekly for {source}...")
+                discovery_tracks = self.database.get_discovery_pool_tracks(limit=2000, new_releases_only=False, source=source)
 
-                    # Add selected tracks
+                if not discovery_tracks:
+                    logger.warning(f"[{source.upper()}] No discovery pool tracks found for Discovery Weekly - check populate_discovery_pool()")
+
+                discovery_weekly_tracks = []
+                if discovery_tracks:
+                    # Separate tracks by popularity tiers
+                    popular_picks = []
+                    balanced_mix = []
+                    deep_cuts = []
+
+                    for track in discovery_tracks:
+                        popularity = track.popularity if hasattr(track, 'popularity') else 50
+                        if popularity >= 60:
+                            popular_picks.append(track)
+                        elif popularity >= 40:
+                            balanced_mix.append(track)
+                        else:
+                            deep_cuts.append(track)
+
+                    logger.info(f"Discovery pool ({source}): {len(popular_picks)} popular, {len(balanced_mix)} mid-tier, {len(deep_cuts)} deep cuts")
+
+                    # Balanced selection
+                    random.shuffle(popular_picks)
+                    random.shuffle(balanced_mix)
+                    random.shuffle(deep_cuts)
+
+                    selected_tracks = []
+                    selected_tracks.extend(popular_picks[:20])
+                    selected_tracks.extend(balanced_mix[:20])
+                    selected_tracks.extend(deep_cuts[:10])
+                    random.shuffle(selected_tracks)
+
+                    # Extract appropriate track IDs based on source
                     for track in selected_tracks:
-                        balanced_tracks.append(track['id'])
-                        balanced_track_data.append(track)
+                        if source == 'spotify' and track.spotify_track_id:
+                            discovery_weekly_tracks.append(track.spotify_track_id)
+                        elif source == 'itunes' and track.itunes_track_id:
+                            discovery_weekly_tracks.append(track.itunes_track_id)
 
-                # IMPROVED: Sort by score first, then shuffle for variety
-                balanced_track_data.sort(key=lambda t: t['score'], reverse=True)
+                playlist_key = f'discovery_weekly_{source}'
+                self.database.save_curated_playlist(playlist_key, discovery_weekly_tracks)
+                logger.info(f"Discovery Weekly ({source}) curated: {len(discovery_weekly_tracks)} tracks")
 
-                # Take top 75, then shuffle for final randomization (prevents album grouping)
-                top_tracks = balanced_track_data[:75]
-                random.shuffle(top_tracks)
+            # Also save without suffix for backward compatibility (use active source)
+            active_source = 'spotify' if spotify_available else 'itunes'
+            release_radar_key = f'release_radar_{active_source}'
+            discovery_weekly_key = f'discovery_weekly_{active_source}'
 
-                # Take final 50 tracks
-                release_radar_tracks = [track['id'] for track in top_tracks[:50]]
-                release_radar_track_data = top_tracks[:50]
-
-                # Add Release Radar tracks to discovery pool so they're available for fast lookup
-                logger.info(f"Adding {len(release_radar_track_data)} Release Radar tracks to discovery pool...")
-
-                # Cache genres by artist_id to avoid duplicate API calls
-                artist_genres_cache = {}
-
-                for track_data in release_radar_track_data:
-                    try:
-                        # Fetch artist genres (with caching)
-                        artist_genres = []
-                        if track_data['artists'] and len(track_data['artists']) > 0:
-                            artist_id = track_data['artists'][0]['id']
-
-                            if artist_id in artist_genres_cache:
-                                artist_genres = artist_genres_cache[artist_id]
-                            else:
-                                try:
-                                    artist_data = self.spotify_client.get_artist(artist_id)
-                                    if artist_data and 'genres' in artist_data:
-                                        artist_genres = artist_data['genres']
-                                        artist_genres_cache[artist_id] = artist_genres
-                                except Exception as e:
-                                    logger.debug(f"Could not fetch genres for artist {artist_id}: {e}")
-
-                        # Format track data for discovery pool (expects specific structure)
-                        formatted_track = {
-                            'spotify_track_id': track_data['id'],
-                            'spotify_album_id': track_data['album'].get('id', ''),
-                            'spotify_artist_id': track_data['artists'][0]['id'] if track_data['artists'] else '',
-                            'track_name': track_data['name'],
-                            'artist_name': track_data['artists'][0]['name'] if track_data['artists'] else 'Unknown',
-                            'album_name': track_data['album'].get('name', 'Unknown'),
-                            'album_cover_url': track_data['album']['images'][0]['url'] if track_data['album'].get('images') else None,
-                            'duration_ms': track_data.get('duration_ms', 0),
-                            'popularity': track_data.get('popularity', 0),
-                            'release_date': track_data['album'].get('release_date', ''),
-                            'is_new_release': True,
-                            'track_data_json': track_data,
-                            'artist_genres': artist_genres
-                        }
-                        self.database.add_to_discovery_pool(formatted_track)
-                    except Exception as e:
-                        logger.warning(f"Failed to add track {track_data['name']} to discovery pool: {e}")
-                        continue
-
-            self.database.save_curated_playlist('release_radar', release_radar_tracks)
-            logger.info(f"Release Radar curated: {len(release_radar_tracks)} tracks")
-
-            # 2. Curate Discovery Weekly - 50 tracks from full discovery pool
-            # IMPROVED: Spotify-style algorithm with balanced mix of popular, mid-tier, and deep cuts
-            logger.info("Curating Discovery Weekly playlist...")
-            discovery_tracks = self.database.get_discovery_pool_tracks(limit=2000, new_releases_only=False)
-
-            discovery_weekly_tracks = []
-            if discovery_tracks:
-                # Separate tracks by popularity tiers for balanced selection
-                popular_picks = []    # popularity >= 60
-                balanced_mix = []     # 40 <= popularity < 60
-                deep_cuts = []        # popularity < 40
-
-                for track in discovery_tracks:
-                    popularity = track.popularity if hasattr(track, 'popularity') else 50
-
-                    if popularity >= 60:
-                        popular_picks.append(track)
-                    elif popularity >= 40:
-                        balanced_mix.append(track)
-                    else:
-                        deep_cuts.append(track)
-
-                logger.info(f"Discovery pool breakdown: {len(popular_picks)} popular, {len(balanced_mix)} mid-tier, {len(deep_cuts)} deep cuts")
-
-                # Create balanced playlist (Spotify-style distribution)
-                # 40% popular picks (20 tracks)
-                # 40% balanced mid-tier (20 tracks)
-                # 20% deep cuts (10 tracks)
-                selected_tracks = []
-
-                # Randomly select from each tier
-                random.shuffle(popular_picks)
-                random.shuffle(balanced_mix)
-                random.shuffle(deep_cuts)
-
-                selected_tracks.extend(popular_picks[:20])   # 20 popular
-                selected_tracks.extend(balanced_mix[:20])    # 20 mid-tier
-                selected_tracks.extend(deep_cuts[:10])       # 10 deep cuts
-
-                # Shuffle final selection for variety
-                random.shuffle(selected_tracks)
-
-                # Extract track IDs
-                discovery_weekly_tracks = [track.spotify_track_id for track in selected_tracks]
-
-                logger.info(f"Discovery Weekly composition: {len(popular_picks[:20])} popular + {len(balanced_mix[:20])} mid-tier + {len(deep_cuts[:10])} deep cuts = {len(discovery_weekly_tracks)} total")
-
-            self.database.save_curated_playlist('discovery_weekly', discovery_weekly_tracks)
-            logger.info(f"Discovery Weekly curated: {len(discovery_weekly_tracks)} tracks")
+            # Copy active source playlists to non-suffixed keys
+            release_radar_ids = self.database.get_curated_playlist(release_radar_key) or []
+            discovery_weekly_ids = self.database.get_curated_playlist(discovery_weekly_key) or []
+            self.database.save_curated_playlist('release_radar', release_radar_ids)
+            self.database.save_curated_playlist('discovery_weekly', discovery_weekly_ids)
 
             logger.info("Playlist curation complete")
 

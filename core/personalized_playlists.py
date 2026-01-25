@@ -100,6 +100,43 @@ class PersonalizedPlaylistsService:
         self.database = database
         self.spotify_client = spotify_client
 
+    def _get_active_source(self) -> str:
+        """
+        Determine which music source is active for discovery.
+        Returns 'spotify' if Spotify is authenticated, 'itunes' otherwise.
+        """
+        if self.spotify_client and hasattr(self.spotify_client, 'is_spotify_authenticated'):
+            if self.spotify_client.is_spotify_authenticated():
+                return 'spotify'
+        return 'itunes'
+
+    def _build_track_dict(self, row, source: str) -> Dict:
+        """Build a standardized track dictionary from a database row."""
+        # Convert sqlite3.Row to dict if needed (Row objects don't support .get())
+        if hasattr(row, 'keys'):
+            row = dict(row)
+
+        track_data = row.get('track_data_json')
+        if isinstance(track_data, str):
+            try:
+                track_data = json.loads(track_data)
+            except:
+                track_data = None
+
+        return {
+            'track_id': row.get('spotify_track_id') or row.get('itunes_track_id'),
+            'spotify_track_id': row.get('spotify_track_id'),
+            'itunes_track_id': row.get('itunes_track_id'),
+            'track_name': row.get('track_name', 'Unknown'),
+            'artist_name': row.get('artist_name', 'Unknown'),
+            'album_name': row.get('album_name', 'Unknown'),
+            'album_cover_url': row.get('album_cover_url'),
+            'duration_ms': row.get('duration_ms', 0),
+            'popularity': row.get('popularity', 0),
+            'track_data_json': track_data,
+            'source': source
+        }
+
     @staticmethod
     def get_parent_genre(spotify_genre: str) -> str:
         """
@@ -166,25 +203,30 @@ class PersonalizedPlaylistsService:
             logger.error(f"Error getting forgotten favorites: {e}")
             return []
 
-    def get_decade_playlist(self, decade: int, limit: int = 100) -> List[Dict]:
+    def get_decade_playlist(self, decade: int, limit: int = 100, source: str = None) -> List[Dict]:
         """
         Get tracks from a specific decade from discovery pool with diversity filtering.
 
         Args:
             decade: Decade year (e.g., 2020 for 2020s, 2010 for 2010s)
             limit: Maximum tracks to return
+            source: Optional source filter ('spotify' or 'itunes'), auto-detects if not provided
         """
         try:
             start_year = decade
             end_year = decade + 9
 
+            # Determine active source if not specified
+            active_source = source or self._get_active_source()
+
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Query discovery_pool - get 10x more for diversity filtering
+                # Query discovery_pool - get 10x more for diversity filtering, filtered by source
                 cursor.execute("""
                     SELECT
                         spotify_track_id,
+                        itunes_track_id,
                         track_name,
                         artist_name,
                         album_name,
@@ -192,26 +234,20 @@ class PersonalizedPlaylistsService:
                         duration_ms,
                         popularity,
                         release_date,
-                        track_data_json
+                        track_data_json,
+                        source
                     FROM discovery_pool
                     WHERE release_date IS NOT NULL
                       AND CAST(SUBSTR(release_date, 1, 4) AS INTEGER) BETWEEN ? AND ?
+                      AND source = ?
                     ORDER BY RANDOM()
                     LIMIT ?
-                """, (start_year, end_year, limit * 10))
+                """, (start_year, end_year, active_source, limit * 10))
 
                 rows = cursor.fetchall()
                 all_tracks = []
                 for row in rows:
-                    track_dict = dict(row)
-                    # Parse track_data_json if available
-                    if track_dict.get('track_data_json'):
-                        try:
-                            import json
-                            track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
-                        except:
-                            pass
-                    all_tracks.append(track_dict)
+                    all_tracks.append(self._build_track_dict(row, active_source))
 
                 if not all_tracks:
                     logger.warning(f"No tracks found for {decade}s")
@@ -268,22 +304,25 @@ class PersonalizedPlaylistsService:
             logger.error(f"Error getting decade playlist for {decade}s: {e}")
             return []
 
-    def get_available_genres(self) -> List[Dict]:
+    def get_available_genres(self, source: str = None) -> List[Dict]:
         """
         Get list of consolidated parent genres with track counts from discovery pool.
         Uses cached artist genres from database (populated during discovery scan).
         Consolidates specific Spotify genres into broader parent categories.
         """
         try:
+            # Determine active source if not specified
+            active_source = source or self._get_active_source()
+
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Get all tracks with genres from discovery pool
+                # Get all tracks with genres from discovery pool, filtered by source
                 cursor.execute("""
                     SELECT artist_genres
                     FROM discovery_pool
-                    WHERE artist_genres IS NOT NULL
-                """)
+                    WHERE artist_genres IS NOT NULL AND source = ?
+                """, (active_source,))
                 rows = cursor.fetchall()
 
                 if not rows:
@@ -327,20 +366,24 @@ class PersonalizedPlaylistsService:
             logger.error(f"Error getting available genres: {e}")
             return []
 
-    def get_genre_playlist(self, genre: str, limit: int = 50) -> List[Dict]:
+    def get_genre_playlist(self, genre: str, limit: int = 50, source: str = None) -> List[Dict]:
         """
         Get tracks from a specific genre with diversity filtering.
         Uses cached artist genres from database (populated during discovery scan).
         Supports both parent genres (e.g., "Electronic/Dance") and specific genres (e.g., "house").
         """
         try:
+            # Determine active source if not specified
+            active_source = source or self._get_active_source()
+
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Get all tracks with genres from discovery pool
+                # Get all tracks with genres from discovery pool, filtered by source
                 cursor.execute("""
                     SELECT
                         spotify_track_id,
+                        itunes_track_id,
                         track_name,
                         artist_name,
                         album_name,
@@ -348,10 +391,12 @@ class PersonalizedPlaylistsService:
                         duration_ms,
                         popularity,
                         artist_genres,
-                        track_data_json
+                        track_data_json,
+                        source
                     FROM discovery_pool
                     WHERE artist_genres IS NOT NULL
-                """)
+                      AND source = ?
+                """, (active_source,))
                 rows = cursor.fetchall()
 
                 # Determine if this is a parent genre or specific genre
@@ -372,7 +417,7 @@ class PersonalizedPlaylistsService:
 
                 for row in rows:
                     try:
-                        artist_genres_json = row[7]  # artist_genres column
+                        artist_genres_json = row['artist_genres']
                         if artist_genres_json:
                             genres = json.loads(artist_genres_json)
 
@@ -388,23 +433,7 @@ class PersonalizedPlaylistsService:
                                     break
 
                             if genre_match:
-                                # Convert row to dict (exclude artist_genres from output)
-                                track_dict = {
-                                    'spotify_track_id': row[0],
-                                    'track_name': row[1],
-                                    'artist_name': row[2],
-                                    'album_name': row[3],
-                                    'album_cover_url': row[4],
-                                    'duration_ms': row[5],
-                                    'popularity': row[6]
-                                }
-                                # Parse track_data_json if available
-                                if row[8]:  # track_data_json column
-                                    try:
-                                        track_dict['track_data_json'] = json.loads(row[8])
-                                    except:
-                                        pass
-                                matching_tracks.append(track_dict)
+                                matching_tracks.append(self._build_track_dict(row, active_source))
                     except Exception as e:
                         logger.debug(f"Error parsing genres for track: {e}")
                         continue
@@ -475,39 +504,34 @@ class PersonalizedPlaylistsService:
 
     def get_popular_picks(self, limit: int = 50) -> List[Dict]:
         """Get high popularity tracks from discovery pool with diversity (max 2 tracks per album/artist)"""
+        # Determine active source
+        active_source = self._get_active_source()
+
         try:
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Get more tracks than needed to allow for filtering
+                # Get more tracks than needed to allow for filtering, filtered by source
                 cursor.execute("""
                     SELECT
                         spotify_track_id,
+                        itunes_track_id,
                         track_name,
                         artist_name,
                         album_name,
                         album_cover_url,
                         duration_ms,
                         popularity,
-                        track_data_json
+                        track_data_json,
+                        source
                     FROM discovery_pool
-                    WHERE popularity >= 60
+                    WHERE popularity >= 60 AND source = ?
                     ORDER BY popularity DESC, RANDOM()
                     LIMIT ?
-                """, (limit * 3,))  # Get 3x more for diversity filtering
+                """, (active_source, limit * 3))
 
                 rows = cursor.fetchall()
-                all_tracks = []
-                for row in rows:
-                    track_dict = dict(row)
-                    # Parse track_data_json if available
-                    if track_dict.get('track_data_json'):
-                        try:
-                            import json
-                            track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
-                        except:
-                            pass
-                    all_tracks.append(track_dict)
+                all_tracks = [self._build_track_dict(row, active_source) for row in rows]
 
                 # Apply diversity constraint: max 2 tracks per album, max 3 per artist
                 tracks_by_album = {}
@@ -531,7 +555,7 @@ class PersonalizedPlaylistsService:
                         if len(diverse_tracks) >= limit:
                             break
 
-                logger.info(f"Popular Picks: Selected {len(diverse_tracks)} tracks with diversity")
+                logger.info(f"Popular Picks ({active_source}): Selected {len(diverse_tracks)} tracks with diversity")
                 return diverse_tracks[:limit]
 
         except Exception as e:
@@ -540,6 +564,9 @@ class PersonalizedPlaylistsService:
 
     def get_hidden_gems(self, limit: int = 50) -> List[Dict]:
         """Get low popularity (underground/indie) tracks from discovery pool"""
+        # Determine active source
+        active_source = self._get_active_source()
+
         try:
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
@@ -547,32 +574,23 @@ class PersonalizedPlaylistsService:
                 cursor.execute("""
                     SELECT
                         spotify_track_id,
+                        itunes_track_id,
                         track_name,
                         artist_name,
                         album_name,
                         album_cover_url,
                         duration_ms,
                         popularity,
-                        track_data_json
+                        track_data_json,
+                        source
                     FROM discovery_pool
-                    WHERE popularity < 40
+                    WHERE popularity < 40 AND source = ?
                     ORDER BY RANDOM()
                     LIMIT ?
-                """, (limit,))
+                """, (active_source, limit))
 
                 rows = cursor.fetchall()
-                tracks = []
-                for row in rows:
-                    track_dict = dict(row)
-                    # Parse track_data_json if available
-                    if track_dict.get('track_data_json'):
-                        try:
-                            import json
-                            track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
-                        except:
-                            pass
-                    tracks.append(track_dict)
-                return tracks
+                return [self._build_track_dict(row, active_source) for row in rows]
 
         except Exception as e:
             logger.error(f"Error getting hidden gems: {e}")
@@ -584,6 +602,9 @@ class PersonalizedPlaylistsService:
 
         Different every time you call it!
         """
+        # Determine active source
+        active_source = self._get_active_source()
+
         try:
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
@@ -591,31 +612,23 @@ class PersonalizedPlaylistsService:
                 cursor.execute("""
                     SELECT
                         spotify_track_id,
+                        itunes_track_id,
                         track_name,
                         artist_name,
                         album_name,
                         album_cover_url,
                         duration_ms,
                         popularity,
-                        track_data_json
+                        track_data_json,
+                        source
                     FROM discovery_pool
+                    WHERE source = ?
                     ORDER BY RANDOM()
                     LIMIT ?
-                """, (limit,))
+                """, (active_source, limit))
 
                 rows = cursor.fetchall()
-                tracks = []
-                for row in rows:
-                    track_dict = dict(row)
-                    # Parse track_data_json if available
-                    if track_dict.get('track_data_json'):
-                        try:
-                            import json
-                            track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
-                        except:
-                            pass
-                    tracks.append(track_dict)
-                return tracks
+                return [self._build_track_dict(row, active_source) for row in rows]
 
         except Exception as e:
             logger.error(f"Error getting discovery shuffle: {e}")
@@ -769,6 +782,9 @@ class PersonalizedPlaylistsService:
 
     def _get_discovery_tracks_by_category(self, category: str, limit: int) -> List[Dict]:
         """Get tracks from discovery pool matching genre or artist"""
+        # Determine active source
+        active_source = self._get_active_source()
+
         try:
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
@@ -776,32 +792,23 @@ class PersonalizedPlaylistsService:
                 cursor.execute("""
                     SELECT
                         spotify_track_id,
+                        itunes_track_id,
                         track_name,
                         artist_name,
                         album_name,
                         album_cover_url,
                         duration_ms,
                         popularity,
-                        track_data_json
+                        track_data_json,
+                        source
                     FROM discovery_pool
-                    WHERE artist_name LIKE ? OR track_name LIKE ?
+                    WHERE (artist_name LIKE ? OR track_name LIKE ?) AND source = ?
                     ORDER BY RANDOM()
                     LIMIT ?
-                """, (f'%{category}%', f'%{category}%', limit))
+                """, (f'%{category}%', f'%{category}%', active_source, limit))
 
                 rows = cursor.fetchall()
-                tracks = []
-                for row in rows:
-                    track_dict = dict(row)
-                    # Parse track_data_json if available
-                    if track_dict.get('track_data_json'):
-                        try:
-                            import json
-                            track_dict['track_data_json'] = json.loads(track_dict['track_data_json'])
-                        except:
-                            pass
-                    tracks.append(track_dict)
-                return tracks
+                return [self._build_track_dict(row, active_source) for row in rows]
 
         except Exception as e:
             logger.error(f"Error getting discovery tracks by category: {e}")
