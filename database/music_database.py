@@ -3212,15 +3212,16 @@ class MusicDatabase:
             logger.error(f"Error updating similar artist iTunes ID: {e}")
             return False
 
-    def has_fresh_similar_artists(self, source_artist_id: str, days_threshold: int = 30, require_itunes: bool = True) -> bool:
+    def has_fresh_similar_artists(self, source_artist_id: str, days_threshold: int = 30, require_itunes: bool = True, require_spotify: bool = False) -> bool:
         """
-        Check if we have cached similar artists that are still fresh (< days_threshold old).
+        Check if we have cached similar artists that are still fresh (<days_threshold old).
         Also checks that similar artists have the required provider IDs.
 
         Args:
             source_artist_id: The source artist ID to check
             days_threshold: Maximum age in days to consider fresh
             require_itunes: If True, also requires iTunes IDs to be present (for seamless provider switching)
+            require_spotify: If True, also requires Spotify IDs to be present (for Spotify discovery)
 
         Returns True if we have recent data with required IDs, False if data is stale, missing, or incomplete.
         """
@@ -3262,6 +3263,23 @@ class MusicDatabase:
                         itunes_ratio = id_row['has_itunes'] / id_row['total']
                         if itunes_ratio < 0.5:
                             logger.debug(f"Similar artists for {source_artist_id} missing iTunes IDs ({id_row['has_itunes']}/{id_row['total']}), will refetch")
+                            return False
+
+                # Check if we have Spotify IDs (for Spotify discovery)
+                if require_spotify:
+                    cursor.execute("""
+                        SELECT COUNT(*) as total,
+                               SUM(CASE WHEN similar_artist_spotify_id IS NOT NULL AND similar_artist_spotify_id != '' THEN 1 ELSE 0 END) as has_spotify
+                        FROM similar_artists
+                        WHERE source_artist_id = ?
+                    """, (source_artist_id,))
+                    id_row = cursor.fetchone()
+
+                    if id_row and id_row['total'] > 0:
+                        # If less than 50% have Spotify IDs, consider stale and refetch
+                        spotify_ratio = id_row['has_spotify'] / id_row['total']
+                        if spotify_ratio < 0.5:
+                            logger.debug(f"Similar artists for {source_artist_id} missing Spotify IDs ({id_row['has_spotify']}/{id_row['total']}), will refetch")
                             return False
 
                 return True
