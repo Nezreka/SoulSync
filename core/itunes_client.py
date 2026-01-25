@@ -53,15 +53,18 @@ class Track:
     image_url: Optional[str] = None
 
     @classmethod
-    def from_itunes_track(cls, track_data: Dict[str, Any]) -> 'Track':
+    def from_itunes_track(cls, track_data: Dict[str, Any], clean_artist_name: Optional[str] = None) -> 'Track':
         # Extract album image (highest quality)
         album_image_url = None
         if 'artworkUrl100' in track_data:
             # Replace 100x100 with 600x600 for higher quality
             album_image_url = track_data['artworkUrl100'].replace('100x100bb', '600x600bb')
         
-        # Get artist name(s)
-        artists = [track_data.get('artistName', 'Unknown Artist')]
+        # Get artist name(s) - prefer clean name from ID lookup if available
+        if clean_artist_name:
+            artists = [clean_artist_name]
+        else:
+            artists = [track_data.get('artistName', 'Unknown Artist')]
         
         # Build external URLs
         external_urls = {}
@@ -286,12 +289,58 @@ class iTunesClient:
         results = self._search(query, 'song', limit)
         tracks = []
         
+        # Collect artist IDs for batch lookup
+        artist_ids = set()
         for track_data in results:
             if track_data.get('wrapperType') == 'track' and track_data.get('kind') == 'song':
-                track = Track.from_itunes_track(track_data)
+                artist_id = str(track_data.get('artistId', ''))
+                if artist_id:
+                    artist_ids.add(artist_id)
+        
+        # Batch lookup artist clean names
+        clean_artist_map = {}
+        if artist_ids:
+            clean_artist_map = self._get_clean_artist_names(list(artist_ids))
+
+        for track_data in results:
+            if track_data.get('wrapperType') == 'track' and track_data.get('kind') == 'song':
+                artist_id = str(track_data.get('artistId', ''))
+                clean_artist = clean_artist_map.get(artist_id)
+                track = Track.from_itunes_track(track_data, clean_artist_name=clean_artist)
                 tracks.append(track)
         
         return tracks
+    
+    def _get_clean_artist_names(self, artist_ids: List[str]) -> Dict[str, str]:
+        """
+        Perform a batched lookup of artist IDs to get clean artist names.
+        Returns a map of {artist_id: clean_artist_name}
+        """
+        if not artist_ids:
+            return {}
+            
+        clean_names = {}
+        # iTunes lookup allows comma-separated IDs, but keep batch size reasonable (e.g. 50)
+        batch_size = 50
+        
+        for i in range(0, len(artist_ids), batch_size):
+            batch = artist_ids[i:i+batch_size]
+            ids_str = ",".join(batch)
+            
+            try:
+                # Lookup is fast/unlimited compared to search
+                results = self._lookup(id=ids_str)
+                
+                for item in results:
+                    if item.get('wrapperType') == 'artist':
+                        a_id = str(item.get('artistId', ''))
+                        a_name = item.get('artistName', '')
+                        if a_id and a_name:
+                            clean_names[a_id] = a_name
+            except Exception as e:
+                logger.warning(f"Failed batch artist lookup: {e}")
+                
+        return clean_names
     
     def get_track_details(self, track_id: str) -> Optional[Dict[str, Any]]:
         """Get detailed track information including album data and track number"""
@@ -300,6 +349,16 @@ class iTunesClient:
         for track_data in results:
             if track_data.get('wrapperType') == 'track':
                 # Enhance with additional useful metadata
+                # Enhance with additional useful metadata
+                # Get clean artist name
+                clean_artist_name = 'Unknown Artist'
+                artist_id = str(track_data.get('artistId', ''))
+                if artist_id:
+                    clean_names = self._get_clean_artist_names([artist_id])
+                    clean_artist_name = clean_names.get(artist_id, track_data.get('artistName', 'Unknown Artist'))
+                else:
+                    clean_artist_name = track_data.get('artistName', 'Unknown Artist')
+
                 enhanced_data = {
                     'id': str(track_data.get('trackId', '')),
                     'name': track_data.get('trackName', ''),
@@ -307,15 +366,15 @@ class iTunesClient:
                     'disc_number': track_data.get('discNumber', 1),
                     'duration_ms': track_data.get('trackTimeMillis', 0),
                     'explicit': track_data.get('trackExplicitness') == 'explicit',
-                    'artists': [track_data.get('artistName', 'Unknown Artist')],
-                    'primary_artist': track_data.get('artistName', 'Unknown Artist'),
+                    'artists': [clean_artist_name],
+                    'primary_artist': clean_artist_name,
                     'album': {
                         'id': str(track_data.get('collectionId', '')),
                         'name': track_data.get('collectionName', ''),
                         'total_tracks': track_data.get('trackCount', 0),
                         'release_date': track_data.get('releaseDate', ''),
                         'album_type': 'album',  # iTunes doesn't distinguish clearly
-                        'artists': [track_data.get('artistName', 'Unknown Artist')]
+                        'artists': [clean_artist_name]
                     },
                     'is_album_track': track_data.get('trackCount', 0) > 1,
                     'raw_data': track_data
@@ -440,14 +499,31 @@ class iTunesClient:
 
         # First result is usually the album/collection info
         # Remaining results are tracks
+        
+        # Collect artist IDs for batch lookup
+        artist_ids = set()
+        for item in results:
+            if item.get('wrapperType') == 'track' and item.get('kind') == 'song':
+                artist_id = str(item.get('artistId', ''))
+                if artist_id:
+                    artist_ids.add(artist_id)
+                    
+        # Batch lookup artist clean names
+        clean_artist_map = {}
+        if artist_ids:
+            clean_artist_map = self._get_clean_artist_names(list(artist_ids))
+
         tracks = []
         for item in results:
             if item.get('wrapperType') == 'track' and item.get('kind') == 'song':
+                artist_id = str(item.get('artistId', ''))
+                clean_artist = clean_artist_map.get(artist_id, item.get('artistName', 'Unknown Artist'))
+                
                 # Normalize each track to Spotify-compatible format
                 normalized_track = {
                     'id': str(item.get('trackId', '')),
                     'name': item.get('trackName', ''),
-                    'artists': [{'name': item.get('artistName', 'Unknown Artist')}],  # List of dicts like Spotify
+                    'artists': [{'name': clean_artist}],  # List of dicts like Spotify
                     'duration_ms': item.get('trackTimeMillis', 0),
                     'track_number': item.get('trackNumber', 0),
                     'disc_number': item.get('discNumber', 1),
