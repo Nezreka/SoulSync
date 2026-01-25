@@ -17423,7 +17423,8 @@ def get_watchlist_artists():
                 "last_scan_timestamp": artist.last_scan_timestamp.isoformat() if artist.last_scan_timestamp else None,
                 "created_at": artist.created_at.isoformat() if artist.created_at else None,
                 "updated_at": artist.updated_at.isoformat() if artist.updated_at else None,
-                "image_url": artist.image_url  # Cached during watchlist scans
+                "image_url": artist.image_url,  # Cached during watchlist scans
+                "itunes_artist_id": artist.itunes_artist_id  # For iTunes-only artists
             })
 
         return jsonify({"success": True, "artists": artists_data})
@@ -17446,9 +17447,42 @@ def add_to_watchlist():
         success = database.add_artist_to_watchlist(artist_id, artist_name)
 
         if success:
-            # Fetch and cache artist image immediately from Spotify
+            # Detect ID type: iTunes IDs are purely numeric, Spotify IDs are alphanumeric
+            is_itunes_id = artist_id.isdigit()
+            
+            # Fetch and cache artist image immediately
             try:
-                if spotify_client and spotify_client.is_authenticated():
+                if is_itunes_id:
+                    # For iTunes artists, fetch image from iTunes API
+                    # We look up 'album' entity because 'artist' entity doesn't always have artwork
+                    # We fallback to the first album's artwork as the artist image
+                    try:
+                        itunes_url = f"https://itunes.apple.com/lookup?id={artist_id}&entity=album&limit=5"
+                        print(f"🔍 Fetching iTunes artist image: {itunes_url}")
+                        resp = requests.get(itunes_url, timeout=5)
+                        
+                        image_url = None
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            results = data.get('results', [])
+                            
+                            # Iterate results to find one with artwork
+                            for res in results:
+                                if 'artworkUrl100' in res:
+                                    # Get highest res by replacing dimensions
+                                    # iTunes artwork URLs usually end in .../100x100bb.jpg
+                                    image_url = res['artworkUrl100'].replace('100x100', '600x600')
+                                    break
+                        
+                        if image_url:
+                            database.update_watchlist_artist_image(artist_id, image_url)
+                            print(f"✅ Cached iTunes artist image for {artist_name}")
+                        else:
+                            print(f"⚠️ No artwork found for iTunes artist {artist_name}")
+                    except Exception as itunes_error:
+                        print(f"⚠️ Error fetching iTunes artwork: {itunes_error}")
+                elif spotify_client and spotify_client.is_authenticated():
+                    # For Spotify artists, fetch from Spotify API
                     artist_data = spotify_client.get_artist(artist_id)
                     if artist_data and 'images' in artist_data and artist_data['images']:
                         # Get medium-sized image (usually the second one, or first if only one)
@@ -17974,21 +18008,26 @@ def watchlist_artist_config(artist_id):
             cursor.execute("""
                 SELECT include_albums, include_eps, include_singles,
                        include_live, include_remixes, include_acoustic, include_compilations,
-                       artist_name, image_url
+                       artist_name, image_url, spotify_artist_id, itunes_artist_id
                 FROM watchlist_artists
-                WHERE spotify_artist_id = ?
-            """, (artist_id,))
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ?
+            """, (artist_id, artist_id))
             result = cursor.fetchone()
             conn.close()
 
             if not result:
                 return jsonify({"success": False, "error": "Artist not found in watchlist"}), 404
+            
+            # Determine if this is an iTunes or Spotify artist
+            is_itunes_artist = artist_id.isdigit()
+            spotify_id = result[9]  # spotify_artist_id from query
+            itunes_id = result[10]  # itunes_artist_id from query
 
-            # Get artist info from Spotify
+            # Get artist info from Spotify (only for Spotify artists)
             artist_info = None
-            if spotify_client and spotify_client.is_authenticated():
+            if not is_itunes_artist and spotify_client and spotify_client.is_authenticated() and spotify_id:
                 try:
-                    artist_data = spotify_client.sp.artist(artist_id)
+                    artist_data = spotify_client.sp.artist(spotify_id)
                     if artist_data:
                         artist_info = {
                             'id': artist_data['id'],
@@ -18053,10 +18092,10 @@ def watchlist_artist_config(artist_id):
                 SET include_albums = ?, include_eps = ?, include_singles = ?,
                     include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE spotify_artist_id = ?
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ?
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
-                  artist_id))
+                  artist_id, artist_id))
             conn.commit()
 
             if cursor.rowcount == 0:
