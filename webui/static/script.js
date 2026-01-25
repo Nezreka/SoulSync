@@ -2164,7 +2164,8 @@ async function testConnection(service) {
         const result = await response.json();
 
         if (result.success) {
-            showToast(`${service} connection successful`, 'success');
+            // Use backend's message which contains dynamic source name (Spotify or Apple Music)
+            showToast(result.message || `${service} connection successful`, 'success');
 
             // Load music libraries after successful connection
             if (service === 'plex') {
@@ -2197,7 +2198,8 @@ async function testDashboardConnection(service) {
         const result = await response.json();
 
         if (result.success) {
-            showToast(`${service} service verified`, 'success');
+            // Use backend's message which contains dynamic source name (Spotify or Apple Music)
+            showToast(result.message || `${service} service verified`, 'success');
         } else {
             showToast(`${service} service check failed: ${result.error}`, 'error');
         }
@@ -23214,6 +23216,15 @@ function updateServiceStatus(service, statusData) {
             statusText.className = 'service-card-status-text disconnected';
         }
     }
+
+    // Update music source title (Spotify or Apple Music) based on active source
+    if (service === 'spotify' && statusData.source) {
+        const musicSourceTitleElement = document.getElementById('music-source-title');
+        if (musicSourceTitleElement) {
+            const sourceName = statusData.source === 'itunes' ? 'Apple Music' : 'Spotify';
+            musicSourceTitleElement.textContent = sourceName;
+        }
+    }
 }
 
 function updateSidebarServiceStatus(service, statusData) {
@@ -23236,6 +23247,15 @@ function updateSidebarServiceStatus(service, statusData) {
             if (mediaServerNameElement) {
                 const serverName = statusData.type.charAt(0).toUpperCase() + statusData.type.slice(1);
                 mediaServerNameElement.textContent = serverName;
+            }
+        }
+
+        // Update music source name (Spotify or Apple Music) based on active source
+        if (service === 'spotify' && statusData.source) {
+            const musicSourceNameElement = document.getElementById('music-source-name');
+            if (musicSourceNameElement) {
+                const sourceName = statusData.source === 'itunes' ? 'Apple Music' : 'Spotify';
+                musicSourceNameElement.textContent = sourceName;
             }
         }
     }

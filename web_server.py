@@ -1506,10 +1506,23 @@ def run_service_test(service, test_config):
         # 3. Run the test with the temporary config
         if service == "spotify":
             temp_client = SpotifyClient()
+            
+            # Check if Spotify credentials are configured
+            spotify_config = config_manager.get('spotify', {})
+            spotify_configured = bool(spotify_config.get('client_id') and spotify_config.get('client_secret'))
+            
             if temp_client.is_authenticated():
-                 return True, "Spotify connection successful!"
+                 # Determine which source is active
+                 if temp_client.is_spotify_authenticated():
+                     return True, "Spotify connection successful!"
+                 else:
+                     # Using iTunes fallback
+                     if spotify_configured:
+                         return True, "Apple Music connection successful! (Spotify configured but not authenticated)"
+                     else:
+                         return True, "Apple Music connection successful! (Spotify not configured)"
             else:
-                 return False, "Spotify authentication failed. Check credentials and complete OAuth flow in browser if prompted."
+                 return False, "Music service authentication failed. Check credentials and complete OAuth flow in browser if prompted."
         elif service == "tidal":
             temp_client = TidalClient()
             if temp_client.is_authenticated():
@@ -1926,9 +1939,14 @@ def get_status():
             # Actually validate authentication (makes API call, but cached for 2 min)
             spotify_status = spotify_client.is_authenticated()
             spotify_response_time = (time.time() - spotify_start) * 1000
+            
+            # Determine active music source (spotify or itunes)
+            music_source = 'spotify' if spotify_client.is_spotify_authenticated() else 'itunes'
+            
             _status_cache['spotify'] = {
                 'connected': spotify_status,
-                'response_time': round(spotify_response_time, 1)
+                'response_time': round(spotify_response_time, 1),
+                'source': music_source
             }
             _status_cache_timestamps['spotify'] = current_time
         # else: use cached value
@@ -2365,7 +2383,7 @@ def test_connection_endpoint():
 
     # Add activity for connection test
     if success:
-        add_activity_item("✅", "Connection Test", f"{service.title()} connection successful", "Now")
+        add_activity_item("✅", "Connection Test", message, "Now")
     else:
         add_activity_item("❌", "Connection Test", f"{service.title()} connection failed", "Now")
 
@@ -2411,7 +2429,7 @@ def test_dashboard_connection_endpoint():
 
     # Add activity for dashboard connection test (different from settings test)
     if success:
-        add_activity_item("🎛️", "Dashboard Test", f"{service.title()} service verified", "Now")
+        add_activity_item("🎛️", "Dashboard Test", message, "Now")
     else:
         add_activity_item("⚠️", "Dashboard Test", f"{service.title()} service check failed", "Now")
 
