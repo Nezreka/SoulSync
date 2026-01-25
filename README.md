@@ -59,6 +59,15 @@ SoulSync bridges streaming services to your media server with automated discover
 - Batch processing with retry logic
 - Synchronized lyrics (LRC) for every track
 
+### Metadata & Reliability
+
+**Dual-Source System**
+- **Primary**: Spotify (Preferred for richer data and discovery features)
+- **Backup**: iTunes (No authentication required)
+- **Redundancy**: System automatically manages both sources. If Spotify is authorized, it is prioritized. If Spotify is unavailable, rate-limited, or unauthorized, SoulSync **seamlessly switches to iTunes** for metadata, cover art, and artist tracking.
+- **Fail-Safe**: Even with Spotify authorized, iTunes metadata is maintained as a redundant layer to ensure zero downtime.
+
+
 ### Advanced Matching
 
 - Unicode/accent handling (KoЯn, Björk, A$AP Rocky)
