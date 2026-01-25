@@ -21,8 +21,60 @@ logger = get_logger("watchlist_scanner")
 
 # Rate limiting constants for watchlist operations
 DELAY_BETWEEN_ARTISTS = 2.0      # 2 seconds between different artists
-DELAY_BETWEEN_ALBUMS = 0.5       # 500ms between albums for same artist  
+DELAY_BETWEEN_ALBUMS = 0.5       # 500ms between albums for same artist
 DELAY_BETWEEN_API_BATCHES = 1.0  # 1 second between API batch operations
+
+# iTunes API retry configuration
+ITUNES_MAX_RETRIES = 3
+ITUNES_BASE_DELAY = 1.0  # Base delay in seconds for exponential backoff
+
+
+def itunes_api_call_with_retry(func, *args, max_retries=ITUNES_MAX_RETRIES, **kwargs):
+    """
+    Execute an iTunes API call with exponential backoff retry logic.
+
+    Args:
+        func: The function to call
+        *args: Arguments to pass to the function
+        max_retries: Maximum number of retry attempts
+        **kwargs: Keyword arguments to pass to the function
+
+    Returns:
+        The result of the function call, or None if all retries failed
+    """
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            result = func(*args, **kwargs)
+            return result
+        except requests.exceptions.HTTPError as e:
+            # Handle rate limiting (429) and server errors (5xx)
+            if e.response is not None and e.response.status_code == 429:
+                delay = ITUNES_BASE_DELAY * (2 ** attempt)
+                logger.warning(f"[iTunes] Rate limited, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(delay)
+                last_error = e
+            elif e.response is not None and e.response.status_code >= 500:
+                delay = ITUNES_BASE_DELAY * (2 ** attempt)
+                logger.warning(f"[iTunes] Server error {e.response.status_code}, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(delay)
+                last_error = e
+            else:
+                raise  # Don't retry on client errors (4xx except 429)
+        except requests.exceptions.RequestException as e:
+            # Retry on connection errors
+            delay = ITUNES_BASE_DELAY * (2 ** attempt)
+            logger.warning(f"[iTunes] Connection error, retrying in {delay}s (attempt {attempt + 1}/{max_retries}): {e}")
+            time.sleep(delay)
+            last_error = e
+        except Exception as e:
+            # Don't retry on other exceptions
+            raise
+
+    if last_error:
+        logger.error(f"[iTunes] All {max_retries} retry attempts failed: {last_error}")
+    return None
+
 
 def clean_track_name_for_search(track_name):
     """
@@ -1287,9 +1339,11 @@ class WatchlistScanner:
                         except Exception as e:
                             logger.debug(f"Spotify match failed for {artist_name_to_match}: {e}")
 
-                    # Try to match on iTunes
+                    # Try to match on iTunes (with retry for rate limiting)
                     try:
-                        itunes_results = itunes_client.search_artists(artist_name_to_match, limit=1)
+                        itunes_results = itunes_api_call_with_retry(
+                            itunes_client.search_artists, artist_name_to_match, limit=1
+                        )
                         if itunes_results and len(itunes_results) > 0:
                             itunes_artist = itunes_results[0]
                             # Skip if this is the searched artist
@@ -1301,8 +1355,10 @@ class WatchlistScanner:
                                 # Use iTunes genres if we don't have Spotify genres
                                 if not artist_data['genres'] and hasattr(itunes_artist, 'genres'):
                                     artist_data['genres'] = itunes_artist.genres
+                        else:
+                            logger.info(f"  [iTunes] No match found for: {artist_name_to_match}")
                     except Exception as e:
-                        logger.debug(f"iTunes match failed for {artist_name_to_match}: {e}")
+                        logger.info(f"  [iTunes] Match failed for {artist_name_to_match}: {e}")
 
                     # Only add if we got at least one ID
                     if artist_data['spotify_id'] or artist_data['itunes_id']:
@@ -1314,7 +1370,11 @@ class WatchlistScanner:
                     logger.debug(f"Error matching {artist_name_to_match}: {match_error}")
                     continue
 
-            logger.info(f"Matched {len(matched_artists)} similar artists (Spotify + iTunes)")
+            # Log detailed matching statistics
+            itunes_matched = sum(1 for a in matched_artists if a.get('itunes_id'))
+            spotify_matched = sum(1 for a in matched_artists if a.get('spotify_id'))
+            both_matched = sum(1 for a in matched_artists if a.get('itunes_id') and a.get('spotify_id'))
+            logger.info(f"Matched {len(matched_artists)} similar artists - iTunes: {itunes_matched}, Spotify: {spotify_matched}, Both: {both_matched}")
             return matched_artists
 
         except requests.exceptions.RequestException as e:
@@ -1436,9 +1496,15 @@ class WatchlistScanner:
             from datetime import datetime, timedelta
             import random
 
-            # Check if we should run (prevents over-polling)
-            if not self.database.should_populate_discovery_pool(hours_threshold=24):
-                logger.info("Discovery pool was populated recently (< 24 hours ago). Skipping.")
+            # Check if we should run discovery pool population (prevents over-polling)
+            skip_pool_population = not self.database.should_populate_discovery_pool(hours_threshold=24)
+
+            if skip_pool_population:
+                logger.info("Discovery pool was populated recently (< 24 hours ago). Skipping pool population.")
+                logger.info("But still refreshing recent albums cache and curated playlists...")
+                # Still run these even when skipping main pool population
+                self.cache_discovery_recent_albums()
+                self.curate_discovery_playlists()
                 return
 
             logger.info("Populating discovery pool from similar artists...")
@@ -1461,7 +1527,11 @@ class WatchlistScanner:
             similar_artists = self.database.get_top_similar_artists(limit=top_artists_limit)
 
             if not similar_artists:
-                logger.info("No similar artists found to populate discovery pool")
+                logger.info("No similar artists found to populate discovery pool from similar artists")
+                logger.info("But still caching recent albums from watchlist artists and curating playlists...")
+                # Still run these even without similar artists - they use watchlist artists
+                self.cache_discovery_recent_albums()
+                self.curate_discovery_playlists()
                 return
 
             logger.info(f"Processing {len(similar_artists)} top similar artists for discovery pool")
@@ -2056,26 +2126,40 @@ class WatchlistScanner:
                     logger.debug(f"Error processing album: {e}")
                 return False
 
+            # Track resolution stats
+            itunes_resolved = 0
+            itunes_failed_resolve = 0
+
             # Process watchlist artists
             for artist in watchlist_artists:
                 # Always process iTunes (baseline)
                 itunes_id = artist.itunes_artist_id
                 if not itunes_id:
-                    # Try to resolve iTunes ID on-the-fly
+                    # Try to resolve iTunes ID on-the-fly (with retry for rate limiting)
                     try:
-                        results = itunes_client.search_artists(artist.artist_name, limit=1)
+                        results = itunes_api_call_with_retry(
+                            itunes_client.search_artists, artist.artist_name, limit=1
+                        )
                         if results and len(results) > 0:
                             itunes_id = results[0].id
-                    except:
-                        pass
+                            itunes_resolved += 1
+                            logger.debug(f"[iTunes] Resolved ID for {artist.artist_name}: {itunes_id}")
+                        else:
+                            itunes_failed_resolve += 1
+                            logger.info(f"[iTunes] No artist found for: {artist.artist_name}")
+                    except Exception as e:
+                        itunes_failed_resolve += 1
+                        logger.info(f"[iTunes] Failed to resolve {artist.artist_name}: {e}")
 
                 if itunes_id:
                     try:
-                        albums = itunes_client.get_artist_albums(itunes_id, album_type='album,single', limit=20)
+                        albums = itunes_api_call_with_retry(
+                            itunes_client.get_artist_albums, itunes_id, album_type='album,single', limit=20
+                        )
                         for album in albums or []:
                             process_album(album, artist.artist_name, artist.spotify_artist_id, itunes_id, 'itunes')
                     except Exception as e:
-                        logger.debug(f"Error fetching iTunes albums for {artist.artist_name}: {e}")
+                        logger.info(f"[iTunes] Error fetching albums for {artist.artist_name}: {e}")
 
                 # Process Spotify if authenticated
                 if spotify_available and artist.spotify_artist_id:
@@ -2097,23 +2181,33 @@ class WatchlistScanner:
                 # Always process iTunes (baseline)
                 itunes_id = artist.similar_artist_itunes_id
                 if not itunes_id:
-                    # Try to resolve iTunes ID on-the-fly
+                    # Try to resolve iTunes ID on-the-fly (with retry for rate limiting)
                     try:
-                        results = itunes_client.search_artists(artist.similar_artist_name, limit=1)
+                        results = itunes_api_call_with_retry(
+                            itunes_client.search_artists, artist.similar_artist_name, limit=1
+                        )
                         if results and len(results) > 0:
                             itunes_id = results[0].id
                             # Cache for future
                             self.database.update_similar_artist_itunes_id(artist.id, itunes_id)
-                    except:
-                        pass
+                            itunes_resolved += 1
+                            logger.debug(f"[iTunes] Resolved ID for similar artist {artist.similar_artist_name}: {itunes_id}")
+                        else:
+                            itunes_failed_resolve += 1
+                            logger.info(f"[iTunes] No artist found for similar: {artist.similar_artist_name}")
+                    except Exception as e:
+                        itunes_failed_resolve += 1
+                        logger.info(f"[iTunes] Failed to resolve similar {artist.similar_artist_name}: {e}")
 
                 if itunes_id:
                     try:
-                        albums = itunes_client.get_artist_albums(itunes_id, album_type='album,single', limit=20)
+                        albums = itunes_api_call_with_retry(
+                            itunes_client.get_artist_albums, itunes_id, album_type='album,single', limit=20
+                        )
                         for album in albums or []:
                             process_album(album, artist.similar_artist_name, artist.similar_artist_spotify_id, itunes_id, 'itunes')
                     except Exception as e:
-                        logger.debug(f"Error fetching iTunes albums for {artist.similar_artist_name}: {e}")
+                        logger.info(f"[iTunes] Error fetching albums for similar {artist.similar_artist_name}: {e}")
 
                 # Process Spotify if authenticated
                 if spotify_available and artist.similar_artist_spotify_id:
@@ -2132,6 +2226,7 @@ class WatchlistScanner:
 
             total_cached = cached_count['spotify'] + cached_count['itunes']
             logger.info(f"Cached {total_cached} recent albums (Spotify: {cached_count['spotify']}, iTunes: {cached_count['itunes']}) from {albums_checked} albums checked")
+            logger.info(f"[iTunes] ID resolution stats: {itunes_resolved} resolved, {itunes_failed_resolve} failed")
 
         except Exception as e:
             logger.error(f"Error caching discovery recent albums: {e}")
@@ -2171,6 +2266,9 @@ class WatchlistScanner:
                 recent_albums = self.database.get_discovery_recent_albums(limit=50, source=source)
                 release_radar_tracks = []
 
+                if not recent_albums:
+                    logger.warning(f"[{source.upper()}] No recent albums found for Release Radar - check cache_discovery_recent_albums()")
+
                 if recent_albums:
                     # Group albums by artist for variety
                     albums_by_artist = {}
@@ -2196,7 +2294,9 @@ class WatchlistScanner:
                                 if source == 'spotify':
                                     album_data = self.spotify_client.get_album(album_id)
                                 else:
-                                    album_data = itunes_client.get_album(album_id)
+                                    album_data = itunes_api_call_with_retry(
+                                        itunes_client.get_album, album_id
+                                    )
 
                                 if not album_data or 'tracks' not in album_data:
                                     continue
@@ -2294,6 +2394,9 @@ class WatchlistScanner:
                 # 2. Curate Discovery Weekly - 50 tracks from discovery pool
                 logger.info(f"Curating Discovery Weekly for {source}...")
                 discovery_tracks = self.database.get_discovery_pool_tracks(limit=2000, new_releases_only=False, source=source)
+
+                if not discovery_tracks:
+                    logger.warning(f"[{source.upper()}] No discovery pool tracks found for Discovery Weekly - check populate_discovery_pool()")
 
                 discovery_weekly_tracks = []
                 if discovery_tracks:

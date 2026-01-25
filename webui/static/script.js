@@ -33121,8 +33121,16 @@ async function openDownloadModalForRecentAlbum(albumIndex) {
     showLoadingOverlay(`Loading tracks for ${album.album_name}...`);
 
     try {
-        // Fetch album tracks from Spotify API via backend
-        const response = await fetch(`/api/spotify/album/${album.album_spotify_id}`);
+        // Determine source and album ID - use source-agnostic endpoint
+        const source = album.source || (album.album_spotify_id ? 'spotify' : 'itunes');
+        const albumId = source === 'spotify' ? album.album_spotify_id : album.album_itunes_id;
+
+        if (!albumId) {
+            throw new Error(`No ${source} album ID available`);
+        }
+
+        // Fetch album tracks from appropriate source via backend
+        const response = await fetch(`/api/discover/album/${source}/${albumId}`);
         if (!response.ok) {
             throw new Error('Failed to fetch album tracks');
         }
@@ -33157,13 +33165,14 @@ async function openDownloadModalForRecentAlbum(albumIndex) {
             };
         });
 
-        // Create virtual playlist ID
-        const virtualPlaylistId = `discover_album_${album.album_spotify_id}`;
+        // Create virtual playlist ID using the appropriate album ID
+        const virtualPlaylistId = `discover_album_${albumId}`;
 
         // CRITICAL FIX: Pass proper artist/album context for modal display
         const artistContext = {
-            id: album.artist_spotify_id,
-            name: album.artist_name
+            id: source === 'spotify' ? album.artist_spotify_id : album.artist_itunes_id,
+            name: album.artist_name,
+            source: source
         };
 
         const albumContext = {

@@ -14327,6 +14327,105 @@ def search_itunes_tracks():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/itunes/album/<album_id>', methods=['GET'])
+def get_itunes_album_tracks(album_id):
+    """Fetches full track details for a specific iTunes album."""
+    try:
+        from core.itunes_client import iTunesClient
+
+        itunes_client = iTunesClient()
+        album_data = itunes_client.get_album(album_id)
+
+        if not album_data:
+            return jsonify({"error": "Album not found"}), 404
+
+        # Get tracks for this album
+        tracks_data = itunes_client.get_album_tracks(album_id)
+        tracks = tracks_data.get('items', []) if tracks_data else []
+
+        # Format response to match Spotify structure for frontend compatibility
+        album_dict = {
+            'id': album_data.get('id', album_id),
+            'name': album_data.get('name', 'Unknown Album'),
+            'artists': album_data.get('artists', []),
+            'release_date': album_data.get('release_date', ''),
+            'total_tracks': album_data.get('total_tracks', len(tracks)),
+            'album_type': album_data.get('album_type', 'album'),
+            'images': album_data.get('images', []),
+            'tracks': tracks,
+            'source': 'itunes'
+        }
+        return jsonify(album_dict)
+
+    except Exception as e:
+        logger.error(f"Error fetching iTunes album tracks: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/discover/album/<source>/<album_id>', methods=['GET'])
+def get_discover_album(source, album_id):
+    """
+    Source-agnostic album endpoint for discover page.
+    Fetches album from the appropriate source (spotify or itunes).
+    """
+    try:
+        if source == 'spotify':
+            if not spotify_client or not spotify_client.is_authenticated():
+                return jsonify({"error": "Spotify not authenticated."}), 401
+
+            album_data = spotify_client.get_album(album_id)
+            if not album_data:
+                return jsonify({"error": "Album not found"}), 404
+
+            tracks = album_data.get('tracks', {}).get('items', [])
+            if not tracks:
+                tracks_data = spotify_client.get_album_tracks(album_id)
+                if tracks_data and 'items' in tracks_data:
+                    tracks = tracks_data['items']
+
+            return jsonify({
+                'id': album_data['id'],
+                'name': album_data['name'],
+                'artists': album_data.get('artists', []),
+                'release_date': album_data.get('release_date', ''),
+                'total_tracks': album_data.get('total_tracks', 0),
+                'album_type': album_data.get('album_type', 'album'),
+                'images': album_data.get('images', []),
+                'tracks': tracks,
+                'source': 'spotify'
+            })
+
+        elif source == 'itunes':
+            from core.itunes_client import iTunesClient
+            itunes_client = iTunesClient()
+
+            album_data = itunes_client.get_album(album_id)
+            if not album_data:
+                return jsonify({"error": "Album not found"}), 404
+
+            tracks_data = itunes_client.get_album_tracks(album_id)
+            tracks = tracks_data.get('items', []) if tracks_data else []
+
+            return jsonify({
+                'id': album_data.get('id', album_id),
+                'name': album_data.get('name', 'Unknown Album'),
+                'artists': album_data.get('artists', []),
+                'release_date': album_data.get('release_date', ''),
+                'total_tracks': album_data.get('total_tracks', len(tracks)),
+                'album_type': album_data.get('album_type', 'album'),
+                'images': album_data.get('images', []),
+                'tracks': tracks,
+                'source': 'itunes'
+            })
+
+        else:
+            return jsonify({"error": f"Unknown source: {source}"}), 400
+
+    except Exception as e:
+        logger.error(f"Error fetching discover album: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ===================================================================
 # TIDAL PLAYLIST API ENDPOINTS
 # ===================================================================
@@ -17618,7 +17717,24 @@ def start_watchlist_scan():
                         })())
                         
                         print(f"✅ Scanned {artist.artist_name}: {artist_new_tracks} new tracks found, {artist_added_tracks} added to wishlist")
-                        
+
+                        # Fetch similar artists for discovery feature
+                        # This is critical for the discover page to work
+                        try:
+                            watchlist_scan_state['current_phase'] = 'fetching_similar_artists'
+                            source_artist_id = artist.spotify_artist_id or artist.itunes_artist_id or str(artist.id)
+
+                            if database.has_fresh_similar_artists(source_artist_id, days_threshold=30):
+                                print(f"  Similar artists for {artist.artist_name} are cached and fresh")
+                                # Still backfill missing iTunes IDs
+                                scanner._backfill_similar_artists_itunes_ids(source_artist_id)
+                            else:
+                                print(f"  Fetching similar artists for {artist.artist_name}...")
+                                scanner.update_similar_artists(artist)
+                                print(f"  Similar artists updated for {artist.artist_name}")
+                        except Exception as similar_error:
+                            print(f"  ⚠️ Failed to update similar artists for {artist.artist_name}: {similar_error}")
+
                         # Delay between artists
                         if i < len(watchlist_artists) - 1:
                             watchlist_scan_state['current_phase'] = 'rate_limiting'
@@ -18469,11 +18585,63 @@ def get_discover_hero():
         active_source = _get_active_discovery_source()
         print(f"🎵 Discover hero using source: {active_source}")
 
+        # Import iTunes client for fallback
+        from core.itunes_client import iTunesClient
+        itunes_client = iTunesClient()
+
         # Get top similar artists (by occurrence count) - get 20 for variety
         similar_artists = database.get_top_similar_artists(limit=20)
 
+        # FALLBACK: If no similar artists exist, use watchlist artists for Hero section
         if not similar_artists:
-            return jsonify({"success": True, "artists": [], "source": active_source})
+            print("[Discover Hero] No similar artists found, falling back to watchlist artists")
+            watchlist_artists = database.get_watchlist_artists()
+
+            if not watchlist_artists:
+                return jsonify({"success": True, "artists": [], "source": active_source})
+
+            # Convert watchlist artists to hero format
+            import random
+            shuffled_watchlist = list(watchlist_artists)
+            random.shuffle(shuffled_watchlist)
+
+            hero_artists = []
+            for artist in shuffled_watchlist[:10]:
+                artist_id = artist.itunes_artist_id if active_source == 'itunes' else artist.spotify_artist_id
+                if not artist_id:
+                    continue
+
+                artist_data = {
+                    "spotify_artist_id": artist.spotify_artist_id,
+                    "itunes_artist_id": artist.itunes_artist_id,
+                    "artist_id": artist_id,
+                    "artist_name": artist.artist_name,
+                    "occurrence_count": 1,
+                    "similarity_rank": 1,
+                    "source": active_source,
+                    "is_watchlist": True
+                }
+
+                # Try to get artist image
+                try:
+                    if active_source == 'itunes' and artist.itunes_artist_id:
+                        itunes_artist = itunes_client.get_artist(artist.itunes_artist_id)
+                        if itunes_artist:
+                            artist_data['image_url'] = itunes_artist.get('images', [{}])[0].get('url') if itunes_artist.get('images') else None
+                            artist_data['genres'] = itunes_artist.get('genres', [])
+                    elif active_source == 'spotify' and artist.spotify_artist_id:
+                        if spotify_client and spotify_client.is_authenticated():
+                            sp_artist = spotify_client.get_artist(artist.spotify_artist_id)
+                            if sp_artist and sp_artist.get('images'):
+                                artist_data['image_url'] = sp_artist['images'][0]['url'] if sp_artist['images'] else None
+                                artist_data['genres'] = sp_artist.get('genres', [])
+                except Exception as img_err:
+                    print(f"Could not fetch watchlist artist image: {img_err}")
+
+                hero_artists.append(artist_data)
+
+            print(f"[Discover Hero] Returning {len(hero_artists)} watchlist artists as fallback")
+            return jsonify({"success": True, "artists": hero_artists, "source": active_source, "fallback": "watchlist"})
 
         # Filter to artists that have the appropriate ID for the active source
         valid_artists = []
@@ -18486,15 +18654,40 @@ def get_discover_hero():
             elif artist.similar_artist_spotify_id and artist.similar_artist_itunes_id:
                 valid_artists.append(artist)
 
+        # FALLBACK: If no valid artists for iTunes, try to resolve iTunes IDs on-the-fly
+        if active_source == 'itunes' and not valid_artists:
+            print(f"[iTunes Fallback] No artists with iTunes IDs found, attempting on-the-fly resolution for {len(similar_artists)} artists")
+            resolved_count = 0
+            for artist in similar_artists:
+                if artist.similar_artist_itunes_id:
+                    valid_artists.append(artist)
+                    continue
+                # Try to resolve iTunes ID by name
+                try:
+                    itunes_results = itunes_client.search_artists(artist.similar_artist_name, limit=1)
+                    if itunes_results and len(itunes_results) > 0:
+                        itunes_id = itunes_results[0].id
+                        # Cache the resolved ID for future use
+                        database.update_similar_artist_itunes_id(artist.id, itunes_id)
+                        # Create a modified artist object with the resolved ID
+                        artist.similar_artist_itunes_id = itunes_id
+                        valid_artists.append(artist)
+                        resolved_count += 1
+                        print(f"  [Resolved] {artist.similar_artist_name} -> iTunes ID: {itunes_id}")
+                except Exception as resolve_err:
+                    print(f"  [Failed] Could not resolve iTunes ID for {artist.similar_artist_name}: {resolve_err}")
+                # Stop after 10 successful resolutions to avoid rate limiting
+                if len(valid_artists) >= 10:
+                    break
+            print(f"[iTunes Fallback] Resolved {resolved_count} artists with iTunes IDs")
+
+        print(f"[Discover Hero] Found {len(valid_artists)} valid artists for source: {active_source}")
+
         # Shuffle for variety and take top 10
         import random
         shuffled = list(valid_artists)
         random.shuffle(shuffled)
         similar_artists = shuffled[:10]
-
-        # Import iTunes client for fallback
-        from core.itunes_client import iTunesClient
-        itunes_client = iTunesClient()
 
         # Convert to JSON format with data enrichment from appropriate source
         hero_artists = []
@@ -18684,6 +18877,121 @@ def get_discover_weekly():
     except Exception as e:
         print(f"Error getting discovery weekly: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/refresh', methods=['POST'])
+def refresh_discover_data():
+    """
+    Force refresh discover page data (recent albums cache and curated playlists).
+    Useful for initial setup or when data appears stale.
+    """
+    try:
+        from core.watchlist_scanner import WatchlistScanner
+
+        database = get_database()
+        scanner = WatchlistScanner(spotify_client, database)
+
+        print("[Discover Refresh] Starting forced refresh of discover data...")
+
+        # Cache recent albums from watchlist and similar artists
+        print("[Discover Refresh] Caching recent albums...")
+        scanner.cache_discovery_recent_albums()
+
+        # Curate playlists
+        print("[Discover Refresh] Curating discovery playlists...")
+        scanner.curate_discovery_playlists()
+
+        # Get counts for response
+        active_source = _get_active_discovery_source()
+        recent_albums = database.get_discovery_recent_albums(limit=100, source=active_source)
+        release_radar = database.get_curated_playlist(f'release_radar_{active_source}') or []
+        discovery_weekly = database.get_curated_playlist(f'discovery_weekly_{active_source}') or []
+
+        print(f"[Discover Refresh] Complete! Recent albums: {len(recent_albums)}, Release Radar: {len(release_radar)} tracks, Discovery Weekly: {len(discovery_weekly)} tracks")
+
+        return jsonify({
+            "success": True,
+            "message": "Discover data refreshed",
+            "source": active_source,
+            "recent_albums_count": len(recent_albums),
+            "release_radar_tracks": len(release_radar),
+            "discovery_weekly_tracks": len(discovery_weekly)
+        })
+
+    except Exception as e:
+        print(f"Error refreshing discover data: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/diagnose', methods=['GET'])
+def diagnose_discover_data():
+    """
+    Diagnostic endpoint to check the state of discover data.
+    Returns counts of similar artists, discovery pool, recent albums, etc.
+    """
+    try:
+        database = get_database()
+        active_source = _get_active_discovery_source()
+
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Similar artists stats
+            cursor.execute("SELECT COUNT(*) as total FROM similar_artists")
+            total_similar = cursor.fetchone()['total']
+
+            cursor.execute("SELECT COUNT(*) as count FROM similar_artists WHERE similar_artist_itunes_id IS NOT NULL")
+            similar_with_itunes = cursor.fetchone()['count']
+
+            cursor.execute("SELECT COUNT(*) as count FROM similar_artists WHERE similar_artist_spotify_id IS NOT NULL")
+            similar_with_spotify = cursor.fetchone()['count']
+
+            # Discovery pool stats
+            cursor.execute("SELECT source, COUNT(*) as count FROM discovery_pool GROUP BY source")
+            pool_by_source = {row['source']: row['count'] for row in cursor.fetchall()}
+
+            # Recent albums stats
+            cursor.execute("SELECT source, COUNT(*) as count FROM discovery_recent_albums GROUP BY source")
+            albums_by_source = {row['source']: row['count'] for row in cursor.fetchall()}
+
+            # Curated playlists
+            cursor.execute("SELECT playlist_type, track_ids_json FROM discovery_curated_playlists")
+            playlists = {}
+            for row in cursor.fetchall():
+                import json
+                track_ids = json.loads(row['track_ids_json']) if row['track_ids_json'] else []
+                playlists[row['playlist_type']] = len(track_ids)
+
+            # Watchlist artists
+            cursor.execute("SELECT COUNT(*) as total FROM watchlist_artists")
+            total_watchlist = cursor.fetchone()['total']
+
+            cursor.execute("SELECT COUNT(*) as count FROM watchlist_artists WHERE itunes_artist_id IS NOT NULL")
+            watchlist_with_itunes = cursor.fetchone()['count']
+
+        return jsonify({
+            "success": True,
+            "active_source": active_source,
+            "similar_artists": {
+                "total": total_similar,
+                "with_itunes_id": similar_with_itunes,
+                "with_spotify_id": similar_with_spotify
+            },
+            "discovery_pool": pool_by_source,
+            "recent_albums": albums_by_source,
+            "curated_playlists": playlists,
+            "watchlist_artists": {
+                "total": total_watchlist,
+                "with_itunes_id": watchlist_with_itunes
+            }
+        })
+
+    except Exception as e:
+        print(f"Error diagnosing discover data: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 # ========================================
 # SEASONAL DISCOVERY ENDPOINTS

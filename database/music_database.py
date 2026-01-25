@@ -636,6 +636,90 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE discovery_recent_albums ADD COLUMN source TEXT DEFAULT 'spotify'")
                 logger.info("Added iTunes columns to discovery_recent_albums table for dual-source discovery")
 
+            # Migration: Fix NOT NULL constraint on album_spotify_id (required for iTunes-only albums)
+            # Check if album_spotify_id has NOT NULL constraint by checking table schema
+            cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='discovery_recent_albums'")
+            table_schema = cursor.fetchone()
+            if table_schema and 'album_spotify_id TEXT NOT NULL' in (table_schema[0] or ''):
+                logger.info("Migrating discovery_recent_albums to allow NULL album_spotify_id for iTunes support...")
+                # SQLite doesn't support ALTER COLUMN, so recreate table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS discovery_recent_albums_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        album_spotify_id TEXT,
+                        album_itunes_id TEXT,
+                        artist_spotify_id TEXT,
+                        artist_itunes_id TEXT,
+                        source TEXT NOT NULL DEFAULT 'spotify',
+                        album_name TEXT NOT NULL,
+                        artist_name TEXT NOT NULL,
+                        album_cover_url TEXT,
+                        release_date TEXT NOT NULL,
+                        album_type TEXT DEFAULT 'album',
+                        cached_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(album_spotify_id, album_itunes_id, source)
+                    )
+                """)
+                cursor.execute("""
+                    INSERT OR IGNORE INTO discovery_recent_albums_new
+                    SELECT * FROM discovery_recent_albums
+                """)
+                cursor.execute("DROP TABLE discovery_recent_albums")
+                cursor.execute("ALTER TABLE discovery_recent_albums_new RENAME TO discovery_recent_albums")
+                conn.commit()
+                logger.info("Successfully migrated discovery_recent_albums table for iTunes support")
+
+            # Migration: Add UNIQUE constraint to similar_artists table
+            # Test if ON CONFLICT works by trying a dummy operation
+            needs_similar_migration = False
+            try:
+                cursor.execute("""
+                    INSERT INTO similar_artists
+                    (source_artist_id, similar_artist_name, similarity_rank, occurrence_count, last_updated)
+                    VALUES ('__migration_test__', '__migration_test__', 1, 1, CURRENT_TIMESTAMP)
+                    ON CONFLICT(source_artist_id, similar_artist_name)
+                    DO UPDATE SET occurrence_count = occurrence_count
+                """)
+                # Clean up test row
+                cursor.execute("DELETE FROM similar_artists WHERE source_artist_id = '__migration_test__'")
+                logger.info("similar_artists table has correct UNIQUE constraint")
+            except Exception as constraint_error:
+                logger.info(f"similar_artists needs migration (constraint test failed: {constraint_error})")
+                needs_similar_migration = True
+
+            if needs_similar_migration:
+                logger.info("Migrating similar_artists to add UNIQUE constraint...")
+                # Get a fresh connection for the migration
+                with self._get_connection() as migration_conn:
+                    migration_cursor = migration_conn.cursor()
+                    # SQLite doesn't support adding constraints, so recreate table
+                    migration_cursor.execute("DROP TABLE IF EXISTS similar_artists_new")
+                    migration_cursor.execute("""
+                        CREATE TABLE similar_artists_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            source_artist_id TEXT NOT NULL,
+                            similar_artist_spotify_id TEXT,
+                            similar_artist_itunes_id TEXT,
+                            similar_artist_name TEXT NOT NULL,
+                            similarity_rank INTEGER DEFAULT 1,
+                            occurrence_count INTEGER DEFAULT 1,
+                            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            UNIQUE(source_artist_id, similar_artist_name)
+                        )
+                    """)
+                    migration_cursor.execute("""
+                        INSERT OR IGNORE INTO similar_artists_new
+                        (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
+                         similar_artist_name, similarity_rank, occurrence_count, last_updated)
+                        SELECT source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
+                               similar_artist_name, similarity_rank, occurrence_count, last_updated
+                        FROM similar_artists
+                    """)
+                    migration_cursor.execute("DROP TABLE similar_artists")
+                    migration_cursor.execute("ALTER TABLE similar_artists_new RENAME TO similar_artists")
+                    migration_conn.commit()
+                    logger.info("Successfully migrated similar_artists table with UNIQUE constraint")
+
             # ============== INDEXES (after migrations to ensure columns exist) ==============
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_source ON similar_artists (source_artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_spotify ON similar_artists (similar_artist_spotify_id)")
