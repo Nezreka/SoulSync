@@ -291,6 +291,9 @@ class MusicDatabase:
             # Add iTunes artist ID column to watchlist_artists (migration)
             self._add_watchlist_itunes_id_column(cursor)
 
+            # Make spotify_artist_id nullable for iTunes-only artists (migration)
+            self._fix_watchlist_spotify_id_nullable(cursor)
+
             conn.commit()
             logger.info("Database initialized successfully")
             
@@ -819,6 +822,67 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding itunes_artist_id column to watchlist_artists: {e}")
+            # Don't raise - this is a migration, database can still function
+
+    def _fix_watchlist_spotify_id_nullable(self, cursor):
+        """
+        Make spotify_artist_id nullable in watchlist_artists table.
+        This allows adding iTunes-only artists without Spotify IDs.
+        
+        Since SQLite doesn't support modifying column constraints directly,
+        we need to recreate the table if the constraint needs to be changed.
+        """
+        try:
+            # Check if spotify_artist_id is currently NOT NULL
+            cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='watchlist_artists'")
+            result = cursor.fetchone()
+            
+            if result and 'spotify_artist_id TEXT UNIQUE NOT NULL' in result[0]:
+                logger.info("Migrating watchlist_artists table to make spotify_artist_id nullable...")
+                
+                # Create new table with nullable spotify_artist_id
+                cursor.execute("""
+                    CREATE TABLE watchlist_artists_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        spotify_artist_id TEXT UNIQUE,
+                        artist_name TEXT NOT NULL,
+                        date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        last_scan_timestamp TIMESTAMP,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        image_url TEXT,
+                        include_albums INTEGER DEFAULT 1,
+                        include_eps INTEGER DEFAULT 1,
+                        include_singles INTEGER DEFAULT 1,
+                        include_live INTEGER DEFAULT 0,
+                        include_remixes INTEGER DEFAULT 0,
+                        include_acoustic INTEGER DEFAULT 0,
+                        include_compilations INTEGER DEFAULT 0,
+                        itunes_artist_id TEXT
+                    )
+                """)
+                
+                # Copy data from old table
+                cursor.execute("""
+                    INSERT INTO watchlist_artists_new 
+                    SELECT * FROM watchlist_artists
+                """)
+                
+                # Drop old table
+                cursor.execute("DROP TABLE watchlist_artists")
+                
+                # Rename new table
+                cursor.execute("ALTER TABLE watchlist_artists_new RENAME TO watchlist_artists")
+                
+                # Recreate indexes
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_spotify_id ON watchlist_artists (spotify_artist_id)")
+                
+                logger.info("Successfully migrated watchlist_artists table - spotify_artist_id is now nullable")
+            else:
+                logger.debug("watchlist_artists table already has nullable spotify_artist_id or custom schema")
+                
+        except Exception as e:
+            logger.error(f"Error making spotify_artist_id nullable in watchlist_artists: {e}")
             # Don't raise - this is a migration, database can still function
 
     def close(self):

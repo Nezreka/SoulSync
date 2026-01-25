@@ -23669,7 +23669,7 @@ async function showWatchlistModal() {
                         ${artistsData.artists.map(artist => `
                             <div class="watchlist-artist-item"
                                  data-artist-name="${artist.artist_name.toLowerCase().replace(/"/g, '&quot;')}"
-                                 data-artist-id="${artist.spotify_artist_id}"
+                                 data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}"
                                  style="cursor: pointer;">
                                 ${artist.image_url ? `
                                     <img src="${artist.image_url}"
@@ -23689,7 +23689,7 @@ async function showWatchlistModal() {
                                     ` : ''}
                                 </div>
                                 <button class="playlist-modal-btn playlist-modal-btn-secondary watchlist-remove-btn"
-                                        data-artist-id="${artist.spotify_artist_id}"
+                                        data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}"
                                         data-artist-name="${escapeHtml(artist.artist_name)}"
                                         onclick="event.stopPropagation();">
                                     Remove
