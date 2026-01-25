@@ -18616,8 +18616,8 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
         if (actionsCell) {
             const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
             const platform = state?.is_listenbrainz_playlist ? 'listenbrainz' :
-                           (state?.is_tidal_playlist ? 'tidal' :
-                           (state?.is_beatport_playlist ? 'beatport' : 'youtube'));
+                (state?.is_tidal_playlist ? 'tidal' :
+                    (state?.is_beatport_playlist ? 'beatport' : 'youtube'));
             actionsCell.innerHTML = generateDiscoveryActionButton(result, urlHash, platform);
         }
     });
@@ -30065,20 +30065,28 @@ function displayDiscoverHeroArtist(artist) {
     }
 
     // Store artist ID for both buttons and update watchlist state
+    // Use artist_id which is set by the backend to the appropriate ID for the active source
     const addBtn = document.getElementById('discover-hero-add');
     const discographyBtn = document.getElementById('discover-hero-discography');
+    const artistId = artist.artist_id || artist.spotify_artist_id || artist.itunes_artist_id;
 
-    if (addBtn && artist.spotify_artist_id) {
-        addBtn.setAttribute('data-artist-id', artist.spotify_artist_id);
+    if (addBtn && artistId) {
+        addBtn.setAttribute('data-artist-id', artistId);
         addBtn.setAttribute('data-artist-name', artist.artist_name);
+        // Also store both IDs for cross-source operations
+        if (artist.spotify_artist_id) addBtn.setAttribute('data-spotify-id', artist.spotify_artist_id);
+        if (artist.itunes_artist_id) addBtn.setAttribute('data-itunes-id', artist.itunes_artist_id);
 
         // Check if this artist is already in watchlist and update button appearance
-        checkAndUpdateDiscoverHeroWatchlistButton(artist.spotify_artist_id);
+        checkAndUpdateDiscoverHeroWatchlistButton(artistId);
     }
 
-    if (discographyBtn && artist.spotify_artist_id) {
-        discographyBtn.setAttribute('data-artist-id', artist.spotify_artist_id);
+    if (discographyBtn && artistId) {
+        discographyBtn.setAttribute('data-artist-id', artistId);
         discographyBtn.setAttribute('data-artist-name', artist.artist_name);
+        // Also store both IDs for cross-source operations
+        if (artist.spotify_artist_id) discographyBtn.setAttribute('data-spotify-id', artist.spotify_artist_id);
+        if (artist.itunes_artist_id) discographyBtn.setAttribute('data-itunes-id', artist.itunes_artist_id);
     }
 
     // Update slideshow indicators
