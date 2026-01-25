@@ -12,6 +12,7 @@ let currentStream = {
     progress: 0,
     track: null
 };
+let currentMusicSourceName = 'Spotify'; // 'Spotify' or 'Apple Music' - updated from status endpoint
 
 // Streaming state management (enhanced functionality)
 let streamStatusPoller = null;
@@ -18137,7 +18138,7 @@ function openYouTubeDiscoveryModal(urlHash) {
 
                     <div class="modal-body">
                         <div class="progress-section">
-                            <div class="progress-label">🔍 Spotify Discovery Progress</div>
+                            <div class="progress-label">🔍 ${currentMusicSourceName} Discovery Progress</div>
                             <div class="progress-bar-container">
                                 <div class="progress-bar-fill" id="youtube-discovery-progress-${urlHash}" style="width: 0%;"></div>
                             </div>
@@ -18151,8 +18152,8 @@ function openYouTubeDiscoveryModal(urlHash) {
                                         <th>${sourceLabel} Track</th>
                                         <th>${sourceLabel} Artist</th>
                                         <th>Status</th>
-                                        <th>Spotify Track</th>
-                                        <th>Spotify Artist</th>
+                                        <th>${currentMusicSourceName} Track</th>
+                                        <th>${currentMusicSourceName} Artist</th>
                                         <th>Album</th>
                                         <th>Actions</th>
                                     </tr>
@@ -18300,7 +18301,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
                 }
             } else {
                 // Discovering phase - show progress
-                return `<div class="modal-info">🔍 Discovering Spotify matches...</div>`;
+                return `<div class="modal-info">🔍 Discovering ${currentMusicSourceName} matches...</div>`;
             }
 
         case 'discovered':
@@ -18446,13 +18447,13 @@ function getModalDescription(phase, isTidal = false, isBeatport = false, isListe
     const source = isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube'));
     switch (phase) {
         case 'fresh':
-            return `Ready to discover clean Spotify metadata for ${source} tracks...`;
+            return `Ready to discover clean ${currentMusicSourceName} metadata for ${source} tracks...`;
         case 'discovering':
-            return `Discovering clean Spotify metadata for ${source} tracks...`;
+            return `Discovering clean ${currentMusicSourceName} metadata for ${source} tracks...`;
         case 'discovered':
             return 'Discovery complete! View the results below.';
         default:
-            return `Discovering clean Spotify metadata for ${source} tracks...`;
+            return `Discovering clean ${currentMusicSourceName} metadata for ${source} tracks...`;
     }
 }
 
@@ -23223,6 +23224,8 @@ function updateServiceStatus(service, statusData) {
         if (musicSourceTitleElement) {
             const sourceName = statusData.source === 'itunes' ? 'Apple Music' : 'Spotify';
             musicSourceTitleElement.textContent = sourceName;
+            // Update global variable for use in discovery modals
+            currentMusicSourceName = sourceName;
         }
     }
 }
