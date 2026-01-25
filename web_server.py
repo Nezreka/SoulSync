@@ -8778,43 +8778,40 @@ def get_version_info():
     This provides the same data that the GUI version modal displays.
     """
     version_data = {
-        "version": "1.3",
+        "version": "1.4",
         "title": "What's New in SoulSync",
-        "subtitle": "Version 1.3 - New YouTube Engine, Docker Fixes & More",
+        "subtitle": "Version 1.4 - Full iTunes Metadata Support & More",
         "sections": [
             {
-                "title": "📺 New YouTube Download Source",
-                "description": "Major overhaul of the YouTube download engine, making it a first-class citizen alongside Soulseek",
+                "title": "🍎 Full iTunes Metadata Support",
+                "description": "Complete iTunes integration as a powerful alternative to Spotify",
+                "features": [
+                    "• Full Independence - Use SoulSync without a Spotify account! iTunes metadata is now fully capable of replacing Spotify",
+                    "• Automatic Fallback - Seamlessly switches to iTunes metadata if Spotify is unavailable or unauthenticated",
+                    "• Watchlist Support - Add artists, configure downloads, and fetch cover art using iTunes IDs",
+                    "• Smart Matching - Automatically links artists between platforms for maximum compatibility",
+                    "• High-Res Artwork - Fetches high-quality album art directly from Apple's servers"
+                ],
+                "usage_note": "No configuration needed! SoulSync automatically uses the best available metadata source."
+            },
+            {
+                "title": "📺 YouTube Download Engine",
+                "description": "Major overhaul of the YouTube download engine (v1.3 feature)",
                 "features": [
                     "• First-Class Support - YouTube is now a primary download source, fully integrated into the app's core",
                     "• Hybrid Mode - Automatically fallback to YouTube if Soulseek downloads fail (or vice-versa)",
                     "• Reliable Downloads - Completely rewritten post-processing engine to eliminate 'file not found' errors",
-                    "• Batch Processing - YouTube downloads now support batch operations and queue management",
-                    "• High Quality - Automatic selection of highest quality audio streams (up to 320kbps opus/aac)",
-                    "• Metadata Matching - Intelligent matching of YouTube videos to correct Spotify metadata"
-                ],
-                "usage_note": "Configure your preferred download sources in Settings > Download Settings!"
+                    "• Batch Processing - YouTube downloads now support batch operations and queue management"
+                ]
             },
-
             {
                 "title": "🐳 Docker & System Reliability",
                 "description": "Critical fixes for Docker environments and general system stability",
                 "features": [
                     "• Docker Streaming Fix - Resolved issues with path resolution when streaming in Docker containers",
-                    "• Volume Mapping - Improved handling of mapped volumes and permissions",
+                    "• Low-Memory Optimization - Improved memory usage during long scanning sessions",
                     "• Settings Persistence - Fixed an issue where Spotify settings wouldn't save correctly",
-                    "• Soulseek Connection - Better connection stability and compatibility checks",
-                    "• Background Workers - More robust background task handling for long-running operations"
-                ]
-            },
-            {
-                "title": "🛠️ Fixes & Improvements",
-                "description": "General bug fixes and quality of life improvements",
-                "features": [
-                    "• Diacritics Support - Fixed album/artist matching for names with special characters (e.g., 'Pielea de găină')",
-                    "• Search Timing - Optimized search scheduling to prevent rate limiting",
-                    "• Library Scanning - Faster and more accurate matching against existing library tracks",
-                    "• Mobile Layout - Improved responsiveness for sidebar and modals on mobile devices"
+                    "• Watchlist Cleanup - Better handling of duplicate entries and cross-platform IDs"
                 ]
             }
         ]
