@@ -1506,10 +1506,23 @@ def run_service_test(service, test_config):
         # 3. Run the test with the temporary config
         if service == "spotify":
             temp_client = SpotifyClient()
+            
+            # Check if Spotify credentials are configured
+            spotify_config = config_manager.get('spotify', {})
+            spotify_configured = bool(spotify_config.get('client_id') and spotify_config.get('client_secret'))
+            
             if temp_client.is_authenticated():
-                 return True, "Spotify connection successful!"
+                 # Determine which source is active
+                 if temp_client.is_spotify_authenticated():
+                     return True, "Spotify connection successful!"
+                 else:
+                     # Using iTunes fallback
+                     if spotify_configured:
+                         return True, "Apple Music connection successful! (Spotify configured but not authenticated)"
+                     else:
+                         return True, "Apple Music connection successful! (Spotify not configured)"
             else:
-                 return False, "Spotify authentication failed. Check credentials and complete OAuth flow in browser if prompted."
+                 return False, "Music service authentication failed. Check credentials and complete OAuth flow in browser if prompted."
         elif service == "tidal":
             temp_client = TidalClient()
             if temp_client.is_authenticated():
@@ -1926,9 +1939,14 @@ def get_status():
             # Actually validate authentication (makes API call, but cached for 2 min)
             spotify_status = spotify_client.is_authenticated()
             spotify_response_time = (time.time() - spotify_start) * 1000
+            
+            # Determine active music source (spotify or itunes)
+            music_source = 'spotify' if spotify_client.is_spotify_authenticated() else 'itunes'
+            
             _status_cache['spotify'] = {
                 'connected': spotify_status,
-                'response_time': round(spotify_response_time, 1)
+                'response_time': round(spotify_response_time, 1),
+                'source': music_source
             }
             _status_cache_timestamps['spotify'] = current_time
         # else: use cached value
@@ -2365,7 +2383,7 @@ def test_connection_endpoint():
 
     # Add activity for connection test
     if success:
-        add_activity_item("✅", "Connection Test", f"{service.title()} connection successful", "Now")
+        add_activity_item("✅", "Connection Test", message, "Now")
     else:
         add_activity_item("❌", "Connection Test", f"{service.title()} connection failed", "Now")
 
@@ -2411,7 +2429,7 @@ def test_dashboard_connection_endpoint():
 
     # Add activity for dashboard connection test (different from settings test)
     if success:
-        add_activity_item("🎛️", "Dashboard Test", f"{service.title()} service verified", "Now")
+        add_activity_item("🎛️", "Dashboard Test", message, "Now")
     else:
         add_activity_item("⚠️", "Dashboard Test", f"{service.title()} service check failed", "Now")
 
@@ -5017,23 +5035,102 @@ def get_similar_artists(artist_name):
             "error": str(e)
         }), 500
 
+@app.route('/api/artist/<artist_id>/image', methods=['GET'])
+def get_artist_image(artist_id):
+    """Get artist image URL - used for lazy loading in search results.
+
+    For iTunes, this fetches the artist's first album artwork as a fallback.
+    For Spotify, returns the artist's image directly.
+    """
+    try:
+        if spotify_client and spotify_client.is_spotify_authenticated():
+            # Use Spotify directly
+            artist_data = spotify_client.sp.artist(artist_id)
+            if artist_data and artist_data.get('images'):
+                image_url = artist_data['images'][0]['url'] if artist_data['images'] else None
+                return jsonify({"success": True, "image_url": image_url})
+            return jsonify({"success": True, "image_url": None})
+        else:
+            # Use iTunes fallback - fetch album art
+            from core.itunes_client import iTunesClient
+            itunes = iTunesClient()
+            image_url = itunes._get_artist_image_from_albums(artist_id)
+            return jsonify({"success": True, "image_url": image_url})
+    except Exception as e:
+        print(f"Error fetching artist image: {e}")
+        return jsonify({"success": False, "image_url": None, "error": str(e)})
+
 @app.route('/api/artist/<artist_id>/discography', methods=['GET'])
 def get_artist_discography(artist_id):
     """Get an artist's complete discography (albums and singles)"""
     try:
-        if not spotify_client or not spotify_client.is_authenticated():
-            return jsonify({"error": "Spotify not authenticated"}), 401
-        
-        print(f"🎤 Fetching discography for artist: {artist_id}")
-        
-        # Get artist's albums and singles (temporarily include appears_on for debugging)
-        albums = spotify_client.get_artist_albums(artist_id, album_type='album,single', limit=50)
-        print(f"📊 Raw albums returned from Spotify: {len(albums)}")
+        # Get optional artist name for fallback searches
+        artist_name = request.args.get('artist_name', '')
+
+        # Determine which source to use
+        spotify_available = spotify_client and spotify_client.is_spotify_authenticated()
+
+        # Import iTunes client for fallback
+        from core.itunes_client import iTunesClient
+        itunes_client = iTunesClient()
+
+        print(f"🎤 Fetching discography for artist: {artist_id} (name: {artist_name}, spotify: {spotify_available})")
+
+        albums = []
+        active_source = None
+
+        # Try to get albums from the appropriate source
+        # Check if the ID looks like Spotify (alphanumeric) or iTunes (numeric only)
+        is_numeric_id = artist_id.isdigit()
+
+        if spotify_available and not is_numeric_id:
+            # Try Spotify first for alphanumeric IDs
+            try:
+                albums = spotify_client.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                if albums:
+                    active_source = 'spotify'
+                    print(f"📊 Got {len(albums)} albums from Spotify")
+            except Exception as e:
+                print(f"Spotify lookup failed: {e}")
+
+        # Try iTunes if Spotify didn't work or if it's a numeric ID
+        if not albums:
+            try:
+                if is_numeric_id:
+                    # It's an iTunes ID, use directly
+                    albums = itunes_client.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                    if albums:
+                        active_source = 'itunes'
+                        print(f"📊 Got {len(albums)} albums from iTunes (direct ID)")
+                elif artist_name:
+                    # Search iTunes by name
+                    print(f"🔄 Trying iTunes search by name: '{artist_name}'")
+                    itunes_artists = itunes_client.search_artists(artist_name, limit=5)
+                    if itunes_artists:
+                        # Find best match
+                        best_match = None
+                        for artist in itunes_artists:
+                            if artist.name.lower() == artist_name.lower():
+                                best_match = artist
+                                break
+                        if not best_match:
+                            best_match = itunes_artists[0]
+
+                        print(f"✅ Found iTunes artist: {best_match.name} (ID: {best_match.id})")
+                        albums = itunes_client.get_artist_albums(best_match.id, album_type='album,single', limit=50)
+                        if albums:
+                            active_source = 'itunes'
+                            print(f"📊 Got {len(albums)} albums from iTunes (name search)")
+            except Exception as e:
+                print(f"iTunes lookup failed: {e}")
+
+        print(f"📊 Total albums returned: {len(albums)} (source: {active_source})")
         
         if not albums:
             return jsonify({
                 "albums": [],
-                "singles": []
+                "singles": [],
+                "source": active_source or "unknown"
             })
         
         # Separate albums from singles/EPs
@@ -5048,23 +5145,18 @@ def get_artist_discography(artist_id):
             if album.id in seen_albums:
                 continue
             seen_albums.add(album.id)
-            
-            # Debug: Check artist information
-            print(f"🔍 Checking album: {album.name}")
+
+            # Handle artist matching for both Spotify (objects) and iTunes (strings) formats
             if hasattr(album, 'artists') and album.artists:
-                primary_artist_id = album.artists[0].id if hasattr(album.artists[0], 'id') else None
-                primary_artist_name = album.artists[0].name if hasattr(album.artists[0], 'name') else None
-                print(f"   Primary artist: {primary_artist_name} (ID: {primary_artist_id})")
-                print(f"   Requested artist ID: {artist_id}")
-                
-                # Skip if the primary artist doesn't match our requested artist
-                if primary_artist_id and primary_artist_id != artist_id:
-                    print(f"🚫 Skipping '{album.name}' - primary artist mismatch")
-                    continue
-                elif not primary_artist_id:
-                    print(f"⚠️ No primary artist ID found for '{album.name}' - including anyway")
-            else:
-                print(f"⚠️ No artists found for '{album.name}' - including anyway")
+                first_artist = album.artists[0]
+                # Check if artists are objects (Spotify) or strings (iTunes)
+                if hasattr(first_artist, 'id'):
+                    # Spotify format: artist is an object with .id and .name
+                    primary_artist_id = first_artist.id
+                    # Skip if the primary artist doesn't match our requested artist
+                    if primary_artist_id and primary_artist_id != artist_id:
+                        continue
+                # iTunes format: artist is a string, can't verify ID match so include all
             
             album_data = {
                 "id": album.id,
@@ -5113,9 +5205,10 @@ def get_artist_discography(artist_id):
         
         return jsonify({
             "albums": album_list,
-            "singles": singles_list
+            "singles": singles_list,
+            "source": active_source or "spotify"
         })
-        
+
     except Exception as e:
         print(f"❌ Error fetching artist discography: {e}")
         import traceback
@@ -8685,43 +8778,40 @@ def get_version_info():
     This provides the same data that the GUI version modal displays.
     """
     version_data = {
-        "version": "1.3",
+        "version": "1.4",
         "title": "What's New in SoulSync",
-        "subtitle": "Version 1.3 - New YouTube Engine, Docker Fixes & More",
+        "subtitle": "Version 1.4 - Full iTunes Metadata Support & More",
         "sections": [
             {
-                "title": "📺 New YouTube Download Source",
-                "description": "Major overhaul of the YouTube download engine, making it a first-class citizen alongside Soulseek",
+                "title": "🍎 Full iTunes Metadata Support",
+                "description": "Complete iTunes integration as a powerful alternative to Spotify",
+                "features": [
+                    "• Full Independence - Use SoulSync without a Spotify account! iTunes metadata is now fully capable of replacing Spotify",
+                    "• Automatic Fallback - Seamlessly switches to iTunes metadata if Spotify is unavailable or unauthenticated",
+                    "• Watchlist Support - Add artists, configure downloads, and fetch cover art using iTunes IDs",
+                    "• Smart Matching - Automatically links artists between platforms for maximum compatibility",
+                    "• High-Res Artwork - Fetches high-quality album art directly from Apple's servers"
+                ],
+                "usage_note": "No configuration needed! SoulSync automatically uses the best available metadata source."
+            },
+            {
+                "title": "📺 YouTube Download Engine",
+                "description": "Major overhaul of the YouTube download engine (v1.3 feature)",
                 "features": [
                     "• First-Class Support - YouTube is now a primary download source, fully integrated into the app's core",
                     "• Hybrid Mode - Automatically fallback to YouTube if Soulseek downloads fail (or vice-versa)",
                     "• Reliable Downloads - Completely rewritten post-processing engine to eliminate 'file not found' errors",
-                    "• Batch Processing - YouTube downloads now support batch operations and queue management",
-                    "• High Quality - Automatic selection of highest quality audio streams (up to 320kbps opus/aac)",
-                    "• Metadata Matching - Intelligent matching of YouTube videos to correct Spotify metadata"
-                ],
-                "usage_note": "Configure your preferred download sources in Settings > Download Settings!"
+                    "• Batch Processing - YouTube downloads now support batch operations and queue management"
+                ]
             },
-
             {
                 "title": "🐳 Docker & System Reliability",
                 "description": "Critical fixes for Docker environments and general system stability",
                 "features": [
                     "• Docker Streaming Fix - Resolved issues with path resolution when streaming in Docker containers",
-                    "• Volume Mapping - Improved handling of mapped volumes and permissions",
+                    "• Low-Memory Optimization - Improved memory usage during long scanning sessions",
                     "• Settings Persistence - Fixed an issue where Spotify settings wouldn't save correctly",
-                    "• Soulseek Connection - Better connection stability and compatibility checks",
-                    "• Background Workers - More robust background task handling for long-running operations"
-                ]
-            },
-            {
-                "title": "🛠️ Fixes & Improvements",
-                "description": "General bug fixes and quality of life improvements",
-                "features": [
-                    "• Diacritics Support - Fixed album/artist matching for names with special characters (e.g., 'Pielea de găină')",
-                    "• Search Timing - Optimized search scheduling to prevent rate limiting",
-                    "• Library Scanning - Faster and more accurate matching against existing library tracks",
-                    "• Mobile Layout - Improved responsiveness for sidebar and modals on mobile devices"
+                    "• Watchlist Cleanup - Better handling of duplicate entries and cross-platform IDs"
                 ]
             }
         ]
@@ -14111,8 +14201,14 @@ def get_album_tracks(album_id):
         if not album_data:
             return jsonify({"error": "Album not found"}), 404
 
-        # Extract tracks from album data
+        # Extract tracks from album data (Spotify format)
         tracks = album_data.get('tracks', {}).get('items', [])
+
+        # If no tracks in album data (iTunes format), fetch them separately
+        if not tracks:
+            tracks_data = spotify_client.get_album_tracks(album_id)
+            if tracks_data and 'items' in tracks_data:
+                tracks = tracks_data['items']
 
         # Format response
         album_dict = {
@@ -14121,12 +14217,13 @@ def get_album_tracks(album_id):
             'artists': album_data.get('artists', []),
             'release_date': album_data.get('release_date', ''),
             'total_tracks': album_data.get('total_tracks', 0),
-            'album_type': album_data.get('album_type', 'album'),  # CRITICAL FIX: Include album_type for correct classification
+            'album_type': album_data.get('album_type', 'album'),
             'images': album_data.get('images', []),
             'tracks': tracks
         }
         return jsonify(album_dict)
     except Exception as e:
+        logger.error(f"Error fetching album tracks: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -14208,6 +14305,139 @@ def search_spotify_tracks():
 
     except Exception as e:
         print(f"❌ Error searching Spotify tracks: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/itunes/search_tracks', methods=['GET'])
+def search_itunes_tracks():
+    """Search for tracks on iTunes - used by discovery fix modal when iTunes is the source"""
+    try:
+        from core.itunes_client import iTunesClient
+
+        query = request.args.get('query', '').strip()
+        limit = int(request.args.get('limit', 20))
+
+        if not query:
+            return jsonify({"error": "Query parameter is required"}), 400
+
+        # Search using iTunes client
+        itunes_client = iTunesClient()
+        tracks = itunes_client.search_tracks(query, limit=limit)
+
+        # Convert tracks to dict format matching Spotify structure for frontend compatibility
+        tracks_dict = [{
+            'id': t.id,
+            'name': t.name,
+            'artists': t.artists,  # Already a list
+            'album': t.album,
+            'duration_ms': t.duration_ms,
+            'image_url': t.image_url,
+            'source': 'itunes'
+        } for t in tracks]
+
+        return jsonify({'tracks': tracks_dict})
+
+    except Exception as e:
+        print(f"❌ Error searching iTunes tracks: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/itunes/album/<album_id>', methods=['GET'])
+def get_itunes_album_tracks(album_id):
+    """Fetches full track details for a specific iTunes album."""
+    try:
+        from core.itunes_client import iTunesClient
+
+        itunes_client = iTunesClient()
+        album_data = itunes_client.get_album(album_id)
+
+        if not album_data:
+            return jsonify({"error": "Album not found"}), 404
+
+        # Get tracks for this album
+        tracks_data = itunes_client.get_album_tracks(album_id)
+        tracks = tracks_data.get('items', []) if tracks_data else []
+
+        # Format response to match Spotify structure for frontend compatibility
+        album_dict = {
+            'id': album_data.get('id', album_id),
+            'name': album_data.get('name', 'Unknown Album'),
+            'artists': album_data.get('artists', []),
+            'release_date': album_data.get('release_date', ''),
+            'total_tracks': album_data.get('total_tracks', len(tracks)),
+            'album_type': album_data.get('album_type', 'album'),
+            'images': album_data.get('images', []),
+            'tracks': tracks,
+            'source': 'itunes'
+        }
+        return jsonify(album_dict)
+
+    except Exception as e:
+        logger.error(f"Error fetching iTunes album tracks: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/discover/album/<source>/<album_id>', methods=['GET'])
+def get_discover_album(source, album_id):
+    """
+    Source-agnostic album endpoint for discover page.
+    Fetches album from the appropriate source (spotify or itunes).
+    """
+    try:
+        if source == 'spotify':
+            if not spotify_client or not spotify_client.is_authenticated():
+                return jsonify({"error": "Spotify not authenticated."}), 401
+
+            album_data = spotify_client.get_album(album_id)
+            if not album_data:
+                return jsonify({"error": "Album not found"}), 404
+
+            tracks = album_data.get('tracks', {}).get('items', [])
+            if not tracks:
+                tracks_data = spotify_client.get_album_tracks(album_id)
+                if tracks_data and 'items' in tracks_data:
+                    tracks = tracks_data['items']
+
+            return jsonify({
+                'id': album_data['id'],
+                'name': album_data['name'],
+                'artists': album_data.get('artists', []),
+                'release_date': album_data.get('release_date', ''),
+                'total_tracks': album_data.get('total_tracks', 0),
+                'album_type': album_data.get('album_type', 'album'),
+                'images': album_data.get('images', []),
+                'tracks': tracks,
+                'source': 'spotify'
+            })
+
+        elif source == 'itunes':
+            from core.itunes_client import iTunesClient
+            itunes_client = iTunesClient()
+
+            album_data = itunes_client.get_album(album_id)
+            if not album_data:
+                return jsonify({"error": "Album not found"}), 404
+
+            tracks_data = itunes_client.get_album_tracks(album_id)
+            tracks = tracks_data.get('items', []) if tracks_data else []
+
+            return jsonify({
+                'id': album_data.get('id', album_id),
+                'name': album_data.get('name', 'Unknown Album'),
+                'artists': album_data.get('artists', []),
+                'release_date': album_data.get('release_date', ''),
+                'total_tracks': album_data.get('total_tracks', len(tracks)),
+                'album_type': album_data.get('album_type', 'album'),
+                'images': album_data.get('images', []),
+                'tracks': tracks,
+                'source': 'itunes'
+            })
+
+        else:
+            return jsonify({"error": f"Unknown source: {source}"}), 400
+
+    except Exception as e:
+        logger.error(f"Error fetching discover album: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -14639,30 +14869,47 @@ def update_tidal_playlist_phase(playlist_id):
 
 
 def _run_tidal_discovery_worker(playlist_id):
-    """Background worker for Tidal Spotify discovery process (like sync.py)"""
+    """Background worker for Tidal discovery process (Spotify preferred, iTunes fallback)"""
     try:
         state = tidal_discovery_states[playlist_id]
         playlist = state['playlist']
-        
-        print(f"🎵 Starting Tidal Spotify discovery for: {playlist.name}")
-        
+
+        # Determine which provider to use
+        use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
+        discovery_source = 'spotify' if use_spotify else 'itunes'
+
+        # Initialize iTunes client if needed
+        itunes_client_instance = None
+        if not use_spotify:
+            from core.itunes_client import iTunesClient
+            itunes_client_instance = iTunesClient()
+
+        print(f"🎵 Starting Tidal discovery for: {playlist.name} (using {discovery_source.upper()})")
+
+        # Store discovery source in state for frontend
+        state['discovery_source'] = discovery_source
+
         # Import matching engine for validation (like sync.py)
         from core.matching_engine import MusicMatchingEngine
         matching_engine = MusicMatchingEngine()
-        
+
         successful_discoveries = 0
-        
+
         for i, tidal_track in enumerate(playlist.tracks):
             if state.get('cancelled', False):
                 break
-            
+
             try:
-                print(f"🔍 [{i+1}/{len(playlist.tracks)}] Searching: {tidal_track.name} by {', '.join(tidal_track.artists)}")
-                
-                # Use the same search logic as sync.py TidalSpotifyDiscoveryWorker
-                spotify_track = _search_spotify_for_tidal_track(tidal_track)
-                
-                # Create result entry
+                print(f"🔍 [{i+1}/{len(playlist.tracks)}] Searching {discovery_source.upper()}: {tidal_track.name} by {', '.join(tidal_track.artists)}")
+
+                # Use the search function with appropriate provider
+                track_result = _search_spotify_for_tidal_track(
+                    tidal_track,
+                    use_spotify=use_spotify,
+                    itunes_client=itunes_client_instance
+                )
+
+                # Create result entry - use 'match_data' as generic key for both providers
                 result = {
                     'tidal_track': {
                         'id': tidal_track.id,
@@ -14671,47 +14918,66 @@ def _run_tidal_discovery_worker(playlist_id):
                         'album': getattr(tidal_track, 'album', 'Unknown Album'),
                         'duration_ms': getattr(tidal_track, 'duration_ms', 0),
                     },
-                    'spotify_data': None,
-                    'status': 'not_found'
+                    'spotify_data': None,  # Keep for backwards compatibility
+                    'match_data': None,    # Generic field for any provider
+                    'status': 'not_found',
+                    'discovery_source': discovery_source
                 }
-                
-                if isinstance(spotify_track, tuple):
-                    # Function now returns (Track, raw_data)
-                    track_obj, raw_track_data = spotify_track
+
+                if use_spotify and isinstance(track_result, tuple):
+                    # Spotify: Function returns (Track, raw_data)
+                    track_obj, raw_track_data = track_result
                     # Use full album object from raw API response
                     album_obj = raw_track_data.get('album', {}) if raw_track_data else {}
 
-                    result['spotify_data'] = {
+                    match_data = {
                         'id': track_obj.id,
                         'name': track_obj.name,
                         'artists': track_obj.artists,  # Already a list of strings
                         'album': album_obj,  # Full album object with images
                         'duration_ms': track_obj.duration_ms,
-                        'external_urls': track_obj.external_urls
+                        'external_urls': track_obj.external_urls,
+                        'source': 'spotify'
                     }
+                    result['spotify_data'] = match_data  # Backwards compatibility
+                    result['match_data'] = match_data
                     result['status'] = 'found'
                     successful_discoveries += 1
                     state['spotify_matches'] = successful_discoveries
-                elif spotify_track:
-                    # Fallback for old format (shouldn't happen after update)
-                    result['spotify_data'] = {
-                        'id': spotify_track.id,
-                        'name': spotify_track.name,
-                        'artists': spotify_track.artists,
-                        'album': {'name': spotify_track.album, 'album_type': 'album', 'images': []},
-                        'duration_ms': spotify_track.duration_ms,
-                        'external_urls': spotify_track.external_urls
-                    }
+
+                elif not use_spotify and track_result and isinstance(track_result, dict):
+                    # iTunes: Function returns a dict with track data
+                    match_data = track_result
+                    match_data['source'] = 'itunes'
+                    result['spotify_data'] = match_data  # Use same field for frontend compatibility
+                    result['match_data'] = match_data
                     result['status'] = 'found'
                     successful_discoveries += 1
                     state['spotify_matches'] = successful_discoveries
-                
+
+                elif use_spotify and track_result:
+                    # Spotify fallback for old format (shouldn't happen after update)
+                    match_data = {
+                        'id': track_result.id,
+                        'name': track_result.name,
+                        'artists': track_result.artists,
+                        'album': {'name': track_result.album, 'album_type': 'album', 'images': []},
+                        'duration_ms': track_result.duration_ms,
+                        'external_urls': track_result.external_urls,
+                        'source': 'spotify'
+                    }
+                    result['spotify_data'] = match_data
+                    result['match_data'] = match_data
+                    result['status'] = 'found'
+                    successful_discoveries += 1
+                    state['spotify_matches'] = successful_discoveries
+
                 state['discovery_results'].append(result)
                 state['discovery_progress'] = int(((i + 1) / len(playlist.tracks)) * 100)
-                
-                # Add delay between requests (like sync.py)
+
+                # Add delay between requests
                 time.sleep(0.1)
-                
+
             except Exception as e:
                 print(f"❌ Error processing track {i+1}: {e}")
                 # Add error result
@@ -14721,32 +14987,49 @@ def _run_tidal_discovery_worker(playlist_id):
                         'artists': tidal_track.artists or [],
                     },
                     'spotify_data': None,
+                    'match_data': None,
                     'status': 'error',
-                    'error': str(e)
+                    'error': str(e),
+                    'discovery_source': discovery_source
                 }
                 state['discovery_results'].append(result)
                 state['discovery_progress'] = int(((i + 1) / len(playlist.tracks)) * 100)
-        
+
         # Mark as complete
         state['phase'] = 'discovered'
         state['status'] = 'discovered'
         state['discovery_progress'] = 100
-        
+
         # Add activity for discovery completion
-        add_activity_item("✅", "Tidal Discovery Complete", f"'{playlist.name}' - {successful_discoveries}/{len(playlist.tracks)} tracks found", "Now")
-        
-        print(f"✅ Tidal discovery complete: {successful_discoveries}/{len(playlist.tracks)} tracks found")
-        
+        source_label = discovery_source.upper()
+        add_activity_item("✅", f"Tidal Discovery Complete ({source_label})", f"'{playlist.name}' - {successful_discoveries}/{len(playlist.tracks)} tracks found", "Now")
+
+        print(f"✅ Tidal discovery complete ({source_label}): {successful_discoveries}/{len(playlist.tracks)} tracks found")
+
     except Exception as e:
         print(f"❌ Error in Tidal discovery worker: {e}")
         state['phase'] = 'error'
         state['status'] = f'error: {str(e)}'
 
 
-def _search_spotify_for_tidal_track(tidal_track):
-    """Search Spotify for a Tidal track using matching_engine for better accuracy"""
-    if not spotify_client or not spotify_client.is_authenticated():
-        return None
+def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client=None):
+    """Search Spotify/iTunes for a Tidal track using matching_engine for better accuracy
+
+    Args:
+        tidal_track: The Tidal track to search for
+        use_spotify: If True, use Spotify; if False, use iTunes
+        itunes_client: iTunes client instance (required when use_spotify=False)
+
+    Returns:
+        For Spotify: (Track, raw_data) tuple or None
+        For iTunes: dict with track data or None
+    """
+    if use_spotify:
+        if not spotify_client or not spotify_client.is_authenticated():
+            return None
+    else:
+        if not itunes_client:
+            return None
 
     try:
         # Get track info
@@ -14757,8 +15040,9 @@ def _search_spotify_for_tidal_track(tidal_track):
             return None
 
         artist_name = artists[0]  # Use primary artist
+        source_name = "Spotify" if use_spotify else "iTunes"
 
-        print(f"🔍 Tidal track: '{artist_name}' - '{track_name}'")
+        print(f"🔍 Tidal track: '{artist_name}' - '{track_name}' (searching {source_name})")
 
         # Use matching engine to generate search queries (with fallback)
         try:
@@ -14787,62 +15071,116 @@ def _search_spotify_for_tidal_track(tidal_track):
 
         for query_idx, search_query in enumerate(search_queries):
             try:
-                print(f"🔍 Tidal query {query_idx + 1}/{len(search_queries)}: {search_query}")
+                print(f"🔍 Tidal query {query_idx + 1}/{len(search_queries)}: {search_query} ({source_name})")
 
-                # Get raw Spotify API response to access full album object with images
-                raw_results = spotify_client.sp.search(q=search_query, type='track', limit=5)
-                if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
-                    continue
+                if use_spotify:
+                    # SPOTIFY PATH: Get raw Spotify API response to access full album object with images
+                    raw_results = spotify_client.sp.search(q=search_query, type='track', limit=5)
+                    if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
+                        continue
 
-                # Also get Track objects for matching logic
-                results = spotify_client.search_tracks(search_query, limit=5)
+                    # Also get Track objects for matching logic
+                    results = spotify_client.search_tracks(search_query, limit=5)
 
-                if not results:
-                    continue
+                    if not results:
+                        continue
 
-                # Score each result using matching engine
-                for idx, result in enumerate(results):
-                    raw_track = raw_results['tracks']['items'][idx] if idx < len(raw_results['tracks']['items']) else None
-                    try:
-                        # Calculate confidence using matching engine's similarity scoring (with fallback)
+                    # Score each result using matching engine
+                    for idx, result in enumerate(results):
+                        raw_track = raw_results['tracks']['items'][idx] if idx < len(raw_results['tracks']['items']) else None
                         try:
-                            artist_confidence = 0.0
-                            if result.artists:
-                                # Get best artist match confidence
-                                for result_artist in result.artists:
+                            # Calculate confidence using matching engine's similarity scoring (with fallback)
+                            try:
+                                artist_confidence = 0.0
+                                if result.artists:
+                                    # Get best artist match confidence
+                                    for result_artist in result.artists:
+                                        artist_sim = matching_engine.similarity_score(
+                                            matching_engine.normalize_string(artist_name),
+                                            matching_engine.normalize_string(result_artist)
+                                        )
+                                        artist_confidence = max(artist_confidence, artist_sim)
+
+                                # Calculate title confidence
+                                title_confidence = matching_engine.similarity_score(
+                                    matching_engine.normalize_string(track_name),
+                                    matching_engine.normalize_string(result.name)
+                                )
+
+                                # Combined confidence (equal weighting for Tidal clean data)
+                                combined_confidence = (artist_confidence * 0.5 + title_confidence * 0.5)
+                            except Exception as e:
+                                print(f"⚠️ Matching engine scoring failed for Tidal, using first match: {e}")
+                                # Fallback: just take the first result if matching engine fails
+                                combined_confidence = 1.0  # Set high to accept this match
+                                best_match = result
+                                break
+
+                            print(f"🔍 Tidal candidate: '{result.artists[0]}' - '{result.name}' (confidence: {combined_confidence:.3f})")
+
+                            # Update best match if this is better
+                            if combined_confidence > best_confidence and combined_confidence >= min_confidence:
+                                best_confidence = combined_confidence
+                                best_match = result
+                                best_match_raw = raw_track  # Store raw data with full album object
+                                print(f"✅ New best Tidal match: {result.artists[0]} - {result.name} (confidence: {combined_confidence:.3f})")
+
+                        except Exception as e:
+                            print(f"❌ Error processing Tidal search result: {e}")
+                            continue
+
+                else:
+                    # ITUNES PATH: Search using iTunes client
+                    # For iTunes, use a simpler query format
+                    simple_query = f"{artist_name} {track_name}"
+                    itunes_results = itunes_client.search_tracks(simple_query, limit=5)
+
+                    if not itunes_results:
+                        continue
+
+                    # Score each iTunes result
+                    # Note: iTunes returns Track dataclass objects with 'artists' (list), not 'artist'
+                    for result in itunes_results:
+                        try:
+                            # Calculate confidence using matching engine
+                            try:
+                                artist_confidence = 0.0
+                                # iTunes Track has 'artists' as a list
+                                result_artists = result.artists if hasattr(result, 'artists') else []
+                                result_artist = result_artists[0] if result_artists else ''
+                                if result_artist:
                                     artist_sim = matching_engine.similarity_score(
                                         matching_engine.normalize_string(artist_name),
                                         matching_engine.normalize_string(result_artist)
                                     )
-                                    artist_confidence = max(artist_confidence, artist_sim)
+                                    artist_confidence = artist_sim
 
-                            # Calculate title confidence
-                            title_confidence = matching_engine.similarity_score(
-                                matching_engine.normalize_string(track_name),
-                                matching_engine.normalize_string(result.name)
-                            )
+                                # Calculate title confidence
+                                result_name = result.name if hasattr(result, 'name') else ''
+                                title_confidence = matching_engine.similarity_score(
+                                    matching_engine.normalize_string(track_name),
+                                    matching_engine.normalize_string(result_name)
+                                )
 
-                            # Combined confidence (equal weighting for Tidal clean data)
-                            combined_confidence = (artist_confidence * 0.5 + title_confidence * 0.5)
+                                combined_confidence = (artist_confidence * 0.5 + title_confidence * 0.5)
+                            except Exception as e:
+                                print(f"⚠️ Matching engine scoring failed for iTunes Tidal, using first match: {e}")
+                                combined_confidence = 1.0
+                                best_match = result
+                                break
+
+                            result_artist_display = result_artists[0] if result_artists else 'Unknown'
+                            result_name_display = result.name if hasattr(result, 'name') else 'Unknown'
+                            print(f"🔍 iTunes Tidal candidate: '{result_artist_display}' - '{result_name_display}' (confidence: {combined_confidence:.3f})")
+
+                            if combined_confidence > best_confidence and combined_confidence >= min_confidence:
+                                best_confidence = combined_confidence
+                                best_match = result
+                                print(f"✅ New best iTunes Tidal match: {result_artist_display} - {result_name_display} (confidence: {combined_confidence:.3f})")
+
                         except Exception as e:
-                            print(f"⚠️ Matching engine scoring failed for Tidal, using first match: {e}")
-                            # Fallback: just take the first result if matching engine fails
-                            combined_confidence = 1.0  # Set high to accept this match
-                            best_match = result
-                            break
-
-                        print(f"🔍 Tidal candidate: '{result.artists[0]}' - '{result.name}' (confidence: {combined_confidence:.3f})")
-
-                        # Update best match if this is better
-                        if combined_confidence > best_confidence and combined_confidence >= min_confidence:
-                            best_confidence = combined_confidence
-                            best_match = result
-                            best_match_raw = raw_track  # Store raw data with full album object
-                            print(f"✅ New best Tidal match: {result.artists[0]} - {result.name} (confidence: {combined_confidence:.3f})")
-
-                    except Exception as e:
-                        print(f"❌ Error processing Tidal search result: {e}")
-                        continue
+                            print(f"❌ Error processing iTunes Tidal search result: {e}")
+                            continue
 
                 # If we found a very high confidence match, stop searching
                 if best_confidence >= 0.9:
@@ -14850,12 +15188,39 @@ def _search_spotify_for_tidal_track(tidal_track):
                     break
 
             except Exception as e:
-                print(f"❌ Error in Tidal Spotify search for query '{search_query}': {e}")
+                print(f"❌ Error in Tidal {source_name} search for query '{search_query}': {e}")
                 continue
 
         if best_match:
-            print(f"✅ Final Tidal match: {best_match.artists[0]} - {best_match.name} (confidence: {best_confidence:.3f})")
-            return (best_match, best_match_raw)  # Return both Track object and raw data
+            if use_spotify:
+                print(f"✅ Final Tidal Spotify match: {best_match.artists[0]} - {best_match.name} (confidence: {best_confidence:.3f})")
+                return (best_match, best_match_raw)  # Return both Track object and raw data
+            else:
+                # For iTunes, return a dict with normalized data
+                # Note: iTunes Track dataclass has 'artists' (list) and 'image_url', not 'artist' and 'artwork_url'
+                result_artists = best_match.artists if hasattr(best_match, 'artists') else []
+                result_artist = result_artists[0] if result_artists else 'Unknown'
+                result_name = best_match.name if hasattr(best_match, 'name') else 'Unknown'
+                print(f"✅ Final Tidal iTunes match: {result_artist} - {result_name} (confidence: {best_confidence:.3f})")
+
+                # Build iTunes result dict with album info
+                album_name = best_match.album if hasattr(best_match, 'album') else 'Unknown Album'
+                image_url = best_match.image_url if hasattr(best_match, 'image_url') else ''
+                track_id = best_match.id if hasattr(best_match, 'id') else ''
+                duration_ms = best_match.duration_ms if hasattr(best_match, 'duration_ms') else 0
+
+                return {
+                    'id': track_id,
+                    'name': result_name,
+                    'artists': [result_artist],
+                    'album': {
+                        'name': album_name,
+                        'album_type': 'album',
+                        'images': [{'url': image_url, 'height': 300, 'width': 300}] if image_url else []
+                    },
+                    'duration_ms': duration_ms,
+                    'source': 'itunes'
+                }
         else:
             print(f"❌ No suitable Tidal match found (best confidence was {best_confidence:.3f}, required {min_confidence:.3f})")
             return None
@@ -15230,34 +15595,39 @@ def update_youtube_discovery_match():
 
 
 def _run_youtube_discovery_worker(url_hash):
-    """Background worker for YouTube Spotify discovery process"""
+    """Background worker for YouTube music discovery process (Spotify preferred, iTunes fallback)"""
     try:
         state = youtube_playlist_states[url_hash]
         playlist = state['playlist']
         tracks = playlist['tracks']
+
+        # Determine which provider to use (Spotify preferred, iTunes fallback)
+        use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
+        discovery_source = 'spotify' if use_spotify else 'itunes'
+
+        # Get iTunes client for fallback
+        from core.itunes_client import iTunesClient
+        itunes_client = iTunesClient()
+
+        print(f"🔍 Starting {discovery_source} discovery for {len(tracks)} YouTube tracks...")
+
+        # Store the discovery source in state
+        state['discovery_source'] = discovery_source
         
-        print(f"🔍 Starting Spotify discovery for {len(tracks)} YouTube tracks...")
-        
-        if not spotify_client or not spotify_client.is_authenticated():
-            print("❌ Spotify client not authenticated")
-            state['status'] = 'error'
-            state['phase'] = 'fresh'
-            return
-        
-        # Process each track for Spotify discovery
+        # Process each track for discovery
         for i, track in enumerate(tracks):
             try:
                 # Update progress
                 state['discovery_progress'] = int((i / len(tracks)) * 100)
-                
-                # Search for track on Spotify using cleaned data
+
+                # Search for track using active provider
                 cleaned_title = track['name']
                 cleaned_artist = track['artists'][0] if track['artists'] else 'Unknown Artist'
-                
-                print(f"🔍 Searching Spotify for: '{cleaned_artist}' - '{cleaned_title}'")
+
+                print(f"🔍 Searching {discovery_source} for: '{cleaned_artist}' - '{cleaned_title}'")
                 
                 # Try multiple search strategies using matching_engine for better accuracy
-                spotify_track = None
+                matched_track = None
                 best_confidence = 0.0
                 min_confidence = 0.6  # Keep same threshold as before
 
@@ -15276,33 +15646,42 @@ def _run_youtube_discovery_worker(url_hash):
                     # Fallback to original simple query
                     search_queries = [f"artist:{cleaned_artist} track:{cleaned_title}"]
 
-                # Store raw Spotify data for best match
+                # Store raw data for best match
                 best_raw_track = None
 
                 for query_idx, search_query in enumerate(search_queries):
                     try:
                         print(f"🔍 YouTube query {query_idx + 1}/{len(search_queries)}: {search_query}")
 
-                        # Get raw Spotify API response to access full album object with images
-                        raw_results = spotify_client.sp.search(q=search_query, type='track', limit=5)
-                        if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
-                            continue
+                        # Search using appropriate provider
+                        raw_results = None
+                        search_results = None
 
-                        spotify_results = spotify_client.search_tracks(search_query, limit=5)
+                        if use_spotify:
+                            # Get raw Spotify API response to access full album object with images
+                            raw_results = spotify_client.sp.search(q=search_query, type='track', limit=5)
+                            if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
+                                continue
+                            search_results = spotify_client.search_tracks(search_query, limit=5)
+                        else:
+                            # Use iTunes search
+                            search_results = itunes_client.search_tracks(search_query, limit=5)
 
-                        if not spotify_results:
+                        if not search_results:
                             continue
 
                         # Score each result using matching engine
-                        for result_idx, spotify_result in enumerate(spotify_results):
-                            raw_track = raw_results['tracks']['items'][result_idx] if result_idx < len(raw_results['tracks']['items']) else None
+                        for result_idx, search_result in enumerate(search_results):
+                            raw_track = None
+                            if use_spotify and raw_results:
+                                raw_track = raw_results['tracks']['items'][result_idx] if result_idx < len(raw_results['tracks']['items']) else None
                             try:
                                 # Calculate confidence using matching engine's similarity scoring (with fallback)
                                 try:
                                     artist_confidence = 0.0
-                                    if spotify_result.artists:
+                                    if search_result.artists:
                                         # Get best artist match confidence
-                                        for result_artist in spotify_result.artists:
+                                        for result_artist in search_result.artists:
                                             artist_sim = matching_engine.similarity_score(
                                                 matching_engine.normalize_string(cleaned_artist),
                                                 matching_engine.normalize_string(result_artist)
@@ -15312,7 +15691,7 @@ def _run_youtube_discovery_worker(url_hash):
                                     # Calculate title confidence
                                     title_confidence = matching_engine.similarity_score(
                                         matching_engine.normalize_string(cleaned_title),
-                                        matching_engine.normalize_string(spotify_result.name)
+                                        matching_engine.normalize_string(search_result.name)
                                     )
 
                                     # Combined confidence (70% title, 30% artist - same as original)
@@ -15335,18 +15714,18 @@ def _run_youtube_discovery_worker(url_hash):
                                         union = len(set1.union(set2))
                                         return intersection / union if union > 0 else 0
 
-                                    title_score = _calculate_similarity_fallback(cleaned_title, spotify_result.name)
-                                    artist_score = _calculate_similarity_fallback(cleaned_artist, spotify_result.artists[0] if spotify_result.artists else "")
+                                    title_score = _calculate_similarity_fallback(cleaned_title, search_result.name)
+                                    artist_score = _calculate_similarity_fallback(cleaned_artist, search_result.artists[0] if search_result.artists else "")
                                     combined_confidence = (title_score * 0.7) + (artist_score * 0.3)
 
-                                print(f"🔍 YouTube candidate: '{spotify_result.artists[0]}' - '{spotify_result.name}' (confidence: {combined_confidence:.3f})")
+                                print(f"🔍 YouTube candidate: '{search_result.artists[0]}' - '{search_result.name}' (confidence: {combined_confidence:.3f})")
 
                                 # Update best match if this is better
                                 if combined_confidence > best_confidence and combined_confidence >= min_confidence:
                                     best_confidence = combined_confidence
-                                    spotify_track = spotify_result
-                                    best_raw_track = raw_track  # Store raw data with full album object
-                                    print(f"✅ New best YouTube match: {spotify_result.artists[0]} - {spotify_result.name} (confidence: {combined_confidence:.3f})")
+                                    matched_track = search_result
+                                    best_raw_track = raw_track  # Store raw data with full album object (Spotify only)
+                                    print(f"✅ New best YouTube match: {search_result.artists[0]} - {search_result.name} (confidence: {combined_confidence:.3f})")
 
                             except Exception as e:
                                 print(f"❌ Error processing YouTube search result: {e}")
@@ -15361,61 +15740,78 @@ def _run_youtube_discovery_worker(url_hash):
                         print(f"❌ Error in YouTube search for query '{search_query}': {e}")
                         continue
 
-                if spotify_track:
-                    print(f"✅ Strategy 1 YouTube match: {spotify_track.artists[0]} - {spotify_track.name} (confidence: {best_confidence:.3f})")
-                
+                if matched_track:
+                    print(f"✅ Strategy 1 YouTube match: {matched_track.artists[0]} - {matched_track.name} (confidence: {best_confidence:.3f})")
+
                 # Strategy 2: Swapped search (if first failed) - keep simple for fallback
-                if not spotify_track:
+                if not matched_track:
                     print("🔄 YouTube Strategy 2: Trying swapped search (artist/title reversed)")
                     query = f"artist:{cleaned_title} track:{cleaned_artist}"
-                    spotify_results = spotify_client.search_tracks(query, limit=3)
-                    if spotify_results:
-                        spotify_track = spotify_results[0]
-                        print(f"✅ Strategy 2 YouTube match (swapped): {spotify_track.artists[0]} - {spotify_track.name}")
+                    if use_spotify:
+                        fallback_results = spotify_client.search_tracks(query, limit=3)
+                    else:
+                        fallback_results = itunes_client.search_tracks(query, limit=3)
+                    if fallback_results:
+                        matched_track = fallback_results[0]
+                        print(f"✅ Strategy 2 YouTube match (swapped): {matched_track.artists[0]} - {matched_track.name}")
 
                 # Strategy 3: Raw data search (if still failed) - keep simple for fallback
-                if not spotify_track:
+                if not matched_track:
                     raw_title = track['raw_title']
                     raw_artist = track['raw_artist']
                     print(f"🔄 YouTube Strategy 3: Trying raw data search: '{raw_artist} {raw_title}'")
                     query = f"{raw_artist} {raw_title}"
-                    spotify_results = spotify_client.search_tracks(query, limit=3)
-                    if spotify_results:
-                        spotify_track = spotify_results[0]
-                        print(f"✅ Strategy 3 YouTube match (raw): {spotify_track.artists[0]} - {spotify_track.name}")
-                
+                    if use_spotify:
+                        fallback_results = spotify_client.search_tracks(query, limit=3)
+                    else:
+                        fallback_results = itunes_client.search_tracks(query, limit=3)
+                    if fallback_results:
+                        matched_track = fallback_results[0]
+                        print(f"✅ Strategy 3 YouTube match (raw): {matched_track.artists[0]} - {matched_track.name}")
+
                 # Create result entry
                 result = {
                     'index': i,
                     'yt_track': cleaned_title,
                     'yt_artist': cleaned_artist,
-                    'status': '✅ Found' if spotify_track else '❌ Not Found',
-                    'status_class': 'found' if spotify_track else 'not-found',
-                    'spotify_track': spotify_track.name if spotify_track else '',
-                    'spotify_artist': spotify_track.artists[0] if spotify_track else '',
-                    'spotify_album': spotify_track.album if spotify_track else '',
-                    'duration': f"{track['duration_ms'] // 60000}:{(track['duration_ms'] % 60000) // 1000:02d}" if track['duration_ms'] else '0:00'
+                    'status': '✅ Found' if matched_track else '❌ Not Found',
+                    'status_class': 'found' if matched_track else 'not-found',
+                    'spotify_track': matched_track.name if matched_track else '',
+                    'spotify_artist': matched_track.artists[0] if matched_track else '',
+                    'spotify_album': matched_track.album if matched_track else '',
+                    'duration': f"{track['duration_ms'] // 60000}:{(track['duration_ms'] % 60000) // 1000:02d}" if track['duration_ms'] else '0:00',
+                    'discovery_source': discovery_source
                 }
-                
-                if spotify_track:
-                    state['spotify_matches'] += 1
-                    # Use full album object from raw Spotify data if available
-                    album_data = best_raw_track.get('album', {}) if best_raw_track else {}
-                    if not album_data:
-                        # Fallback to string album name
-                        album_data = {'name': spotify_track.album, 'album_type': 'album', 'images': []}
 
-                    result['spotify_data'] = {
-                        'id': spotify_track.id,
-                        'name': spotify_track.name,
-                        'artists': spotify_track.artists,
-                        'album': album_data,  # Full album object with images
-                        'duration_ms': spotify_track.duration_ms
+                if matched_track:
+                    state['spotify_matches'] += 1  # Keep key name for compatibility
+
+                    # Build album data based on provider
+                    if use_spotify and best_raw_track:
+                        album_data = best_raw_track.get('album', {})
+                    else:
+                        # For iTunes or when raw data unavailable
+                        album_data = {
+                            'name': matched_track.album,
+                            'album_type': 'album',
+                            'images': [{'url': matched_track.image_url}] if hasattr(matched_track, 'image_url') and matched_track.image_url else []
+                        }
+
+                    # Store track data with source info
+                    result['matched_data'] = {
+                        'id': matched_track.id,
+                        'name': matched_track.name,
+                        'artists': matched_track.artists,
+                        'album': album_data,
+                        'duration_ms': matched_track.duration_ms,
+                        'source': discovery_source
                     }
+                    # Keep spotify_data for backward compatibility
+                    result['spotify_data'] = result['matched_data']
                 
                 state['discovery_results'].append(result)
-                
-                print(f"  {'✅' if spotify_track else '❌'} Track {i+1}/{len(tracks)}: {result['status']}")
+
+                print(f"  {'✅' if matched_track else '❌'} Track {i+1}/{len(tracks)}: {result['status']}")
                 
             except Exception as e:
                 print(f"❌ Error processing track {i}: {e}")
@@ -15440,9 +15836,10 @@ def _run_youtube_discovery_worker(url_hash):
         
         # Add activity for discovery completion
         playlist_name = playlist['name']
-        add_activity_item("✅", "YouTube Discovery Complete", f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
-        
-        print(f"✅ YouTube discovery complete: {state['spotify_matches']}/{len(tracks)} tracks matched")
+        source_label = 'Spotify' if use_spotify else 'iTunes'
+        add_activity_item("✅", f"YouTube Discovery Complete ({source_label})", f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
+
+        print(f"✅ YouTube discovery complete ({discovery_source}): {state['spotify_matches']}/{len(tracks)} tracks matched")
         
     except Exception as e:
         print(f"❌ Error in YouTube discovery worker: {e}")
@@ -15450,21 +15847,26 @@ def _run_youtube_discovery_worker(url_hash):
         state['phase'] = 'fresh'
 
 def _run_listenbrainz_discovery_worker(playlist_mbid):
-    """Background worker for ListenBrainz Spotify discovery process"""
+    """Background worker for ListenBrainz music discovery process (Spotify preferred, iTunes fallback)"""
     try:
         state = listenbrainz_playlist_states[playlist_mbid]
         playlist = state['playlist']
         tracks = playlist['tracks']
 
-        print(f"🔍 Starting Spotify discovery for {len(tracks)} ListenBrainz tracks...")
+        # Determine which provider to use (Spotify preferred, iTunes fallback)
+        use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
+        discovery_source = 'spotify' if use_spotify else 'itunes'
 
-        if not spotify_client or not spotify_client.is_authenticated():
-            print("❌ Spotify client not authenticated")
-            state['status'] = 'error'
-            state['phase'] = 'fresh'
-            return
+        # Get iTunes client for fallback
+        from core.itunes_client import iTunesClient
+        itunes_client = iTunesClient()
 
-        # Process each track for Spotify discovery
+        print(f"🔍 Starting {discovery_source} discovery for {len(tracks)} ListenBrainz tracks...")
+
+        # Store the discovery source in state
+        state['discovery_source'] = discovery_source
+
+        # Process each track for discovery
         for i, track in enumerate(tracks):
             try:
                 # Update progress
@@ -15476,10 +15878,10 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
                 album_name = track.get('album_name', '')
                 duration_ms = track.get('duration_ms', 0)
 
-                print(f"🔍 Searching Spotify for: '{cleaned_artist}' - '{cleaned_title}'")
+                print(f"🔍 Searching {discovery_source} for: '{cleaned_artist}' - '{cleaned_title}'")
 
                 # Try multiple search strategies using matching_engine for better accuracy
-                spotify_track = None
+                matched_track = None
                 best_confidence = 0.0
                 min_confidence = 0.6  # Keep same threshold as YouTube
 
@@ -15498,33 +15900,42 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
                     # Fallback to original simple query
                     search_queries = [f"artist:{cleaned_artist} track:{cleaned_title}"]
 
-                # Store raw Spotify data for best match
+                # Store raw data for best match
                 best_raw_track = None
 
                 for query_idx, search_query in enumerate(search_queries):
                     try:
                         print(f"🔍 ListenBrainz query {query_idx + 1}/{len(search_queries)}: {search_query}")
 
-                        # Get raw Spotify API response to access full album object with images
-                        raw_results = spotify_client.sp.search(q=search_query, type='track', limit=5)
-                        if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
-                            continue
+                        # Search using appropriate provider
+                        raw_results = None
+                        search_results = None
 
-                        spotify_results = spotify_client.search_tracks(search_query, limit=5)
+                        if use_spotify:
+                            # Get raw Spotify API response to access full album object with images
+                            raw_results = spotify_client.sp.search(q=search_query, type='track', limit=5)
+                            if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
+                                continue
+                            search_results = spotify_client.search_tracks(search_query, limit=5)
+                        else:
+                            # Use iTunes search
+                            search_results = itunes_client.search_tracks(search_query, limit=5)
 
-                        if not spotify_results:
+                        if not search_results:
                             continue
 
                         # Score each result using matching engine
-                        for result_idx, spotify_result in enumerate(spotify_results):
-                            raw_track = raw_results['tracks']['items'][result_idx] if result_idx < len(raw_results['tracks']['items']) else None
+                        for result_idx, search_result in enumerate(search_results):
+                            raw_track = None
+                            if use_spotify and raw_results:
+                                raw_track = raw_results['tracks']['items'][result_idx] if result_idx < len(raw_results['tracks']['items']) else None
                             try:
                                 # Calculate confidence using matching engine's similarity scoring (with fallback)
                                 try:
                                     artist_confidence = 0.0
-                                    if spotify_result.artists:
+                                    if search_result.artists:
                                         # Get best artist match confidence
-                                        for result_artist in spotify_result.artists:
+                                        for result_artist in search_result.artists:
                                             artist_sim = matching_engine.similarity_score(
                                                 matching_engine.normalize_string(cleaned_artist),
                                                 matching_engine.normalize_string(result_artist)
@@ -15534,7 +15945,7 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
                                     # Calculate title confidence
                                     title_confidence = matching_engine.similarity_score(
                                         matching_engine.normalize_string(cleaned_title),
-                                        matching_engine.normalize_string(spotify_result.name)
+                                        matching_engine.normalize_string(search_result.name)
                                     )
 
                                     # Combined confidence (70% title, 30% artist - same as YouTube)
@@ -15557,18 +15968,18 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
                                         union = len(set1.union(set2))
                                         return intersection / union if union > 0 else 0
 
-                                    title_score = _calculate_similarity_fallback(cleaned_title, spotify_result.name)
-                                    artist_score = _calculate_similarity_fallback(cleaned_artist, spotify_result.artists[0] if spotify_result.artists else "")
+                                    title_score = _calculate_similarity_fallback(cleaned_title, search_result.name)
+                                    artist_score = _calculate_similarity_fallback(cleaned_artist, search_result.artists[0] if search_result.artists else "")
                                     combined_confidence = (title_score * 0.7) + (artist_score * 0.3)
 
-                                print(f"🔍 ListenBrainz candidate: '{spotify_result.artists[0]}' - '{spotify_result.name}' (confidence: {combined_confidence:.3f})")
+                                print(f"🔍 ListenBrainz candidate: '{search_result.artists[0]}' - '{search_result.name}' (confidence: {combined_confidence:.3f})")
 
                                 # Update best match if this is better
                                 if combined_confidence > best_confidence and combined_confidence >= min_confidence:
                                     best_confidence = combined_confidence
-                                    spotify_track = spotify_result
-                                    best_raw_track = raw_track  # Store raw data with full album object
-                                    print(f"✅ New best ListenBrainz match: {spotify_result.artists[0]} - {spotify_result.name} (confidence: {combined_confidence:.3f})")
+                                    matched_track = search_result
+                                    best_raw_track = raw_track  # Store raw data with full album object (Spotify only)
+                                    print(f"✅ New best ListenBrainz match: {search_result.artists[0]} - {search_result.name} (confidence: {combined_confidence:.3f})")
 
                             except Exception as e:
                                 print(f"❌ Error processing ListenBrainz search result: {e}")
@@ -15583,59 +15994,76 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
                         print(f"❌ Error in ListenBrainz search for query '{search_query}': {e}")
                         continue
 
-                if spotify_track:
-                    print(f"✅ Strategy 1 ListenBrainz match: {spotify_track.artists[0]} - {spotify_track.name} (confidence: {best_confidence:.3f})")
+                if matched_track:
+                    print(f"✅ Strategy 1 ListenBrainz match: {matched_track.artists[0]} - {matched_track.name} (confidence: {best_confidence:.3f})")
 
                 # Strategy 2: Swapped search (if first failed) - keep simple for fallback
-                if not spotify_track:
+                if not matched_track:
                     print("🔄 ListenBrainz Strategy 2: Trying swapped search (artist/title reversed)")
                     query = f"artist:{cleaned_title} track:{cleaned_artist}"
-                    spotify_results = spotify_client.search_tracks(query, limit=3)
-                    if spotify_results:
-                        spotify_track = spotify_results[0]
-                        print(f"✅ Strategy 2 ListenBrainz match (swapped): {spotify_track.artists[0]} - {spotify_track.name}")
+                    if use_spotify:
+                        fallback_results = spotify_client.search_tracks(query, limit=3)
+                    else:
+                        fallback_results = itunes_client.search_tracks(query, limit=3)
+                    if fallback_results:
+                        matched_track = fallback_results[0]
+                        print(f"✅ Strategy 2 ListenBrainz match (swapped): {matched_track.artists[0]} - {matched_track.name}")
 
                 # Strategy 3: Album-based search (if still failed and we have album name)
-                if not spotify_track and album_name:
+                if not matched_track and album_name:
                     print(f"🔄 ListenBrainz Strategy 3: Trying album-based search: '{cleaned_artist} {album_name} {cleaned_title}'")
                     query = f"artist:{cleaned_artist} album:{album_name} track:{cleaned_title}"
-                    spotify_results = spotify_client.search_tracks(query, limit=3)
-                    if spotify_results:
-                        spotify_track = spotify_results[0]
-                        print(f"✅ Strategy 3 ListenBrainz match (album): {spotify_track.artists[0]} - {spotify_track.name}")
+                    if use_spotify:
+                        fallback_results = spotify_client.search_tracks(query, limit=3)
+                    else:
+                        fallback_results = itunes_client.search_tracks(query, limit=3)
+                    if fallback_results:
+                        matched_track = fallback_results[0]
+                        print(f"✅ Strategy 3 ListenBrainz match (album): {matched_track.artists[0]} - {matched_track.name}")
 
                 # Create result entry
                 result = {
                     'index': i,
                     'lb_track': cleaned_title,
                     'lb_artist': cleaned_artist,
-                    'status': '✅ Found' if spotify_track else '❌ Not Found',
-                    'status_class': 'found' if spotify_track else 'not-found',
-                    'spotify_track': spotify_track.name if spotify_track else '',
-                    'spotify_artist': spotify_track.artists[0] if spotify_track else '',
-                    'spotify_album': spotify_track.album if spotify_track else '',
-                    'duration': f"{duration_ms // 60000}:{(duration_ms % 60000) // 1000:02d}" if duration_ms else '0:00'
+                    'status': '✅ Found' if matched_track else '❌ Not Found',
+                    'status_class': 'found' if matched_track else 'not-found',
+                    'spotify_track': matched_track.name if matched_track else '',
+                    'spotify_artist': matched_track.artists[0] if matched_track else '',
+                    'spotify_album': matched_track.album if matched_track else '',
+                    'duration': f"{duration_ms // 60000}:{(duration_ms % 60000) // 1000:02d}" if duration_ms else '0:00',
+                    'discovery_source': discovery_source
                 }
 
-                if spotify_track:
-                    state['spotify_matches'] += 1
-                    # Use full album object from raw Spotify data if available
-                    album_data = best_raw_track.get('album', {}) if best_raw_track else {}
-                    if not album_data:
-                        # Fallback to string album name
-                        album_data = {'name': spotify_track.album, 'album_type': 'album', 'images': []}
+                if matched_track:
+                    state['spotify_matches'] += 1  # Keep key name for compatibility
 
-                    result['spotify_data'] = {
-                        'id': spotify_track.id,
-                        'name': spotify_track.name,
-                        'artists': spotify_track.artists,
-                        'album': album_data,  # Full album object with images
-                        'duration_ms': spotify_track.duration_ms
+                    # Build album data based on provider
+                    if use_spotify and best_raw_track:
+                        album_data = best_raw_track.get('album', {})
+                    else:
+                        # For iTunes or when raw data unavailable
+                        album_data = {
+                            'name': matched_track.album,
+                            'album_type': 'album',
+                            'images': [{'url': matched_track.image_url}] if hasattr(matched_track, 'image_url') and matched_track.image_url else []
+                        }
+
+                    # Store track data with source info
+                    result['matched_data'] = {
+                        'id': matched_track.id,
+                        'name': matched_track.name,
+                        'artists': matched_track.artists,
+                        'album': album_data,
+                        'duration_ms': matched_track.duration_ms,
+                        'source': discovery_source
                     }
+                    # Keep spotify_data for backward compatibility
+                    result['spotify_data'] = result['matched_data']
 
                 state['discovery_results'].append(result)
 
-                print(f"  {'✅' if spotify_track else '❌'} Track {i+1}/{len(tracks)}: {result['status']}")
+                print(f"  {'✅' if matched_track else '❌'} Track {i+1}/{len(tracks)}: {result['status']}")
 
             except Exception as e:
                 print(f"❌ Error processing track {i}: {e}")
@@ -15660,9 +16088,10 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
 
         # Add activity for discovery completion
         playlist_name = playlist['name']
-        add_activity_item("✅", "ListenBrainz Discovery Complete", f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
+        source_label = 'Spotify' if use_spotify else 'iTunes'
+        add_activity_item("✅", f"ListenBrainz Discovery Complete ({source_label})", f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
 
-        print(f"✅ ListenBrainz discovery complete: {state['spotify_matches']}/{len(tracks)} tracks matched")
+        print(f"✅ ListenBrainz discovery complete ({discovery_source}): {state['spotify_matches']}/{len(tracks)} tracks matched")
 
     except Exception as e:
         print(f"❌ Error in ListenBrainz discovery worker: {e}")
@@ -16991,7 +17420,8 @@ def get_watchlist_artists():
                 "last_scan_timestamp": artist.last_scan_timestamp.isoformat() if artist.last_scan_timestamp else None,
                 "created_at": artist.created_at.isoformat() if artist.created_at else None,
                 "updated_at": artist.updated_at.isoformat() if artist.updated_at else None,
-                "image_url": artist.image_url  # Cached during watchlist scans
+                "image_url": artist.image_url,  # Cached during watchlist scans
+                "itunes_artist_id": artist.itunes_artist_id  # For iTunes-only artists
             })
 
         return jsonify({"success": True, "artists": artists_data})
@@ -17014,9 +17444,42 @@ def add_to_watchlist():
         success = database.add_artist_to_watchlist(artist_id, artist_name)
 
         if success:
-            # Fetch and cache artist image immediately from Spotify
+            # Detect ID type: iTunes IDs are purely numeric, Spotify IDs are alphanumeric
+            is_itunes_id = artist_id.isdigit()
+            
+            # Fetch and cache artist image immediately
             try:
-                if spotify_client and spotify_client.is_authenticated():
+                if is_itunes_id:
+                    # For iTunes artists, fetch image from iTunes API
+                    # We look up 'album' entity because 'artist' entity doesn't always have artwork
+                    # We fallback to the first album's artwork as the artist image
+                    try:
+                        itunes_url = f"https://itunes.apple.com/lookup?id={artist_id}&entity=album&limit=5"
+                        print(f"🔍 Fetching iTunes artist image: {itunes_url}")
+                        resp = requests.get(itunes_url, timeout=5)
+                        
+                        image_url = None
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            results = data.get('results', [])
+                            
+                            # Iterate results to find one with artwork
+                            for res in results:
+                                if 'artworkUrl100' in res:
+                                    # Get highest res by replacing dimensions
+                                    # iTunes artwork URLs usually end in .../100x100bb.jpg
+                                    image_url = res['artworkUrl100'].replace('100x100', '600x600')
+                                    break
+                        
+                        if image_url:
+                            database.update_watchlist_artist_image(artist_id, image_url)
+                            print(f"✅ Cached iTunes artist image for {artist_name}")
+                        else:
+                            print(f"⚠️ No artwork found for iTunes artist {artist_name}")
+                    except Exception as itunes_error:
+                        print(f"⚠️ Error fetching iTunes artwork: {itunes_error}")
+                elif spotify_client and spotify_client.is_authenticated():
+                    # For Spotify artists, fetch from Spotify API
                     artist_data = spotify_client.get_artist(artist_id)
                     if artist_data and 'images' in artist_data and artist_data['images']:
                         # Get medium-sized image (usually the second one, or first if only one)
@@ -17093,8 +17556,22 @@ def check_watchlist_status():
 def start_watchlist_scan():
     """Start a watchlist scan for new releases"""
     try:
-        if not spotify_client or not spotify_client.is_authenticated():
-            return jsonify({"success": False, "error": "Spotify client not available or not authenticated"}), 400
+        # Check if MetadataService can provide a working client (Spotify OR iTunes)
+        from core.metadata_service import MetadataService
+        metadata_service = MetadataService()
+        
+        # Get active provider - will be either spotify or itunes
+        active_provider = metadata_service.get_active_provider()
+        provider_info = metadata_service.get_provider_info()
+        
+        # Verify we have at least one working provider
+        if not provider_info['spotify_authenticated'] and not provider_info['itunes_available']:
+            return jsonify({
+                "success": False, 
+                "error": "No music provider available. Please authenticate Spotify or ensure iTunes is accessible."
+            }), 400
+        
+        logger.info(f"Starting watchlist scan with {active_provider} provider")
 
         # Check if wishlist auto-processing is currently running (using smart detection)
         if is_wishlist_actually_processing():
@@ -17108,7 +17585,7 @@ def start_watchlist_scan():
         def run_scan():
             try:
                 global watchlist_scan_state, watchlist_auto_scanning, watchlist_auto_scanning_timestamp
-                from core.watchlist_scanner import get_watchlist_scanner
+                from core.watchlist_scanner import WatchlistScanner
                 from database.music_database import get_database
 
                 # Set flag and timestamp for manual scan
@@ -17137,7 +17614,20 @@ def start_watchlist_scan():
                         watchlist_next_run_time = 0  # Clear timer for consistency
                     return
 
-                scanner = get_watchlist_scanner(spotify_client)
+                # Initialize scanner with MetadataService for cross-provider support
+                scanner = WatchlistScanner(metadata_service=metadata_service)
+                
+                # PROACTIVE ID BACKFILLING (cross-provider support)
+                # Before scanning, ensure all artists have IDs for the current provider
+                try:
+                    active_provider = metadata_service.get_active_provider()
+                    print(f"🔍 Checking for missing {active_provider} IDs in watchlist...")
+                    scanner._backfill_missing_ids(watchlist_artists, active_provider)
+                except Exception as backfill_error:
+                    print(f"⚠️ Error during ID backfilling: {backfill_error}")
+                    import traceback
+                    traceback.print_exc()
+                    # Continue with scan even if backfilling fails
                 
                 # Initialize detailed progress tracking
                 watchlist_scan_state.update({
@@ -17160,14 +17650,8 @@ def start_watchlist_scan():
                 
                 for i, artist in enumerate(watchlist_artists):
                     try:
-                        # Fetch artist image
-                        artist_image_url = ''
-                        try:
-                            artist_data = spotify_client.get_artist(artist.spotify_artist_id)
-                            if artist_data and 'images' in artist_data and artist_data['images']:
-                                artist_image_url = artist_data['images'][0]['url']
-                        except:
-                            pass
+                        # Fetch artist image using provider-aware method
+                        artist_image_url = scanner.get_artist_image_url(artist) or ''
 
                         # Update progress
                         watchlist_scan_state.update({
@@ -17181,9 +17665,9 @@ def start_watchlist_scan():
                             'current_album_image_url': '',
                             'current_track_name': ''
                         })
-                        
-                        # Get artist discography
-                        albums = scanner.get_artist_discography(artist.spotify_artist_id, artist.last_scan_timestamp)
+
+                        # Get artist discography using provider-aware method
+                        albums = scanner.get_artist_discography_for_watchlist(artist, artist.last_scan_timestamp)
                         
                         if albums is None:
                             scan_results.append(type('ScanResult', (), {
@@ -17211,8 +17695,8 @@ def start_watchlist_scan():
                         # Scan each album
                         for album_index, album in enumerate(albums):
                             try:
-                                # Get album tracks
-                                album_data = scanner.spotify_client.get_album(album.id)
+                                # Get album tracks using provider-aware method
+                                album_data = scanner.metadata_service.get_album(album.id)
                                 if not album_data or 'tracks' not in album_data:
                                     continue
 
@@ -17282,7 +17766,26 @@ def start_watchlist_scan():
                         })())
                         
                         print(f"✅ Scanned {artist.artist_name}: {artist_new_tracks} new tracks found, {artist_added_tracks} added to wishlist")
-                        
+
+                        # Fetch similar artists for discovery feature
+                        # This is critical for the discover page to work
+                        try:
+                            watchlist_scan_state['current_phase'] = 'fetching_similar_artists'
+                            source_artist_id = artist.spotify_artist_id or artist.itunes_artist_id or str(artist.id)
+
+                            # If Spotify is authenticated, also require Spotify IDs to be present
+                            spotify_authenticated = spotify_client and spotify_client.is_spotify_authenticated()
+                            if database.has_fresh_similar_artists(source_artist_id, days_threshold=30, require_spotify=spotify_authenticated):
+                                print(f"  Similar artists for {artist.artist_name} are cached and fresh")
+                                # Still backfill missing iTunes IDs
+                                scanner._backfill_similar_artists_itunes_ids(source_artist_id)
+                            else:
+                                print(f"  Fetching similar artists for {artist.artist_name}...")
+                                scanner.update_similar_artists(artist)
+                                print(f"  Similar artists updated for {artist.artist_name}")
+                        except Exception as similar_error:
+                            print(f"  ⚠️ Failed to update similar artists for {artist.artist_name}: {similar_error}")
+
                         # Delay between artists
                         if i < len(watchlist_artists) - 1:
                             watchlist_scan_state['current_phase'] = 'rate_limiting'
@@ -17502,21 +18005,26 @@ def watchlist_artist_config(artist_id):
             cursor.execute("""
                 SELECT include_albums, include_eps, include_singles,
                        include_live, include_remixes, include_acoustic, include_compilations,
-                       artist_name, image_url
+                       artist_name, image_url, spotify_artist_id, itunes_artist_id
                 FROM watchlist_artists
-                WHERE spotify_artist_id = ?
-            """, (artist_id,))
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ?
+            """, (artist_id, artist_id))
             result = cursor.fetchone()
             conn.close()
 
             if not result:
                 return jsonify({"success": False, "error": "Artist not found in watchlist"}), 404
+            
+            # Determine if this is an iTunes or Spotify artist
+            is_itunes_artist = artist_id.isdigit()
+            spotify_id = result[9]  # spotify_artist_id from query
+            itunes_id = result[10]  # itunes_artist_id from query
 
-            # Get artist info from Spotify
+            # Get artist info from Spotify (only for Spotify artists)
             artist_info = None
-            if spotify_client and spotify_client.is_authenticated():
+            if not is_itunes_artist and spotify_client and spotify_client.is_authenticated() and spotify_id:
                 try:
-                    artist_data = spotify_client.sp.artist(artist_id)
+                    artist_data = spotify_client.sp.artist(spotify_id)
                     if artist_data:
                         artist_info = {
                             'id': artist_data['id'],
@@ -17581,10 +18089,10 @@ def watchlist_artist_config(artist_id):
                 SET include_albums = ?, include_eps = ?, include_singles = ?,
                     include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE spotify_artist_id = ?
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ?
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
-                  artist_id))
+                  artist_id, artist_id))
             conn.commit()
 
             if cursor.rowcount == 0:
@@ -17860,14 +18368,8 @@ def _process_watchlist_scan_automatically():
             # Scan each artist with detailed tracking
             for i, artist in enumerate(watchlist_artists):
                 try:
-                    # Fetch artist image
-                    artist_image_url = ''
-                    try:
-                        artist_data = spotify_client.get_artist(artist.spotify_artist_id)
-                        if artist_data and 'images' in artist_data and artist_data['images']:
-                            artist_image_url = artist_data['images'][0]['url']
-                    except:
-                        pass
+                    # Fetch artist image using provider-aware method
+                    artist_image_url = scanner.get_artist_image_url(artist) or ''
 
                     # Update progress
                     watchlist_scan_state.update({
@@ -17882,8 +18384,8 @@ def _process_watchlist_scan_automatically():
                         'current_track_name': ''
                     })
 
-                    # Get artist discography
-                    albums = scanner.get_artist_discography(artist.spotify_artist_id, artist.last_scan_timestamp)
+                    # Get artist discography using provider-aware method
+                    albums = scanner.get_artist_discography_for_watchlist(artist, artist.last_scan_timestamp)
 
                     if albums is None:
                         scan_results.append(type('ScanResult', (), {
@@ -17911,8 +18413,8 @@ def _process_watchlist_scan_automatically():
                     # Scan each album
                     for album_index, album in enumerate(albums):
                         try:
-                            # Get album tracks
-                            album_data = scanner.spotify_client.get_album(album.id)
+                            # Get album tracks using provider-aware method
+                            album_data = scanner.metadata_service.get_album(album.id)
                             if not album_data or 'tracks' not in album_data:
                                 continue
 
@@ -18119,52 +18621,175 @@ metadata_update_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=
 # == DISCOVER PAGE ENDPOINTS   ==
 # ===============================
 
+def _get_active_discovery_source():
+    """
+    Determine which music source is active for discovery.
+    Returns 'spotify' if Spotify is authenticated, 'itunes' otherwise.
+    """
+    if spotify_client and spotify_client.is_spotify_authenticated():
+        return 'spotify'
+    return 'itunes'
+
+
 @app.route('/api/discover/hero', methods=['GET'])
 def get_discover_hero():
     """Get featured similar artists for hero slideshow"""
     try:
         database = get_database()
 
+        # Determine active source
+        active_source = _get_active_discovery_source()
+        print(f"🎵 Discover hero using source: {active_source}")
+
+        # Import iTunes client for fallback
+        from core.itunes_client import iTunesClient
+        itunes_client = iTunesClient()
+
         # Get top similar artists (by occurrence count) - get 20 for variety
         similar_artists = database.get_top_similar_artists(limit=20)
 
+        # FALLBACK: If no similar artists exist, use watchlist artists for Hero section
         if not similar_artists:
-            return jsonify({"success": True, "artists": []})
+            print("[Discover Hero] No similar artists found, falling back to watchlist artists")
+            watchlist_artists = database.get_watchlist_artists()
+
+            if not watchlist_artists:
+                return jsonify({"success": True, "artists": [], "source": active_source})
+
+            # Convert watchlist artists to hero format
+            import random
+            shuffled_watchlist = list(watchlist_artists)
+            random.shuffle(shuffled_watchlist)
+
+            hero_artists = []
+            for artist in shuffled_watchlist[:10]:
+                artist_id = artist.itunes_artist_id if active_source == 'itunes' else artist.spotify_artist_id
+                if not artist_id:
+                    continue
+
+                artist_data = {
+                    "spotify_artist_id": artist.spotify_artist_id,
+                    "itunes_artist_id": artist.itunes_artist_id,
+                    "artist_id": artist_id,
+                    "artist_name": artist.artist_name,
+                    "occurrence_count": 1,
+                    "similarity_rank": 1,
+                    "source": active_source,
+                    "is_watchlist": True
+                }
+
+                # Try to get artist image
+                try:
+                    if active_source == 'itunes' and artist.itunes_artist_id:
+                        itunes_artist = itunes_client.get_artist(artist.itunes_artist_id)
+                        if itunes_artist:
+                            artist_data['image_url'] = itunes_artist.get('images', [{}])[0].get('url') if itunes_artist.get('images') else None
+                            artist_data['genres'] = itunes_artist.get('genres', [])
+                    elif active_source == 'spotify' and artist.spotify_artist_id:
+                        if spotify_client and spotify_client.is_authenticated():
+                            sp_artist = spotify_client.get_artist(artist.spotify_artist_id)
+                            if sp_artist and sp_artist.get('images'):
+                                artist_data['image_url'] = sp_artist['images'][0]['url'] if sp_artist['images'] else None
+                                artist_data['genres'] = sp_artist.get('genres', [])
+                except Exception as img_err:
+                    print(f"Could not fetch watchlist artist image: {img_err}")
+
+                hero_artists.append(artist_data)
+
+            print(f"[Discover Hero] Returning {len(hero_artists)} watchlist artists as fallback")
+            return jsonify({"success": True, "artists": hero_artists, "source": active_source, "fallback": "watchlist"})
+
+        # Filter to artists that have the appropriate ID for the active source
+        valid_artists = []
+        for artist in similar_artists:
+            if active_source == 'spotify' and artist.similar_artist_spotify_id:
+                valid_artists.append(artist)
+            elif active_source == 'itunes' and artist.similar_artist_itunes_id:
+                valid_artists.append(artist)
+            # If we have both IDs, include regardless of source
+            elif artist.similar_artist_spotify_id and artist.similar_artist_itunes_id:
+                valid_artists.append(artist)
+
+        # FALLBACK: If no valid artists for iTunes, try to resolve iTunes IDs on-the-fly
+        if active_source == 'itunes' and not valid_artists:
+            print(f"[iTunes Fallback] No artists with iTunes IDs found, attempting on-the-fly resolution for {len(similar_artists)} artists")
+            resolved_count = 0
+            for artist in similar_artists:
+                if artist.similar_artist_itunes_id:
+                    valid_artists.append(artist)
+                    continue
+                # Try to resolve iTunes ID by name
+                try:
+                    itunes_results = itunes_client.search_artists(artist.similar_artist_name, limit=1)
+                    if itunes_results and len(itunes_results) > 0:
+                        itunes_id = itunes_results[0].id
+                        # Cache the resolved ID for future use
+                        database.update_similar_artist_itunes_id(artist.id, itunes_id)
+                        # Create a modified artist object with the resolved ID
+                        artist.similar_artist_itunes_id = itunes_id
+                        valid_artists.append(artist)
+                        resolved_count += 1
+                        print(f"  [Resolved] {artist.similar_artist_name} -> iTunes ID: {itunes_id}")
+                except Exception as resolve_err:
+                    print(f"  [Failed] Could not resolve iTunes ID for {artist.similar_artist_name}: {resolve_err}")
+                # Stop after 10 successful resolutions to avoid rate limiting
+                if len(valid_artists) >= 10:
+                    break
+            print(f"[iTunes Fallback] Resolved {resolved_count} artists with iTunes IDs")
+
+        print(f"[Discover Hero] Found {len(valid_artists)} valid artists for source: {active_source}")
 
         # Shuffle for variety and take top 10
         import random
-        shuffled = list(similar_artists)
+        shuffled = list(valid_artists)
         random.shuffle(shuffled)
         similar_artists = shuffled[:10]
 
-        # Convert to JSON format with Spotify data enrichment
+        # Convert to JSON format with data enrichment from appropriate source
         hero_artists = []
         for artist in similar_artists:
+            # Use the ID for the active source, falling back to the other if needed
+            if active_source == 'spotify':
+                artist_id = artist.similar_artist_spotify_id or artist.similar_artist_itunes_id
+            else:
+                artist_id = artist.similar_artist_itunes_id or artist.similar_artist_spotify_id
+
             artist_data = {
                 "spotify_artist_id": artist.similar_artist_spotify_id,
+                "itunes_artist_id": artist.similar_artist_itunes_id,
+                "artist_id": artist_id,  # The ID for the current active source
                 "artist_name": artist.similar_artist_name,
                 "occurrence_count": artist.occurrence_count,
-                "similarity_rank": artist.similarity_rank
+                "similarity_rank": artist.similarity_rank,
+                "source": active_source
             }
 
-            # Try to get artist image from Spotify
+            # Try to get artist image from the active source
             try:
-                if spotify_client and spotify_client.is_authenticated():
-                    sp_artist = spotify_client.get_artist(artist.similar_artist_spotify_id)
-                    if sp_artist and sp_artist.get('images'):
-                        artist_data['image_url'] = sp_artist['images'][0]['url'] if sp_artist['images'] else None
-                        artist_data['genres'] = sp_artist.get('genres', [])
-                        artist_data['popularity'] = sp_artist.get('popularity', 0)
-            except:
-                pass
+                if active_source == 'spotify' and artist.similar_artist_spotify_id:
+                    if spotify_client and spotify_client.is_authenticated():
+                        sp_artist = spotify_client.get_artist(artist.similar_artist_spotify_id)
+                        if sp_artist and sp_artist.get('images'):
+                            artist_data['image_url'] = sp_artist['images'][0]['url'] if sp_artist['images'] else None
+                            artist_data['genres'] = sp_artist.get('genres', [])
+                            artist_data['popularity'] = sp_artist.get('popularity', 0)
+                elif active_source == 'itunes' and artist.similar_artist_itunes_id:
+                    itunes_artist = itunes_client.get_artist(artist.similar_artist_itunes_id)
+                    if itunes_artist:
+                        artist_data['image_url'] = itunes_artist.get('images', [{}])[0].get('url') if itunes_artist.get('images') else None
+                        artist_data['genres'] = itunes_artist.get('genres', [])
+                        artist_data['popularity'] = itunes_artist.get('popularity', 0)
+            except Exception as img_err:
+                print(f"Could not fetch artist image: {img_err}")
 
             hero_artists.append(artist_data)
 
-        return jsonify({"success": True, "artists": hero_artists})
+        return jsonify({"success": True, "artists": hero_artists, "source": active_source})
 
     except Exception as e:
         print(f"Error getting discover hero: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/api/discover/recent-releases', methods=['GET'])
 def get_discover_recent_releases():
@@ -18172,14 +18797,18 @@ def get_discover_recent_releases():
     try:
         database = get_database()
 
-        # Get cached recent albums (max 20)
-        albums = database.get_discovery_recent_albums(limit=20)
+        # Determine active source
+        active_source = _get_active_discovery_source()
 
-        return jsonify({"success": True, "albums": albums})
+        # Get cached recent albums filtered by source (max 20)
+        albums = database.get_discovery_recent_albums(limit=20, source=active_source)
+
+        return jsonify({"success": True, "albums": albums, "source": active_source})
 
     except Exception as e:
         print(f"Error getting recent releases: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/api/discover/release-radar', methods=['GET'])
 def get_discover_release_radar():
@@ -18187,16 +18816,25 @@ def get_discover_release_radar():
     try:
         database = get_database()
 
-        if not spotify_client or not spotify_client.is_authenticated():
-            return jsonify({"success": True, "tracks": []})
+        # Determine active source - release radar works with any source now
+        active_source = _get_active_discovery_source()
 
-        # Try to get curated playlist first
-        curated_track_ids = database.get_curated_playlist('release_radar')
+        # Try source-specific playlist first, then fall back to generic
+        curated_track_ids = database.get_curated_playlist(f'release_radar_{active_source}')
+        if not curated_track_ids:
+            curated_track_ids = database.get_curated_playlist('release_radar')
 
         if curated_track_ids:
-            # Use curated selection - fetch track data from discovery pool (same as Discovery Weekly)
-            discovery_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False)
-            tracks_by_id = {track.spotify_track_id: track for track in discovery_tracks}
+            # Use curated selection - fetch track data from discovery pool filtered by source
+            discovery_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False, source=active_source)
+
+            # Build lookup dict with source-appropriate IDs
+            tracks_by_id = {}
+            for track in discovery_tracks:
+                if active_source == 'spotify' and track.spotify_track_id:
+                    tracks_by_id[track.spotify_track_id] = track
+                elif active_source == 'itunes' and track.itunes_track_id:
+                    tracks_by_id[track.itunes_track_id] = track
 
             selected_tracks = []
             for track_id in curated_track_ids:
@@ -18212,19 +18850,22 @@ def get_discover_release_radar():
                             track_data = None
 
                     selected_tracks.append({
+                        "track_id": track.spotify_track_id or track.itunes_track_id,
                         "spotify_track_id": track.spotify_track_id,
+                        "itunes_track_id": track.itunes_track_id,
                         "track_name": track.track_name,
                         "artist_name": track.artist_name,
                         "album_name": track.album_name,
                         "album_cover_url": track.album_cover_url,
                         "duration_ms": track.duration_ms,
-                        "track_data_json": track_data  # Now properly parsed
+                        "track_data_json": track_data,
+                        "source": track.source
                     })
 
-            return jsonify({"success": True, "tracks": selected_tracks})
+            return jsonify({"success": True, "tracks": selected_tracks, "source": active_source})
 
         # Fallback: no curated playlist exists (shouldn't happen after first scan)
-        return jsonify({"success": True, "tracks": []})
+        return jsonify({"success": True, "tracks": [], "source": active_source})
 
     except Exception as e:
         print(f"Error getting release radar: {e}")
@@ -18238,13 +18879,25 @@ def get_discover_weekly():
     try:
         database = get_database()
 
-        # Try to get curated playlist first
-        curated_track_ids = database.get_curated_playlist('discovery_weekly')
+        # Determine active source
+        active_source = _get_active_discovery_source()
+
+        # Try source-specific playlist first, then fall back to generic
+        curated_track_ids = database.get_curated_playlist(f'discovery_weekly_{active_source}')
+        if not curated_track_ids:
+            curated_track_ids = database.get_curated_playlist('discovery_weekly')
 
         if curated_track_ids:
-            # Use curated selection - fetch track data from discovery pool
-            discovery_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False)
-            tracks_by_id = {track.spotify_track_id: track for track in discovery_tracks}
+            # Use curated selection - fetch track data from discovery pool filtered by source
+            discovery_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False, source=active_source)
+
+            # Build lookup dict with source-appropriate IDs
+            tracks_by_id = {}
+            for track in discovery_tracks:
+                if active_source == 'spotify' and track.spotify_track_id:
+                    tracks_by_id[track.spotify_track_id] = track
+                elif active_source == 'itunes' and track.itunes_track_id:
+                    tracks_by_id[track.itunes_track_id] = track
 
             selected_tracks = []
             for track_id in curated_track_ids:
@@ -18260,23 +18913,141 @@ def get_discover_weekly():
                             track_data = None
 
                     selected_tracks.append({
+                        "track_id": track.spotify_track_id or track.itunes_track_id,
                         "spotify_track_id": track.spotify_track_id,
+                        "itunes_track_id": track.itunes_track_id,
                         "track_name": track.track_name,
                         "artist_name": track.artist_name,
                         "album_name": track.album_name,
                         "album_cover_url": track.album_cover_url,
                         "duration_ms": track.duration_ms,
-                        "track_data_json": track_data  # Now properly parsed
+                        "track_data_json": track_data,
+                        "source": track.source
                     })
 
-            return jsonify({"success": True, "tracks": selected_tracks})
+            return jsonify({"success": True, "tracks": selected_tracks, "source": active_source})
 
         # Fallback: no curated playlist exists (shouldn't happen after first scan)
-        return jsonify({"success": True, "tracks": []})
+        return jsonify({"success": True, "tracks": [], "source": active_source})
 
     except Exception as e:
         print(f"Error getting discovery weekly: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/refresh', methods=['POST'])
+def refresh_discover_data():
+    """
+    Force refresh discover page data (recent albums cache and curated playlists).
+    Useful for initial setup or when data appears stale.
+    """
+    try:
+        from core.watchlist_scanner import WatchlistScanner
+
+        database = get_database()
+        scanner = WatchlistScanner(spotify_client, database)
+
+        print("[Discover Refresh] Starting forced refresh of discover data...")
+
+        # Cache recent albums from watchlist and similar artists
+        print("[Discover Refresh] Caching recent albums...")
+        scanner.cache_discovery_recent_albums()
+
+        # Curate playlists
+        print("[Discover Refresh] Curating discovery playlists...")
+        scanner.curate_discovery_playlists()
+
+        # Get counts for response
+        active_source = _get_active_discovery_source()
+        recent_albums = database.get_discovery_recent_albums(limit=100, source=active_source)
+        release_radar = database.get_curated_playlist(f'release_radar_{active_source}') or []
+        discovery_weekly = database.get_curated_playlist(f'discovery_weekly_{active_source}') or []
+
+        print(f"[Discover Refresh] Complete! Recent albums: {len(recent_albums)}, Release Radar: {len(release_radar)} tracks, Discovery Weekly: {len(discovery_weekly)} tracks")
+
+        return jsonify({
+            "success": True,
+            "message": "Discover data refreshed",
+            "source": active_source,
+            "recent_albums_count": len(recent_albums),
+            "release_radar_tracks": len(release_radar),
+            "discovery_weekly_tracks": len(discovery_weekly)
+        })
+
+    except Exception as e:
+        print(f"Error refreshing discover data: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/diagnose', methods=['GET'])
+def diagnose_discover_data():
+    """
+    Diagnostic endpoint to check the state of discover data.
+    Returns counts of similar artists, discovery pool, recent albums, etc.
+    """
+    try:
+        database = get_database()
+        active_source = _get_active_discovery_source()
+
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Similar artists stats
+            cursor.execute("SELECT COUNT(*) as total FROM similar_artists")
+            total_similar = cursor.fetchone()['total']
+
+            cursor.execute("SELECT COUNT(*) as count FROM similar_artists WHERE similar_artist_itunes_id IS NOT NULL")
+            similar_with_itunes = cursor.fetchone()['count']
+
+            cursor.execute("SELECT COUNT(*) as count FROM similar_artists WHERE similar_artist_spotify_id IS NOT NULL")
+            similar_with_spotify = cursor.fetchone()['count']
+
+            # Discovery pool stats
+            cursor.execute("SELECT source, COUNT(*) as count FROM discovery_pool GROUP BY source")
+            pool_by_source = {row['source']: row['count'] for row in cursor.fetchall()}
+
+            # Recent albums stats
+            cursor.execute("SELECT source, COUNT(*) as count FROM discovery_recent_albums GROUP BY source")
+            albums_by_source = {row['source']: row['count'] for row in cursor.fetchall()}
+
+            # Curated playlists
+            cursor.execute("SELECT playlist_type, track_ids_json FROM discovery_curated_playlists")
+            playlists = {}
+            for row in cursor.fetchall():
+                import json
+                track_ids = json.loads(row['track_ids_json']) if row['track_ids_json'] else []
+                playlists[row['playlist_type']] = len(track_ids)
+
+            # Watchlist artists
+            cursor.execute("SELECT COUNT(*) as total FROM watchlist_artists")
+            total_watchlist = cursor.fetchone()['total']
+
+            cursor.execute("SELECT COUNT(*) as count FROM watchlist_artists WHERE itunes_artist_id IS NOT NULL")
+            watchlist_with_itunes = cursor.fetchone()['count']
+
+        return jsonify({
+            "success": True,
+            "active_source": active_source,
+            "similar_artists": {
+                "total": total_similar,
+                "with_itunes_id": similar_with_itunes,
+                "with_spotify_id": similar_with_spotify
+            },
+            "discovery_pool": pool_by_source,
+            "recent_albums": albums_by_source,
+            "curated_playlists": playlists,
+            "watchlist_artists": {
+                "total": total_watchlist,
+                "with_itunes_id": watchlist_with_itunes
+            }
+        })
+
+    except Exception as e:
+        print(f"Error diagnosing discover data: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 # ========================================
 # SEASONAL DISCOVERY ENDPOINTS
@@ -21309,21 +22080,28 @@ def clean_beatport_text(text):
     return text
 
 def _run_beatport_discovery_worker(url_hash):
-    """Background worker for Beatport Spotify discovery process"""
+    """Background worker for Beatport discovery process (Spotify preferred, iTunes fallback)"""
     try:
         state = beatport_chart_states[url_hash]
         chart = state['chart']
         tracks = chart['tracks']
 
-        print(f"🔍 Starting Spotify discovery for {len(tracks)} Beatport tracks...")
+        # Determine which provider to use
+        use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
+        discovery_source = 'spotify' if use_spotify else 'itunes'
 
-        if not spotify_client or not spotify_client.is_authenticated():
-            print("❌ Spotify client not authenticated")
-            state['status'] = 'error'
-            state['phase'] = 'fresh'
-            return
+        # Initialize iTunes client if needed
+        itunes_client_instance = None
+        if not use_spotify:
+            from core.itunes_client import iTunesClient
+            itunes_client_instance = iTunesClient()
 
-        # Process each track for Spotify discovery
+        print(f"🔍 Starting {discovery_source.upper()} discovery for {len(tracks)} Beatport tracks...")
+
+        # Store discovery source in state for frontend
+        state['discovery_source'] = discovery_source
+
+        # Process each track for discovery
         for i, track in enumerate(tracks):
             try:
                 # Update progress
@@ -21342,10 +22120,10 @@ def _run_beatport_discovery_worker(url_hash):
                 else:
                     track_artist = clean_beatport_text(str(track_artists))
 
-                print(f"🔍 Searching Spotify for: '{track_artist}' - '{track_title}'")
+                print(f"🔍 Searching {discovery_source.upper()} for: '{track_artist}' - '{track_title}'")
 
                 # Use matching engine for sophisticated track matching (like other discovery processes)
-                spotify_track = None
+                found_track = None
 
                 # Generate search queries using matching engine (with fallback)
                 try:
@@ -21374,84 +22152,137 @@ def _run_beatport_discovery_worker(url_hash):
 
                 for query_idx, search_query in enumerate(search_queries):
                     try:
-                        print(f"🔍 Query {query_idx + 1}/{len(search_queries)}: {search_query}")
+                        print(f"🔍 Query {query_idx + 1}/{len(search_queries)}: {search_query} ({discovery_source.upper()})")
 
-                        # Get raw Spotify API response to access full album object with images
-                        raw_results = spotify_client.sp.search(q=search_query, type='track', limit=10)
-                        if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
-                            continue
+                        if use_spotify:
+                            # SPOTIFY PATH: Get raw Spotify API response to access full album object with images
+                            raw_results = spotify_client.sp.search(q=search_query, type='track', limit=10)
+                            if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
+                                continue
 
-                        search_results = spotify_client.search_tracks(search_query, limit=10)
+                            search_results = spotify_client.search_tracks(search_query, limit=10)
 
-                        if not search_results:
-                            continue
+                            if not search_results:
+                                continue
 
-                        # Use matching engine to find the best match from search results
-                        for result_idx, result in enumerate(search_results):
-                            raw_track = raw_results['tracks']['items'][result_idx] if result_idx < len(raw_results['tracks']['items']) else None
-                            try:
-                                # Calculate confidence using matching engine's similarity scoring (with fallback)
+                            # Use matching engine to find the best match from search results
+                            for result_idx, result in enumerate(search_results):
+                                raw_track = raw_results['tracks']['items'][result_idx] if result_idx < len(raw_results['tracks']['items']) else None
                                 try:
-                                    artist_confidence = 0.0
-                                    if result.artists:
-                                        # Get best artist match confidence
-                                        result_artist_names = [artist for artist in result.artists]
-                                        for result_artist in result_artist_names:
+                                    # Calculate confidence using matching engine's similarity scoring (with fallback)
+                                    try:
+                                        artist_confidence = 0.0
+                                        if result.artists:
+                                            # Get best artist match confidence
+                                            result_artist_names = [artist for artist in result.artists]
+                                            for result_artist in result_artist_names:
+                                                artist_sim = matching_engine.similarity_score(
+                                                    matching_engine.normalize_string(track_artist),
+                                                    matching_engine.normalize_string(result_artist)
+                                                )
+                                                artist_confidence = max(artist_confidence, artist_sim)
+
+                                        # Calculate title confidence
+                                        title_confidence = matching_engine.similarity_score(
+                                            matching_engine.normalize_string(track_title),
+                                            matching_engine.normalize_string(result.name)
+                                        )
+
+                                        # Combined confidence (more balanced to avoid bad matches from same artist)
+                                        combined_confidence = (artist_confidence * 0.4 + title_confidence * 0.6)
+                                    except Exception as e:
+                                        print(f"⚠️ Matching engine scoring failed for Beatport, using basic matching: {e}")
+                                        # Fallback to simple string matching
+                                        artist_match = any(track_artist.lower() in artist.lower() for artist in result.artists) if result.artists else False
+                                        title_match = track_title.lower() in result.name.lower() or result.name.lower() in track_title.lower()
+                                        combined_confidence = 0.8 if (artist_match and title_match) else 0.4 if (artist_match or title_match) else 0.1
+
+                                    print(f"🔍 Match candidate: '{result.artists[0]}' - '{result.name}'")
+                                    print(f"    Artist confidence: {artist_confidence:.3f} ('{track_artist}' vs '{result.artists[0]}')")
+                                    print(f"    Title confidence: {title_confidence:.3f} ('{track_title}' vs '{result.name}')")
+                                    print(f"    Combined confidence: {combined_confidence:.3f} (threshold: {min_confidence})")
+
+                                    # Additional check for core title similarity (excluding version keywords)
+                                    def remove_version_keywords(title):
+                                        keywords = ['extended mix', 'radio mix', 'club mix', 'remix', 'extended', 'version', 'mix', 'original']
+                                        clean_title = title.lower()
+                                        for keyword in keywords:
+                                            clean_title = clean_title.replace(keyword, '').strip(' -()[]')
+                                        return clean_title.strip()
+
+                                    core_title1 = remove_version_keywords(track_title)
+                                    core_title2 = remove_version_keywords(result.name)
+                                    core_title_confidence = matching_engine.similarity_score(core_title1, core_title2)
+
+                                    print(f"    Core title confidence: {core_title_confidence:.3f} ('{core_title1}' vs '{core_title2}')")
+
+                                    # Update best match if this is better AND meets all similarity requirements
+                                    min_title_confidence = 0.5  # Require at least 50% title similarity
+                                    min_core_title_confidence = 0.4  # Require at least 40% core title similarity
+                                    if (combined_confidence > best_confidence and
+                                        combined_confidence >= min_confidence and
+                                        title_confidence >= min_title_confidence and
+                                        core_title_confidence >= min_core_title_confidence):
+                                        best_confidence = combined_confidence
+                                        best_match = result
+                                        best_raw_track = raw_track  # Store raw data with full album object
+                                        print(f"✅ New best match: {result.artists[0]} - {result.name} (confidence: {combined_confidence:.3f})")
+
+                                except Exception as e:
+                                    print(f"❌ Error processing search result: {e}")
+                                    continue
+
+                        else:
+                            # ITUNES PATH: Search using iTunes client
+                            simple_query = f"{track_artist} {track_title}"
+                            itunes_results = itunes_client_instance.search_tracks(simple_query, limit=10)
+
+                            if not itunes_results:
+                                continue
+
+                            # Score each iTunes result
+                            # Note: iTunes returns Track dataclass objects with 'artists' (list), not 'artist'
+                            for result in itunes_results:
+                                try:
+                                    # Calculate confidence using matching engine
+                                    try:
+                                        artist_confidence = 0.0
+                                        # iTunes Track has 'artists' as a list
+                                        result_artists = result.artists if hasattr(result, 'artists') else []
+                                        result_artist = result_artists[0] if result_artists else ''
+                                        if result_artist:
                                             artist_sim = matching_engine.similarity_score(
                                                 matching_engine.normalize_string(track_artist),
                                                 matching_engine.normalize_string(result_artist)
                                             )
-                                            artist_confidence = max(artist_confidence, artist_sim)
+                                            artist_confidence = artist_sim
 
-                                    # Calculate title confidence
-                                    title_confidence = matching_engine.similarity_score(
-                                        matching_engine.normalize_string(track_title),
-                                        matching_engine.normalize_string(result.name)
-                                    )
+                                        # Calculate title confidence
+                                        result_name = result.name if hasattr(result, 'name') else ''
+                                        title_confidence = matching_engine.similarity_score(
+                                            matching_engine.normalize_string(track_title),
+                                            matching_engine.normalize_string(result_name)
+                                        )
 
-                                    # Combined confidence (more balanced to avoid bad matches from same artist)
-                                    combined_confidence = (artist_confidence * 0.4 + title_confidence * 0.6)
+                                        combined_confidence = (artist_confidence * 0.4 + title_confidence * 0.6)
+                                    except Exception as e:
+                                        print(f"⚠️ Matching engine scoring failed for iTunes Beatport, using first match: {e}")
+                                        combined_confidence = 1.0
+                                        best_match = result
+                                        break
+
+                                    result_artist_display = result_artists[0] if result_artists else 'Unknown'
+                                    result_name_display = result.name if hasattr(result, 'name') else 'Unknown'
+                                    print(f"🔍 iTunes Beatport candidate: '{result_artist_display}' - '{result_name_display}' (confidence: {combined_confidence:.3f})")
+
+                                    if combined_confidence > best_confidence and combined_confidence >= min_confidence:
+                                        best_confidence = combined_confidence
+                                        best_match = result
+                                        print(f"✅ New best iTunes Beatport match: {result_artist_display} - {result_name_display} (confidence: {combined_confidence:.3f})")
+
                                 except Exception as e:
-                                    print(f"⚠️ Matching engine scoring failed for Beatport, using basic matching: {e}")
-                                    # Fallback to simple string matching
-                                    artist_match = any(track_artist.lower() in artist.lower() for artist in result.artists) if result.artists else False
-                                    title_match = track_title.lower() in result.name.lower() or result.name.lower() in track_title.lower()
-                                    combined_confidence = 0.8 if (artist_match and title_match) else 0.4 if (artist_match or title_match) else 0.1
-
-                                print(f"🔍 Match candidate: '{result.artists[0]}' - '{result.name}'")
-                                print(f"    Artist confidence: {artist_confidence:.3f} ('{track_artist}' vs '{result.artists[0]}')")
-                                print(f"    Title confidence: {title_confidence:.3f} ('{track_title}' vs '{result.name}')")
-                                print(f"    Combined confidence: {combined_confidence:.3f} (threshold: {min_confidence})")
-
-                                # Additional check for core title similarity (excluding version keywords)
-                                def remove_version_keywords(title):
-                                    keywords = ['extended mix', 'radio mix', 'club mix', 'remix', 'extended', 'version', 'mix', 'original']
-                                    clean_title = title.lower()
-                                    for keyword in keywords:
-                                        clean_title = clean_title.replace(keyword, '').strip(' -()[]')
-                                    return clean_title.strip()
-
-                                core_title1 = remove_version_keywords(track_title)
-                                core_title2 = remove_version_keywords(result.name)
-                                core_title_confidence = matching_engine.similarity_score(core_title1, core_title2)
-
-                                print(f"    Core title confidence: {core_title_confidence:.3f} ('{core_title1}' vs '{core_title2}')")
-
-                                # Update best match if this is better AND meets all similarity requirements
-                                min_title_confidence = 0.5  # Require at least 50% title similarity
-                                min_core_title_confidence = 0.4  # Require at least 40% core title similarity
-                                if (combined_confidence > best_confidence and
-                                    combined_confidence >= min_confidence and
-                                    title_confidence >= min_title_confidence and
-                                    core_title_confidence >= min_core_title_confidence):
-                                    best_confidence = combined_confidence
-                                    best_match = result
-                                    best_raw_track = raw_track  # Store raw data with full album object
-                                    print(f"✅ New best match: {result.artists[0]} - {result.name} (confidence: {combined_confidence:.3f})")
-
-                            except Exception as e:
-                                print(f"❌ Error processing search result: {e}")
-                                continue
+                                    print(f"❌ Error processing iTunes Beatport search result: {e}")
+                                    continue
 
                         # If we found a very high confidence match, stop searching
                         if best_confidence >= 0.9:
@@ -21459,12 +22290,19 @@ def _run_beatport_discovery_worker(url_hash):
                             break
 
                     except Exception as e:
-                        print(f"❌ Error in Spotify search for query '{search_query}': {e}")
+                        print(f"❌ Error in {discovery_source.upper()} search for query '{search_query}': {e}")
                         continue
 
-                spotify_track = best_match
-                if spotify_track:
-                    print(f"✅ Final match selected: {spotify_track.artists[0]} - {spotify_track.name} (confidence: {best_confidence:.3f})")
+                found_track = best_match
+                if found_track:
+                    if use_spotify:
+                        print(f"✅ Final Spotify match selected: {found_track.artists[0]} - {found_track.name} (confidence: {best_confidence:.3f})")
+                    else:
+                        # iTunes Track has 'artists' (list), not 'artist'
+                        found_artists = found_track.artists if hasattr(found_track, 'artists') else []
+                        found_artist = found_artists[0] if found_artists else 'Unknown'
+                        found_name = found_track.name if hasattr(found_track, 'name') else 'Unknown'
+                        print(f"✅ Final iTunes match selected: {found_artist} - {found_name} (confidence: {best_confidence:.3f})")
                 else:
                     print(f"❌ No suitable match found (best confidence was {best_confidence:.3f}, required {min_confidence:.3f})")
 
@@ -21475,41 +22313,72 @@ def _run_beatport_discovery_worker(url_hash):
                         'title': track_title,
                         'artist': track_artist
                     },
-                    'status': 'found' if spotify_track else 'not_found',
-                    'status_class': 'found' if spotify_track else 'not-found'  # Add status class for CSS styling
+                    'status': 'found' if found_track else 'not_found',
+                    'status_class': 'found' if found_track else 'not-found',  # Add status class for CSS styling
+                    'discovery_source': discovery_source
                 }
 
-                if spotify_track:
-                    # Debug: show available attributes
-                    print(f"🔍 Spotify track attributes: {dir(spotify_track)}")
+                if found_track:
+                    if use_spotify:
+                        # SPOTIFY result formatting
+                        # Debug: show available attributes
+                        print(f"🔍 Spotify track attributes: {dir(found_track)}")
 
-                    # Format artists correctly for frontend compatibility
-                    formatted_artists = []
-                    if isinstance(spotify_track.artists, list):
-                        # If it's already a list of strings, convert to objects with 'name' property
-                        for artist in spotify_track.artists:
-                            if isinstance(artist, str):
-                                formatted_artists.append({'name': artist})
-                            else:
-                                # If it's already an object, use as-is
-                                formatted_artists.append(artist)
+                        # Format artists correctly for frontend compatibility
+                        formatted_artists = []
+                        if isinstance(found_track.artists, list):
+                            # If it's already a list of strings, convert to objects with 'name' property
+                            for artist in found_track.artists:
+                                if isinstance(artist, str):
+                                    formatted_artists.append({'name': artist})
+                                else:
+                                    # If it's already an object, use as-is
+                                    formatted_artists.append(artist)
+                        else:
+                            # Single artist case
+                            formatted_artists = [{'name': str(found_track.artists)}]
+
+                        # Use full album object from raw Spotify data if available
+                        album_data = best_raw_track.get('album', {}) if best_raw_track else {}
+                        if not album_data:
+                            # Fallback to string album name
+                            album_data = {'name': found_track.album, 'album_type': 'album', 'images': []}
+
+                        result_entry['spotify_data'] = {
+                            'name': found_track.name,
+                            'artists': formatted_artists,  # Now formatted as list of objects with 'name' property
+                            'album': album_data,  # Full album object with images
+                            'id': found_track.id,
+                            'source': 'spotify'
+                        }
                     else:
-                        # Single artist case
-                        formatted_artists = [{'name': str(spotify_track.artists)}]
+                        # ITUNES result formatting
+                        # Note: iTunes Track dataclass has 'artists' (list) and 'image_url', not 'artist' and 'artwork_url'
+                        result_artists = found_track.artists if hasattr(found_track, 'artists') else []
+                        result_artist = result_artists[0] if result_artists else 'Unknown'
+                        result_name = found_track.name if hasattr(found_track, 'name') else 'Unknown'
+                        album_name = found_track.album if hasattr(found_track, 'album') else 'Unknown Album'
+                        image_url = found_track.image_url if hasattr(found_track, 'image_url') else ''
+                        track_id = found_track.id if hasattr(found_track, 'id') else ''
 
-                    # Use full album object from raw Spotify data if available
-                    album_data = best_raw_track.get('album', {}) if best_raw_track else {}
-                    if not album_data:
-                        # Fallback to string album name
-                        album_data = {'name': spotify_track.album, 'album_type': 'album', 'images': []}
+                        # Format artists as list of objects for frontend compatibility
+                        formatted_artists = [{'name': result_artist}]
 
-                    result_entry['spotify_data'] = {
-                        'name': spotify_track.name,
-                        'artists': formatted_artists,  # Now formatted as list of objects with 'name' property
-                        'album': album_data,  # Full album object with images
-                        'id': spotify_track.id
-                        # Remove uri for now since it's causing errors
-                    }
+                        # Build album data with artwork
+                        album_data = {
+                            'name': album_name,
+                            'album_type': 'album',
+                            'images': [{'url': image_url, 'height': 300, 'width': 300}] if image_url else []
+                        }
+
+                        result_entry['spotify_data'] = {  # Use same key for frontend compatibility
+                            'name': result_name,
+                            'artists': formatted_artists,
+                            'album': album_data,
+                            'id': track_id,
+                            'source': 'itunes'
+                        }
+
                     state['spotify_matches'] += 1
 
                 state['discovery_results'].append(result_entry)
@@ -21528,7 +22397,8 @@ def _run_beatport_discovery_worker(url_hash):
                     },
                     'status': 'error',
                     'status_class': 'error',  # Add status class for CSS styling
-                    'error': str(e)
+                    'error': str(e),
+                    'discovery_source': discovery_source
                 })
 
         # Mark discovery as complete
@@ -21538,10 +22408,11 @@ def _run_beatport_discovery_worker(url_hash):
 
         # Add activity for completion
         chart_name = chart.get('name', 'Unknown Chart')
-        add_activity_item("✅", "Beatport Discovery Complete",
+        source_label = discovery_source.upper()
+        add_activity_item("✅", f"Beatport Discovery Complete ({source_label})",
                          f"'{chart_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
 
-        print(f"✅ Beatport discovery complete: {state['spotify_matches']}/{len(tracks)} tracks found")
+        print(f"✅ Beatport discovery complete ({source_label}): {state['spotify_matches']}/{len(tracks)} tracks found")
 
     except Exception as e:
         print(f"❌ Error in Beatport discovery worker: {e}")
@@ -22657,8 +23528,11 @@ def get_spotify_artist_discography(artist_name):
 
             if album_type == 'single' or track_count <= 3:
                 singles.append(release_data)
-            elif album_type == 'compilation' or (track_count <= 8 and track_count > 3):
+            elif album_type == 'ep' or (track_count >= 4 and track_count <= 6):
                 eps.append(release_data)
+            elif album_type == 'compilation':
+                # Compilations go with albums
+                albums.append(release_data)
             else:
                 albums.append(release_data)
 
