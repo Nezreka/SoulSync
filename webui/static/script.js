@@ -21052,8 +21052,24 @@ function updateArtistDetailHeader(artist) {
     const nameElement = document.getElementById('search-artist-detail-name');
     const genresElement = document.getElementById('search-artist-detail-genres');
 
-    if (imageElement && artist.image_url) {
-        imageElement.style.backgroundImage = `url('${artist.image_url}')`;
+    if (imageElement) {
+        if (artist.image_url) {
+            imageElement.style.backgroundImage = `url('${artist.image_url}')`;
+        } else {
+            // Lazy load image if missing (common for iTunes artists)
+            console.log(`🖼️ Lazy loading detail image for ${artist.name} (${artist.id})`);
+            fetch(`/api/artist/${artist.id}/image`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.image_url) {
+                        console.log(`✅ Loaded detail image for ${artist.name}`);
+                        imageElement.style.backgroundImage = `url('${data.image_url}')`;
+                        // Update the artist object in memory too
+                        artist.image_url = data.image_url;
+                    }
+                })
+                .catch(err => console.error('❌ Failed to load detail image:', err));
+        }
     }
 
     if (nameElement) {
@@ -22175,7 +22191,34 @@ async function openSearchDownloadModal(artistName) {
     modal.style.display = 'flex';
 
     // Start monitoring for status changes
+    // Start monitoring for status changes
     monitorSearchDownloadModal(artistName);
+
+    // Lazy load artist image if missing (common for iTunes)
+    if (!artistBubbleData.artist.image_url) {
+        console.log(`🖼️ Lazy loading modal image for ${artistBubbleData.artist.name} (${artistBubbleData.artist.id})`);
+        fetch(`/api/artist/${artistBubbleData.artist.id}/image`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.image_url) {
+                    // Update header background
+                    const headerBg = modal.querySelector('.artist-download-modal-hero-bg');
+                    if (headerBg) {
+                        headerBg.style.backgroundImage = `url('${data.image_url}')`;
+                    }
+
+                    // Update avatar
+                    const avatarContainer = modal.querySelector('.artist-download-modal-hero-avatar');
+                    if (avatarContainer) {
+                        avatarContainer.innerHTML = `<img src="${data.image_url}" alt="${artistBubbleData.artist.name}" class="artist-download-modal-hero-image" loading="lazy">`;
+                    }
+
+                    // Update artist object in memory
+                    artistBubbleData.artist.image_url = data.image_url;
+                }
+            })
+            .catch(err => console.error('❌ Failed to load modal image:', err));
+    }
 }
 
 /**
