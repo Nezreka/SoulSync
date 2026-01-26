@@ -1202,18 +1202,18 @@ class MusicDatabase:
             
             genres_json = json.dumps(genres) if genres else None
             
-            # Check if album exists with this ID and server source
-            cursor.execute("SELECT id FROM albums WHERE id = ? AND server_source = ?", (album_id, server_source))
-            exists = cursor.fetchone()
-            
-            if exists:
-                # Update existing album
+            # Check if album exists with this ID (PRIMARY KEY check)
+            cursor.execute("SELECT id, server_source FROM albums WHERE id = ?", (album_id,))
+            existing = cursor.fetchone()
+
+            if existing:
+                # Album exists - update it (update server_source if different)
                 cursor.execute("""
-                    UPDATE albums 
-                    SET artist_id = ?, title = ?, year = ?, thumb_url = ?, genres = ?, 
-                        track_count = ?, duration = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ? AND server_source = ?
-                """, (artist_id, title, year, thumb_url, genres_json, track_count, duration, album_id, server_source))
+                    UPDATE albums
+                    SET artist_id = ?, title = ?, year = ?, thumb_url = ?, genres = ?,
+                        track_count = ?, duration = ?, server_source = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (artist_id, title, year, thumb_url, genres_json, track_count, duration, server_source, album_id))
             else:
                 # Insert new album
                 cursor.execute("""

@@ -533,7 +533,7 @@ class DatabaseUpdateWorker(QThread):
                         total_tracks_checked += len(album_tracks)
 
                         for track in album_tracks:
-                            if not self.database.track_exists(track.ratingKey, self.server_type):
+                            if not self.database.track_exists_by_server(track.ratingKey, self.server_type):
                                 album_has_new_tracks = True
                                 consecutive_complete_albums = 0  # Reset counter
                                 break
