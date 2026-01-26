@@ -546,7 +546,7 @@ class WebUIDownloadMonitor:
                             # 'Completed' is used by YouTubeClient, 'Succeeded' by Soulseek
                             if state in ['Completed', 'Succeeded'] and task['status'] == 'downloading':
                                 print(f"✅ Monitor detected completed download for {task_id} ({state}) - triggering post-processing")
-                                _on_download_completed(task_id, success=True)
+                                _on_download_completed(batch_id, task_id, success=True)
                 
         # ENHANCED: Add worker count validation to detect ghost workers
         self._validate_worker_counts()
