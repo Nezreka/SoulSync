@@ -10678,7 +10678,28 @@ async function handleAddToWishlist() {
                     artists: formattedArtists
                 };
 
+                // Use track's album data if available (from API), falling back to modal's album data
+                // This ensures consistency with how the Artists page handles wishlisting
+                let trackAlbum = track.album;
+                let trackAlbumType = albumType || 'album';
+
+                if (trackAlbum && typeof trackAlbum === 'object') {
+                    // Track has album data from API - use its album_type
+                    trackAlbumType = trackAlbum.album_type || albumType || 'album';
+                    // Ensure album has required fields
+                    if (!trackAlbum.name) {
+                        trackAlbum.name = album.name;
+                    }
+                    if (!trackAlbum.id) {
+                        trackAlbum.id = album.id;
+                    }
+                } else {
+                    // Fall back to the album passed to the modal
+                    trackAlbum = album;
+                }
+
                 console.log(`🔄 Adding track with formatted artists:`, formattedTrack.name, formattedTrack.artists);
+                console.log(`🔄 Using album_type: ${trackAlbumType} (from ${track.album ? 'track.album' : 'modal album'})`);
 
                 const response = await fetch('/api/add-album-to-wishlist', {
                     method: 'POST',
@@ -10688,12 +10709,12 @@ async function handleAddToWishlist() {
                     body: JSON.stringify({
                         track: formattedTrack,
                         artist: artist,
-                        album: album,
+                        album: trackAlbum,
                         source_type: 'album',
                         source_context: {
-                            album_name: album.name,
+                            album_name: trackAlbum.name,
                             artist_name: artist.name,
-                            album_type: albumType
+                            album_type: trackAlbumType
                         }
                     })
                 });
