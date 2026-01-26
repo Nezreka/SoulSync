@@ -11865,6 +11865,50 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                     track_info['_is_explicit_album_download'] = True
                     print(f"🎵 [Task Creation] Added explicit album context for: {track_info.get('name')}")
 
+                # SPECIAL WISHLIST HANDLING: Inject album context if available to force grouping
+                elif playlist_id == 'wishlist':
+                    # Extract spotify_data again since it might be buried
+                    spotify_data = track_info.get('spotify_data')
+                    if isinstance(spotify_data, str):
+                        try:
+                            import json
+                            spotify_data = json.loads(spotify_data)
+                        except:
+                            spotify_data = {}
+                    
+                    if not spotify_data:
+                        spotify_data = {}
+
+                    s_album = spotify_data.get('album')
+                    s_artists = spotify_data.get('artists', [])
+                    
+                    # We need at least an album name and artist
+                    if s_album and s_album.get('name'):
+                        # Construct minimal artist context
+                        artist_ctx = {}
+                        if s_artists and len(s_artists) > 0:
+                            artist_ctx = s_artists[0] # Take first artist
+                        else:
+                            # Fallback if no artist in spotify_data
+                             artist_ctx = {'name': track_info.get('artist', 'Unknown Artist')}
+
+                        # Construct minimal album context
+                        # Ensure images are preserved (important for artwork)
+                        album_ctx = {
+                            'id': s_album.get('id', 'wishlist_album'),
+                            'name': s_album.get('name'),
+                            'release_date': s_album.get('release_date', ''),
+                            'total_tracks': s_album.get('total_tracks', 1),
+                            'album_type': s_album.get('album_type', 'album'),
+                            'images': s_album.get('images', []) # Pass images array directly
+                        }
+
+                        track_info['_explicit_album_context'] = album_ctx
+                        track_info['_explicit_artist_context'] = artist_ctx
+                        track_info['_is_explicit_album_download'] = True
+                        print(f"🎵 [Wishlist] Added album context for: '{track_info.get('name')}' -> '{album_ctx['name']}'")
+
+
                 # Add playlist folder mode flag for sync page playlists
                 if batch_playlist_folder_mode:
                     track_info['_playlist_folder_mode'] = True
