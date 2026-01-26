@@ -23630,6 +23630,7 @@ def merge_discography_data(owned_releases, spotify_discography):
 
                     # Add Spotify metadata
                     owned_release['spotify_id'] = spotify_release['spotify_id']
+                    owned_release['album_type'] = spotify_release.get('album_type', 'album')
                     owned_release['owned'] = True
 
                     # Calculate track completion using Spotify track count
