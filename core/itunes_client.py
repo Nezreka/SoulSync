@@ -75,7 +75,7 @@ class Track:
             id=str(track_data.get('trackId', '')),
             name=track_data.get('trackName', ''),
             artists=artists,
-            album=self._clean_album_name(track_data.get('collectionName', '')),
+            album=track_data.get('collectionName', ''),
             duration_ms=track_data.get('trackTimeMillis', 0),
             popularity=0,  # iTunes doesn't provide popularity
             preview_url=track_data.get('previewUrl'),
@@ -161,7 +161,7 @@ class Album:
         
         return cls(
             id=str(album_data.get('collectionId', '')),
-            name=self._clean_album_name(album_data.get('collectionName', '')),
+            name=album_data.get('collectionName', ''),
             artists=[album_data.get('artistName', 'Unknown Artist')],
             release_date=album_data.get('releaseDate', ''),
             total_tracks=track_count,
@@ -221,24 +221,6 @@ class iTunesClient:
         Check if iTunes client is available (always True since no auth required)
         """
         return True
-
-    @staticmethod
-    def _clean_album_name(album_name: str) -> str:
-        """
-        Remove iTunes-specific suffixes like " - Single", " - EP" from album names.
-        iTunes API adds these suffixes but users don't want them displayed.
-        """
-        if not album_name:
-            return album_name
-
-        # List of suffixes to remove (case-insensitive)
-        suffixes_to_remove = [' - Single', ' - EP']
-
-        for suffix in suffixes_to_remove:
-            if album_name.endswith(suffix):
-                return album_name[:-len(suffix)]
-
-        return album_name
     
     @rate_limited
     def _search(self, term: str, entity: str, limit: int = 50) -> List[Dict[str, Any]]:
@@ -388,7 +370,7 @@ class iTunesClient:
                     'primary_artist': clean_artist_name,
                     'album': {
                         'id': str(track_data.get('collectionId', '')),
-                        'name': self._clean_album_name(track_data.get('collectionName', '')),
+                        'name': track_data.get('collectionName', ''),
                         'total_tracks': track_data.get('trackCount', 0),
                         'release_date': track_data.get('releaseDate', ''),
                         'album_type': 'album',  # iTunes doesn't distinguish clearly
@@ -426,8 +408,7 @@ class iTunesClient:
                 continue
 
             # Get album name and explicitness
-            # Clean album name before comparison for better deduplication
-            album_name = self._clean_album_name(album_data.get('collectionName', '')).lower().strip()
+            album_name = album_data.get('collectionName', '').lower().strip()
             artist_name = album_data.get('artistName', '').lower().strip()
             is_explicit = album_data.get('collectionExplicitness') == 'explicit'
 
@@ -485,7 +466,7 @@ class iTunesClient:
 
                 album_result = {
                     'id': str(album_data.get('collectionId', '')),
-                    'name': self._clean_album_name(album_data.get('collectionName', '')),
+                    'name': album_data.get('collectionName', ''),
                     'images': images,
                     'artists': [{'name': album_data.get('artistName', 'Unknown Artist'), 'id': str(album_data.get('artistId', ''))}],
                     'release_date': album_data.get('releaseDate', '')[:10] if album_data.get('releaseDate') else '',  # YYYY-MM-DD format
@@ -517,22 +498,8 @@ class iTunesClient:
             return None
 
         # First result is usually the album/collection info
-        # Extract album information to include in each track (like Spotify does)
-        album_info = None
-        album_images = []
-        for item in results:
-            if item.get('wrapperType') == 'collection':
-                album_info = item
-                # Build album images array
-                if item.get('artworkUrl100'):
-                    base_url = item['artworkUrl100'].replace('100x100bb', '{size}x{size}bb')
-                    album_images = [
-                        {'url': base_url.replace('{size}x{size}bb', '600x600bb'), 'height': 600, 'width': 600},
-                        {'url': base_url.replace('{size}x{size}bb', '300x300bb'), 'height': 300, 'width': 300},
-                        {'url': item['artworkUrl100'], 'height': 100, 'width': 100}
-                    ]
-                break
-
+        # Remaining results are tracks
+        
         # Collect artist IDs for batch lookup
         artist_ids = set()
         for item in results:
@@ -540,7 +507,7 @@ class iTunesClient:
                 artist_id = str(item.get('artistId', ''))
                 if artist_id:
                     artist_ids.add(artist_id)
-
+                    
         # Batch lookup artist clean names
         clean_artist_map = {}
         if artist_ids:
@@ -551,21 +518,12 @@ class iTunesClient:
             if item.get('wrapperType') == 'track' and item.get('kind') == 'song':
                 artist_id = str(item.get('artistId', ''))
                 clean_artist = clean_artist_map.get(artist_id, item.get('artistName', 'Unknown Artist'))
-
-                # Build album object for this track (like Spotify format)
-                track_album = {
-                    'id': str(item.get('collectionId', album_id)),
-                    'name': self._clean_album_name(item.get('collectionName', 'Unknown Album')),
-                    'images': album_images,
-                    'release_date': item.get('releaseDate', '')[:10] if item.get('releaseDate') else ''
-                }
-
+                
                 # Normalize each track to Spotify-compatible format
                 normalized_track = {
                     'id': str(item.get('trackId', '')),
                     'name': item.get('trackName', ''),
                     'artists': [{'name': clean_artist}],  # List of dicts like Spotify
-                    'album': track_album,  # CRITICAL: Include album info like Spotify does
                     'duration_ms': item.get('trackTimeMillis', 0),
                     'track_number': item.get('trackNumber', 0),
                     'disc_number': item.get('discNumber', 1),
