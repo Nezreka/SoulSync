@@ -5068,12 +5068,31 @@ async function cleanupDownloadProcess(playlistId) {
     if (process.batchId) {
         try {
             console.log(`🚀 Sending cleanup request to server for batch: ${process.batchId}`);
-            await fetch('/api/playlists/cleanup_batch', {
+            const response = await fetch('/api/playlists/cleanup_batch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ batch_id: process.batchId })
             });
-            console.log(`✅ Server cleanup completed for batch: ${process.batchId}`);
+
+            // Handle deferred cleanup (202 = wishlist processing in progress)
+            if (response.status === 202) {
+                console.log(`⏳ Wishlist processing in progress for batch ${process.batchId}, will retry cleanup in 2s...`);
+                // Retry cleanup after delay to allow wishlist processing to complete
+                setTimeout(async () => {
+                    try {
+                        await fetch('/api/playlists/cleanup_batch', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ batch_id: process.batchId })
+                        });
+                        console.log(`✅ Delayed cleanup completed for batch: ${process.batchId}`);
+                    } catch (error) {
+                        console.warn(`⚠️ Delayed cleanup failed:`, error);
+                    }
+                }, 2000); // 2 second delay
+            } else {
+                console.log(`✅ Server cleanup completed for batch: ${process.batchId}`);
+            }
         } catch (error) {
             console.warn(`⚠️ Failed to send cleanup request to server:`, error);
             // Don't show toast for cleanup failures - they're not user-facing
