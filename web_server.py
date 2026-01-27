@@ -11565,7 +11565,7 @@ def _on_download_completed(batch_id, task_id, success=True):
             
             # Build track_info structure matching sync.py's permanently_failed_tracks format
             original_track_info = task.get('track_info', {})
-            
+
             # Ensure spotify_track has proper structure for wishlist service
             spotify_track_data = _ensure_spotify_track_format(original_track_info)
             
