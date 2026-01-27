@@ -11447,8 +11447,9 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
         with tasks_lock:
             if batch_id in download_batches:
                 download_batches[batch_id]['wishlist_summary'] = completion_summary
+                download_batches[batch_id]['wishlist_processing_complete'] = True
                 # Phase already set to 'complete' in _on_download_completed
-        
+
         print(f"✅ [Wishlist Processing] Completed wishlist processing for batch {batch_id}")
         return completion_summary
     
@@ -11469,6 +11470,7 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                         'total_failed': 0,
                         'error_message': str(e)
                     }
+                    download_batches[batch_id]['wishlist_processing_complete'] = True
         except Exception as lock_error:
             print(f"❌ [Wishlist Processing] Failed to update batch after error: {lock_error}")
         
@@ -11717,7 +11719,10 @@ def _on_download_completed(batch_id, task_id, success=True):
             
             print(f"🎉 [Batch Manager] Batch {batch_id} complete - stopping monitor")
             download_monitor.stop_monitoring(batch_id)
-            
+
+            # Mark that wishlist processing is starting (prevents premature cleanup)
+            batch['wishlist_processing_started'] = True
+
             # Process wishlist outside of the lock to prevent threading issues
             if is_auto_batch:
                 # For auto-initiated batches, handle completion and schedule next cycle
@@ -13824,9 +13829,22 @@ def cleanup_batch():
         with tasks_lock:
             # Check if the batch exists before trying to delete
             if batch_id in download_batches:
+                batch = download_batches[batch_id]
+
+                # CRITICAL: Don't allow cleanup if wishlist processing is in progress
+                # This prevents a race condition where cleanup deletes the batch before
+                # the wishlist processing thread can access it
+                if batch.get('wishlist_processing_started') and not batch.get('wishlist_processing_complete'):
+                    print(f"⏳ [Cleanup] Batch {batch_id} cleanup deferred - wishlist processing in progress")
+                    return jsonify({
+                        "success": False,
+                        "error": "Batch cleanup deferred - wishlist processing in progress",
+                        "deferred": True
+                    }), 202  # 202 = Accepted but not yet processed
+
                 # Get the list of task IDs before deleting the batch
-                task_ids_to_remove = download_batches[batch_id].get('queue', [])
-                
+                task_ids_to_remove = batch.get('queue', [])
+
                 # Delete the batch record
                 del download_batches[batch_id]
                 
