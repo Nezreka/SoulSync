@@ -9301,7 +9301,11 @@ def _process_wishlist_automatically():
                     except:
                         spotify_data = {}
 
-                album_data = spotify_data.get('album', {})
+                # CRITICAL FIX: Handle case where album is explicitly null in JSON
+                album_data = spotify_data.get('album') or {}
+                # Ensure album_data is a dict (just in case it's a string/other)
+                if not isinstance(album_data, dict):
+                    album_data = {}
                 total_tracks = album_data.get('total_tracks')
                 album_type = album_data.get('album_type', 'album').lower()
 
@@ -9550,7 +9554,11 @@ def get_wishlist_stats():
                 import json
                 spotify_data = json.loads(spotify_data)
 
-            album_data = spotify_data.get('album', {})
+            # CRITICAL FIX: Handle case where album is explicitly null in JSON
+            album_data = spotify_data.get('album') or {}
+            # Ensure album_data is a dict (just in case)
+            if not isinstance(album_data, dict):
+                album_data = {}
             total_tracks = album_data.get('total_tracks')
             album_type = album_data.get('album_type', 'album').lower()
 
@@ -9817,7 +9825,11 @@ def get_wishlist_tracks():
                     except:
                         spotify_data = {}
 
-                album_data = spotify_data.get('album', {})
+                # CRITICAL FIX: Handle case where album is explicitly null in JSON
+                album_data = spotify_data.get('album') or {}
+                # Ensure album_data is a dict (just in case)
+                if not isinstance(album_data, dict):
+                    album_data = {}
                 total_tracks = album_data.get('total_tracks')
                 album_type = album_data.get('album_type', 'album').lower()
 
@@ -10234,12 +10246,16 @@ def remove_album_from_wishlist():
                 except:
                     spotify_data = {}
 
-            # Get album ID - use spotify ID if available, otherwise create custom ID
-            track_album_id = spotify_data.get('album', {}).get('id')
+            # Get album ID - safely handle null album data
+            album_data = spotify_data.get('album') or {}
+            if not isinstance(album_data, dict):
+                album_data = {}
+            track_album_id = album_data.get('id')
 
             if not track_album_id:
                 # Create custom ID matching frontend logic exactly
-                album_name = spotify_data.get('album', {}).get('name', 'Unknown Album')
+                # album_data is guaranteed to be a dict from above check
+                album_name = album_data.get('name', 'Unknown Album')
                 artist_name = spotify_data.get('artists', [{}])[0].get('name', 'Unknown Artist') if spotify_data.get('artists') else 'Unknown Artist'
                 custom_id = f"{album_name}_{artist_name}"
                 # Match frontend regex exactly:
