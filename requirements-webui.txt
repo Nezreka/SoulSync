@@ -35,5 +35,8 @@ yt-dlp>=2024.12.13
 # Lyrics support
 lrclibapi>=0.3.1
 
+# Drop-in folder support
+watchdog>=4.0.0
+
 # Optional: MQTT support (for future features)
 asyncio-mqtt>=0.16.0
