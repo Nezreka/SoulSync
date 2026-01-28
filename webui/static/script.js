@@ -4935,12 +4935,28 @@ async function loadSpotifyPlaylists() {
     refreshBtn.textContent = '🔄 Loading...';
 
     try {
+        // Fetch user's own playlists
         const response = await fetch('/api/spotify/playlists');
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || 'Failed to fetch playlists');
         }
-        spotifyPlaylists = await response.json();
+        const userPlaylists = await response.json();
+
+        // Fetch friend playlists (non-blocking, don't fail if this errors)
+        let friendPlaylists = [];
+        try {
+            const friendResponse = await fetch('/api/spotify/friend_playlists');
+            if (friendResponse.ok) {
+                friendPlaylists = await friendResponse.json();
+                console.log(`📋 Loaded ${friendPlaylists.length} friend playlists`);
+            }
+        } catch (friendError) {
+            console.warn('Could not load friend playlists:', friendError.message);
+        }
+
+        // Combine: user playlists first, then friend playlists
+        spotifyPlaylists = [...userPlaylists, ...friendPlaylists];
         renderSpotifyPlaylists();
         spotifyPlaylistsLoaded = true;
 
@@ -4967,14 +4983,19 @@ function renderSpotifyPlaylists() {
         if (p.sync_status.startsWith('Synced')) statusClass = 'status-synced';
         if (p.sync_status === 'Needs Sync') statusClass = 'status-needs-sync';
 
+        // Check if this is a friend playlist
+        const isFriendPlaylist = p.source === 'friend_profile';
+        const friendBadge = isFriendPlaylist ? `<span class="friend-playlist-badge" title="From friend: ${escapeHtml(p.owner)}">👥</span>` : '';
+        const ownerInfo = isFriendPlaylist ? ` • <span class="playlist-owner-name">from ${escapeHtml(p.owner)}</span>` : '';
+
         // This HTML structure creates the interactive playlist cards
         return `
-        <div class="playlist-card" data-playlist-id="${p.id}" onclick="togglePlaylistSelection(event)">
+        <div class="playlist-card ${isFriendPlaylist ? 'friend-playlist' : ''}" data-playlist-id="${p.id}" onclick="togglePlaylistSelection(event)">
             <div class="playlist-card-main">
                 <div class="playlist-card-content">
-                    <div class="playlist-card-name">${escapeHtml(p.name)}</div>
+                    <div class="playlist-card-name">${friendBadge}${escapeHtml(p.name)}</div>
                     <div class="playlist-card-info">
-                        <span>${p.track_count} tracks</span> • 
+                        <span>${p.track_count} tracks</span>${ownerInfo} • 
                         <span class="playlist-card-status ${statusClass}">${p.sync_status}</span>
                     </div>
                     <div class="sync-progress-indicator" id="progress-${p.id}"></div>

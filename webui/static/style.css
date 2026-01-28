@@ -6826,6 +6826,33 @@ body {
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
+/* Friend Playlist Styles */
+.friend-playlist {
+    border-color: rgba(100, 149, 237, 0.25);
+    border-top-color: rgba(100, 149, 237, 0.35);
+}
+
+.friend-playlist:hover {
+    border-color: rgba(100, 149, 237, 0.4);
+    box-shadow: 
+        0 16px 48px rgba(0, 0, 0, 0.5),
+        0 8px 16px rgba(0, 0, 0, 0.3),
+        0 0 20px rgba(100, 149, 237, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.friend-playlist-badge {
+    display: inline-block;
+    margin-right: 8px;
+    font-size: 14px;
+    cursor: help;
+}
+
+.playlist-owner-name {
+    color: rgba(100, 149, 237, 0.9);
+    font-weight: 500;
+}
+
 .playlist-card-actions {
     flex-shrink: 0;
     margin-left: 20px;
