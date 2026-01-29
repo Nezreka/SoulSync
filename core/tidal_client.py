@@ -475,10 +475,16 @@ class TidalClient:
         return True
     
     def is_authenticated(self):
-        """Check if client is authenticated"""
-        # Don't trigger authentication automatically here, just check token status
-        return (self.access_token is not None and 
-                time.time() < self.token_expires_at)
+        """Check if client is authenticated, refreshing expired tokens if possible"""
+        if self.access_token and time.time() < self.token_expires_at:
+            return True
+
+        # Token expired but refresh token available — try silent refresh
+        if self.access_token and self.refresh_token:
+            logger.info("Tidal access token expired — attempting silent refresh...")
+            return self._refresh_access_token()
+
+        return False
     
     def _get_user_id(self):
         """Get current user's ID from /users/me endpoint"""
