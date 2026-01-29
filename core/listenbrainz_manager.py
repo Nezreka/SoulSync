@@ -285,21 +285,21 @@ class ListenBrainzManager:
         logger.info(f"✅ Fetched {covers_found}/{len(track_data_list)} cover art URLs")
 
     def _cleanup_old_playlists(self):
-        """Remove old playlists, keeping only the 4 most recent per type"""
+        """Remove old playlists, keeping only the 25 most recent per type"""
         conn = self._get_db_connection()
         cursor = conn.cursor()
 
-        # For each playlist type, keep only the 4 most recent
+        # For each playlist type, keep only the 25 most recent
         playlist_types = ['created_for', 'user', 'collaborative']
 
         for playlist_type in playlist_types:
             try:
-                # Get IDs of playlists to delete (all except 4 most recent)
+                # Get IDs of playlists to delete (all except 25 most recent)
                 cursor.execute("""
                     SELECT id FROM listenbrainz_playlists
                     WHERE playlist_type = ?
                     ORDER BY last_updated DESC
-                    LIMIT -1 OFFSET 4
+                    LIMIT -1 OFFSET 25
                 """, (playlist_type,))
 
                 old_playlist_ids = [row[0] for row in cursor.fetchall()]
@@ -330,7 +330,7 @@ class ListenBrainzManager:
         return count > 0
 
     def get_cached_playlists(self, playlist_type: str) -> List[Dict]:
-        """Get cached playlists of a specific type from database (limited to 4 most recent)"""
+        """Get cached playlists of a specific type from database (up to 25 most recent)"""
         conn = self._get_db_connection()
         cursor = conn.cursor()
 
@@ -339,7 +339,7 @@ class ListenBrainzManager:
             FROM listenbrainz_playlists
             WHERE playlist_type = ?
             ORDER BY last_updated DESC
-            LIMIT 4
+            LIMIT 25
         """, (playlist_type,))
 
         playlists = []
