@@ -2863,6 +2863,54 @@ def auth_tidal():
         return f"<h1>❌ Tidal Authentication Error</h1><p>{str(e)}</p>", 500
 
 
+@app.route('/callback')
+def spotify_callback():
+    """
+    Handles Spotify OAuth callback via the main Flask app (port 8008).
+    This allows reverse proxy users to use a redirect_uri pointing at the main app.
+    The dedicated HTTPServer on port 8888 continues to work for direct access.
+    """
+    global spotify_client
+    auth_code = request.args.get('code')
+
+    if not auth_code:
+        error = request.args.get('error', 'Unknown error')
+        if 'error' not in request.args:
+            # Spurious request (e.g., healthcheck) - ignore silently
+            return '', 204
+        return f"<h1>Spotify Authentication Failed</h1><p>OAuth error: {error}</p>", 400
+
+    try:
+        from core.spotify_client import SpotifyClient
+        from spotipy.oauth2 import SpotifyOAuth
+        from config.settings import config_manager
+
+        config = config_manager.get_spotify_config()
+        auth_manager = SpotifyOAuth(
+            client_id=config['client_id'],
+            client_secret=config['client_secret'],
+            redirect_uri=config.get('redirect_uri', "http://127.0.0.1:8888/callback"),
+            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
+            cache_path='config/.spotify_cache'
+        )
+
+        token_info = auth_manager.get_access_token(auth_code, as_dict=True)
+
+        if token_info:
+            spotify_client = SpotifyClient()
+            if spotify_client.is_authenticated():
+                add_activity_item("✅", "Spotify Auth Complete", "Successfully authenticated with Spotify", "Now")
+                return "<h1>Spotify Authentication Successful!</h1><p>You can close this window.</p>"
+            else:
+                raise Exception("Token exchange succeeded but authentication validation failed")
+        else:
+            raise Exception("Failed to exchange authorization code for access token")
+    except Exception as e:
+        print(f"🔴 Spotify OAuth callback error: {e}")
+        add_activity_item("❌", "Spotify Auth Failed", f"Token processing failed: {str(e)}", "Now")
+        return f"<h1>Spotify Authentication Failed</h1><p>{str(e)}</p>", 400
+
+
 @app.route('/tidal/callback')
 def tidal_callback():
     """
