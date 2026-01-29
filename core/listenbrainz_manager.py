@@ -21,6 +21,44 @@ class ListenBrainzManager:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self.client = ListenBrainzClient()
+        self._ensure_tables()
+
+    def _ensure_tables(self):
+        """Ensure ListenBrainz tables exist in the database"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS listenbrainz_playlists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                playlist_mbid TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL,
+                creator TEXT,
+                playlist_type TEXT NOT NULL,
+                track_count INTEGER DEFAULT 0,
+                annotation_data TEXT,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                cached_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS listenbrainz_tracks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                playlist_id INTEGER NOT NULL,
+                position INTEGER NOT NULL,
+                track_name TEXT NOT NULL,
+                artist_name TEXT NOT NULL,
+                album_name TEXT NOT NULL,
+                duration_ms INTEGER DEFAULT 0,
+                recording_mbid TEXT,
+                release_mbid TEXT,
+                album_cover_url TEXT,
+                additional_metadata TEXT,
+                FOREIGN KEY (playlist_id) REFERENCES listenbrainz_playlists (id) ON DELETE CASCADE,
+                UNIQUE(playlist_id, position)
+            )
+        """)
+        conn.commit()
+        conn.close()
 
     def _get_db_connection(self):
         """Get database connection"""
