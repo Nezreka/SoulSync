@@ -23,7 +23,8 @@ RUN useradd --create-home --shell /bin/bash --uid 1000 soulsync
 # Copy requirements and install Python dependencies
 COPY requirements-webui.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements-webui.txt
+    pip install --no-cache-dir -r requirements-webui.txt && \
+    playwright install --with-deps chromium
 
 # Copy application code
 COPY . .
