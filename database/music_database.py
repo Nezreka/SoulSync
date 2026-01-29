@@ -1293,6 +1293,14 @@ class MusicDatabase:
                             part = media.parts[0]
                             file_path = getattr(part, 'file', None)
                         bitrate = getattr(media, 'bitrate', None)
+
+                # Fallback for Navidrome/Subsonic tracks
+                if file_path is None and hasattr(track_obj, 'path') and track_obj.path:
+                    file_path = track_obj.path
+                if bitrate is None and hasattr(track_obj, 'bitRate') and track_obj.bitRate:
+                    bitrate = track_obj.bitRate
+                if file_path is None and hasattr(track_obj, 'suffix') and track_obj.suffix:
+                    file_path = f"{track_obj.title}.{track_obj.suffix}"
                 
                 # Use INSERT OR REPLACE to handle duplicate IDs gracefully
                 cursor.execute("""
