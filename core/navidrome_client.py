@@ -113,6 +113,11 @@ class NavidromeTrack:
         self.userRating = navidrome_data.get('userRating')
         self.addedAt = self._parse_date(navidrome_data.get('created'))
 
+        # Subsonic API file/quality fields
+        self.suffix = navidrome_data.get('suffix')      # e.g. "flac", "mp3"
+        self.bitRate = navidrome_data.get('bitRate')     # e.g. 320
+        self.path = navidrome_data.get('path')           # e.g. "/music/Artist/Album/track.flac"
+
         self._album_id = navidrome_data.get('albumId', '')
         self._artist_id = navidrome_data.get('artistId', '')
 
