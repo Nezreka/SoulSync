@@ -31502,6 +31502,7 @@ async function openDownloadModalForGenre(genreName) {
 let listenbrainzPlaylistsCache = {}; // Store playlists by type
 let listenbrainzTracksCache = {}; // Store tracks for each playlist
 let activeListenBrainzTab = 'recommendations'; // Track active tab
+let activeListenBrainzSubTab = null; // Track active sub-tab within recommendations
 
 async function initializeListenBrainzTabs() {
     try {
@@ -31622,17 +31623,47 @@ function switchListenBrainzTab(tabId) {
     loadListenBrainzTabContent(tabId);
 }
 
-async function loadListenBrainzTabContent(tabId) {
-    const container = document.getElementById('listenbrainz-tab-content');
-    if (!container) return;
+function groupListenBrainzPlaylists(playlists) {
+    const groups = {};
+    const groupOrder = [];
 
-    const playlists = listenbrainzPlaylistsCache[tabId] || [];
-    if (playlists.length === 0) {
-        container.innerHTML = '<div class="discover-empty"><p>No playlists in this category</p></div>';
-        return;
+    playlists.forEach(playlist => {
+        const playlistData = playlist.playlist || playlist;
+        const title = (playlistData.title || '').toLowerCase();
+
+        let groupName;
+        if (title.includes('weekly jams')) {
+            groupName = 'Weekly Jams';
+        } else if (title.includes('weekly exploration')) {
+            groupName = 'Weekly Exploration';
+        } else if (title.includes('top discoveries')) {
+            groupName = 'Top Discoveries';
+        } else if (title.includes('top missed recordings')) {
+            groupName = 'Top Missed Recordings';
+        } else if (title.includes('daily jams')) {
+            groupName = 'Daily Jams';
+        } else {
+            groupName = 'Other';
+        }
+
+        if (!groups[groupName]) {
+            groups[groupName] = [];
+            groupOrder.push(groupName);
+        }
+        groups[groupName].push(playlist);
+    });
+
+    // Move "Other" to the end if it exists
+    const otherIdx = groupOrder.indexOf('Other');
+    if (otherIdx !== -1 && otherIdx !== groupOrder.length - 1) {
+        groupOrder.splice(otherIdx, 1);
+        groupOrder.push('Other');
     }
 
-    // Build HTML for all playlists in this tab
+    return { groups, groupOrder };
+}
+
+function buildListenBrainzPlaylistsHtml(playlists, tabId) {
     let html = '';
     playlists.forEach((playlist, index) => {
         const playlistData = playlist.playlist || playlist;
@@ -31702,16 +31733,121 @@ async function loadListenBrainzTabContent(tabId) {
             </div>
         `;
     });
+    return html;
+}
 
-    container.innerHTML = html;
-
-    // Load tracks for all playlists in this tab
-    playlists.forEach((playlist, index) => {
+function loadTracksForPlaylists(playlists) {
+    playlists.forEach((playlist) => {
         const playlistData = playlist.playlist || playlist;
         const identifier = playlistData.identifier?.split('/').pop() || '';
-        const playlistId = `discover-lb-playlist-${identifier}`;  // Use consistent MBID-based ID
+        const playlistId = `discover-lb-playlist-${identifier}`;
         loadListenBrainzPlaylistTracks(identifier, playlistId);
     });
+}
+
+function switchListenBrainzSubTab(groupId) {
+    activeListenBrainzSubTab = groupId;
+
+    // Update sub-tab buttons
+    const subTabs = document.querySelectorAll('#lb-subtabs-bar .lb-subtab');
+    subTabs.forEach(tab => {
+        if (tab.dataset.group === groupId) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+
+    // Show/hide sub-tab content panels
+    const panels = document.querySelectorAll('.lb-subtab-panel');
+    panels.forEach(panel => {
+        if (panel.dataset.group === groupId) {
+            panel.style.display = 'block';
+            // Load tracks for playlists in this panel if not already loaded
+            const unloaded = panel.querySelectorAll('.discover-loading');
+            if (unloaded.length > 0) {
+                const groupPlaylists = panel._playlists;
+                if (groupPlaylists) {
+                    loadTracksForPlaylists(groupPlaylists);
+                }
+            }
+        } else {
+            panel.style.display = 'none';
+        }
+    });
+}
+
+async function loadListenBrainzTabContent(tabId) {
+    const container = document.getElementById('listenbrainz-tab-content');
+    if (!container) return;
+
+    const playlists = listenbrainzPlaylistsCache[tabId] || [];
+    if (playlists.length === 0) {
+        container.innerHTML = '<div class="discover-empty"><p>No playlists in this category</p></div>';
+        return;
+    }
+
+    // For recommendations tab with multiple playlists, group into sub-tabs
+    if (tabId === 'recommendations' && playlists.length > 1) {
+        const { groups, groupOrder } = groupListenBrainzPlaylists(playlists);
+
+        // If only one group, no need for sub-tabs
+        if (groupOrder.length <= 1) {
+            const html = buildListenBrainzPlaylistsHtml(playlists, tabId);
+            container.innerHTML = html;
+            loadTracksForPlaylists(playlists);
+            return;
+        }
+
+        // Build sub-tabs bar
+        const firstGroup = activeListenBrainzSubTab && groupOrder.includes(activeListenBrainzSubTab)
+            ? activeListenBrainzSubTab
+            : groupOrder[0];
+        activeListenBrainzSubTab = firstGroup;
+
+        let subTabsHtml = '<div class="decade-tabs-inner" id="lb-subtabs-bar" style="margin-bottom: 16px;">';
+        groupOrder.forEach(groupName => {
+            const isActive = groupName === firstGroup;
+            const count = groups[groupName].length;
+            subTabsHtml += `
+                <button class="decade-tab lb-subtab${isActive ? ' active' : ''}"
+                        onclick="switchListenBrainzSubTab('${groupName}')"
+                        data-group="${groupName}"
+                        style="font-size: 13px; padding: 8px 16px;">
+                    ${groupName} (${count})
+                </button>
+            `;
+        });
+        subTabsHtml += '</div>';
+
+        // Build content panels for each group
+        let panelsHtml = '';
+        groupOrder.forEach(groupName => {
+            const isActive = groupName === firstGroup;
+            panelsHtml += `<div class="lb-subtab-panel" data-group="${groupName}" style="display: ${isActive ? 'block' : 'none'};">`;
+            panelsHtml += buildListenBrainzPlaylistsHtml(groups[groupName], tabId);
+            panelsHtml += '</div>';
+        });
+
+        container.innerHTML = subTabsHtml + panelsHtml;
+
+        // Store playlist references on panels for lazy loading
+        groupOrder.forEach(groupName => {
+            const panel = container.querySelector(`.lb-subtab-panel[data-group="${groupName}"]`);
+            if (panel) {
+                panel._playlists = groups[groupName];
+            }
+        });
+
+        // Load tracks only for the active sub-tab
+        loadTracksForPlaylists(groups[firstGroup]);
+        return;
+    }
+
+    // Default: flat list for user/collaborative tabs (or single-group recommendations)
+    const html = buildListenBrainzPlaylistsHtml(playlists, tabId);
+    container.innerHTML = html;
+    loadTracksForPlaylists(playlists);
 }
 
 async function loadListenBrainzPlaylistTracks(identifier, playlistId) {
