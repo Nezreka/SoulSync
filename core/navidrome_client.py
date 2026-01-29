@@ -505,8 +505,8 @@ class NavidromeClient:
                 return playlist
         return None
 
-    def create_playlist(self, name: str, tracks) -> bool:
-        """Create a new playlist with given tracks"""
+    def create_playlist(self, name: str, tracks, playlist_id: str = None) -> bool:
+        """Create a new playlist or update existing one if playlist_id provided"""
         if not self.ensure_connection():
             return False
 
@@ -523,25 +523,29 @@ class NavidromeClient:
                 logger.warning(f"No valid tracks provided for playlist '{name}'")
                 return False
 
-            logger.info(f"Creating Navidrome playlist '{name}' with {len(track_ids)} tracks")
+            logger.info(f"{'Updating' if playlist_id else 'Creating'} Navidrome playlist '{name}' with {len(track_ids)} tracks")
 
-            # Create playlist with tracks
+            # Create/Update playlist params
             params = {
                 'name': name,
                 'songId': track_ids  # Subsonic API accepts multiple songId parameters
             }
+            
+            # If playlist_id is provided, it acts as an overwrite/update
+            if playlist_id:
+                params['playlistId'] = playlist_id
 
             response = self._make_request('createPlaylist', params)
 
             if response and response.get('status') == 'ok':
-                logger.info(f"✅ Created Navidrome playlist '{name}' with {len(track_ids)} tracks")
+                logger.info(f"✅ {'Updated' if playlist_id else 'Created'} Navidrome playlist '{name}' with {len(track_ids)} tracks")
                 return True
             else:
-                logger.error(f"Failed to create Navidrome playlist '{name}'")
+                logger.error(f"Failed to {'update' if playlist_id else 'create'} Navidrome playlist '{name}'")
                 return False
 
         except Exception as e:
-            logger.error(f"Error creating Navidrome playlist '{name}': {e}")
+            logger.error(f"Error {'updating' if playlist_id else 'creating'} Navidrome playlist '{name}': {e}")
             return False
 
     def copy_playlist(self, source_name: str, target_name: str) -> bool:
@@ -614,37 +618,61 @@ class NavidromeClient:
             logger.error(f"Error getting tracks for playlist {playlist_id}: {e}")
             return []
 
+    def get_playlists_by_name(self, name: str) -> List[NavidromePlaylistInfo]:
+        """Get all playlists matching a specific name (case-insensitive)"""
+        matches = []
+        playlists = self.get_all_playlists()
+        for playlist in playlists:
+            if playlist.title.lower() == name.lower():
+                matches.append(playlist)
+        return matches
+
     def update_playlist(self, playlist_name: str, tracks) -> bool:
-        """Update an existing playlist or create it if it doesn't exist"""
+        """Update an existing playlist or create it if it doesn't exist. Handles duplicates."""
         if not self.ensure_connection():
             return False
 
         try:
-            existing_playlist = self.get_playlist_by_name(playlist_name)
-
+            # Find ALL existing playlists with this name to handle duplicates
+            existing_playlists = self.get_playlists_by_name(playlist_name)
+            
             # Check if backup is enabled in config
             from config.settings import config_manager
             create_backup = config_manager.get('playlist_sync.create_backup', True)
 
-            if existing_playlist and create_backup:
+            # If we have existing playlists and want to backup, use the first one found
+            if existing_playlists and create_backup:
                 backup_name = f"{playlist_name} Backup"
                 logger.info(f"🛡️ Creating backup playlist '{backup_name}' before sync")
-
+                
+                # We only need to backup once, even if duplicates exist
                 if self.copy_playlist(playlist_name, backup_name):
                     logger.info(f"✅ Backup created successfully")
                 else:
                     logger.warning(f"⚠️ Failed to create backup, continuing with sync")
 
-            if existing_playlist:
-                # Delete existing playlist
-                response = self._make_request('deletePlaylist', {'id': existing_playlist.id})
-                if response and response.get('status') == 'ok':
-                    logger.info(f"Deleted existing Navidrome playlist '{playlist_name}'")
-                else:
-                    logger.warning(f"Could not delete existing playlist '{playlist_name}', creating anyway")
+            # STRATEGY: Update the first match, delete the rest
+            if existing_playlists:
+                primary_playlist = existing_playlists[0]
+                duplicates = existing_playlists[1:]
+                
+                if duplicates:
+                    logger.info(f"Found {len(duplicates)} duplicate playlists for '{playlist_name}'. Cleaning them up...")
+                    for dup in duplicates:
+                        try:
+                            self._make_request('deletePlaylist', {'id': dup.id})
+                            logger.info(f"Deleted duplicate playlist '{playlist_name}' (ID: {dup.id})")
+                        except Exception as del_err:
+                            logger.error(f"Error deleting duplicate playlist '{playlist_name}': {del_err}")
 
-            # Create new playlist with tracks
-            return self.create_playlist(playlist_name, tracks)
+                # Update the primary playlist using overwrite (passing playlistId)
+                logger.info(f"Updating existing playlist '{playlist_name}' (ID: {primary_playlist.id})")
+                return self.create_playlist(playlist_name, tracks, playlist_id=primary_playlist.id)
+
+            else:
+                # No existing playlist, create new
+                logger.info(f"Creating new playlist '{playlist_name}'")
+                return self.create_playlist(playlist_name, tracks)
 
         except Exception as e:
             logger.error(f"Error updating Navidrome playlist '{playlist_name}': {e}")

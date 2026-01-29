@@ -159,7 +159,7 @@ class WishlistService:
                     'id': spotify_data.get('id'),
                     'name': spotify_data.get('name', 'Unknown Track'),
                     'artists': spotify_data.get('artists', []),
-                    'album': spotify_data.get('album', {}),
+                    'album': spotify_data.get('album') or {},
                     'duration_ms': spotify_data.get('duration_ms', 0),
                     'preview_url': spotify_data.get('preview_url'),
                     'external_urls': spotify_data.get('external_urls', {}),

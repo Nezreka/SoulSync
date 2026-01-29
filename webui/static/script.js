@@ -12,6 +12,7 @@ let currentStream = {
     progress: 0,
     track: null
 };
+let currentMusicSourceName = 'Spotify'; // 'Spotify' or 'Apple Music' - updated from status endpoint
 
 // Streaming state management (enhanced functionality)
 let streamStatusPoller = null;
@@ -2172,7 +2173,8 @@ async function testConnection(service) {
         const result = await response.json();
 
         if (result.success) {
-            showToast(`${service} connection successful`, 'success');
+            // Use backend's message which contains dynamic source name (Spotify or Apple Music)
+            showToast(result.message || `${service} connection successful`, 'success');
 
             // Load music libraries after successful connection
             if (service === 'plex') {
@@ -2205,7 +2207,8 @@ async function testDashboardConnection(service) {
         const result = await response.json();
 
         if (result.success) {
-            showToast(`${service} service verified`, 'success');
+            // Use backend's message which contains dynamic source name (Spotify or Apple Music)
+            showToast(result.message || `${service} service verified`, 'success');
         } else {
             showToast(`${service} service check failed: ${result.error}`, 'error');
         }
@@ -2689,6 +2692,57 @@ function initializeSearchModeToggle() {
                 };
             }
         );
+
+        // Lazy load artist images that are missing
+        lazyLoadEnhancedSearchArtistImages();
+    }
+
+    // Lazy load artist images for enhanced search results
+    async function lazyLoadEnhancedSearchArtistImages() {
+        const artistLists = [
+            document.getElementById('enh-db-artists-list'),
+            document.getElementById('enh-spotify-artists-list')
+        ];
+
+        for (const list of artistLists) {
+            if (!list) continue;
+
+            const cardsNeedingImages = list.querySelectorAll('[data-needs-image="true"]');
+            if (cardsNeedingImages.length === 0) continue;
+
+            console.log(`🖼️ Lazy loading ${cardsNeedingImages.length} artist images in enhanced search`);
+
+            for (const card of cardsNeedingImages) {
+                const artistId = card.dataset.artistId;
+                if (!artistId) continue;
+
+                try {
+                    const response = await fetch(`/api/artist/${artistId}/image`);
+                    const data = await response.json();
+
+                    if (data.success && data.image_url) {
+                        // Find the placeholder and replace with image
+                        const placeholder = card.querySelector('.enh-item-image-placeholder');
+                        if (placeholder) {
+                            const img = document.createElement('img');
+                            img.src = data.image_url;
+                            img.className = 'enh-item-image artist-image';
+                            img.alt = card.querySelector('.enh-item-name')?.textContent || 'Artist';
+                            placeholder.replaceWith(img);
+
+                            // Apply dynamic glow
+                            extractImageColors(data.image_url, (colors) => {
+                                applyDynamicGlow(card, colors);
+                            });
+                        }
+                        card.dataset.needsImage = 'false';
+                        console.log(`✅ Loaded image for artist ${artistId}`);
+                    }
+                } catch (error) {
+                    console.warn(`⚠️ Failed to load image for artist ${artistId}:`, error);
+                }
+            }
+        }
     }
 
     function formatDuration(durationMs) {
@@ -2737,6 +2791,11 @@ function initializeSearchModeToggle() {
             // Add appropriate card class
             if (isArtist) {
                 elem.className = 'enh-compact-item artist-card';
+                // Add data attributes for lazy loading
+                if (item.id) {
+                    elem.dataset.artistId = item.id;
+                    elem.dataset.needsImage = config.image ? 'false' : 'true';
+                }
             } else if (isAlbum) {
                 elem.className = 'enh-compact-item album-card';
             } else if (isTrack) {
@@ -2760,7 +2819,7 @@ function initializeSearchModeToggle() {
 
             const imageHtml = config.image
                 ? `<img src="${escapeHtml(config.image)}" class="${imageClass}" alt="${escapeHtml(config.name)}">`
-                : `<div class="${placeholderClass}">${config.placeholder}</div>`;
+                : `<div class="${placeholderClass}" data-lazy-image="true">${config.placeholder}</div>`;
 
             const badgeHtml = config.badge
                 ? `<div class="enh-item-badge ${config.badge.class}">${config.badge.text}</div>`
@@ -5017,12 +5076,31 @@ async function cleanupDownloadProcess(playlistId) {
     if (process.batchId) {
         try {
             console.log(`🚀 Sending cleanup request to server for batch: ${process.batchId}`);
-            await fetch('/api/playlists/cleanup_batch', {
+            const response = await fetch('/api/playlists/cleanup_batch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ batch_id: process.batchId })
             });
-            console.log(`✅ Server cleanup completed for batch: ${process.batchId}`);
+
+            // Handle deferred cleanup (202 = wishlist processing in progress)
+            if (response.status === 202) {
+                console.log(`⏳ Wishlist processing in progress for batch ${process.batchId}, will retry cleanup in 2s...`);
+                // Retry cleanup after delay to allow wishlist processing to complete
+                setTimeout(async () => {
+                    try {
+                        await fetch('/api/playlists/cleanup_batch', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ batch_id: process.batchId })
+                        });
+                        console.log(`✅ Delayed cleanup completed for batch: ${process.batchId}`);
+                    } catch (error) {
+                        console.warn(`⚠️ Delayed cleanup failed:`, error);
+                    }
+                }, 2000); // 2 second delay
+            } else {
+                console.log(`✅ Server cleanup completed for batch: ${process.batchId}`);
+            }
         } catch (error) {
             console.warn(`⚠️ Failed to send cleanup request to server:`, error);
             // Don't show toast for cleanup failures - they're not user-facing
@@ -7334,8 +7412,8 @@ async function startMissingTracksProcess(playlistId) {
         };
 
         // If this is an artist album download, use album name and include full context
-        // Match both 'artist_album_' and 'enhanced_search_album_' prefixes
-        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_')) {
+        // Match 'artist_album_', 'enhanced_search_album_', and 'discover_album_' prefixes
+        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('discover_album_')) {
             requestBody.playlist_name = process.album?.name || process.playlist.name;
             requestBody.is_album_download = true;
             requestBody.album_context = process.album;   // Full Spotify album object
@@ -9898,7 +9976,8 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
     // Note: Beatport, Tidal, and ListenBrainz have their own states, but reuse YouTube modal infrastructure
     let state, result;
     if (platform === 'youtube') {
-        state = youtubePlaylistStates[identifier];
+        // Check both states - ListenBrainz also uses YouTube modal infrastructure
+        state = listenbrainzPlaylistStates[identifier] || youtubePlaylistStates[identifier];
     } else if (platform === 'tidal') {
         state = youtubePlaylistStates[identifier]; // Tidal uses YouTube state infrastructure
     } else if (platform === 'beatport') {
@@ -10051,15 +10130,23 @@ async function searchDiscoveryFix() {
         return;
     }
 
+    // Determine discovery source from state
+    const identifier = currentDiscoveryFix.identifier;
+    const state = listenbrainzPlaylistStates[identifier] || youtubePlaylistStates[identifier];
+    const discoverySource = state?.discovery_source || state?.discoverySource || 'spotify';
+    const useItunes = discoverySource === 'itunes';
+
     const resultsContainer = fixModalOverlay.querySelector('#fix-modal-results');
-    resultsContainer.innerHTML = '<div class="loading">🔍 Searching Spotify...</div>';
+    const sourceLabel = useItunes ? 'iTunes' : 'Spotify';
+    resultsContainer.innerHTML = `<div class="loading">🔍 Searching ${sourceLabel}...</div>`;
 
     try {
         // Build search query
         const query = `${artistInput} ${trackInput}`.trim();
 
-        // Call Spotify search API
-        const response = await fetch(`/api/spotify/search_tracks?query=${encodeURIComponent(query)}&limit=20`);
+        // Call appropriate search API based on discovery source
+        const searchEndpoint = useItunes ? '/api/itunes/search_tracks' : '/api/spotify/search_tracks';
+        const response = await fetch(`${searchEndpoint}?query=${encodeURIComponent(query)}&limit=20`);
         const data = await response.json();
 
         if (data.error) {
@@ -10072,7 +10159,7 @@ async function searchDiscoveryFix() {
             return;
         }
 
-        // Render results
+        // Render results (same format for both Spotify and iTunes)
         renderDiscoveryFixResults(data.tracks, fixModalOverlay);
 
     } catch (error) {
@@ -10168,13 +10255,16 @@ async function selectDiscoveryFixTrack(track) {
 
         // Update frontend state
         // Note: Beatport and Tidal reuse youtubePlaylistStates for discovery results
+        // ListenBrainz uses its own state but may also be accessed via YouTube
         let state;
         if (platform === 'youtube') {
-            state = youtubePlaylistStates[identifier];
+            state = listenbrainzPlaylistStates[identifier] || youtubePlaylistStates[identifier];
         } else if (platform === 'tidal') {
             state = youtubePlaylistStates[identifier];
         } else if (platform === 'beatport') {
             state = youtubePlaylistStates[identifier];
+        } else if (platform === 'listenbrainz') {
+            state = listenbrainzPlaylistStates[identifier];
         }
 
         // Support both camelCase and snake_case
@@ -10615,7 +10705,28 @@ async function handleAddToWishlist() {
                     artists: formattedArtists
                 };
 
+                // Use track's album data if available (from API), falling back to modal's album data
+                // This ensures consistency with how the Artists page handles wishlisting
+                let trackAlbum = track.album;
+                let trackAlbumType = albumType || 'album';
+
+                if (trackAlbum && typeof trackAlbum === 'object') {
+                    // Track has album data from API - use its album_type
+                    trackAlbumType = trackAlbum.album_type || albumType || 'album';
+                    // Ensure album has required fields
+                    if (!trackAlbum.name) {
+                        trackAlbum.name = album.name;
+                    }
+                    if (!trackAlbum.id) {
+                        trackAlbum.id = album.id;
+                    }
+                } else {
+                    // Fall back to the album passed to the modal
+                    trackAlbum = album;
+                }
+
                 console.log(`🔄 Adding track with formatted artists:`, formattedTrack.name, formattedTrack.artists);
+                console.log(`🔄 Using album_type: ${trackAlbumType} (from ${track.album ? 'track.album' : 'modal album'})`);
 
                 const response = await fetch('/api/add-album-to-wishlist', {
                     method: 'POST',
@@ -10625,12 +10736,12 @@ async function handleAddToWishlist() {
                     body: JSON.stringify({
                         track: formattedTrack,
                         artist: artist,
-                        album: album,
+                        album: trackAlbum,
                         source_type: 'album',
                         source_context: {
-                            album_name: album.name,
+                            album_name: trackAlbum.name,
                             artist_name: artist.name,
-                            album_type: albumType
+                            album_type: trackAlbumType
                         }
                     })
                 });
@@ -11459,6 +11570,10 @@ function createArtistCard(artist, confidence) {
     const imageUrl = artist.image_url || '';
     const confidencePercent = Math.round(confidence * 100);
 
+    // Add data attribute for lazy loading
+    card.dataset.artistId = artist.id;
+    card.dataset.needsImage = imageUrl ? 'false' : 'true';
+
     card.innerHTML = `
         <div class="suggestion-card-overlay"></div>
         <div class="suggestion-card-content">
@@ -11691,6 +11806,16 @@ function renderArtistSearchResults(results) {
             console.error(`Error calling createArtistCard for result ${index}:`, error);
         }
     });
+
+    // Lazy load missing artist images
+    console.log('🖼️ Starting lazy load for artist images in matching modal...');
+    if (typeof lazyLoadArtistImages === 'function') {
+        lazyLoadArtistImages(container);
+    } else if (typeof window.lazyLoadArtistImages === 'function') {
+        window.lazyLoadArtistImages(container);
+    } else {
+        console.error('❌ lazyLoadArtistImages function not found!');
+    }
 }
 
 function renderAlbumSearchResults(results) {
@@ -18061,7 +18186,7 @@ function openYouTubeDiscoveryModal(urlHash) {
 
                     <div class="modal-body">
                         <div class="progress-section">
-                            <div class="progress-label">🔍 Spotify Discovery Progress</div>
+                            <div class="progress-label">🔍 ${currentMusicSourceName} Discovery Progress</div>
                             <div class="progress-bar-container">
                                 <div class="progress-bar-fill" id="youtube-discovery-progress-${urlHash}" style="width: 0%;"></div>
                             </div>
@@ -18075,8 +18200,8 @@ function openYouTubeDiscoveryModal(urlHash) {
                                         <th>${sourceLabel} Track</th>
                                         <th>${sourceLabel} Artist</th>
                                         <th>Status</th>
-                                        <th>Spotify Track</th>
-                                        <th>Spotify Artist</th>
+                                        <th>${currentMusicSourceName} Track</th>
+                                        <th>${currentMusicSourceName} Artist</th>
                                         <th>Album</th>
                                         <th>Actions</th>
                                     </tr>
@@ -18224,7 +18349,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
                 }
             } else {
                 // Discovering phase - show progress
-                return `<div class="modal-info">🔍 Discovering Spotify matches...</div>`;
+                return `<div class="modal-info">🔍 Discovering ${currentMusicSourceName} matches...</div>`;
             }
 
         case 'discovered':
@@ -18370,13 +18495,13 @@ function getModalDescription(phase, isTidal = false, isBeatport = false, isListe
     const source = isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube'));
     switch (phase) {
         case 'fresh':
-            return `Ready to discover clean Spotify metadata for ${source} tracks...`;
+            return `Ready to discover clean ${currentMusicSourceName} metadata for ${source} tracks...`;
         case 'discovering':
-            return `Discovering clean Spotify metadata for ${source} tracks...`;
+            return `Discovering clean ${currentMusicSourceName} metadata for ${source} tracks...`;
         case 'discovered':
             return 'Discovery complete! View the results below.';
         default:
-            return `Discovering clean Spotify metadata for ${source} tracks...`;
+            return `Discovering clean ${currentMusicSourceName} metadata for ${source} tracks...`;
     }
 }
 
@@ -18540,15 +18665,17 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
 
         // Update actions cell with appropriate button
         if (actionsCell) {
-            const state = youtubePlaylistStates[urlHash];
-            const platform = state?.is_tidal_playlist ? 'tidal' : (state?.is_beatport_playlist ? 'beatport' : 'youtube');
+            const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
+            const platform = state?.is_listenbrainz_playlist ? 'listenbrainz' :
+                (state?.is_tidal_playlist ? 'tidal' :
+                    (state?.is_beatport_playlist ? 'beatport' : 'youtube'));
             actionsCell.innerHTML = generateDiscoveryActionButton(result, urlHash, platform);
         }
     });
 
     // Update action buttons if discovery is complete (progress = 100%)
     if (status.progress >= 100) {
-        const state = youtubePlaylistStates[urlHash];
+        const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
         if (state && state.phase === 'discovered') {
             const actionButtonsContainer = document.querySelector(`#youtube-discovery-modal-${urlHash} .modal-footer-left`);
             if (actionButtonsContainer) {
@@ -19776,6 +19903,16 @@ function displayArtistsResults(query, results) {
     // Update watchlist status for all cards
     updateArtistCardWatchlistStatus();
 
+    // Lazy load missing artist images
+    console.log('🖼️ Starting lazy load for artist images on Artists page...');
+    if (typeof lazyLoadArtistImages === 'function') {
+        lazyLoadArtistImages(container);
+    } else if (typeof window.lazyLoadArtistImages === 'function') {
+        window.lazyLoadArtistImages(container);
+    } else {
+        console.error('❌ lazyLoadArtistImages function not found!');
+    }
+
     // Add mouse wheel horizontal scrolling
     container.addEventListener('wheel', (event) => {
         if (event.deltaY !== 0) {
@@ -19784,6 +19921,77 @@ function displayArtistsResults(query, results) {
         }
     });
 }
+
+/**
+ * Lazy load artist images for cards that don't have images yet.
+ * Fetches images asynchronously so search results appear immediately.
+ */
+async function lazyLoadArtistImages(container) {
+    if (!container) {
+        console.error('❌ lazyLoadArtistImages: container is null');
+        return;
+    }
+
+    // Find all cards that need images
+    const cardsNeedingImages = container.querySelectorAll('[data-needs-image="true"]');
+
+    if (cardsNeedingImages.length === 0) {
+        console.log('✅ All artist cards have images');
+        return;
+    }
+
+    console.log(`🖼️ Lazy loading images for ${cardsNeedingImages.length} artist cards`);
+
+    // Load images in parallel (but with a small batch to avoid overwhelming the server)
+    const batchSize = 5;
+    const cards = Array.from(cardsNeedingImages);
+
+    for (let i = 0; i < cards.length; i += batchSize) {
+        const batch = cards.slice(i, i + batchSize);
+
+        await Promise.all(batch.map(async (card) => {
+            const artistId = card.dataset.artistId;
+            if (!artistId) {
+                console.warn('⚠️ Card missing artistId:', card);
+                return;
+            }
+
+            try {
+                console.log(`🔄 Fetching image for artist ${artistId}...`);
+                const response = await fetch(`/api/artist/${artistId}/image`);
+                const data = await response.json();
+
+                console.log(`📥 Got response for ${artistId}:`, data);
+
+                if (data.success && data.image_url) {
+                    // Update the card's background image
+                    // Handle both card types (suggestion-card and artist-card)
+                    if (card.classList.contains('suggestion-card')) {
+                        card.style.backgroundImage = `url(${data.image_url})`;
+                        card.style.backgroundSize = 'cover';
+                        card.style.backgroundPosition = 'center';
+                    } else if (card.classList.contains('artist-card')) {
+                        const bgElement = card.querySelector('.artist-card-background');
+                        if (bgElement) {
+                            // Clear the gradient first, then set the image
+                            bgElement.style.cssText = `background-image: url('${data.image_url}'); background-size: cover; background-position: center;`;
+                        }
+                    }
+
+                    card.dataset.needsImage = 'false';
+                    console.log(`✅ Loaded image for artist ${artistId}`);
+                }
+            } catch (error) {
+                console.error(`❌ Failed to load image for artist ${artistId}:`, error);
+            }
+        }));
+    }
+
+    console.log('✅ Finished lazy loading artist images');
+}
+
+// Make function globally accessible
+window.lazyLoadArtistImages = lazyLoadArtistImages;
 
 /**
  * Create HTML for an artist card
@@ -19802,8 +20010,11 @@ function createArtistCardHTML(artist) {
     // Format popularity as a percentage for better UX
     const popularityText = popularity > 0 ? `${popularity}% Popular` : 'Popularity Unknown';
 
+    // Track if image needs to be lazy loaded
+    const needsImage = imageUrl ? 'false' : 'true';
+
     return `
-        <div class="artist-card" data-artist-id="${artist.id}">
+        <div class="artist-card" data-artist-id="${artist.id}" data-needs-image="${needsImage}">
             <div class="artist-card-background" style="${backgroundStyle}"></div>
             <div class="artist-card-overlay"></div>
             <div class="artist-card-content">
@@ -19854,15 +20065,17 @@ async function selectArtistForDetail(artist) {
     // Update artist info in header
     updateArtistDetailHeader(artist);
 
-    // Load discography
-    await loadArtistDiscography(artist.id);
+    // Load discography (pass artist name for cross-source fallback)
+    await loadArtistDiscography(artist.id, artist.name);
 }
 
 /**
- * Load artist's discography from Spotify
+ * Load artist's discography from Spotify or iTunes
+ * @param {string} artistId - Artist ID (Spotify or iTunes format)
+ * @param {string} [artistName] - Optional artist name for fallback searches
  */
-async function loadArtistDiscography(artistId) {
-    console.log(`💿 Loading discography for artist: ${artistId}`);
+async function loadArtistDiscography(artistId, artistName = null) {
+    console.log(`💿 Loading discography for artist: ${artistId} (name: ${artistName})`);
 
     // Check cache first
     if (artistsPageState.cache.discography[artistId]) {
@@ -19884,8 +20097,14 @@ async function loadArtistDiscography(artistId) {
         // Show loading states
         showDiscographyLoading();
 
+        // Build URL with optional artist name for fallback
+        let url = `/api/artist/${artistId}/discography`;
+        if (artistName) {
+            url += `?artist_name=${encodeURIComponent(artistName)}`;
+        }
+
         // Call the real API endpoint
-        const response = await fetch(`/api/artist/${artistId}/discography`);
+        const response = await fetch(url);
 
         if (!response.ok) {
             if (response.status === 401) {
@@ -20115,6 +20334,9 @@ async function loadSimilarArtists(artistName) {
                                     <div style="font-size: 14px;">No similar artists found</div>
                                 </div>
                             `;
+                        } else {
+                            // Lazy load images for similar artists that don't have them
+                            lazyLoadSimilarArtistImages(container);
                         }
                     }
                 } catch (parseError) {
@@ -20151,6 +20373,54 @@ async function loadSimilarArtists(artistName) {
         // Always clear the controller
         similarArtistsController = null;
     }
+}
+
+/**
+ * Lazy load images for similar artist bubbles that don't have images
+ */
+async function lazyLoadSimilarArtistImages(container) {
+    if (!container) return;
+
+    const bubblesNeedingImages = container.querySelectorAll('.similar-artist-bubble[data-needs-image="true"]');
+
+    if (bubblesNeedingImages.length === 0) {
+        console.log('✅ All similar artist bubbles have images');
+        return;
+    }
+
+    console.log(`🖼️ Lazy loading images for ${bubblesNeedingImages.length} similar artists`);
+
+    // Load images in parallel batches
+    const batchSize = 5;
+    const bubbles = Array.from(bubblesNeedingImages);
+
+    for (let i = 0; i < bubbles.length; i += batchSize) {
+        const batch = bubbles.slice(i, i + batchSize);
+
+        await Promise.all(batch.map(async (bubble) => {
+            const artistId = bubble.getAttribute('data-artist-id');
+            if (!artistId) return;
+
+            try {
+                const response = await fetch(`/api/artist/${artistId}/image`);
+                const data = await response.json();
+
+                if (data.success && data.image_url) {
+                    const imageContainer = bubble.querySelector('.similar-artist-bubble-image');
+                    if (imageContainer) {
+                        const artistName = bubble.querySelector('.similar-artist-bubble-name')?.textContent || 'Artist';
+                        imageContainer.innerHTML = `<img src="${data.image_url}" alt="${artistName}">`;
+                        bubble.setAttribute('data-needs-image', 'false');
+                        console.log(`✅ Loaded image for similar artist ${artistId}`);
+                    }
+                }
+            } catch (error) {
+                console.warn(`⚠️ Failed to load image for similar artist ${artistId}:`, error);
+            }
+        }));
+    }
+
+    console.log('✅ Finished lazy loading similar artist images');
 }
 
 /**
@@ -20214,11 +20484,15 @@ function createSimilarArtistBubble(artist) {
     bubble.className = 'similar-artist-bubble';
     bubble.setAttribute('data-artist-id', artist.id);
 
+    // Track if image needs lazy loading
+    const hasImage = artist.image_url && artist.image_url.trim() !== '';
+    bubble.setAttribute('data-needs-image', hasImage ? 'false' : 'true');
+
     // Create image container
     const imageContainer = document.createElement('div');
     imageContainer.className = 'similar-artist-bubble-image';
 
-    if (artist.image_url && artist.image_url.trim() !== '') {
+    if (hasImage) {
         const img = document.createElement('img');
         img.src = artist.image_url;
         img.alt = artist.name;
@@ -20227,11 +20501,12 @@ function createSimilarArtistBubble(artist) {
         img.onerror = () => {
             console.log(`Failed to load image for ${artist.name}`);
             imageContainer.innerHTML = `<div class="similar-artist-bubble-image-fallback">🎵</div>`;
+            bubble.setAttribute('data-needs-image', 'true');
         };
 
         imageContainer.appendChild(img);
     } else {
-        // No image - show fallback
+        // No image - show fallback (will be lazy loaded)
         imageContainer.innerHTML = `<div class="similar-artist-bubble-image-fallback">🎵</div>`;
     }
 
@@ -20825,8 +21100,24 @@ function updateArtistDetailHeader(artist) {
     const nameElement = document.getElementById('search-artist-detail-name');
     const genresElement = document.getElementById('search-artist-detail-genres');
 
-    if (imageElement && artist.image_url) {
-        imageElement.style.backgroundImage = `url('${artist.image_url}')`;
+    if (imageElement) {
+        if (artist.image_url) {
+            imageElement.style.backgroundImage = `url('${artist.image_url}')`;
+        } else {
+            // Lazy load image if missing (common for iTunes artists)
+            console.log(`🖼️ Lazy loading detail image for ${artist.name} (${artist.id})`);
+            fetch(`/api/artist/${artist.id}/image`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.image_url) {
+                        console.log(`✅ Loaded detail image for ${artist.name}`);
+                        imageElement.style.backgroundImage = `url('${data.image_url}')`;
+                        // Update the artist object in memory too
+                        artist.image_url = data.image_url;
+                    }
+                })
+                .catch(err => console.error('❌ Failed to load detail image:', err));
+        }
     }
 
     if (nameElement) {
@@ -21948,7 +22239,34 @@ async function openSearchDownloadModal(artistName) {
     modal.style.display = 'flex';
 
     // Start monitoring for status changes
+    // Start monitoring for status changes
     monitorSearchDownloadModal(artistName);
+
+    // Lazy load artist image if missing (common for iTunes)
+    if (!artistBubbleData.artist.image_url) {
+        console.log(`🖼️ Lazy loading modal image for ${artistBubbleData.artist.name} (${artistBubbleData.artist.id})`);
+        fetch(`/api/artist/${artistBubbleData.artist.id}/image`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.image_url) {
+                    // Update header background
+                    const headerBg = modal.querySelector('.artist-download-modal-hero-bg');
+                    if (headerBg) {
+                        headerBg.style.backgroundImage = `url('${data.image_url}')`;
+                    }
+
+                    // Update avatar
+                    const avatarContainer = modal.querySelector('.artist-download-modal-hero-avatar');
+                    if (avatarContainer) {
+                        avatarContainer.innerHTML = `<img src="${data.image_url}" alt="${artistBubbleData.artist.name}" class="artist-download-modal-hero-image" loading="lazy">`;
+                    }
+
+                    // Update artist object in memory
+                    artistBubbleData.artist.image_url = data.image_url;
+                }
+            })
+            .catch(err => console.error('❌ Failed to load modal image:', err));
+    }
 }
 
 /**
@@ -22990,6 +23308,17 @@ function updateServiceStatus(service, statusData) {
             statusText.className = 'service-card-status-text disconnected';
         }
     }
+
+    // Update music source title (Spotify or Apple Music) based on active source
+    if (service === 'spotify' && statusData.source) {
+        const musicSourceTitleElement = document.getElementById('music-source-title');
+        if (musicSourceTitleElement) {
+            const sourceName = statusData.source === 'itunes' ? 'Apple Music' : 'Spotify';
+            musicSourceTitleElement.textContent = sourceName;
+            // Update global variable for use in discovery modals
+            currentMusicSourceName = sourceName;
+        }
+    }
 }
 
 function updateSidebarServiceStatus(service, statusData) {
@@ -23012,6 +23341,15 @@ function updateSidebarServiceStatus(service, statusData) {
             if (mediaServerNameElement) {
                 const serverName = statusData.type.charAt(0).toUpperCase() + statusData.type.slice(1);
                 mediaServerNameElement.textContent = serverName;
+            }
+        }
+
+        // Update music source name (Spotify or Apple Music) based on active source
+        if (service === 'spotify' && statusData.source) {
+            const musicSourceNameElement = document.getElementById('music-source-name');
+            if (musicSourceNameElement) {
+                const sourceName = statusData.source === 'itunes' ? 'Apple Music' : 'Spotify';
+                musicSourceNameElement.textContent = sourceName;
             }
         }
     }
@@ -23422,7 +23760,7 @@ async function showWatchlistModal() {
                         ${artistsData.artists.map(artist => `
                             <div class="watchlist-artist-item"
                                  data-artist-name="${artist.artist_name.toLowerCase().replace(/"/g, '&quot;')}"
-                                 data-artist-id="${artist.spotify_artist_id}"
+                                 data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}"
                                  style="cursor: pointer;">
                                 ${artist.image_url ? `
                                     <img src="${artist.image_url}"
@@ -23442,7 +23780,7 @@ async function showWatchlistModal() {
                                     ` : ''}
                                 </div>
                                 <button class="playlist-modal-btn playlist-modal-btn-secondary watchlist-remove-btn"
-                                        data-artist-id="${artist.spotify_artist_id}"
+                                        data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}"
                                         data-artist-name="${escapeHtml(artist.artist_name)}"
                                         onclick="event.stopPropagation();">
                                     Remove
@@ -25419,7 +25757,7 @@ function createReleaseCard(release) {
                 name: release.title,
                 image_url: release.image_url,
                 release_date: release.year ? `${release.year}-01-01` : '',
-                album_type: release.type || 'album',
+                album_type: release.album_type || release.type || 'album',
                 total_tracks: (release.track_completion && typeof release.track_completion === 'object')
                     ? release.track_completion.total_tracks : 1
             };
@@ -25448,8 +25786,8 @@ function createReleaseCard(release) {
                 throw new Error('No tracks found for this release');
             }
 
-            // Determine album type based on release data
-            const albumType = release.type === 'single' ? 'singles' : 'albums';
+            // Use the actual album type from release data
+            const albumType = release.album_type || release.type || 'album';
 
             // Open the Add to Wishlist modal
             // Note: openAddToWishlistModal has its own loading overlay
@@ -29841,20 +30179,28 @@ function displayDiscoverHeroArtist(artist) {
     }
 
     // Store artist ID for both buttons and update watchlist state
+    // Use artist_id which is set by the backend to the appropriate ID for the active source
     const addBtn = document.getElementById('discover-hero-add');
     const discographyBtn = document.getElementById('discover-hero-discography');
+    const artistId = artist.artist_id || artist.spotify_artist_id || artist.itunes_artist_id;
 
-    if (addBtn && artist.spotify_artist_id) {
-        addBtn.setAttribute('data-artist-id', artist.spotify_artist_id);
+    if (addBtn && artistId) {
+        addBtn.setAttribute('data-artist-id', artistId);
         addBtn.setAttribute('data-artist-name', artist.artist_name);
+        // Also store both IDs for cross-source operations
+        if (artist.spotify_artist_id) addBtn.setAttribute('data-spotify-id', artist.spotify_artist_id);
+        if (artist.itunes_artist_id) addBtn.setAttribute('data-itunes-id', artist.itunes_artist_id);
 
         // Check if this artist is already in watchlist and update button appearance
-        checkAndUpdateDiscoverHeroWatchlistButton(artist.spotify_artist_id);
+        checkAndUpdateDiscoverHeroWatchlistButton(artistId);
     }
 
-    if (discographyBtn && artist.spotify_artist_id) {
-        discographyBtn.setAttribute('data-artist-id', artist.spotify_artist_id);
+    if (discographyBtn && artistId) {
+        discographyBtn.setAttribute('data-artist-id', artistId);
         discographyBtn.setAttribute('data-artist-name', artist.artist_name);
+        // Also store both IDs for cross-source operations
+        if (artist.spotify_artist_id) discographyBtn.setAttribute('data-spotify-id', artist.spotify_artist_id);
+        if (artist.itunes_artist_id) discographyBtn.setAttribute('data-itunes-id', artist.itunes_artist_id);
     }
 
     // Update slideshow indicators
@@ -32897,8 +33243,16 @@ async function openDownloadModalForRecentAlbum(albumIndex) {
     showLoadingOverlay(`Loading tracks for ${album.album_name}...`);
 
     try {
-        // Fetch album tracks from Spotify API via backend
-        const response = await fetch(`/api/spotify/album/${album.album_spotify_id}`);
+        // Determine source and album ID - use source-agnostic endpoint
+        const source = album.source || (album.album_spotify_id ? 'spotify' : 'itunes');
+        const albumId = source === 'spotify' ? album.album_spotify_id : album.album_itunes_id;
+
+        if (!albumId) {
+            throw new Error(`No ${source} album ID available`);
+        }
+
+        // Fetch album tracks from appropriate source via backend
+        const response = await fetch(`/api/discover/album/${source}/${albumId}`);
         if (!response.ok) {
             throw new Error('Failed to fetch album tracks');
         }
@@ -32933,13 +33287,14 @@ async function openDownloadModalForRecentAlbum(albumIndex) {
             };
         });
 
-        // Create virtual playlist ID
-        const virtualPlaylistId = `discover_album_${album.album_spotify_id}`;
+        // Create virtual playlist ID using the appropriate album ID
+        const virtualPlaylistId = `discover_album_${albumId}`;
 
         // CRITICAL FIX: Pass proper artist/album context for modal display
         const artistContext = {
-            id: album.artist_spotify_id,
-            name: album.artist_name
+            id: source === 'spotify' ? album.artist_spotify_id : album.artist_itunes_id,
+            name: album.artist_name,
+            source: source
         };
 
         const albumContext = {
