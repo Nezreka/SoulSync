@@ -1918,25 +1918,39 @@ class MusicDatabase:
     def check_album_completeness(self, album_id: int, expected_track_count: Optional[int] = None) -> Tuple[int, int, bool]:
         """
         Check if we have all tracks for an album.
+        Merges counts across split album entries (same title+year+artist) so that
+        albums split by the media server (e.g. Navidrome) are treated as one.
         Returns (owned_tracks, expected_tracks, is_complete)
         """
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            
-            # Get actual track count in our database
-            cursor.execute("SELECT COUNT(*) FROM tracks WHERE album_id = ?", (album_id,))
-            owned_tracks = cursor.fetchone()[0]
-            
-            # Get expected track count from album table
-            cursor.execute("SELECT track_count FROM albums WHERE id = ?", (album_id,))
-            result = cursor.fetchone()
-            
-            if not result:
+
+            # Look up this album's title, year, and artist to find all sibling entries
+            cursor.execute("SELECT title, year, artist_id FROM albums WHERE id = ?", (album_id,))
+            album_info = cursor.fetchone()
+
+            if not album_info:
                 return 0, 0, False
-            
-            stored_track_count = result[0]
-            
+
+            # Find all album IDs that share the same title, year, and artist
+            # This merges split albums (e.g. Navidrome splitting one album into multiple entries)
+            cursor.execute("""
+                SELECT id FROM albums
+                WHERE title = ? AND artist_id = ? AND (year IS ? OR (year IS NULL AND ? IS NULL))
+            """, (album_info['title'], album_info['artist_id'], album_info['year'], album_info['year']))
+            sibling_ids = [row['id'] for row in cursor.fetchall()]
+
+            # Get actual track count across all sibling album entries
+            placeholders = ','.join('?' for _ in sibling_ids)
+            cursor.execute(f"SELECT COUNT(*) FROM tracks WHERE album_id IN ({placeholders})", sibling_ids)
+            owned_tracks = cursor.fetchone()[0]
+
+            # Get combined expected track count from all sibling album entries
+            cursor.execute(f"SELECT SUM(track_count) FROM albums WHERE id IN ({placeholders})", sibling_ids)
+            result = cursor.fetchone()
+            stored_track_count = result[0] if result and result[0] else 0
+
             # Use provided expected count if available, otherwise use stored count
             expected_tracks = expected_track_count if expected_track_count is not None else stored_track_count
             
@@ -2173,15 +2187,20 @@ class MusicDatabase:
             # Log when normalized matching helps (only if it's the best score and better than others)
             if normalized_title_similarity == best_title_similarity and normalized_title_similarity > max(title_similarity, clean_title_similarity):
                 logger.debug(f"  🌍 Diacritic normalization improved match: '{search_title}' -> '{db_album.title}' (normalized: {normalized_title_similarity:.3f} vs raw: {title_similarity:.3f})")
-            
+
+            # Require minimum title similarity to prevent a perfect artist match from
+            # carrying a bad title match over the threshold (e.g. "divisions" vs "silos")
+            if best_title_similarity < 0.6:
+                return best_title_similarity * 0.5  # Can never exceed 0.3, well below any threshold
+
             # Weight: 50% title, 50% artist (equal weight to prevent false positives)
             # Also require minimum artist similarity to prevent matching wrong artists
             confidence = (best_title_similarity * 0.5) + (artist_similarity * 0.5)
-            
+
             # Apply artist similarity penalty: if artist match is too low, drastically reduce confidence
             if artist_similarity < 0.6:  # Less than 60% artist match
                 confidence *= 0.3  # Reduce confidence by 70%
-            
+
             # Smart Edition Matching: Boost confidence if we found a "better" edition
             if expected_track_count and db_album.track_count and clean_title_similarity >= 0.8:
                 # If the cleaned titles match well, check if this is an edition upgrade
@@ -4079,13 +4098,14 @@ class MusicDatabase:
 
                 # Get artist's albums with track counts and completion
                 # Include albums from ALL artists with the same name (fixes duplicate artist issue)
+                # Group by title+year to merge split albums (e.g. Navidrome splitting one album into multiple entries)
                 cursor.execute("""
                     SELECT
-                        a.id,
+                        MIN(a.id) as id,
                         a.title,
                         a.year,
-                        a.track_count,
-                        a.thumb_url,
+                        SUM(a.track_count) as track_count,
+                        MAX(a.thumb_url) as thumb_url,
                         COUNT(t.id) as owned_tracks
                     FROM albums a
                     LEFT JOIN tracks t ON a.id = t.album_id
@@ -4094,7 +4114,7 @@ class MusicDatabase:
                         WHERE name = (SELECT name FROM artists WHERE id = ?)
                         AND server_source = (SELECT server_source FROM artists WHERE id = ?)
                     )
-                    GROUP BY a.id, a.title, a.year, a.track_count, a.thumb_url
+                    GROUP BY a.title, a.year
                     ORDER BY a.year DESC, a.title
                 """, (artist_id, artist_id))
 
@@ -4106,9 +4126,10 @@ class MusicDatabase:
                 singles = []
 
                 # Get total stats for the artist (including all artists with same name)
+                # Count distinct title+year pairs to avoid overcounting split albums
                 cursor.execute("""
                     SELECT
-                        COUNT(DISTINCT a.id) as album_count,
+                        COUNT(DISTINCT a.title || '::' || COALESCE(CAST(a.year AS TEXT), '')) as album_count,
                         COUNT(DISTINCT t.id) as track_count
                     FROM albums a
                     LEFT JOIN tracks t ON a.id = t.album_id
