@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 import sys
 import re
 from pathlib import Path
@@ -73,8 +74,11 @@ def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> loggin
     if log_file:
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        file_handler = logging.FileHandler(log_path, encoding='utf-8')
+
+        # RotatingFileHandler: 10 MB max per file, keep 3 backups (40 MB total max)
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_path, maxBytes=10*1024*1024, backupCount=3, encoding='utf-8'
+        )
         file_handler.setLevel(log_level)
         
         file_formatter = SafeFormatter(
