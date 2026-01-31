@@ -11319,7 +11319,28 @@ def _ensure_spotify_track_format(track_info):
     if isinstance(track_info.get('artists'), list) and len(track_info.get('artists', [])) > 0:
         first_artist = track_info['artists'][0]
         if isinstance(first_artist, dict) and 'name' in first_artist:
-            # Already has proper Spotify format
+            # Already has proper Spotify format — but ensure album has images
+            album = track_info.get('album')
+            if not isinstance(album, dict) or not album.get('images'):
+                # Album images missing at top level, check spotify_data
+                spotify_data = track_info.get('spotify_data', {})
+                if isinstance(spotify_data, str):
+                    try:
+                        import json
+                        spotify_data = json.loads(spotify_data)
+                    except Exception:
+                        spotify_data = {}
+                if isinstance(spotify_data, dict) and isinstance(spotify_data.get('album'), dict):
+                    s_album = spotify_data['album']
+                    if s_album.get('images'):
+                        if not isinstance(album, dict):
+                            track_info['album'] = {}
+                        track_info['album']['images'] = s_album['images']
+                        if 'name' not in track_info.get('album', {}):
+                            track_info['album']['name'] = s_album.get('name', 'Unknown Album')
+                        for field in ('id', 'album_type', 'total_tracks', 'release_date'):
+                            if field in s_album and field not in track_info.get('album', {}):
+                                track_info['album'][field] = s_album[field]
             return track_info
     
     # Convert to proper Spotify format
@@ -11349,13 +11370,36 @@ def _ensure_spotify_track_format(track_info):
     
     # Build album object with images if available
     album_data = track_info.get('album', {})
+
+    # Wishlist tracks store album data inside spotify_data, not at top level
+    # album_data may be a string (sanitized), empty, or a dict without images
+    if not album_data or not isinstance(album_data, dict) or not album_data.get('images'):
+        spotify_data = track_info.get('spotify_data', {})
+        if isinstance(spotify_data, str):
+            try:
+                import json
+                spotify_data = json.loads(spotify_data)
+            except Exception:
+                spotify_data = {}
+        if isinstance(spotify_data, dict) and isinstance(spotify_data.get('album'), dict):
+            album_data = spotify_data['album']
+
     if isinstance(album_data, dict):
         album = {
             'name': album_data.get('name', 'Unknown Album')
         }
-        # Preserve album images if present (important for ListenBrainz tracks)
+        # Preserve album images if present
         if 'images' in album_data:
             album['images'] = album_data['images']
+        # Preserve album ID, type, and total_tracks for proper wishlist grouping
+        if 'id' in album_data:
+            album['id'] = album_data['id']
+        if 'album_type' in album_data:
+            album['album_type'] = album_data['album_type']
+        if 'total_tracks' in album_data:
+            album['total_tracks'] = album_data['total_tracks']
+        if 'release_date' in album_data:
+            album['release_date'] = album_data['release_date']
     else:
         album = {
             'name': str(album_data) if album_data else 'Unknown Album'
@@ -11721,6 +11765,19 @@ def _on_download_completed(batch_id, task_id, success=True):
                         print(f"⏰ [Stuck Detection] Task {task_id} stuck in searching for {task_age:.0f}s - forcing failure")
                         task['status'] = 'failed'
                         task['error_message'] = f'Retry timeout after {task_age:.0f} seconds'
+                        # Add to permanently_failed_tracks so it gets re-added to wishlist
+                        original_track_info = task.get('track_info', {})
+                        track_info = {
+                            'download_index': task.get('track_index', 0),
+                            'table_index': task.get('track_index', 0),
+                            'track_name': original_track_info.get('name', 'Unknown Track'),
+                            'artist_name': _get_track_artist_name(original_track_info),
+                            'retry_count': task.get('retry_count', 0),
+                            'spotify_track': _ensure_spotify_track_format(original_track_info),
+                            'failure_reason': f'Search timeout after {task_age:.0f} seconds',
+                            'candidates': task.get('cached_candidates', [])
+                        }
+                        batch.get('permanently_failed_tracks', []).append(track_info)
                         finished_count += 1
                     else:
                         retrying_count += 1
@@ -11799,6 +11856,94 @@ def _on_download_completed(batch_id, task_id, success=True):
     # Start next downloads in queue
     print(f"🔄 [Batch Manager] Starting next batch for {batch_id}")
     _start_next_batch_of_downloads(batch_id)
+
+def _attempt_wishlist_album_searches(batch_id, missing_tracks):
+    """
+    Group wishlist tracks by album and run album-level search for each group.
+    Reuses _attempt_album_level_search for each album group with 2+ tracks.
+
+    Returns:
+        Tuple of:
+        - all_album_matched: List of (track_analysis_result, pre_assigned_candidate: TrackResult) tuples
+        - all_unmatched: List of track_analysis_results that need per-track search
+    """
+    import json as _json
+
+    # Group tracks by album
+    album_groups = {}  # key -> list of track analysis results
+    album_meta = {}    # key -> {album_ctx, artist_ctx}
+    no_album_tracks = []
+
+    for res in missing_tracks:
+        track_data = res.get('track', {})
+        spotify_data = track_data.get('spotify_data', {})
+        if isinstance(spotify_data, str):
+            try:
+                spotify_data = _json.loads(spotify_data)
+            except Exception:
+                spotify_data = {}
+
+        s_album = spotify_data.get('album') if spotify_data else None
+        s_artists = spotify_data.get('artists', []) if spotify_data else []
+
+        if not s_album or not s_album.get('name'):
+            no_album_tracks.append(res)
+            continue
+
+        # Grouping key: album ID preferred, fallback to artist+album name
+        album_id = s_album.get('id', '')
+        album_name = s_album.get('name', '')
+        artist_name = ''
+        if s_artists and len(s_artists) > 0:
+            a = s_artists[0]
+            artist_name = a.get('name', '') if isinstance(a, dict) else str(a)
+
+        group_key = album_id if album_id else f"{artist_name}::{album_name}"
+
+        if group_key not in album_groups:
+            album_groups[group_key] = []
+            album_meta[group_key] = {
+                'album_ctx': {
+                    'name': album_name,
+                    'id': album_id,
+                    'album_type': s_album.get('album_type', 'album'),
+                    'total_tracks': s_album.get('total_tracks', 0),
+                    'release_date': s_album.get('release_date', ''),
+                    'images': s_album.get('images', [])
+                },
+                'artist_ctx': {
+                    'name': artist_name,
+                    'id': s_artists[0].get('id', '') if s_artists and isinstance(s_artists[0], dict) else ''
+                }
+            }
+
+        album_groups[group_key].append(res)
+
+    # Process each album group
+    all_matched = []
+    all_unmatched = list(no_album_tracks)  # Tracks with no album data go straight to per-track
+
+    for group_key, group_tracks in album_groups.items():
+        meta = album_meta[group_key]
+        album_ctx = meta['album_ctx']
+        artist_ctx = meta['artist_ctx']
+        album_type = album_ctx.get('album_type', 'album').lower()
+
+        # Skip singles and groups with < 2 tracks
+        if album_type == 'single' or len(group_tracks) < 2:
+            all_unmatched.extend(group_tracks)
+            continue
+
+        logger.info(f"[Wishlist Album Search] Searching for '{artist_ctx['name']}' - '{album_ctx['name']}' ({len(group_tracks)} tracks)")
+        print(f"🎵 [Wishlist] Album search: '{artist_ctx['name']}' - '{album_ctx['name']}' ({len(group_tracks)} tracks)")
+
+        matched, unmatched = _attempt_album_level_search(batch_id, group_tracks, album_ctx, artist_ctx)
+        all_matched.extend(matched)
+        all_unmatched.extend(unmatched)
+
+    logger.info(f"[Wishlist Album Search] Total: {len(all_matched)} pre-matched, {len(all_unmatched)} per-track search")
+    return all_matched, all_unmatched
+
 
 def _attempt_album_level_search(batch_id, missing_tracks, batch_album_context, batch_artist_context):
     """
@@ -12095,9 +12240,13 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
         album_unmatched = missing_tracks
 
         if batch_is_album and batch_album_context and batch_artist_context:
+            # Single album from artist page / discover page
             album_matched, album_unmatched = _attempt_album_level_search(
                 batch_id, missing_tracks, batch_album_context, batch_artist_context
             )
+        elif playlist_id == 'wishlist':
+            # Wishlist albums cycle — group tracks by album, search each
+            album_matched, album_unmatched = _attempt_wishlist_album_searches(batch_id, missing_tracks)
 
         # Now create download tasks under the lock
         with tasks_lock:
@@ -13313,6 +13462,7 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                             if task['status'] != 'post_processing':
                                 task_status['status'] = 'post_processing'
                                 task['status'] = 'post_processing'
+                                task['status_change_time'] = time.time()  # Reset so stuck detector doesn't fire prematurely
                                 print(f"🔄 Task {task_id} API reports 'Succeeded' - starting post-processing verification")
                                 
                                 # Submit post-processing worker to verify file and complete the task
@@ -13907,6 +14057,19 @@ def _check_batch_completion_v2(batch_id):
                             print(f"⏰ [Stuck Detection V2] Task {task_id} stuck in searching for {task_age:.0f}s - forcing failure")
                             task['status'] = 'failed'
                             task['error_message'] = f'Retry timeout after {task_age:.0f} seconds'
+                            # Add to permanently_failed_tracks so it gets re-added to wishlist
+                            original_track_info = task.get('track_info', {})
+                            track_info = {
+                                'download_index': task.get('track_index', 0),
+                                'table_index': task.get('track_index', 0),
+                                'track_name': original_track_info.get('name', 'Unknown Track'),
+                                'artist_name': _get_track_artist_name(original_track_info),
+                                'retry_count': task.get('retry_count', 0),
+                                'spotify_track': _ensure_spotify_track_format(original_track_info),
+                                'failure_reason': f'Search timeout after {task_age:.0f} seconds',
+                                'candidates': task.get('cached_candidates', [])
+                            }
+                            batch.get('permanently_failed_tracks', []).append(track_info)
                             finished_count += 1
                         else:
                             retrying_count += 1

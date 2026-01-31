@@ -928,7 +928,8 @@ class MusicMatchingEngine:
         album_result: AlbumResult,
         spotify_tracks: List[SpotifyTrack],
         spotify_album_name: str,
-        spotify_artist_name: str
+        spotify_artist_name: str,
+        expected_track_count: int = 0
     ) -> Tuple[float, Dict[str, TrackResult]]:
         """
         Match an AlbumResult from Soulseek against a list of Spotify tracks.
@@ -1034,23 +1035,28 @@ class MusicMatchingEngine:
         # Calculate album confidence
         match_ratio = len(track_mapping) / len(spotify_tracks) if spotify_tracks else 0.0
         avg_track_score = sum(matched_scores) / len(matched_scores) if matched_scores else 0.0
-        track_count_ratio = (
-            min(album_result.track_count, len(spotify_tracks)) /
-            max(album_result.track_count, len(spotify_tracks))
-        ) if spotify_tracks else 0.0
+
+        # Source completeness: prefer sources whose track count matches the full album,
+        # not just the missing tracks. A complete 13/13 rip is more reliable than an 8-file folder.
+        reference_count = expected_track_count if expected_track_count > 0 else len(spotify_tracks)
+        source_completeness = (
+            min(album_result.track_count, reference_count) /
+            max(album_result.track_count, reference_count)
+        ) if reference_count > 0 else 0.0
 
         album_confidence = (
             (match_ratio * 0.40) +
             (avg_track_score * 0.25) +
-            (album_title_score * 0.20) +
+            (album_title_score * 0.15) +
             (artist_score * 0.10) +
-            (track_count_ratio * 0.05)
+            (source_completeness * 0.10)
         )
 
         logger.info(
             f"Album match: '{album_result.album_title}' by {album_result.username} -> "
             f"confidence={album_confidence:.2f}, matched={len(track_mapping)}/{len(spotify_tracks)}, "
-            f"title={album_title_score:.2f}, artist={artist_score:.2f}, tracks_avg={avg_track_score:.2f}"
+            f"title={album_title_score:.2f}, artist={artist_score:.2f}, tracks_avg={avg_track_score:.2f}, "
+            f"completeness={source_completeness:.2f} ({album_result.track_count}/{reference_count})"
         )
 
         return album_confidence, track_mapping
@@ -1092,7 +1098,8 @@ class MusicMatchingEngine:
                     logger.warning(f"Quality filter error for album '{album.album_title}': {e}")
 
             confidence, mapping = self.match_album_result_to_spotify_tracks(
-                album, spotify_tracks, spotify_album_name, spotify_artist_name
+                album, spotify_tracks, spotify_album_name, spotify_artist_name,
+                expected_track_count=expected_track_count
             )
 
             if confidence > best_confidence:
