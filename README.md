@@ -115,32 +115,121 @@ python web_server.py
 
 ---
 
-## Quick Setup
+## Setup Guide
 
 ### Prerequisites
 
-- **slskd** on port 5030 ([Download](https://github.com/slskd/slskd/releases))
+- **slskd** running and accessible ([Download](https://github.com/slskd/slskd/releases))
 - **Spotify API** credentials ([Dashboard](https://developer.spotify.com/dashboard))
 - **Media Server** (optional): Plex, Jellyfin, or Navidrome
 
-### Configuration
+### Step 1: Set Up slskd
 
-1. **Spotify API**
-   - Create app → Add redirect: `http://127.0.0.1:8888/callback`
-   - Copy Client ID and Secret
+SoulSync talks to slskd through its API, so you need an API key.
 
-2. **SoulSync Settings**
-   - Enter API credentials
-   - Configure slskd URL and API key
-   - Set download/transfer paths
-   - Connect media server (optional)
-   - **Configure slskd file sharing to avoid bans**
+**Getting your slskd API key:**
+1. Open your slskd web UI (usually `http://localhost:5030`)
+2. Go to the settings/options page
+3. Find the API keys section - if there isn't one already set, you'll need to add one in your slskd config file (`settings.yml`)
+4. In your slskd config, under `web` > `authentication` > `api_keys`, add a key. It can be literally anything, just make it long enough. Example:
+   ```yaml
+   web:
+     authentication:
+       api_keys:
+         my_key:
+           key: "12345678910111213"
+   ```
+5. Restart slskd after adding the key
+6. Copy that same key - you'll paste it into SoulSync's settings
 
-3. **Docker OAuth Fix** (if accessing from remote device)
-   - Redirected to `http://127.0.0.1:8888/callback?code=...`
-   - Manually edit URL to server IP: `http://192.168.1.5:8888/callback?code=...`
-   - Spotify requires 127.0.0.1 (banned localhost Nov 2025)
-   - See [DOCKER-OAUTH-FIX.md](DOCKER-OAUTH-FIX.md)
+**Making sure SoulSync can see slskd's downloads:**
+
+This is the part that trips people up. slskd downloads files to a folder on your system, and SoulSync needs to be able to see that same folder. If both are running in Docker, you need to make sure they're pointed at the same place on disk.
+
+For example, if slskd downloads to `/mnt/user/Music/Downloads` on your host machine, SoulSync needs a volume mapping that points to that same host folder. In your SoulSync docker-compose or container config, map it like:
+
+```yaml
+volumes:
+  - /mnt/user/Music/Downloads:/app/downloads
+```
+
+Then in SoulSync's settings, set the download path to `/app/downloads` (the container path, not the host path).
+
+Same idea for the transfer/library folder - wherever you want your organized music to end up, map that host folder into the container and use the container path in SoulSync's settings.
+
+**Configure file sharing in slskd to avoid Soulseek bans.** Soulseek expects you to share files. Set up shared folders at `http://localhost:5030/shares`.
+
+### Step 2: Set Up Spotify API
+
+Spotify is optional but gives you the best discovery features (playlists, recommendations, metadata). Without it, SoulSync falls back to iTunes for search and metadata which works fine for basic downloading.
+
+If you want Spotify features:
+1. Go to [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) and create an app
+2. In the app settings, add this as a Redirect URI: `http://127.0.0.1:8888/callback`
+3. Copy your Client ID and Client Secret - you'll paste these into SoulSync's settings page
+
+**If you're accessing SoulSync from a different machine than where it's running** (like a server), the Spotify OAuth callback can be tricky. Spotify redirects to `127.0.0.1` which points to your browser's machine, not the server. You have two options:
+- When it redirects, manually change `127.0.0.1` in the URL bar to your server's IP, then hit enter
+- Set up SSH port forwarding: `ssh -L 8888:localhost:8888 user@your-server-ip`, then do the auth from that terminal session
+
+More detail in [Support/DOCKER-OAUTH-FIX.md](Support/DOCKER-OAUTH-FIX.md).
+
+### Step 3: Configure SoulSync
+
+Open SoulSync at `http://localhost:8008` (or your server's IP) and go to Settings.
+
+**slskd Connection:**
+- **slskd URL**: If both containers are on the same machine, use `http://host.docker.internal:5030`. If that doesn't work, use your machine's local IP like `http://192.168.1.100:5030`. Don't use `localhost` - that refers to inside the SoulSync container itself.
+- **API Key**: Paste the API key you set up in slskd's config
+
+**Paths:**
+- **Download Path**: This should be the container path where slskd's downloads are mapped. If you followed the volume mapping above, that's `/app/downloads`
+- **Transfer Path**: This is where SoulSync puts your organized/renamed music. The default is `/app/Transfer` - just make sure you have a volume mapping for it
+
+**Media Server** (optional):
+- **Plex/Jellyfin/Navidrome URL**: Use your machine's actual IP address, not `localhost`. For example `http://192.168.1.100:32400` for Plex. Same reason as slskd - `localhost` inside Docker means the container, not your host machine.
+
+### Step 4: Docker Path Mapping
+
+This is where most issues come from. The key concept: SoulSync runs inside a Docker container and can only see folders you explicitly map in. Paths inside the container are different from paths on your host machine.
+
+**What you need mapped:**
+
+| What | Container Path | Host Path (your system) |
+|------|---------------|------------------------|
+| Config | `/app/config` | Wherever you want config stored |
+| Logs | `/app/logs` | Wherever you want logs stored |
+| Database | `/app/data` | Use a named volume (see below) |
+| slskd Downloads | `/app/downloads` | Same folder slskd downloads to |
+| Music Library/Transfer | `/app/Transfer` | Where you want organized music to go |
+
+**Example docker-compose volumes for Linux:**
+```yaml
+volumes:
+  - ./config:/app/config
+  - ./logs:/app/logs
+  - soulsync_database:/app/data
+  - /path/to/slskd/downloads:/app/downloads
+  - /path/to/music/library:/app/Transfer
+```
+
+**Example for Unraid:**
+```yaml
+volumes:
+  - /mnt/user/appdata/soulsync/config:/app/config
+  - /mnt/user/appdata/soulsync/logs:/app/logs
+  - soulsync_database:/app/data
+  - /mnt/user/Music/Downloads:/app/downloads
+  - /mnt/user/Music/Library:/app/Transfer
+```
+
+**Important:** The database should use a named volume (`soulsync_database:/app/data`), not a direct host path mount. Mounting a host folder to `/app/database` will overwrite Python module files the app needs to run.
+
+The paths you enter in SoulSync's settings page should always be the **container paths** (left side), not the host paths (right side). SoulSync doesn't know about your host filesystem - it only sees what's inside the container.
+
+### Unraid Users
+
+If you're using the Unraid template from Community Applications, double check that the container path for your music share is set to match what SoulSync actually uses. The download folder should map to `/app/downloads` and your library/transfer folder should map to `/app/Transfer`. Then use those same container paths in SoulSync's settings page.
 
 ---
 
