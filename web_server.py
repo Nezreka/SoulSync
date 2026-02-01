@@ -11800,175 +11800,6 @@ def _on_download_completed(batch_id, task_id, success=True):
     print(f"🔄 [Batch Manager] Starting next batch for {batch_id}")
     _start_next_batch_of_downloads(batch_id)
 
-def _attempt_album_level_search(batch_id, missing_tracks, batch_album_context, batch_artist_context):
-    """
-    Attempt to find a complete album source on Soulseek before falling back to per-track search.
-    Searches for "Artist Album" and uses AlbumResult objects to find a single user with the full album.
-
-    Returns:
-        Tuple of:
-        - album_matched: List of (track_analysis_result, pre_assigned_candidate: TrackResult) tuples
-        - unmatched: List of track_analysis_results that need per-track search
-    """
-    try:
-        # Guard checks
-        download_mode = config_manager.get('download_source.mode', 'soulseek')
-        if download_mode == 'youtube':
-            return [], missing_tracks
-
-        album_name = batch_album_context.get('name', '')
-        album_type = batch_album_context.get('album_type', 'album')
-        artist_name = batch_artist_context.get('name', '')
-
-        if not album_name or not artist_name:
-            return [], missing_tracks
-
-        if album_type not in ('album', 'ep'):
-            return [], missing_tracks
-
-        if len(missing_tracks) < 2:
-            return [], missing_tracks
-
-        logger.info(f"[Album Search] '{artist_name}' - '{album_name}' ({album_type}), {len(missing_tracks)} missing tracks")
-
-        # Build SpotifyTrack objects from the missing tracks
-        spotify_tracks = []
-
-        for res in missing_tracks:
-            track_data = res['track']
-            raw_artists = track_data.get('artists', [])
-            processed_artists = []
-            for artist in raw_artists:
-                if isinstance(artist, str):
-                    processed_artists.append(artist)
-                elif isinstance(artist, dict) and 'name' in artist:
-                    processed_artists.append(artist['name'])
-                else:
-                    processed_artists.append(str(artist))
-
-            raw_album = track_data.get('album', '')
-            if isinstance(raw_album, dict) and 'name' in raw_album:
-                track_album_name = raw_album['name']
-            elif isinstance(raw_album, str):
-                track_album_name = raw_album
-            else:
-                track_album_name = str(raw_album)
-
-            sp_track = SpotifyTrack(
-                id=track_data.get('id', f'missing_{res["track_index"]}'),
-                name=track_data.get('name', ''),
-                artists=processed_artists,
-                album=track_album_name,
-                duration_ms=track_data.get('duration_ms', 0),
-                popularity=track_data.get('popularity', 0)
-            )
-            spotify_tracks.append(sp_track)
-
-        # Perform album-level search with query variations
-        # Soulseek can block certain artist names, so try multiple queries
-        artist_words = artist_name.split()
-        first_word = artist_words[0] if artist_words else ''
-        if first_word.lower() == 'the' and len(artist_words) > 1:
-            first_word = artist_words[1]
-
-        search_queries = [f"{artist_name} {album_name}"]
-        if first_word and len(first_word) > 1:
-            fallback_query = f"{first_word} {album_name}"
-            if fallback_query.lower() != search_queries[0].lower():
-                search_queries.append(fallback_query)
-        search_queries.append(album_name)
-
-        album_results = []
-        tracks_result = []
-        for search_query in search_queries:
-            try:
-                tr, ar = asyncio.run(soulseek_client.search(search_query, timeout=30))
-                logger.info(f"[Album Search] Query '{search_query}': {len(ar)} album results, {len(tr)} tracks")
-                tracks_result.extend(tr)
-                album_results.extend(ar)
-                if ar:
-                    break
-            except Exception as search_err:
-                logger.warning(f"[Album Search] Query '{search_query}' failed: {search_err}")
-                continue
-
-        if not album_results:
-            logger.info(f"[Album Search] No album results found — falling back to per-track search")
-            return [], missing_tracks
-
-        # Quality filter: check if album's dominant quality is acceptable
-        # Uses DB quality profile (same source as filter_results_by_quality_preference)
-        def quality_filter(album_result):
-            """Check if album quality passes user's quality profile"""
-            try:
-                from database.music_database import MusicDatabase
-                db = MusicDatabase()
-                profile = db.get_quality_profile()
-
-                # Build set of enabled quality formats from DB profile
-                enabled_formats = set()
-                for quality_name, quality_config in profile.get('qualities', {}).items():
-                    if quality_config.get('enabled', False):
-                        if quality_name == 'flac':
-                            enabled_formats.add('flac')
-                        elif quality_name.startswith('mp3'):
-                            enabled_formats.add('mp3')
-
-                if not enabled_formats:
-                    return True  # No specific quality enabled, accept anything
-
-                dominant = (album_result.dominant_quality or '').lower()
-
-                # Accept if dominant quality matches an enabled format
-                if dominant in enabled_formats:
-                    return True
-
-                # At album selection level, be strict — we have many sources to choose from.
-                # Fallback logic applies at per-track download level, not here.
-                return False
-            except Exception:
-                return True  # Accept on error
-
-        # Find best album source
-        expected_count = batch_album_context.get('total_tracks', len(spotify_tracks))
-
-        best_album, confidence, track_mapping = matching_engine.find_best_album_source(
-            album_results, spotify_tracks, album_name, artist_name,
-            expected_count, quality_filter_fn=quality_filter
-        )
-
-        if not best_album:
-            logger.info(f"[Album Search] No suitable album source found — falling back to per-track search")
-            return [], missing_tracks
-
-        logger.info(f"[Album Search] Match: {best_album.username} ({best_album.dominant_quality}), "
-                     f"confidence={confidence:.2f}, matched={len(track_mapping)}/{len(spotify_tracks)}")
-
-        # Partition missing tracks into matched (with pre-assigned candidate) and unmatched
-        album_matched = []
-        unmatched = []
-
-        for res in missing_tracks:
-            track_data = res['track']
-            track_id = track_data.get('id', f'missing_{res["track_index"]}')
-
-            if track_id in track_mapping:
-                album_matched.append((res, track_mapping[track_id]))
-            else:
-                unmatched.append(res)
-
-        logger.info(f"[Album Search] Result: {len(album_matched)} pre-matched from {best_album.username}, {len(unmatched)} per-track fallback")
-        print(f"🎵 [Album Search] '{artist_name}' - '{album_name}': {len(album_matched)} pre-matched from {best_album.username}, {len(unmatched)} per-track fallback")
-        return album_matched, unmatched
-
-    except Exception as e:
-        import traceback
-        logger.error(f"[Album Search] Error: {e}")
-        logger.error(traceback.format_exc())
-        print(f"⚠️ [Album Search] Error during album-level search: {e}")
-        return [], missing_tracks
-
-
 def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
     """
     A master worker that handles the entire missing tracks process:
@@ -12079,9 +11910,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
 
         print(f" transitioning batch {batch_id} to download phase with {len(missing_tracks)} tracks.")
 
-        # Extract batch context BEFORE album-level search (read-only, safe outside lock)
         with tasks_lock:
             if batch_id not in download_batches: return
+
+            download_batches[batch_id]['phase'] = 'downloading'
+
+            # Get batch album context (if this is an artist album download)
             batch = download_batches[batch_id]
             batch_album_context = batch.get('album_context')
             batch_artist_context = batch.get('artist_context')
@@ -12089,24 +11923,10 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
             batch_playlist_folder_mode = batch.get('playlist_folder_mode', False)
             batch_playlist_name = batch.get('playlist_name', 'Unknown Playlist')
 
-        # ALBUM-LEVEL SEARCH: Try to find a complete album source on Soulseek
-        # This runs OUTSIDE tasks_lock since it does network I/O (~30s)
-        album_matched = []
-        album_unmatched = missing_tracks
+            for res in missing_tracks:
+                task_id = str(uuid.uuid4())
+                track_info = res['track'].copy()
 
-        if batch_is_album and batch_album_context and batch_artist_context:
-            album_matched, album_unmatched = _attempt_album_level_search(
-                batch_id, missing_tracks, batch_album_context, batch_artist_context
-            )
-
-        # Now create download tasks under the lock
-        with tasks_lock:
-            if batch_id not in download_batches: return
-
-            download_batches[batch_id]['phase'] = 'downloading'
-
-            # Helper: enrich track_info with album/playlist context
-            def _enrich_track_info(track_info, res):
                 # Add explicit album context to track_info for artist album downloads
                 if batch_is_album and batch_album_context and batch_artist_context:
                     track_info['_explicit_album_context'] = batch_album_context
@@ -12124,13 +11944,13 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                             spotify_data = json.loads(spotify_data)
                         except:
                             spotify_data = {}
-
+                    
                     if not spotify_data:
                         spotify_data = {}
 
                     s_album = spotify_data.get('album')
                     s_artists = spotify_data.get('artists', [])
-
+                    
                     # We need at least an album name and artist
                     if s_album and s_album.get('name'):
                         # Construct minimal artist context
@@ -12157,6 +11977,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         track_info['_is_explicit_album_download'] = True
                         print(f"🎵 [Wishlist] Added album context for: '{track_info.get('name')}' -> '{album_ctx['name']}'")
 
+
                 # Add playlist folder mode flag for sync page playlists
                 if batch_playlist_folder_mode:
                     track_info['_playlist_folder_mode'] = True
@@ -12164,30 +11985,6 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                     print(f"📁 [Task Creation] Added playlist folder mode for: {track_info.get('name')} → {batch_playlist_name}")
                 else:
                     print(f"🔍 [Debug] Task Creation - playlist folder mode NOT enabled for: {track_info.get('name')}")
-
-            # Create tasks for album-matched tracks (pre-assigned candidate from album source)
-            for res, pre_assigned_candidate in album_matched:
-                task_id = str(uuid.uuid4())
-                track_info = res['track'].copy()
-                _enrich_track_info(track_info, res)
-
-                download_tasks[task_id] = {
-                    'status': 'pending', 'track_info': track_info,
-                    'playlist_id': playlist_id, 'batch_id': batch_id,
-                    'track_index': res['track_index'], 'retry_count': 0,
-                    'cached_candidates': [], 'used_sources': set(),
-                    'status_change_time': time.time(),
-                    'metadata_enhanced': False,
-                    'pre_assigned_candidate': pre_assigned_candidate
-                }
-                download_batches[batch_id]['queue'].append(task_id)
-                print(f"🎵 [Album Match] Task created with pre-assigned source for: {track_info.get('name')}")
-
-            # Create tasks for unmatched tracks (normal per-track search)
-            for res in album_unmatched:
-                task_id = str(uuid.uuid4())
-                track_info = res['track'].copy()
-                _enrich_track_info(track_info, res)
 
                 download_tasks[task_id] = {
                     'status': 'pending', 'track_info': track_info,
@@ -12648,57 +12445,6 @@ def _download_track_worker(task_id, batch_id=None):
             popularity=track_data.get('popularity', 0)
         )
         print(f"📥 [Modal Worker] Starting download task for: {track.name} by {track.artists[0] if track.artists else 'Unknown'}")
-
-        # CHECK: Pre-assigned candidate from album-level search
-        pre_assigned = None
-        with tasks_lock:
-            if task_id in download_tasks:
-                pre_assigned = download_tasks[task_id].get('pre_assigned_candidate')
-
-        if pre_assigned:
-            print(f"🎵 [Album Match] Using pre-assigned candidate for '{track.name}' from {pre_assigned.username}")
-
-            with tasks_lock:
-                if task_id in download_tasks:
-                    download_tasks[task_id]['status'] = 'searching'
-
-            # Validate pre-assigned candidate with lightweight checks only.
-            # Album-level matching already confirmed track match (title, duration, track number).
-            # Here we only verify: 1) quality profile  2) artist in file path
-            from core.soulseek_client import SoulseekClient
-            temp_client = SoulseekClient()
-            quality_passed = temp_client.filter_results_by_quality_preference([pre_assigned])
-
-            # Artist path verification (same check as get_valid_candidates)
-            spotify_artist_name = track.artists[0] if track.artists else ""
-            normalized_spotify_artist = re.sub(r'[^a-zA-Z0-9]', '', spotify_artist_name).lower()
-            normalized_slskd_path = re.sub(r'[^a-zA-Z0-9]', '', pre_assigned.filename).lower()
-            artist_in_path = normalized_spotify_artist in normalized_slskd_path if normalized_spotify_artist else True
-
-            logger.info(f"[Album Match] '{track.name}': quality_passed={len(quality_passed)}, artist_in_path={artist_in_path}")
-
-            if quality_passed and artist_in_path:
-                # Set confidence attribute expected by _attempt_download_with_candidates sort
-                # (normally set by find_best_slskd_matches_enhanced, which we bypass for pre-assigned)
-                for c in quality_passed:
-                    c.confidence = 1.0
-                    c.version_type = 'original'
-                candidates = quality_passed
-                with tasks_lock:
-                    if task_id in download_tasks:
-                        download_tasks[task_id]['cached_candidates'] = candidates
-
-                success = _attempt_download_with_candidates(task_id, candidates, track, batch_id)
-                if success:
-                    print(f"✅ [Album Match] Pre-assigned download initiated for '{track.name}'")
-                    return
-                else:
-                    print(f"⚠️ [Album Match] Pre-assigned candidate failed for '{track.name}', falling back to per-track search")
-            else:
-                logger.warning(f"[Album Match] Rejected '{track.name}': quality={pre_assigned.quality}, artist_in_path={artist_in_path}")
-                print(f"⚠️ [Album Match] Pre-assigned candidate rejected for '{track.name}', falling back to per-track search")
-
-            # Fall through to normal per-track search below
 
         # Initialize task state tracking (like GUI's parallel_search_tracking)
         with tasks_lock:
