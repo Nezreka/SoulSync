@@ -8183,6 +8183,17 @@ def _safe_move_file(src, dst):
     src = Path(src)
     dst = Path(dst)
 
+    # Ensure parent directory exists
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    # On Windows, shutil.move fails with FileExistsError if destination exists.
+    # Remove it first to prevent the error chain.
+    if dst.exists():
+        try:
+            dst.unlink()
+        except Exception:
+            pass  # If we can't remove it, let shutil.move handle the error
+
     try:
         # Try standard move first (works if same filesystem)
         shutil.move(str(src), str(dst))
