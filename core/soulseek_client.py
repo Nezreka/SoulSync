@@ -45,18 +45,33 @@ class SearchResult:
             elif self.bitrate < 128:
                 base_score -= 0.2
         
-        if self.free_upload_slots > 0:
-            base_score += 0.1
-        
-        if self.upload_speed > 100:
+        # Free upload slots
+        if self.free_upload_slots == 0:
+            base_score -= 0.15
+        elif self.free_upload_slots > 0:
             base_score += 0.05
-        
-        if self.queue_length > 10:
-            base_score -= 0.1
-        
+
+        # Upload speed (tiered)
+        if self.upload_speed >= 5000:
+            base_score += 0.15
+        elif self.upload_speed >= 1000:
+            base_score += 0.10
+        elif self.upload_speed >= 500:
+            base_score += 0.05
+        elif self.upload_speed < 100:
+            base_score -= 0.05
+
+        # Queue length (graduated penalty)
+        if self.queue_length > 50:
+            base_score -= 0.25
+        elif self.queue_length > 20:
+            base_score -= 0.15
+        elif self.queue_length > 10:
+            base_score -= 0.10
+
         return min(base_score, 1.0)
 
-@dataclass  
+@dataclass
 class TrackResult(SearchResult):
     """Individual track search result"""
     artist: Optional[str] = None
@@ -163,16 +178,30 @@ class AlbumResult:
         elif self.track_count > 20:
             base_score += 0.05
         
-        # User metrics (same as individual tracks)
-        if self.free_upload_slots > 0:
-            base_score += 0.1
-        
-        if self.upload_speed > 100:
+        # Free upload slots
+        if self.free_upload_slots == 0:
+            base_score -= 0.15
+        elif self.free_upload_slots > 0:
             base_score += 0.05
-        
-        if self.queue_length > 10:
-            base_score -= 0.1
-        
+
+        # Upload speed (tiered)
+        if self.upload_speed >= 5000:
+            base_score += 0.15
+        elif self.upload_speed >= 1000:
+            base_score += 0.10
+        elif self.upload_speed >= 500:
+            base_score += 0.05
+        elif self.upload_speed < 100:
+            base_score -= 0.05
+
+        # Queue length (graduated penalty)
+        if self.queue_length > 50:
+            base_score -= 0.25
+        elif self.queue_length > 20:
+            base_score -= 0.15
+        elif self.queue_length > 10:
+            base_score -= 0.10
+
         return min(base_score, 1.0)
     
     @property
@@ -1035,7 +1064,102 @@ class SoulseekClient:
         except Exception as e:
             logger.error(f"Error signaling download completion: {e}")
             return False
-    
+
+    async def browse_user_directory(self, username: str, directory: str, timeout: int = 10) -> Optional[List[Dict[str, Any]]]:
+        """Browse a specific directory on a Soulseek user's share.
+
+        Args:
+            username: The Soulseek username to browse
+            directory: The directory path to list
+            timeout: Request timeout in seconds
+
+        Returns:
+            List of file dicts from the directory, or None on failure
+        """
+        if not self.base_url:
+            return None
+        try:
+            response = await self._make_request('POST', f'users/{username}/directory',
+                                                 json={"directory": directory})
+            if not response:
+                logger.warning(f"Browse got empty/None response for {username}:{directory}")
+                return None
+            # Log raw response keys to debug field naming
+            if isinstance(response, dict):
+                logger.info(f"Browse response keys: {list(response.keys())}")
+                # Try multiple possible key names (slskd API may use 'files' or 'directories')
+                files = response.get('files', [])
+                if not files:
+                    # Some slskd versions nest files under directories
+                    dirs = response.get('directories', [])
+                    if dirs and isinstance(dirs, list) and len(dirs) > 0:
+                        files = dirs[0].get('files', []) if isinstance(dirs[0], dict) else []
+                if not files:
+                    logger.info(f"Browse raw response (truncated): {str(response)[:500]}")
+            elif isinstance(response, list):
+                logger.info(f"Browse response is a list with {len(response)} items")
+                # Response is likely a list of directory objects, each containing 'files'
+                if len(response) > 0:
+                    first_item = response[0]
+                    logger.info(f"Browse first item type={type(first_item).__name__}, keys={list(first_item.keys()) if isinstance(first_item, dict) else 'N/A'}")
+                    if isinstance(first_item, dict) and 'files' in first_item:
+                        files = first_item.get('files', [])
+                        logger.info(f"Extracted {len(files)} files from directory object")
+                    else:
+                        # Log the item to understand its structure
+                        logger.info(f"Browse first item (truncated): {str(first_item)[:500]}")
+                        files = response
+                else:
+                    files = []
+            else:
+                files = []
+            logger.info(f"Browse found {len(files)} files in {username}:{directory}")
+            return files
+        except Exception as e:
+            logger.warning(f"Error browsing {username}:{directory}: {e}")
+            return None
+
+    def parse_browse_results_to_tracks(self, username: str, files: List[Dict[str, Any]],
+                                        upload_speed: int = 0, free_slots: int = 0,
+                                        queue_length: int = 0,
+                                        directory: str = '') -> List['TrackResult']:
+        """Convert browse API file results into TrackResult objects.
+
+        Args:
+            username: The source username
+            files: Raw file dicts from browse API
+            upload_speed: User's upload speed
+            free_slots: User's free upload slots
+            queue_length: User's queue length
+            directory: The directory path these files came from (prepended to bare filenames)
+
+        Returns:
+            List of TrackResult objects for audio files
+        """
+        audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
+        results = []
+        if files:
+            logger.debug(f"Browse raw file sample: {files[0]}")
+        for file_data in files:
+            filename = file_data.get('filename', '')
+            # If filename is bare (no path separators), prepend the directory path
+            # so the matching engine can find artist/album context in the full path
+            if directory and '\\' not in filename and '/' not in filename:
+                sep = '\\' if '\\' in directory else '/'
+                filename = f"{directory}{sep}{filename}"
+            ext = Path(filename).suffix.lower()
+            if ext not in audio_extensions:
+                continue
+            quality = ext.lstrip('.') if ext.lstrip('.') in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown'
+            raw_duration = file_data.get('length')
+            duration_ms = raw_duration * 1000 if raw_duration else None
+            results.append(TrackResult(
+                username=username, filename=filename, size=file_data.get('size', 0),
+                bitrate=file_data.get('bitRate'), duration=duration_ms, quality=quality,
+                free_upload_slots=free_slots, upload_speed=upload_speed, queue_length=queue_length
+            ))
+        return results
+
     async def clear_all_completed_downloads(self) -> bool:
         """Clear all completed/finished downloads from slskd backend
         

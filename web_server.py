@@ -26,6 +26,25 @@ from config.settings import config_manager
 
 # Initialize logger
 logger = get_logger("web_server")
+
+# Dedicated source reuse logger — writes to logs/source_reuse.log
+import logging as _logging
+source_reuse_logger = _logging.getLogger("source_reuse")
+source_reuse_logger.setLevel(_logging.DEBUG)
+if not source_reuse_logger.handlers:
+    _sr_handler = _logging.FileHandler("logs/source_reuse.log", encoding="utf-8")
+    _sr_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    source_reuse_logger.addHandler(_sr_handler)
+    source_reuse_logger.propagate = False
+
+# Dedicated post-processing logger — writes to logs/post_processing.log
+pp_logger = _logging.getLogger("post_processing")
+pp_logger.setLevel(_logging.DEBUG)
+if not pp_logger.handlers:
+    _pp_handler = _logging.FileHandler("logs/post_processing.log", encoding="utf-8")
+    _pp_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    pp_logger.addHandler(_pp_handler)
+    pp_logger.propagate = False
 from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack
 from core.plex_client import PlexClient
 from core.jellyfin_client import JellyfinClient
@@ -702,15 +721,15 @@ class WebUIDownloadMonitor:
                 
                 # Use context-aware timeouts like GUI:
                 # - 15 seconds for artist album downloads (streaming context)
-                # - 90 seconds for background playlist downloads  
+                # - 90 seconds for background playlist downloads
                 is_streaming_context = task.get('track_info', {}).get('is_album_download', False)
                 timeout_threshold = 15.0 if is_streaming_context else 90.0
-                
+
                 if queue_time > timeout_threshold:
                     # Track retry attempts to prevent rapid loops
                     retry_count = task.get('stuck_retry_count', 0)
                     last_retry = task.get('last_retry_time', 0)
-                    
+
                     # Don't retry too frequently (wait at least 30 seconds between retries)
                     if retry_count < 3 and (current_time - last_retry) > 30:  # Max 3 retry attempts
                         print(f"⚠️ Task stuck in queue for {queue_time:.1f}s - immediate retry {retry_count + 1}/3")
@@ -785,11 +804,11 @@ class WebUIDownloadMonitor:
                 download_time = current_time - task['downloading_start_time']
                 
                 # Use context-aware timeouts like GUI:
-                # - 15 seconds for artist album downloads (streaming context)  
+                # - 15 seconds for artist album downloads (streaming context)
                 # - 90 seconds for background playlist downloads
                 is_streaming_context = task.get('track_info', {}).get('is_album_download', False)
                 timeout_threshold = 15.0 if is_streaming_context else 90.0
-                
+
                 if download_time > timeout_threshold:
                     retry_count = task.get('stuck_retry_count', 0)
                     last_retry = task.get('last_retry_time', 0)
@@ -890,7 +909,7 @@ class WebUIDownloadMonitor:
                     for task_id in queue:
                         if task_id in download_tasks:
                             task_status = download_tasks[task_id]['status']
-                            if task_status in ['searching', 'downloading', 'queued']:
+                            if task_status in ['searching', 'downloading', 'queued', 'post_processing']:
                                 actually_active += 1
                             elif task_status in ['failed', 'complete', 'cancelled'] and task_id in queue[queue_index:]:
                                 # These are orphaned tasks - they're done but still in active queue
@@ -7997,9 +8016,8 @@ def _post_process_matched_download_with_verification(context_key, context, file_
     NEW VERIFICATION WORKFLOW: Enhanced post-processing with file verification.
     Only sets task status to 'completed' after successful file verification and move operation.
     """
+    _pp = pp_logger
     try:
-        print(f"🎯 [Verification] Starting enhanced post-processing for: {context_key}")
-        
         # Call the existing post-processing logic (but skip its completion callback)
         # We'll handle the completion callback ourselves after verification
         original_task_id = context.pop('task_id', None)  # Temporarily remove to prevent double callback
@@ -8013,25 +8031,21 @@ def _post_process_matched_download_with_verification(context_key, context, file_
 
         # Check if simple download handler already completed everything
         if context.get('_simple_download_completed'):
-            print(f"✅ [Verification] Simple download handler already completed - verifying at custom path")
             expected_final_path = context.get('_final_path')
 
             if expected_final_path and os.path.exists(expected_final_path):
-                print(f"✅ [Verification] File verified at simple download path: {expected_final_path}")
                 with tasks_lock:
                     if task_id in download_tasks:
                         _mark_task_completed(task_id, context.get('track_info'))
-                        print(f"✅ [Verification] Task {task_id} marked as completed (simple download)")
 
                 with matched_context_lock:
                     if context_key in matched_downloads_context:
                         del matched_downloads_context[context_key]
-                        print(f"🗑️ [Verification] Cleaned up context after simple download completion: {context_key}")
 
                 _on_download_completed(batch_id, task_id, success=True)
                 return
             else:
-                print(f"❌ [Verification] Simple download file not found at: {expected_final_path}")
+                _pp.info(f"FAILED simple download file not found at: {expected_final_path} (task={task_id}, context={context_key})")
                 with tasks_lock:
                     if task_id in download_tasks:
                         download_tasks[task_id]['status'] = 'failed'
@@ -8098,57 +8112,59 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         file_ext = os.path.splitext(file_path)[1]
         expected_final_path, _ = _build_final_path_for_track(context, spotify_artist, album_info, file_ext)
 
-        print(f"📁 [Verification] Expected final path: {expected_final_path}")
-
         # VERIFICATION: Check if file exists at expected final path
         if os.path.exists(expected_final_path):
-            print(f"✅ [Verification] File verified at final path: {expected_final_path}")
             # Mark task as completed only after successful verification
             with tasks_lock:
                 if task_id in download_tasks:
                     _mark_task_completed(task_id, context.get('track_info'))
                     download_tasks[task_id]['metadata_enhanced'] = True
-                    print(f"✅ [Verification] Task {task_id} marked as completed with metadata enhanced")
-            
-            # Clean up context now that both stream processor and verification worker are done
+
             with matched_context_lock:
                 if context_key in matched_downloads_context:
                     del matched_downloads_context[context_key]
-                    print(f"🗑️ [Verification] Cleaned up context after successful verification: {context_key}")
-            
-            # FIXED: Call completion callback now since we prevented original post-processing from calling it
-            print(f"✅ [Verification] Task {task_id} verification complete - calling batch completion callback")
+
             _on_download_completed(batch_id, task_id, success=True)
         else:
-            print(f"❌ [Verification] File move verification failed - not found at: {expected_final_path}")
+            # Log failure details for diagnosis
+            track_name = context.get('original_search_result', {}).get('spotify_clean_title', context_key)
+            _pp.info(f"FAILED verification for '{track_name}' (task={task_id})")
+            _pp.info(f"  expected_final_path: {expected_final_path}")
+            _pp.info(f"  file_path (source): {file_path}, exists={os.path.exists(file_path)}")
+            _pp.info(f"  is_album={is_album_download}, has_clean_data={has_clean_spotify_data}")
+            if album_info:
+                _pp.info(f"  album={album_info.get('album_name')}, track_num={album_info.get('track_number')}, track={album_info.get('clean_track_name')}")
+            expected_dir = os.path.dirname(expected_final_path)
+            if os.path.exists(expected_dir):
+                dir_contents = os.listdir(expected_dir)
+                _pp.info(f"  directory contains {len(dir_contents)} files: {dir_contents[:20]}")
+            else:
+                _pp.info(f"  directory does not exist: {expected_dir}")
+
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id]['status'] = 'failed'
                     download_tasks[task_id]['error_message'] = "File move to transfer folder failed."
-            
-            # Clean up context even on failure to prevent memory leaks
+
             with matched_context_lock:
                 if context_key in matched_downloads_context:
                     del matched_downloads_context[context_key]
-                    print(f"🗑️ [Verification] Cleaned up context after verification failure: {context_key}")
-            
+
             _on_download_completed(batch_id, task_id, success=False)
-            
+
     except Exception as e:
-        print(f"❌ [Verification] Post-processing with verification failed: {e}")
         import traceback
-        traceback.print_exc()
+        _pp.info(f"EXCEPTION in post-processing for '{context_key}' (task={task_id}): {e}")
+        _pp.info(traceback.format_exc())
         with tasks_lock:
             if task_id in download_tasks:
                 download_tasks[task_id]['status'] = 'failed'
                 download_tasks[task_id]['error_message'] = f"Post-processing verification failed: {str(e)}"
-        
-        # Clean up context even on exception to prevent memory leaks
+
         with matched_context_lock:
             if context_key in matched_downloads_context:
                 del matched_downloads_context[context_key]
-                print(f"🗑️ [Verification] Cleaned up context after exception: {context_key}")
-        
+
         _on_download_completed(batch_id, task_id, success=False)
 
 
@@ -8499,7 +8515,11 @@ def _post_process_matched_download(context_key, context, file_path):
             print(f"📁 Single path: '{final_path}'")
 
         # 3. Enhance metadata, move file, download art, and cleanup
-        _enhance_file_metadata(file_path, context, spotify_artist, album_info)
+        try:
+            _enhance_file_metadata(file_path, context, spotify_artist, album_info)
+        except Exception as meta_err:
+            pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}")
+            # Continue anyway - file can still be moved
 
         print(f"🚚 Moving '{os.path.basename(file_path)}' to '{final_path}'")
         if os.path.exists(final_path):
@@ -8569,14 +8589,16 @@ def _post_process_matched_download(context_key, context, file_path):
 
     except Exception as e:
         import traceback
+        pp_logger.info(f"[inner] EXCEPTION in post-processing for {context_key}: {e}")
+        pp_logger.info(traceback.format_exc())
         print(f"\n❌ CRITICAL ERROR in post-processing for {context_key}: {e}")
         traceback.print_exc()
-        
+
         # Remove from processed set so it can be retried
         if context_key in _processed_download_ids:
             _processed_download_ids.remove(context_key)
             print(f"🔄 Removed {context_key} from processed set - will retry on next check")
-            
+
         # Re-add to matched context for retry
         with matched_context_lock:
             if context_key not in matched_downloads_context:
@@ -9430,7 +9452,7 @@ def _process_wishlist_automatically():
                     'playlist_name': playlist_name,
                     'queue': [],
                     'active_count': 0,
-                    'max_concurrent': 3,
+                    'max_concurrent': 1 if current_cycle == 'albums' else 3,  # 1 worker for album source reuse, 3 for singles
                     'queue_index': 0,
                     'analysis_total': len(wishlist_tracks),
                     'analysis_processed': 0,
@@ -10113,7 +10135,7 @@ def start_wishlist_missing_downloads():
                 'playlist_name': playlist_name,
                 'queue': task_queue,
                 'active_count': 0,
-                'max_concurrent': 3,
+                'max_concurrent': 1 if category == 'albums' else 3,  # 1 worker for album source reuse, 3 for singles
                 'queue_index': 0,
                 'analysis_total': len(wishlist_tracks),
                 'analysis_processed': 0,
@@ -11621,7 +11643,16 @@ def _on_download_completed(batch_id, task_id, success=True):
         if batch_id not in download_batches:
             print(f"⚠️ [Batch Manager] Batch {batch_id} not found for completed task {task_id}")
             return
-        
+
+        # Guard against double-calling: track which tasks have already been completed
+        # This prevents active_count from being decremented multiple times for the same task
+        # (e.g. monitor detects completion AND post-processing calls this again)
+        completed_tasks = download_batches[batch_id].setdefault('_completed_task_ids', set())
+        if task_id in completed_tasks:
+            print(f"⚠️ [Batch Manager] Task {task_id} already completed — skipping duplicate _on_download_completed call")
+            return
+        completed_tasks.add(task_id)
+
         # Track failed/cancelled tasks in batch state (replicating sync.py)
         if not success and task_id in download_tasks:
             task = download_tasks[task_id]
@@ -12446,6 +12477,16 @@ def _download_track_worker(task_id, batch_id=None):
         )
         print(f"📥 [Modal Worker] Starting download task for: {track.name} by {track.artists[0] if track.artists else 'Unknown'}")
 
+        # === SOURCE REUSE: Check batch's last good source before searching ===
+        if _try_source_reuse(task_id, batch_id, track):
+            # Store source for next worker (cascading reuse)
+            with tasks_lock:
+                used_filename = download_tasks.get(task_id, {}).get('filename')
+                used_username = download_tasks.get(task_id, {}).get('username')
+            if used_filename and used_username:
+                _store_batch_source(batch_id, used_username, used_filename)
+            return
+
         # Initialize task state tracking (like GUI's parallel_search_tracking)
         with tasks_lock:
             if task_id in download_tasks:
@@ -12559,6 +12600,12 @@ def _download_track_worker(task_id, batch_id=None):
                             # Download initiated successfully - let the download monitoring system handle completion
                             if batch_id:
                                 print(f"✅ [Modal Worker] Download initiated successfully for task {task_id} - monitoring will handle completion")
+                            # Store this source for batch reuse
+                            with tasks_lock:
+                                used_filename = download_tasks.get(task_id, {}).get('filename')
+                                used_username = download_tasks.get(task_id, {}).get('username')
+                            if used_filename and used_username:
+                                _store_batch_source(batch_id, used_username, used_filename)
                             return  # Success, exit the worker
                             
             except Exception as e:
@@ -12752,14 +12799,14 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                                     enhanced_payload['track_number'] = detailed_track['track_number']
                                     print(f"🔢 [Context] Added Spotify track_number: {detailed_track['track_number']}")
                                 else:
-                                    enhanced_payload['track_number'] = 1
-                                    print(f"⚠️ [Context] No track_number in detailed_track, using fallback: 1")
+                                    enhanced_payload['track_number'] = track_info.get('track_number', 1)
+                                    print(f"⚠️ [Context] No track_number in detailed_track, using track_info fallback: {enhanced_payload['track_number']}")
                             except Exception as e:
-                                enhanced_payload['track_number'] = 1
-                                print(f"❌ [Context] Error getting track_number, using fallback: {e}")
+                                enhanced_payload['track_number'] = track_info.get('track_number', 1)
+                                print(f"❌ [Context] Error getting track_number, using track_info fallback: {enhanced_payload['track_number']} ({e})")
                         else:
-                            enhanced_payload['track_number'] = 1
-                            print(f"⚠️ [Context] No track.id available, using fallback track_number: 1")
+                            enhanced_payload['track_number'] = track_info.get('track_number', 1)
+                            print(f"⚠️ [Context] No track.id available, using track_info fallback track_number: {enhanced_payload['track_number']}")
                         
                         # Determine if this should be treated as album download
                         # First check if we have explicit album context from artist page
@@ -12782,9 +12829,9 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                         # Preserve existing artists array if available, otherwise create from single artist
                         if 'artists' not in enhanced_payload and enhanced_payload.get('artist'):
                             enhanced_payload['artists'] = [{'name': enhanced_payload['artist']}]
-                        enhanced_payload['track_number'] = 1  # Fallback when no clean Spotify data
+                        enhanced_payload['track_number'] = track_info.get('track_number', 1)  # Fallback when no clean Spotify data
                         is_album_context = False
-                        print(f"⚠️ [Context] Using fallback data - no clean Spotify metadata available, track_number=1")
+                        print(f"⚠️ [Context] Using fallback data - no clean Spotify metadata available, track_number={enhanced_payload['track_number']}")
                     
                     matched_downloads_context[context_key] = {
                         "spotify_artist": spotify_artist_context,
@@ -12846,6 +12893,196 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
     # All candidates failed
     print(f"❌ [Modal Worker] All {len(candidates)} candidates failed for '{track.name}'")
     return False
+
+def _try_source_reuse(task_id, batch_id, track):
+    """
+    Check batch's last_good_source for the current track before searching.
+    Returns True if source reuse succeeded, False to fall through to normal search.
+    """
+    _sr = source_reuse_logger
+    _sr.info(f"_try_source_reuse called: task={task_id}, batch={batch_id}, track={track.name}")
+    if not batch_id:
+        _sr.info(f"Skipped — no batch_id")
+        return False
+
+    with tasks_lock:
+        batch = download_batches.get(batch_id)
+        if not batch:
+            _sr.info(f"Skipped — batch {batch_id} not found")
+            return False
+        # Gate: album/EP downloads only
+        is_album = batch.get('is_album_download', False)
+        is_wishlist = batch.get('playlist_id', '') == 'wishlist'
+        if not is_album and not is_wishlist:
+            _sr.info(f"Skipped — not album ({is_album}) and not wishlist ({is_wishlist})")
+            return False
+        source_tracks = batch.get('source_folder_tracks')
+        last_source = batch.get('last_good_source')
+        _sr.info(f"Batch state: last_good_source={last_source}, source_folder_tracks={'None' if source_tracks is None else f'{len(source_tracks)} tracks'}")
+
+    if not source_tracks or not last_source:
+        _sr.info(f"Skipped — no source_tracks or no last_source")
+        return False
+    if last_source.get('username') == 'youtube':
+        _sr.info(f"Skipped — youtube source")
+        return False
+
+    source_username = last_source.get('username')
+    source_folder = last_source.get('folder_path', '')
+    source_key = f"{source_username}:{source_folder}"
+
+    # Check if this source+folder has already failed for this batch
+    with tasks_lock:
+        batch = download_batches.get(batch_id, {})
+        failed_sources = batch.get('failed_sources', set())
+    if source_key in failed_sources:
+        _sr.info(f"Source {source_key} already in failed_sources — skipping")
+        with tasks_lock:
+            if batch_id in download_batches:
+                download_batches[batch_id]['last_good_source'] = None
+                download_batches[batch_id]['source_folder_tracks'] = None
+        return False
+
+    # Detect retry: if this task already tried the stored source and failed (monitor resubmitted),
+    # the task will still have the previous username/download_id from the failed attempt
+    with tasks_lock:
+        task = download_tasks.get(task_id, {})
+        prev_username = task.get('username')
+        prev_download_id = task.get('download_id')
+
+    if prev_username and prev_download_id and prev_username == source_username:
+        _sr.info(f"Task {task_id} already failed from source {source_key} — marking as failed")
+        with tasks_lock:
+            if batch_id in download_batches:
+                if 'failed_sources' not in download_batches[batch_id]:
+                    download_batches[batch_id]['failed_sources'] = set()
+                download_batches[batch_id]['failed_sources'].add(source_key)
+                download_batches[batch_id]['last_good_source'] = None
+                download_batches[batch_id]['source_folder_tracks'] = None
+        return False
+
+    _sr.info(f"Checking reused source for task {task_id}: {source_key}")
+
+    # Score each folder track against current track
+    candidates = []
+    for folder_track in source_tracks:
+        confidence = matching_engine.calculate_slskd_match_confidence(track, folder_track)
+        _sr.info(f"  Match '{track.name}' vs '{folder_track.filename}' → confidence={confidence:.3f}")
+        if confidence >= 0.70:
+            folder_track.confidence = confidence
+            candidates.append(folder_track)
+
+    if not candidates:
+        _sr.info(f"No folder tracks matched above 0.70 for task {task_id}")
+        return False
+
+    # Sort by confidence, filter by quality preference
+    candidates.sort(key=lambda c: c.confidence, reverse=True)
+    _sr.info(f"Found {len(candidates)} candidates above 0.70, best={candidates[0].confidence:.3f} ({candidates[0].filename})")
+    slsk = soulseek_client.soulseek if hasattr(soulseek_client, 'soulseek') else soulseek_client
+    filtered = slsk.filter_results_by_quality_preference(candidates)
+    if not filtered:
+        _sr.info(f"Quality filter rejected all candidates for task {task_id}")
+        return False
+    _sr.info(f"After quality filter: {len(filtered)} candidates remain")
+
+    # Artist verification
+    artist_name = track.artists[0].lower() if track.artists else ''
+    verified = [c for c in filtered if artist_name and artist_name in c.filename.lower().replace('\\', '/')]
+    final_candidates = verified if verified else filtered[:1]
+    _sr.info(f"Artist verification: artist='{artist_name}', verified={len(verified)}, using={len(final_candidates)} candidates")
+
+    # Initialize task state for download attempt
+    with tasks_lock:
+        if task_id in download_tasks:
+            download_tasks[task_id]['status'] = 'searching'
+            download_tasks[task_id]['current_query_index'] = 0
+            download_tasks[task_id]['current_candidate_index'] = 0
+            download_tasks[task_id]['retry_count'] = 0
+            download_tasks[task_id]['candidates'] = []
+            download_tasks[task_id]['used_sources'] = set()
+
+    # Attempt download
+    success = _attempt_download_with_candidates(task_id, final_candidates, track, batch_id)
+    if success:
+        _sr.info(f"SUCCESS — Downloaded from reused source for task {task_id}")
+        return True
+
+    # Source failed — mark as failed so it's never tried again for this batch
+    with tasks_lock:
+        if batch_id in download_batches:
+            if 'failed_sources' not in download_batches[batch_id]:
+                download_batches[batch_id]['failed_sources'] = set()
+            download_batches[batch_id]['failed_sources'].add(source_key)
+            download_batches[batch_id]['last_good_source'] = None
+            download_batches[batch_id]['source_folder_tracks'] = None
+    _sr.info(f"FAILED — Source {source_key} failed for task {task_id}, added to failed_sources")
+    return False
+
+def _store_batch_source(batch_id, username, filename):
+    """Browse the successful download's folder and store results on the batch for reuse."""
+    _sr = source_reuse_logger
+    _sr.info(f"_store_batch_source called: batch={batch_id}, user={username}, file={filename}")
+    if not batch_id or username == 'youtube':
+        _sr.info(f"Skipped — no batch_id or youtube")
+        return
+
+    with tasks_lock:
+        batch = download_batches.get(batch_id)
+        if not batch:
+            _sr.info(f"Skipped — batch not found")
+            return
+        is_album = batch.get('is_album_download', False)
+        is_wishlist = batch.get('playlist_id', '') == 'wishlist'
+        if not is_album and not is_wishlist:
+            _sr.info(f"Skipped — not album ({is_album}) and not wishlist ({is_wishlist})")
+            return
+        # Don't store a source+folder that already failed for this batch
+        failed_sources = batch.get('failed_sources', set())
+
+    # Extract folder path from filename — preserve original separators for slskd API
+    if '\\' in filename:
+        folder_path = filename.rsplit('\\', 1)[0]
+    elif '/' in filename:
+        folder_path = filename.rsplit('/', 1)[0]
+    else:
+        _sr.info(f"Skipped — no folder separator in filename: {filename}")
+        return
+
+    # Check failed_sources with username:folder key
+    source_key = f"{username}:{folder_path}"
+    if source_key in failed_sources:
+        _sr.info(f"Not storing source {source_key} — already in failed_sources")
+        return
+
+    try:
+        # Access SoulseekClient directly (soulseek_client is DownloadOrchestrator)
+        slsk = soulseek_client.soulseek if hasattr(soulseek_client, 'soulseek') else soulseek_client
+        _sr.info(f"Browsing {username}:{folder_path}...")
+        files = asyncio.run(slsk.browse_user_directory(username, folder_path))
+        if not files:
+            _sr.info(f"Browse returned no files for {username}:{folder_path}")
+            return
+        _sr.info(f"Browse returned {len(files)} raw files")
+
+        tracks = slsk.parse_browse_results_to_tracks(username, files, directory=folder_path)
+        if not tracks:
+            _sr.info(f"No audio tracks after parsing for {username}:{folder_path}")
+            return
+        _sr.info(f"Parsed {len(tracks)} audio tracks from {username}:{folder_path}")
+
+        with tasks_lock:
+            if batch_id in download_batches:
+                download_batches[batch_id]['last_good_source'] = {
+                    'username': username,
+                    'folder_path': folder_path
+                }
+                download_batches[batch_id]['source_folder_tracks'] = tracks
+                _sr.info(f"STORED {len(tracks)} tracks from {username}:{folder_path} as last_good_source")
+    except Exception as e:
+        _sr.info(f"EXCEPTION browsing source folder: {e}")
+        import traceback
+        _sr.info(traceback.format_exc())
 
 @app.route('/api/playlists/<playlist_id>/download_missing', methods=['POST'])
 def start_playlist_missing_downloads(playlist_id):
@@ -13980,7 +14217,7 @@ def start_missing_tracks_process(playlist_id):
             'playlist_name': playlist_name,
             'queue': [],
             'active_count': 0,
-            'max_concurrent': 3,
+            'max_concurrent': 1 if is_album_download else 3,  # Album/EP: 1 worker for source reuse; Playlist: 3 workers
             # Track state management (replicating sync.py)
             'permanently_failed_tracks': [],
             'cancelled_tracks': set(),
