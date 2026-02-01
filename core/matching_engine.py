@@ -31,7 +31,11 @@ class MusicMatchingEngine:
             # Only remove explicit/clean markers - preserve remixes, versions, and content after hyphens
             r'\s*\(explicit\)',
             r'\s*\(clean\)',
-            # Remove featuring artists from the title itself
+            # Parenthesized featuring (must come before space-based patterns)
+            r'\s*\(feat\.?[^)]*\)',
+            r'\s*\(ft\.?[^)]*\)',
+            r'\s*\(featuring[^)]*\)',
+            # Space-based featuring (catches "Title feat. Artist" without parens)
             r'\sfeat\.?.*',
             r'\sft\.?.*',
             r'\sfeaturing.*'
@@ -500,7 +504,12 @@ class MusicMatchingEngine:
             if original_track_clean not in [q.split(' ', 1)[1] for q in queries if ' ' in q]:
                 queries.append(f"{artist} {original_track_clean}".strip())
                 logger.debug(f"PRIORITY 3: Original query: '{artist} {original_track_clean}'")
-        
+
+        # PRIORITY 4: Clean title without artist (broadens results when artist name limits matches)
+        if original_track_clean and original_track_clean not in [q.lower() for q in queries]:
+            queries.append(original_track_clean)
+            logger.debug(f"PRIORITY 4: Title-only query: '{original_track_clean}'")
+
         # Remove duplicates while preserving order
         unique_queries = []
         seen = set()
