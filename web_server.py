@@ -29,19 +29,24 @@ logger = get_logger("web_server")
 
 # Dedicated source reuse logger — writes to logs/source_reuse.log
 import logging as _logging
+import logging.handlers as _logging_handlers
 source_reuse_logger = _logging.getLogger("source_reuse")
 source_reuse_logger.setLevel(_logging.DEBUG)
 if not source_reuse_logger.handlers:
-    _sr_handler = _logging.FileHandler("logs/source_reuse.log", encoding="utf-8")
+    _sr_handler = _logging_handlers.RotatingFileHandler(
+        "logs/source_reuse.log", encoding="utf-8", maxBytes=5*1024*1024, backupCount=2
+    )
     _sr_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     source_reuse_logger.addHandler(_sr_handler)
     source_reuse_logger.propagate = False
 
-# Dedicated post-processing logger — writes to logs/post_processing.log
+# Dedicated post-processing logger (failures only) — writes to logs/post_processing.log
 pp_logger = _logging.getLogger("post_processing")
 pp_logger.setLevel(_logging.DEBUG)
 if not pp_logger.handlers:
-    _pp_handler = _logging.FileHandler("logs/post_processing.log", encoding="utf-8")
+    _pp_handler = _logging_handlers.RotatingFileHandler(
+        "logs/post_processing.log", encoding="utf-8", maxBytes=5*1024*1024, backupCount=2
+    )
     _pp_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     pp_logger.addHandler(_pp_handler)
     pp_logger.propagate = False
