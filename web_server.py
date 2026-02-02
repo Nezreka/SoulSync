@@ -12700,7 +12700,11 @@ def _download_track_worker(task_id, batch_id=None):
                 download_tasks[task_id]['current_candidate_index'] = 0
                 download_tasks[task_id]['retry_count'] = 0
                 download_tasks[task_id]['candidates'] = []
-                download_tasks[task_id]['used_sources'] = set()
+                # CRITICAL: Preserve used_sources from previous retry attempts (don't reset to empty set)
+                # If this is a retry, the monitor will have already marked failed sources
+                if 'used_sources' not in download_tasks[task_id]:
+                    download_tasks[task_id]['used_sources'] = set()
+                # Else: keep existing used_sources to avoid retrying same failed hosts
 
         # 1. Generate multiple search queries (like GUI's generate_smart_search_queries)
         artist_name = track.artists[0] if track.artists else None
