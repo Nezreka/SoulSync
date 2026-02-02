@@ -5535,7 +5535,7 @@ async function openDownloadMissingModal(playlistId) {
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
                                         <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
-                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${formatArtists(track.artists)}</td>
+                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${playlistId}-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${playlistId}-${index}">-</td>
@@ -5912,7 +5912,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
                                         <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
-                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${formatArtists(track.artists)}</td>
+                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${virtualPlaylistId}-${index}">-</td>
@@ -7134,7 +7134,7 @@ async function openDownloadMissingWishlistModal(category = null) {
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
                                         <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
-                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${formatArtists(track.artists)}</td>
+                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-match-status match-checking" id="match-${playlistId}-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${playlistId}-${index}">-</td>
                                         <td class="track-actions" id="actions-${playlistId}-${index}">-</td>
@@ -14584,7 +14584,7 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
                                         <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
-                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${formatArtists(track.artists)}</td>
+                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${virtualPlaylistId}-${index}">-</td>
@@ -21651,7 +21651,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
                                         <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
-                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${formatArtists(track.artists)}</td>
+                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${virtualPlaylistId}-${index}">-</td>
@@ -31908,7 +31908,6 @@ function cleanArtistName(artistName) {
         /\s+featuring\s+.*/i,    // "featuring"
         /\s+ft\.?\s+.*/i,        // "ft." or "ft"
         /\s+with\s+.*/i,         // "with"
-        /\s+\&\s+.*/,            // " & " (if it appears without feat/ft)
         /\s+x\s+.*/i             // " x " (common in collaborations)
     ];
 
