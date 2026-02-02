@@ -541,6 +541,9 @@ class WebUIDownloadMonitor:
         # Get live transfer data from slskd
         live_transfers_lookup = self._get_live_transfers()
         
+        # Track tasks with exhausted retries to handle after releasing lock
+        exhausted_tasks = []  # List of (batch_id, task_id) tuples
+        
         with tasks_lock:
             # Check all monitored batches for timeouts and errors
             for batch_id in list(self.monitored_batches):
@@ -554,7 +557,11 @@ class WebUIDownloadMonitor:
                         continue
                         
                     # Check for timeouts and errors - retries handled directly in _should_retry_task
-                    self._should_retry_task(task_id, task, live_transfers_lookup, current_time)
+                    # If _should_retry_task returns True, it means retries were exhausted
+                    retry_exhausted = self._should_retry_task(task_id, task, live_transfers_lookup, current_time)
+                    # Collect exhausted tasks to handle outside lock (prevents deadlock)
+                    if retry_exhausted:
+                        exhausted_tasks.append((batch_id, task_id))
 
                     # ENHANCED: Check for successful completions (especially YouTube)
                     task_filename = task.get('filename') or task.get('track_info', {}).get('filename')
@@ -571,6 +578,13 @@ class WebUIDownloadMonitor:
                             if state in ['Completed', 'Succeeded'] and task['status'] == 'downloading':
                                 print(f"✅ Monitor detected completed download for {task_id} ({state}) - triggering post-processing")
                                 _on_download_completed(batch_id, task_id, success=True)
+        # Handle exhausted retry tasks outside the lock to prevent deadlock
+        for batch_id, task_id in exhausted_tasks:
+            try:
+                print(f"📋 [Monitor] Calling completion callback for exhausted task {task_id}")
+                _on_download_completed(batch_id, task_id, success=False)
+            except Exception as e:
+                print(f"❌ [Monitor] Error handling exhausted task {task_id}: {e}")
                 
         # ENHANCED: Add worker count validation to detect ghost workers
         self._validate_worker_counts()
@@ -714,6 +728,14 @@ class WebUIDownloadMonitor:
                 print(f"❌ Task failed after 3 error retry attempts")
                 task['status'] = 'failed'
                 task['error_message'] = 'Failed after multiple error retries'
+                
+                # CRITICAL: Notify batch manager so track is added to permanently_failed_tracks
+                batch_id = task.get('batch_id')
+                if batch_id:
+                    print(f"📋 [Retry Exhausted] Notifying batch manager of permanent failure for task {task_id}")
+                    # Release lock before calling completion to prevent deadlock
+                    # The completion callback will re-acquire the lock
+                    return True  # Signal that we need to call completion outside the lock
                 return False
         
         # Check for queued timeout (90 seconds like GUI)
@@ -798,6 +820,12 @@ class WebUIDownloadMonitor:
                         # Clear timers to prevent further retry loops
                         task.pop('queued_start_time', None)
                         task.pop('downloading_start_time', None)
+                        
+                        # CRITICAL: Notify batch manager so track is added to permanently_failed_tracks
+                        batch_id = task.get('batch_id')
+                        if batch_id:
+                            print(f"📋 [Retry Exhausted] Notifying batch manager of permanent failure for task {task_id}")
+                            return True  # Signal that we need to call completion outside the lock
                         return False
                 
         # Check for downloading at 0% timeout (90 seconds like GUI) 
@@ -880,6 +908,12 @@ class WebUIDownloadMonitor:
                         # Clear timers to prevent further retry loops
                         task.pop('queued_start_time', None)
                         task.pop('downloading_start_time', None)
+                        
+                        # CRITICAL: Notify batch manager so track is added to permanently_failed_tracks
+                        batch_id = task.get('batch_id')
+                        if batch_id:
+                            print(f"📋 [Retry Exhausted] Notifying batch manager of permanent failure for task {task_id}")
+                            return True  # Signal that we need to call completion outside the lock
                         return False
         else:
             # Progress being made, reset timers and retry counts
