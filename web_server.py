@@ -650,8 +650,8 @@ class WebUIDownloadMonitor:
         state_str = live_info.get('state', '')
         progress = live_info.get('percentComplete', 0)
         
-        # IMMEDIATE ERROR RETRY: Check for errored downloads first (no timeout needed)
-        if 'Errored' in state_str or 'Failed' in state_str:
+        # IMMEDIATE ERROR RETRY: Check for errored/rejected downloads first (no timeout needed)
+        if 'Errored' in state_str or 'Failed' in state_str or 'Rejected' in state_str:
             retry_count = task.get('error_retry_count', 0)
             last_retry = task.get('last_error_retry_time', 0)
             
@@ -4049,7 +4049,7 @@ def get_download_status():
                                 state = file_info.get('state', '').lower()
 
                                 # Check for completion state
-                                if ('succeeded' in state or 'completed' in state) and 'errored' not in state:
+                                if ('succeeded' in state or 'completed' in state) and 'errored' not in state and 'rejected' not in state:
                                     filename_from_api = file_info.get('filename')
                                     if not filename_from_api: continue
 
@@ -13366,7 +13366,7 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                         if 'Cancelled' in state_str or 'Canceled' in state_str:
                             task_status['status'] = 'cancelled'
                             task['status'] = 'cancelled'
-                        elif 'Failed' in state_str or 'Errored' in state_str:
+                        elif 'Failed' in state_str or 'Errored' in state_str or 'Rejected' in state_str:
                             # UNIFIED ERROR HANDLING: Let monitor handle errors for consistency
                             # Monitor will detect errored state and trigger retry within 5 seconds
                             print(f"🔍 Task {task_id} API shows error state: {state_str} - letting monitor handle retry")
