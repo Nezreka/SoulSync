@@ -7705,6 +7705,61 @@ from mutagen.mp4 import MP4, MP4Cover
 from mutagen.oggvorbis import OggVorbis
 import urllib.request
 
+def _strip_musicbrainz_ids(audio_file) -> None:
+    """
+    Remove MusicBrainz release/album/track IDs from audio file tags.
+    Files from different soulseek sources carry different MusicBrainz IDs,
+    which causes media servers (Navidrome, Plex) to split identically-named
+    albums into separate entries even when album name and artist match.
+    Operates on a non-easy-mode MutagenFile object (caller must save).
+    """
+    try:
+        removed = []
+
+        # ID3 (MP3): MusicBrainz IDs stored as TXXX custom frames
+        if hasattr(audio_file, 'tags') and audio_file.tags and hasattr(audio_file.tags, 'getall'):
+            mb_descs = [
+                'MusicBrainz Album Id',
+                'MusicBrainz Release Group Id',
+                'MusicBrainz Release Track Id',
+                'MusicBrainz Artist Id',
+                'MusicBrainz Album Artist Id',
+                'MusicBrainz Album Type',
+                'MusicBrainz Album Status',
+                'MusicBrainz Album Release Country',
+                'MUSICBRAINZ_ALBUMID',
+                'MUSICBRAINZ_RELEASEGROUPID',
+            ]
+            for txxx in audio_file.tags.getall('TXXX'):
+                if txxx.desc in mb_descs:
+                    audio_file.tags.delall(f'TXXX:{txxx.desc}')
+                    removed.append(f'TXXX:{txxx.desc}')
+            # Also remove UFID (unique file identifier) MusicBrainz frames
+            for ufid_key in [k for k in audio_file.tags if k.startswith('UFID:')]:
+                if 'musicbrainz' in ufid_key.lower():
+                    del audio_file.tags[ufid_key]
+                    removed.append(ufid_key)
+
+        # FLAC / OGG Vorbis: MusicBrainz IDs stored as vorbis comments
+        if hasattr(audio_file, 'tags') and audio_file.tags and hasattr(audio_file.tags, 'keys'):
+            mb_vorbis_keys = [k for k in audio_file.tags.keys() if 'musicbrainz' in k.lower()]
+            for key in mb_vorbis_keys:
+                del audio_file.tags[key]
+                removed.append(key)
+
+        # MP4 (M4A/AAC): MusicBrainz IDs stored as freeform atoms
+        if hasattr(audio_file, 'tags') and audio_file.tags:
+            mb_mp4_keys = [k for k in audio_file.tags.keys()
+                           if isinstance(k, str) and 'musicbrainz' in k.lower()]
+            for key in mb_mp4_keys:
+                del audio_file.tags[key]
+                removed.append(key)
+
+        if removed:
+            print(f"🧹 Stripped MusicBrainz IDs: {', '.join(removed)}")
+    except Exception as e:
+        print(f"⚠️ Error stripping MusicBrainz IDs (non-fatal): {e}")
+
 def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
     """
     Core function to enhance audio file metadata using Spotify data.
@@ -7749,12 +7804,18 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
 
             audio_file.save()
 
-            # Embed album art if enabled
-            if config_manager.get('metadata_enhancement.embed_album_art', True):
-                # Re-open in non-easy mode for embedding art
-                audio_file_art = MutagenFile(file_path)
-                _embed_album_art_metadata(audio_file_art, metadata)
-                audio_file_art.save()
+            # Re-open in non-easy mode for MusicBrainz cleanup and album art embedding.
+            # Files from different soulseek sources carry different MusicBrainz Release IDs,
+            # which causes media servers (Navidrome, Plex) to split identically-named albums
+            # into separate entries. Stripping these ensures grouping by album name + artist.
+            audio_file_raw = MutagenFile(file_path)
+            if audio_file_raw is not None:
+                _strip_musicbrainz_ids(audio_file_raw)
+
+                if config_manager.get('metadata_enhancement.embed_album_art', True):
+                    _embed_album_art_metadata(audio_file_raw, metadata)
+
+                audio_file_raw.save()
 
             print("✅ Metadata enhanced successfully.")
             return True
@@ -7876,6 +7937,17 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
             metadata['album'] = metadata['title'] # For true singles, album is the title
             metadata['track_number'] = 1
             metadata['total_tracks'] = 1
+
+    # Always write disc_number to overwrite any stale tags from the soulseek source.
+    # Without this, original disc tags persist and can cause media servers (Plex) to
+    # split a single album into standard/deluxe based on differing disc numbers.
+    # Priority: original_search context (from API) > album_info > default to 1
+    disc_num = original_search.get('disc_number')
+    if disc_num is None and album_info:
+        disc_num = album_info.get('disc_number')
+    if disc_num is None:
+        disc_num = 1
+    metadata['disc_number'] = disc_num
 
     if spotify_album and spotify_album.get('release_date'):
         metadata['date'] = spotify_album['release_date'][:4]
@@ -12414,9 +12486,20 @@ def _run_post_processing_worker(task_id, batch_id):
                                 'confidence': 0.9,
                                 'source': 'verification_worker_corrected'
                             }
-                            
-                            print(f"🎯 [Verification] Created proper album_info - track_number: {track_number}, album: {spotify_album.get('name')}")
-                            
+
+                            # Apply album grouping for consistency with stream processor path.
+                            # Without this, the verification worker could write a different album
+                            # name than the stream processor (e.g. raw API name vs resolved name),
+                            # causing media servers to split tracks into separate albums.
+                            try:
+                                original_album_ctx = original_search.get('album') if isinstance(original_search.get('album'), str) else None
+                                consistent_album_name = _resolve_album_group(spotify_artist, album_info, original_album_ctx)
+                                album_info['album_name'] = consistent_album_name
+                            except Exception as group_err:
+                                print(f"⚠️ [Verification] Album grouping failed, using raw name: {group_err}")
+
+                            print(f"🎯 [Verification] Created proper album_info - track_number: {track_number}, album: {album_info['album_name']}")
+
                             print(f"🎵 [Post-Processing] Attempting metadata enhancement for: {found_file}")
                             enhancement_success = _enhance_file_metadata(found_file, context, spotify_artist, album_info)
                             
@@ -12879,21 +12962,25 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                         enhanced_payload['artists'] = [{'name': artist} for artist in track.artists] if track.artists else []
                         print(f"✨ [Context] Using clean Spotify metadata - Album: '{track.album}', Title: '{track.name}'")
                         
-                        # CRITICAL FIX: Get track_number from Spotify API like GUI does
+                        # CRITICAL FIX: Get track_number and disc_number from Spotify API like GUI does
                         if hasattr(track, 'id') and track.id:
                             try:
                                 detailed_track = spotify_client.get_track_details(track.id)
                                 if detailed_track and 'track_number' in detailed_track:
                                     enhanced_payload['track_number'] = detailed_track['track_number']
-                                    print(f"🔢 [Context] Added Spotify track_number: {detailed_track['track_number']}")
+                                    enhanced_payload['disc_number'] = detailed_track.get('disc_number', 1)
+                                    print(f"🔢 [Context] Added Spotify track_number: {detailed_track['track_number']}, disc_number: {enhanced_payload['disc_number']}")
                                 else:
                                     enhanced_payload['track_number'] = track_info.get('track_number', 1)
+                                    enhanced_payload['disc_number'] = track_info.get('disc_number', 1)
                                     print(f"⚠️ [Context] No track_number in detailed_track, using track_info fallback: {enhanced_payload['track_number']}")
                             except Exception as e:
                                 enhanced_payload['track_number'] = track_info.get('track_number', 1)
+                                enhanced_payload['disc_number'] = track_info.get('disc_number', 1)
                                 print(f"❌ [Context] Error getting track_number, using track_info fallback: {enhanced_payload['track_number']} ({e})")
                         else:
                             enhanced_payload['track_number'] = track_info.get('track_number', 1)
+                            enhanced_payload['disc_number'] = track_info.get('disc_number', 1)
                             print(f"⚠️ [Context] No track.id available, using track_info fallback track_number: {enhanced_payload['track_number']}")
                         
                         # Determine if this should be treated as album download
@@ -13081,6 +13168,8 @@ def _try_source_reuse(task_id, batch_id, track):
     _sr.info(f"Artist verification: artist='{artist_name}', verified={len(verified)}, using={len(final_candidates)} candidates")
 
     # Initialize task state for download attempt
+    # IMPORTANT: Preserve used_sources from previous attempts (e.g. monitor error retries)
+    # so that _attempt_download_with_candidates skips sources that already failed.
     with tasks_lock:
         if task_id in download_tasks:
             download_tasks[task_id]['status'] = 'searching'
@@ -13088,7 +13177,7 @@ def _try_source_reuse(task_id, batch_id, track):
             download_tasks[task_id]['current_candidate_index'] = 0
             download_tasks[task_id]['retry_count'] = 0
             download_tasks[task_id]['candidates'] = []
-            download_tasks[task_id]['used_sources'] = set()
+            # Don't reset used_sources — the download monitor marks failed sources here
 
     # Attempt download
     success = _attempt_download_with_candidates(task_id, final_candidates, track, batch_id)
