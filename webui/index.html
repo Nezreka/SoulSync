@@ -164,6 +164,27 @@
                         </div>
                         <div class="header-spacer"></div>
                         <div class="header-actions">
+                            <!-- MusicBrainz Enrichment Status Icon -->
+                            <div class="mb-button-container">
+                                <button class="musicbrainz-button" id="musicbrainz-button"
+                                    title="MusicBrainz Library Enrichment">
+                                    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png"
+                                        alt="MusicBrainz" class="mb-logo">
+                                    <div class="mb-spinner"></div>
+                                </button>
+                                <!-- MusicBrainz Hover Tooltip -->
+                                <div class="musicbrainz-tooltip" id="musicbrainz-tooltip">
+                                    <div class="tooltip-content">
+                                        <div class="tooltip-header">🎵 MusicBrainz Enrichment</div>
+                                        <div class="tooltip-body" id="mb-tooltip-body">
+                                            <div class="tooltip-status">Status: <span id="mb-tooltip-status">Idle</span>
+                                            </div>
+                                            <div class="tooltip-current" id="mb-tooltip-current">No active matches</div>
+                                            <div class="tooltip-progress" id="mb-tooltip-progress">Progress: 0 / 0</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <button class="header-button watchlist-button" id="watchlist-button">👁️ Watchlist
                                 (0)</button>
                             <button class="header-button wishlist-button" id="wishlist-button">🎵 Wishlist (0)</button>
