@@ -67,6 +67,7 @@ from datetime import datetime
 import yt_dlp
 from core.matching_engine import MusicMatchingEngine
 from beatport_unified_scraper import BeatportUnifiedScraper
+from core.musicbrainz_worker import MusicBrainzWorker
 
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -24297,6 +24298,83 @@ def merge_discography_data(owned_releases, spotify_discography):
             'eps': [],
             'singles': []
         }
+
+# ================================================================================================
+# MUSICBRAINZ ENRICHMENT - PHASE 5 WEB UI INTEGRATION
+# ================================================================================================
+
+# --- MusicBrainz Worker Initialization ---
+mb_worker = None
+try:
+    from database.music_database import MusicDatabase
+    mb_db = MusicDatabase()
+    mb_worker = MusicBrainzWorker(
+        database=mb_db,
+        app_name="SoulSync",
+        app_version="1.0",
+        contact_email=""
+    )
+    # Start worker automatically (can be paused via UI)
+    mb_worker.start()
+    print("✅ MusicBrainz enrichment worker initialized and started")
+except Exception as e:
+    print(f"⚠️ MusicBrainz worker initialization failed: {e}")
+    mb_worker = None
+
+# --- MusicBrainz API Endpoints ---
+
+@app.route('/api/musicbrainz/status', methods=['GET'])
+def musicbrainz_status():
+    """Get MusicBrainz enrichment status for UI polling"""
+    try:
+        if mb_worker is None:
+            return jsonify({
+                'enabled': False,
+                'running': False,
+                'paused': False,
+                'current_item': None,
+                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
+                'progress': {}
+            }), 200
+        
+        status = mb_worker.get_stats()
+        return jsonify(status), 200
+    except Exception as e:
+        logger.error(f"Error getting MusicBrainz status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/musicbrainz/pause', methods=['POST'])
+def musicbrainz_pause():
+    """Pause MusicBrainz enrichment worker (finishes current match first)"""
+    try:
+        if mb_worker is None:
+            return jsonify({'error': 'MusicBrainz worker not initialized'}), 400
+        
+        mb_worker.pause()
+        logger.info("MusicBrainz worker paused via UI")
+        return jsonify({'status': 'paused'}), 200
+    except Exception as e:
+        logger.error(f"Error pausing MusicBrainz worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/musicbrainz/resume', methods=['POST'])
+def musicbrainz_resume():
+    """Resume MusicBrainz enrichment worker"""
+    try:
+        if mb_worker is None:
+            return jsonify({'error': 'MusicBrainz worker not initialized'}), 400
+        
+        mb_worker.resume()
+        logger.info("MusicBrainz worker resumed via UI")
+        return jsonify({'status': 'running'}), 200
+    except Exception as e:
+        logger.error(f"Error resuming MusicBrainz worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ================================================================================================
+# END MUSICBRAINZ INTEGRATION
+# ================================================================================================
+
 
 if __name__ == '__main__':
     # Initialize logging for web server

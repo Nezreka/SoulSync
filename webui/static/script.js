@@ -34160,3 +34160,118 @@ if (document.readyState === 'loading') {
 } else {
     initializeDiscoverDownloadBar();
 }
+
+// ============================================================================
+// MUSICBRAINZ ENRICHMENT UI - PHASE 5 WEB UI
+// ============================================================================
+
+/**
+ * Poll MusicBrainz status every 2 seconds and update UI
+ */
+async function updateMusicBrainzStatus() {
+    try {
+        const response = await fetch('/api/musicbrainz/status');
+        if (!response.ok) {
+            console.warn('MusicBrainz status endpoint unavailable');
+            return;
+        }
+
+        const data = await response.json();
+        const button = document.getElementById('musicbrainz-button');
+        if (!button) return;
+
+        // Update button state classes
+        button.classList.remove('active', 'paused');
+        if (data.running && !data.paused) {
+            button.classList.add('active');
+        } else if (data.paused) {
+            button.classList.add('paused');
+        }
+
+        // Update tooltip content
+        const tooltipStatus = document.getElementById('mb-tooltip-status');
+        const tooltipCurrent = document.getElementById('mb-tooltip-current');
+        const tooltipProgress = document.getElementById('mb-tooltip-progress');
+
+        if (tooltipStatus) {
+            if (data.running && !data.paused) {
+                tooltipStatus.textContent = 'Running';
+            } else if (data.paused) {
+                tooltipStatus.textContent = 'Paused';
+            } else {
+                tooltipStatus.textContent = 'Idle';
+            }
+        }
+
+        if (tooltipCurrent) {
+            if (data.current_item && data.current_item.name) {
+                const type = data.current_item.type || 'item';
+                const name = data.current_item.name;
+                tooltipCurrent.textContent = `${type.charAt(0).toUpperCase() + type.slice(1)}: "${name}"`;
+            } else {
+                tooltipCurrent.textContent = 'No active matches';
+            }
+        }
+
+        if (tooltipProgress && data.progress) {
+            const artists = data.progress.artists || {};
+            const matched = artists.matched || 0;
+            const total = artists.total || 0;
+            const percent = total > 0 ? Math.round((matched / total) * 100) : 0;
+            tooltipProgress.textContent = `Progress: ${matched} / ${total} artists (${percent}%)`;
+        }
+
+    } catch (error) {
+        console.error('Error updating MusicBrainz status:', error);
+    }
+}
+
+/**
+ * Toggle MusicBrainz enrichment pause/resume
+ */
+async function toggleMusicBrainzEnrichment() {
+    try {
+        const button = document.getElementById('musicbrainz-button');
+        if (!button) return;
+
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/musicbrainz/pause' : '/api/musicbrainz/resume';
+
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} MusicBrainz enrichment`);
+        }
+
+        // Immediately update UI
+        await updateMusicBrainzStatus();
+
+        console.log(`✅ MusicBrainz enrichment ${isRunning ? 'paused' : 'resumed'}`);
+
+    } catch (error) {
+        console.error('Error toggling MusicBrainz enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+// Initialize MusicBrainz UI on page load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('musicbrainz-button');
+        if (button) {
+            button.addEventListener('click', toggleMusicBrainzEnrichment);
+            // Start polling
+            updateMusicBrainzStatus();
+            setInterval(updateMusicBrainzStatus, 2000); // Poll every 2 seconds
+            console.log('✅ MusicBrainz UI initialized');
+        }
+    });
+} else {
+    const button = document.getElementById('musicbrainz-button');
+    if (button) {
+        button.addEventListener('click', toggleMusicBrainzEnrichment);
+        // Start polling
+        updateMusicBrainzStatus();
+        setInterval(updateMusicBrainzStatus, 2000); // Poll every 2 seconds
+        console.log('✅ MusicBrainz UI initialized');
+    }
+}
