@@ -57,6 +57,7 @@ from core.navidrome_client import NavidromeClient
 from core.soulseek_client import SoulseekClient
 from core.download_orchestrator import DownloadOrchestrator
 from core.tidal_client import TidalClient # Added import for Tidal
+from core.spotify_profile_scraper import get_all_friend_playlists, fetch_profile_playlists, is_playwright_available
 from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
 from core.web_scan_manager import WebScanManager
@@ -14672,6 +14673,52 @@ def get_spotify_playlists():
 
         return jsonify(playlist_data)
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/spotify/friend_playlists', methods=['GET'])
+def get_friend_playlists():
+    """Fetches public playlists from configured friend Spotify profiles."""
+    try:
+        # Check if any friend profiles are configured
+        spotify_config = config_manager.get_spotify_config()
+        friend_profiles = spotify_config.get('friend_profiles', [])
+        
+        if not friend_profiles:
+            return jsonify([])
+        
+        # Check if playwright is available (required for scraping)
+        if not is_playwright_available():
+            print("⚠️ Playwright not installed - friend playlist scraping disabled")
+            print("   Install with: pip install playwright && python -m playwright install chromium")
+            return jsonify([])
+        
+        # Get playlists from all configured friend profiles
+        friend_playlists = get_all_friend_playlists()
+        
+        if not friend_playlists:
+            print("📋 No friend playlists found from configured profiles")
+            return jsonify([])
+        
+        # Format response to match the standard playlist format
+        playlist_data = []
+        for p in friend_playlists:
+            playlist_data.append({
+                "id": p['id'],
+                "name": p['name'],
+                "owner": p.get('owner_display_name', p.get('owner', 'Unknown')),
+                "track_count": p.get('track_count', 0),
+                "image_url": p.get('image_url'),
+                "sync_status": "Never Synced",
+                "snapshot_id": "",
+                "source": "friend_profile",
+                "source_user_id": p.get('source_user_id', p.get('owner'))
+            })
+        
+        print(f"🎵 Returning {len(playlist_data)} playlists from friend profiles")
+        return jsonify(playlist_data)
+        
+    except Exception as e:
+        print(f"❌ Error fetching friend playlists: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/spotify/playlist/<playlist_id>', methods=['GET'])
