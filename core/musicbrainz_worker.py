@@ -336,48 +336,48 @@ class MusicBrainzWorker:
             cursor.execute("""
                 SELECT 
                     COUNT(*) AS total,
-                    SUM(CASE WHEN musicbrainz_match_status = 'matched' THEN 1 ELSE 0 END) AS matched
+                    SUM(CASE WHEN musicbrainz_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
                 FROM artists
             """)
             row = cursor.fetchone()
             if row:
-                total, matched = row[0], row[1] or 0
+                total, processed = row[0], row[1] or 0
                 progress['artists'] = {
-                    'matched': matched,
+                    'matched': processed,  # Actually "processed" count for UI
                     'total': total,
-                    'percent': int((matched / total * 100) if total > 0 else 0)
+                    'percent': int((processed / total * 100) if total > 0 else 0)
                 }
             
             # Albums progress
             cursor.execute("""
                 SELECT 
                     COUNT(*) AS total,
-                    SUM(CASE WHEN musicbrainz_match_status = 'matched' THEN 1 ELSE 0 END) AS matched
+                    SUM(CASE WHEN musicbrainz_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
                 FROM albums
             """)
             row = cursor.fetchone()
             if row:
-                total, matched = row[0], row[1] or 0
+                total, processed = row[0], row[1] or 0
                 progress['albums'] = {
-                    'matched': matched,
+                    'matched': processed,
                     'total': total,
-                    'percent': int((matched / total * 100) if total > 0 else 0)
+                    'percent': int((processed / total * 100) if total > 0 else 0)
                 }
             
             # Tracks progress
             cursor.execute("""
                 SELECT 
                     COUNT(*) AS total,
-                    SUM(CASE WHEN musicbrainz_match_status = 'matched' THEN 1 ELSE 0 END) AS matched
+                    SUM(CASE WHEN musicbrainz_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
                 FROM tracks
             """)
             row = cursor.fetchone()
             if row:
-                total, matched = row[0], row[1] or 0
+                total, processed = row[0], row[1] or 0
                 progress['tracks'] = {
-                    'matched': matched,
+                    'matched': processed,
                     'total': total,
-                    'percent': int((matched / total * 100) if total > 0 else 0)
+                    'percent': int((processed / total * 100) if total > 0 else 0)
                 }
             
             return progress

@@ -34221,10 +34221,34 @@ async function updateMusicBrainzStatus() {
 
         if (tooltipProgress && data.progress) {
             const artists = data.progress.artists || {};
-            const matched = artists.matched || 0;
-            const total = artists.total || 0;
-            const percent = total > 0 ? Math.round((matched / total) * 100) : 0;
-            tooltipProgress.textContent = `Progress: ${matched} / ${total} artists (${percent}%)`;
+            const albums = data.progress.albums || {};
+            const tracks = data.progress.tracks || {};
+
+            // Determine which phase we're in by checking:
+            // 1. Current item type (if available)
+            // 2. Which entity type still has pending work
+            const currentType = data.current_item?.type;
+            let progressText = '';
+
+            // Check if each phase is complete (all items have been attempted)
+            const artistsComplete = artists.matched >= artists.total;
+            const albumsComplete = albums.matched >= albums.total;
+
+            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+                // Show artists if not complete OR if explicitly processing an artist
+                progressText = `Artists: ${artists.matched || 0} / ${artists.total} (${artists.percent || 0}%)`;
+            } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
+                // Show albums if artists done and albums not done
+                progressText = `Albums: ${albums.matched || 0} / ${albums.total} (${albums.percent || 0}%)`;
+            } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
+                // Show tracks if both artists and albums done
+                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total} (${tracks.percent || 0}%)`;
+            } else {
+                // Fallback to artists
+                progressText = `Artists: ${artists.matched || 0} / ${artists.total} (${artists.percent || 0}%)`;
+            }
+
+            tooltipProgress.textContent = progressText;
         }
 
     } catch (error) {
