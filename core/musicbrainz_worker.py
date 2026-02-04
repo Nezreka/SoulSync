@@ -112,12 +112,14 @@ class MusicBrainzWorker:
                     time.sleep(1)
                     continue
                 
+                # Clear previous item before getting next
+                self.current_item = None
+                
                 # Get next item to process
                 item = self._get_next_item()
                 
                 if not item:
                     # No more items - sleep for a bit
-                    self.current_item = None
                     logger.debug("No pending items, sleeping...")
                     time.sleep(10)
                     continue
@@ -128,9 +130,7 @@ class MusicBrainzWorker:
                 # Process the item
                 self._process_item(item)
                 
-                # Clear current item after processing
-                self.current_item = None
-                
+                # Keep current_item set during sleep so UI can see what was just processed
                 # Rate limit: 1 request per second
                 time.sleep(1)
                 
