@@ -2618,6 +2618,26 @@
                                     </div>
                                 </div>
 
+                                <!-- AcoustID Settings -->
+                                <div class="api-service-frame">
+                                    <h4 class="service-title acoustid-title">AcoustID</h4>
+                                    <div class="form-group">
+                                        <label>API Key:</label>
+                                        <input type="password" id="acoustid-api-key"
+                                            placeholder="AcoustID API Key (Optional)">
+                                    </div>
+                                    <div class="callback-info">
+                                        <div class="callback-help">Get your free API key from <a
+                                                href="https://acoustid.org/new-application" target="_blank"
+                                                style="color: #ba55d3;">AcoustID Applications</a></div>
+                                        <div class="callback-help"
+                                            style="opacity: 0.7; font-size: 0.85em; margin-top: 4px;">
+                                            Optional: Enables audio fingerprint verification of downloads. If not
+                                            provided, verification is skipped.
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- Test Connection Buttons -->
                                 <div class="api-test-buttons">
                                     <button class="test-button" onclick="testConnection('spotify')">Test

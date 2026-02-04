@@ -1677,6 +1677,9 @@ async function loadSettingsData() {
         // Populate ListenBrainz settings
         document.getElementById('listenbrainz-token').value = settings.listenbrainz?.token || '';
 
+        // Populate AcoustID settings
+        document.getElementById('acoustid-api-key').value = settings.acoustid?.api_key || '';
+
         // Populate Download settings (right column)
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
         document.getElementById('transfer-path').value = settings.soulseek?.transfer_path || './Transfer';
@@ -2074,6 +2077,9 @@ async function saveSettings() {
         },
         listenbrainz: {
             token: document.getElementById('listenbrainz-token').value
+        },
+        acoustid: {
+            api_key: document.getElementById('acoustid-api-key').value
         },
         download_source: {
             mode: document.getElementById('download-source-mode').value,

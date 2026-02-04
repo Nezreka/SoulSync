@@ -1106,6 +1106,10 @@ body {
     color: #eb743b;
 }
 
+.acoustid-title {
+    color: #ba55d3;
+}
+
 /* Server Toggle Buttons */
 .server-toggle-container {
     display: flex;
