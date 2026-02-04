@@ -195,6 +195,11 @@ class ConfigManager:
             "listenbrainz": {
                 "token": ""
             },
+            "drop_folder": {
+                "enabled": False,
+                "watch_path": "",
+                "supported_formats": ['.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a']
+            },
             "logging": {
                 "path": "logs/app.log",
                 "level": "INFO"

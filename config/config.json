@@ -61,5 +61,10 @@
   },
   "listenbrainz": {
     "token": "LISTENBRAINZ_TOKEN"
+  },
+  "drop_folder": {
+    "enabled": false,
+    "watch_path": "/app/dropin",
+    "supported_formats": [".mp3", ".flac", ".ogg", ".aac", ".wma", ".wav", ".m4a"]
   }
 }

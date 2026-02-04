@@ -3087,6 +3087,33 @@
                                 </div>
                             </div>
 
+                            <!-- Drop Folder Settings -->
+                            <div class="settings-group">
+                                <h3>📂 Drop Folder</h3>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="drop-folder-enabled">
+                                        Enable drop folder monitoring
+                                    </label>
+                                    <div class="setting-help-text">
+                                        Automatically import audio files dropped into a watched folder.
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Watch Folder Path:</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="drop-folder-path" placeholder="./DropFolder">
+                                        <button class="browse-button" onclick="browsePath('drop_folder')">Browse</button>
+                                    </div>
+                                    <div class="setting-help-text">
+                                        Audio files placed here will be automatically processed and moved to your transfer folder.
+                                        Metadata will be enhanced via Spotify if connected.
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Playlist Sync Settings -->
                             <div class="settings-group">
                                 <h3>Playlist Sync Settings</h3>
