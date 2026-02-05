@@ -91,6 +91,9 @@ let artistsSearchController = null;
 let artistCompletionController = null; // Track ongoing completion check to cancel when navigating away
 let similarArtistsController = null; // Track ongoing similar artists stream to cancel when navigating away
 
+// --- MusicBrainz Integration Constants ---
+const MUSICBRAINZ_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png';
+
 // --- Wishlist Modal Persistence State Management ---
 const WishlistModalState = {
     // Track if wishlist modal was visible before page refresh
@@ -20014,10 +20017,9 @@ function createArtistCardHTML(artist) {
     // Check for MusicBrainz ID
     let mbIconHTML = '';
     if (artist.musicbrainz_id) {
-        const mbLogoUrl = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png'; // Use official SVG logo
         mbIconHTML = `
             <div class="mb-card-icon" title="View on MusicBrainz" onclick="event.stopPropagation(); window.open('https://musicbrainz.org/artist/${artist.musicbrainz_id}', '_blank')">
-                <img src="${mbLogoUrl}" style="width: 20px; height: auto; display: block;">
+                <img src="${MUSICBRAINZ_LOGO_URL}" style="width: 20px; height: auto; display: block;">
             </div>
         `;
     }
@@ -21144,13 +21146,8 @@ function updateArtistDetailHeader(artist) {
     if (nameElement) {
         nameElement.textContent = artist.name;
 
-        // DEBUG: Log the artist object to check for MBID
-        console.log(`🔍 [DEBUG] Updating header for ${artist.name}`, artist);
-        console.log(`🔍 [DEBUG] MBID present?`, artist.musicbrainz_id);
-
         // Add MusicBrainz link if available
         if (artist.musicbrainz_id) {
-            console.log('✅ [DEBUG] Adding MusicBrainz link to header');
             // Remove existing MB link if any
             const existingMb = nameElement.parentNode.querySelector('.mb-link-btn');
             if (existingMb) existingMb.remove();
@@ -25178,10 +25175,7 @@ function createLibraryArtistCard(artist) {
         const mbIcon = document.createElement('div');
         mbIcon.className = 'mb-card-icon';
         mbIcon.title = 'View on MusicBrainz';
-
-        // Use official SVG logo
-        const mbLogoUrl = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png';
-        mbIcon.innerHTML = `<img src="${mbLogoUrl}" style="width: 20px; height: auto; display: block;">`;
+        mbIcon.innerHTML = `<img src="${MUSICBRAINZ_LOGO_URL}" style="width: 20px; height: auto; display: block;">`;
 
         mbIcon.onclick = (e) => {
             e.stopPropagation();
@@ -25430,15 +25424,6 @@ function updateArtistDetailPageHeader(artistName) {
     const mainTitle = document.getElementById("artist-info-name");
     if (mainTitle) {
         mainTitle.textContent = artistName;
-
-        // Try to find the artist object in memory to get the MBID
-        // We can look at the data passed to populateArtistDetailPage if this function accepted the full object
-        // Or access the state if it was saved
-
-        // Actually, let's look at how this is invoked. It's called from loadArtistDetailData which has the full 'data' object.
-        // But this function only accepts 'artistName'. 
-        // We should query the state or modify the function signature.
-        // For now, let's try to find the MB link element and update it if we can find the artist in data.
     }
 }
 
@@ -25447,18 +25432,9 @@ function updateArtistDetailPageHeaderWithData(artist) {
     const mainTitle = document.getElementById("artist-detail-name");
 
     if (mainTitle) {
-        console.log('✅ [DEBUG] Updating header for:', artist.name);
-        // We assume textContent is set by updateArtistHeroSection, so we just APPEND the link
-        // But to be safe, we can ensure name is there. 
-        // If we run AFTER populateArtistDetailPage, textContent is already set.
-
-        // If we reset textContent here, we might lose other formatting? 
-        // artist-detail-name usually just contains text.
         mainTitle.textContent = artist.name;
 
         if (artist.musicbrainz_id) {
-            console.log('✅ [DEBUG] Adding MusicBrainz link to DETAIL page header for', artist.name);
-
             // Remove existing link if any (to prevent duplicates)
             const existingMb = mainTitle.querySelector('.mb-link-btn');
             if (existingMb) existingMb.remove();
@@ -25468,11 +25444,9 @@ function updateArtistDetailPageHeaderWithData(artist) {
             mbLink.href = `https://musicbrainz.org/artist/${artist.musicbrainz_id}`;
             mbLink.target = '_blank';
             mbLink.title = 'View on MusicBrainz';
-            // Use the specific logo requested by user
-            const mbLogoUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png";
 
             mbLink.innerHTML = `
-                <img src="${mbLogoUrl}" style="height: 24px; width: auto; vertical-align: middle; display: inline-block;">
+                <img src="${MUSICBRAINZ_LOGO_URL}" style="height: 24px; width: auto; vertical-align: middle; display: inline-block;">
                 <span style="color:rgba(255,255,255,0.9); margin-left:10px; font-size: 13px; font-weight: 600; vertical-align: middle;">View on MusicBrainz</span>
             `;
             mbLink.style.padding = '5px 14px';
@@ -25731,27 +25705,18 @@ function createReleaseCard(release) {
     card.setAttribute("data-release-id", release.id || "");
     card.setAttribute("data-spotify-id", release.spotify_id || "");
 
-    // DEBUG: Log release to check for MBID
-    // console.log(`🔍 [DEBUG] Release: ${release.title}`, release);
-
     // Add MusicBrainz icon if available
     let mbIcon = null;
     if (release.musicbrainz_release_id) {
-        console.log(`✅ [DEBUG] Adding MB icon for release: ${release.title}`);
-        const mbLogoUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png";
         mbIcon = document.createElement("div");
         mbIcon.className = "mb-card-icon";
         mbIcon.title = "View on MusicBrainz";
-        // Use image instead of text
-        mbIcon.innerHTML = `<img src="${mbLogoUrl}" style="width: 20px; height: auto; display: block;">`;
+        mbIcon.innerHTML = `<img src="${MUSICBRAINZ_LOGO_URL}" style="width: 20px; height: auto; display: block;">`;
         mbIcon.onclick = (e) => {
             e.stopPropagation();
             window.open(`https://musicbrainz.org/release/${release.musicbrainz_release_id}`, '_blank');
         };
-        // Will append last
     }
-
-
 
     // Create image
     const imageContainer = document.createElement("div");
