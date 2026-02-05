@@ -4033,13 +4033,14 @@ class MusicDatabase:
                         a.name,
                         a.thumb_url,
                         a.genres,
+                        a.musicbrainz_id,
                         COUNT(DISTINCT al.id) as album_count,
                         COUNT(DISTINCT t.id) as track_count
                     FROM artists a
                     LEFT JOIN albums al ON a.id = al.artist_id
                     LEFT JOIN tracks t ON al.id = t.album_id
                     WHERE {where_clause}
-                    GROUP BY a.id, a.name, a.thumb_url, a.genres
+                    GROUP BY a.id, a.name, a.thumb_url, a.genres, a.musicbrainz_id
                     ORDER BY a.name COLLATE NOCASE
                     LIMIT ? OFFSET ?
                 """
@@ -4076,6 +4077,7 @@ class MusicDatabase:
                         'name': artist.name,
                         'image_url': artist.thumb_url,
                         'genres': artist.genres,
+                        'musicbrainz_id': row['musicbrainz_id'],
                         'album_count': row['album_count'] or 0,
                         'track_count': row['track_count'] or 0
                     }
@@ -4130,7 +4132,7 @@ class MusicDatabase:
                 # Get artist information
                 cursor.execute("""
                     SELECT
-                        id, name, thumb_url, genres, server_source
+                        id, name, thumb_url, genres, server_source, musicbrainz_id
                     FROM artists
                     WHERE id = ?
                 """, (artist_id,))
@@ -4173,6 +4175,7 @@ class MusicDatabase:
                         a.year,
                         SUM(a.track_count) as track_count,
                         MAX(a.thumb_url) as thumb_url,
+                        MAX(a.musicbrainz_release_id) as musicbrainz_release_id,
                         COUNT(t.id) as owned_tracks
                     FROM albums a
                     LEFT JOIN tracks t ON a.id = t.album_id
@@ -4225,6 +4228,7 @@ class MusicDatabase:
                         'owned': True,  # All albums in our DB are owned
                         'track_count': album_row['track_count'],
                         'owned_tracks': owned_tracks,
+                        'musicbrainz_release_id': album_row['musicbrainz_release_id'],
                         'track_completion': completion_percentage
                     }
 
@@ -4265,6 +4269,7 @@ class MusicDatabase:
                         'image_url': artist_image_url,
                         'genres': genres,
                         'server_source': artist_row['server_source'],
+                        'musicbrainz_id': artist_row['musicbrainz_id'],
                         'album_count': album_count,
                         'track_count': track_count
                     },

@@ -21715,3 +21715,74 @@ body {
     border-right: 6px solid transparent;
     border-bottom: 8px solid rgba(30, 30, 30, 0.98);
 }
+
+/* MusicBrainz Integration */
+.release-card {
+    position: relative !important;
+    /* Ensure positioning context */
+}
+
+.mb-link-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: #fff;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    margin-left: 10px;
+    cursor: pointer;
+    vertical-align: middle;
+}
+
+.mb-link-btn:hover {
+    background: rgba(186, 71, 143, 0.4);
+    /* MusicBrainz Purple-ish */
+    border-color: rgba(186, 71, 143, 0.6);
+    transform: translateY(-1px);
+}
+
+.mb-link-btn img,
+.mb-link-btn svg {
+    width: 16px;
+    height: 16px;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+.mb-card-icon {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    /* MusicBrainz Purple - Force visible color */
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.9 !important;
+    /* Force visible */
+    transition: transform 0.2s;
+    cursor: pointer;
+    z-index: 100 !important;
+    /* Force on top */
+    color: white;
+    font-size: 11px;
+    font-weight: 800;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.mb-card-icon:hover {
+    transform: scale(1.1);
+    background: #d466a9;
+    opacity: 1 !important;
+}
