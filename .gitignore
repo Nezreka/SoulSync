@@ -6,3 +6,6 @@ __pycache__/
 **/__pycache__/
 *.pyc
 *.pyo
+
+# Auto-downloaded binaries
+bin/

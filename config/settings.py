@@ -195,6 +195,10 @@ class ConfigManager:
             "listenbrainz": {
                 "token": ""
             },
+            "acoustid": {
+                "api_key": "",
+                "enabled": False  # Disabled by default - requires API key and fpcalc
+            },
             "logging": {
                 "path": "logs/app.log",
                 "level": "INFO"

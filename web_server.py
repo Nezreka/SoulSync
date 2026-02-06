@@ -1701,6 +1701,39 @@ def run_service_test(service, test_config):
 
             except Exception as e:
                 return False, f"ListenBrainz connection error: {str(e)}"
+        elif service == "acoustid":
+            api_key = test_config.get('api_key', '')
+
+            if not api_key:
+                return False, "Missing AcoustID API key."
+
+            try:
+                from core.acoustid_client import AcoustIDClient, CHROMAPRINT_AVAILABLE, ACOUSTID_AVAILABLE, FPCALC_PATH
+
+                if not ACOUSTID_AVAILABLE:
+                    return False, "pyacoustid library not installed. Run: pip install pyacoustid"
+
+                client = AcoustIDClient()
+
+                # Override the cached API key with the test config key
+                client._api_key = api_key
+
+                # Check chromaprint/fpcalc availability
+                if CHROMAPRINT_AVAILABLE and FPCALC_PATH:
+                    fingerprint_status = f"fpcalc ready: {FPCALC_PATH}"
+                elif CHROMAPRINT_AVAILABLE:
+                    fingerprint_status = "Fingerprint backend available"
+                else:
+                    fingerprint_status = "fpcalc not found (will auto-download on first use)"
+
+                # Validate API key with test request
+                success, message = client.test_api_key()
+                if success:
+                    return True, f"AcoustID API key is valid! {fingerprint_status}"
+                else:
+                    return False, f"{message}. {fingerprint_status}"
+            except Exception as e:
+                return False, f"AcoustID test error: {str(e)}"
         return False, "Unknown service."
     except AttributeError as e:
         # This specifically catches the error you reported for Jellyfin
@@ -8141,6 +8174,20 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         if original_batch_id:
             context['batch_id'] = original_batch_id
 
+        # Check if AcoustID quarantined the file — no further processing needed
+        if context.get('_acoustid_quarantined'):
+            failure_msg = context.get('_acoustid_failure_msg', 'AcoustID verification failed')
+            _pp.info(f"File was quarantined by AcoustID verification (task={task_id}): {failure_msg}")
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = f"AcoustID verification failed: {failure_msg}"
+            with matched_context_lock:
+                if context_key in matched_downloads_context:
+                    del matched_downloads_context[context_key]
+            _on_download_completed(batch_id, task_id, success=False)
+            return
+
         # Check if simple download handler already completed everything
         if context.get('_simple_download_completed'):
             expected_final_path = context.get('_final_path')
@@ -8280,6 +8327,71 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         _on_download_completed(batch_id, task_id, success=False)
 
 
+def _move_to_quarantine(file_path: str, context: dict, reason: str) -> str:
+    """
+    Move a file to quarantine folder when AcoustID verification fails.
+    Creates a JSON sidecar file with metadata about why the file was quarantined.
+
+    Args:
+        file_path: Original file path
+        context: Download context with track info
+        reason: Reason for quarantine
+
+    Returns:
+        Path to quarantined file
+    """
+    import json
+    from pathlib import Path
+    from datetime import datetime
+
+    # Get quarantine directory (parallel to Transfer folder)
+    transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+    quarantine_dir = Path(transfer_dir).parent / "Quarantine"
+    quarantine_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create quarantine entry with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    original_name = Path(file_path).stem
+    file_ext = Path(file_path).suffix
+
+    # Build quarantine filename: TIMESTAMP_originalname.ext
+    quarantine_filename = f"{timestamp}_{original_name}{file_ext}"
+    quarantine_path = quarantine_dir / quarantine_filename
+
+    # Move file to quarantine
+    _safe_move_file(file_path, str(quarantine_path))
+
+    # Write metadata sidecar file
+    metadata_path = quarantine_dir / f"{timestamp}_{original_name}.json"
+
+    # Extract track info from context
+    track_info = context.get('track_info', {})
+    original_search = context.get('original_search_result', {})
+    spotify_artist = context.get('spotify_artist', {})
+
+    metadata = {
+        'original_filename': Path(file_path).name,
+        'quarantine_reason': reason,
+        'timestamp': datetime.now().isoformat(),
+        'expected_track': (
+            original_search.get('spotify_clean_title') or
+            track_info.get('name') or
+            original_search.get('title', 'Unknown')
+        ),
+        'expected_artist': spotify_artist.get('name', 'Unknown'),
+        'context_key': context.get('context_key', 'unknown')
+    }
+
+    try:
+        with open(metadata_path, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.warning(f"Failed to write quarantine metadata: {e}")
+
+    logger.warning(f"🚫 File quarantined: {quarantine_path} - Reason: {reason}")
+    return str(quarantine_path)
+
+
 def _safe_move_file(src, dst):
     """
     Safely move a file across different filesystems/volumes.
@@ -8388,6 +8500,75 @@ def _post_process_matched_download(context_key, context, file_path):
         print(f"⏳ Waiting 1 second for file handle release for: {os.path.basename(file_path)}")
         time.sleep(1)
         # --- END OF FIX ---
+
+        # --- ACOUSTID VERIFICATION ---
+        # Optional verification that downloaded audio matches expected track.
+        # Only runs if enabled and configured. Fails gracefully (skips on any error).
+        try:
+            from core.acoustid_verification import AcoustIDVerification, VerificationResult
+
+            verifier = AcoustIDVerification()
+            available, available_reason = verifier.quick_check_available()
+
+            if available:
+                # Extract expected track info from context
+                track_info = context.get('track_info', {})
+                original_search = context.get('original_search_result', {})
+                spotify_artist = context.get('spotify_artist', {})
+
+                expected_track = (
+                    original_search.get('spotify_clean_title') or
+                    track_info.get('name') or
+                    original_search.get('title', '')
+                )
+                expected_artist = spotify_artist.get('name', '')
+
+                if expected_track and expected_artist:
+                    print(f"🔍 Running AcoustID verification for: '{expected_track}' by '{expected_artist}'")
+                    verification_result, verification_msg = verifier.verify_audio_file(
+                        file_path,
+                        expected_track,
+                        expected_artist,
+                        context
+                    )
+                    print(f"🔍 AcoustID verification result: {verification_result.value} - {verification_msg}")
+
+                    if verification_result == VerificationResult.FAIL:
+                        # Move to quarantine instead of Transfer
+                        quarantine_path = _move_to_quarantine(file_path, context, verification_msg)
+                        print(f"🚫 File quarantined due to verification failure: {quarantine_path}")
+
+                        # Set flag so the _with_verification wrapper knows we quarantined
+                        context['_acoustid_quarantined'] = True
+                        context['_acoustid_failure_msg'] = verification_msg
+
+                        # Clean up context
+                        with matched_context_lock:
+                            if context_key in matched_downloads_context:
+                                del matched_downloads_context[context_key]
+
+                        # Mark as failed in download tasks if we have task info
+                        task_id = context.get('task_id')
+                        batch_id = context.get('batch_id')
+                        if task_id:
+                            with tasks_lock:
+                                if task_id in download_tasks:
+                                    download_tasks[task_id]['status'] = 'failed'
+                                    download_tasks[task_id]['error_message'] = f"AcoustID verification failed: {verification_msg}"
+
+                        # Call completion callback with failure
+                        if task_id and batch_id:
+                            _on_download_completed(batch_id, task_id, success=False)
+
+                        return  # Don't continue with normal processing
+                else:
+                    print(f"⚠️ AcoustID verification skipped: missing track/artist info")
+            else:
+                print(f"ℹ️ AcoustID verification not available: {available_reason}")
+        except Exception as verify_error:
+            # Any verification error should NOT block the download - fail open
+            print(f"⚠️ AcoustID verification error (continuing normally): {verify_error}")
+        # --- END ACOUSTID VERIFICATION ---
 
         # --- SIMPLE DOWNLOAD HANDLING ---
         # Check if this is a simple download (search page "Download ⬇" button only)
@@ -9043,40 +9224,50 @@ def get_version_info():
     This provides the same data that the GUI version modal displays.
     """
     version_data = {
-        "version": "1.4",
+        "version": "1.5",
         "title": "What's New in SoulSync",
-        "subtitle": "Version 1.4 - Full iTunes Metadata Support & More",
+        "subtitle": "Version 1.5 - AcoustID Verification & MusicBrainz Integration",
         "sections": [
             {
-                "title": "🍎 Full iTunes Metadata Support",
-                "description": "Complete iTunes integration as a powerful alternative to Spotify",
+                "title": "🔊 AcoustID Download Verification",
+                "description": "Optional audio fingerprint verification to ensure downloaded files match the expected track",
                 "features": [
-                    "• Full Independence - Use SoulSync without a Spotify account! iTunes metadata is now fully capable of replacing Spotify",
-                    "• Automatic Fallback - Seamlessly switches to iTunes metadata if Spotify is unavailable or unauthenticated",
-                    "• Watchlist Support - Add artists, configure downloads, and fetch cover art using iTunes IDs",
-                    "• Smart Matching - Automatically links artists between platforms for maximum compatibility",
-                    "• High-Res Artwork - Fetches high-quality album art directly from Apple's servers"
+                    "• Audio Fingerprinting - Uses AcoustID to verify downloaded files are the correct track before transferring",
+                    "• Smart Matching - Compares title and artist using fuzzy string matching with configurable thresholds",
+                    "• Fail-Safe Design - Only rejects files when confident they are wrong; skips verification on any uncertainty",
+                    "• Quarantine System - Mismatched files are moved to a quarantine folder with metadata for review",
+                    "• Failed tracks are automatically added to the wishlist for retry"
                 ],
-                "usage_note": "No configuration needed! SoulSync automatically uses the best available metadata source."
+                "usage_note": "Enable in Settings > AcoustID. Requires a free API key from acoustid.org."
             },
             {
-                "title": "📺 YouTube Download Engine",
-                "description": "Major overhaul of the YouTube download engine (v1.3 feature)",
+                "title": "🎵 MusicBrainz Enrichment",
+                "description": "Automatic metadata enrichment using MusicBrainz with real-time status tracking",
                 "features": [
-                    "• First-Class Support - YouTube is now a primary download source, fully integrated into the app's core",
-                    "• Hybrid Mode - Automatically fallback to YouTube if Soulseek downloads fail (or vice-versa)",
-                    "• Reliable Downloads - Completely rewritten post-processing engine to eliminate 'file not found' errors",
-                    "• Batch Processing - YouTube downloads now support batch operations and queue management"
+                    "• Background Worker - Continuously enriches your library with MusicBrainz metadata",
+                    "• Live Status UI - Real-time progress indicator shows enrichment status per track",
+                    "• MusicBrainz Badge - Visual indicator on tracks that have been matched and enriched"
                 ]
             },
             {
-                "title": "🐳 Docker & System Reliability",
-                "description": "Critical fixes for Docker environments and general system stability",
+                "title": "🔍 Smarter Soulseek Downloads",
+                "description": "Improved search, source management, and download reliability",
                 "features": [
-                    "• Docker Streaming Fix - Resolved issues with path resolution when streaming in Docker containers",
-                    "• Low-Memory Optimization - Improved memory usage during long scanning sessions",
-                    "• Settings Persistence - Fixed an issue where Spotify settings wouldn't save correctly",
-                    "• Watchlist Cleanup - Better handling of duplicate entries and cross-platform IDs"
+                    "• Source Reuse - After the first track downloads from a source, subsequent album tracks reuse the same source for consistency",
+                    "• Enhanced Search Queries - Fourth search query added for better matching with cleaned and artist-removed searches",
+                    "• Improved Error Handling - Better detection of rejected/errored states from Soulseek sources",
+                    "• Race Condition Fix - Resolved post-processing conflicts between Stream Processor and Verification Worker"
+                ]
+            },
+            {
+                "title": "🛠️ Stability & Fixes",
+                "description": "Bug fixes and reliability improvements across the board",
+                "features": [
+                    "• Fixed failed tracks not being added to wishlist after batch completion",
+                    "• Fixed album splitting in media servers for multi-source downloads",
+                    "• Fixed regex issue where '&' in track names was incorrectly scrubbed",
+                    "• Fixed source file removal timing on Windows",
+                    "• App log rotation with capped file size to prevent unbounded log growth"
                 ]
             }
         ]
