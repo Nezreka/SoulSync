@@ -1,5 +1,3 @@
-version: '3.8'
-
 # BREAKING CHANGE (v1.3+): Database volume mount changed from /app/database to /app/data
 # If upgrading from a previous version, update your docker-compose.yml:
 #   OLD: - soulsync_database:/app/database
@@ -20,12 +18,12 @@ services:
       - PYTHONPATH=/app
       # Optional: Configure through environment variables
       - SOULSYNC_CONFIG_PATH=/app/config/config.json
-      # Set timezone
+      # Set timezone (change to your timezone)
       - TZ=America/New_York
     ports:
-      - "8008:8008"      # Main web app
-      - "8888:8888"      # Spotify OAuth callback
-      - "8889:8889"      # Tidal OAuth callback
+      - "8008:8008" # Main web app
+      - "8888:8888" # Spotify OAuth callback
+      - "8889:8889" # Tidal OAuth callback
     volumes:
       # Persistent data volumes
       - ./config:/app/config
@@ -34,24 +32,21 @@ services:
       # Use named volume for database persistence (separate from host database)
       # NOTE: Changed from /app/database to /app/data to avoid overwriting Python package
       - soulsync_database:/app/data
-      # IMPORTANT: Mount the drives containing your download and transfer folders
-      # If your download/transfer paths are on E: drive, mount E: drive:
-      - /mnt/e:/host/mnt/e:rw
-      # Mount H: drive for transfer folder
-      - /mnt/h:/host/mnt/h:rw
-      # If your download/transfer paths are on C: drive, uncomment this line:
-      # - /mnt/c:/host/mnt/c:rw
-      # If your download/transfer paths are on D: drive, uncomment this line:
-      # - /mnt/d:/host/mnt/d:rw
-      # Add additional drive mounts as needed for your specific setup
-      # Optional: Mount your music library for Plex/Jellyfin access
-      - /path/to/your/music:/music:ro
+      # IMPORTANT: Mount host paths that your download/transfer folders live on.
+      # Replace these examples with your actual paths:
+      #   Linux/Mac:  - /path/to/your/downloads:/host/downloads:rw
+      #   WSL:        - /mnt/d/Music:/host/music:rw
+      # You can add as many mounts as needed for your setup.
+      # - /path/to/downloads:/host/downloads:rw
+      # - /path/to/transfer:/host/transfer:rw
+      # Optional: Mount your music library for Plex/Jellyfin/Navidrome access
+      # - /path/to/your/music:/music:ro
     extra_hosts:
       # Allow container to reach host services
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8888/"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8888/" ]
       interval: 30s
       timeout: 10s
       retries: 3
