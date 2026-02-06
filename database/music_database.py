@@ -753,6 +753,25 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listenbrainz_tracks_position ON listenbrainz_tracks (playlist_id, position)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_artist ON discovery_recent_albums (artist_spotify_id)")
 
+            # Discovery Match Cache - caches successful discovery matches across all sources
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_match_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    normalized_title TEXT NOT NULL,
+                    normalized_artist TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    match_confidence REAL NOT NULL,
+                    matched_data_json TEXT NOT NULL,
+                    original_title TEXT,
+                    original_artist TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    use_count INTEGER DEFAULT 1,
+                    UNIQUE(normalized_title, normalized_artist, provider)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_cache_lookup ON discovery_match_cache (normalized_title, normalized_artist, provider)")
+
             logger.info("Discovery tables created successfully")
 
         except Exception as e:
@@ -4329,6 +4348,54 @@ class MusicDatabase:
                 'success': False,
                 'error': str(e)
             }
+
+    # ==================== Discovery Match Cache Methods ====================
+
+    def get_discovery_cache_match(self, normalized_title: str, normalized_artist: str, provider: str) -> Optional[Dict]:
+        """Look up a cached discovery match. Returns the matched_data dict or None.
+        Also bumps last_used_at and use_count on hit."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT matched_data_json, match_confidence FROM discovery_match_cache
+                WHERE normalized_title = ? AND normalized_artist = ? AND provider = ?
+            """, (normalized_title, normalized_artist, provider))
+            row = cursor.fetchone()
+            if row:
+                # Bump usage stats
+                cursor.execute("""
+                    UPDATE discovery_match_cache
+                    SET last_used_at = CURRENT_TIMESTAMP, use_count = use_count + 1
+                    WHERE normalized_title = ? AND normalized_artist = ? AND provider = ?
+                """, (normalized_title, normalized_artist, provider))
+                conn.commit()
+                return json.loads(row['matched_data_json'])
+            return None
+        except Exception as e:
+            logger.error(f"Error reading discovery cache: {e}")
+            return None
+
+    def save_discovery_cache_match(self, normalized_title: str, normalized_artist: str,
+                                    provider: str, confidence: float, matched_data: Dict,
+                                    original_title: str = None, original_artist: str = None) -> bool:
+        """Save a discovery match to cache. Uses INSERT OR REPLACE for upsert."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO discovery_match_cache
+                (normalized_title, normalized_artist, provider, match_confidence,
+                 matched_data_json, original_title, original_artist,
+                 created_at, last_used_at, use_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)
+            """, (normalized_title, normalized_artist, provider, confidence,
+                  json.dumps(matched_data), original_title, original_artist))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving discovery cache: {e}")
+            return False
 
 # Thread-safe singleton pattern for database access
 _database_instances: Dict[int, MusicDatabase] = {}  # Thread ID -> Database instance

@@ -460,6 +460,45 @@
         padding: 10px 8px;
     }
 
+    /* Spotify playlist cards - stack vertically on mobile */
+    .playlist-card {
+        padding: 16px;
+        margin: 8px 4px;
+        border-radius: 14px;
+    }
+
+    .playlist-card-main {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    .playlist-card-content {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .playlist-card-name {
+        font-size: 15px;
+        margin-bottom: 6px;
+    }
+
+    .playlist-card-info {
+        font-size: 13px;
+    }
+
+    .playlist-card-actions {
+        margin-left: 0;
+        display: flex;
+        gap: 8px;
+    }
+
+    .playlist-card-actions button {
+        flex: 1;
+        padding: 10px 14px;
+        font-size: 12px;
+    }
+
     .beatport-tabs {
         flex-wrap: wrap;
         gap: 4px;

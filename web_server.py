@@ -15821,6 +15821,13 @@ def update_tidal_playlist_phase(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 
+def _get_discovery_cache_key(title, artist):
+    """Normalize title/artist for discovery cache lookup using matching_engine."""
+    norm_title = matching_engine.clean_title(title)
+    norm_artist = matching_engine.clean_artist(artist)
+    return (norm_title, norm_artist)
+
+
 def _run_tidal_discovery_worker(playlist_id):
     """Background worker for Tidal discovery process (Spotify preferred, iTunes fallback)"""
     try:
@@ -15854,6 +15861,34 @@ def _run_tidal_discovery_worker(playlist_id):
 
             try:
                 print(f"🔍 [{i+1}/{len(playlist.tracks)}] Searching {discovery_source.upper()}: {tidal_track.name} by {', '.join(tidal_track.artists)}")
+
+                # Check discovery cache first
+                cache_key = _get_discovery_cache_key(tidal_track.name, tidal_track.artists[0] if tidal_track.artists else '')
+                try:
+                    cache_db = get_database()
+                    cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
+                    if cached_match:
+                        print(f"⚡ CACHE HIT [{i+1}/{len(playlist.tracks)}]: {tidal_track.name} by {', '.join(tidal_track.artists)}")
+                        result = {
+                            'tidal_track': {
+                                'id': tidal_track.id,
+                                'name': tidal_track.name,
+                                'artists': tidal_track.artists or [],
+                                'album': getattr(tidal_track, 'album', 'Unknown Album'),
+                                'duration_ms': getattr(tidal_track, 'duration_ms', 0),
+                            },
+                            'spotify_data': cached_match,
+                            'match_data': cached_match,
+                            'status': 'found',
+                            'discovery_source': discovery_source
+                        }
+                        successful_discoveries += 1
+                        state['spotify_matches'] = successful_discoveries
+                        state['discovery_results'].append(result)
+                        state['discovery_progress'] = int(((i + 1) / len(playlist.tracks)) * 100)
+                        continue
+                except Exception as cache_err:
+                    print(f"⚠️ Cache lookup error: {cache_err}")
 
                 # Use the search function with appropriate provider
                 track_result = _search_spotify_for_tidal_track(
@@ -15924,6 +15959,19 @@ def _run_tidal_discovery_worker(playlist_id):
                     result['status'] = 'found'
                     successful_discoveries += 1
                     state['spotify_matches'] = successful_discoveries
+
+                # Save to discovery cache if match found
+                if result['status'] == 'found' and result.get('match_data'):
+                    try:
+                        cache_db = get_database()
+                        cache_db.save_discovery_cache_match(
+                            cache_key[0], cache_key[1], discovery_source, 0.80,
+                            result['match_data'], tidal_track.name,
+                            tidal_track.artists[0] if tidal_track.artists else ''
+                        )
+                        print(f"💾 CACHE SAVED: {tidal_track.name}")
+                    except Exception as cache_err:
+                        print(f"⚠️ Cache save error: {cache_err}")
 
                 state['discovery_results'].append(result)
                 state['discovery_progress'] = int(((i + 1) / len(playlist.tracks)) * 100)
@@ -16578,7 +16626,34 @@ def _run_youtube_discovery_worker(url_hash):
                 cleaned_artist = track['artists'][0] if track['artists'] else 'Unknown Artist'
 
                 print(f"🔍 Searching {discovery_source} for: '{cleaned_artist}' - '{cleaned_title}'")
-                
+
+                # Check discovery cache first
+                cache_key = _get_discovery_cache_key(cleaned_title, cleaned_artist)
+                try:
+                    cache_db = get_database()
+                    cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
+                    if cached_match:
+                        print(f"⚡ CACHE HIT [{i+1}/{len(tracks)}]: {cleaned_artist} - {cleaned_title}")
+                        result = {
+                            'index': i,
+                            'yt_track': cleaned_title,
+                            'yt_artist': cleaned_artist,
+                            'status': '✅ Found',
+                            'status_class': 'found',
+                            'spotify_track': cached_match.get('name', ''),
+                            'spotify_artist': cached_match.get('artists', [''])[0] if cached_match.get('artists') else '',
+                            'spotify_album': cached_match.get('album', {}).get('name', '') if isinstance(cached_match.get('album'), dict) else cached_match.get('album', ''),
+                            'duration': f"{track['duration_ms'] // 60000}:{(track['duration_ms'] % 60000) // 1000:02d}" if track['duration_ms'] else '0:00',
+                            'discovery_source': discovery_source,
+                            'matched_data': cached_match,
+                            'spotify_data': cached_match
+                        }
+                        state['spotify_matches'] += 1
+                        state['discovery_results'].append(result)
+                        continue
+                except Exception as cache_err:
+                    print(f"⚠️ Cache lookup error: {cache_err}")
+
                 # Try multiple search strategies using matching_engine for better accuracy
                 matched_track = None
                 best_confidence = 0.0
@@ -16761,11 +16836,23 @@ def _run_youtube_discovery_worker(url_hash):
                     }
                     # Keep spotify_data for backward compatibility
                     result['spotify_data'] = result['matched_data']
-                
+
+                    # Save to discovery cache (only Strategy 1 high-confidence matches)
+                    if best_confidence >= 0.7:
+                        try:
+                            cache_db = get_database()
+                            cache_db.save_discovery_cache_match(
+                                cache_key[0], cache_key[1], discovery_source, best_confidence,
+                                result['matched_data'], cleaned_title, cleaned_artist
+                            )
+                            print(f"💾 CACHE SAVED: {cleaned_artist} - {cleaned_title} (confidence: {best_confidence:.3f})")
+                        except Exception as cache_err:
+                            print(f"⚠️ Cache save error: {cache_err}")
+
                 state['discovery_results'].append(result)
 
                 print(f"  {'✅' if matched_track else '❌'} Track {i+1}/{len(tracks)}: {result['status']}")
-                
+
             except Exception as e:
                 print(f"❌ Error processing track {i}: {e}")
                 # Add failed result
@@ -16832,6 +16919,33 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
                 duration_ms = track.get('duration_ms', 0)
 
                 print(f"🔍 Searching {discovery_source} for: '{cleaned_artist}' - '{cleaned_title}'")
+
+                # Check discovery cache first
+                cache_key = _get_discovery_cache_key(cleaned_title, cleaned_artist)
+                try:
+                    cache_db = get_database()
+                    cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
+                    if cached_match:
+                        print(f"⚡ CACHE HIT [{i+1}/{len(tracks)}]: {cleaned_artist} - {cleaned_title}")
+                        result = {
+                            'index': i,
+                            'lb_track': cleaned_title,
+                            'lb_artist': cleaned_artist,
+                            'status': '✅ Found',
+                            'status_class': 'found',
+                            'spotify_track': cached_match.get('name', ''),
+                            'spotify_artist': cached_match.get('artists', [''])[0] if cached_match.get('artists') else '',
+                            'spotify_album': cached_match.get('album', {}).get('name', '') if isinstance(cached_match.get('album'), dict) else cached_match.get('album', ''),
+                            'duration': f"{duration_ms // 60000}:{(duration_ms % 60000) // 1000:02d}" if duration_ms else '0:00',
+                            'discovery_source': discovery_source,
+                            'matched_data': cached_match,
+                            'spotify_data': cached_match
+                        }
+                        state['spotify_matches'] += 1
+                        state['discovery_results'].append(result)
+                        continue
+                except Exception as cache_err:
+                    print(f"⚠️ Cache lookup error: {cache_err}")
 
                 # Try multiple search strategies using matching_engine for better accuracy
                 matched_track = None
@@ -17013,6 +17127,18 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
                     }
                     # Keep spotify_data for backward compatibility
                     result['spotify_data'] = result['matched_data']
+
+                    # Save to discovery cache (only Strategy 1 high-confidence matches)
+                    if best_confidence >= 0.7:
+                        try:
+                            cache_db = get_database()
+                            cache_db.save_discovery_cache_match(
+                                cache_key[0], cache_key[1], discovery_source, best_confidence,
+                                result['matched_data'], cleaned_title, cleaned_artist
+                            )
+                            print(f"💾 CACHE SAVED: {cleaned_artist} - {cleaned_title} (confidence: {best_confidence:.3f})")
+                        except Exception as cache_err:
+                            print(f"⚠️ Cache save error: {cache_err}")
 
                 state['discovery_results'].append(result)
 
@@ -23075,6 +23201,34 @@ def _run_beatport_discovery_worker(url_hash):
 
                 print(f"🔍 Searching {discovery_source.upper()} for: '{track_artist}' - '{track_title}'")
 
+                # Check discovery cache first
+                cache_key = _get_discovery_cache_key(track_title, track_artist)
+                try:
+                    cache_db = get_database()
+                    cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
+                    if cached_match:
+                        print(f"⚡ CACHE HIT [{i+1}/{len(tracks)}]: {track_artist} - {track_title}")
+                        # Convert artists from ['str'] to [{'name': 'str'}] for Beatport frontend format
+                        beatport_artists = cached_match.get('artists', [])
+                        if beatport_artists and isinstance(beatport_artists[0], str):
+                            cached_match['artists'] = [{'name': a} for a in beatport_artists]
+                        result_entry = {
+                            'index': i,
+                            'beatport_track': {
+                                'title': track_title,
+                                'artist': track_artist
+                            },
+                            'status': 'found',
+                            'status_class': 'found',
+                            'discovery_source': discovery_source,
+                            'spotify_data': cached_match
+                        }
+                        state['spotify_matches'] += 1
+                        state['discovery_results'].append(result_entry)
+                        continue
+                except Exception as cache_err:
+                    print(f"⚠️ Cache lookup error: {cache_err}")
+
                 # Use matching engine for sophisticated track matching (like other discovery processes)
                 found_track = None
 
@@ -23333,6 +23487,22 @@ def _run_beatport_discovery_worker(url_hash):
                         }
 
                     state['spotify_matches'] += 1
+
+                    # Save to discovery cache (normalize artists from [{name:str}] to [str] for canonical format)
+                    if best_confidence >= 0.75:
+                        try:
+                            cache_data = dict(result_entry['spotify_data'])
+                            cache_artists = cache_data.get('artists', [])
+                            if cache_artists and isinstance(cache_artists[0], dict):
+                                cache_data['artists'] = [a.get('name', '') for a in cache_artists]
+                            cache_db = get_database()
+                            cache_db.save_discovery_cache_match(
+                                cache_key[0], cache_key[1], discovery_source, best_confidence,
+                                cache_data, track_title, track_artist
+                            )
+                            print(f"💾 CACHE SAVED: {track_artist} - {track_title} (confidence: {best_confidence:.3f})")
+                        except Exception as cache_err:
+                            print(f"⚠️ Cache save error: {cache_err}")
 
                 state['discovery_results'].append(result_entry)
 
