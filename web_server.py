@@ -7767,9 +7767,9 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
 # METADATA & COVER ART HELPERS (Ported from downloads.py)
 # ===================================================================
 from mutagen import File as MutagenFile
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, TPOS, TXXX, APIC
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, TPOS, TXXX, APIC, UFID, TSRC
 from mutagen.flac import FLAC, Picture
-from mutagen.mp4 import MP4, MP4Cover
+from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 from mutagen.oggvorbis import OggVorbis
 import urllib.request
 
@@ -7882,6 +7882,8 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
 
                 if config_manager.get('metadata_enhancement.embed_album_art', True):
                     _embed_album_art_metadata(audio_file_raw, metadata)
+
+                _embed_source_ids(audio_file_raw, metadata)
 
                 audio_file_raw.save()
 
@@ -8025,6 +8027,28 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
 
     metadata['album_art_url'] = album_info.get('album_image_url')
 
+    # Extract source IDs (Spotify or iTunes) for tag embedding
+    track_info = context.get("track_info", {})
+    if track_info and track_info.get('id'):
+        # Spotify track IDs are alphanumeric strings; iTunes IDs are numeric
+        track_id = str(track_info['id'])
+        if track_id.isdigit():
+            metadata['itunes_track_id'] = track_id
+        else:
+            metadata['spotify_track_id'] = track_id
+    if artist.get('id'):
+        artist_id = str(artist['id'])
+        if artist_id.isdigit():
+            pass  # iTunes artist ID not available in this context reliably
+        else:
+            metadata['spotify_artist_id'] = artist_id
+    if spotify_album and spotify_album.get('id'):
+        album_id = str(spotify_album['id'])
+        if album_id.isdigit():
+            pass  # iTunes album ID not available in this context reliably
+        else:
+            metadata['spotify_album_id'] = album_id
+
     return metadata
 
 def _embed_album_art_metadata(audio_file, metadata: dict):
@@ -8064,6 +8088,161 @@ def _embed_album_art_metadata(audio_file, metadata: dict):
         print("🎨 Album art successfully embedded.")
     except Exception as e:
         print(f"❌ Error embedding album art: {e}")
+
+def _embed_source_ids(audio_file, metadata: dict):
+    """
+    Lookup MusicBrainz recording MBID, ISRC, and genres, then embed them along
+    with Spotify/iTunes source IDs as custom tags into the audio file.
+    One file write, one shot.  Concurrent calls are safe — the global rate
+    limiter in musicbrainz_client.py serializes all MB API access.
+    Operates on a non-easy-mode MutagenFile object (caller must save).
+    """
+    try:
+        # ── 1. Collect Spotify / iTunes IDs already in metadata ──
+        id_tags = {}
+        if metadata.get('spotify_track_id'):
+            id_tags['SPOTIFY_TRACK_ID'] = metadata['spotify_track_id']
+        if metadata.get('spotify_artist_id'):
+            id_tags['SPOTIFY_ARTIST_ID'] = metadata['spotify_artist_id']
+        if metadata.get('spotify_album_id'):
+            id_tags['SPOTIFY_ALBUM_ID'] = metadata['spotify_album_id']
+        if metadata.get('itunes_track_id'):
+            id_tags['ITUNES_TRACK_ID'] = metadata['itunes_track_id']
+
+        # ── 2. MusicBrainz lookup for MBID, genres, and ISRC ──
+        # The global rate limiter in musicbrainz_client.py serializes all API
+        # calls (worker + any number of post-processing threads) to 1 req/sec
+        # via _api_call_lock, so no pause/resume needed.
+        recording_mbid = None
+        artist_mbid = None
+        mb_genres = []
+        isrc = None
+        track_title = metadata.get('title', '')
+        # Use album_artist (single primary artist) for MB lookup, not the
+        # comma-joined multi-artist field which would give bad search results
+        artist_name = metadata.get('album_artist', '') or metadata.get('artist', '')
+
+        if not config_manager.get('musicbrainz.embed_tags', True):
+            # Skip MB lookup, just write Spotify/iTunes IDs if any
+            pass
+        elif track_title and artist_name:
+            try:
+                mb_service = mb_worker.mb_service if mb_worker else None
+                if mb_service:
+                    result = mb_service.match_recording(track_title, artist_name)
+                    if result and result.get('mbid'):
+                        recording_mbid = result['mbid']
+                        id_tags['MUSICBRAINZ_RECORDING_ID'] = recording_mbid
+                        print(f"🎵 MusicBrainz recording matched: {recording_mbid}")
+
+                        # Lookup recording details for ISRC and genres
+                        details = mb_service.mb_client.get_recording(
+                            recording_mbid, includes=['isrcs', 'genres']
+                        )
+                        if details:
+                            isrcs = details.get('isrcs', [])
+                            if isrcs:
+                                isrc = isrcs[0]
+                            mb_genres = [
+                                g['name'] for g in sorted(
+                                    details.get('genres', []),
+                                    key=lambda x: x.get('count', 0),
+                                    reverse=True
+                                )
+                            ]
+
+                    # Also try to get artist MBID (may already be cached from worker)
+                    artist_result = mb_service.match_artist(artist_name)
+                    if artist_result and artist_result.get('mbid'):
+                        artist_mbid = artist_result['mbid']
+                        id_tags['MUSICBRAINZ_ARTIST_ID'] = artist_mbid
+                else:
+                    print("⚠️ MusicBrainz worker not available, skipping MBID lookup")
+            except Exception as e:
+                print(f"⚠️ MusicBrainz lookup failed (non-fatal): {e}")
+
+        if not id_tags:
+            return
+
+        # ── 3. Write all tags into the file ──
+        written = []
+
+        # MP3 (ID3)
+        if isinstance(audio_file.tags, ID3):
+            for tag_name, value in id_tags.items():
+                if tag_name == 'MUSICBRAINZ_RECORDING_ID':
+                    audio_file.tags.add(UFID(owner='http://musicbrainz.org', data=value.encode('ascii')))
+                    written.append('UFID:http://musicbrainz.org')
+                elif tag_name == 'MUSICBRAINZ_ARTIST_ID':
+                    audio_file.tags.add(TXXX(encoding=3, desc='MusicBrainz Artist Id', text=[value]))
+                    written.append('TXXX:MusicBrainz Artist Id')
+                else:
+                    audio_file.tags.add(TXXX(encoding=3, desc=tag_name, text=[str(value)]))
+                    written.append(f'TXXX:{tag_name}')
+
+        # FLAC / OGG Vorbis
+        elif isinstance(audio_file, (FLAC, OggVorbis)):
+            for tag_name, value in id_tags.items():
+                if tag_name == 'MUSICBRAINZ_RECORDING_ID':
+                    audio_file['MUSICBRAINZ_TRACKID'] = [value]
+                    written.append('MUSICBRAINZ_TRACKID')
+                elif tag_name == 'MUSICBRAINZ_ARTIST_ID':
+                    audio_file['MUSICBRAINZ_ARTISTID'] = [value]
+                    written.append('MUSICBRAINZ_ARTISTID')
+                else:
+                    audio_file[tag_name] = [str(value)]
+                    written.append(tag_name)
+
+        # MP4 (M4A/AAC)
+        elif isinstance(audio_file, MP4):
+            for tag_name, value in id_tags.items():
+                if tag_name == 'MUSICBRAINZ_RECORDING_ID':
+                    key = '----:com.apple.iTunes:MusicBrainz Track Id'
+                elif tag_name == 'MUSICBRAINZ_ARTIST_ID':
+                    key = '----:com.apple.iTunes:MusicBrainz Artist Id'
+                else:
+                    key = f'----:com.apple.iTunes:{tag_name}'
+                audio_file[key] = [MP4FreeForm(str(value).encode('utf-8'))]
+                written.append(key)
+
+        if written:
+            print(f"🔗 Embedded IDs: {', '.join(written)}")
+
+        # ── 4. Merge genres (Spotify + MusicBrainz) and overwrite tag ──
+        if mb_genres:
+            spotify_genres = [g.strip() for g in metadata.get('genre', '').split(',') if g.strip()]
+            seen = set()
+            merged = []
+            for g in spotify_genres + mb_genres:
+                key = g.strip().lower()
+                if key and key not in seen:
+                    seen.add(key)
+                    merged.append(g.strip().title())
+                if len(merged) >= 5:
+                    break
+
+            if merged:
+                genre_string = ', '.join(merged)
+                if isinstance(audio_file.tags, ID3):
+                    audio_file.tags.add(TCON(encoding=3, text=[genre_string]))
+                elif isinstance(audio_file, (FLAC, OggVorbis)):
+                    audio_file['GENRE'] = [genre_string]
+                elif isinstance(audio_file, MP4):
+                    audio_file['\xa9gen'] = [genre_string]
+                print(f"🎶 Genres merged: {genre_string}")
+
+        # ── 5. Write ISRC if available ──
+        if isrc:
+            if isinstance(audio_file.tags, ID3):
+                audio_file.tags.add(TSRC(encoding=3, text=[isrc]))
+            elif isinstance(audio_file, (FLAC, OggVorbis)):
+                audio_file['ISRC'] = [isrc]
+            elif isinstance(audio_file, MP4):
+                audio_file['----:com.apple.iTunes:ISRC'] = [MP4FreeForm(isrc.encode('utf-8'))]
+            print(f"🔖 ISRC: {isrc}")
+
+    except Exception as e:
+        print(f"⚠️ Error embedding source IDs (non-fatal): {e}")
 
 def _download_cover_art(album_info: dict, target_dir: str):
     """Downloads cover.jpg into the specified directory."""
