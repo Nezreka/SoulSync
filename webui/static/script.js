@@ -14712,9 +14712,10 @@ function initializeSyncPage() {
             });
             document.getElementById(`${tabId}-tab-content`).classList.add('active');
 
-            // Show/hide sidebar based on active tab
+            // Show/hide sidebar based on active tab (skip on mobile where sidebar is always hidden)
             if (syncSidebar && syncContentArea) {
-                if (tabId === 'spotify') {
+                const isMobile = window.innerWidth <= 1300;
+                if (tabId === 'spotify' && !isMobile) {
                     syncSidebar.style.display = '';
                     syncContentArea.style.gridTemplateColumns = '2.5fr 0.75fr';
                 } else {
