@@ -303,6 +303,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Initialize components
     initializeNavigation();
+    initializeMobileNavigation();
     initializeMediaPlayer();
     initializeDonationWidget();
     initializeSyncPage();
@@ -358,6 +359,51 @@ function initializeNavigation() {
         button.addEventListener('click', () => {
             const page = button.getAttribute('data-page');
             navigateToPage(page);
+        });
+    });
+}
+
+// ===============================
+// MOBILE NAVIGATION
+// ===============================
+
+function initializeMobileNavigation() {
+    const hamburgerBtn = document.getElementById('hamburger-btn');
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.getElementById('mobile-overlay');
+
+    if (!hamburgerBtn || !sidebar || !overlay) return;
+
+    function openMobileNav() {
+        sidebar.classList.add('mobile-open');
+        hamburgerBtn.classList.add('active');
+        overlay.classList.add('active');
+        document.body.classList.add('mobile-nav-open');
+    }
+
+    function closeMobileNav() {
+        sidebar.classList.remove('mobile-open');
+        hamburgerBtn.classList.remove('active');
+        overlay.classList.remove('active');
+        document.body.classList.remove('mobile-nav-open');
+    }
+
+    hamburgerBtn.addEventListener('click', () => {
+        if (sidebar.classList.contains('mobile-open')) {
+            closeMobileNav();
+        } else {
+            openMobileNav();
+        }
+    });
+
+    overlay.addEventListener('click', closeMobileNav);
+
+    // Close sidebar on nav button click (mobile only)
+    document.querySelectorAll('.nav-button').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (window.innerWidth <= 768) {
+                closeMobileNav();
+            }
         });
     });
 }

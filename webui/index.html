@@ -3,12 +3,22 @@
 
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>SoulSync - Music Sync & Manager</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css') }}">
 </head>
 
 <body>
     <div class="main-container">
+        <!-- Mobile Navigation -->
+        <button class="hamburger-btn" id="hamburger-btn" aria-label="Toggle navigation">
+            <span class="hamburger-line"></span>
+            <span class="hamburger-line"></span>
+            <span class="hamburger-line"></span>
+        </button>
+        <div class="mobile-overlay" id="mobile-overlay"></div>
+
         <!-- Sidebar - Always Visible -->
         <div class="sidebar">
             <!-- Header Section -->

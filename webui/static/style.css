@@ -2754,20 +2754,19 @@ body {
 }
 
 /* Desktop-Only Optimizations */
-.main-container {
-    min-width: 1200px;
-    /* Ensure minimum desktop width */
-}
+@media (min-width: 769px) {
+    .main-container {
+        min-width: 1200px;
+    }
 
-.sidebar {
-    min-width: 240px;
-    /* Fixed sidebar width for desktop */
-    max-width: 240px;
-}
+    .sidebar {
+        min-width: 240px;
+        max-width: 240px;
+    }
 
-.main-content {
-    min-width: 960px;
-    /* Ensure content area has enough space */
+    .main-content {
+        min-width: 960px;
+    }
 }
 
 /* Optimize for larger screens */

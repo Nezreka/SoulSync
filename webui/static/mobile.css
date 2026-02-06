@@ -1,0 +1,1799 @@
+/* ============================================
+   SoulSync Mobile Responsive Styles
+   Loaded after style.css - overrides for ≤768px
+   ============================================ */
+
+/* ======================================
+   HAMBURGER BUTTON (hidden on desktop)
+   ====================================== */
+
+.hamburger-btn {
+    display: none;
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    z-index: 10002;
+    width: 44px;
+    height: 44px;
+    background: rgba(20, 20, 20, 0.9);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    cursor: pointer;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 0;
+}
+
+.hamburger-line {
+    display: block;
+    width: 20px;
+    height: 2px;
+    background: #fff;
+    border-radius: 2px;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+/* Animated X state */
+.hamburger-btn.active .hamburger-line:nth-child(1) {
+    transform: translateY(7px) rotate(45deg);
+}
+
+.hamburger-btn.active .hamburger-line:nth-child(2) {
+    opacity: 0;
+}
+
+.hamburger-btn.active .hamburger-line:nth-child(3) {
+    transform: translateY(-7px) rotate(-45deg);
+}
+
+/* ======================================
+   MOBILE OVERLAY (hidden on desktop)
+   ====================================== */
+
+.mobile-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 10000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.mobile-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* ======================================
+   MOBILE BREAKPOINT (≤768px)
+   ====================================== */
+
+@media (max-width: 768px) {
+
+    /* --- Phase 0: Foundation --- */
+
+    body {
+        overflow: hidden;
+        height: 100vh;
+    }
+
+    .main-container {
+        flex-direction: column;
+        height: 100vh;
+        width: 100%;
+    }
+
+    .main-content {
+        width: 100%;
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    /* --- Phase 1: Sidebar → Off-canvas --- */
+
+    .hamburger-btn {
+        display: flex;
+    }
+
+    .mobile-overlay {
+        display: block;
+    }
+
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 280px;
+        height: 100vh;
+        z-index: 10001;
+        transform: translateX(-100%);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border-radius: 0;
+        border-top-right-radius: 24px;
+        border-bottom-right-radius: 24px;
+        overflow-y: auto;
+    }
+
+    .sidebar.mobile-open {
+        transform: translateX(0);
+    }
+
+    .page {
+        padding: 70px 20px 20px 20px;
+        height: auto;
+        min-height: 0;
+        overflow: visible;
+        flex-shrink: 0;
+    }
+
+    .page.active {
+        display: block;
+    }
+
+    .nav-button {
+        width: 100%;
+    }
+
+    /* --- Phase 2: Dashboard --- */
+
+    .dashboard-content {
+        flex-direction: column;
+        height: auto;
+        gap: 20px;
+    }
+
+    .header-actions {
+        flex-wrap: wrap;
+        width: 100%;
+    }
+
+    /* MusicBrainz tooltip - reposition for mobile */
+    .musicbrainz-tooltip {
+        left: 0;
+        right: auto;
+        transform: translateY(-5px);
+    }
+
+    .musicbrainz-button:hover + .musicbrainz-tooltip {
+        transform: translateY(0);
+    }
+
+    .tooltip-content {
+        min-width: auto;
+        width: calc(100vw - 60px);
+        max-width: 280px;
+    }
+
+    .tooltip-content::before,
+    .tooltip-content::after {
+        left: 24px;
+        transform: none;
+    }
+
+    .tools-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .tool-card {
+        padding: 20px 16px;
+    }
+
+    .tool-card-header {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .tool-card-title {
+        font-size: 15px;
+    }
+
+    .tool-card-info {
+        font-size: 12px;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+    }
+
+    .tool-card-controls {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .tool-card-controls select,
+    .tool-card-controls button {
+        width: 100%;
+        min-height: 44px;
+        box-sizing: border-box;
+    }
+
+    /* --- Phase 3: Downloads (Search) --- */
+
+    .downloads-content {
+        grid-template-columns: 1fr;
+        height: auto;
+        padding: 0 16px 16px 16px;
+    }
+
+    .downloads-side-panel {
+        max-height: 400px;
+        margin-top: 0;
+    }
+
+    .search-bar-container {
+        flex-direction: column;
+        gap: 12px;
+        padding: 12px 16px;
+    }
+
+    .search-bar-container button {
+        width: 100%;
+        min-height: 44px;
+    }
+
+    #downloads-search-input {
+        width: 100%;
+    }
+
+    .enhanced-search-bar-container {
+        flex-direction: column;
+        gap: 12px;
+        padding: 16px;
+    }
+
+    .enhanced-search-wrapper {
+        width: 100%;
+    }
+
+    .enhanced-search-bar-container button {
+        width: 100%;
+        min-height: 44px;
+    }
+
+    .filter-group {
+        flex-wrap: wrap;
+    }
+
+    .filter-btn {
+        font-size: 13px;
+        padding: 8px 14px;
+        min-height: 36px;
+    }
+
+    .sort-order-btn {
+        min-width: 44px;
+        min-height: 44px;
+        width: 44px;
+        height: 44px;
+    }
+
+    .enhanced-dropdown {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        margin-top: 0;
+        border-radius: 0;
+        z-index: 10003;
+        overflow-y: auto;
+        max-height: 100vh;
+    }
+
+    .search-mode-btn {
+        min-height: 44px;
+    }
+
+    .enh-artists-wrapper {
+        grid-template-columns: 1fr;
+    }
+
+    /* --- Enhanced Search Results --- */
+
+    .track-result-card {
+        padding: 14px;
+        margin: 8px 4px;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .track-icon {
+        width: 36px;
+        height: 36px;
+        font-size: 14px;
+    }
+
+    .track-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .track-result-card .track-title {
+        font-size: 13px;
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    .track-details {
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    .track-result-card .track-actions {
+        width: 100%;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .album-result-card {
+        padding: 16px;
+        margin: 8px 4px;
+    }
+
+    .album-card-header {
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .album-icon {
+        width: 44px;
+        height: 44px;
+        font-size: 22px;
+    }
+
+    .album-info {
+        min-width: 0;
+        flex: 1;
+    }
+
+    .album-title {
+        font-size: 14px;
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    .album-details {
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    .album-actions {
+        width: auto;
+    }
+
+    .album-track-list {
+        margin-top: 12px;
+        padding-top: 12px;
+    }
+
+    /* Standard search results */
+    .search-result-item {
+        padding: 12px;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .result-item__main-content {
+        flex: 1;
+        min-width: 0;
+        gap: 10px;
+    }
+
+    .result-item__title {
+        white-space: normal;
+        word-break: break-word;
+        font-size: 12px;
+    }
+
+    .result-item__secondary-info {
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    .result-item__actions {
+        width: auto;
+        flex-shrink: 0;
+    }
+
+    .action-btn {
+        width: 40px;
+        height: 40px;
+        border-radius: 20px;
+    }
+
+    /* Enhanced search artist/album grids */
+    .enh-compact-list.artists-grid {
+        gap: 12px;
+        justify-content: center;
+    }
+
+    .enh-compact-item.artist-card {
+        padding: 16px 12px;
+    }
+
+    .enh-item-image.artist-image {
+        width: 120px;
+        height: 120px;
+    }
+
+    .enh-item-image-placeholder.artist-placeholder {
+        width: 120px;
+        height: 120px;
+        font-size: 48px;
+    }
+
+    .enh-compact-item.artist-card .enh-item-info {
+        min-width: 120px;
+        max-width: 160px;
+    }
+
+    .enh-compact-list.albums-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 12px;
+    }
+
+    .enh-compact-item.album-card {
+        padding: 14px 12px;
+    }
+
+    /* --- Phase 4: Sync --- */
+
+    .sync-content {
+        max-width: 100%;
+    }
+
+    .sync-tabs {
+        flex-wrap: wrap;
+    }
+
+    .sync-tab-button {
+        min-width: calc(50% - 2px);
+        font-size: 13px;
+        padding: 10px 8px;
+    }
+
+    .beatport-tabs {
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .beatport-tab-button {
+        flex: 0 0 calc(50% - 4px);
+        padding: 10px 12px;
+        font-size: 12px;
+    }
+
+    .beatport-genre-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    }
+
+    .beatport-top10-container {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+
+    .beatport-top10-title {
+        font-size: 24px;
+    }
+
+    .beatport-top10-card,
+    .beatport-hype10-card {
+        padding: 12px;
+        min-height: 70px;
+        max-height: none;
+    }
+
+    .beatport-top10-card-rank,
+    .beatport-hype10-card-rank {
+        font-size: 16px;
+        min-width: 30px;
+        margin-right: 10px;
+    }
+
+    .beatport-top10-card-artwork,
+    .beatport-hype10-card-artwork {
+        width: 44px;
+        height: 44px;
+        margin-right: 10px;
+    }
+
+    .beatport-top10-card-title,
+    .beatport-hype10-card-title {
+        font-size: 13px;
+    }
+
+    /* --- Beatport rebuild hero slider --- */
+    .beatport-rebuild-slider {
+        height: 280px;
+    }
+
+    .beatport-rebuild-slider-container {
+        padding: 12px;
+    }
+
+    .beatport-rebuild-slide-content {
+        padding: 16px 12px;
+    }
+
+    .beatport-rebuild-track-title {
+        font-size: 20px;
+    }
+
+    .beatport-rebuild-artist-name {
+        font-size: 14px;
+    }
+
+    .beatport-rebuild-slider-nav {
+        display: none;
+    }
+
+    /* --- Beatport card sliders: convert from absolute stacking to show/hide --- */
+
+    /* All slider tracks: auto height */
+    .beatport-releases-slider-track,
+    .beatport-hype-picks-slider-track,
+    .beatport-charts-slider-track,
+    .beatport-dj-slider-track {
+        height: auto;
+        min-height: auto;
+    }
+
+    /* All slides: position relative, hidden by default */
+    .beatport-releases-slide,
+    .beatport-hype-picks-slide,
+    .beatport-charts-slide,
+    .beatport-dj-slide {
+        position: relative;
+        top: auto;
+        left: auto;
+        width: 100%;
+        height: auto;
+        display: none;
+        opacity: 0;
+        transform: none;
+    }
+
+    /* Active slide: visible */
+    .beatport-releases-slide.active,
+    .beatport-hype-picks-slide.active,
+    .beatport-charts-slide.active,
+    .beatport-dj-slide.active {
+        display: block;
+        opacity: 1;
+        transform: none;
+    }
+
+    /* Prev/next slides: hidden */
+    .beatport-releases-slide.prev,
+    .beatport-releases-slide.next,
+    .beatport-hype-picks-slide.prev,
+    .beatport-hype-picks-slide.next,
+    .beatport-charts-slide.prev,
+    .beatport-charts-slide.next,
+    .beatport-dj-slide.prev,
+    .beatport-dj-slide.next {
+        display: none;
+    }
+
+    /* All slider containers: reduced padding */
+    .beatport-releases-slider-container,
+    .beatport-hype-picks-slider-container,
+    .beatport-charts-slider-container,
+    .beatport-dj-slider-container {
+        padding: 12px;
+    }
+
+    /* All card grids: 2 columns, auto rows */
+    .beatport-releases-grid,
+    .beatport-hype-picks-grid,
+    .beatport-charts-grid {
+        grid-template-columns: repeat(2, 1fr);
+        grid-template-rows: auto;
+        gap: 10px;
+        padding: 10px;
+    }
+
+    .beatport-dj-grid {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto;
+        gap: 10px;
+        padding: 10px;
+    }
+
+    /* Card heights: auto instead of fixed */
+    .beatport-chart-card {
+        height: auto;
+        min-height: 120px;
+        max-height: none;
+    }
+
+    .beatport-dj-card {
+        height: auto;
+        min-height: 120px;
+        max-height: none;
+    }
+
+    /* Release/hype card compact */
+    .beatport-release-card,
+    .beatport-hype-pick-card {
+        padding: 10px;
+    }
+
+    .beatport-release-artwork,
+    .beatport-hype-pick-artwork {
+        width: 50px;
+        height: 50px;
+    }
+
+    .beatport-release-title,
+    .beatport-hype-pick-title {
+        font-size: 12px;
+    }
+
+    .beatport-release-artist,
+    .beatport-hype-pick-artist {
+        font-size: 11px;
+    }
+
+    /* Slider nav buttons (prev/next arrows) */
+    .beatport-releases-slider-nav,
+    .beatport-hype-picks-slider-nav,
+    .beatport-charts-slider-nav,
+    .beatport-dj-slider-nav {
+        position: relative;
+        top: auto;
+        display: flex;
+        justify-content: center;
+        gap: 16px;
+        padding: 10px 0;
+        z-index: 1;
+    }
+
+    /* Slider indicators */
+    .beatport-releases-slider-indicators,
+    .beatport-hype-picks-slider-indicators,
+    .beatport-charts-slider-indicators,
+    .beatport-dj-slider-indicators {
+        position: relative;
+        bottom: auto;
+        left: auto;
+        transform: none;
+        display: flex;
+        justify-content: center;
+        padding: 8px 0;
+    }
+
+    /* Section titles */
+    .beatport-releases-title,
+    .beatport-hype-picks-title,
+    .beatport-charts-title {
+        font-size: 20px;
+    }
+
+    /* Nav buttons */
+    .beatport-nav-buttons-container {
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .beatport-nav-button {
+        max-width: none;
+        width: 100%;
+    }
+
+    .genre-chart-types-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* --- Phase 5A: Artists --- */
+
+    .artists-content {
+        height: auto;
+        overflow-y: visible;
+    }
+
+    .artists-search-state {
+        min-height: auto;
+        padding: 20px 16px;
+        gap: 20px;
+    }
+
+    .artists-welcome-title {
+        font-size: 24px;
+    }
+
+    .artists-welcome-subtitle {
+        font-size: 14px;
+    }
+
+    .artists-results-state {
+        padding: 16px;
+    }
+
+    .artists-results-header {
+        flex-direction: column;
+        gap: 12px;
+        margin-bottom: 20px;
+    }
+
+    .artists-cards-container {
+        flex-wrap: wrap;
+        overflow-x: visible;
+        overflow-y: visible;
+        justify-content: center;
+        padding: 16px 0;
+    }
+
+    .artist-card {
+        width: 100%;
+        max-width: 280px;
+        height: 300px;
+    }
+
+    .artist-detail-info {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+    }
+
+    .album-cards-container,
+    .singles-cards-container {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    }
+
+    /* --- Phase 5B: Library --- */
+
+    .library-container {
+        height: auto;
+        padding: 16px;
+    }
+
+    .library-controls {
+        flex-direction: column;
+    }
+
+    .library-search-container {
+        max-width: 100%;
+    }
+
+    .alphabet-selector-inner {
+        flex-wrap: wrap;
+        min-width: 0;
+        gap: 4px;
+    }
+
+    .alphabet-btn {
+        min-width: 32px;
+        min-height: 32px;
+    }
+
+    .library-artists-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    }
+
+    /* Artist Detail (Library) */
+    .artist-hero-content {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+    }
+
+    .artist-image-container {
+        width: 120px;
+        height: 120px;
+    }
+
+    .artist-image,
+    .artist-image-fallback {
+        width: 120px;
+        height: 120px;
+    }
+
+    .releases-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    }
+
+    /* --- Phase 6: Discover --- */
+
+    .discover-hero-content {
+        padding: 16px;
+    }
+
+    .discover-section-header {
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .discover-section-actions {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .discover-section-actions .action-button {
+        flex: 1;
+        min-height: 44px;
+        justify-content: center;
+    }
+
+    .discover-card {
+        width: 160px;
+    }
+
+    /* Horizontal scroll tabs */
+    .decade-tabs,
+    .genre-tabs,
+    .listenbrainz-tabs {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    .decade-tabs::-webkit-scrollbar,
+    .genre-tabs::-webkit-scrollbar,
+    .listenbrainz-tabs::-webkit-scrollbar {
+        display: none;
+    }
+
+    .discover-download-sidebar {
+        width: 60px;
+        top: auto;
+        bottom: 16px;
+        right: 16px;
+        height: auto;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    /* --- Phase 7: Settings --- */
+
+    .settings-columns {
+        flex-direction: column;
+    }
+
+    .settings-left-column,
+    .settings-right-column,
+    .settings-third-column {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .page-header {
+        flex-direction: column;
+        gap: 12px;
+        align-items: stretch;
+    }
+
+    .page-header button {
+        width: 100%;
+        min-height: 44px;
+    }
+
+    .api-test-buttons {
+        flex-direction: column;
+    }
+
+    .api-test-buttons .test-button {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .server-toggle-btn {
+        flex: 1;
+        min-height: 44px;
+    }
+
+    .path-input-group {
+        flex-direction: column;
+    }
+
+    .path-input-group input {
+        width: 100%;
+    }
+
+    .preset-button {
+        flex: 1;
+    }
+
+    /* --- Phase 8: All Modals Responsive --- */
+
+    .modal-overlay {
+        padding: 8px;
+        align-items: flex-start;
+        overflow-y: auto;
+    }
+
+    .matching-modal {
+        width: 100%;
+        max-width: 100%;
+        height: auto;
+        max-height: 95vh;
+        border-radius: 16px;
+    }
+
+    .matching-modal-content {
+        padding: 16px;
+    }
+
+    .matching-modal-actions {
+        flex-direction: column;
+        gap: 12px;
+        padding: 16px;
+    }
+
+    .matching-modal-actions button {
+        width: 100%;
+        min-height: 44px;
+    }
+
+    .version-modal {
+        width: 95vw;
+    }
+
+    .add-to-wishlist-modal {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .download-missing-modal-content {
+        width: 100%;
+        max-width: 100%;
+        height: 95vh;
+        max-height: 95vh;
+        border-radius: 16px;
+    }
+
+    /* Download modal hero - compact */
+    .download-missing-modal-hero {
+        padding: 12px 14px;
+        gap: 10px;
+        min-height: auto;
+    }
+
+    .download-missing-modal-hero-content {
+        gap: 10px;
+    }
+
+    .download-missing-modal-hero-images {
+        gap: 8px;
+    }
+
+    .download-missing-modal-hero-image {
+        width: 48px;
+        height: 48px;
+    }
+
+    .download-missing-modal-hero-image.artist {
+        width: 44px;
+        height: 44px;
+    }
+
+    .download-missing-modal-hero-image.album {
+        width: 48px;
+        height: 48px;
+    }
+
+    .download-missing-modal-hero-icon {
+        width: 48px;
+        height: 48px;
+        font-size: 24px;
+    }
+
+    .download-missing-modal-hero-title {
+        font-size: 15px;
+        white-space: normal;
+        line-height: 1.2;
+    }
+
+    .download-missing-modal-hero-subtitle {
+        font-size: 12px;
+        white-space: normal;
+    }
+
+    .download-missing-modal-hero-details {
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    .download-missing-modal-hero-detail {
+        font-size: 10px;
+        padding: 2px 5px;
+    }
+
+    .download-missing-modal-header-actions {
+        padding: 10px 14px 0 0;
+    }
+
+    /* Download modal body */
+    .download-missing-modal-body {
+        padding: 10px 12px 14px 12px;
+        gap: 12px;
+    }
+
+    /* Download stats grid */
+    .download-dashboard-stats {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        padding: 12px;
+    }
+
+    .dashboard-stat-number {
+        font-size: 20px;
+    }
+
+    .dashboard-stat-label {
+        font-size: 10px;
+    }
+
+    /* Download tracks table - compact on mobile */
+    .download-tracks-header {
+        padding: 10px 12px;
+    }
+
+    .download-tracks-title {
+        font-size: 13px;
+    }
+
+    .download-tracks-table {
+        table-layout: auto;
+    }
+
+    .download-tracks-table th,
+    .download-tracks-table td {
+        padding: 6px 4px;
+        font-size: 10px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* Hide # and Duration columns on mobile */
+    .download-tracks-table th:nth-child(1),
+    .download-tracks-table td.track-number {
+        display: none;
+    }
+
+    .download-tracks-table th:nth-child(4),
+    .download-tracks-table td.track-duration {
+        display: none;
+    }
+
+    .track-name {
+        width: auto;
+        max-width: 120px;
+        font-size: 11px;
+    }
+
+    .track-artist {
+        width: auto;
+        max-width: 80px;
+        font-size: 11px;
+    }
+
+    .track-match-status {
+        width: auto;
+        font-size: 10px;
+    }
+
+    .track-download-status {
+        width: auto;
+        font-size: 10px;
+    }
+
+    .download-tracks-table .track-actions {
+        width: auto;
+        font-size: 10px;
+    }
+
+    .cancel-track-btn {
+        padding: 3px 6px;
+        font-size: 10px;
+    }
+
+    /* Download modal footer - stack everything vertically */
+    .download-missing-modal-footer {
+        padding: 12px;
+        flex-direction: column;
+        gap: 10px;
+        align-items: stretch;
+    }
+
+    .download-phase-controls {
+        width: 100%;
+        flex-direction: column;
+        gap: 8px;
+        align-items: stretch;
+    }
+
+    /* Toggle container - stack vertically, prevent overflow */
+    .force-download-toggle-container {
+        width: 100%;
+        padding: 8px 12px;
+        box-sizing: border-box;
+    }
+
+    .force-download-toggle {
+        gap: 8px;
+    }
+
+    .force-download-toggle span {
+        font-size: 11px;
+        line-height: 1.3;
+        word-break: break-word;
+    }
+
+    .force-download-toggle input[type="checkbox"] {
+        width: 40px;
+        height: 20px;
+        flex-shrink: 0;
+    }
+
+    .force-download-toggle input[type="checkbox"]:before {
+        width: 14px;
+        height: 14px;
+    }
+
+    .force-download-toggle input[type="checkbox"]:checked:before {
+        transform: translateX(20px);
+    }
+
+    /* All download control buttons - full width stacked */
+    .download-control-btn {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+        padding: 10px 14px;
+        font-size: 12px;
+        text-align: center;
+        box-sizing: border-box;
+    }
+
+    .modal-close-section {
+        width: 100%;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .modal-close-section .download-control-btn {
+        width: 100%;
+    }
+
+    .youtube-discovery-modal {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .artist-download-modal-content {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .confirmation-modal {
+        width: 90vw;
+        max-width: 90vw;
+        padding: 24px;
+    }
+
+    .confirmation-modal button {
+        width: 100%;
+        min-height: 44px;
+    }
+
+    .genre-browser-modal-container {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .tool-help-modal-content {
+        width: 95vw;
+        max-width: 95vw;
+    }
+
+    /* Wishlist & Watchlist modals (playlist-modal based) */
+    .playlist-modal {
+        width: 100%;
+        max-width: 100%;
+        max-height: 95vh;
+        border-radius: 16px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .playlist-modal-header {
+        padding: 16px;
+        flex-wrap: wrap;
+        gap: 8px;
+        flex-shrink: 0;
+    }
+
+    .playlist-header-content h2 {
+        font-size: 18px;
+    }
+
+    .playlist-quick-info {
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    /* Critical fix: allow modal body to scroll */
+    .playlist-modal-body {
+        padding: 0 16px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        flex: 1;
+        min-height: 0;
+    }
+
+    /* Wishlist category tracks view */
+    .wishlist-category-tracks {
+        height: auto;
+        padding: 0 16px;
+        overflow: visible;
+    }
+
+    /* Tracks scroll container - fit within modal */
+    .playlist-tracks-scroll {
+        max-height: none;
+        overflow-y: visible;
+        flex: none;
+    }
+
+    /* Album grid needs to be able to grow */
+    .wishlist-album-grid {
+        overflow: visible;
+    }
+
+    .playlist-modal-footer {
+        padding: 16px;
+        flex-direction: column;
+        gap: 10px;
+        flex-shrink: 0;
+    }
+
+    .playlist-modal-footer-left,
+    .playlist-modal-footer-right {
+        width: 100%;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    /* Footer/action buttons - full width stacked */
+    .playlist-modal-footer .playlist-modal-btn,
+    .watchlist-actions .playlist-modal-btn {
+        width: 100%;
+        min-height: 44px;
+        text-align: center;
+    }
+
+    /* Inline remove buttons - compact sizing */
+    .watchlist-remove-btn {
+        width: auto;
+        min-height: auto;
+        padding: 6px 12px;
+        font-size: 12px;
+        min-width: auto;
+        flex-shrink: 0;
+    }
+
+    /* Watchlist artist items */
+    .watchlist-artist-item {
+        padding: 12px 14px;
+        gap: 10px;
+    }
+
+    .watchlist-artist-image,
+    .watchlist-artist-image-placeholder {
+        width: 44px;
+        height: 44px;
+        margin-right: 10px;
+    }
+
+    .watchlist-artist-name {
+        font-size: 14px;
+    }
+
+    .watchlist-artist-date,
+    .watchlist-artist-scan {
+        font-size: 11px;
+    }
+
+    .watchlist-search-container {
+        padding: 0 16px;
+    }
+
+    /* Watchlist live activity - stack on mobile */
+    #watchlist-live-activity {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    /* Wishlist category grid */
+    .wishlist-category-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+        padding: 16px;
+    }
+
+    .wishlist-category-card {
+        min-height: 140px;
+    }
+
+    /* Wishlist track items */
+    .wishlist-track-item {
+        padding: 10px 12px;
+        padding-right: 50px;
+        gap: 8px;
+    }
+
+    .wishlist-track-number {
+        width: 24px;
+        font-size: 12px;
+    }
+
+    .wishlist-track-name {
+        font-size: 13px;
+    }
+
+    .wishlist-track-artists {
+        font-size: 12px;
+    }
+
+    .wishlist-delete-btn {
+        padding: 6px 8px;
+        font-size: 13px;
+        right: 8px;
+    }
+
+    .wishlist-delete-album-btn {
+        padding: 6px 8px;
+        font-size: 13px;
+        right: 8px;
+    }
+
+    .wishlist-delete-btn-small {
+        padding: 4px 8px;
+        font-size: 12px;
+    }
+
+    .wishlist-back-btn {
+        min-height: 36px;
+        font-size: 13px;
+    }
+
+    /* Modal footer buttons */
+    .modal-footer button,
+    .modal-actions button {
+        flex: 1;
+        min-height: 44px;
+    }
+
+    /* --- Phase 9: Touch & Hover Adaptations --- */
+
+    /* Global touch targets - only standalone/action buttons, not inline */
+    button:not(.watchlist-remove-btn):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close) {
+        min-height: 38px;
+    }
+
+    /* Range slider thumbs */
+    input[type="range"]::-webkit-slider-thumb {
+        width: 24px;
+        height: 24px;
+    }
+
+    input[type="range"]::-moz-range-thumb {
+        width: 24px;
+        height: 24px;
+    }
+
+    input[type="range"] {
+        min-height: 12px;
+    }
+
+    /* Fix hover-only invisible elements */
+    .wishlist-delete-btn {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .wishlist-delete-album-btn {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    /* --- Phase 10: Typography & Spacing --- */
+
+    /* Prevent iOS zoom on focus */
+    input,
+    select,
+    textarea {
+        font-size: 16px;
+    }
+
+    /* Font size floors */
+    .app-subtitle,
+    .stat-label,
+    .stat-value-small {
+        font-size: 12px;
+    }
+
+    /* Scale down oversized headings */
+    .discover-hero-title {
+        font-size: 32px;
+    }
+
+    .page-header h2 {
+        font-size: 22px;
+    }
+
+    /* Spacing reductions */
+    .page {
+        padding: 70px 16px 16px 16px;
+    }
+
+    .activity-section {
+        padding: 16px;
+    }
+
+    /* --- Chart slideshow grids (fixed 4-col → responsive) --- */
+    .new-charts-grid,
+    .dj-charts-grid,
+    .featured-charts-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+    }
+
+    /* --- Media player compact --- */
+    .media-player {
+        margin: 8px 10px;
+        padding: 14px;
+        border-radius: 12px;
+    }
+
+    .media-header {
+        gap: 10px;
+        margin-bottom: 6px;
+    }
+
+    .media-player .track-title {
+        font-size: 13px;
+    }
+
+    .media-player .artist-name {
+        font-size: 11px;
+    }
+
+    .media-expanded {
+        margin-top: 6px;
+        padding-top: 6px;
+    }
+
+    .media-controls {
+        gap: 8px;
+    }
+
+    .volume-control {
+        gap: 6px;
+    }
+
+    .volume-slider {
+        width: 80px;
+    }
+
+    /* --- Settings form inputs full width --- */
+    .form-group select {
+        width: 100%;
+    }
+
+    .form-group input[type="number"] {
+        width: 100%;
+    }
+
+    .form-group input[type="text"],
+    .form-group input[type="url"],
+    .form-group input[type="password"] {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* --- Toast container mobile adjustment --- */
+    .toast-container {
+        bottom: 16px;
+        left: 16px;
+        right: 16px;
+        transform: none;
+        width: auto;
+        z-index: 10003;
+    }
+
+    .toast {
+        max-width: 100%;
+    }
+}
+
+/* ======================================
+   EXTRA SMALL SCREENS (≤480px)
+   ====================================== */
+
+@media (max-width: 480px) {
+
+    .page {
+        padding: 70px 12px 12px 12px;
+    }
+
+    .stats-grid-dashboard {
+        grid-template-columns: 1fr;
+    }
+
+    .discover-card {
+        width: 140px;
+    }
+
+    .discover-hero-title {
+        font-size: 26px;
+    }
+
+    .artist-card {
+        width: 100%;
+        max-width: 280px;
+    }
+
+    .header-button {
+        font-size: 13px;
+        padding: 10px 14px;
+    }
+
+    .sync-tab-button {
+        min-width: 100%;
+    }
+
+    .matching-modal-actions {
+        padding: 12px;
+    }
+
+    /* Tool cards tighter on small screens */
+    .tool-card {
+        padding: 16px 12px;
+    }
+
+    .tool-card-title {
+        font-size: 14px;
+    }
+
+    /* Enhanced search - smaller artist cards */
+    .enh-item-image.artist-image {
+        width: 100px;
+        height: 100px;
+    }
+
+    .enh-item-image-placeholder.artist-placeholder {
+        width: 100px;
+        height: 100px;
+        font-size: 40px;
+    }
+
+    .enh-compact-item.artist-card .enh-item-info {
+        min-width: 100px;
+        max-width: 140px;
+    }
+
+    .enh-compact-list.albums-grid {
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+        gap: 10px;
+    }
+
+    /* Beatport tighter */
+    .beatport-tab-button {
+        flex: 0 0 100%;
+        font-size: 12px;
+    }
+
+    .beatport-rebuild-slider {
+        height: 220px;
+    }
+
+    .beatport-rebuild-track-title {
+        font-size: 16px;
+    }
+
+    .beatport-rebuild-artist-name {
+        font-size: 12px;
+    }
+
+    .beatport-top10-card,
+    .beatport-hype10-card {
+        padding: 10px;
+    }
+
+    .beatport-top10-card-artwork,
+    .beatport-hype10-card-artwork {
+        width: 36px;
+        height: 36px;
+    }
+
+    /* Beatport card grids: single column at 480px */
+    .beatport-releases-grid,
+    .beatport-hype-picks-grid,
+    .beatport-charts-grid,
+    .beatport-dj-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+        padding: 8px;
+    }
+
+    .beatport-release-card,
+    .beatport-hype-pick-card {
+        padding: 8px;
+    }
+
+    .beatport-release-artwork,
+    .beatport-hype-pick-artwork {
+        width: 40px;
+        height: 40px;
+    }
+
+    .beatport-chart-card,
+    .beatport-dj-card {
+        min-height: 100px;
+    }
+
+    /* Playlist modal footer tighter */
+    .playlist-modal-header {
+        padding: 12px;
+    }
+
+    .playlist-modal-footer {
+        padding: 12px;
+    }
+
+    .playlist-modal-footer .playlist-modal-btn {
+        padding: 10px 16px;
+        font-size: 13px;
+    }
+
+    /* Watchlist items even tighter */
+    .watchlist-artist-item {
+        padding: 10px 12px;
+    }
+
+    .watchlist-artist-image,
+    .watchlist-artist-image-placeholder {
+        width: 38px;
+        height: 38px;
+        margin-right: 8px;
+    }
+
+    .watchlist-artist-name {
+        font-size: 13px;
+    }
+
+    .watchlist-remove-btn {
+        padding: 5px 10px;
+        font-size: 11px;
+    }
+
+    /* Download modal - even more compact */
+    .download-missing-modal-hero {
+        padding: 10px 12px;
+    }
+
+    .download-missing-modal-hero-image,
+    .download-missing-modal-hero-image.artist,
+    .download-missing-modal-hero-image.album {
+        width: 40px;
+        height: 40px;
+    }
+
+    .download-missing-modal-hero-icon {
+        width: 40px;
+        height: 40px;
+        font-size: 20px;
+    }
+
+    .download-missing-modal-hero-title {
+        font-size: 14px;
+    }
+
+    .download-missing-modal-hero-subtitle {
+        font-size: 11px;
+    }
+
+    .download-missing-modal-body {
+        padding: 8px 10px 12px 10px;
+    }
+
+    /* Hide Library Match column too at 480px */
+    .download-tracks-table th:nth-child(5),
+    .download-tracks-table td.track-match-status {
+        display: none;
+    }
+
+    .track-name {
+        max-width: 100px;
+    }
+
+    .track-artist {
+        max-width: 70px;
+    }
+
+    .download-tracks-table th,
+    .download-tracks-table td {
+        padding: 5px 3px;
+        font-size: 9px;
+    }
+
+    .download-control-btn {
+        padding: 8px 10px;
+        font-size: 11px;
+    }
+
+    .force-download-toggle span {
+        font-size: 10px;
+    }
+
+    .download-missing-modal-footer {
+        padding: 10px;
+    }
+
+    .dashboard-stat-number {
+        font-size: 18px;
+    }
+
+    /* Chart grids single column at small screens */
+    .new-charts-grid,
+    .dj-charts-grid,
+    .featured-charts-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    /* Media player even more compact */
+    .media-player {
+        margin: 6px 8px;
+        padding: 10px;
+    }
+
+    .media-player .track-title {
+        font-size: 12px;
+    }
+
+    .volume-slider {
+        width: 60px;
+    }
+}
+
+/* ======================================
+   TOUCH DEVICE ADAPTATIONS
+   ====================================== */
+
+@media (hover: none) {
+
+    /* Disable alphabet-btn scale hover effect for touch */
+    .alphabet-btn:hover {
+        transform: none;
+    }
+
+    /* Make hover-reveal elements always visible */
+    .wishlist-delete-btn,
+    .wishlist-delete-album-btn {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    /* Active feedback states */
+    button:active,
+    .nav-button:active,
+    .filter-btn:active,
+    .header-button:active {
+        opacity: 0.7;
+        transition: opacity 0.1s ease;
+    }
+}
