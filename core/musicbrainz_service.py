@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 import json
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
@@ -87,26 +87,26 @@ class MusicBrainzService:
             if conn:
                 conn.close()
     
-    def _save_to_cache(self, entity_type: str, entity_name: str, artist_name: Optional[str], 
+    def _save_to_cache(self, entity_type: str, entity_name: str, artist_name: Optional[str],
                        musicbrainz_id: Optional[str], metadata: Optional[Dict], confidence: int):
         """Save MusicBrainz result to cache"""
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            
+
             metadata_json = json.dumps(metadata) if metadata else None
-            
+
             cursor.execute("""
-                INSERT OR REPLACE INTO musicbrainz_cache 
+                INSERT OR REPLACE INTO musicbrainz_cache
                 (entity_type, entity_name, artist_name, musicbrainz_id, metadata_json, match_confidence, last_updated)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (entity_type, entity_name, artist_name, musicbrainz_id, metadata_json, confidence, datetime.now()))
-            
+
             conn.commit()
-            
+
             logger.debug(f"Cached {entity_type} '{entity_name}' (MBID: {musicbrainz_id}, confidence: {confidence})")
-            
+
         except Exception as e:
             logger.error(f"Error saving to cache: {e}")
             if conn:
@@ -410,7 +410,7 @@ class MusicBrainzService:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            
+
             cursor.execute("""
                 UPDATE tracks
                 SET musicbrainz_recording_id = ?,
@@ -418,11 +418,11 @@ class MusicBrainzService:
                     musicbrainz_match_status = ?
                 WHERE id = ?
             """, (mbid, datetime.now(), status, track_id))
-            
+
             conn.commit()
-            
+
             logger.debug(f"Updated track {track_id} with MBID: {mbid}, status: {status}")
-            
+
         except Exception as e:
             logger.error(f"Error updating track {track_id}: {e}")
             if conn:
@@ -430,3 +430,4 @@ class MusicBrainzService:
         finally:
             if conn:
                 conn.close()
+

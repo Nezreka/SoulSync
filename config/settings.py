@@ -211,6 +211,9 @@ class ConfigManager:
                 "enabled": True,
                 "embed_album_art": True
             },
+            "musicbrainz": {
+                "embed_tags": True
+            },
             "playlist_sync": {
                 "create_backup": True
             },

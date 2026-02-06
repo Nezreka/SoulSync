@@ -297,6 +297,9 @@ class MusicDatabase:
             # Add MusicBrainz columns to library tables (migration)
             self._add_musicbrainz_columns(cursor)
 
+            # Add external ID columns (Spotify/iTunes) to library tables (migration)
+            self._add_external_id_columns(cursor)
+
             conn.commit()
             logger.info("Database initialized successfully")
             
@@ -950,6 +953,46 @@ class MusicDatabase:
             
         except Exception as e:
             logger.error(f"Error adding MusicBrainz columns: {e}")
+            # Don't raise - this is a migration, database can still function
+
+    def _add_external_id_columns(self, cursor):
+        """Add Spotify/iTunes external ID columns to library tables for enrichment"""
+        try:
+            # Artists table
+            cursor.execute("PRAGMA table_info(artists)")
+            artists_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'spotify_artist_id' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN spotify_artist_id TEXT")
+                cursor.execute("ALTER TABLE artists ADD COLUMN itunes_artist_id TEXT")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_spotify_id ON artists (spotify_artist_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_itunes_id ON artists (itunes_artist_id)")
+                logger.info("Added external ID columns to artists table")
+
+            # Albums table
+            cursor.execute("PRAGMA table_info(albums)")
+            albums_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'spotify_album_id' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN spotify_album_id TEXT")
+                cursor.execute("ALTER TABLE albums ADD COLUMN itunes_album_id TEXT")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_spotify_id ON albums (spotify_album_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_itunes_id ON albums (itunes_album_id)")
+                logger.info("Added external ID columns to albums table")
+
+            # Tracks table
+            cursor.execute("PRAGMA table_info(tracks)")
+            tracks_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'spotify_track_id' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN spotify_track_id TEXT")
+                cursor.execute("ALTER TABLE tracks ADD COLUMN itunes_track_id TEXT")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_spotify_id ON tracks (spotify_track_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_itunes_id ON tracks (itunes_track_id)")
+                logger.info("Added external ID columns to tracks table")
+
+        except Exception as e:
+            logger.error(f"Error adding external ID columns: {e}")
             # Don't raise - this is a migration, database can still function
 
     def close(self):
