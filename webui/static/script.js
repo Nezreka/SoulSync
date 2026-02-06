@@ -1682,6 +1682,7 @@ async function loadSettingsData() {
 
         // Populate AcoustID settings
         document.getElementById('acoustid-api-key').value = settings.acoustid?.api_key || '';
+        document.getElementById('acoustid-enabled').checked = settings.acoustid?.enabled || false;
 
         // Populate Download settings (right column)
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
@@ -2082,7 +2083,8 @@ async function saveSettings() {
             token: document.getElementById('listenbrainz-token').value
         },
         acoustid: {
-            api_key: document.getElementById('acoustid-api-key').value
+            api_key: document.getElementById('acoustid-api-key').value,
+            enabled: document.getElementById('acoustid-enabled').checked
         },
         download_source: {
             mode: document.getElementById('download-source-mode').value,

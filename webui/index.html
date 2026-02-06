@@ -131,7 +131,7 @@
 
             <!-- Version Section -->
             <div class="version-section">
-                <button class="version-button" onclick="showVersionInfo()">v1.4</button>
+                <button class="version-button" onclick="showVersionInfo()">v1.5</button>
             </div>
 
             <!-- Status Section -->
@@ -2620,11 +2620,20 @@
 
                                 <!-- AcoustID Settings -->
                                 <div class="api-service-frame">
-                                    <h4 class="service-title acoustid-title">AcoustID</h4>
+                                    <h4 class="service-title acoustid-title">AcoustID Verification</h4>
+                                    <div class="form-group" style="margin-bottom: 12px;">
+                                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                            <input type="checkbox" id="acoustid-enabled" style="width: 16px; height: 16px;">
+                                            <span>Enable Download Verification</span>
+                                        </label>
+                                        <div style="color: #888; font-size: 0.8em; margin-top: 4px; margin-left: 24px;">
+                                            Verifies downloaded audio matches expected track using fingerprints
+                                        </div>
+                                    </div>
                                     <div class="form-group">
                                         <label>API Key:</label>
                                         <input type="password" id="acoustid-api-key"
-                                            placeholder="AcoustID API Key (Optional)">
+                                            placeholder="AcoustID API Key">
                                     </div>
                                     <div class="callback-info">
                                         <div class="callback-help">Get your free API key from <a
@@ -2632,8 +2641,8 @@
                                                 style="color: #ba55d3;">AcoustID Applications</a></div>
                                         <div class="callback-help"
                                             style="opacity: 0.7; font-size: 0.85em; margin-top: 4px;">
-                                            Optional: Enables audio fingerprint verification of downloads. If not
-                                            provided, verification is skipped.
+                                            The fpcalc fingerprint tool is automatically downloaded if needed.
+                                            Failed verifications move files to Quarantine folder.
                                         </div>
                                     </div>
                                 </div>
@@ -2647,6 +2656,8 @@
                                         Soulseek</button>
                                     <button class="test-button" onclick="testConnection('listenbrainz')">Test
                                         ListenBrainz</button>
+                                    <button class="test-button" onclick="testConnection('acoustid')">Test
+                                        AcoustID</button>
                                 </div>
                             </div>
 
