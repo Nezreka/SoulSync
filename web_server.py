@@ -8039,13 +8039,13 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
     if artist.get('id'):
         artist_id = str(artist['id'])
         if artist_id.isdigit():
-            pass  # iTunes artist ID not available in this context reliably
+            metadata['itunes_artist_id'] = artist_id
         else:
             metadata['spotify_artist_id'] = artist_id
     if spotify_album and spotify_album.get('id'):
         album_id = str(spotify_album['id'])
         if album_id.isdigit():
-            pass  # iTunes album ID not available in this context reliably
+            metadata['itunes_album_id'] = album_id
         else:
             metadata['spotify_album_id'] = album_id
 
@@ -8108,6 +8108,10 @@ def _embed_source_ids(audio_file, metadata: dict):
             id_tags['SPOTIFY_ALBUM_ID'] = metadata['spotify_album_id']
         if metadata.get('itunes_track_id'):
             id_tags['ITUNES_TRACK_ID'] = metadata['itunes_track_id']
+        if metadata.get('itunes_artist_id'):
+            id_tags['ITUNES_ARTIST_ID'] = metadata['itunes_artist_id']
+        if metadata.get('itunes_album_id'):
+            id_tags['ITUNES_ALBUM_ID'] = metadata['itunes_album_id']
 
         # ── 2. MusicBrainz lookup for MBID, genres, and ISRC ──
         # The global rate limiter in musicbrainz_client.py serializes all API
