@@ -34568,8 +34568,21 @@ async function searchImportAlbum() {
                 </div>
             </div>
         `).join('');
+        // Show clear button
+        document.getElementById('import-album-clear-btn').classList.remove('hidden');
     } catch (err) {
         grid.innerHTML = `<div style="color:#ef4444;text-align:center;padding:20px;">Error: ${err.message}</div>`;
+    }
+}
+
+function clearImportAlbumSearch() {
+    document.getElementById('import-album-search-input').value = '';
+    document.getElementById('import-album-results').innerHTML = '';
+    document.getElementById('import-album-clear-btn').classList.add('hidden');
+    // Re-show suggestions
+    const sugGrid = document.getElementById('import-suggestions-grid');
+    if (sugGrid && sugGrid.children.length > 0) {
+        document.getElementById('import-suggestions-section').classList.remove('hidden');
     }
 }
 
@@ -34652,9 +34665,10 @@ function resetImportAlbumSearch() {
     }
     // Refresh suggestions since files may have changed
     loadImportSuggestions();
-    // Clear search results
+    // Clear search results and hide clear button
     document.getElementById('import-album-results').innerHTML = '';
     document.getElementById('import-album-search-input').value = '';
+    document.getElementById('import-album-clear-btn').classList.add('hidden');
 }
 
 async function processImportAlbum() {

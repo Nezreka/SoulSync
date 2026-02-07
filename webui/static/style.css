@@ -21791,11 +21791,54 @@ body {
 /* ============================= */
 
 .import-button {
-    background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%) !important;
-    color: #fff !important;
+    position: relative;
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg,
+            rgba(124, 58, 237, 0.12) 0%,
+            rgba(99, 39, 196, 0.18) 100%);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1.5px solid rgba(124, 58, 237, 0.25);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow:
+        0 4px 16px rgba(124, 58, 237, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    padding: 0;
 }
 .import-button:hover {
-    background: linear-gradient(135deg, #a855f7 0%, #c084fc 100%) !important;
+    background: linear-gradient(135deg,
+            rgba(124, 58, 237, 0.18) 0%,
+            rgba(99, 39, 196, 0.25) 100%);
+    border-color: rgba(124, 58, 237, 0.4);
+    transform: scale(1.05);
+    box-shadow:
+        0 6px 20px rgba(124, 58, 237, 0.3),
+        0 3px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.import-button:active {
+    transform: scale(0.95);
+    box-shadow:
+        0 2px 8px rgba(124, 58, 237, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.import-logo {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+    opacity: 0.85;
+    transition: opacity 0.3s ease;
+    filter: invert(1) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+.import-button:hover .import-logo {
+    opacity: 1;
 }
 
 /* Modal container — matches wishlist/playlist modal vibe */
@@ -21987,6 +22030,29 @@ body {
     background: linear-gradient(135deg, #1ed760 0%, #22e167 100%);
     transform: translateY(-1px);
     box-shadow: 0 4px 16px rgba(29, 185, 84, 0.3);
+}
+.import-clear-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.import-clear-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+.import-clear-btn.hidden {
+    display: none;
 }
 
 /* Album grid */

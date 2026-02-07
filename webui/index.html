@@ -195,7 +195,9 @@
                                     </div>
                                 </div>
                             </div>
-                            <button class="header-button import-button" id="import-button" onclick="openImportModal()">📥 Import</button>
+                            <button class="import-button" id="import-button" onclick="openImportModal()" title="Import Music from Staging">
+                                <img src="https://cdn-icons-png.flaticon.com/512/8765/8765164.png" alt="Import" class="import-logo">
+                            </button>
                             <button class="header-button watchlist-button" id="watchlist-button">👁️ Watchlist
                                 (0)</button>
                             <button class="header-button wishlist-button" id="wishlist-button">🎵 Wishlist (0)</button>
@@ -3302,6 +3304,7 @@
                         <div class="import-search-bar">
                             <input type="text" id="import-album-search-input" placeholder="Search for an album..." onkeydown="if(event.key==='Enter')searchImportAlbum()">
                             <button class="import-search-btn" onclick="searchImportAlbum()">Search</button>
+                            <button class="import-clear-btn hidden" id="import-album-clear-btn" onclick="clearImportAlbumSearch()" title="Clear search">✕</button>
                         </div>
                         <div class="import-album-grid" id="import-album-results"></div>
                     </div>
