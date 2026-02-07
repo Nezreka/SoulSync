@@ -29,6 +29,7 @@ services:
       - ./config:/app/config
       - ./logs:/app/logs
       - ./downloads:/app/downloads
+      - ./Staging:/app/Staging
       # Use named volume for database persistence (separate from host database)
       # NOTE: Changed from /app/database to /app/data to avoid overwriting Python package
       - soulsync_database:/app/data

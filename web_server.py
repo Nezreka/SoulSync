@@ -2362,7 +2362,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'listenbrainz', 'acoustid']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'listenbrainz', 'acoustid', 'import']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -24917,6 +24917,637 @@ def musicbrainz_resume():
 
 # ================================================================================================
 # END MUSICBRAINZ INTEGRATION
+# ================================================================================================
+
+
+# ================================================================================================
+# IMPORT / STAGING SYSTEM
+# ================================================================================================
+
+AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif', '.ape'}
+
+def _get_staging_path():
+    """Get the resolved staging folder path."""
+    raw = config_manager.get('import.staging_path', './Staging')
+    return docker_resolve_path(raw)
+
+
+@app.route('/api/import/staging/files', methods=['GET'])
+def import_staging_files():
+    """Scan the staging folder and return audio files with tag metadata."""
+    try:
+        staging_path = _get_staging_path()
+        os.makedirs(staging_path, exist_ok=True)
+
+        files = []
+        for root, _dirs, filenames in os.walk(staging_path):
+            for fname in filenames:
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in AUDIO_EXTENSIONS:
+                    continue
+                full_path = os.path.join(root, fname)
+                rel_path = os.path.relpath(full_path, staging_path)
+
+                # Try reading tags
+                title, artist, album, track_number = None, None, None, None
+                try:
+                    from mutagen import File as MutagenFile
+                    tags = MutagenFile(full_path, easy=True)
+                    if tags:
+                        title = (tags.get('title') or [None])[0]
+                        artist = (tags.get('artist') or [None])[0]
+                        album = (tags.get('album') or [None])[0]
+                        tn = (tags.get('tracknumber') or [None])[0]
+                        if tn:
+                            try:
+                                track_number = int(str(tn).split('/')[0])
+                            except ValueError:
+                                pass
+                except Exception:
+                    pass
+
+                # Fallback to filename parsing
+                if not title:
+                    parsed = _parse_filename_metadata(fname)
+                    title = parsed.get('title') or os.path.splitext(fname)[0]
+                    if not artist:
+                        artist = parsed.get('artist')
+                    if not track_number:
+                        track_number = parsed.get('track_number')
+
+                files.append({
+                    'filename': fname,
+                    'rel_path': rel_path,
+                    'full_path': full_path,
+                    'title': title,
+                    'artist': artist or 'Unknown Artist',
+                    'album': album,
+                    'track_number': track_number,
+                    'extension': ext
+                })
+
+        # Sort by filename
+        files.sort(key=lambda f: f['filename'].lower())
+        return jsonify({'success': True, 'files': files, 'staging_path': staging_path})
+    except Exception as e:
+        logger.error(f"Error scanning staging files: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/import/staging/suggestions', methods=['GET'])
+def import_staging_suggestions():
+    """Suggest albums based on staging folder contents (tags + folder names)."""
+    try:
+        staging_path = _get_staging_path()
+        if not os.path.isdir(staging_path):
+            return jsonify({'success': True, 'suggestions': []})
+
+        # Collect hints from tags and folder structure
+        tag_albums = {}   # (album, artist) -> file count
+        folder_hints = {} # subfolder name -> file count
+
+        for root, _dirs, filenames in os.walk(staging_path):
+            audio_files = [f for f in filenames if os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
+            if not audio_files:
+                continue
+
+            # Folder-based hint: use immediate subfolder name relative to staging
+            rel_dir = os.path.relpath(root, staging_path)
+            if rel_dir != '.':
+                # Use the top-level subfolder as the hint
+                top_folder = rel_dir.split(os.sep)[0]
+                folder_hints[top_folder] = folder_hints.get(top_folder, 0) + len(audio_files)
+
+            # Tag-based hints
+            for fname in audio_files:
+                full_path = os.path.join(root, fname)
+                try:
+                    from mutagen import File as MutagenFile
+                    tags = MutagenFile(full_path, easy=True)
+                    if tags:
+                        album = (tags.get('album') or [None])[0]
+                        artist = (tags.get('artist') or (tags.get('albumartist') or [None]))[0]
+                        if album:
+                            key = (album.strip(), (artist or '').strip())
+                            tag_albums[key] = tag_albums.get(key, 0) + 1
+                except Exception:
+                    pass
+
+        # Build search queries, prioritizing tag-based hints (more specific)
+        queries = []
+        seen_queries_lower = set()
+
+        # Tag-based: sort by file count descending
+        for (album, artist), count in sorted(tag_albums.items(), key=lambda x: -x[1]):
+            q = f"{album} {artist}".strip() if artist else album
+            if q.lower() not in seen_queries_lower:
+                seen_queries_lower.add(q.lower())
+                queries.append(q)
+
+        # Folder-based: parse "Artist - Album" pattern or use as-is
+        for folder, count in sorted(folder_hints.items(), key=lambda x: -x[1]):
+            # Try to parse "Artist - Album" folder name
+            q = folder.replace('_', ' ')
+            if q.lower() not in seen_queries_lower:
+                seen_queries_lower.add(q.lower())
+                queries.append(q)
+
+        # Cap at 5 queries to keep it fast
+        queries = queries[:5]
+
+        if not queries:
+            return jsonify({'success': True, 'suggestions': []})
+
+        # Search Spotify for each hint, take top 1-2 results per query
+        suggestions = []
+        seen_ids = set()
+        for q in queries:
+            try:
+                albums = spotify_client.search_albums(q, limit=2)
+                for a in albums:
+                    if a.id not in seen_ids:
+                        seen_ids.add(a.id)
+                        suggestions.append({
+                            'id': a.id,
+                            'name': a.name,
+                            'artist': ', '.join(a.artists) if a.artists else 'Unknown Artist',
+                            'release_date': a.release_date or '',
+                            'total_tracks': a.total_tracks,
+                            'image_url': a.image_url,
+                            'album_type': a.album_type or 'album',
+                            'hint_query': q
+                        })
+            except Exception as search_err:
+                logger.warning(f"Suggestion search failed for '{q}': {search_err}")
+
+        return jsonify({'success': True, 'suggestions': suggestions[:8]})
+    except Exception as e:
+        logger.error(f"Error getting staging suggestions: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/import/search/albums', methods=['GET'])
+def import_search_albums():
+    """Search for albums via Spotify for import matching."""
+    try:
+        query = request.args.get('q', '').strip()
+        if not query:
+            return jsonify({'success': False, 'error': 'Missing query parameter'}), 400
+
+        limit = min(int(request.args.get('limit', 12)), 50)
+        albums = spotify_client.search_albums(query, limit=limit)
+
+        results = []
+        for a in albums:
+            results.append({
+                'id': a.id,
+                'name': a.name,
+                'artist': ', '.join(a.artists) if a.artists else 'Unknown Artist',
+                'release_date': a.release_date or '',
+                'total_tracks': a.total_tracks,
+                'image_url': a.image_url,
+                'album_type': a.album_type or 'album'
+            })
+
+        return jsonify({'success': True, 'albums': results})
+    except Exception as e:
+        logger.error(f"Error searching albums for import: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/import/album/match', methods=['POST'])
+def import_album_match():
+    """Match staging files to an album's tracklist."""
+    try:
+        data = request.get_json()
+        album_id = data.get('album_id')
+        if not album_id:
+            return jsonify({'success': False, 'error': 'Missing album_id'}), 400
+
+        # Get album info and tracklist from Spotify
+        album_data = spotify_client.get_album(album_id)
+        if not album_data:
+            return jsonify({'success': False, 'error': 'Album not found'}), 404
+
+        tracks_data = spotify_client.get_album_tracks(album_id)
+        if not tracks_data or 'items' not in tracks_data:
+            return jsonify({'success': False, 'error': 'Could not get album tracks'}), 500
+
+        spotify_tracks = tracks_data['items']
+
+        # Build album summary
+        album_artists = [a['name'] for a in album_data.get('artists', [])]
+        album_info = {
+            'id': album_id,
+            'name': album_data.get('name', 'Unknown Album'),
+            'artist': ', '.join(album_artists),
+            'artists': album_artists,
+            'release_date': album_data.get('release_date', ''),
+            'total_tracks': album_data.get('total_tracks', len(spotify_tracks)),
+            'image_url': (album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None),
+            'genres': album_data.get('genres', [])
+        }
+
+        # Get artist info for context building later
+        if album_data.get('artists'):
+            primary_artist = album_data['artists'][0]
+            album_info['artist_id'] = primary_artist.get('id', '')
+
+        # Scan staging files
+        staging_path = _get_staging_path()
+        staging_files = []
+        for root, _dirs, filenames in os.walk(staging_path):
+            for fname in filenames:
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in AUDIO_EXTENSIONS:
+                    continue
+                full_path = os.path.join(root, fname)
+
+                title, artist, album_tag, track_number = None, None, None, None
+                try:
+                    from mutagen import File as MutagenFile
+                    tags = MutagenFile(full_path, easy=True)
+                    if tags:
+                        title = (tags.get('title') or [None])[0]
+                        artist = (tags.get('artist') or [None])[0]
+                        album_tag = (tags.get('album') or [None])[0]
+                        tn = (tags.get('tracknumber') or [None])[0]
+                        if tn:
+                            try:
+                                track_number = int(str(tn).split('/')[0])
+                            except ValueError:
+                                pass
+                except Exception:
+                    pass
+
+                if not title:
+                    parsed = _parse_filename_metadata(fname)
+                    title = parsed.get('title') or os.path.splitext(fname)[0]
+                    if not artist:
+                        artist = parsed.get('artist')
+                    if not track_number:
+                        track_number = parsed.get('track_number')
+
+                staging_files.append({
+                    'filename': fname,
+                    'full_path': full_path,
+                    'title': title,
+                    'artist': artist,
+                    'album': album_tag,
+                    'track_number': track_number
+                })
+
+        # Match each Spotify track to the best staging file
+        matches = []
+        used_files = set()
+
+        for sp_track in spotify_tracks:
+            sp_name = sp_track.get('name', '')
+            sp_number = sp_track.get('track_number', 0)
+            sp_disc = sp_track.get('disc_number', 1)
+
+            best_match = None
+            best_score = 0.0
+
+            for i, sf in enumerate(staging_files):
+                if i in used_files:
+                    continue
+
+                score = 0.0
+                # Title similarity (weight 0.5)
+                title_sim = matching_engine.similarity_score(
+                    matching_engine.normalize_string(sp_name),
+                    matching_engine.normalize_string(sf['title'] or '')
+                )
+                score += title_sim * 0.5
+
+                # Track number match (weight 0.5)
+                if sf['track_number'] and sp_number:
+                    if sf['track_number'] == sp_number:
+                        score += 0.5
+                    elif abs(sf['track_number'] - sp_number) <= 1:
+                        score += 0.2
+
+                if score > best_score and score >= 0.4:
+                    best_score = score
+                    best_match = i
+
+            if best_match is not None:
+                used_files.add(best_match)
+                matches.append({
+                    'spotify_track': {
+                        'name': sp_name,
+                        'track_number': sp_number,
+                        'disc_number': sp_disc,
+                        'duration_ms': sp_track.get('duration_ms', 0),
+                        'id': sp_track.get('id', ''),
+                        'artists': [a['name'] for a in sp_track.get('artists', [])],
+                        'uri': sp_track.get('uri', '')
+                    },
+                    'staging_file': staging_files[best_match],
+                    'confidence': round(best_score, 2)
+                })
+            else:
+                matches.append({
+                    'spotify_track': {
+                        'name': sp_name,
+                        'track_number': sp_number,
+                        'disc_number': sp_disc,
+                        'duration_ms': sp_track.get('duration_ms', 0),
+                        'id': sp_track.get('id', ''),
+                        'artists': [a['name'] for a in sp_track.get('artists', [])],
+                        'uri': sp_track.get('uri', '')
+                    },
+                    'staging_file': None,
+                    'confidence': 0
+                })
+
+        # Unmatched staging files
+        unmatched_files = [sf for i, sf in enumerate(staging_files) if i not in used_files]
+
+        return jsonify({
+            'success': True,
+            'album': album_info,
+            'matches': matches,
+            'unmatched_files': unmatched_files
+        })
+    except Exception as e:
+        logger.error(f"Error matching album for import: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/import/album/process', methods=['POST'])
+def import_album_process():
+    """Process matched album files through the post-processing pipeline."""
+    try:
+        data = request.get_json()
+        album = data.get('album', {})
+        matches = data.get('matches', [])
+
+        if not album or not matches:
+            return jsonify({'success': False, 'error': 'Missing album or matches data'}), 400
+
+        processed = 0
+        errors = []
+        album_name = album.get('name', 'Unknown Album')
+        artist_name = album.get('artist', 'Unknown Artist')
+        artist_id = album.get('artist_id', '')
+        album_id = album.get('id', '')
+
+        # Get artist genres from Spotify if possible
+        artist_genres = album.get('genres', [])
+        if not artist_genres and artist_id:
+            try:
+                sp_artist = spotify_client.sp.artist(artist_id) if hasattr(spotify_client, 'sp') and spotify_client.sp else None
+                if sp_artist:
+                    artist_genres = sp_artist.get('genres', [])
+            except Exception:
+                pass
+
+        for match in matches:
+            staging_file = match.get('staging_file')
+            spotify_track = match.get('spotify_track')
+            if not staging_file or not spotify_track:
+                continue
+
+            file_path = staging_file.get('full_path', '')
+            if not os.path.isfile(file_path):
+                errors.append(f"File not found: {staging_file.get('filename', '?')}")
+                continue
+
+            track_name = spotify_track.get('name', 'Unknown Track')
+            track_number = spotify_track.get('track_number', 1)
+            disc_number = spotify_track.get('disc_number', 1)
+            track_artists = spotify_track.get('artists', [artist_name])
+
+            context_key = f"import_album_{album_id}_{track_number}_{uuid.uuid4().hex[:8]}"
+            context = {
+                'spotify_artist': {
+                    'name': artist_name,
+                    'id': artist_id,
+                    'genres': artist_genres
+                },
+                'spotify_album': {
+                    'id': album_id,
+                    'name': album_name,
+                    'release_date': album.get('release_date', ''),
+                    'total_tracks': album.get('total_tracks', len(matches)),
+                    'image_url': album.get('image_url', '')
+                },
+                'track_info': {
+                    'name': track_name,
+                    'id': spotify_track.get('id', ''),
+                    'track_number': track_number,
+                    'disc_number': disc_number,
+                    'duration_ms': spotify_track.get('duration_ms', 0),
+                    'artists': [{'name': a} if isinstance(a, str) else a for a in track_artists],
+                    'uri': spotify_track.get('uri', '')
+                },
+                'original_search_result': {
+                    'title': track_name,
+                    'artist': artist_name,
+                    'album': album_name,
+                    'track_number': track_number,
+                    'disc_number': disc_number,
+                    'spotify_clean_title': track_name,
+                    'spotify_clean_album': album_name,
+                    'artists': [{'name': a} if isinstance(a, str) else a for a in track_artists]
+                },
+                'is_album_download': True,
+                'has_clean_spotify_data': True,
+                'has_full_spotify_metadata': True
+            }
+
+            try:
+                _post_process_matched_download(context_key, context, file_path)
+                processed += 1
+                logger.info(f"Import processed: {track_number}. {track_name} from {album_name}")
+            except Exception as proc_err:
+                err_msg = f"{track_name}: {str(proc_err)}"
+                errors.append(err_msg)
+                logger.error(f"Import processing error: {err_msg}")
+
+        # Trigger library scan
+        if web_scan_manager and processed > 0:
+            threading.Thread(
+                target=lambda: web_scan_manager.request_scan("Import album processed"),
+                daemon=True
+            ).start()
+
+        add_activity_item("📥", "Album Imported", f"{album_name} by {artist_name} ({processed}/{len(matches)} tracks)", "Now")
+
+        return jsonify({
+            'success': True,
+            'processed': processed,
+            'total': len(matches),
+            'errors': errors
+        })
+    except Exception as e:
+        logger.error(f"Error processing album import: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/import/singles/process', methods=['POST'])
+def import_singles_process():
+    """Process individual staging files as singles through the post-processing pipeline."""
+    try:
+        data = request.get_json()
+        files = data.get('files', [])
+
+        if not files:
+            return jsonify({'success': False, 'error': 'No files provided'}), 400
+
+        processed = 0
+        errors = []
+
+        for file_info in files:
+            file_path = file_info.get('full_path', '')
+            if not os.path.isfile(file_path):
+                errors.append(f"File not found: {file_info.get('filename', '?')}")
+                continue
+
+            title = file_info.get('title', '')
+            artist = file_info.get('artist', '')
+
+            # Fallback to filename parsing if no metadata
+            if not title:
+                parsed = _parse_filename_metadata(file_info.get('filename', ''))
+                title = parsed.get('title', os.path.splitext(file_info.get('filename', 'Unknown'))[0])
+                if not artist:
+                    artist = parsed.get('artist', '')
+
+            # Search Spotify for rich metadata
+            spotify_track_data = None
+            spotify_artist_data = None
+            spotify_album_data = None
+
+            if title:
+                try:
+                    search_q = f"{title} {artist}" if artist else title
+                    tracks = spotify_client.search_tracks(search_q, limit=1)
+                    if tracks:
+                        t = tracks[0]
+                        spotify_track_data = {
+                            'name': t.name,
+                            'id': t.id,
+                            'track_number': t.track_number if hasattr(t, 'track_number') else 1,
+                            'disc_number': 1,
+                            'duration_ms': t.duration_ms if hasattr(t, 'duration_ms') else 0,
+                            'artists': [{'name': a} for a in (t.artists if hasattr(t, 'artists') else [artist])],
+                            'uri': f"spotify:track:{t.id}"
+                        }
+                        # Get album info from the track's album
+                        if hasattr(t, 'album_id') and t.album_id:
+                            sp_album = spotify_client.get_album(t.album_id)
+                            if sp_album:
+                                spotify_album_data = {
+                                    'id': t.album_id,
+                                    'name': sp_album.get('name', ''),
+                                    'release_date': sp_album.get('release_date', ''),
+                                    'total_tracks': sp_album.get('total_tracks', 1),
+                                    'image_url': (sp_album.get('images', [{}])[0].get('url') if sp_album.get('images') else '')
+                                }
+                                # Get artist genres
+                                sp_artists = sp_album.get('artists', [])
+                                if sp_artists:
+                                    spotify_artist_data = {
+                                        'name': sp_artists[0].get('name', artist),
+                                        'id': sp_artists[0].get('id', ''),
+                                        'genres': []
+                                    }
+                                    try:
+                                        sp_a = spotify_client.sp.artist(sp_artists[0]['id']) if hasattr(spotify_client, 'sp') and spotify_client.sp else None
+                                        if sp_a:
+                                            spotify_artist_data['genres'] = sp_a.get('genres', [])
+                                    except Exception:
+                                        pass
+
+                        # Fallback artist data from track
+                        if not spotify_artist_data:
+                            track_artists = t.artists if hasattr(t, 'artists') else [artist]
+                            spotify_artist_data = {
+                                'name': track_artists[0] if track_artists else artist,
+                                'id': '',
+                                'genres': []
+                            }
+
+                        # Fallback album data
+                        if not spotify_album_data:
+                            spotify_album_data = {
+                                'id': '',
+                                'name': t.album if hasattr(t, 'album') else '',
+                                'release_date': '',
+                                'total_tracks': 1,
+                                'image_url': t.image_url if hasattr(t, 'image_url') else ''
+                            }
+                except Exception as sp_err:
+                    logger.warning(f"Spotify lookup failed for '{title}': {sp_err}")
+
+            # Build context — use Spotify data if found, else use file metadata
+            if not spotify_artist_data:
+                spotify_artist_data = {'name': artist or 'Unknown Artist', 'id': '', 'genres': []}
+            if not spotify_album_data:
+                spotify_album_data = {'id': '', 'name': '', 'release_date': '', 'total_tracks': 1, 'image_url': ''}
+            if not spotify_track_data:
+                spotify_track_data = {
+                    'name': title, 'id': '', 'track_number': 1, 'disc_number': 1,
+                    'duration_ms': 0, 'artists': [{'name': artist or 'Unknown Artist'}], 'uri': ''
+                }
+
+            final_title = spotify_track_data.get('name', title)
+            final_artist = spotify_artist_data.get('name', artist)
+            final_album = spotify_album_data.get('name', '')
+
+            context_key = f"import_single_{uuid.uuid4().hex[:8]}"
+            context = {
+                'spotify_artist': spotify_artist_data,
+                'spotify_album': spotify_album_data,
+                'track_info': spotify_track_data,
+                'original_search_result': {
+                    'title': final_title,
+                    'artist': final_artist,
+                    'album': final_album,
+                    'track_number': spotify_track_data.get('track_number', 1),
+                    'disc_number': 1,
+                    'spotify_clean_title': final_title,
+                    'spotify_clean_album': final_album,
+                    'artists': spotify_track_data.get('artists', [{'name': final_artist}])
+                },
+                'is_album_download': False,
+                'has_clean_spotify_data': bool(spotify_track_data.get('id')),
+                'has_full_spotify_metadata': bool(spotify_track_data.get('id'))
+            }
+
+            try:
+                _post_process_matched_download(context_key, context, file_path)
+                processed += 1
+                logger.info(f"Import single processed: {final_title} by {final_artist}")
+            except Exception as proc_err:
+                err_msg = f"{title}: {str(proc_err)}"
+                errors.append(err_msg)
+                logger.error(f"Import single processing error: {err_msg}")
+
+        # Trigger library scan
+        if web_scan_manager and processed > 0:
+            threading.Thread(
+                target=lambda: web_scan_manager.request_scan("Import singles processed"),
+                daemon=True
+            ).start()
+
+        add_activity_item("📥", "Singles Imported", f"{processed}/{len(files)} tracks processed", "Now")
+
+        return jsonify({
+            'success': True,
+            'processed': processed,
+            'total': len(files),
+            'errors': errors
+        })
+    except Exception as e:
+        logger.error(f"Error processing singles import: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ================================================================================================
+# END IMPORT / STAGING SYSTEM
 # ================================================================================================
 
 
