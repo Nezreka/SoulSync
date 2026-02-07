@@ -219,6 +219,9 @@ class ConfigManager:
             },
             "settings": {
                 "audio_quality": "flac"
+            },
+            "import": {
+                "staging_path": "./Staging"
             }
         }
 

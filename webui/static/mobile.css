@@ -1835,4 +1835,36 @@
         opacity: 0.7;
         transition: opacity 0.1s ease;
     }
+
+    /* Import Modal - Mobile */
+    .import-modal {
+        width: 100vw;
+        max-width: 100vw;
+        max-height: 100vh;
+        border-radius: 0;
+        height: 100vh;
+    }
+    .import-album-grid {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 10px;
+    }
+    .import-singles-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .import-singles-actions {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+    .import-match-item {
+        flex-wrap: wrap;
+    }
+    .import-match-file {
+        text-align: left;
+        flex-basis: 100%;
+    }
+    .import-album-hero {
+        flex-direction: column;
+        text-align: center;
+    }
 }

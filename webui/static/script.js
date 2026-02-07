@@ -1733,6 +1733,7 @@ async function loadSettingsData() {
         // Populate Download settings (right column)
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
         document.getElementById('transfer-path').value = settings.soulseek?.transfer_path || './Transfer';
+        document.getElementById('staging-path').value = settings.import?.staging_path || './Staging';
 
         // Populate Download Source settings
         document.getElementById('download-source-mode').value = settings.download_source?.mode || 'soulseek';
@@ -2154,6 +2155,9 @@ async function saveSettings() {
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked
+        },
+        import: {
+            staging_path: document.getElementById('staging-path').value || './Staging'
         }
     };
 
@@ -34474,4 +34478,408 @@ if (document.readyState === 'loading') {
         setInterval(updateMusicBrainzStatus, 2000); // Poll every 2 seconds
         console.log('✅ MusicBrainz UI initialized');
     }
+}
+
+// ===================================================================
+// IMPORT / STAGING SYSTEM
+// ===================================================================
+
+let currentImportAlbumData = null;
+let currentImportStagingFiles = [];
+let selectedStagingFiles = new Set();
+
+function openImportModal() {
+    document.getElementById('import-modal-overlay').classList.remove('hidden');
+    // Always refresh suggestions when opening — staging path or contents may have changed
+    loadImportSuggestions();
+}
+
+function closeImportModal() {
+    document.getElementById('import-modal-overlay').classList.add('hidden');
+}
+
+function switchImportTab(tab) {
+    // Toggle tab buttons
+    document.getElementById('import-tab-album-btn').classList.toggle('active', tab === 'album');
+    document.getElementById('import-tab-singles-btn').classList.toggle('active', tab === 'singles');
+    // Toggle tab content
+    document.getElementById('import-tab-album').classList.toggle('active', tab === 'album');
+    document.getElementById('import-tab-singles').classList.toggle('active', tab === 'singles');
+    // Auto-load staging files when switching to singles tab
+    if (tab === 'singles' && currentImportStagingFiles.length === 0) {
+        loadStagingFiles();
+    }
+}
+
+// --- Album Tab ---
+
+async function loadImportSuggestions() {
+    const section = document.getElementById('import-suggestions-section');
+    const grid = document.getElementById('import-suggestions-grid');
+    grid.innerHTML = '';
+    section.classList.add('hidden');
+
+    try {
+        const resp = await fetch('/api/import/staging/suggestions');
+        const data = await resp.json();
+        if (!data.success || !data.suggestions || data.suggestions.length === 0) return;
+
+        section.classList.remove('hidden');
+        grid.innerHTML = data.suggestions.map(a => `
+            <div class="import-album-card" onclick="selectImportAlbum('${a.id}')">
+                <img src="${a.image_url || '/static/placeholder.png'}" alt="${a.name}" onerror="this.src='/static/placeholder.png'">
+                <div class="import-album-card-info">
+                    <div class="import-album-card-title" title="${a.name}">${a.name}</div>
+                    <div class="import-album-card-artist" title="${a.artist}">${a.artist}</div>
+                    <div class="import-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0,4) : ''}</div>
+                </div>
+            </div>
+        `).join('');
+    } catch (err) {
+        // Silently fail - suggestions are optional
+        console.warn('Failed to load import suggestions:', err);
+    }
+}
+
+async function searchImportAlbum() {
+    const query = document.getElementById('import-album-search-input').value.trim();
+    if (!query) return;
+
+    // Hide suggestions once user searches manually
+    document.getElementById('import-suggestions-section').classList.add('hidden');
+
+    const grid = document.getElementById('import-album-results');
+    grid.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">Searching...</div>';
+
+    try {
+        const resp = await fetch(`/api/import/search/albums?q=${encodeURIComponent(query)}&limit=12`);
+        const data = await resp.json();
+        if (!data.success || !data.albums.length) {
+            grid.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">No albums found</div>';
+            return;
+        }
+        grid.innerHTML = data.albums.map(a => `
+            <div class="import-album-card" onclick="selectImportAlbum('${a.id}')">
+                <img src="${a.image_url || '/static/placeholder.png'}" alt="${a.name}" onerror="this.src='/static/placeholder.png'">
+                <div class="import-album-card-info">
+                    <div class="import-album-card-title" title="${a.name}">${a.name}</div>
+                    <div class="import-album-card-artist" title="${a.artist}">${a.artist}</div>
+                    <div class="import-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0,4) : ''}</div>
+                </div>
+            </div>
+        `).join('');
+    } catch (err) {
+        grid.innerHTML = `<div style="color:#ef4444;text-align:center;padding:20px;">Error: ${err.message}</div>`;
+    }
+}
+
+async function selectImportAlbum(albumId) {
+    // Show match section, hide search
+    document.getElementById('import-album-search-section').classList.add('hidden');
+    document.getElementById('import-album-match-section').classList.remove('hidden');
+    document.getElementById('import-album-progress-section').classList.add('hidden');
+
+    const matchList = document.getElementById('import-match-list');
+    matchList.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">Matching files to tracklist...</div>';
+
+    try {
+        const resp = await fetch('/api/import/album/match', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({album_id: albumId})
+        });
+        const data = await resp.json();
+        if (!data.success) {
+            matchList.innerHTML = `<div style="color:#ef4444;padding:20px;">Error: ${data.error}</div>`;
+            return;
+        }
+
+        currentImportAlbumData = data;
+
+        // Render hero
+        const album = data.album;
+        document.getElementById('import-album-hero').innerHTML = `
+            <img src="${album.image_url || '/static/placeholder.png'}" alt="${album.name}" onerror="this.src='/static/placeholder.png'">
+            <div class="import-album-hero-info">
+                <h3>${album.name}</h3>
+                <p>${album.artist} · ${album.total_tracks} tracks · ${album.release_date ? album.release_date.substring(0,4) : ''}</p>
+            </div>
+        `;
+
+        // Render match list
+        const matchedCount = data.matches.filter(m => m.staging_file).length;
+        matchList.innerHTML = data.matches.map(m => {
+            const hasFile = m.staging_file !== null;
+            const confClass = m.confidence >= 0.7 ? 'high' : m.confidence >= 0.5 ? 'medium' : 'low';
+            return `
+                <div class="import-match-item ${hasFile ? 'matched' : 'unmatched'}">
+                    <span class="import-match-number">${m.spotify_track.track_number}</span>
+                    <span class="import-match-track">${m.spotify_track.name}</span>
+                    <span class="import-match-arrow">${hasFile ? '←' : '✗'}</span>
+                    <span class="import-match-file">${hasFile ? m.staging_file.filename : 'No match'}</span>
+                    ${hasFile ? `<span class="import-match-confidence ${confClass}">${Math.round(m.confidence * 100)}%</span>` : ''}
+                </div>
+            `;
+        }).join('');
+
+        // Stats
+        document.getElementById('import-match-stats').textContent = `${matchedCount} of ${data.matches.length} tracks matched`;
+        const processBtn = document.getElementById('import-album-process-btn');
+        processBtn.disabled = matchedCount === 0;
+        processBtn.textContent = `Process ${matchedCount} Track${matchedCount !== 1 ? 's' : ''}`;
+
+    } catch (err) {
+        matchList.innerHTML = `<div style="color:#ef4444;padding:20px;">Error: ${err.message}</div>`;
+    }
+}
+
+function resetImportAlbumSearch() {
+    currentImportAlbumData = null;
+    document.getElementById('import-album-search-section').classList.remove('hidden');
+    document.getElementById('import-album-match-section').classList.add('hidden');
+    document.getElementById('import-album-progress-section').classList.add('hidden');
+    // Reset progress bar state
+    const progressFill = document.getElementById('import-album-progress-fill');
+    const progressBar = document.getElementById('import-album-progress-bar');
+    progressFill.style.width = '0%';
+    progressFill.classList.remove('processing');
+    progressBar.classList.remove('processing');
+    document.getElementById('import-album-progress-actions').classList.add('hidden');
+    // Re-show suggestions if they were loaded
+    const sugGrid = document.getElementById('import-suggestions-grid');
+    if (sugGrid && sugGrid.children.length > 0) {
+        document.getElementById('import-suggestions-section').classList.remove('hidden');
+    }
+    // Refresh suggestions since files may have changed
+    loadImportSuggestions();
+    // Clear search results
+    document.getElementById('import-album-results').innerHTML = '';
+    document.getElementById('import-album-search-input').value = '';
+}
+
+async function processImportAlbum() {
+    if (!currentImportAlbumData) return;
+
+    const matched = currentImportAlbumData.matches.filter(m => m.staging_file);
+    if (matched.length === 0) return;
+
+    // Show progress
+    document.getElementById('import-album-match-section').classList.add('hidden');
+    document.getElementById('import-album-progress-section').classList.remove('hidden');
+    const progressText = document.getElementById('import-album-progress-text');
+    const progressBar = document.getElementById('import-album-progress-bar');
+    const progressFill = document.getElementById('import-album-progress-fill');
+    const progressResult = document.getElementById('import-album-progress-result');
+    const progressActions = document.getElementById('import-album-progress-actions');
+
+    const total = matched.length;
+    let processed = 0;
+    let errors = [];
+    progressFill.style.width = '0%';
+    progressFill.classList.remove('processing');
+    progressBar.classList.remove('processing');
+    progressResult.textContent = '';
+    progressActions.classList.add('hidden');
+
+    // Process one track at a time for real progress
+    for (let i = 0; i < total; i++) {
+        const trackName = matched[i].spotify_track?.name || `Track ${i + 1}`;
+        progressText.textContent = `Processing ${i + 1}/${total}: ${trackName}`;
+        progressFill.style.width = `${Math.round((i / total) * 100)}%`;
+
+        try {
+            const resp = await fetch('/api/import/album/process', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    album: currentImportAlbumData.album,
+                    matches: [matched[i]]
+                })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                processed += data.processed;
+            }
+            if (data.errors && data.errors.length > 0) {
+                errors.push(...data.errors);
+            }
+        } catch (err) {
+            errors.push(`${trackName}: ${err.message}`);
+        }
+
+        // Update bar after each track
+        progressFill.style.width = `${Math.round(((i + 1) / total) * 100)}%`;
+    }
+
+    // Done
+    progressFill.style.width = '100%';
+    if (processed === total) {
+        progressText.textContent = 'Import Complete';
+    } else {
+        progressText.textContent = `Import Complete (${processed}/${total})`;
+    }
+    progressResult.innerHTML = `<span style="color:#1ed760">${processed}/${total} tracks processed successfully</span>`;
+    if (errors.length > 0) {
+        progressResult.innerHTML += `<br><span style="color:#ef4444;font-size:12px">${errors.length} error(s): ${errors.join(', ')}</span>`;
+    }
+    progressActions.classList.remove('hidden');
+}
+
+// --- Singles Tab ---
+
+async function loadStagingFiles() {
+    const list = document.getElementById('import-singles-list');
+    list.innerHTML = '<div class="import-singles-empty">Scanning staging folder...</div>';
+    selectedStagingFiles.clear();
+    updateSinglesProcessButton();
+
+    try {
+        const resp = await fetch('/api/import/staging/files');
+        const data = await resp.json();
+
+        if (!data.success) {
+            list.innerHTML = `<div class="import-singles-empty" style="color:#ef4444">Error: ${data.error}</div>`;
+            return;
+        }
+
+        // Show staging path
+        const pathDisplay = document.getElementById('import-staging-path-display');
+        if (pathDisplay) pathDisplay.textContent = `Staging: ${data.staging_path}`;
+
+        currentImportStagingFiles = data.files;
+
+        if (data.files.length === 0) {
+            list.innerHTML = '<div class="import-singles-empty">No audio files found in staging folder</div>';
+            return;
+        }
+
+        list.innerHTML = data.files.map((f, i) => `
+            <div class="import-single-item ${selectedStagingFiles.has(i) ? 'selected' : ''}" onclick="toggleStagingFile(${i})">
+                <input type="checkbox" ${selectedStagingFiles.has(i) ? 'checked' : ''} onclick="event.stopPropagation(); toggleStagingFile(${i})">
+                <div class="import-single-info">
+                    <div class="import-single-title">${f.title || f.filename}</div>
+                    <div class="import-single-artist">${f.artist || 'Unknown Artist'}${f.album ? ' · ' + f.album : ''}</div>
+                </div>
+                <span class="import-single-ext">${f.extension}</span>
+            </div>
+        `).join('');
+    } catch (err) {
+        list.innerHTML = `<div class="import-singles-empty" style="color:#ef4444">Error: ${err.message}</div>`;
+    }
+}
+
+function toggleStagingFile(idx) {
+    if (selectedStagingFiles.has(idx)) {
+        selectedStagingFiles.delete(idx);
+    } else {
+        selectedStagingFiles.add(idx);
+    }
+    // Update UI
+    const items = document.querySelectorAll('#import-singles-list .import-single-item');
+    items.forEach((item, i) => {
+        item.classList.toggle('selected', selectedStagingFiles.has(i));
+        const cb = item.querySelector('input[type="checkbox"]');
+        if (cb) cb.checked = selectedStagingFiles.has(i);
+    });
+    updateSinglesProcessButton();
+}
+
+function selectAllStagingFiles() {
+    if (selectedStagingFiles.size === currentImportStagingFiles.length) {
+        // Deselect all
+        selectedStagingFiles.clear();
+    } else {
+        // Select all
+        currentImportStagingFiles.forEach((_, i) => selectedStagingFiles.add(i));
+    }
+    // Update UI
+    const items = document.querySelectorAll('#import-singles-list .import-single-item');
+    items.forEach((item, i) => {
+        item.classList.toggle('selected', selectedStagingFiles.has(i));
+        const cb = item.querySelector('input[type="checkbox"]');
+        if (cb) cb.checked = selectedStagingFiles.has(i);
+    });
+    updateSinglesProcessButton();
+}
+
+function updateSinglesProcessButton() {
+    const btn = document.getElementById('import-singles-process-btn');
+    const count = selectedStagingFiles.size;
+    btn.textContent = `Process Selected (${count})`;
+    btn.disabled = count === 0;
+}
+
+async function processImportSingles() {
+    if (selectedStagingFiles.size === 0) return;
+
+    const filesToProcess = Array.from(selectedStagingFiles).map(i => currentImportStagingFiles[i]);
+
+    // Show progress
+    document.getElementById('import-singles-progress-section').classList.remove('hidden');
+    const progressText = document.getElementById('import-singles-progress-text');
+    const progressBar = document.getElementById('import-singles-progress-bar');
+    const progressFill = document.getElementById('import-singles-progress-fill');
+    const progressResult = document.getElementById('import-singles-progress-result');
+    const progressActions = document.getElementById('import-singles-progress-actions');
+
+    const total = filesToProcess.length;
+    let processed = 0;
+    let errors = [];
+    progressFill.style.width = '0%';
+    progressFill.classList.remove('processing');
+    progressBar.classList.remove('processing');
+    progressResult.textContent = '';
+    progressActions.classList.add('hidden');
+
+    // Process one file at a time for real progress
+    for (let i = 0; i < total; i++) {
+        const fileName = filesToProcess[i].title || filesToProcess[i].filename || `File ${i + 1}`;
+        progressText.textContent = `Processing ${i + 1}/${total}: ${fileName}`;
+        progressFill.style.width = `${Math.round((i / total) * 100)}%`;
+
+        try {
+            const resp = await fetch('/api/import/singles/process', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({files: [filesToProcess[i]]})
+            });
+            const data = await resp.json();
+            if (data.success) {
+                processed += data.processed;
+            }
+            if (data.errors && data.errors.length > 0) {
+                errors.push(...data.errors);
+            }
+        } catch (err) {
+            errors.push(`${fileName}: ${err.message}`);
+        }
+
+        progressFill.style.width = `${Math.round(((i + 1) / total) * 100)}%`;
+    }
+
+    // Done
+    progressFill.style.width = '100%';
+    selectedStagingFiles.clear();
+    updateSinglesProcessButton();
+
+    if (processed === total) {
+        progressText.textContent = 'Import Complete';
+    } else {
+        progressText.textContent = `Import Complete (${processed}/${total})`;
+    }
+    progressResult.innerHTML = `<span style="color:#1ed760">${processed}/${total} tracks processed successfully</span>`;
+    if (errors.length > 0) {
+        progressResult.innerHTML += `<br><span style="color:#ef4444;font-size:12px">${errors.length} error(s): ${errors.join(', ')}</span>`;
+    }
+    progressActions.classList.remove('hidden');
+
+    // Pre-refresh the file list in the background so it's ready when user clicks "Import More"
+    loadStagingFiles();
+    // Also refresh album suggestions since staging contents changed
+    loadImportSuggestions();
+}
+
+function resetImportSingles() {
+    document.getElementById('import-singles-progress-section').classList.add('hidden');
+    loadStagingFiles();
 }

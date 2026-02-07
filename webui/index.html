@@ -195,6 +195,7 @@
                                     </div>
                                 </div>
                             </div>
+                            <button class="header-button import-button" id="import-button" onclick="openImportModal()">📥 Import</button>
                             <button class="header-button watchlist-button" id="watchlist-button">👁️ Watchlist
                                 (0)</button>
                             <button class="header-button wishlist-button" id="wishlist-button">🎵 Wishlist (0)</button>
@@ -2798,6 +2799,14 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>Import Staging Dir:</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="staging-path" placeholder="./Staging">
+                                        <button class="browse-button" onclick="browsePath('staging')">Browse</button>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
                                     <label>Download Source:</label>
                                     <select id="download-source-mode" class="form-select"
                                         onchange="updateDownloadSourceUI()">
@@ -3266,6 +3275,96 @@
             <!-- Footer -->
             <div class="version-modal-footer">
                 <button class="version-modal-close" onclick="closeVersionModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Modal -->
+    <div class="modal-overlay hidden" id="import-modal-overlay" onclick="if(event.target===this)closeImportModal()">
+        <div class="import-modal" id="import-modal">
+            <div class="import-modal-header">
+                <h2 class="import-modal-title">Import Music</h2>
+                <div class="import-tab-bar">
+                    <button class="import-tab-btn active" id="import-tab-album-btn" onclick="switchImportTab('album')">Album</button>
+                    <button class="import-tab-btn" id="import-tab-singles-btn" onclick="switchImportTab('singles')">Singles</button>
+                </div>
+                <span class="import-modal-close" onclick="closeImportModal()">&times;</span>
+            </div>
+            <div class="import-modal-body">
+                <!-- Album Tab -->
+                <div class="import-tab-content active" id="import-tab-album">
+                    <!-- Search state -->
+                    <div id="import-album-search-section">
+                        <div class="import-suggestions-section" id="import-suggestions-section">
+                            <div class="import-suggestions-label">Suggested from your staging folder</div>
+                            <div class="import-album-grid" id="import-suggestions-grid"></div>
+                        </div>
+                        <div class="import-search-bar">
+                            <input type="text" id="import-album-search-input" placeholder="Search for an album..." onkeydown="if(event.key==='Enter')searchImportAlbum()">
+                            <button class="import-search-btn" onclick="searchImportAlbum()">Search</button>
+                        </div>
+                        <div class="import-album-grid" id="import-album-results"></div>
+                    </div>
+                    <!-- Match state (hidden initially) -->
+                    <div id="import-album-match-section" class="hidden">
+                        <div class="import-album-hero" id="import-album-hero"></div>
+                        <div class="import-match-header">
+                            <h3>Track Matching</h3>
+                            <button class="import-back-btn" onclick="resetImportAlbumSearch()">← Back to Search</button>
+                        </div>
+                        <div class="import-match-list" id="import-match-list"></div>
+                        <div class="import-match-footer">
+                            <div class="import-match-stats" id="import-match-stats"></div>
+                            <button class="import-process-btn" id="import-album-process-btn" onclick="processImportAlbum()">Process Album</button>
+                        </div>
+                    </div>
+                    <!-- Progress state -->
+                    <div id="import-album-progress-section" class="hidden">
+                        <div class="import-progress-container">
+                            <div class="import-progress-text" id="import-album-progress-text">Processing...</div>
+                            <div class="import-progress-bar" id="import-album-progress-bar">
+                                <div class="import-progress-fill" id="import-album-progress-fill"></div>
+                            </div>
+                            <div class="import-progress-result" id="import-album-progress-result"></div>
+                            <div class="import-progress-actions hidden" id="import-album-progress-actions">
+                                <button class="import-secondary-btn" onclick="resetImportAlbumSearch()">Import Another</button>
+                                <button class="import-process-btn" onclick="closeImportModal()">Done</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Singles Tab -->
+                <div class="import-tab-content" id="import-tab-singles">
+                    <div id="import-singles-controls">
+                        <div class="import-singles-header">
+                            <div class="import-singles-info">
+                                <span id="import-staging-path-display"></span>
+                            </div>
+                            <div class="import-singles-actions">
+                                <button class="import-action-btn" onclick="loadStagingFiles()">Refresh</button>
+                                <button class="import-action-btn" onclick="selectAllStagingFiles()">Select All</button>
+                                <button class="import-process-btn" id="import-singles-process-btn" onclick="processImportSingles()" disabled>Process Selected (0)</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="import-singles-list" id="import-singles-list">
+                        <div class="import-singles-empty">Click "Refresh" to scan staging folder for audio files</div>
+                    </div>
+                    <!-- Singles Progress -->
+                    <div id="import-singles-progress-section" class="hidden">
+                        <div class="import-progress-container">
+                            <div class="import-progress-text" id="import-singles-progress-text">Processing...</div>
+                            <div class="import-progress-bar" id="import-singles-progress-bar">
+                                <div class="import-progress-fill" id="import-singles-progress-fill"></div>
+                            </div>
+                            <div class="import-progress-result" id="import-singles-progress-result"></div>
+                            <div class="import-progress-actions hidden" id="import-singles-progress-actions">
+                                <button class="import-secondary-btn" onclick="resetImportSingles()">Import More</button>
+                                <button class="import-process-btn" onclick="closeImportModal()">Done</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
