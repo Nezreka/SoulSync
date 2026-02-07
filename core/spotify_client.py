@@ -79,7 +79,7 @@ class Track:
             artists=[artist['name'] for artist in track_data['artists']],
             album=track_data['album']['name'],
             duration_ms=track_data['duration_ms'],
-            popularity=track_data['popularity'],
+            popularity=track_data.get('popularity', 0),
             preview_url=track_data.get('preview_url'),
             external_urls=track_data.get('external_urls'),
             image_url=album_image_url
