@@ -27,6 +27,10 @@ SoulSync bridges streaming services to your media server with automated discover
 
 ## Key Features
 
+<p align="center">
+  <img src="./assets/pages.gif" alt="SoulSync Interface">
+</p>
+
 ### Discovery Engine
 
 **Release Radar** - 30 new tracks from watchlist artists (updates daily)
