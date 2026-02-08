@@ -12,7 +12,7 @@
     position: fixed;
     top: 16px;
     left: 16px;
-    z-index: 10002;
+    z-index: 9999;
     width: 44px;
     height: 44px;
     background: rgba(20, 20, 20, 0.9);
