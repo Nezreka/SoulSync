@@ -9407,50 +9407,45 @@ def get_version_info():
     This provides the same data that the GUI version modal displays.
     """
     version_data = {
-        "version": "1.5",
+        "version": "1.6",
         "title": "What's New in SoulSync",
-        "subtitle": "Version 1.5 - AcoustID Verification & MusicBrainz Integration",
+        "subtitle": "Version 1.6 - Local Import, Enhanced Tagging & Mobile Support",
         "sections": [
             {
-                "title": "🔊 AcoustID Download Verification",
-                "description": "Optional audio fingerprint verification to ensure downloaded files match the expected track",
+                "title": "📂 Local Music Import",
+                "description": "Import music directly from a local staging folder into your library",
                 "features": [
-                    "• Audio Fingerprinting - Uses AcoustID to verify downloaded files are the correct track before transferring",
-                    "• Smart Matching - Compares title and artist using fuzzy string matching with configurable thresholds",
-                    "• Fail-Safe Design - Only rejects files when confident they are wrong; skips verification on any uncertainty",
-                    "• Quarantine System - Mismatched files are moved to a quarantine folder with metadata for review",
-                    "• Failed tracks are automatically added to the wishlist for retry"
-                ],
-                "usage_note": "Enable in Settings > AcoustID. Requires a free API key from acoustid.org."
-            },
-            {
-                "title": "🎵 MusicBrainz Enrichment",
-                "description": "Automatic metadata enrichment using MusicBrainz with real-time status tracking",
-                "features": [
-                    "• Background Worker - Continuously enriches your library with MusicBrainz metadata",
-                    "• Live Status UI - Real-time progress indicator shows enrichment status per track",
-                    "• MusicBrainz Badge - Visual indicator on tracks that have been matched and enriched"
+                    "• Import music files from a configurable local staging directory",
+                    "• Automatic metadata detection and library integration",
+                    "• Redesigned import button for easier access"
                 ]
             },
             {
-                "title": "🔍 Smarter Soulseek Downloads",
-                "description": "Improved search, source management, and download reliability",
+                "title": "🏷️ Enhanced Audio File Tagging",
+                "description": "Richer metadata embedded directly into your audio files",
                 "features": [
-                    "• Source Reuse - After the first track downloads from a source, subsequent album tracks reuse the same source for consistency",
-                    "• Enhanced Search Queries - Fourth search query added for better matching with cleaned and artist-removed searches",
-                    "• Improved Error Handling - Better detection of rejected/errored states from Soulseek sources",
-                    "• Race Condition Fix - Resolved post-processing conflicts between Stream Processor and Verification Worker"
+                    "• MusicBrainz, Spotify, and iTunes IDs embedded into file tags",
+                    "• ISRC codes written to audio files for universal track identification",
+                    "• Merged genres from multiple sources for more complete genre tagging",
+                    "• iTunes metadata parity for consistent tagging across providers"
                 ]
             },
             {
-                "title": "🛠️ Stability & Fixes",
-                "description": "Bug fixes and reliability improvements across the board",
+                "title": "📱 Mobile Responsive Layout",
+                "description": "Full mobile support for managing your library on the go",
                 "features": [
-                    "• Fixed failed tracks not being added to wishlist after batch completion",
-                    "• Fixed album splitting in media servers for multi-source downloads",
-                    "• Fixed regex issue where '&' in track names was incorrectly scrubbed",
-                    "• Fixed source file removal timing on Windows",
-                    "• App log rotation with capped file size to prevent unbounded log growth"
+                    "• Responsive WebUI layout optimized for phones and tablets",
+                    "• Mobile-friendly sync page with improved controls",
+                    "• CSS fixes for consistent rendering across screen sizes"
+                ]
+            },
+            {
+                "title": "⚡ Performance & Reliability",
+                "description": "Caching, compatibility fixes, and proactive maintenance",
+                "features": [
+                    "• Discovery match cache for faster repeated lookups",
+                    "• Proactive fix for upcoming Spotify API changes (February 2026)",
+                    "• Docker Compose configuration updates"
                 ]
             }
         ]
