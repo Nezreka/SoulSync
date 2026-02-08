@@ -91,6 +91,36 @@
         width: 100%;
     }
 
+    .dashboard-container {
+        gap: 15px;
+        margin: 15px;
+        padding: 15px;
+    }
+
+    #media-player {
+        min-height: fit-content;
+    }
+
+    .tool-help-button {
+        height: 35px;
+        width: 35px;
+    }
+
+    .discover-carousel,
+    #genre-tabs {
+        width: 100%;
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .enh-compact-item.artist-card {
+        width: 45%;
+    }
+
+    .sidebar-header {
+        text-align: right;
+    }
+
     .main-content {
         width: 100%;
         flex: 1;
@@ -164,7 +194,7 @@
         transform: translateY(-5px);
     }
 
-    .musicbrainz-button:hover + .musicbrainz-tooltip {
+    .musicbrainz-button:hover+.musicbrainz-tooltip {
         transform: translateY(0);
     }
 
@@ -1844,25 +1874,31 @@
         border-radius: 0;
         height: 100vh;
     }
+
     .import-album-grid {
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
         gap: 10px;
     }
+
     .import-singles-header {
         flex-direction: column;
         align-items: flex-start;
     }
+
     .import-singles-actions {
         width: 100%;
         flex-wrap: wrap;
     }
+
     .import-match-item {
         flex-wrap: wrap;
     }
+
     .import-match-file {
         text-align: left;
         flex-basis: 100%;
     }
+
     .import-album-hero {
         flex-direction: column;
         text-align: center;
