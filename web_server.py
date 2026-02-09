@@ -19757,12 +19757,16 @@ def get_discover_hero():
                     if active_source == 'itunes' and artist.itunes_artist_id:
                         itunes_artist = itunes_client.get_artist(artist.itunes_artist_id)
                         if itunes_artist:
+                            # Use canonical name from iTunes API (normalized to 'name' field)
+                            artist_data['artist_name'] = itunes_artist.get('name', artist.artist_name)
                             artist_data['image_url'] = itunes_artist.get('images', [{}])[0].get('url') if itunes_artist.get('images') else None
                             artist_data['genres'] = itunes_artist.get('genres', [])
                     elif active_source == 'spotify' and artist.spotify_artist_id:
                         if spotify_client and spotify_client.is_authenticated():
                             sp_artist = spotify_client.get_artist(artist.spotify_artist_id)
                             if sp_artist and sp_artist.get('images'):
+                                # Use canonical name from Spotify API
+                                artist_data['artist_name'] = sp_artist.get('name', artist.artist_name)
                                 artist_data['image_url'] = sp_artist['images'][0]['url'] if sp_artist['images'] else None
                                 artist_data['genres'] = sp_artist.get('genres', [])
                 except Exception as img_err:
@@ -19840,16 +19844,32 @@ def get_discover_hero():
 
             # Try to get artist image from the active source
             try:
+                # DEBUG: Log what we're starting with
+                print(f"[Hero Debug] Processing artist: DB name='{artist.similar_artist_name}', Spotify ID={artist.similar_artist_spotify_id}, iTunes ID={artist.similar_artist_itunes_id}")
+                
                 if active_source == 'spotify' and artist.similar_artist_spotify_id:
                     if spotify_client and spotify_client.is_authenticated():
                         sp_artist = spotify_client.get_artist(artist.similar_artist_spotify_id)
                         if sp_artist and sp_artist.get('images'):
+                            api_name = sp_artist.get('name', 'UNKNOWN')
+                            print(f"[Hero Debug] Spotify API returned name='{api_name}' for ID={artist.similar_artist_spotify_id}")
+                            print(f"[Hero Debug] Name match? {api_name == artist.similar_artist_name}")
+                            
+                            # Use canonical name from API
+                            artist_data['artist_name'] = api_name
                             artist_data['image_url'] = sp_artist['images'][0]['url'] if sp_artist['images'] else None
                             artist_data['genres'] = sp_artist.get('genres', [])
                             artist_data['popularity'] = sp_artist.get('popularity', 0)
                 elif active_source == 'itunes' and artist.similar_artist_itunes_id:
                     itunes_artist = itunes_client.get_artist(artist.similar_artist_itunes_id)
                     if itunes_artist:
+                        # iTunes client normalizes to Spotify format, so use 'name' not 'artistName'
+                        api_name = itunes_artist.get('name', 'UNKNOWN')
+                        print(f"[Hero Debug] iTunes API returned name='{api_name}' for ID={artist.similar_artist_itunes_id}")
+                        print(f"[Hero Debug] Name match? {api_name == artist.similar_artist_name}")
+                        
+                        # Use canonical name from API
+                        artist_data['artist_name'] = api_name
                         artist_data['image_url'] = itunes_artist.get('images', [{}])[0].get('url') if itunes_artist.get('images') else None
                         artist_data['genres'] = itunes_artist.get('genres', [])
                         artist_data['popularity'] = itunes_artist.get('popularity', 0)
