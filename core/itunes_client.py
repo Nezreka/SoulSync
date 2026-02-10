@@ -722,16 +722,50 @@ class iTunesClient:
 
             # Deduplicate by normalized name, prefer explicit versions
             normalized_name = normalize_album_name(album.name)
+            
+            logger.debug(f"Processing album: {album.name} (ID: {album.id}, explicit: {is_explicit}, normalized: {normalized_name})")
 
             if normalized_name in seen_albums:
+                logger.debug(f"  Found duplicate for: {normalized_name}")
                 # Only replace if current one is explicit and previous was clean
+                # BUT verify the explicit version actually has tracks (some iTunes albums are broken)
                 if is_explicit and not seen_albums[normalized_name]['is_explicit']:
-                    logger.debug(f"Replacing clean version with explicit: {album.name}")
-                    seen_albums[normalized_name] = {'album': album, 'is_explicit': is_explicit}
+                    logger.info(f"  Attempting to replace clean with explicit for: {album.name}")
+                    # Quick validation: check if this explicit album actually has tracks
+                    try:
+                        test_tracks = self._lookup(id=album.id, entity='song')
+                        track_count = len([t for t in test_tracks if t.get('wrapperType') == 'track'])
+                        
+                        if track_count > 0:
+                            logger.debug(f"Replacing clean version with explicit: {album.name} (verified {track_count} tracks)")
+                            seen_albums[normalized_name] = {'album': album, 'is_explicit': is_explicit}
+                        else:
+                            logger.warning(f"⚠️ Skipping broken explicit album {album.name} (ID {album.id}): reports tracks but has 0")
+                    except Exception as e:
+                        logger.warning(f"Failed to validate explicit album {album.name}: {e}, keeping clean version")
                 else:
                     logger.debug(f"Skipping duplicate album: {album.name} (normalized: {normalized_name})")
             else:
-                seen_albums[normalized_name] = {'album': album, 'is_explicit': is_explicit}
+                logger.debug(f"  First occurrence of: {normalized_name}")
+                
+                # If this is an explicit album, validate it has tracks before keeping it
+                # (Some iTunes explicit albums are broken and return 0 tracks)
+                if is_explicit:
+                    try:
+                        test_tracks = self._lookup(id=album.id, entity='song')
+                        track_count = len([t for t in test_tracks if t.get('wrapperType') == 'track'])
+                        
+                        if track_count > 0:
+                            logger.debug(f"  Verified explicit album has {track_count} tracks")
+                            seen_albums[normalized_name] = {'album': album, 'is_explicit': is_explicit}
+                        else:
+                            logger.warning(f"⚠️ Skipping broken explicit album {album.name} (ID {album.id}): reports tracks but has 0")
+                            # Don't add to seen_albums so a clean version can be added later
+                    except Exception as e:
+                        logger.warning(f"Failed to validate explicit album {album.name}: {e}, skipping")
+                else:
+                    # Clean versions - just add them
+                    seen_albums[normalized_name] = {'album': album, 'is_explicit': is_explicit}
 
         # Extract albums from dict
         albums = [item['album'] for item in seen_albums.values()]
