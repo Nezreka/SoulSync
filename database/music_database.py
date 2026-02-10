@@ -1656,7 +1656,7 @@ class MusicDatabase:
                     return normalized_results
             
             # STRATEGY 3: Last resort - broader fuzzy search with Python filtering
-            fuzzy_results = self._search_tracks_fuzzy_fallback(cursor, title, artist, limit)
+            fuzzy_results = self._search_tracks_fuzzy_fallback(cursor, title, artist, limit, server_source)
             if fuzzy_results:
                 logger.debug(f"🔍 Fuzzy fallback search found {len(fuzzy_results)} results")
             
@@ -1770,7 +1770,7 @@ class MusicDatabase:
         
         return self._rows_to_tracks(filtered_tracks)
     
-    def _search_tracks_fuzzy_fallback(self, cursor, title: str, artist: str, limit: int) -> List[DatabaseTrack]:
+    def _search_tracks_fuzzy_fallback(self, cursor, title: str, artist: str, limit: int, server_source: str = None) -> List[DatabaseTrack]:
         """Broadest fuzzy search - partial word matching"""
         # Get broader results by searching for individual words
         search_terms = []
@@ -1798,7 +1798,13 @@ class MusicDatabase:
         if not like_conditions:
             return []
         
-        where_clause = " OR ".join(like_conditions)
+        # Build WHERE clause with optional server filter
+        where_parts = [f"({' OR '.join(like_conditions)})"]
+        if server_source:
+            where_parts.append("tracks.server_source = ?")
+            params.insert(-1 if params else 0, server_source)  # Insert before limit
+        
+        where_clause = " AND ".join(where_parts)
         params.append(limit * 3)  # Get more results for scoring
         
         cursor.execute(f"""
