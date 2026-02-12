@@ -360,6 +360,44 @@ class NavidromeClient:
             logger.error(f"Error getting albums for artist {artist_id}: {e}")
             return []
 
+    def get_recently_added_albums(self, limit: int = 400) -> List[NavidromeAlbum]:
+        """Get recently added albums from Navidrome using getAlbumList2 sorted by newest"""
+        if not self.ensure_connection():
+            return []
+
+        try:
+            albums = []
+            page_size = min(limit, 500)
+            offset = 0
+
+            while len(albums) < limit:
+                response = self._make_request('getAlbumList2', {
+                    'type': 'newest',
+                    'size': page_size,
+                    'offset': offset
+                })
+                if not response:
+                    break
+
+                album_list = response.get('albumList2', {}).get('album', [])
+                if not album_list:
+                    break
+
+                for album_data in album_list:
+                    albums.append(NavidromeAlbum(album_data, self))
+
+                if len(album_list) < page_size:
+                    break  # No more pages
+
+                offset += page_size
+
+            logger.info(f"Retrieved {len(albums)} recently added albums from Navidrome")
+            return albums[:limit]
+
+        except Exception as e:
+            logger.error(f"Error getting recently added albums from Navidrome: {e}")
+            return []
+
     def get_tracks_for_album(self, album_id: str) -> List[NavidromeTrack]:
         """Get all tracks for a specific album"""
         # Check cache first
