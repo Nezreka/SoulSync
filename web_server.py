@@ -5849,6 +5849,93 @@ def library_completion_stream():
         }
     )
 
+@app.route('/api/library/check-tracks', methods=['POST'])
+def library_check_tracks():
+    """Check which tracks from a list are already owned in the library.
+    Uses a single batch DB query + in-memory fuzzy matching for speed."""
+    try:
+        data = request.get_json()
+        if not data or 'artist_name' not in data or 'tracks' not in data:
+            return jsonify({"success": False, "error": "Missing artist_name or tracks"}), 400
+
+        artist_name = data['artist_name']
+        tracks = data['tracks']
+
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        active_server = config_manager.get_active_media_server()
+
+        # Single query: get ALL tracks by this artist from the DB
+        db_tracks = db.search_tracks(artist=artist_name, limit=500, server_source=active_server)
+
+        if not db_tracks:
+            # No tracks by this artist in DB — none owned
+            owned_map = {t.get('name', ''): False for t in tracks if t.get('name')}
+            return jsonify({"success": True, "owned_tracks": owned_map})
+
+        # Pre-normalize all DB track titles for fast in-memory comparison
+        from difflib import SequenceMatcher
+        try:
+            from unidecode import unidecode
+        except ImportError:
+            unidecode = lambda x: x
+
+        def _normalize(text):
+            if not text:
+                return ""
+            return unidecode(text).lower().strip()
+
+        def _clean_title(text):
+            import re
+            cleaned = _normalize(text)
+            # Remove parenthetical/bracket content, dashes, feat/ft, remaster tags
+            cleaned = re.sub(r'\s*[\[\(].*?[\]\)]', '', cleaned)
+            cleaned = re.sub(r'\s*-\s*', ' ', cleaned)
+            cleaned = re.sub(r'\s*feat\..*', '', cleaned)
+            cleaned = re.sub(r'\s*featuring.*', '', cleaned)
+            cleaned = re.sub(r'\s*ft\..*', '', cleaned)
+            cleaned = re.sub(r'\s*\d{4}\s*remaster.*', '', cleaned)
+            cleaned = re.sub(r'\s*remaster(ed)?.*', '', cleaned)
+            cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+            return cleaned
+
+        # Pre-compute normalized DB titles once
+        db_title_pairs = [(_normalize(t.title), _clean_title(t.title)) for t in db_tracks]
+
+        owned_map = {}
+        for track in tracks:
+            track_name = track.get('name', '')
+            if not track_name:
+                continue
+
+            search_norm = _normalize(track_name)
+            search_clean = _clean_title(track_name)
+            is_owned = False
+
+            for db_norm, db_clean in db_title_pairs:
+                # Check normalized match first (fast path for exact/near-exact)
+                if search_norm == db_norm or search_clean == db_clean:
+                    is_owned = True
+                    break
+                # Fuzzy match: try both normalized and cleaned
+                sim = max(
+                    SequenceMatcher(None, search_norm, db_norm).ratio(),
+                    SequenceMatcher(None, search_clean, db_clean).ratio()
+                )
+                if sim >= 0.7:
+                    is_owned = True
+                    break
+
+            owned_map[track_name] = is_owned
+
+        return jsonify({"success": True, "owned_tracks": owned_map})
+
+    except Exception as e:
+        print(f"❌ Error checking track ownership: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/stream/start', methods=['POST'])
 def stream_start():
     """Start streaming a track in the background"""
