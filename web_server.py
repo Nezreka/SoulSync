@@ -4822,7 +4822,7 @@ def get_artist_detail(artist_id):
                 }
 
                 # Merge owned and Spotify data for complete picture
-                merged_discography = merge_discography_data(owned_releases, spotify_discography)
+                merged_discography = merge_discography_data(owned_releases, spotify_discography, db=database, artist_name=artist_info['name'])
             else:
                 print(f"⚠️ Spotify discography not found: {spotify_discography.get('error', 'Unknown error')}")
                 # Fall back to our database categorization
@@ -5781,11 +5781,79 @@ def check_artist_discography_completion_stream(artist_id):
         }
     )
 
+@app.route('/api/library/completion-stream', methods=['POST'])
+def library_completion_stream():
+    """Stream completion status for library artist detail view - checks ownership per release via SSE"""
+    try:
+        data = request.get_json()
+        if not data or 'artist_name' not in data:
+            return jsonify({"error": "Missing artist_name"}), 400
+    except Exception as e:
+        return jsonify({"error": "Invalid request data"}), 400
+
+    artist_name = data['artist_name']
+
+    def generate():
+        try:
+            from database.music_database import MusicDatabase
+            db = MusicDatabase()
+
+            categories = ['albums', 'eps', 'singles']
+            all_items = []
+            for cat in categories:
+                for item in data.get(cat, []):
+                    all_items.append((cat, item))
+
+            yield f"data: {json.dumps({'type': 'start', 'total_items': len(all_items)})}\n\n"
+
+            for i, (category, item) in enumerate(all_items):
+                try:
+                    # Map Library field names to helper field names
+                    mapped = {
+                        'id': item.get('spotify_id', ''),
+                        'name': item['title'],
+                        'total_tracks': item.get('track_count', 0),
+                        'album_type': item.get('album_type', 'album')
+                    }
+
+                    if category == 'singles':
+                        result = _check_single_completion(db, mapped, artist_name)
+                    else:
+                        result = _check_album_completion(db, mapped, artist_name)
+
+                    result['spotify_id'] = item.get('spotify_id', '')
+                    result['category'] = category
+                    result['type'] = 'completion'
+                    yield f"data: {json.dumps(result)}\n\n"
+                except Exception as e:
+                    yield f"data: {json.dumps({'type': 'completion', 'category': category, 'spotify_id': item.get('spotify_id', ''), 'status': 'error', 'owned_tracks': 0, 'expected_tracks': item.get('track_count', 0), 'completion_percentage': 0, 'confidence': 0.0, 'error': str(e)})}\n\n"
+
+                time.sleep(0.05)  # 50ms between items for visible streaming
+
+            yield f"data: {json.dumps({'type': 'complete', 'processed_count': len(all_items)})}\n\n"
+
+        except Exception as e:
+            print(f"❌ Error in library completion stream: {e}")
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+
+    return Response(
+        generate(),
+        content_type='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Cache-Control'
+        }
+    )
+
 @app.route('/api/stream/start', methods=['POST'])
 def stream_start():
     """Start streaming a track in the background"""
     global stream_background_task
-    
+
     data = request.get_json()
     if not data:
         return jsonify({"success": False, "error": "No track data provided"}), 400
@@ -24642,6 +24710,7 @@ def get_spotify_artist_discography(artist_name):
             release_data = {
                 'title': album.name,
                 'year': album.release_date[:4] if album.release_date else None,
+                'release_date': album.release_date if album.release_date else None,
                 'image_url': album.image_url,
                 'spotify_id': album.id,
                 'owned': False,  # Will be updated when merging with owned data
@@ -24681,151 +24750,37 @@ def get_spotify_artist_discography(artist_name):
             'error': str(e)
         }
 
-def merge_discography_data(owned_releases, spotify_discography):
-    """Build discography using Spotify as source of truth, checking if we own each release"""
+def merge_discography_data(owned_releases, spotify_discography, db=None, artist_name=None):
+    """Build discography from Spotify data with 'checking' state - ownership is resolved via SSE stream"""
     try:
-        print("🔄 Building discography using Spotify categorization...")
-
-        def normalize_title(title):
-            """Normalize title for comparison"""
-            import re
-            import unicodedata
-            
-            # Normalize unicode characters to decomposed form (NFD)
-            normalized = unicodedata.normalize('NFD', title)
-            # Filter out non-spacing mark characters (accents)
-            normalized = "".join(c for c in normalized if unicodedata.category(c) != 'Mn')
-            
-            # Standard normalization
-            normalized = normalized.lower().strip()
-            normalized = re.sub(r'[^\w\s]', '', normalized)
-            normalized = re.sub(r'\s+', ' ', normalized)
-            return normalized.strip()
-
-        def normalize_year(year):
-            """Normalize year to integer for comparison"""
-            if year is None:
-                return None
-            try:
-                return int(year)
-            except (ValueError, TypeError):
-                return None
-
-        # Create a flat map of ALL owned releases (regardless of category)
-        all_owned = []
-        all_owned.extend(owned_releases['albums'])
-        all_owned.extend(owned_releases['eps'])
-        all_owned.extend(owned_releases['singles'])
-
-        owned_map = {}
-        for owned in all_owned:
-            key = (normalize_title(owned['title']), normalize_year(owned.get('year')))
-            if key not in owned_map:
-                owned_map[key] = []
-            owned_map[key].append(owned)
-
-        print(f"📀 Created lookup map for {len(all_owned)} owned releases")
+        print("🔄 Building discography cards (fast path - no DB matching)...")
 
         def build_category(spotify_category, category_name):
-            """Build cards for a category using Spotify as source of truth"""
+            """Build cards for a category with checking state"""
             cards = []
-            print(f"📀 Building {category_name} category with {len(spotify_category)} Spotify releases")
-
             for spotify_release in spotify_category:
-                spotify_key = (normalize_title(spotify_release['title']), normalize_year(spotify_release.get('year')))
-
-                # Check if we own this release (exact match first)
-                owned_release = None
-                matched_key = None
-
-                if spotify_key in owned_map and owned_map[spotify_key]:
-                    owned_release = owned_map[spotify_key].pop(0).copy()
-                    matched_key = spotify_key
-                else:
-                    # Fallback: try matching by title only (ignore year)
-                    title_only = normalize_title(spotify_release['title'])
-                    for key, releases in owned_map.items():
-                        if key[0] == title_only and releases:  # key[0] is the normalized title
-                            owned_release = releases.pop(0).copy()
-                            matched_key = key
-                            print(f"🔄 Year mismatch fallback: '{spotify_release['title']}' matched by title only")
-                            break
-
-                if owned_release:
-                    # We own it - use owned data with Spotify enhancements
-
-                    # Add Spotify metadata
-                    owned_release['spotify_id'] = spotify_release['spotify_id']
-                    owned_release['album_type'] = spotify_release.get('album_type', 'album')
-                    owned_release['owned'] = True
-
-                    # Calculate track completion using Spotify track count
-                    spotify_track_count = spotify_release.get('track_count', 0)
-                    owned_track_count = owned_release.get('owned_tracks') or 0
-
-                    if spotify_track_count > 0 and owned_track_count is not None:
-                        completion_percentage = (owned_track_count / spotify_track_count) * 100
-                        owned_release['track_completion'] = {
-                            'owned_tracks': owned_track_count,
-                            'total_tracks': spotify_track_count,
-                            'percentage': round(completion_percentage, 1),
-                            'missing_tracks': spotify_track_count - owned_track_count
-                        }
-                    else:
-                        # Fallback if no Spotify track count
-                        owned_release['track_completion'] = {
-                            'owned_tracks': owned_track_count,
-                            'total_tracks': owned_track_count,
-                            'percentage': 100.0,
-                            'missing_tracks': 0
-                        }
-
-                    # Image priority: owned first, then Spotify fallback
-                    if not owned_release.get('image_url') and spotify_release.get('image_url'):
-                        owned_release['image_url'] = spotify_release['image_url']
-
-                    # Release date priority: Spotify first (more reliable), then owned fallback
-                    if spotify_release.get('release_date'):
-                        owned_release['release_date'] = spotify_release['release_date']
-                    elif spotify_release.get('year'):
-                        owned_release['release_date'] = f"{spotify_release['year']}-01-01"
-                    elif owned_release.get('year'):
-                        # Convert year to release_date format if needed
-                        owned_release['release_date'] = f"{owned_release['year']}-01-01"
-
-                    cards.append(owned_release)
-
-                    # Enhanced logging with track completion
-                    completion = owned_release['track_completion']
-                    if completion['missing_tracks'] > 0:
-                        print(f"✅ {category_name}: '{spotify_release['title']}' - OWNED ({completion['owned_tracks']}/{completion['total_tracks']} tracks, missing {completion['missing_tracks']})")
-                    else:
-                        print(f"✅ {category_name}: '{spotify_release['title']}' - OWNED (complete: {completion['owned_tracks']} tracks)")
-
-                    # Remove empty lists from map (use the key that actually matched)
-                    if matched_key and not owned_map[matched_key]:
-                        del owned_map[matched_key]
-                else:
-                    # We don't own it - create missing card
-                    missing_release = spotify_release.copy()
-                    missing_release['owned'] = False
-                    missing_release['track_completion'] = 0
-                    cards.append(missing_release)
-                    print(f"❌ {category_name}: '{spotify_release['title']}' - MISSING")
-
+                card = {
+                    'title': spotify_release['title'],
+                    'spotify_id': spotify_release.get('spotify_id'),
+                    'album_type': spotify_release.get('album_type', 'album'),
+                    'image_url': spotify_release.get('image_url'),
+                    'year': spotify_release.get('year'),
+                    'track_count': spotify_release.get('track_count', 0),
+                    'owned': None,  # null = checking (resolved by completion stream)
+                    'track_completion': 'checking',
+                }
+                if spotify_release.get('release_date'):
+                    card['release_date'] = spotify_release['release_date']
+                elif spotify_release.get('year'):
+                    card['release_date'] = f"{spotify_release['year']}-01-01"
+                cards.append(card)
             return cards
 
-        # Build each category using Spotify as the source of truth
         albums = build_category(spotify_discography['albums'], 'Albums')
         eps = build_category(spotify_discography['eps'], 'EPs')
         singles = build_category(spotify_discography['singles'], 'Singles')
 
-        # Report any owned releases that didn't match Spotify (rare)
-        remaining_owned = sum(len(owned_list) for owned_list in owned_map.values())
-        if remaining_owned > 0:
-            print(f"📀 Note: {remaining_owned} owned releases not found on Spotify (compilations, bootlegs, etc.)")
-
-        print(f"✅ Built discography - Albums: {len(albums)}, EPs: {len(eps)}, Singles: {len(singles)}")
+        print(f"✅ Built discography cards - Albums: {len(albums)}, EPs: {len(eps)}, Singles: {len(singles)}")
 
         return {
             'success': True,

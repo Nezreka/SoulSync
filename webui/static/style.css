@@ -13281,6 +13281,33 @@ body {
     width: 0%;
 }
 
+/* Checking state - lazy-load ownership streaming */
+.release-card.checking {
+    opacity: 0.75;
+    animation: cardCheckingPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes cardCheckingPulse {
+    0%, 100% { opacity: 0.75; }
+    50% { opacity: 0.55; }
+}
+
+.completion-text.checking {
+    color: #888;
+    font-weight: 400;
+}
+
+.completion-fill.checking {
+    background: linear-gradient(90deg, rgba(255,255,255,0.08), rgba(255,255,255,0.15), rgba(255,255,255,0.08));
+    background-size: 200% 100%;
+    animation: checkingBarShimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes checkingBarShimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .artist-detail-header {
