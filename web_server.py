@@ -9614,6 +9614,8 @@ def _simple_monitor_task():
     last_search_cleanup = 0  # Force initial cleanup on first run
     search_cleanup_interval = 3600  # 1 hour
     initial_cleanup_done = False
+    last_download_cleanup = 0
+    download_cleanup_interval = 300  # 5 minutes
     
     while True:
         try:
@@ -9663,7 +9665,27 @@ def _simple_monitor_task():
                     print(f"❌ [Auto Cleanup] Error in automatic search cleanup: {cleanup_error}")
                     last_search_cleanup = current_time  # Still update to avoid spam
                     initial_cleanup_done = True  # Mark as done even on error to avoid blocking
-            
+
+            # Automatic download cleanup every 5 minutes
+            if current_time - last_download_cleanup > download_cleanup_interval:
+                try:
+                    # Only clear if no batches are actively downloading
+                    has_active_batches = False
+                    with tasks_lock:
+                        for batch_data in download_batches.values():
+                            if batch_data.get('phase') not in ['complete', 'error', 'cancelled', None]:
+                                has_active_batches = True
+                                break
+
+                    if not has_active_batches:
+                        asyncio.run(soulseek_client.clear_all_completed_downloads())
+                        print("✅ [Auto Cleanup] Periodic download cleanup completed")
+
+                    last_download_cleanup = current_time
+                except Exception as dl_cleanup_error:
+                    print(f"❌ [Auto Cleanup] Error in download cleanup: {dl_cleanup_error}")
+                    last_download_cleanup = current_time
+
             time.sleep(1)
         except Exception as e:
             print(f"❌ Simple monitor error: {e}")
@@ -12256,6 +12278,15 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                 # Phase already set to 'complete' in _on_download_completed
 
         print(f"✅ [Wishlist Processing] Completed wishlist processing for batch {batch_id}")
+
+        # Auto-cleanup: Clear completed downloads from slskd
+        try:
+            logger.info(f"🧹 [Auto-Cleanup] Clearing completed downloads from slskd after batch {batch_id}")
+            asyncio.run(soulseek_client.clear_all_completed_downloads())
+            logger.info(f"✅ [Auto-Cleanup] Completed downloads cleared from slskd")
+        except Exception as cleanup_error:
+            logger.warning(f"⚠️ [Auto-Cleanup] Failed to clear completed downloads: {cleanup_error}")
+
         return completion_summary
     
     except Exception as e:
