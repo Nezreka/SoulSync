@@ -13946,6 +13946,35 @@ body {
     text-align: right;
 }
 
+/* Track ownership indicators */
+.wishlist-track-item.owned {
+    opacity: 0.5;
+    border-left: 3px solid rgba(29, 185, 84, 0.6);
+}
+
+.wishlist-track-item.owned:hover {
+    opacity: 0.7;
+}
+
+.wishlist-track-item.missing {
+    border-left: 3px solid rgba(255, 152, 0, 0.6);
+}
+
+.wishlist-track-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.wishlist-track-badge.owned {
+    color: rgba(29, 185, 84, 0.9);
+}
+
 /* Modal Footer */
 .add-to-wishlist-modal-footer {
     background: linear-gradient(135deg,

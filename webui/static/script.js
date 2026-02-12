@@ -10579,6 +10579,7 @@ function getSuccessfulDownloadCount(process) {
 // ===============================
 
 let currentWishlistModalData = null;
+let wishlistModalVersion = 0;
 
 /**
  * Open the Add to Wishlist modal for an album/EP/single
@@ -10587,7 +10588,8 @@ let currentWishlistModalData = null;
  * @param {Array} tracks - Array of track objects
  * @param {string} albumType - Type of release (album, EP, single)
  */
-async function openAddToWishlistModal(album, artist, tracks, albumType) {
+async function openAddToWishlistModal(album, artist, tracks, albumType, trackOwnership) {
+    wishlistModalVersion++;
     showLoadingOverlay('Preparing wishlist...');
     console.log(`🎵 Opening Add to Wishlist modal for: ${artist.name} - ${album.name}`);
 
@@ -10609,14 +10611,14 @@ async function openAddToWishlistModal(album, artist, tracks, albumType) {
         }
 
         // Generate and populate hero section
-        const heroContent = generateWishlistModalHeroSection(album, artist, tracks, albumType);
+        const heroContent = generateWishlistModalHeroSection(album, artist, tracks, albumType, trackOwnership);
         const heroContainer = document.getElementById('add-to-wishlist-modal-hero');
         if (heroContainer) {
             heroContainer.innerHTML = heroContent;
         }
 
         // Generate and populate track list
-        const trackListHTML = generateWishlistTrackList(tracks);
+        const trackListHTML = generateWishlistTrackList(tracks, trackOwnership);
         const trackListContainer = document.getElementById('wishlist-track-list');
         if (trackListContainer) {
             trackListContainer.innerHTML = trackListHTML;
@@ -10644,10 +10646,20 @@ async function openAddToWishlistModal(album, artist, tracks, albumType) {
 /**
  * Generate the hero section HTML for the wishlist modal
  */
-function generateWishlistModalHeroSection(album, artist, tracks, albumType) {
+function generateWishlistModalHeroSection(album, artist, tracks, albumType, trackOwnership) {
     const artistImage = artist.image_url || '';
     const albumImage = album.image_url || '';
     const trackCount = tracks.length;
+
+    // Calculate missing tracks if ownership info is available
+    let trackDetailText = `${trackCount} track${trackCount !== 1 ? 's' : ''}`;
+    if (trackOwnership) {
+        const ownedCount = Object.values(trackOwnership).filter(v => v === true).length;
+        const missingCount = trackCount - ownedCount;
+        if (missingCount > 0 && ownedCount > 0) {
+            trackDetailText = `${missingCount} of ${trackCount} tracks missing`;
+        }
+    }
 
     let heroBackgroundImage = '';
     if (albumImage) {
@@ -10665,7 +10677,7 @@ function generateWishlistModalHeroSection(album, artist, tracks, albumType) {
                 <div class="add-to-wishlist-modal-hero-subtitle">by ${escapeHtml(artist.name || 'Unknown Artist')}</div>
                 <div class="add-to-wishlist-modal-hero-details">
                     <span class="add-to-wishlist-modal-hero-detail">${albumType || 'Album'}</span>
-                    <span class="add-to-wishlist-modal-hero-detail">${trackCount} track${trackCount !== 1 ? 's' : ''}</span>
+                    <span class="add-to-wishlist-modal-hero-detail">${trackDetailText}</span>
                 </div>
             </div>
         </div>
@@ -10680,7 +10692,7 @@ function generateWishlistModalHeroSection(album, artist, tracks, albumType) {
 /**
  * Generate the track list HTML for the wishlist modal
  */
-function generateWishlistTrackList(tracks) {
+function generateWishlistTrackList(tracks, trackOwnership) {
     if (!tracks || tracks.length === 0) {
         return '<div style="text-align: center; padding: 40px; color: rgba(255, 255, 255, 0.6);">No tracks found</div>';
     }
@@ -10691,14 +10703,21 @@ function generateWishlistTrackList(tracks) {
         const artistsString = formatArtists(track.artists) || 'Unknown Artist';
         const duration = formatDuration(track.duration_ms);
 
+        const isOwned = trackOwnership ? trackOwnership[track.name] === true : null;
+        const ownershipClass = isOwned === true ? 'owned' : (isOwned === false ? 'missing' : '');
+        const badge = isOwned === true
+            ? '<div class="wishlist-track-badge owned"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>'
+            : '';
+
         return `
-            <div class="wishlist-track-item">
+            <div class="wishlist-track-item ${ownershipClass}">
                 <div class="wishlist-track-number">${trackNumber}</div>
                 <div class="wishlist-track-info">
                     <div class="wishlist-track-name">${trackName}</div>
                     <div class="wishlist-track-artists">${artistsString}</div>
                 </div>
                 <div class="wishlist-track-duration">${duration}</div>
+                ${badge}
             </div>
         `;
     }).join('');
@@ -10840,6 +10859,84 @@ async function handleAddToWishlist() {
             addToWishlistBtn.textContent = 'Add to Wishlist';
             addToWishlistBtn.disabled = false;
         }
+    }
+}
+
+/**
+ * Lazy-load per-track ownership indicators into an already-open wishlist modal.
+ * Fetches ownership from the backend, then updates the modal DOM in-place.
+ * If all tracks are owned (Spotify metadata discrepancy), also fixes the source card.
+ */
+async function lazyLoadTrackOwnership(artistName, tracks, sourceCard) {
+    const myVersion = wishlistModalVersion;
+    try {
+        const resp = await fetch('/api/library/check-tracks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                artist_name: artistName,
+                tracks: tracks.map(t => ({ name: t.name, track_number: t.track_number }))
+            })
+        });
+        const data = await resp.json();
+        if (!data.success) return;
+
+        // Guard against stale updates if user reopened modal for a different album
+        if (myVersion !== wishlistModalVersion) return;
+
+        const ownership = data.owned_tracks;
+        const trackItems = document.querySelectorAll('#wishlist-track-list .wishlist-track-item');
+
+        let ownedCount = 0;
+        trackItems.forEach((item, index) => {
+            const track = tracks[index];
+            if (!track) return;
+            const isOwned = ownership[track.name] === true;
+            if (isOwned) {
+                ownedCount++;
+                item.classList.add('owned');
+                const badge = document.createElement('div');
+                badge.className = 'wishlist-track-badge owned';
+                badge.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+                item.appendChild(badge);
+            } else {
+                item.classList.add('missing');
+            }
+        });
+
+        // Update hero subtitle with missing count
+        const missingCount = tracks.length - ownedCount;
+        const heroDetails = document.querySelectorAll('.add-to-wishlist-modal-hero-detail');
+        const trackDetailEl = heroDetails.length > 1 ? heroDetails[heroDetails.length - 1] : null;
+        if (trackDetailEl && missingCount > 0 && ownedCount > 0) {
+            trackDetailEl.textContent = `${missingCount} of ${tracks.length} tracks missing`;
+        }
+
+        // If ALL returned tracks are owned, this is a Spotify metadata discrepancy
+        // (e.g. total_tracks says 15 but API only returns 14, and all 14 are owned)
+        // Fix the source card to show complete
+        if (missingCount === 0 && sourceCard && sourceCard._releaseData) {
+            sourceCard._releaseData.track_completion = {
+                owned_tracks: ownedCount,
+                total_tracks: tracks.length,
+                percentage: 100,
+                missing_tracks: 0
+            };
+            const completionText = sourceCard.querySelector('.completion-text');
+            if (completionText) {
+                completionText.textContent = `Complete (${ownedCount})`;
+                completionText.className = 'completion-text complete';
+                completionText.title = '';
+            }
+            const completionFill = sourceCard.querySelector('.completion-fill');
+            if (completionFill) {
+                completionFill.style.width = '100%';
+                completionFill.classList.remove('partial');
+                completionFill.classList.add('complete');
+            }
+        }
+    } catch (e) {
+        console.warn('Could not load track ownership:', e);
     }
 }
 
@@ -26012,10 +26109,14 @@ function createReleaseCard(release) {
             // Use the actual album type from release data
             const albumType = rel.album_type || rel.type || 'album';
 
-            // Open the Add to Wishlist modal
-            // Note: openAddToWishlistModal has its own loading overlay
+            // Open the Add to Wishlist modal immediately (no waiting for ownership check)
             hideLoadingOverlay();
             await openAddToWishlistModal(albumData, currentArtist, data.tracks, albumType);
+
+            // Lazy-load per-track ownership for partial albums (non-blocking)
+            if (rel.track_completion && typeof rel.track_completion === 'object' && rel.track_completion.missing_tracks > 0) {
+                lazyLoadTrackOwnership(currentArtist.name, data.tracks, card);
+            }
 
         } catch (error) {
             hideLoadingOverlay();
@@ -26150,15 +26251,20 @@ function updateLibraryReleaseCard(data) {
         card.classList.add('missing');
     }
 
+    // If backend says "completed" (>=90%), trust it — Spotify metadata track counts
+    // can be wrong (e.g. total_tracks=15 but API only returns 14 actual tracks)
+    const isComplete = data.status === 'completed';
+    const effectiveMissing = isComplete ? 0 : (data.expected_tracks - data.owned_tracks);
+
     // Update the mutable release data on the card
     if (card._releaseData) {
         card._releaseData.owned = isOwned;
         if (isOwned && data.expected_tracks > 0) {
             card._releaseData.track_completion = {
                 owned_tracks: data.owned_tracks,
-                total_tracks: data.expected_tracks,
-                percentage: data.completion_percentage,
-                missing_tracks: data.expected_tracks - data.owned_tracks
+                total_tracks: isComplete ? data.owned_tracks : data.expected_tracks,
+                percentage: isComplete ? 100 : data.completion_percentage,
+                missing_tracks: effectiveMissing
             };
         } else if (isOwned) {
             card._releaseData.track_completion = {
@@ -26177,14 +26283,13 @@ function updateLibraryReleaseCard(data) {
     if (completionText) {
         completionText.classList.remove('checking', 'complete', 'partial', 'missing');
         if (isOwned) {
-            const missing = data.expected_tracks - data.owned_tracks;
-            if (missing <= 0) {
+            if (effectiveMissing <= 0) {
                 completionText.textContent = `Complete (${data.owned_tracks})`;
                 completionText.className = 'completion-text complete';
             } else {
                 completionText.textContent = `${data.owned_tracks}/${data.expected_tracks} tracks`;
                 completionText.className = 'completion-text partial';
-                completionText.title = `Missing ${missing} track${missing !== 1 ? 's' : ''}`;
+                completionText.title = `Missing ${effectiveMissing} track${effectiveMissing !== 1 ? 's' : ''}`;
             }
         } else {
             completionText.textContent = 'Missing';
@@ -26197,10 +26302,9 @@ function updateLibraryReleaseCard(data) {
     if (completionFill) {
         completionFill.classList.remove('checking', 'complete', 'partial', 'missing');
         if (isOwned) {
-            const pct = data.completion_percentage || 100;
+            const pct = isComplete ? 100 : (data.completion_percentage || 100);
             completionFill.style.width = `${pct}%`;
-            const missing = data.expected_tracks - data.owned_tracks;
-            completionFill.classList.add(missing <= 0 ? 'complete' : 'partial');
+            completionFill.classList.add(effectiveMissing <= 0 ? 'complete' : 'partial');
         } else {
             completionFill.style.width = '0%';
             completionFill.classList.add('missing');
