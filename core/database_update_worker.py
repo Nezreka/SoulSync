@@ -916,52 +916,12 @@ class DatabaseUpdateWorker(QThread):
             return []
 
     def _get_recent_albums_navidrome(self) -> List:
-        """Get recently added albums from Navidrome using all albums sorted by date"""
+        """Get recently added albums from Navidrome using getAlbumList2 API"""
         try:
             logger.info("Getting recent albums from Navidrome...")
-
-            # Navidrome doesn't have a direct "recent albums" API like Plex/Jellyfin
-            # So we need to get all albums and sort them by date
-            all_artists = self.media_client.get_all_artists()
-            if not all_artists:
-                return []
-
-            all_albums = []
-            # Get albums from a subset of artists to avoid too much data
-            # Take first 200 artists to get a reasonable sample of recent albums
-            sample_artists = all_artists[:200]
-
-            for artist in sample_artists:
-                try:
-                    artist_albums = self.media_client.get_albums_for_artist(artist.ratingKey)
-                    all_albums.extend(artist_albums)
-                except Exception as e:
-                    logger.warning(f"Error getting albums for artist {getattr(artist, 'title', 'Unknown')}: {e}")
-                    continue
-
-            if not all_albums:
-                return []
-
-            # Sort by addedAt date (newest first) and take recent ones
-            try:
-                def get_sort_date(album):
-                    date_val = getattr(album, 'addedAt', None)
-                    if date_val is None:
-                        return 0
-                    return date_val
-
-                all_albums.sort(key=get_sort_date, reverse=True)
-                # Take the most recent 400 albums for incremental checking
-                recent_albums = all_albums[:400]
-
-                logger.info(f"Found {len(recent_albums)} recent albums from Navidrome (from {len(all_albums)} total)")
-                return recent_albums
-
-            except Exception as e:
-                logger.warning(f"Error sorting Navidrome albums by date: {e}")
-                # If sorting fails, just return the first 400 albums
-                return all_albums[:400]
-
+            recent_albums = self.media_client.get_recently_added_albums(400)
+            logger.info(f"Found {len(recent_albums)} recently added albums from Navidrome")
+            return recent_albums
         except Exception as e:
             logger.error(f"Error getting recent Navidrome albums: {e}")
             return []
