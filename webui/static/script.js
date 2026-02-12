@@ -25368,6 +25368,12 @@ let artistDetailPageState = {
 function navigateToArtistDetail(artistId, artistName) {
     console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId})`);
 
+    // Abort any in-progress completion stream
+    if (artistDetailPageState.completionController) {
+        artistDetailPageState.completionController.abort();
+        artistDetailPageState.completionController = null;
+    }
+
     // Store current artist info
     artistDetailPageState.currentArtistId = artistId;
     artistDetailPageState.currentArtistName = artistName;
@@ -25392,6 +25398,11 @@ function initializeArtistDetailPage() {
     if (backBtn) {
         backBtn.addEventListener("click", () => {
             console.log("🔙 Returning to Library page");
+            // Abort any in-progress completion stream
+            if (artistDetailPageState.completionController) {
+                artistDetailPageState.completionController.abort();
+                artistDetailPageState.completionController = null;
+            }
             // Clear artist detail state so we go back to the list view
             artistDetailPageState.currentArtistId = null;
             artistDetailPageState.currentArtistName = null;
@@ -25453,6 +25464,17 @@ async function loadArtistDetailData(artistId, artistName) {
 
         // Update header with artist name and MusicBrainz link LAST to avoid overwrite
         updateArtistDetailPageHeaderWithData(data.artist);
+
+        // Start streaming ownership checks if we have Spotify discography with checking state
+        if (data.discography && data.discography.albums) {
+            const hasChecking = [...(data.discography.albums || []), ...(data.discography.eps || []), ...(data.discography.singles || [])]
+                .some(r => r.owned === null);
+            if (hasChecking) {
+                // Store discography for stream updates
+                artistDetailPageState.currentDiscography = data.discography;
+                checkLibraryCompletion(data.artist.name, data.discography);
+            }
+        }
 
     } catch (error) {
         console.error(`❌ Error loading artist detail data:`, error);
@@ -25590,28 +25612,30 @@ function updateArtistGenres(genres) {
 }
 
 function updateArtistSummaryStats(discography) {
-    // Calculate stats
-    const ownedAlbums = discography.albums.filter(album => album.owned).length;
-    const missingAlbums = discography.albums.filter(album => !album.owned).length;
+    const allReleases = [...discography.albums, ...discography.eps, ...discography.singles];
+    const hasChecking = allReleases.some(r => r.owned === null);
+
+    const ownedAlbums = discography.albums.filter(album => album.owned === true).length;
+    const missingAlbums = discography.albums.filter(album => album.owned === false).length;
     const totalAlbums = discography.albums.length;
     const completionPercentage = totalAlbums > 0 ? Math.round((ownedAlbums / totalAlbums) * 100) : 0;
 
     // Update owned albums count
     const ownedElement = document.getElementById("owned-albums-count");
     if (ownedElement) {
-        ownedElement.textContent = ownedAlbums;
+        ownedElement.textContent = hasChecking ? '...' : ownedAlbums;
     }
 
     // Update missing albums count
     const missingElement = document.getElementById("missing-albums-count");
     if (missingElement) {
-        missingElement.textContent = missingAlbums;
+        missingElement.textContent = hasChecking ? '...' : missingAlbums;
     }
 
     // Update completion percentage
     const completionElement = document.getElementById("completion-percentage");
     if (completionElement) {
-        completionElement.textContent = `${completionPercentage}%`;
+        completionElement.textContent = hasChecking ? 'Checking...' : `${completionPercentage}%`;
     }
 }
 
@@ -25675,29 +25699,42 @@ function updateArtistHeroSection(artist, discography) {
 }
 
 function updateCategoryStats(category, releases) {
-    const owned = releases.filter(r => r.owned !== false).length;
+    const hasChecking = releases.some(r => r.owned === null);
+    const owned = releases.filter(r => r.owned === true).length;
     const missing = releases.filter(r => r.owned === false).length;
     const total = releases.length;
     const completion = total > 0 ? Math.round((owned / total) * 100) : 100;
 
-    console.log(`📊 ${category}: ${owned} owned, ${missing} missing, ${completion}% complete`);
-
     // Update stats text
     const statsElement = document.getElementById(`${category}-stats`);
     if (statsElement) {
-        statsElement.textContent = `${owned} owned, ${missing} missing`;
+        if (hasChecking) {
+            statsElement.textContent = `Checking...`;
+        } else {
+            statsElement.textContent = `${owned} owned, ${missing} missing`;
+        }
     }
 
     // Update completion bar
     const fillElement = document.getElementById(`${category}-completion-fill`);
     if (fillElement) {
-        fillElement.style.width = `${completion}%`;
+        if (hasChecking) {
+            fillElement.style.width = '100%';
+            fillElement.classList.add('checking');
+        } else {
+            fillElement.style.width = `${completion}%`;
+            fillElement.classList.remove('checking');
+        }
     }
 
     // Update completion text
     const textElement = document.getElementById(`${category}-completion-text`);
     if (textElement) {
-        textElement.textContent = `${completion}%`;
+        if (hasChecking) {
+            textElement.textContent = `Checking...`;
+        } else {
+            textElement.textContent = `${completion}%`;
+        }
     }
 }
 
@@ -25723,28 +25760,26 @@ function populateReleaseSection(sectionType, releases) {
     // Clear existing content
     grid.innerHTML = "";
 
-    // Calculate stats
-    const ownedCount = releases.filter(release => release.owned).length;
-    const missingCount = releases.filter(release => !release.owned).length;
+    const hasChecking = releases.some(r => r.owned === null);
+    const ownedCount = releases.filter(release => release.owned === true).length;
+    const missingCount = releases.filter(release => release.owned === false).length;
 
     // Update section stats
     const ownedElement = document.getElementById(ownedCountId);
     const missingElement = document.getElementById(missingCountId);
 
     if (ownedElement) {
-        ownedElement.textContent = `${ownedCount} owned`;
+        ownedElement.textContent = hasChecking ? 'Checking...' : `${ownedCount} owned`;
     }
 
     if (missingElement) {
-        missingElement.textContent = `${missingCount} missing`;
+        missingElement.textContent = hasChecking ? '' : `${missingCount} missing`;
     }
 
     // Create release cards
     releases.forEach((release, index) => {
-        console.log(`📀 Creating card ${index + 1} for: ${release.title}`);
         const card = createReleaseCard(release);
         grid.appendChild(card);
-        console.log(`📀 Added card to grid:`, card);
     });
 
     console.log(`📀 Populated ${sectionType} section: ${ownedCount} owned, ${missingCount} missing`);
@@ -25754,9 +25789,12 @@ function populateReleaseSection(sectionType, releases) {
 
 function createReleaseCard(release) {
     const card = document.createElement("div");
-    card.className = `release-card${release.owned ? "" : " missing"}`;
+    const isChecking = release.owned === null;
+    card.className = `release-card${isChecking ? " checking" : (release.owned ? "" : " missing")}`;
     card.setAttribute("data-release-id", release.id || "");
     card.setAttribute("data-spotify-id", release.spotify_id || "");
+    // Store mutable reference so stream updates propagate to click handler
+    card._releaseData = release;
 
     // Add MusicBrainz icon if available
     let mbIcon = null;
@@ -25847,7 +25885,13 @@ function createReleaseCard(release) {
     const completionFill = document.createElement("div");
     completionFill.className = "completion-fill";
 
-    if (release.owned) {
+    if (release.owned === null || release.track_completion === 'checking') {
+        // Checking state - ownership not yet resolved
+        completionText.textContent = "Checking...";
+        completionText.className = "completion-text checking";
+        completionFill.className += " checking";
+        completionFill.style.width = "100%";
+    } else if (release.owned) {
         // Handle new detailed track completion object
         if (release.track_completion && typeof release.track_completion === 'object') {
             const completion = release.track_completion;
@@ -25907,15 +25951,22 @@ function createReleaseCard(release) {
         card.appendChild(mbIcon);
     }
 
-    // Add click handler for release card
+    // Add click handler for release card (uses card._releaseData for mutable reference)
     card.addEventListener("click", async () => {
-        console.log(`Clicked on release: ${release.title} (Owned: ${release.owned})`);
+        const rel = card._releaseData;
+        console.log(`Clicked on release: ${rel.title} (Owned: ${rel.owned})`);
+
+        // Still checking - ignore click
+        if (rel.owned === null) {
+            showToast(`Still checking ownership for ${rel.title}...`, "info");
+            return;
+        }
 
         // For owned/complete releases, show info message
-        if (release.owned && (!release.track_completion ||
-            (typeof release.track_completion === 'object' && release.track_completion.missing_tracks === 0) ||
-            (typeof release.track_completion === 'number' && release.track_completion === 100))) {
-            showToast(`${release.title} is already complete in your library`, "info");
+        if (rel.owned && (!rel.track_completion ||
+            (typeof rel.track_completion === 'object' && rel.track_completion.missing_tracks === 0) ||
+            (typeof rel.track_completion === 'number' && rel.track_completion === 100))) {
+            showToast(`${rel.title} is already complete in your library`, "info");
             return;
         }
 
@@ -25925,13 +25976,13 @@ function createReleaseCard(release) {
         try {
             // Convert release object to album format expected by our function
             const albumData = {
-                id: release.spotify_id || release.id,
-                name: release.title,
-                image_url: release.image_url,
-                release_date: release.year ? `${release.year}-01-01` : '',
-                album_type: release.album_type || release.type || 'album',
-                total_tracks: (release.track_completion && typeof release.track_completion === 'object')
-                    ? release.track_completion.total_tracks : 1
+                id: rel.spotify_id || rel.id,
+                name: rel.title,
+                image_url: rel.image_url,
+                release_date: rel.year ? `${rel.year}-01-01` : '',
+                album_type: rel.album_type || rel.type || 'album',
+                total_tracks: (rel.track_completion && typeof rel.track_completion === 'object')
+                    ? rel.track_completion.total_tracks : (rel.track_count || 1)
             };
 
             // Get current artist from artist detail page state
@@ -25959,7 +26010,7 @@ function createReleaseCard(release) {
             }
 
             // Use the actual album type from release data
-            const albumType = release.album_type || release.type || 'album';
+            const albumType = rel.album_type || rel.type || 'album';
 
             // Open the Add to Wishlist modal
             // Note: openAddToWishlistModal has its own loading overlay
@@ -26004,6 +26055,228 @@ function getArtistImageFromPage() {
     } catch (error) {
         console.warn('Error getting artist image from page:', error);
         return null;
+    }
+}
+
+// ================================================================================================
+// LIBRARY COMPLETION STREAMING - Two-phase lazy-load pattern
+// ================================================================================================
+
+async function checkLibraryCompletion(artistName, discography) {
+    // Abort any in-progress check
+    if (artistDetailPageState.completionController) {
+        artistDetailPageState.completionController.abort();
+    }
+    artistDetailPageState.completionController = new AbortController();
+
+    const payload = {
+        artist_name: artistName,
+        albums: discography.albums || [],
+        eps: discography.eps || [],
+        singles: discography.singles || []
+    };
+
+    try {
+        const response = await fetch('/api/library/completion-stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: artistDetailPageState.completionController.signal
+        });
+
+        if (!response.ok) {
+            console.error(`❌ Completion stream failed: ${response.status}`);
+            return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let ownedCounts = { albums: 0, eps: 0, singles: 0 };
+        let totalCounts = { albums: 0, eps: 0, singles: 0 };
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep incomplete line in buffer
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try {
+                    const eventData = JSON.parse(line.slice(6));
+                    if (eventData.type === 'completion') {
+                        updateLibraryReleaseCard(eventData);
+                        totalCounts[eventData.category]++;
+                        if (eventData.status !== 'missing' && eventData.status !== 'error') {
+                            ownedCounts[eventData.category]++;
+                        }
+                        // Update stats incrementally
+                        updateCategoryStatsFromStream(
+                            eventData.category,
+                            ownedCounts[eventData.category],
+                            totalCounts[eventData.category] - ownedCounts[eventData.category]
+                        );
+                    } else if (eventData.type === 'complete') {
+                        console.log(`✅ Library completion stream done: ${eventData.processed_count} items`);
+                        // Final stats recalculation
+                        recalculateSummaryStats();
+                    }
+                } catch (parseError) {
+                    console.warn('Error parsing SSE event:', parseError, line);
+                }
+            }
+        }
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            console.log('🛑 Library completion stream aborted (navigation)');
+        } else {
+            console.error('❌ Error in library completion stream:', error);
+        }
+    }
+}
+
+function updateLibraryReleaseCard(data) {
+    const card = document.querySelector(`[data-spotify-id="${data.spotify_id}"]`);
+    if (!card) return;
+
+    const isOwned = data.status !== 'missing' && data.status !== 'error';
+
+    // Update card class
+    card.classList.remove('checking', 'missing');
+    if (!isOwned) {
+        card.classList.add('missing');
+    }
+
+    // Update the mutable release data on the card
+    if (card._releaseData) {
+        card._releaseData.owned = isOwned;
+        if (isOwned && data.expected_tracks > 0) {
+            card._releaseData.track_completion = {
+                owned_tracks: data.owned_tracks,
+                total_tracks: data.expected_tracks,
+                percentage: data.completion_percentage,
+                missing_tracks: data.expected_tracks - data.owned_tracks
+            };
+        } else if (isOwned) {
+            card._releaseData.track_completion = {
+                owned_tracks: data.owned_tracks,
+                total_tracks: data.owned_tracks,
+                percentage: 100,
+                missing_tracks: 0
+            };
+        } else {
+            card._releaseData.track_completion = 0;
+        }
+    }
+
+    // Update completion text element in-place
+    const completionText = card.querySelector('.completion-text');
+    if (completionText) {
+        completionText.classList.remove('checking', 'complete', 'partial', 'missing');
+        if (isOwned) {
+            const missing = data.expected_tracks - data.owned_tracks;
+            if (missing <= 0) {
+                completionText.textContent = `Complete (${data.owned_tracks})`;
+                completionText.className = 'completion-text complete';
+            } else {
+                completionText.textContent = `${data.owned_tracks}/${data.expected_tracks} tracks`;
+                completionText.className = 'completion-text partial';
+                completionText.title = `Missing ${missing} track${missing !== 1 ? 's' : ''}`;
+            }
+        } else {
+            completionText.textContent = 'Missing';
+            completionText.className = 'completion-text missing';
+        }
+    }
+
+    // Update completion fill bar in-place
+    const completionFill = card.querySelector('.completion-fill');
+    if (completionFill) {
+        completionFill.classList.remove('checking', 'complete', 'partial', 'missing');
+        if (isOwned) {
+            const pct = data.completion_percentage || 100;
+            completionFill.style.width = `${pct}%`;
+            const missing = data.expected_tracks - data.owned_tracks;
+            completionFill.classList.add(missing <= 0 ? 'complete' : 'partial');
+        } else {
+            completionFill.style.width = '0%';
+            completionFill.classList.add('missing');
+        }
+    }
+}
+
+function updateCategoryStatsFromStream(category, ownedCount, missingCount) {
+    const statsElement = document.getElementById(`${category}-stats`);
+    if (statsElement) {
+        statsElement.textContent = `${ownedCount} owned, ${missingCount} missing`;
+    }
+
+    const total = ownedCount + missingCount;
+    const completion = total > 0 ? Math.round((ownedCount / total) * 100) : 100;
+
+    const fillElement = document.getElementById(`${category}-completion-fill`);
+    if (fillElement) {
+        fillElement.classList.remove('checking');
+        fillElement.style.width = `${completion}%`;
+    }
+
+    const textElement = document.getElementById(`${category}-completion-text`);
+    if (textElement) {
+        textElement.textContent = `${completion}%`;
+    }
+
+    // Update section owned/missing counts
+    const ownedElement = document.getElementById(`${category}-owned-count`);
+    if (ownedElement) {
+        ownedElement.textContent = `${ownedCount} owned`;
+    }
+    const missingElement = document.getElementById(`${category}-missing-count`);
+    if (missingElement) {
+        missingElement.textContent = `${missingCount} missing`;
+    }
+}
+
+function recalculateSummaryStats() {
+    const disc = artistDetailPageState.currentDiscography;
+    if (!disc) return;
+
+    // Recalculate from the live card data
+    const categories = ['albums', 'eps', 'singles'];
+    for (const cat of categories) {
+        const grid = document.getElementById(`${cat}-grid`);
+        if (!grid) continue;
+        let owned = 0, missing = 0;
+        grid.querySelectorAll('.release-card').forEach(card => {
+            if (card._releaseData) {
+                if (card._releaseData.owned === true) owned++;
+                else if (card._releaseData.owned === false) missing++;
+            }
+        });
+        updateCategoryStatsFromStream(cat, owned, missing);
+    }
+
+    // Update summary stats (albums only, matches original behavior)
+    const albumGrid = document.getElementById('albums-grid');
+    if (albumGrid) {
+        let ownedAlbums = 0, missingAlbums = 0;
+        albumGrid.querySelectorAll('.release-card').forEach(card => {
+            if (card._releaseData) {
+                if (card._releaseData.owned === true) ownedAlbums++;
+                else if (card._releaseData.owned === false) missingAlbums++;
+            }
+        });
+        const total = ownedAlbums + missingAlbums;
+        const pct = total > 0 ? Math.round((ownedAlbums / total) * 100) : 0;
+
+        const ownedEl = document.getElementById("owned-albums-count");
+        if (ownedEl) ownedEl.textContent = ownedAlbums;
+        const missingEl = document.getElementById("missing-albums-count");
+        if (missingEl) missingEl.textContent = missingAlbums;
+        const completionEl = document.getElementById("completion-percentage");
+        if (completionEl) completionEl.textContent = `${pct}%`;
     }
 }
 
