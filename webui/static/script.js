@@ -2598,6 +2598,15 @@ function initializeSearchModeToggle() {
         });
     }
 
+    // Close button inside dropdown (mobile)
+    const dropdownCloseBtn = document.getElementById('enhanced-dropdown-close');
+    if (dropdownCloseBtn) {
+        dropdownCloseBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            hideDropdown();
+        });
+    }
+
     // Close dropdown when clicking outside
     document.addEventListener('click', (e) => {
         const dropdown = document.getElementById('enhanced-dropdown');
