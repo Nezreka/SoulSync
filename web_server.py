@@ -3718,7 +3718,8 @@ def enhanced_search():
                     "artist": artist_name,
                     "image_url": album.image_url,
                     "release_date": album.release_date,
-                    "total_tracks": album.total_tracks
+                    "total_tracks": album.total_tracks,
+                    "album_type": album.album_type
                 })
 
             # Search for tracks
