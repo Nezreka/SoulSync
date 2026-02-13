@@ -2612,8 +2612,12 @@ function initializeSearchModeToggle() {
     async function performEnhancedSearch(query) {
         console.log('Enhanced search:', query);
 
-        // Show loading state
+        // Show loading state with correct source name
         showDropdown();
+        const loadingText = document.getElementById('enhanced-loading-text');
+        if (loadingText) {
+            loadingText.textContent = `Searching across ${currentMusicSourceName} and your library...`;
+        }
         loadingState.classList.remove('hidden');
         emptyState.classList.add('hidden');
         resultsContainer.classList.add('hidden');
@@ -2711,15 +2715,35 @@ function initializeSearchModeToggle() {
             })
         );
 
+        // Split albums from singles/EPs (albums is the catch-all for unknown types)
+        const allAlbums = data.spotify_albums || [];
+        const singlesAndEPs = allAlbums.filter(a => a.album_type === 'single' || a.album_type === 'ep');
+        const albums = allAlbums.filter(a => a.album_type !== 'single' && a.album_type !== 'ep');
+
         // Render Albums
         renderCompactSection(
             'enh-albums-section',
             'enh-albums-list',
             'enh-albums-count',
-            data.spotify_albums || [],
+            albums,
             (album) => ({
                 image: album.image_url,
                 placeholder: '💿',
+                name: album.name,
+                meta: `${album.artist} • ${album.release_date ? album.release_date.substring(0, 4) : 'N/A'}`,
+                onClick: () => handleEnhancedSearchAlbumClick(album)
+            })
+        );
+
+        // Render Singles & EPs
+        renderCompactSection(
+            'enh-singles-section',
+            'enh-singles-list',
+            'enh-singles-count',
+            singlesAndEPs,
+            (album) => ({
+                image: album.image_url,
+                placeholder: '🎶',
                 name: album.name,
                 meta: `${album.artist} • ${album.release_date ? album.release_date.substring(0, 4) : 'N/A'}`,
                 onClick: () => handleEnhancedSearchAlbumClick(album)
@@ -2825,7 +2849,7 @@ function initializeSearchModeToggle() {
 
         // Determine type based on section ID
         const isArtist = sectionId.includes('artists');
-        const isAlbum = sectionId.includes('albums');
+        const isAlbum = sectionId.includes('albums') || sectionId.includes('singles');
         const isTrack = sectionId.includes('tracks');
 
         // Add appropriate grid class to list
@@ -2939,7 +2963,9 @@ function initializeSearchModeToggle() {
             const albumData = await response.json();
 
             if (!albumData || !albumData.tracks || albumData.tracks.length === 0) {
-                throw new Error('No tracks found for this album');
+                hideLoadingOverlay();
+                showToast(`No tracks available for "${album.name}". This release may have been delisted or is not available in your region.`, 'warning');
+                return;
             }
 
             console.log(`✅ Loaded ${albumData.tracks.length} tracks for ${albumData.name}`);
