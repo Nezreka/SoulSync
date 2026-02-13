@@ -91,6 +91,10 @@
         width: 100%;
     }
 
+    .enhanced-dropdown-content {
+        max-width: 100% !important;
+    }
+
     .dashboard-container {
         gap: 15px;
         margin: 15px;
