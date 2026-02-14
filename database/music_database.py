@@ -2257,10 +2257,17 @@ class MusicDatabase:
     def _generate_album_title_variations(self, title: str) -> List[str]:
         """Generate variations of album title to handle edition matching"""
         variations = [title]  # Always include original
-        
+
+        # Add diacritic-normalized variation (fixes #101)
+        # SQLite LIKE is not Unicode-aware, so "găină" won't match "gaina"
+        # Adding the normalized form lets the SQL query catch both
+        normalized_title = self._normalize_for_comparison(title)
+        if normalized_title != title.lower():
+            variations.append(normalized_title)
+
         # Clean up the title
         title_lower = title.lower().strip()
-        
+
         # Define edition patterns and their variations
         edition_patterns = {
             r'\s*\(deluxe\s*edition?\)': ['deluxe', 'deluxe edition'],
@@ -2396,7 +2403,12 @@ class MusicDatabase:
     def _generate_track_title_variations(self, title: str) -> List[str]:
         """Generate variations of track title for better matching"""
         variations = [title]  # Always include original
-        
+
+        # Add diacritic-normalized variation (fixes #101)
+        normalized_title = self._normalize_for_comparison(title)
+        if normalized_title != title.lower():
+            variations.append(normalized_title)
+
         # IMPORTANT: Generate bracket/dash style variations for better matching
         # Convert "Track - Instrumental" to "Track (Instrumental)" and vice versa
         if ' - ' in title:
