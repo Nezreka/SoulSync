@@ -676,9 +676,8 @@ class WatchlistScanner:
                     logger.warning(f"Error checking album {album.name}: {e}")
                     continue
             
-            # Update last scan timestamp for this artist (use spotify_artist_id as DB key for consistency)
-            db_artist_id = watchlist_artist.spotify_artist_id or artist_id
-            self.update_artist_scan_timestamp(db_artist_id)
+            # Update last scan timestamp for this artist
+            self.update_artist_scan_timestamp(watchlist_artist)
 
             # Fetch and store similar artists for discovery feature (with caching to avoid over-polling)
             # Similar artists are fetched from MusicMap (works with any source) and matched to both Spotify and iTunes
@@ -1203,29 +1202,45 @@ class WatchlistScanner:
             logger.error(f"Error adding track to wishlist: {track_name}: {e}")
             return False
     
-    def update_artist_scan_timestamp(self, spotify_artist_id: str) -> bool:
-        """Update the last scan timestamp for an artist"""
+    def update_artist_scan_timestamp(self, artist) -> bool:
+        """Update the last scan timestamp for an artist.
+
+        Args:
+            artist: WatchlistArtist object, or a string spotify_artist_id for backward compat
+        """
         try:
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
-                
-                cursor.execute("""
-                    UPDATE watchlist_artists 
-                    SET last_scan_timestamp = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-                    WHERE spotify_artist_id = ?
-                """, (spotify_artist_id,))
-                
+
+                # Support both WatchlistArtist objects and raw string IDs
+                if hasattr(artist, 'id'):
+                    # WatchlistArtist object - use database primary key (always reliable)
+                    cursor.execute("""
+                        UPDATE watchlist_artists
+                        SET last_scan_timestamp = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, (artist.id,))
+                    artist_label = f"{artist.artist_name} (id={artist.id})"
+                else:
+                    # Backward compat: raw string ID (try spotify, then itunes)
+                    cursor.execute("""
+                        UPDATE watchlist_artists
+                        SET last_scan_timestamp = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                        WHERE spotify_artist_id = ? OR itunes_artist_id = ?
+                    """, (artist, artist))
+                    artist_label = f"ID {artist}"
+
                 conn.commit()
-                
+
                 if cursor.rowcount > 0:
-                    logger.debug(f"Updated scan timestamp for artist {spotify_artist_id}")
+                    logger.debug(f"Updated scan timestamp for artist {artist_label}")
                     return True
                 else:
-                    logger.warning(f"No artist found with Spotify ID {spotify_artist_id}")
+                    logger.warning(f"No artist found for {artist_label}")
                     return False
-                
+
         except Exception as e:
-            logger.error(f"Error updating scan timestamp for artist {spotify_artist_id}: {e}")
+            logger.error(f"Error updating scan timestamp: {e}")
             return False
 
     def _fetch_similar_artists_from_musicmap(self, artist_name: str, limit: int = 20) -> List[Dict[str, Any]]:

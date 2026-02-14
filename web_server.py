@@ -19013,8 +19013,8 @@ def start_watchlist_scan():
                                 continue
                         
                         # Update scan timestamp
-                        scanner.update_artist_scan_timestamp(artist.spotify_artist_id)
-                        
+                        scanner.update_artist_scan_timestamp(artist)
+
                         # Store result
                         scan_results.append(type('ScanResult', (), {
                             'artist_name': artist.artist_name,
@@ -19025,7 +19025,7 @@ def start_watchlist_scan():
                             'success': True,
                             'error_message': None
                         })())
-                        
+
                         print(f"✅ Scanned {artist.artist_name}: {artist_new_tracks} new tracks found, {artist_added_tracks} added to wishlist")
 
                         # Fetch similar artists for discovery feature
@@ -19731,7 +19731,7 @@ def _process_watchlist_scan_automatically():
                             continue
 
                     # Update scan timestamp
-                    scanner.update_artist_scan_timestamp(artist.spotify_artist_id)
+                    scanner.update_artist_scan_timestamp(artist)
 
                     # Store result
                     scan_results.append(type('ScanResult', (), {

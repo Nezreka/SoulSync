@@ -247,7 +247,7 @@ class WatchlistScanWorker(QThread):
                     continue
             
             # Update last scan timestamp
-            scanner.update_artist_scan_timestamp(watchlist_artist.spotify_artist_id)
+            scanner.update_artist_scan_timestamp(watchlist_artist)
             
             return ScanResult(
                 artist_name=watchlist_artist.artist_name,
