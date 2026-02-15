@@ -3095,7 +3095,12 @@ class MusicDatabase:
                         track_data = json.loads(track['spotify_data'])
                         track_name = track_data.get('name', '').lower()
                         artists = track_data.get('artists', [])
-                        artist_name = artists[0].get('name', '').lower() if artists else 'unknown'
+                        if artists and isinstance(artists[0], dict):
+                            artist_name = artists[0].get('name', '').lower()
+                        elif artists:
+                            artist_name = str(artists[0]).lower()
+                        else:
+                            artist_name = 'unknown'
 
                         key = (track_name, artist_name)
 

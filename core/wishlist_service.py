@@ -271,7 +271,7 @@ class WishlistService:
                     spotify_data = track['spotify_data']
                     recent_failures.append({
                         'name': spotify_data.get('name', 'Unknown Track'),
-                        'artist': spotify_data.get('artists', [{}])[0].get('name', 'Unknown Artist'),
+                        'artist': (spotify_data.get('artists', [{}])[0].get('name', 'Unknown Artist') if isinstance(spotify_data.get('artists', [{}])[0], dict) else spotify_data.get('artists', ['Unknown Artist'])[0]) if spotify_data.get('artists') else 'Unknown Artist',
                         'failure_reason': track['failure_reason'],
                         'retry_count': track['retry_count'],
                         'date_added': track['date_added']
