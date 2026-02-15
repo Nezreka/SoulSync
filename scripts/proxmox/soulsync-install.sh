@@ -7,7 +7,7 @@
 #  inside a Debian/Ubuntu-based Proxmox LXC container.
 #
 #  Usage:
-#    bash soulsync-install.sh
+#    bash -c "$(curl -fsSL https://raw.githubusercontent.com/tanujdargan/SoulSync/main/scripts/proxmox/soulsync-install.sh)"
 #
 #  Requirements:
 #    - Debian 12+ or Ubuntu 22.04+ LXC container
@@ -169,7 +169,7 @@ BANNER
 root_check() {
   if [[ "$(id -u)" -ne 0 ]]; then
     msg_error "This script must be run as root"
-    echo -e "\n${TAB}Run with: ${GN}sudo bash $(basename "$0")${CL}\n" >&2
+    echo -e "\n${TAB}Run as root or with: ${GN}sudo bash soulsync-install.sh${CL}\n" >&2
     exit 1
   fi
 }
@@ -241,7 +241,7 @@ prompt_input() {
   else
     printf "\n${TAB}${GEAR} ${YW}%s${CL}: " "$prompt" >&2
   fi
-  read -r result
+  read -r result </dev/tty
   echo "${result:-$default}"
 }
 
@@ -250,7 +250,7 @@ prompt_password() {
   local result
 
   printf "\n${TAB}${LOCK} ${YW}%s${CL}: " "$prompt" >&2
-  read -rs result
+  read -rs result </dev/tty
   echo "" >&2
   echo "$result"
 }
@@ -267,7 +267,7 @@ prompt_confirm() {
   fi
 
   printf "\n${TAB}${INFO} ${YW}%s ${DIM}[%s]${CL}: " "$prompt" "$hint" >&2
-  read -r result
+  read -r result </dev/tty
   result="${result:-$default}"
   [[ "${result,,}" =~ ^(y|yes)$ ]]
 }
@@ -288,7 +288,7 @@ prompt_select() {
   local result
   while true; do
     printf "${TAB}${TAB}${YW}Select [1-%d]${CL}: " "${#options[@]}" >&2
-    read -r result
+    read -r result </dev/tty
     if [[ "$result" =~ ^[0-9]+$ ]] && ((result >= 1 && result <= ${#options[@]})); then
       echo "$result"
       return
