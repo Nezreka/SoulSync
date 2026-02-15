@@ -11130,7 +11130,13 @@ def remove_album_from_wishlist():
                 # Create custom ID matching frontend logic exactly
                 # album_data is guaranteed to be a dict from above check
                 album_name = album_data.get('name', 'Unknown Album')
-                artist_name = spotify_data.get('artists', [{}])[0].get('name', 'Unknown Artist') if spotify_data.get('artists') else 'Unknown Artist'
+                artists = spotify_data.get('artists', [])
+                if artists and isinstance(artists[0], dict):
+                    artist_name = artists[0].get('name', 'Unknown Artist')
+                elif artists and isinstance(artists[0], str):
+                    artist_name = artists[0]
+                else:
+                    artist_name = 'Unknown Artist'
                 custom_id = f"{album_name}_{artist_name}"
                 # Match frontend regex exactly:
                 # 1. Remove all special chars except spaces, underscores, hyphens: /[^a-zA-Z0-9\s_-]/g
