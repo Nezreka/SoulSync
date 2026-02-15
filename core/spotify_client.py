@@ -162,7 +162,7 @@ class Playlist:
             public=playlist_data['public'],
             collaborative=playlist_data['collaborative'],
             tracks=tracks,
-            total_tracks=playlist_data['tracks']['total']
+            total_tracks=(playlist_data.get('tracks') or playlist_data.get('items') or {}).get('total', 0)
         )
 
 class SpotifyClient:
@@ -438,12 +438,14 @@ class SpotifyClient:
         tracks = []
         
         try:
-            results = self.sp.playlist_tracks(playlist_id, limit=100)
-            
+            results = self.sp.playlist_items(playlist_id, limit=100)
+
             while results:
                 for item in results['items']:
-                    if item['track'] and item['track']['id']:
-                        track = Track.from_spotify_track(item['track'])
+                    # Handle both old API ('track') and new Feb 2026 API ('item') field names
+                    track_data = item.get('track') or item.get('item')
+                    if track_data and track_data.get('id'):
+                        track = Track.from_spotify_track(track_data)
                         tracks.append(track)
                 
                 results = self.sp.next(results) if results['next'] else None

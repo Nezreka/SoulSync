@@ -15359,12 +15359,13 @@ def get_playlist_tracks(playlist_id):
 
         # Fetch all tracks with full album data
         tracks = []
-        results = spotify_client.sp.playlist_tracks(playlist_id, limit=100)
+        results = spotify_client.sp.playlist_items(playlist_id, limit=100)
 
         while results:
             for item in results['items']:
-                if item['track'] and item['track']['id']:
-                    track_data = item['track']
+                # Handle both old API ('track') and new Feb 2026 API ('item') field names
+                track_data = item.get('track') or item.get('item')
+                if track_data and track_data.get('id'):
                     tracks.append({
                         'id': track_data['id'],
                         'name': track_data['name'],
