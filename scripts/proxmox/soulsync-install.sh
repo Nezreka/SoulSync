@@ -148,7 +148,7 @@ get_ip() {
 # -- Header --------------------------------------------------------------------
 
 header_info() {
-  clear
+  [[ -t 1 ]] && clear 2>/dev/null || true
   echo ""
   cat <<"BANNER"
     ____              _  ____
@@ -199,14 +199,14 @@ arch_check() {
 
 network_check() {
   msg_info "Checking network connectivity"
-  local tries=0
-  while ! ping -c 1 -W 3 github.com &>/dev/null; do
-    ((tries++))
+  local tries=1
+  while ! curl -fsSL --max-time 5 https://github.com >/dev/null 2>&1; do
     if [[ $tries -ge 3 ]]; then
       msg_error "No network connectivity (cannot reach github.com)"
       echo -e "${TAB}${DIM}Ensure your LXC has a working network configuration.${CL}" >&2
       exit 1
     fi
+    ((tries++)) || true
     sleep 2
   done
   msg_ok "Network connectivity verified"
