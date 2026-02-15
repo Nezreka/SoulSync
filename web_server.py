@@ -4119,7 +4119,16 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
                     file_path = os.path.join(root, file)
                     print(f"✅ Found exact match in {location_name}: {file_path}")
                     return file_path, 1.0
-                
+
+                # Check for slskd dedup suffix (e.g. "Song_639067852665564677.flac")
+                # slskd appends _<timestamp> when a file with the same name already exists
+                file_stem, file_ext_part = os.path.splitext(file)
+                stripped_stem = re.sub(r'_\d{10,}$', '', file_stem)
+                if stripped_stem != file_stem and stripped_stem + file_ext_part == target_basename:
+                    file_path = os.path.join(root, file)
+                    print(f"✅ Found dedup-suffix match in {location_name}: {file_path}")
+                    return file_path, 1.0
+
                 # Fuzzy matching for variations
                 normalized_file = normalize_for_finding(file)
                 similarity = SequenceMatcher(None, normalized_target, normalized_file).ratio()
