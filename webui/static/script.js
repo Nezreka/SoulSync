@@ -10096,8 +10096,8 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
         platform,
         identifier,
         trackIndex,
-        sourceTrack: result.yt_track || result.tidal_track?.name || result.beatport_track?.title,
-        sourceArtist: result.yt_artist || result.tidal_track?.artist || result.beatport_track?.artist
+        sourceTrack: result.lb_track || result.yt_track || result.tidal_track?.name || result.beatport_track?.title || result.track_name || 'Unknown Track',
+        sourceArtist: result.lb_artist || result.yt_artist || result.tidal_track?.artist || result.beatport_track?.artist || result.artist_name || 'Unknown Artist'
     };
 
     // Find the fix modal within the active discovery modal
@@ -10119,11 +10119,11 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
     console.log('🔍 Source artist:', currentDiscoveryFix.sourceArtist);
     console.log('🔍 Fix modal overlay found:', fixModalOverlay);
 
-    // Populate modal - use document.getElementById since IDs are unique globally
-    const sourceTrackEl = document.getElementById('fix-modal-source-track');
-    const sourceArtistEl = document.getElementById('fix-modal-source-artist');
-    const trackInput = document.getElementById('fix-modal-track-input');
-    const artistInput = document.getElementById('fix-modal-artist-input');
+    // Populate modal - scope within the specific fix modal overlay to handle duplicate IDs
+    const sourceTrackEl = fixModalOverlay.querySelector('#fix-modal-source-track');
+    const sourceArtistEl = fixModalOverlay.querySelector('#fix-modal-source-artist');
+    const trackInput = fixModalOverlay.querySelector('#fix-modal-track-input');
+    const artistInput = fixModalOverlay.querySelector('#fix-modal-artist-input');
 
     console.log('🔍 Elements found:', {
         sourceTrackEl,
@@ -10418,8 +10418,8 @@ async function selectDiscoveryFixTrack(track) {
  * Update a single row in the discovery modal table
  */
 function updateDiscoveryModalSingleRow(platform, identifier, trackIndex) {
-    // Note: Beatport and Tidal reuse youtubePlaylistStates for discovery results
-    const state = youtubePlaylistStates[identifier];
+    // Check both state maps - ListenBrainz uses its own, others reuse youtubePlaylistStates
+    const state = listenbrainzPlaylistStates[identifier] || youtubePlaylistStates[identifier];
 
     // Support both camelCase and snake_case
     const results = state?.discoveryResults || state?.discovery_results;
@@ -19450,7 +19450,7 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
                         status_class: result.status_class || (result.status === 'found' || result.status === '✅ Found' ? 'found' : (result.status === 'error' ? 'error' : 'not-found')),
                         spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
                         spotify_artist: result.spotify_data ? (result.spotify_data.artists && result.spotify_data.artists[0] ? result.spotify_data.artists[0] : '-') : (result.spotify_artist || '-'),
-                        spotify_album: result.spotify_data ? (result.spotify_data.album && result.spotify_data.album.name ? result.spotify_data.album.name : '-') : (result.spotify_album || '-'),
+                        spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) || '-' : (result.spotify_album || '-'),
                         spotify_data: result.spotify_data,
                         duration: result.duration || '0:00'
                     })),
