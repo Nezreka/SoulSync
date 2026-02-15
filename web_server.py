@@ -254,6 +254,7 @@ db_update_lock = threading.Lock()
 # Key: slskd download ID, Value: dict containing Spotify artist/album data
 matched_downloads_context = {}
 matched_context_lock = threading.Lock()
+_orphaned_download_keys = set()  # Context keys of downloads abandoned during retry
 
 # --- File-Level Metadata Write Locking ---
 # Prevents concurrent threads from writing metadata to the same file simultaneously
@@ -696,12 +697,20 @@ class WebUIDownloadMonitor:
                     used_sources.add(source_key)
                     task['used_sources'] = used_sources
                     print(f"🚫 Marked errored source as used: {source_key}")
-                
+
+                # Mark old download as orphaned so we can clean it up if it completes later
+                if username and filename:
+                    old_context_key = f"{username}::{extract_filename(filename)}"
+                    _orphaned_download_keys.add(old_context_key)
+                    with matched_context_lock:
+                        matched_downloads_context.pop(old_context_key, None)
+                    print(f"🧹 Marked orphaned download for cleanup: {old_context_key}")
+
                 # Clear download info since we cancelled it
                 task.pop('download_id', None)
-                task.pop('username', None) 
+                task.pop('username', None)
                 task.pop('filename', None)
-                
+
                 # Reset task state for immediate retry
                 task['status'] = 'searching'
                 task.pop('queued_start_time', None)
@@ -785,12 +794,20 @@ class WebUIDownloadMonitor:
                             used_sources.add(source_key)
                             task['used_sources'] = used_sources
                             print(f"🚫 Marked timeout source as used: {source_key}")
-                        
+
+                        # Mark old download as orphaned so we can clean it up if it completes later
+                        if username and filename:
+                            old_context_key = f"{username}::{extract_filename(filename)}"
+                            _orphaned_download_keys.add(old_context_key)
+                            with matched_context_lock:
+                                matched_downloads_context.pop(old_context_key, None)
+                            print(f"🧹 Marked orphaned download for cleanup: {old_context_key}")
+
                         # Clear download info since we cancelled it
                         task.pop('download_id', None)
-                        task.pop('username', None) 
+                        task.pop('username', None)
                         task.pop('filename', None)
-                        
+
                         # Reset task state for immediate retry (like error retry)
                         task['status'] = 'searching'
                         task.pop('queued_start_time', None)
@@ -874,12 +891,20 @@ class WebUIDownloadMonitor:
                             used_sources.add(source_key)
                             task['used_sources'] = used_sources
                             print(f"🚫 Marked 0% progress source as used: {source_key}")
-                        
+
+                        # Mark old download as orphaned so we can clean it up if it completes later
+                        if username and filename:
+                            old_context_key = f"{username}::{extract_filename(filename)}"
+                            _orphaned_download_keys.add(old_context_key)
+                            with matched_context_lock:
+                                matched_downloads_context.pop(old_context_key, None)
+                            print(f"🧹 Marked orphaned download for cleanup: {old_context_key}")
+
                         # Clear download info since we cancelled it
                         task.pop('download_id', None)
-                        task.pop('username', None) 
+                        task.pop('username', None)
                         task.pop('filename', None)
-                        
+
                         # Reset task state for immediate retry (like error retry)
                         task['status'] = 'searching'
                         task.pop('queued_start_time', None)
@@ -4125,6 +4150,43 @@ def get_download_status():
                                     # Check if this completed download has a matched context
                                     # CRITICAL FIX: Use extract_filename() to match storage key format
                                     context_key = f"{username}::{extract_filename(filename_from_api)}"
+
+                                    # Check if this is an orphaned download that completed after retry
+                                    if context_key in _orphaned_download_keys:
+                                        # Safety check: if a new context exists for this key, the retry
+                                        # re-claimed the same source — treat it as active, not orphaned
+                                        with matched_context_lock:
+                                            has_active_context = context_key in matched_downloads_context
+                                        if has_active_context:
+                                            print(f"🔄 Orphaned key {context_key} has active context — retry re-used same source, treating as active")
+                                            _orphaned_download_keys.discard(context_key)
+                                            # Fall through to normal processing below
+                                        else:
+                                            download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
+                                            found_result = _find_completed_file_robust(download_dir, filename_from_api)
+                                            found_path = found_result[0] if found_result and found_result[0] else None
+                                            orphan_cleaned = False
+                                            if found_path:
+                                                try:
+                                                    os.remove(found_path)
+                                                    print(f"🧹 Deleted orphaned download: {os.path.basename(found_path)}")
+                                                    orphan_cleaned = True
+                                                except Exception as e:
+                                                    print(f"⚠️ Failed to delete orphaned file (will retry next poll): {e}")
+                                            else:
+                                                # File not on disk (already gone or never written) — nothing to clean
+                                                orphan_cleaned = True
+                                            if orphan_cleaned:
+                                                # Remove transfer from slskd
+                                                transfer_id = file_info.get('id')
+                                                if transfer_id:
+                                                    try:
+                                                        asyncio.run(soulseek_client.cancel_download(str(transfer_id), username, remove=True))
+                                                    except Exception:
+                                                        pass
+                                                _orphaned_download_keys.discard(context_key)
+                                            continue  # Skip normal post-processing either way
+
                                     with matched_context_lock:
                                         context = matched_downloads_context.get(context_key)
                                         if context:

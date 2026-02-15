@@ -982,7 +982,7 @@ class SoulseekClient:
     async def cancel_download(self, download_id: str, username: str = None, remove: bool = False) -> bool:
         if not self.base_url:
             return False
-        
+
         # If username is not provided, try to extract it from stored transfer data
         if not username:
             logger.debug(f"No username provided for download_id {download_id}, attempting to find it")
@@ -993,27 +993,31 @@ class SoulseekClient:
                         username = download.username
                         logger.debug(f"Found username {username} for download_id {download_id}")
                         break
-                
+
                 if not username:
                     logger.error(f"Could not find username for download_id {download_id}")
                     return False
             except Exception as e:
                 logger.error(f"Error finding username for download: {e}")
                 return False
-        
+
         try:
+            from urllib.parse import quote
+            # URL-encode download_id to handle backslashes and special characters
+            encoded_id = quote(download_id, safe='')
+
             # Try multiple API formats as slskd API may vary between versions
             endpoints_to_try = [
                 # Format 1: With username and remove parameter (original format)
-                f'transfers/downloads/{username}/{download_id}?remove={str(remove).lower()}',
+                f'transfers/downloads/{username}/{encoded_id}?remove={str(remove).lower()}',
                 # Format 2: Simple format with just download_id (used in sync.py)
-                f'transfers/downloads/{download_id}',
+                f'transfers/downloads/{encoded_id}',
                 # Format 3: Alternative format without remove parameter
-                f'transfers/downloads/{username}/{download_id}'
+                f'transfers/downloads/{username}/{encoded_id}'
             ]
-            
+
             action = "Removing" if remove else "Cancelling"
-            
+
             for i, endpoint in enumerate(endpoints_to_try):
                 logger.debug(f"{action} download (attempt {i+1}/3) with endpoint: {endpoint}")
                 response = await self._make_request('DELETE', endpoint)
@@ -1022,10 +1026,30 @@ class SoulseekClient:
                     return True
                 else:
                     logger.debug(f"❌ Endpoint format {i+1} failed: {endpoint}")
-            
+
+            # Fallback: if download_id looks like a filename (contains path separators),
+            # list all transfers, find by filename, and cancel with the real transfer ID
+            if '\\' in download_id or '/' in download_id:
+                logger.debug(f"Download ID looks like a filename, trying filename-based lookup fallback")
+                try:
+                    downloads = await self.get_all_downloads()
+                    target_basename = os.path.basename(download_id.replace('\\', '/'))
+                    for download in downloads:
+                        dl_basename = os.path.basename(download.filename.replace('\\', '/'))
+                        if dl_basename == target_basename and download.username == username:
+                            real_id = quote(str(download.id), safe='')
+                            fallback_endpoint = f'transfers/downloads/{username}/{real_id}?remove={str(remove).lower()}'
+                            logger.debug(f"Found matching transfer with real ID, trying: {fallback_endpoint}")
+                            response = await self._make_request('DELETE', fallback_endpoint)
+                            if response is not None:
+                                logger.info(f"✅ Successfully cancelled download via filename fallback")
+                                return True
+                except Exception as fallback_error:
+                    logger.debug(f"Filename fallback failed: {fallback_error}")
+
             logger.error(f"❌ All cancel endpoint formats failed for download_id: {download_id}")
             return False
-            
+
         except Exception as e:
             logger.error(f"Error cancelling download: {e}")
             return False
