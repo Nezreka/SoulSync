@@ -2617,6 +2617,57 @@ def select_plex_music_library():
         logger.error(f"Error setting Plex music library: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/jellyfin/users', methods=['GET'])
+def get_jellyfin_users():
+    """Get list of Jellyfin users that have music libraries"""
+    try:
+        users = jellyfin_client.get_available_users()
+
+        # Get currently selected user
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        selected_user = db.get_preference('jellyfin_user')
+
+        # Determine the current user name from user_id
+        current_user = None
+        if jellyfin_client.user_id:
+            for u in users:
+                if u['id'] == jellyfin_client.user_id:
+                    current_user = u['name']
+                    break
+
+        return jsonify({
+            "success": True,
+            "users": users,
+            "selected": selected_user,
+            "current": current_user
+        })
+    except Exception as e:
+        logger.error(f"Error getting Jellyfin users: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/jellyfin/select-user', methods=['POST'])
+def select_jellyfin_user():
+    """Set the active Jellyfin user"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+
+        if not username:
+            return jsonify({"success": False, "error": "No username provided"}), 400
+
+        success = jellyfin_client.set_user_by_name(username)
+
+        if success:
+            add_activity_item("👤", "User Selected", f"Jellyfin user set to: {username}", "Now")
+            return jsonify({"success": True, "message": f"User set to: {username}"})
+        else:
+            return jsonify({"success": False, "error": f"User '{username}' not found or has no music library"}), 404
+
+    except Exception as e:
+        logger.error(f"Error setting Jellyfin user: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/jellyfin/music-libraries', methods=['GET'])
 def get_jellyfin_music_libraries():
     """Get list of all available music libraries from Jellyfin"""
