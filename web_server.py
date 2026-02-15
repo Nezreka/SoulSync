@@ -15832,7 +15832,8 @@ def update_tidal_discovery_match():
             'id': spotify_track['id'],
             'name': spotify_track['name'],
             'artists': spotify_track['artists'],
-            'album': spotify_track['album']
+            'album': spotify_track['album'],
+            'duration_ms': spotify_track.get('duration_ms', 0)
         }
 
         result['manual_match'] = True  # Flag for tracking
@@ -16758,7 +16759,8 @@ def update_youtube_discovery_match():
             'id': spotify_track['id'],
             'name': spotify_track['name'],
             'artists': spotify_track['artists'],
-            'album': spotify_track['album']
+            'album': spotify_track['album'],
+            'duration_ms': spotify_track.get('duration_ms', 0)
         }
 
         result['manual_match'] = True  # Flag for tracking
@@ -21397,13 +21399,27 @@ def update_listenbrainz_discovery_match():
             result['status'] = '✅ Found' if spotify_track else '❌ Not Found'
             result['status_class'] = 'found' if spotify_track else 'not-found'
             result['spotify_track'] = spotify_track.get('name', '') if spotify_track else ''
-            result['spotify_artist'] = spotify_track.get('artists', [''])[0] if spotify_track and spotify_track.get('artists') else ''
-            result['spotify_album'] = spotify_track.get('album', {}).get('name', '') if spotify_track else ''
+            # Join all artists (matching YouTube/Tidal/Beatport format)
+            artists = spotify_track.get('artists', []) if spotify_track else []
+            result['spotify_artist'] = ', '.join(artists) if isinstance(artists, list) else artists
+            # Album comes as a string from the frontend fix modal
+            album = spotify_track.get('album', '') if spotify_track else ''
+            result['spotify_album'] = album if isinstance(album, str) else album.get('name', '') if isinstance(album, dict) else ''
+            result['spotify_id'] = spotify_track.get('id', '') if spotify_track else ''
 
             if spotify_track:
-                result['spotify_data'] = spotify_track
+                # Store spotify_data in the same format as other platforms
+                result['spotify_data'] = {
+                    'id': spotify_track.get('id', ''),
+                    'name': spotify_track.get('name', ''),
+                    'artists': artists if isinstance(artists, list) else [artists],
+                    'album': result['spotify_album'],
+                    'duration_ms': spotify_track.get('duration_ms', 0)
+                }
             else:
                 result['spotify_data'] = None
+
+            result['manual_match'] = True
 
             print(f"✅ Updated ListenBrainz match for track {track_index}: {result['status']}")
             return jsonify({'success': True})
@@ -23314,7 +23330,8 @@ def update_beatport_discovery_match():
             'id': spotify_track['id'],
             'name': spotify_track['name'],
             'artists': spotify_track['artists'],
-            'album': spotify_track['album']
+            'album': spotify_track['album'],
+            'duration_ms': spotify_track.get('duration_ms', 0)
         }
 
         result['manual_match'] = True  # Flag for tracking
