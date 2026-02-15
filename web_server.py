@@ -20472,11 +20472,12 @@ def get_current_seasonal_content():
         from core.seasonal_discovery import SEASONAL_CONFIG
         config = SEASONAL_CONFIG[current_season]
 
-        # Get albums (increased limit for more variety)
-        albums = seasonal_service.get_seasonal_albums(current_season, limit=40)
+        # Get albums for active source (increased limit for more variety)
+        active_source = _get_active_discovery_source()
+        albums = seasonal_service.get_seasonal_albums(current_season, limit=40, source=active_source)
 
-        # Check if playlist is curated
-        playlist_track_ids = seasonal_service.get_curated_seasonal_playlist(current_season)
+        # Check if playlist is curated for active source
+        playlist_track_ids = seasonal_service.get_curated_seasonal_playlist(current_season, source=active_source)
 
         return jsonify({
             "success": True,
@@ -20504,7 +20505,8 @@ def get_seasonal_albums(season_key):
         database = get_database()
         seasonal_service = get_seasonal_discovery_service(spotify_client, database)
 
-        albums = seasonal_service.get_seasonal_albums(season_key, limit=40)
+        active_source = _get_active_discovery_source()
+        albums = seasonal_service.get_seasonal_albums(season_key, limit=40, source=active_source)
         config = SEASONAL_CONFIG[season_key]
 
         return jsonify({
@@ -20532,19 +20534,23 @@ def get_seasonal_playlist(season_key):
         database = get_database()
         seasonal_service = get_seasonal_discovery_service(spotify_client, database)
 
-        # Get curated track IDs
-        track_ids = seasonal_service.get_curated_seasonal_playlist(season_key)
+        # Get curated track IDs for active source
+        active_source = _get_active_discovery_source()
+        track_ids = seasonal_service.get_curated_seasonal_playlist(season_key, source=active_source)
 
         if not track_ids:
             return jsonify({"success": True, "tracks": []})
 
-        # Fetch track details from discovery pool or seasonal tracks
+        # Use source-appropriate ID column for lookups
+        track_id_col = 'spotify_track_id' if active_source == 'spotify' else 'itunes_track_id'
+
+        # Fetch track details from seasonal tracks or discovery pool (filtered by source)
         tracks = []
         with database._get_connection() as conn:
             cursor = conn.cursor()
 
             for track_id in track_ids:
-                # Try seasonal_tracks first
+                # Try seasonal_tracks first (filtered by source)
                 cursor.execute("""
                     SELECT
                         spotify_track_id,
@@ -20556,8 +20562,8 @@ def get_seasonal_playlist(season_key):
                         popularity,
                         track_data_json
                     FROM seasonal_tracks
-                    WHERE spotify_track_id = ?
-                """, (track_id,))
+                    WHERE spotify_track_id = ? AND source = ?
+                """, (track_id, active_source))
 
                 result = cursor.fetchone()
 
@@ -20572,10 +20578,10 @@ def get_seasonal_playlist(season_key):
                             pass
                     tracks.append(track_dict)
                 else:
-                    # Try discovery_pool as fallback
-                    cursor.execute("""
+                    # Try discovery_pool as fallback (filtered by source)
+                    cursor.execute(f"""
                         SELECT
-                            spotify_track_id,
+                            {track_id_col} as spotify_track_id,
                             track_name,
                             artist_name,
                             album_name,
@@ -20584,8 +20590,8 @@ def get_seasonal_playlist(season_key):
                             popularity,
                             track_data_json
                         FROM discovery_pool
-                        WHERE spotify_track_id = ?
-                    """, (track_id,))
+                        WHERE {track_id_col} = ? AND source = ?
+                    """, (track_id, active_source))
 
                     result = cursor.fetchone()
                     if result:
