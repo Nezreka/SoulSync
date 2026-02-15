@@ -2754,6 +2754,15 @@
                                         <button class="test-button" onclick="testConnection('jellyfin')">Test</button>
                                     </div>
 
+                                    <div class="form-group" id="jellyfin-user-selector-container"
+                                        style="display: none;">
+                                        <label>Jellyfin User</label>
+                                        <select id="jellyfin-user" onchange="selectJellyfinUser()">
+                                            <option value="">Select User</option>
+                                        </select>
+                                        <small>Select which user's music library to scan</small>
+                                    </div>
+
                                     <div class="form-group" id="jellyfin-library-selector-container"
                                         style="display: none;">
                                         <label>Music Library</label>

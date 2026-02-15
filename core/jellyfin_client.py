@@ -205,38 +205,76 @@ class JellyfinClient:
                     logger.error("No users found on Jellyfin server")
                     return
 
-                # LOGIC CHANGE: Iterate through users instead of blindly picking the first one
+                # Check for a saved user preference
+                from database.music_database import MusicDatabase
+                db = MusicDatabase()
+                preferred_user = db.get_preference('jellyfin_user')
+
                 valid_user_found = False
 
-                for user in users_response:
-                    candidate_id = user['Id']
-                    candidate_name = user.get('Name', 'Unknown')
+                # If a preferred user is saved, try that user first
+                if preferred_user:
+                    for user in users_response:
+                        if user.get('Name') == preferred_user:
+                            candidate_id = user['Id']
+                            try:
+                                views_response = self._make_request(f'/Users/{candidate_id}/Views')
+                                if views_response:
+                                    for view in views_response.get('Items', []):
+                                        collection_type = (view.get('CollectionType') or '').lower()
+                                        if collection_type == 'music':
+                                            self.user_id = candidate_id
+                                            self.music_library_id = view['Id']
+                                            logger.info(f"Using preferred user: {preferred_user} (Music Library: {view.get('Name')})")
+                                            valid_user_found = True
+                                            break
+                            except Exception as e:
+                                logger.debug(f"Preferred user {preferred_user} failed: {e}")
+                            break
 
+                # Check for a saved library preference for the selected user
+                preferred_library = db.get_preference('jellyfin_music_library')
+
+                # Fall back to auto-detect if preference is missing or invalid
+                if not valid_user_found:
+                    for user in users_response:
+                        candidate_id = user['Id']
+                        candidate_name = user.get('Name', 'Unknown')
+
+                        try:
+                            views_response = self._make_request(f'/Users/{candidate_id}/Views')
+
+                            if views_response:
+                                for view in views_response.get('Items', []):
+                                    collection_type = (view.get('CollectionType') or '').lower()
+
+                                    if collection_type == 'music':
+                                        self.user_id = candidate_id
+                                        self.music_library_id = view['Id']
+                                        logger.info(f"Using user: {candidate_name} (Music Library: {view.get('Name')})")
+                                        valid_user_found = True
+                                        break
+                        except Exception as e:
+                            logger.debug(f"Skipping user {candidate_name} due to error: {e}")
+                            continue
+
+                        if valid_user_found:
+                            break
+
+                # If we found a user, check if there's a saved library preference to apply
+                if valid_user_found and preferred_library:
                     try:
-                        # Check this specific user's views (libraries)
-                        views_response = self._make_request(f'/Users/{candidate_id}/Views')
-                        
+                        views_response = self._make_request(f'/Users/{self.user_id}/Views')
                         if views_response:
                             for view in views_response.get('Items', []):
-                                # Check if they have a 'music' collection (case-insensitive safe check)
                                 collection_type = (view.get('CollectionType') or '').lower()
-                                
-                                if collection_type == 'music':
-                                    # Found a winner! Set the class variables.
-                                    self.user_id = candidate_id
+                                if collection_type == 'music' and view.get('Name') == preferred_library:
                                     self.music_library_id = view['Id']
-                                    logger.info(f"Using user: {candidate_name} (Music Library: {view.get('Name')})")
-                                    valid_user_found = True
+                                    logger.info(f"Applied saved library preference: {preferred_library}")
                                     break
                     except Exception as e:
-                        # If this user fails (e.g. permission error), just log it and try the next user
-                        logger.debug(f"Skipping user {candidate_name} due to error: {e}")
-                        continue
-                    
-                    # If we found a valid user, stop looping
-                    if valid_user_found:
-                        break
-                
+                        logger.debug(f"Could not apply library preference: {e}")
+
                 if not valid_user_found:
                     logger.error("Connected to Jellyfin, but could not find any user with access to a Music library")
                     
@@ -319,6 +357,87 @@ class JellyfinClient:
             return False
         except Exception as e:
             logger.error(f"Error setting music library: {e}")
+            return False
+
+    def get_available_users(self) -> List[Dict[str, str]]:
+        """Get list of users that have music libraries"""
+        if not self.ensure_connection():
+            return []
+
+        try:
+            users_response = self._make_request('/Users')
+            if not users_response:
+                return []
+
+            users_with_music = []
+            for user in users_response:
+                candidate_id = user['Id']
+                candidate_name = user.get('Name', 'Unknown')
+
+                try:
+                    views_response = self._make_request(f'/Users/{candidate_id}/Views')
+                    if views_response:
+                        for view in views_response.get('Items', []):
+                            collection_type = (view.get('CollectionType') or '').lower()
+                            if collection_type == 'music':
+                                users_with_music.append({
+                                    'id': candidate_id,
+                                    'name': candidate_name
+                                })
+                                break
+                except Exception as e:
+                    logger.debug(f"Skipping user {candidate_name} during enumeration: {e}")
+                    continue
+
+            logger.debug(f"Found {len(users_with_music)} users with music libraries")
+            return users_with_music
+        except Exception as e:
+            logger.error(f"Error getting available users: {e}")
+            return []
+
+    def set_user_by_name(self, username: str) -> bool:
+        """Set the active user by name, re-discover their music library, and save preference"""
+        if not self.ensure_connection():
+            return False
+
+        try:
+            users_response = self._make_request('/Users')
+            if not users_response:
+                return False
+
+            for user in users_response:
+                if user.get('Name') == username:
+                    candidate_id = user['Id']
+
+                    # Verify this user has a music library
+                    views_response = self._make_request(f'/Users/{candidate_id}/Views')
+                    if not views_response:
+                        return False
+
+                    for view in views_response.get('Items', []):
+                        collection_type = (view.get('CollectionType') or '').lower()
+                        if collection_type == 'music':
+                            self.user_id = candidate_id
+                            self.music_library_id = view['Id']
+                            logger.info(f"Switched to user: {username} (Music Library: {view.get('Name')})")
+
+                            # Save preference to database
+                            from database.music_database import MusicDatabase
+                            db = MusicDatabase()
+                            db.set_preference('jellyfin_user', username)
+
+                            # Clear caches since we switched users
+                            self.clear_cache()
+
+                            return True
+
+                    logger.warning(f"User '{username}' has no music library")
+                    return False
+
+            logger.warning(f"User '{username}' not found")
+            return False
+        except Exception as e:
+            logger.error(f"Error setting user: {e}")
             return False
 
     def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:

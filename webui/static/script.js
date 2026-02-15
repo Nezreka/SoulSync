@@ -1712,8 +1712,9 @@ async function loadSettingsData() {
             loadPlexMusicLibraries();
         }
 
-        // Load Jellyfin music libraries if Jellyfin is the active server
+        // Load Jellyfin users and music libraries if Jellyfin is the active server
         if (activeServer === 'jellyfin') {
+            loadJellyfinUsers();
             loadJellyfinMusicLibraries();
         }
 
@@ -1847,8 +1848,9 @@ function toggleServer(serverType) {
         loadPlexMusicLibraries();
     }
 
-    // Load Jellyfin music libraries when switching to Jellyfin
+    // Load Jellyfin users and music libraries when switching to Jellyfin
     if (serverType === 'jellyfin') {
+        loadJellyfinUsers();
         loadJellyfinMusicLibraries();
     }
 }
@@ -2233,6 +2235,7 @@ async function testConnection(service) {
             if (service === 'plex') {
                 loadPlexMusicLibraries();
             } else if (service === 'jellyfin') {
+                loadJellyfinUsers();
                 loadJellyfinMusicLibraries();
             }
         } else {
@@ -30442,6 +30445,79 @@ async function selectPlexLibrary() {
     } catch (error) {
         console.error('Error selecting Plex library:', error);
         alert('Error selecting library. Please try again.');
+    }
+}
+
+// ============ Jellyfin User Selection ============
+
+async function loadJellyfinUsers() {
+    try {
+        const response = await fetch('/api/jellyfin/users');
+        const data = await response.json();
+
+        if (data.success && data.users && data.users.length > 0) {
+            const selector = document.getElementById('jellyfin-user');
+            const container = document.getElementById('jellyfin-user-selector-container');
+
+            // Clear existing options
+            selector.innerHTML = '';
+
+            // Add options for each user
+            data.users.forEach(user => {
+                const option = document.createElement('option');
+                option.value = user.name;
+                option.textContent = user.name;
+
+                // Mark the currently selected user
+                if (user.name === data.current || user.name === data.selected) {
+                    option.selected = true;
+                }
+
+                selector.appendChild(option);
+            });
+
+            // Show the container
+            container.style.display = 'block';
+        } else {
+            // Hide if no users found or not connected
+            document.getElementById('jellyfin-user-selector-container').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading Jellyfin users:', error);
+        document.getElementById('jellyfin-user-selector-container').style.display = 'none';
+    }
+}
+
+async function selectJellyfinUser() {
+    const selector = document.getElementById('jellyfin-user');
+    const selectedUser = selector.value;
+
+    if (!selectedUser) return;
+
+    try {
+        const response = await fetch('/api/jellyfin/select-user', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                username: selectedUser
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            console.log(`Jellyfin user switched to: ${selectedUser}`);
+            // Refresh library dropdown for the new user
+            loadJellyfinMusicLibraries();
+        } else {
+            console.error('Failed to switch user:', data.error);
+            alert(`Failed to switch user: ${data.error}`);
+        }
+    } catch (error) {
+        console.error('Error selecting Jellyfin user:', error);
+        alert('Error selecting user. Please try again.');
     }
 }
 
