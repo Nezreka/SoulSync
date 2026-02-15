@@ -37,7 +37,7 @@ if [ "$CURRENT_UID" != "$PUID" ] || [ "$CURRENT_GID" != "$PGID" ]; then
 
     # Fix ownership of app directories
     echo "🔒 Fixing permissions on app directories..."
-    chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer 2>/dev/null || true
+    chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging 2>/dev/null || true
 else
     echo "✅ User/Group IDs already correct"
 fi
@@ -66,8 +66,8 @@ else
 fi
 
 # Ensure all directories exist and have proper permissions
-mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer
-chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer
+mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging
+chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging
 
 echo "✅ Configuration initialized successfully"
 
