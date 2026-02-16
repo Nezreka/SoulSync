@@ -21701,13 +21701,6 @@ async function handleArtistAlbumClick(album, albumType) {
         const completionStatus = getAlbumCompletionStatus(album.id, albumType);
         console.log(`📊 Album completion status: ${completionStatus?.status || 'unknown'} (${completionStatus?.completion_percentage || 0}%)`);
 
-        // If album is complete, show informational message and exit
-        if (completionStatus?.status === 'completed') {
-            hideLoadingOverlay();
-            showToast(`${album.name} is already complete in your library`, 'info');
-            return;
-        }
-
         // For Artists page, always use Download Missing Tracks modal to analyze and download
         console.log(`🔄 Opening download missing tracks modal for album analysis`);
 
@@ -26131,14 +26124,6 @@ function createReleaseCard(release) {
         // Still checking - ignore click
         if (rel.owned === null) {
             showToast(`Still checking ownership for ${rel.title}...`, "info");
-            return;
-        }
-
-        // For owned/complete releases, show info message
-        if (rel.owned && (!rel.track_completion ||
-            (typeof rel.track_completion === 'object' && rel.track_completion.missing_tracks === 0) ||
-            (typeof rel.track_completion === 'number' && rel.track_completion === 100))) {
-            showToast(`${rel.title} is already complete in your library`, "info");
             return;
         }
 
