@@ -10971,18 +10971,24 @@ def start_wishlist_missing_downloads():
 
         # FILTER BY TRACK IDs if specified (prioritized - prevents race conditions)
         if track_ids:
-            # Convert to set for O(1) lookup
-            track_id_set = set(track_ids)
-            filtered_tracks = []
-            seen_track_ids = set()  # Track IDs we've already added to prevent duplicates
+            # Build a lookup by track ID for O(1) access
+            track_lookup = {}
             for track in wishlist_tracks:
                 spotify_track_id = track.get('spotify_track_id') or track.get('id')
-                if spotify_track_id in track_id_set and spotify_track_id not in seen_track_ids:
-                    filtered_tracks.append(track)
-                    seen_track_ids.add(spotify_track_id)
+                if spotify_track_id and spotify_track_id not in track_lookup:
+                    track_lookup[spotify_track_id] = track
+
+            # Iterate in track_ids order (matches frontend display order)
+            # so that enumerate()-based track_index aligns with data-track-index in the modal
+            filtered_tracks = []
+            seen_track_ids = set()
+            for tid in track_ids:
+                if tid in track_lookup and tid not in seen_track_ids:
+                    filtered_tracks.append(track_lookup[tid])
+                    seen_track_ids.add(tid)
 
             wishlist_tracks = filtered_tracks
-            print(f"🎯 [Manual-Wishlist] Filtered to {len(wishlist_tracks)} specific tracks by ID (preventing race condition)")
+            print(f"🎯 [Manual-Wishlist] Filtered to {len(wishlist_tracks)} specific tracks by ID (preserving frontend display order)")
 
         # FILTER BY CATEGORY if specified and no track_ids (backward compatibility)
         elif category:
