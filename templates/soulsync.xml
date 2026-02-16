@@ -7,33 +7,29 @@
   <MyIP/>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/Nezreka/SoulSync/issues</Support>
+  <Support>https://github.com/Nezreka/SoulSync</Support>
   <Project>https://github.com/Nezreka/SoulSync</Project>
-  <Overview>Automated music discovery and collection manager. Sync Spotify/Tidal/YouTube playlists to Plex/Jellyfin/Navidrome via Soulseek with FLAC priority, customizable file organization templates, metadata enhancement, and smart matching. Features include wishlist management, artist watchlist, intelligent discovery playlists, and automatic lyrics integration.</Overview>
+  <ReadMe>https://github.com/Nezreka/SoulSync/blob/main/README.md</ReadMe>
+  <Overview>Music discovery and automation platform. Find new music, curate playlists, sync libraries, and integrate with popular streaming services, Soulseek (slskd), and media servers.</Overview>
   <Category>MediaApp:Music</Category>
   <WebUI>http://[IP]:[PORT:8008]</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/Nezreka/SoulSync/main/templates/soulsync.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/Nezreka/SoulSync/main/assets/trans.png</Icon>
-  <ExtraParams>--restart unless-stopped --add-host=host.docker.internal:host-gateway</ExtraParams>
+  <TemplateURL>https://raw.githubusercontent.com/snuffomega/SoulSync_unraid/main/soulsync.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/snuffomega/SoulSync_unraid/main/soulsync.png</Icon>
+  <ExtraParams/>
   <PostArgs/>
   <CPUset/>
-  <DateInstalled>1704067200</DateInstalled>
   <DonateText>Support Development</DonateText>
   <DonateLink>https://ko-fi.com/boulderbadgedad</DonateLink>
-  <Requires>slskd running on host machine or container. Spotify API credentials required.</Requires>
+  <Requires>Requires slskd (Soulseek client) container. For full functionality, a media server (Navidrome, Plex, or Jellyfin) is recommended.</Requires>
   <Config Name="WebUI Port" Target="8008" Default="8008" Mode="tcp" Description="Web interface port" Type="Port" Display="always" Required="true" Mask="false">8008</Config>
   <Config Name="Spotify OAuth Port" Target="8888" Default="8888" Mode="tcp" Description="Spotify OAuth callback port" Type="Port" Display="always" Required="true" Mask="false">8888</Config>
   <Config Name="Tidal OAuth Port" Target="8889" Default="8889" Mode="tcp" Description="Tidal OAuth callback port" Type="Port" Display="always" Required="true" Mask="false">8889</Config>
-  <Config Name="Config Directory" Target="/app/config" Default="/mnt/user/appdata/soulsync/config" Mode="rw" Description="SoulSync configuration directory (stores config.json and settings)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/soulsync/config</Config>
-  <Config Name="Database Directory" Target="/app/data" Default="/mnt/user/appdata/soulsync/data" Mode="rw" Description="Database storage (SQLite files and library cache)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/soulsync/data</Config>
-  <Config Name="Logs Directory" Target="/app/logs" Default="/mnt/user/appdata/soulsync/logs" Mode="rw" Description="Application logs storage" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/soulsync/logs</Config>
-  <Config Name="Music Share" Target="/host/music" Default="/mnt/user/Music" Mode="rw" Description="Mount your music share (containing slskd downloads and music library). Use /host/music/Downloads and /host/music/Library in settings." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/Music</Config>
-  <Config Name="Import Staging Directory" Target="/app/Staging" Default="/mnt/user/appdata/soulsync/staging" Mode="rw" Description="Staging folder for importing existing audio files into your library" Type="Path" Display="always" Required="false" Mask="false">/mnt/user/appdata/soulsync/staging</Config>
-  <Config Name="Timezone" Target="TZ" Default="America/New_York" Mode="" Description="Container timezone (e.g., America/New_York, Europe/London)" Type="Variable" Display="always" Required="false" Mask="false">America/New_York</Config>
-  <Config Name="User ID" Target="PUID" Default="99" Mode="" Description="User ID for file permissions (typically 99 for Unraid)" Type="Variable" Display="always" Required="false" Mask="false">99</Config>
-  <Config Name="Group ID" Target="PGID" Default="100" Mode="" Description="Group ID for file permissions (typically 100 for Unraid)" Type="Variable" Display="always" Required="false" Mask="false">100</Config>
-  <Config Name="File Permission Mask" Target="UMASK" Default="022" Mode="" Description="UMASK for new file permissions (022 = standard, 000 = full access)" Type="Variable" Display="always" Required="false" Mask="false">022</Config>
-  <Config Name="PYTHONPATH" Target="PYTHONPATH" Default="/app" Mode="" Description="Python path (do not change)" Type="Variable" Display="advanced" Required="true" Mask="false">/app</Config>
-  <Config Name="FLASK_ENV" Target="FLASK_ENV" Default="production" Mode="" Description="Flask environment (do not change)" Type="Variable" Display="advanced" Required="true" Mask="false">production</Config>
-  <Config Name="FLASK_APP" Target="FLASK_APP" Default="web_server.py" Mode="" Description="Flask app entry point (do not change)" Type="Variable" Display="advanced" Required="true" Mask="false">web_server.py</Config>
+  <Config Name="Config" Target="/app/config" Default="/mnt/user/appdata/soulsync/config" Mode="rw" Description="Configuration files" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/soulsync/config</Config>
+  <Config Name="Logs" Target="/app/logs" Default="/mnt/user/appdata/soulsync/logs" Mode="rw" Description="Log files" Type="Path" Display="advanced" Required="false" Mask="false">/mnt/user/appdata/soulsync/logs</Config>
+  <Config Name="Database Volume" Target="/app/data" Default="/mnt/user/appdata/soulsync/data" Mode="rw" Description="Database storage (SQLite)" Type="Path" Display="advanced" Required="false" Mask="false">/mnt/user/appdata/soulsync/data</Config>
+  <Config Name="Downloads" Target="/app/downloads" Default="/mnt/user/downloads/" Mode="rw" Description="Path to Soulseek (slskd) downloads folder — should match your slskd download path" Type="Path" Display="always" Required="false" Mask="false">/mnt/user/downloads/</Config>
+  <Config Name="Library/Transfer" Target="/app/Transfer" Default="/mnt/user/library/" Mode="rw" Description="Your music library folder for organized/transferred files" Type="Path" Display="always" Required="false" Mask="false">/mnt/user/library/</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID for file permissions (default 99 = nobody on Unraid)" Type="Variable" Display="always" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID for file permissions (default 100 = users on Unraid)" Type="Variable" Display="always" Required="false" Mask="false">100</Config>
+  <Config Name="Timezone" Target="TZ" Default="America/New_York" Mode="" Description="Timezone for log timestamps and scheduling (e.g., America/New_York)" Type="Variable" Display="always" Required="false" Mask="false">America/New_York</Config>
 </Container>
