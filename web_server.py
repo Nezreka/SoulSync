@@ -8907,8 +8907,22 @@ def _safe_move_file(src, dst):
             return
         raise
     except (OSError, PermissionError) as e:
-        # If it's a cross-device link error or permission error, do manual copy
-        if "cross-device" in str(e).lower() or "operation not permitted" in str(e).lower():
+        error_msg = str(e).lower()
+
+        # shutil.move may have already copied the file successfully but failed
+        # to delete the source (e.g. permission denied on slskd-owned downloads).
+        # If destination exists with content, treat as success.
+        if dst.exists() and dst.stat().st_size > 0:
+            logger.warning(f"⚠️ Move raised {type(e).__name__} but destination exists, treating as success: {e}")
+            # Try to clean up source, but don't fail if we can't
+            try:
+                src.unlink()
+            except Exception:
+                logger.info(f"Could not delete source file (may be owned by another process): {src}")
+            return
+
+        # Cross-device link error — do manual binary copy
+        if "cross-device" in error_msg or "operation not permitted" in error_msg or "permission denied" in error_msg:
             logger.warning(f"⚠️ Cross-device move detected, using fallback copy method: {e}")
             try:
                 # Simple copy without metadata preservation (avoids permission errors)
@@ -8917,7 +8931,10 @@ def _safe_move_file(src, dst):
                         shutil.copyfileobj(f_src, f_dst)
 
                 # Delete source after successful copy
-                src.unlink()
+                try:
+                    src.unlink()
+                except PermissionError:
+                    logger.info(f"Could not delete source file (may be owned by another process): {src}")
                 logger.info(f"✅ Successfully moved file using fallback method: {src} -> {dst}")
                 return
             except Exception as fallback_error:
