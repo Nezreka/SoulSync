@@ -270,7 +270,10 @@ class SoulseekClient:
             logger.info(f"Docker detected, using {download_path_str} for downloads")
         
         self.download_path = Path(download_path_str)
-        self.download_path.mkdir(parents=True, exist_ok=True)
+        try:
+            self.download_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning(f"Could not verify download path {download_path_str}: {e}")
         
         logger.info(f"Soulseek client configured with slskd at {self.base_url}")
     
