@@ -3783,7 +3783,7 @@ def enhanced_search():
                 })
 
             # Search for albums
-            album_objs = spotify_client.search_albums(query, limit=20)
+            album_objs = spotify_client.search_albums(query, limit=10)
             for album in album_objs:
                 # Album has 'artists' (list), convert to string
                 artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'
@@ -3799,7 +3799,7 @@ def enhanced_search():
                 })
 
             # Search for tracks
-            track_objs = spotify_client.search_tracks(query, limit=20)
+            track_objs = spotify_client.search_tracks(query, limit=10)
             for track in track_objs:
                 # Track has 'artists' (list), convert to string
                 artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
@@ -6275,7 +6275,7 @@ def _generate_artist_suggestions(search_result, is_album=False, album_result=Non
             print(f"    clean_album_title: '{clean_album_title}'")
             
             # Search tracks using album title to find the artist
-            tracks = spotify_client.search_tracks(clean_album_title, limit=20)
+            tracks = spotify_client.search_tracks(clean_album_title, limit=10)
             print(f"📊 Found {len(tracks)} tracks from album search")
             
             # Collect unique artists and their associated tracks/albums
