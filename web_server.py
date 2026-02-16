@@ -6546,6 +6546,10 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
     """
     logger.info(f"🎯 Processing enhanced album download for '{spotify_album['name']}' with {len(enhanced_tracks)} matched tracks")
 
+    # Compute total_discs for multi-disc album subfolder support
+    total_discs = max((t['spotify_track'].get('disc_number', 1) for t in enhanced_tracks), default=1)
+    spotify_album['total_discs'] = total_discs
+
     started_count = 0
 
     # Process matched tracks with full Spotify metadata
@@ -6581,6 +6585,7 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
                             'artist': spotify_artist['name'],
                             'album': spotify_album['name'],
                             'track_number': spotify_track['track_number'],  # Use Spotify track number
+                            'disc_number': spotify_track.get('disc_number', 1),
                             'spotify_clean_title': spotify_track['name']  # For filename generation
                         },
                         "is_album_download": True,
@@ -6654,6 +6659,13 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
         print("⚠️ Could not fetch official tracklist from Spotify. Metadata may be inaccurate.")
     # --- END OF NEW LOGIC ---
 
+    # Compute total_discs for multi-disc album subfolder support
+    if official_spotify_tracks:
+        total_discs = max((t.get('disc_number', 1) for t in official_spotify_tracks), default=1)
+    else:
+        total_discs = 1
+    spotify_album['total_discs'] = total_discs
+
     started_count = 0
     for track_data in tracks_to_download:
         try:
@@ -6680,7 +6692,8 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
                 'title': corrected_meta.get('title'),
                 'artist': corrected_meta.get('artist') or spotify_artist['name'],
                 'album': spotify_album['name'],
-                'track_number': corrected_meta.get('track_number')
+                'track_number': corrected_meta.get('track_number'),
+                'disc_number': corrected_meta.get('disc_number', 1)
             }
 
             download_id = asyncio.run(soulseek_client.download(username, filename, size))
@@ -7904,10 +7917,19 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'year': year
         }
 
+        # Multi-disc album subfolder support
+        disc_number = album_info.get('disc_number', 1)
+        spotify_album = context.get('spotify_album', {})
+        total_discs = spotify_album.get('total_discs', 1) if spotify_album else 1
+
         folder_path, filename_base = _get_file_path_from_template(template_context, 'album_path')
         if folder_path and filename_base:
-            final_path = os.path.join(transfer_dir, folder_path, filename_base + file_ext)
-            os.makedirs(os.path.join(transfer_dir, folder_path), exist_ok=True)
+            if total_discs > 1:
+                final_path = os.path.join(transfer_dir, folder_path, f"Disc {disc_number}", filename_base + file_ext)
+                os.makedirs(os.path.join(transfer_dir, folder_path, f"Disc {disc_number}"), exist_ok=True)
+            else:
+                final_path = os.path.join(transfer_dir, folder_path, filename_base + file_ext)
+                os.makedirs(os.path.join(transfer_dir, folder_path), exist_ok=True)
             return final_path, True
         else:
             # Fallback
@@ -7916,6 +7938,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
             album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
             album_dir = os.path.join(artist_dir, album_folder_name)
+            if total_discs > 1:
+                album_dir = os.path.join(album_dir, f"Disc {disc_number}")
             os.makedirs(album_dir, exist_ok=True)
             final_track_name_sanitized = _sanitize_filename(clean_track_name)
             new_filename = f"{track_number:02d} - {final_track_name_sanitized}{file_ext}"
@@ -8565,6 +8589,7 @@ def _get_spotify_album_tracks(spotify_album: dict) -> list:
             return [{
                 'name': item.get('name'),
                 'track_number': item.get('track_number'),
+                'disc_number': item.get('disc_number', 1),
                 'id': item.get('id')
             } for item in tracks_data['items']]
         return []
@@ -8591,7 +8616,8 @@ def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -
                     'title': sp_track['name'],
                     'artist': slsk_track_meta.get('artist'),
                     'album': slsk_track_meta.get('album'),
-                    'track_number': sp_track['track_number']
+                    'track_number': sp_track['track_number'],
+                    'disc_number': sp_track.get('disc_number', 1)
                 }
 
     # Priority 2: Match by title similarity (if track number fails)
@@ -8612,7 +8638,8 @@ def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -
             'title': best_match['name'],
             'artist': slsk_track_meta.get('artist'),
             'album': slsk_track_meta.get('album'),
-            'track_number': best_match['track_number']
+            'track_number': best_match['track_number'],
+            'disc_number': best_match.get('disc_number', 1)
         }
 
     print(f"⚠️ Could not confidently match track '{slsk_track_meta['title']}'. Using original metadata.")
@@ -8700,6 +8727,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
                 'is_album': True,
                 'album_name': clean_album_name,
                 'track_number': original_search.get('track_number', 1),
+                'disc_number': original_search.get('disc_number', 1),
                 'clean_track_name': clean_track_name,
                 'album_image_url': spotify_album.get('image_url'),
                 'confidence': 1.0,
@@ -8716,6 +8744,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
                 'is_album': True,
                 'album_name': album_name,
                 'track_number': original_search.get('track_number', 1),
+                'disc_number': original_search.get('disc_number', 1),
                 'clean_track_name': clean_track_name,
                 'album_image_url': spotify_album.get('image_url'),
                 'confidence': 0.9,
@@ -9190,12 +9219,13 @@ def _post_process_matched_download(context_key, context, file_path):
                 'is_album': True,
                 'album_name': clean_album_name,  # Use clean Spotify album name
                 'track_number': original_search.get('track_number', 1),
+                'disc_number': original_search.get('disc_number', 1),
                 'clean_track_name': clean_track_name,
                 'album_image_url': spotify_album.get('image_url'),
                 'confidence': 1.0,  # High confidence since we have clean Spotify data
                 'source': 'clean_spotify_metadata'
             }
-            
+
             print(f"🎯 Using clean Spotify album: '{clean_album_name}' for track: '{clean_track_name}'")
         elif is_album_download:
             # CRITICAL FIX: Album context without clean Spotify data - still force album treatment
@@ -9220,6 +9250,7 @@ def _post_process_matched_download(context_key, context, file_path):
                 'is_album': True,  # FORCE TRUE - user explicitly selected album for download
                 'album_name': album_name,
                 'track_number': original_search.get('track_number', 1),
+                'disc_number': original_search.get('disc_number', 1),
                 'clean_track_name': clean_track_name,
                 'album_image_url': spotify_album.get('image_url'),
                 'confidence': 0.9,  # Higher confidence - user explicitly chose album
@@ -12852,6 +12883,15 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
             batch_playlist_folder_mode = batch.get('playlist_folder_mode', False)
             batch_playlist_name = batch.get('playlist_name', 'Unknown Playlist')
 
+            # Compute total_discs for multi-disc album subfolder support
+            # Use ALL tracks (tracks_json), not just missing ones, to correctly detect multi-disc
+            # even when only one disc has missing tracks
+            if batch_is_album and batch_album_context:
+                total_discs = max((t.get('disc_number', 1) for t in tracks_json), default=1)
+                batch_album_context['total_discs'] = total_discs
+                if total_discs > 1:
+                    print(f"💿 [Multi-Disc] Detected {total_discs} discs for album '{batch_album_context.get('name')}'")
+
             for res in missing_tracks:
                 task_id = str(uuid.uuid4())
                 track_info = res['track'].copy()
@@ -13219,6 +13259,7 @@ def _run_post_processing_worker(task_id, batch_id):
                                 'is_album': True,  # CRITICAL: Mark as album track
                                 'album_name': spotify_album.get('name', 'Unknown Album'),  # CORRECT KEY
                                 'track_number': track_number,  # CORRECTED TRACK NUMBER
+                                'disc_number': original_search.get('disc_number', 1),
                                 'clean_track_name': clean_track_name,
                                 'album_image_url': spotify_album.get('images', [{}])[0].get('url') if spotify_album.get('images') else None,
                                 'confidence': 0.9,
@@ -13654,9 +13695,10 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                     'release_date': explicit_album.get('release_date', ''),
                     'image_url': album_image_url,
                     'total_tracks': explicit_album.get('total_tracks', 0),
+                    'total_discs': explicit_album.get('total_discs', 1),
                     'album_type': explicit_album.get('album_type', 'album')
                 }
-                print(f"🎵 [Explicit Context] Using real album data: '{spotify_album_context['name']}' ({spotify_album_context['album_type']})")
+                print(f"🎵 [Explicit Context] Using real album data: '{spotify_album_context['name']}' ({spotify_album_context['album_type']}, {spotify_album_context['total_discs']} disc(s))")
             else:
                 # Fallback to generic context for playlists/wishlists
                 spotify_artist_context = {'id': 'from_sync_modal', 'name': track.artists[0] if track.artists else 'Unknown', 'genres': []}
