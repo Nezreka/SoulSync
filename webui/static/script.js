@@ -2290,6 +2290,8 @@ async function testDashboardConnection(service) {
         if (result.success) {
             // Use backend's message which contains dynamic source name (Spotify or Apple Music)
             showToast(result.message || `${service} service verified`, 'success');
+            // Refresh status indicators immediately so UI reflects the new state
+            fetchAndUpdateServiceStatus();
         } else {
             showToast(`${service} service check failed: ${result.error}`, 'error');
         }

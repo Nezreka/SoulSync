@@ -2095,19 +2095,26 @@ def get_status():
             _status_cache_timestamps['media_server'] = current_time
         # else: use cached value
 
-        # Test Soulseek - just check if configured (instant, no network test)
-        # This is so fast we don't need to cache it
-        soulseek_start = time.time()
-        soulseek_status = soulseek_client.is_configured()
-        soulseek_response_time = (time.time() - soulseek_start) * 1000
+        # Test Soulseek - with caching like other services
+        if current_time - _status_cache_timestamps['soulseek'] > STATUS_CACHE_TTL:
+            soulseek_start = time.time()
+            try:
+                async def _check_soulseek():
+                    return await soulseek_client.check_connection()
+                soulseek_status = asyncio.run(_check_soulseek())
+            except Exception:
+                soulseek_status = False
+            soulseek_response_time = (time.time() - soulseek_start) * 1000
+            _status_cache['soulseek'] = {
+                'connected': soulseek_status,
+                'response_time': round(soulseek_response_time, 1)
+            }
+            _status_cache_timestamps['soulseek'] = current_time
 
         status_data = {
             'spotify': _status_cache['spotify'],
             'media_server': _status_cache['media_server'],
-            'soulseek': {
-                'connected': soulseek_status,
-                'response_time': round(soulseek_response_time, 1)
-            },
+            'soulseek': _status_cache['soulseek'],
             'active_media_server': active_server
         }
         return jsonify(status_data)
@@ -2497,8 +2504,9 @@ def test_connection_endpoint():
             _status_cache_timestamps['media_server'] = current_time
             print(f"✅ Updated {service} status cache after successful test")
         elif service == 'soulseek':
-            # Soulseek doesn't use cache, but update anyway for consistency
-            print("✅ Soulseek test successful")
+            _status_cache['soulseek']['connected'] = True
+            _status_cache_timestamps['soulseek'] = current_time
+            print("✅ Updated Soulseek status cache after successful test")
         elif service == 'listenbrainz':
             print("✅ ListenBrainz test successful")
 
@@ -2545,8 +2553,9 @@ def test_dashboard_connection_endpoint():
             _status_cache_timestamps['media_server'] = current_time
             print(f"✅ Updated {service} status cache after successful dashboard test")
         elif service == 'soulseek':
-            # Soulseek doesn't use cache, but log anyway for consistency
-            print("✅ Soulseek dashboard test successful")
+            _status_cache['soulseek']['connected'] = True
+            _status_cache_timestamps['soulseek'] = current_time
+            print("✅ Updated Soulseek status cache after successful dashboard test")
 
     # Add activity for dashboard connection test (different from settings test)
     if success:
