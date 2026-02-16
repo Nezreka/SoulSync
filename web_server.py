@@ -5349,7 +5349,7 @@ def get_artist_discography(artist_id):
         if spotify_available and not is_numeric_id:
             # Try Spotify first for alphanumeric IDs
             try:
-                albums = spotify_client.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                albums = spotify_client.get_artist_albums(artist_id, album_type='album,single')
                 if albums:
                     active_source = 'spotify'
                     print(f"📊 Got {len(albums)} albums from Spotify")
@@ -6401,7 +6401,7 @@ def _generate_album_suggestions(selected_artist, search_result):
         print(f"    target_album: '{clean_target}'")
         
         # Get artist's albums from Spotify
-        artist_albums = spotify_client.get_artist_albums(selected_artist['id'], limit=50)
+        artist_albums = spotify_client.get_artist_albums(selected_artist['id'])
         print(f"📊 Found {len(artist_albums)} albums for artist")
         
         album_matches = []
@@ -6499,7 +6499,7 @@ def search_match():
                 return jsonify({"error": "Artist ID required for album search"}), 400
             
             # Get artist's albums and filter by query
-            artist_albums = spotify_client.get_artist_albums(artist_id, limit=50)
+            artist_albums = spotify_client.get_artist_albums(artist_id)
             results = []
             
             for album in artist_albums:
@@ -24983,7 +24983,7 @@ def get_spotify_artist_discography(artist_name):
         print(f"🎵 Found Spotify artist: {artist.name} (ID: {spotify_artist_id}, confidence: {highest_score:.3f})")
 
         # Get all albums (albums, singles, and compilations)
-        all_albums = spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single,compilation', limit=50)
+        all_albums = spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single,compilation')
 
         if not all_albums:
             return {
