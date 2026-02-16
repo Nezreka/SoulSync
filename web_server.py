@@ -12092,19 +12092,52 @@ def get_valid_candidates(results, spotify_track, query):
             return []
 
     verified_candidates = []
-    spotify_artist_name = spotify_track.artists[0] if spotify_track.artists else ""
-    normalized_spotify_artist = re.sub(r'[^a-zA-Z0-9]', '', spotify_artist_name).lower()
+    spotify_artists = spotify_track.artists if spotify_track.artists else []
+
+    # Pre-normalize all artist names into word sets using the matching engine
+    # This handles Cyrillic, accents, special chars ($), separators, etc.
+    artist_word_sets = []
+    for artist_name in spotify_artists:
+        normalized = matching_engine.normalize_string(artist_name)
+        words = set(normalized.split())
+        if words:
+            artist_word_sets.append(words)
 
     for candidate in quality_filtered_candidates:
         # Skip artist check for YouTube results (title matching is sufficient as processed by matching engine)
         if is_youtube_source:
             verified_candidates.append(candidate)
             continue
-            
-        # This check is critical: it ensures the artist's name is in the file path,
-        # preventing downloads from the wrong artist.
-        normalized_slskd_path = re.sub(r'[^a-zA-Z0-9]', '', candidate.filename).lower()
-        if normalized_spotify_artist in normalized_slskd_path:
+
+        # No artist info available — can't verify, accept candidate
+        if not artist_word_sets:
+            verified_candidates.append(candidate)
+            continue
+
+        # Split the Soulseek path into segments (folders + filename) and check each one.
+        # This prevents false positives where a short artist name like "Sia" accidentally
+        # matches inside a folder name like "Enthusiastic" — by checking words within
+        # individual segments rather than a flat substring of the entire path.
+        path_segments = re.split(r'[/\\]', candidate.filename)
+
+        artist_found = False
+        for segment in path_segments:
+            if not segment:
+                continue
+            seg_words = set(matching_engine.normalize_string(segment).split())
+            if not seg_words:
+                continue
+
+            # Check if ANY artist's words are ALL present in this segment
+            for artist_words in artist_word_sets:
+                if artist_words.issubset(seg_words):
+                    artist_found = True
+                    break
+
+            if artist_found:
+                break
+
+        if artist_found:
             verified_candidates.append(candidate)
     return verified_candidates
 
