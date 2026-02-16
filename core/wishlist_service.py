@@ -107,39 +107,7 @@ class WishlistService:
         try:
             wishlist_tracks = self.database.get_wishlist_tracks(limit=limit)
             formatted_tracks = []
-            
-            # Sort by artist name, then track name for consistent display order
-            try:
-                def get_sort_key(track):
-                    spotify_data = track['spotify_data']
-                    # Parse JSON string if needed
-                    if isinstance(spotify_data, str):
-                        import json
-                        try:
-                            spotify_data = json.loads(spotify_data)
-                        except:
-                            return ('', '')  # Fallback for invalid JSON
 
-                    artist_name = ''
-                    track_name = ''
-
-                    if isinstance(spotify_data, dict):
-                        artists = spotify_data.get('artists', [])
-                        if artists and len(artists) > 0:
-                            if isinstance(artists[0], dict):
-                                artist_name = artists[0].get('name', '')
-                            elif isinstance(artists[0], str):
-                                artist_name = artists[0]
-                        track_name = spotify_data.get('name', '')
-
-                    return (artist_name.lower(), track_name.lower())
-
-                wishlist_tracks.sort(key=get_sort_key)
-                logger.debug(f"Successfully sorted {len(wishlist_tracks)} wishlist tracks by artist/track name")
-            except Exception as sort_error:
-                logger.warning(f"Failed to sort wishlist tracks, using original order: {sort_error}")
-                # Continue with original database order (date_added)
-            
             for wishlist_track in wishlist_tracks:
                 spotify_data = wishlist_track['spotify_data']
                 
@@ -394,7 +362,9 @@ class WishlistService:
                 'duration_ms': getattr(spotify_track, 'duration_ms', 0),
                 'preview_url': getattr(spotify_track, 'preview_url', None),
                 'external_urls': getattr(spotify_track, 'external_urls', {}),
-                'popularity': getattr(spotify_track, 'popularity', 0)
+                'popularity': getattr(spotify_track, 'popularity', 0),
+                'track_number': getattr(spotify_track, 'track_number', 1),
+                'disc_number': getattr(spotify_track, 'disc_number', 1)
             }
             
             logger.info(f"DEBUG: Spotify Track converted: {result['name']} by {[a['name'] for a in result['artists']]}")

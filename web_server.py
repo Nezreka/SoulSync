@@ -11326,6 +11326,7 @@ def add_album_track_to_wishlist():
             },
             'duration_ms': track.get('duration_ms', 0),
             'track_number': track.get('track_number', 1),
+            'disc_number': track.get('disc_number', 1),
             'explicit': track.get('explicit', False),
             'popularity': track.get('popularity', 0),
             'preview_url': track.get('preview_url'),
@@ -12310,6 +12311,8 @@ def _ensure_spotify_track_format(track_info):
         'artists': artists_list,  # Proper Spotify format
         'album': album,
         'duration_ms': track_info.get('duration_ms', 0),
+        'track_number': track_info.get('track_number', 1),
+        'disc_number': track_info.get('disc_number', 1),
         'preview_url': track_info.get('preview_url'),
         'external_urls': track_info.get('external_urls', {}),
         'popularity': track_info.get('popularity', 0),
@@ -12892,6 +12895,27 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                 if total_discs > 1:
                     print(f"💿 [Multi-Disc] Detected {total_discs} discs for album '{batch_album_context.get('name')}'")
 
+            # Pre-compute total_discs per album for wishlist tracks (grouped by album ID)
+            # Wishlist tracks aren't batch_is_album but each track has disc_number in spotify_data
+            wishlist_album_disc_counts = {}
+            if playlist_id == 'wishlist':
+                import json as _json
+                # First pass: collect disc_number from stored spotify_data
+                for t in tracks_json:
+                    sp_data = t.get('spotify_data', {})
+                    if isinstance(sp_data, str):
+                        try:
+                            sp_data = _json.loads(sp_data)
+                        except:
+                            sp_data = {}
+                    album_id = (sp_data.get('album', {}) or {}).get('id')
+                    disc_num = sp_data.get('disc_number', t.get('disc_number', 1))
+                    if album_id:
+                        wishlist_album_disc_counts[album_id] = max(
+                            wishlist_album_disc_counts.get(album_id, 1), disc_num
+                        )
+
+
             for res in missing_tracks:
                 task_id = str(uuid.uuid4())
                 track_info = res['track'].copy()
@@ -12932,11 +12956,13 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
 
                         # Construct minimal album context
                         # Ensure images are preserved (important for artwork)
+                        album_id = s_album.get('id', 'wishlist_album')
                         album_ctx = {
-                            'id': s_album.get('id', 'wishlist_album'),
+                            'id': album_id,
                             'name': s_album.get('name'),
                             'release_date': s_album.get('release_date', ''),
                             'total_tracks': s_album.get('total_tracks', 1),
+                            'total_discs': wishlist_album_disc_counts.get(album_id, 1),
                             'album_type': s_album.get('album_type', 'album'),
                             'images': s_album.get('images', []) # Pass images array directly
                         }
