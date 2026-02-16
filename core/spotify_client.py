@@ -471,11 +471,11 @@ class SpotifyClient:
             return None
     
     @rate_limited
-    def search_tracks(self, query: str, limit: int = 20) -> List[Track]:
+    def search_tracks(self, query: str, limit: int = 10) -> List[Track]:
         """Search for tracks - falls back to iTunes if Spotify not authenticated"""
         if self.is_spotify_authenticated():
             try:
-                results = self.sp.search(q=query, type='track', limit=limit)
+                results = self.sp.search(q=query, type='track', limit=min(limit, 10))
                 tracks = []
 
                 for track_data in results['tracks']['items']:
@@ -493,11 +493,11 @@ class SpotifyClient:
         return self._itunes.search_tracks(query, limit)
 
     @rate_limited
-    def search_artists(self, query: str, limit: int = 20) -> List[Artist]:
+    def search_artists(self, query: str, limit: int = 10) -> List[Artist]:
         """Search for artists - falls back to iTunes if Spotify not authenticated"""
         if self.is_spotify_authenticated():
             try:
-                results = self.sp.search(q=query, type='artist', limit=limit)
+                results = self.sp.search(q=query, type='artist', limit=min(limit, 10))
                 artists = []
 
                 for artist_data in results['artists']['items']:
@@ -515,11 +515,11 @@ class SpotifyClient:
         return self._itunes.search_artists(query, limit)
 
     @rate_limited
-    def search_albums(self, query: str, limit: int = 20) -> List[Album]:
+    def search_albums(self, query: str, limit: int = 10) -> List[Album]:
         """Search for albums - falls back to iTunes if Spotify not authenticated"""
         if self.is_spotify_authenticated():
             try:
-                results = self.sp.search(q=query, type='album', limit=limit)
+                results = self.sp.search(q=query, type='album', limit=min(limit, 10))
                 albums = []
 
                 for album_data in results['albums']['items']:
