@@ -5924,7 +5924,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     }
 
     // CRITICAL FIX: Use album context for discover_album playlists
-    const isDiscoverAlbum = virtualPlaylistId.startsWith('discover_album_');
+    const isDiscoverAlbum = virtualPlaylistId.startsWith('discover_album_') || virtualPlaylistId.startsWith('seasonal_album_');
     const heroContext = isDiscoverAlbum && album && artist ? {
         type: 'album',  // ✅ Show as album, not playlist
         album: {
@@ -7503,8 +7503,8 @@ async function startMissingTracksProcess(playlistId) {
         };
 
         // If this is an artist album download, use album name and include full context
-        // Match 'artist_album_', 'enhanced_search_album_', and 'discover_album_' prefixes
-        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('discover_album_')) {
+        // Match 'artist_album_', 'enhanced_search_album_', 'discover_album_', and 'seasonal_album_' prefixes
+        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('discover_album_') || playlistId.startsWith('seasonal_album_')) {
             requestBody.playlist_name = process.album?.name || process.playlist.name;
             requestBody.is_album_download = true;
             requestBody.album_context = process.album;   // Full Spotify album object
@@ -33149,12 +33149,20 @@ async function openDownloadModalForSeasonalAlbum(albumIndex) {
         return;
     }
 
-    console.log(`📥 Opening Download Missing Tracks modal for album: ${album.album_name}`);
+    console.log(`📥 Opening Download Missing Tracks modal for seasonal album: ${album.album_name}`);
     showLoadingOverlay(`Loading tracks for ${album.album_name}...`);
 
     try {
-        // Fetch album tracks from Spotify API via backend
-        const response = await fetch(`/api/spotify/album/${album.spotify_album_id}`);
+        // Determine source and album ID - use source-agnostic endpoint (matches Recent Releases)
+        const source = album.source || (album.spotify_album_id && !album.spotify_album_id.match(/^\d+$/) ? 'spotify' : 'itunes');
+        const albumId = album.spotify_album_id;
+
+        if (!albumId) {
+            throw new Error('No album ID available');
+        }
+
+        // Fetch album tracks from appropriate source via backend
+        const response = await fetch(`/api/discover/album/${source}/${albumId}`);
         if (!response.ok) {
             throw new Error('Failed to fetch album tracks');
         }
@@ -33164,10 +33172,9 @@ async function openDownloadModalForSeasonalAlbum(albumIndex) {
             throw new Error('No tracks found in album');
         }
 
-        // Convert to expected format
+        // Convert to expected format with full album context (matches Recent Releases)
         const spotifyTracks = albumData.tracks.map(track => {
-            // Normalize artists to array of strings
-            let artists = track.artists || [{ name: album.artist_name }];
+            let artists = track.artists || albumData.artists || [{ name: album.artist_name }];
             if (Array.isArray(artists)) {
                 artists = artists.map(a => a.name || a);
             }
@@ -33177,19 +33184,38 @@ async function openDownloadModalForSeasonalAlbum(albumIndex) {
                 name: track.name,
                 artists: artists,
                 album: {
-                    name: album.album_name,
-                    images: album.album_cover_url ? [{ url: album.album_cover_url }] : []
+                    id: albumData.id,
+                    name: albumData.name,
+                    album_type: albumData.album_type || 'album',
+                    total_tracks: albumData.total_tracks || 0,
+                    release_date: albumData.release_date || '',
+                    images: albumData.images || []
                 },
-                duration_ms: track.duration_ms || 0
+                duration_ms: track.duration_ms || 0,
+                track_number: track.track_number || 0
             };
         });
 
         // Create virtual playlist ID
-        const virtualPlaylistId = `seasonal_album_${album.spotify_album_id}`;
-        const playlistName = `${album.album_name} - ${album.artist_name}`;
+        const virtualPlaylistId = `seasonal_album_${albumId}`;
 
-        // Open download modal (same as Recent Releases)
-        await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
+        // Pass proper artist/album context for album download (1 worker + source reuse)
+        const artistContext = {
+            name: album.artist_name,
+            source: source
+        };
+
+        const albumContext = {
+            id: albumData.id,
+            name: albumData.name,
+            album_type: albumData.album_type || 'album',
+            total_tracks: albumData.total_tracks || 0,
+            release_date: albumData.release_date || '',
+            images: albumData.images || []
+        };
+
+        // Open download modal with album context (same as Recent Releases)
+        await openDownloadMissingModalForYouTube(virtualPlaylistId, albumData.name, spotifyTracks, artistContext, albumContext);
 
         hideLoadingOverlay();
 
