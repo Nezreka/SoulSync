@@ -20631,11 +20631,18 @@ def refresh_seasonal_content():
         database = get_database()
         seasonal_service = get_seasonal_discovery_service(spotify_client, database)
 
-        # Populate all seasons in background thread
+        # Force populate current season in background thread (bypass 7-day threshold)
         import threading
         def populate_all():
             try:
-                seasonal_service.populate_all_seasons()
+                current_season = seasonal_service.get_current_season()
+                if current_season:
+                    print(f"🔄 Force-refreshing seasonal content for: {current_season}")
+                    seasonal_service.populate_seasonal_content(current_season)
+                    seasonal_service.curate_seasonal_playlist(current_season)
+                    print(f"✅ Seasonal content refreshed for: {current_season}")
+                else:
+                    print("ℹ️ No active season to refresh")
             except Exception as e:
                 print(f"Error in background seasonal population: {e}")
 
