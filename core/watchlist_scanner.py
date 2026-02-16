@@ -1126,6 +1126,7 @@ class WatchlistScanner:
                 track_popularity = track.get('popularity', 0)
                 track_preview_url = track.get('preview_url', None)
                 track_number = track.get('track_number', 1)
+                disc_number = track.get('disc_number', 1)
                 track_uri = track.get('uri', '')
             else:
                 track_id = track.id
@@ -1137,6 +1138,7 @@ class WatchlistScanner:
                 track_popularity = getattr(track, 'popularity', 0)
                 track_preview_url = getattr(track, 'preview_url', None)
                 track_number = getattr(track, 'track_number', 1)
+                disc_number = getattr(track, 'disc_number', 1)
                 track_uri = getattr(track, 'uri', '')
             
             if isinstance(album, dict):
@@ -1173,6 +1175,7 @@ class WatchlistScanner:
                 'popularity': track_popularity,
                 'preview_url': track_preview_url,
                 'track_number': track_number,
+                'disc_number': disc_number,
                 'uri': track_uri,
                 'is_local': False
             }
