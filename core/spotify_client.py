@@ -657,12 +657,12 @@ class SpotifyClient:
             return None
     
     @rate_limited
-    def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
+    def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 10) -> List[Album]:
         """Get albums by artist ID - falls back to iTunes if Spotify not authenticated"""
         if self.is_spotify_authenticated():
             try:
                 albums = []
-                results = self.sp.artist_albums(artist_id, album_type=album_type, limit=limit)
+                results = self.sp.artist_albums(artist_id, album_type=album_type, limit=min(limit, 10))
 
                 while results:
                     for album_data in results['items']:
