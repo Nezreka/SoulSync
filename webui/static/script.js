@@ -9359,7 +9359,28 @@ function displayDownloadsResults(results) {
             // Generate individual track items
             let trackListHtml = '';
             if (result.tracks && result.tracks.length > 0) {
+                // Detect disc boundaries from track number resets for multi-disc albums
+                let currentDisc = 1;
+                let lastTrackNum = 0;
+                let discBreaks = new Set();
                 result.tracks.forEach((track, trackIndex) => {
+                    const tn = track.track_number || 0;
+                    if (trackIndex > 0 && tn > 0 && tn <= lastTrackNum) {
+                        currentDisc++;
+                        discBreaks.add(trackIndex);
+                    }
+                    if (tn > 0) lastTrackNum = tn;
+                });
+                const isMultiDisc = discBreaks.size > 0;
+                if (isMultiDisc) {
+                    trackListHtml += `<div class="disc-separator" style="padding: 6px 12px; font-weight: 600; font-size: 0.85em; color: var(--text-secondary, #aaa); border-bottom: 1px solid var(--border-color, #333); margin-bottom: 4px;">Disc 1</div>`;
+                }
+                let discNum = 1;
+                result.tracks.forEach((track, trackIndex) => {
+                    if (discBreaks.has(trackIndex)) {
+                        discNum++;
+                        trackListHtml += `<div class="disc-separator" style="padding: 6px 12px; font-weight: 600; font-size: 0.85em; color: var(--text-secondary, #aaa); border-bottom: 1px solid var(--border-color, #333); margin: 8px 0 4px 0;">Disc ${discNum}</div>`;
+                    }
                     const trackSize = track.size ? `${(track.size / 1024 / 1024).toFixed(1)} MB` : 'Unknown size';
                     const trackBitrate = track.bitrate ? `${track.bitrate}kbps` : '';
                     trackListHtml += `
