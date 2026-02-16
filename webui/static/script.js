@@ -91,6 +91,31 @@ let artistsSearchController = null;
 let artistCompletionController = null; // Track ongoing completion check to cancel when navigating away
 let similarArtistsController = null; // Track ongoing similar artists stream to cancel when navigating away
 
+// --- Lazy Background Image Observer ---
+// Watches elements with data-bg-src, applies background-image when visible, unobserves after.
+const lazyBgObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+        if (entry.isIntersecting) {
+            const el = entry.target;
+            const src = el.dataset.bgSrc;
+            if (src) {
+                el.style.backgroundImage = `url('${src}')`;
+                delete el.dataset.bgSrc;
+            }
+            lazyBgObserver.unobserve(el);
+        }
+    });
+}, { rootMargin: '200px' });
+
+/**
+ * Observe all elements with data-bg-src within a container for lazy background loading.
+ */
+function observeLazyBackgrounds(container) {
+    if (!container) return;
+    const elements = container.querySelectorAll('[data-bg-src]');
+    elements.forEach(el => lazyBgObserver.observe(el));
+}
+
 // --- MusicBrainz Integration Constants ---
 const MUSICBRAINZ_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png';
 
@@ -6340,6 +6365,11 @@ function generateMosaicBackground(coverUrls) {
         `;
     }
 
+    // Cap covers per row to 15 for GPU performance (avoids hundreds of tiles)
+    if (coverUrls.length > 15) {
+        coverUrls = coverUrls.slice(0, 15);
+    }
+
     const rows = 4;
     let mosaicHTML = '<div class="wishlist-mosaic-background">';
 
@@ -6359,8 +6389,8 @@ function generateMosaicBackground(coverUrls) {
         mosaicHTML += `<div class="wishlist-mosaic-row-wrapper">`;
         mosaicHTML += `<div class="wishlist-mosaic-row scroll-${direction}" style="--speed: ${scrollSpeed}s;">`;
 
-        // Generate tiles - duplicate 3 times for smooth infinite scroll
-        for (let duplicate = 0; duplicate < 3; duplicate++) {
+        // Generate tiles - duplicate 2 times for smooth infinite scroll
+        for (let duplicate = 0; duplicate < 2; duplicate++) {
             for (let i = 0; i < shuffledCovers.length; i++) {
                 const coverUrl = shuffledCovers[i];
                 mosaicHTML += `
@@ -20075,6 +20105,7 @@ function displayArtistsResults(query, results) {
 
     // Create artist cards
     container.innerHTML = results.map(result => createArtistCardHTML(result)).join('');
+    observeLazyBackgrounds(container);
 
     // Add event listeners to cards
     container.querySelectorAll('.artist-card').forEach((card, index) => {
@@ -20191,10 +20222,10 @@ function createArtistCardHTML(artist) {
         artist.genres.slice(0, 3).join(', ') : 'Various genres';
     const popularity = artist.popularity || 0;
 
-    // Create a fallback gradient if no image is available
-    const backgroundStyle = imageUrl ?
-        `background-image: url('${imageUrl}');` :
-        `background: linear-gradient(135deg, rgba(29, 185, 84, 0.3) 0%, rgba(24, 156, 71, 0.2) 100%);`;
+    // Use data-bg-src for lazy background loading via IntersectionObserver
+    const backgroundAttr = imageUrl ?
+        `data-bg-src="${imageUrl}"` :
+        `style="background: linear-gradient(135deg, rgba(29, 185, 84, 0.3) 0%, rgba(24, 156, 71, 0.2) 100%);"`;
 
     // Format popularity as a percentage for better UX
     const popularityText = popularity > 0 ? `${popularity}% Popular` : 'Popularity Unknown';
@@ -20215,7 +20246,7 @@ function createArtistCardHTML(artist) {
     return `
         <div class="artist-card" data-artist-id="${artist.id}" data-needs-image="${needsImage}">
             ${mbIconHTML}
-            <div class="artist-card-background" style="${backgroundStyle}"></div>
+            <div class="artist-card-background" ${backgroundAttr}></div>
             <div class="artist-card-overlay"></div>
             <div class="artist-card-content">
                 <div class="artist-card-name">${escapeHtml(artist.name)}</div>
@@ -20369,6 +20400,7 @@ function displayArtistDiscography(discography) {
     if (albumsContainer) {
         if (discography.albums?.length > 0) {
             albumsContainer.innerHTML = discography.albums.map(album => createAlbumCardHTML(album)).join('');
+            observeLazyBackgrounds(albumsContainer);
 
             // Add dynamic glow effects and click handlers to album cards
             albumsContainer.querySelectorAll('.album-card').forEach((card, index) => {
@@ -20398,6 +20430,7 @@ function displayArtistDiscography(discography) {
     if (singlesContainer) {
         if (discography.singles?.length > 0) {
             singlesContainer.innerHTML = discography.singles.map(single => createAlbumCardHTML(single)).join('');
+            observeLazyBackgrounds(singlesContainer);
 
             // Add dynamic glow effects and click handlers to singles cards
             singlesContainer.querySelectorAll('.album-card').forEach((card, index) => {
@@ -21082,14 +21115,14 @@ function createAlbumCardHTML(album) {
     const type = album.album_type === 'album' ? 'Album' :
         album.album_type === 'single' ? 'Single' : 'EP';
 
-    // Create a fallback gradient if no image is available
-    const backgroundStyle = imageUrl ?
-        `background-image: url('${imageUrl}');` :
-        `background: linear-gradient(135deg, rgba(29, 185, 84, 0.2) 0%, rgba(24, 156, 71, 0.1) 100%);`;
+    // Use data-bg-src for lazy background loading via IntersectionObserver
+    const backgroundAttr = imageUrl ?
+        `data-bg-src="${imageUrl}"` :
+        `style="background: linear-gradient(135deg, rgba(29, 185, 84, 0.2) 0%, rgba(24, 156, 71, 0.1) 100%);"`;
 
     return `
         <div class="album-card" data-album-id="${album.id}" data-album-name="${escapeHtml(album.name)}" data-album-type="${album.album_type}" data-total-tracks="${album.total_tracks || 0}">
-            <div class="album-card-image" style="${backgroundStyle}"></div>
+            <div class="album-card-image" ${backgroundAttr}></div>
             <div class="completion-overlay checking">
                 <span class="completion-status">Checking...</span>
             </div>
@@ -24001,6 +24034,7 @@ async function showWatchlistModal() {
                                     <img src="${artist.image_url}"
                                          alt="${escapeHtml(artist.artist_name)}"
                                          class="watchlist-artist-image"
+                                         loading="lazy"
                                          onerror="this.style.display='none'">
                                 ` : `
                                     <div class="watchlist-artist-image-placeholder">
@@ -24153,7 +24187,8 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
             ${artist.image_url ? `
                 <img src="${artist.image_url}"
                      alt="${escapeHtml(artist.name)}"
-                     class="watchlist-artist-config-hero-image">
+                     class="watchlist-artist-config-hero-image"
+                     loading="lazy">
             ` : ''}
             <div class="watchlist-artist-config-hero-info">
                 <h2 class="watchlist-artist-config-hero-name">${escapeHtml(artist.name)}</h2>
@@ -25380,6 +25415,7 @@ function createLibraryArtistCard(artist) {
         const img = document.createElement("img");
         img.src = artist.image_url;
         img.alt = artist.name;
+        img.loading = 'lazy';
         img.onerror = () => {
             console.log(`Failed to load image for ${artist.name}: ${artist.image_url}`);
             // Replace with fallback on error
@@ -25951,6 +25987,7 @@ function createReleaseCard(release) {
         img.src = release.image_url;
         img.alt = release.title;
         img.className = "release-image";
+        img.loading = 'lazy';
         img.onerror = () => {
             imageContainer.innerHTML = `<div class="release-image-fallback">💿</div>`;
         };
@@ -29152,7 +29189,7 @@ function restoreCachedImages(genres) {
             if (genreCard) {
                 const imageElement = genreCard.querySelector('.genre-browser-card-image');
                 if (imageElement) {
-                    imageElement.innerHTML = `<img src="${genre.imageUrl}" alt="${genre.name}" style="width: 100%; height: 100%; object-fit: cover;">`;
+                    imageElement.innerHTML = `<img src="${genre.imageUrl}" alt="${genre.name}" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;">`;
                     genreCard.classList.remove('genre-browser-card-fallback');
                 }
             }
@@ -29202,7 +29239,7 @@ async function loadGenreBrowserImagesProgressively(genres) {
                         const imageElement = genreCard.querySelector('.genre-browser-card-image');
                         if (imageElement) {
                             // Replace the fallback emoji with the actual image
-                            imageElement.innerHTML = `<img src="${data.image_url}" alt="${genre.name}" style="width: 100%; height: 100%; object-fit: cover;">`;
+                            imageElement.innerHTML = `<img src="${data.image_url}" alt="${genre.name}" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;">`;
                             genreCard.classList.remove('genre-browser-card-fallback');
 
                             console.log(`✅ Loaded and cached image for ${genre.name} in modal`);
@@ -31020,7 +31057,7 @@ async function loadDiscoverRecentReleases() {
             html += `
                 <div class="discover-card" onclick="openDownloadModalForRecentAlbum(${index})" style="cursor: pointer;">
                     <div class="discover-card-image">
-                        <img src="${coverUrl}" alt="${album.album_name}">
+                        <img src="${coverUrl}" alt="${album.album_name}" loading="lazy">
                     </div>
                     <div class="discover-card-info">
                         <h4 class="discover-card-title">${album.album_name}</h4>
@@ -31075,7 +31112,7 @@ async function loadDiscoverReleaseRadar() {
                 <div class="discover-playlist-track-compact" data-track-index="${index}">
                     <div class="track-compact-number">${index + 1}</div>
                     <div class="track-compact-image">
-                        <img src="${coverUrl}" alt="${track.album_name}">
+                        <img src="${coverUrl}" alt="${track.album_name}" loading="lazy">
                     </div>
                     <div class="track-compact-info">
                         <div class="track-compact-name">${track.track_name}</div>
@@ -31132,7 +31169,7 @@ async function loadDiscoverWeekly() {
                 <div class="discover-playlist-track-compact" data-track-index="${index}">
                     <div class="track-compact-number">${index + 1}</div>
                     <div class="track-compact-image">
-                        <img src="${coverUrl}" alt="${track.album_name}">
+                        <img src="${coverUrl}" alt="${track.album_name}" loading="lazy">
                     </div>
                     <div class="track-compact-info">
                         <div class="track-compact-name">${track.track_name}</div>
@@ -31608,7 +31645,7 @@ async function loadDecadeTracks(decade) {
                 <div class="discover-playlist-track-compact" data-track-index="${index}">
                     <div class="track-compact-number">${index + 1}</div>
                     <div class="track-compact-image">
-                        <img src="${coverUrl}" alt="${albumName}">
+                        <img src="${coverUrl}" alt="${albumName}" loading="lazy">
                     </div>
                     <div class="track-compact-info">
                         <div class="track-compact-name">${trackName}</div>
@@ -31977,7 +32014,7 @@ async function loadGenreTracks(genreName) {
                 <div class="discover-playlist-track-compact" data-track-index="${index}">
                     <div class="track-compact-number">${index + 1}</div>
                     <div class="track-compact-image">
-                        <img src="${coverUrl}" alt="${albumName}">
+                        <img src="${coverUrl}" alt="${albumName}" loading="lazy">
                     </div>
                     <div class="track-compact-info">
                         <div class="track-compact-name">${trackName}</div>
@@ -32622,7 +32659,7 @@ function displayListenBrainzTracks(tracks, playlistId) {
             <div class="discover-playlist-track-compact" data-track-index="${index}">
                 <div class="track-compact-number">${index + 1}</div>
                 <div class="track-compact-image">
-                    <img src="${coverUrl}" alt="${albumName}" onerror="this.src='${placeholderImage}'">
+                    <img src="${coverUrl}" alt="${albumName}" loading="lazy" onerror="this.src='${placeholderImage}'">
                 </div>
                 <div class="track-compact-info">
                     <div class="track-compact-name">${escapeHtml(track.track_name || 'Unknown Track')}</div>
@@ -33036,7 +33073,7 @@ async function loadSeasonalAlbums(seasonData) {
             html += `
                 <div class="discover-card" onclick="openDownloadModalForSeasonalAlbum(${index})" style="cursor: pointer;">
                     <div class="discover-card-image">
-                        <img src="${coverUrl}" alt="${album.album_name}">
+                        <img src="${coverUrl}" alt="${album.album_name}" loading="lazy">
                     </div>
                     <div class="discover-card-info">
                         <h4 class="discover-card-title">${album.album_name}</h4>
@@ -33106,7 +33143,7 @@ async function loadSeasonalPlaylist(seasonData) {
                 <div class="discover-playlist-track-compact" data-track-index="${index}">
                     <div class="track-compact-number">${index + 1}</div>
                     <div class="track-compact-image">
-                        <img src="${coverUrl}" alt="${track.album_name}">
+                        <img src="${coverUrl}" alt="${track.album_name}" loading="lazy">
                     </div>
                     <div class="track-compact-info">
                         <div class="track-compact-name">${track.track_name}</div>
@@ -33415,7 +33452,7 @@ async function loadPersonalizedDailyMixes() {
             html += `
                 <div class="discover-playlist-card" onclick="openDailyMix(${index})">
                     <div class="discover-playlist-cover">
-                        <img src="${coverUrl}" alt="${mix.name}">
+                        <img src="${coverUrl}" alt="${mix.name}" loading="lazy">
                         <div class="playlist-play-overlay">▶</div>
                     </div>
                     <div class="discover-playlist-info">
@@ -33448,7 +33485,7 @@ function renderCompactPlaylist(container, tracks) {
             <div class="discover-playlist-track-compact" data-track-index="${index}">
                 <div class="track-compact-number">${index + 1}</div>
                 <div class="track-compact-image">
-                    <img src="${coverUrl}" alt="${track.album_name}">
+                    <img src="${coverUrl}" alt="${track.album_name}" loading="lazy">
                 </div>
                 <div class="track-compact-info">
                     <div class="track-compact-name">${track.track_name}</div>
@@ -33547,7 +33584,7 @@ async function searchBuildPlaylistArtists() {
                 const imageUrl = artist.image_url || '/static/placeholder-album.png';
                 html += `
                     <div class="build-playlist-search-result" onclick="addBuildPlaylistArtist('${artist.id}', '${artist.name.replace(/'/g, "\\'")}', '${imageUrl}')">
-                        <img src="${imageUrl}" alt="${artist.name}">
+                        <img src="${imageUrl}" alt="${artist.name}" loading="lazy">
                         <span>${artist.name}</span>
                     </div>
                 `;
@@ -33611,7 +33648,7 @@ function renderBuildPlaylistSelectedArtists() {
     buildPlaylistSelectedArtists.forEach(artist => {
         html += `
             <div class="build-playlist-selected-artist">
-                <img src="${artist.image_url}" alt="${artist.name}">
+                <img src="${artist.image_url}" alt="${artist.name}" loading="lazy">
                 <span>${artist.name}</span>
                 <button onclick="removeBuildPlaylistArtist('${artist.id}')" class="build-playlist-remove-artist">×</button>
             </div>
@@ -35041,7 +35078,7 @@ async function loadImportSuggestions() {
         section.classList.remove('hidden');
         grid.innerHTML = data.suggestions.map(a => `
             <div class="import-album-card" onclick="selectImportAlbum('${a.id}')">
-                <img src="${a.image_url || '/static/placeholder.png'}" alt="${a.name}" onerror="this.src='/static/placeholder.png'">
+                <img src="${a.image_url || '/static/placeholder.png'}" alt="${a.name}" loading="lazy" onerror="this.src='/static/placeholder.png'">
                 <div class="import-album-card-info">
                     <div class="import-album-card-title" title="${a.name}">${a.name}</div>
                     <div class="import-album-card-artist" title="${a.artist}">${a.artist}</div>
@@ -35074,7 +35111,7 @@ async function searchImportAlbum() {
         }
         grid.innerHTML = data.albums.map(a => `
             <div class="import-album-card" onclick="selectImportAlbum('${a.id}')">
-                <img src="${a.image_url || '/static/placeholder.png'}" alt="${a.name}" onerror="this.src='/static/placeholder.png'">
+                <img src="${a.image_url || '/static/placeholder.png'}" alt="${a.name}" loading="lazy" onerror="this.src='/static/placeholder.png'">
                 <div class="import-album-card-info">
                     <div class="import-album-card-title" title="${a.name}">${a.name}</div>
                     <div class="import-album-card-artist" title="${a.artist}">${a.artist}</div>
@@ -35126,7 +35163,7 @@ async function selectImportAlbum(albumId) {
         // Render hero
         const album = data.album;
         document.getElementById('import-album-hero').innerHTML = `
-            <img src="${album.image_url || '/static/placeholder.png'}" alt="${album.name}" onerror="this.src='/static/placeholder.png'">
+            <img src="${album.image_url || '/static/placeholder.png'}" alt="${album.name}" loading="lazy" onerror="this.src='/static/placeholder.png'">
             <div class="import-album-hero-info">
                 <h3>${album.name}</h3>
                 <p>${album.artist} · ${album.total_tracks} tracks · ${album.release_date ? album.release_date.substring(0,4) : ''}</p>
