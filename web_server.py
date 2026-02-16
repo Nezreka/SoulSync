@@ -648,8 +648,9 @@ class WebUIDownloadMonitor:
     
     def _should_retry_task(self, task_id, task, live_transfers_lookup, current_time):
         """Determine if a task should be retried due to timeout (matches GUI logic)"""
-        task_filename = task.get('filename') or task['track_info'].get('filename')
-        task_username = task.get('username') or task['track_info'].get('username')
+        ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+        task_filename = task.get('filename') or ti.get('filename')
+        task_username = task.get('username') or ti.get('username')
         
         if not task_filename or not task_username:
             return False
@@ -678,10 +679,11 @@ class WebUIDownloadMonitor:
                 task['last_error_retry_time'] = current_time
                 
                 # CRITICAL: Cancel the errored download in slskd before retry
-                username = task.get('username') or task['track_info'].get('username')
-                filename = task.get('filename') or task['track_info'].get('filename')
+                _ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+                username = task.get('username') or _ti.get('username')
+                filename = task.get('filename') or _ti.get('filename')
                 download_id = task.get('download_id')
-                
+
                 if username and download_id:
                     try:
                         print(f"🚫 Cancelling errored download: {download_id} from {username}")
@@ -772,10 +774,11 @@ class WebUIDownloadMonitor:
                         print(f"⚠️ Task stuck in queue for {queue_time:.1f}s - immediate retry {retry_count + 1}/3")
                         task['stuck_retry_count'] = retry_count + 1
                         task['last_retry_time'] = current_time
-                        
+
                         # CRITICAL: Cancel the stuck download in slskd before retry
-                        username = task.get('username') or task['track_info'].get('username')
-                        filename = task.get('filename') or task['track_info'].get('filename')
+                        _ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+                        username = task.get('username') or _ti.get('username')
+                        filename = task.get('filename') or _ti.get('filename')
                         download_id = task.get('download_id')
                         
                         if username and download_id:
@@ -869,10 +872,11 @@ class WebUIDownloadMonitor:
                         print(f"⚠️ Task stuck at 0% for {download_time:.1f}s - immediate retry {retry_count + 1}/3")
                         task['stuck_retry_count'] = retry_count + 1
                         task['last_retry_time'] = current_time
-                        
+
                         # CRITICAL: Cancel the stuck download in slskd before retry
-                        username = task.get('username') or task['track_info'].get('username')
-                        filename = task.get('filename') or task['track_info'].get('filename')
+                        _ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+                        username = task.get('username') or _ti.get('username')
+                        filename = task.get('filename') or _ti.get('filename')
                         download_id = task.get('download_id')
                         
                         if username and download_id:
@@ -12029,10 +12033,8 @@ def get_valid_candidates(results, spotify_track, query):
         quality_filtered_candidates = initial_candidates
     else:
         # Filter by user's quality profile before artist verification (Soulseek only)
-        # Use shared soulseek_client method for consistency
-        from core.soulseek_client import SoulseekClient
-        temp_client = SoulseekClient()
-        quality_filtered_candidates = temp_client.filter_results_by_quality_preference(initial_candidates)
+        # Use existing soulseek_client to avoid re-initializing (which accesses download_path filesystem)
+        quality_filtered_candidates = soulseek_client.soulseek.filter_results_by_quality_preference(initial_candidates)
 
         # IMPORTANT: Respect empty results from quality filter
         # If user has strict quality requirements (e.g., FLAC-only with fallback disabled),
@@ -13618,10 +13620,11 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
             _update_task_status(task_id, 'downloading')
 
             # Prepare download - check if we have explicit album context from artist page
-            track_info = None
+            track_info = {}
             with tasks_lock:
                 if task_id in download_tasks:
-                    track_info = download_tasks[task_id].get('track_info', {})
+                    raw_track_info = download_tasks[task_id].get('track_info')
+                    track_info = raw_track_info if isinstance(raw_track_info, dict) else {}
 
             # Use explicit album/artist context if available (from artist album downloads)
             has_explicit_context = track_info and track_info.get('_is_explicit_album_download', False)
@@ -13798,7 +13801,9 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                 continue
                 
         except Exception as e:
+            import traceback
             print(f"❌ [Modal Worker] Error attempting download for '{candidate.filename}': {e}")
+            traceback.print_exc()
             # Reset status back to searching for next attempt
             with tasks_lock:
                 if task_id in download_tasks:
@@ -14179,8 +14184,9 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                 'ui_state': task.get('ui_state', 'normal'),  # normal|cancelling|cancelled
                 'playlist_id': task.get('playlist_id'),      # For V2 system identification
             }
-            task_filename = task.get('filename') or task['track_info'].get('filename')
-            task_username = task.get('username') or task['track_info'].get('username')
+            _ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+            task_filename = task.get('filename') or _ti.get('filename')
+            task_username = task.get('username') or _ti.get('username')
             if task_filename and task_username:
                 lookup_key = f"{task_username}::{extract_filename(task_filename)}"
                 
