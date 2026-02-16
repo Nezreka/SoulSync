@@ -12993,7 +12993,7 @@ def _run_post_processing_worker(task_id, batch_id):
             return
             
         download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
-        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './transfer'))
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
         
         # Try to get context for generating the correct final filename
         task_basename = extract_filename(task_filename)
