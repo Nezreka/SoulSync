@@ -19144,6 +19144,32 @@ def remove_from_watchlist():
         print(f"Error removing from watchlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/watchlist/remove-batch', methods=['POST'])
+def remove_batch_from_watchlist():
+    """Remove multiple artists from the watchlist"""
+    try:
+        data = request.get_json()
+        artist_ids = data.get('artist_ids', [])
+
+        if not artist_ids or not isinstance(artist_ids, list):
+            return jsonify({"success": False, "error": "Missing or invalid artist_ids"}), 400
+
+        database = get_database()
+        removed = 0
+        for artist_id in artist_ids:
+            if database.remove_artist_from_watchlist(artist_id):
+                removed += 1
+
+        return jsonify({
+            "success": True,
+            "removed": removed,
+            "message": f"Removed {removed} artist{'s' if removed != 1 else ''} from watchlist"
+        })
+
+    except Exception as e:
+        print(f"Error batch removing from watchlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/watchlist/check', methods=['POST'])
 def check_watchlist_status():
     """Check if an artist is in the watchlist"""
