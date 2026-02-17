@@ -8143,6 +8143,11 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
     """
     Core function to enhance audio file metadata using Spotify data.
     Thread-safe with per-file locking to prevent concurrent metadata writes.
+
+    Opens the file once in non-easy mode, clears all tags in memory, writes
+    new tags using format-specific frames/keys, embeds album art and source
+    IDs, then saves once.  This avoids the old clear→save→reopen pattern
+    which stripped the ID3v2 header from MP3 files, leaving them tagless.
     """
     if not config_manager.get('metadata_enhancement.enabled', True):
         print("🎵 Metadata enhancement disabled in config.")
@@ -8153,61 +8158,96 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
     with file_lock:
         print(f"🎵 Enhancing metadata for: {os.path.basename(file_path)}")
         try:
-            # Wipe ALL existing tags first — files from Soulseek carry random metadata
-            # (wrong comments, encoder info, ReplayGain, old album art, random TXXX frames)
-            audio_raw = MutagenFile(file_path)
-            if audio_raw is None:
+            audio_file = MutagenFile(file_path)
+            if audio_file is None:
                 print(f"❌ Could not load audio file with Mutagen: {file_path}")
                 return False
 
-            if hasattr(audio_raw, 'clear_pictures'):
-                audio_raw.clear_pictures()
+            # ── Wipe ALL existing tags in memory (NO save yet) ──
+            # Files from Soulseek carry random metadata (wrong comments,
+            # encoder info, ReplayGain, old album art, random TXXX frames).
+            if hasattr(audio_file, 'clear_pictures'):
+                audio_file.clear_pictures()
 
-            if audio_raw.tags is not None:
-                audio_raw.tags.clear()
-            audio_raw.save()
-
-            # Re-open in easy mode for writing standard tags
-            audio_file = MutagenFile(file_path, easy=True)
-            if audio_file is None:
-                print(f"❌ Could not reopen audio file in easy mode: {file_path}")
-                return False
-
-            if audio_file.tags is None:
+            if audio_file.tags is not None:
+                audio_file.tags.clear()
+            else:
                 audio_file.add_tags()
 
             metadata = _extract_spotify_metadata(context, artist, album_info)
             if not metadata:
-                print("⚠️ Could not extract Spotify metadata, preserving original tags.")
+                print("⚠️ Could not extract Spotify metadata, saving with cleared tags.")
+                audio_file.save()
                 return True
 
-            # Use 'easy' tags for broad compatibility first
-            audio_file['title'] = metadata.get('title', '')
-            audio_file['artist'] = metadata.get('artist', '')
-            audio_file['albumartist'] = metadata.get('album_artist', '')
-            audio_file['album'] = metadata.get('album', '')
-            if metadata.get('date'):
-                audio_file['date'] = metadata['date']
-            if metadata.get('genre'):
-                audio_file['genre'] = metadata['genre']
-
+            # ── Write standard tags using format-specific API ──
             track_num_str = f"{metadata.get('track_number', 1)}/{metadata.get('total_tracks', 1)}"
-            audio_file['tracknumber'] = track_num_str
 
-            if metadata.get('disc_number'):
-                audio_file['discnumber'] = str(metadata.get('disc_number'))
+            if isinstance(audio_file.tags, ID3):
+                # MP3: write ID3 frames directly
+                if metadata.get('title'):
+                    audio_file.tags.add(TIT2(encoding=3, text=[metadata['title']]))
+                if metadata.get('artist'):
+                    audio_file.tags.add(TPE1(encoding=3, text=[metadata['artist']]))
+                if metadata.get('album_artist'):
+                    audio_file.tags.add(TPE2(encoding=3, text=[metadata['album_artist']]))
+                if metadata.get('album'):
+                    audio_file.tags.add(TALB(encoding=3, text=[metadata['album']]))
+                if metadata.get('date'):
+                    audio_file.tags.add(TDRC(encoding=3, text=[metadata['date']]))
+                if metadata.get('genre'):
+                    audio_file.tags.add(TCON(encoding=3, text=[metadata['genre']]))
+                audio_file.tags.add(TRCK(encoding=3, text=[track_num_str]))
+                if metadata.get('disc_number'):
+                    audio_file.tags.add(TPOS(encoding=3, text=[str(metadata['disc_number'])]))
 
+            elif isinstance(audio_file, (FLAC, OggVorbis)):
+                # FLAC / OGG Vorbis: dict-style VorbisComment tags
+                if metadata.get('title'):
+                    audio_file['title'] = [metadata['title']]
+                if metadata.get('artist'):
+                    audio_file['artist'] = [metadata['artist']]
+                if metadata.get('album_artist'):
+                    audio_file['albumartist'] = [metadata['album_artist']]
+                if metadata.get('album'):
+                    audio_file['album'] = [metadata['album']]
+                if metadata.get('date'):
+                    audio_file['date'] = [metadata['date']]
+                if metadata.get('genre'):
+                    audio_file['genre'] = [metadata['genre']]
+                audio_file['tracknumber'] = [track_num_str]
+                if metadata.get('disc_number'):
+                    audio_file['discnumber'] = [str(metadata['disc_number'])]
+
+            elif isinstance(audio_file, MP4):
+                # MP4 / M4A: Apple-style tag keys
+                if metadata.get('title'):
+                    audio_file['\xa9nam'] = [metadata['title']]
+                if metadata.get('artist'):
+                    audio_file['\xa9ART'] = [metadata['artist']]
+                if metadata.get('album_artist'):
+                    audio_file['aART'] = [metadata['album_artist']]
+                if metadata.get('album'):
+                    audio_file['\xa9alb'] = [metadata['album']]
+                if metadata.get('date'):
+                    audio_file['\xa9day'] = [metadata['date']]
+                if metadata.get('genre'):
+                    audio_file['\xa9gen'] = [metadata['genre']]
+                track_num = metadata.get('track_number', 1)
+                total_tracks = metadata.get('total_tracks', 1)
+                audio_file['trkn'] = [(track_num, total_tracks)]
+                if metadata.get('disc_number'):
+                    audio_file['disk'] = [(metadata['disc_number'], 0)]
+
+            # ── Embed album art on the same object ──
+            if config_manager.get('metadata_enhancement.embed_album_art', True):
+                _embed_album_art_metadata(audio_file, metadata)
+
+            # ── Embed source IDs (Spotify, MusicBrainz, etc.) on the same object ──
+            _embed_source_ids(audio_file, metadata)
+
+            # ── Single save for everything ──
             audio_file.save()
-
-            # Re-open in non-easy mode for album art and source ID embedding
-            audio_file_raw = MutagenFile(file_path)
-            if audio_file_raw is not None:
-                if config_manager.get('metadata_enhancement.embed_album_art', True):
-                    _embed_album_art_metadata(audio_file_raw, metadata)
-
-                _embed_source_ids(audio_file_raw, metadata)
-
-                audio_file_raw.save()
 
             print("✅ Metadata enhanced successfully.")
             return True
