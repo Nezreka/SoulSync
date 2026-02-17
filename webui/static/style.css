@@ -22698,3 +22698,49 @@ body {
     gap: 12px;
     margin-top: 24px;
 }
+
+/* ========================================
+   FAILED DOWNLOAD ERROR TOOLTIP
+   ======================================== */
+
+.has-error-tooltip {
+    cursor: help;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+}
+
+#error-tooltip-popup {
+    position: fixed;
+    display: none;
+    min-width: 220px;
+    max-width: 480px;
+    padding: 10px 14px;
+    background: linear-gradient(135deg, rgba(30,30,30,0.98), rgba(20,20,20,0.99));
+    border: 1px solid rgba(244, 67, 54, 0.3);
+    border-radius: 10px;
+    color: rgba(255,255,255,0.9);
+    font-size: 12px;
+    font-weight: 400;
+    white-space: normal;
+    text-align: left;
+    z-index: 100000;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+#error-tooltip-popup.visible {
+    display: block;
+    opacity: 1;
+}
+
+#error-tooltip-popup::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: rgba(244, 67, 54, 0.3);
+}

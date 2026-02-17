@@ -7878,6 +7878,52 @@ function stopGlobalDownloadPolling() {
     }
 }
 
+// --- Error tooltip for failed/cancelled downloads (fixed-position, escapes overflow) ---
+function _getErrorTooltipPopup() {
+    let el = document.getElementById('error-tooltip-popup');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'error-tooltip-popup';
+        document.body.appendChild(el);
+    }
+    return el;
+}
+
+function _hideErrorTooltip() {
+    const popup = document.getElementById('error-tooltip-popup');
+    if (popup) popup.classList.remove('visible');
+}
+
+function _ensureErrorTooltipListeners(statusEl) {
+    if (statusEl._errorTooltipBound) return;
+    statusEl._errorTooltipBound = true;
+    statusEl.addEventListener('mouseenter', function () {
+        const msg = this.dataset.errorMsg;
+        if (!msg || !this.offsetParent) return; // skip if element is hidden
+        const popup = _getErrorTooltipPopup();
+        popup.textContent = msg;
+        popup.classList.add('visible');
+        const rect = this.getBoundingClientRect();
+        const popupRect = popup.getBoundingClientRect();
+        let left = rect.left + rect.width / 2 - popupRect.width / 2;
+        let top = rect.top - popupRect.height - 10;
+        // Keep within viewport
+        if (left < 8) left = 8;
+        if (left + popupRect.width > window.innerWidth - 8) left = window.innerWidth - 8 - popupRect.width;
+        if (top < 8) { top = rect.bottom + 10; } // flip below if no room above
+        popup.style.left = left + 'px';
+        popup.style.top = top + 'px';
+    });
+    statusEl.addEventListener('mouseleave', _hideErrorTooltip);
+
+    // Dismiss tooltip when the scrollable modal body scrolls
+    const scrollParent = statusEl.closest('.download-missing-modal-body');
+    if (scrollParent && !scrollParent._errorTooltipScrollBound) {
+        scrollParent._errorTooltipScrollBound = true;
+        scrollParent.addEventListener('scroll', _hideErrorTooltip, { passive: true });
+    }
+}
+
 function processModalStatusUpdate(playlistId, data) {
     // This function contains ALL the existing polling logic from startModalDownloadPolling
     // Extracted so it can be called from both individual and batched polling
@@ -8010,7 +8056,16 @@ function processModalStatusUpdate(playlistId, data) {
             }
 
             if (statusEl) {
+                statusEl.classList.remove('has-error-tooltip');
+                statusEl.removeAttribute('title');
+                statusEl.removeAttribute('data-error-msg');
                 statusEl.textContent = statusText;
+
+                if ((task.status === 'failed' || task.status === 'cancelled') && task.error_message) {
+                    statusEl.classList.add('has-error-tooltip');
+                    statusEl.dataset.errorMsg = task.error_message;
+                    _ensureErrorTooltipListeners(statusEl);
+                }
                 console.debug(`✅ [Status Update] Updated track ${task.track_index} to: ${statusText}${isV2Task ? ' (V2)' : ''}`);
             } else {
                 console.warn(`❌ [Status Update] Status element not found: download-${playlistId}-${task.track_index}`);
