@@ -738,9 +738,12 @@ class WebUIDownloadMonitor:
                 return False
             else:
                 # Too many error retries, mark as failed
+                track_label = task.get('track_info', {}).get('name', 'Unknown')
+                tried_sources = task.get('used_sources', set())
+                sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
                 print(f"❌ Task failed after 3 error retry attempts")
                 task['status'] = 'failed'
-                task['error_message'] = 'Failed after multiple error retries'
+                task['error_message'] = f'Soulseek transfer errored 3 times for "{track_label}"{sources_str} — all sources failed or became unavailable'
                 
                 # CRITICAL: Notify batch manager so track is added to permanently_failed_tracks
                 batch_id = task.get('batch_id')
@@ -836,9 +839,12 @@ class WebUIDownloadMonitor:
                         return False
                     else:
                         # Too many retries, mark as failed
+                        track_label = task.get('track_info', {}).get('name', 'Unknown')
+                        tried_sources = task.get('used_sources', set())
+                        sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
                         print(f"❌ Task failed after 3 retry attempts (queue timeout)")
                         task['status'] = 'failed'
-                        task['error_message'] = 'Failed after multiple queue timeout retries'
+                        task['error_message'] = f'Download stayed queued too long 3 times for "{track_label}"{sources_str} — peers may be offline or have full queues'
                         # Clear timers to prevent further retry loops
                         task.pop('queued_start_time', None)
                         task.pop('downloading_start_time', None)
@@ -933,9 +939,12 @@ class WebUIDownloadMonitor:
                         # Wait longer before next retry
                         return False
                     else:
+                        track_label = task.get('track_info', {}).get('name', 'Unknown')
+                        tried_sources = task.get('used_sources', set())
+                        sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
                         print(f"❌ Task failed after 3 retry attempts (0% progress timeout)")
                         task['status'] = 'failed'
-                        task['error_message'] = 'Failed after multiple 0% progress retries'
+                        task['error_message'] = f'Download stuck at 0% three times for "{track_label}"{sources_str} — peers may have connection issues'
                         # Clear timers to prevent further retry loops
                         task.pop('queued_start_time', None)
                         task.pop('downloading_start_time', None)
@@ -8756,7 +8765,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
                 with tasks_lock:
                     if task_id in download_tasks:
                         download_tasks[task_id]['status'] = 'failed'
-                        download_tasks[task_id]['error_message'] = "Simple download file not found after processing."
+                        download_tasks[task_id]['error_message'] = f'Downloaded file not found at expected location: {os.path.basename(expected_final_path)}'
 
                 with matched_context_lock:
                     if context_key in matched_downloads_context:
@@ -8853,7 +8862,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id]['status'] = 'failed'
-                    download_tasks[task_id]['error_message'] = "File move to transfer folder failed."
+                    download_tasks[task_id]['error_message'] = f'File verification failed: expected file at {os.path.basename(expected_final_path)} but it was not found after processing'
 
             with matched_context_lock:
                 if context_key in matched_downloads_context:
@@ -12778,7 +12787,7 @@ def _on_download_completed(batch_id, task_id, success=True):
                     if task_age > 600:  # 10 minutes
                         print(f"⏰ [Stuck Detection] Task {task_id} stuck in searching for {task_age:.0f}s - forcing failure")
                         task['status'] = 'failed'
-                        task['error_message'] = f'Retry timeout after {task_age:.0f} seconds'
+                        task['error_message'] = f'Search stuck for {int(task_age // 60)} minutes with no results — timed out'
                         finished_count += 1
                     else:
                         retrying_count += 1
@@ -13156,6 +13165,7 @@ def _run_post_processing_worker(task_id, batch_id):
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = 'Post-processing failed: missing file or source information from Soulseek transfer'
             _on_download_completed(batch_id, task_id, success=False)
             return
             
@@ -13333,7 +13343,7 @@ def _run_post_processing_worker(task_id, batch_id):
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id]['status'] = 'failed'
-                    download_tasks[task_id]['error_message'] = "File not found on disk after download completed."
+                    download_tasks[task_id]['error_message'] = f'File not found on disk after 3 search attempts. Expected: {os.path.basename(task_filename)}'
             _on_download_completed(batch_id, task_id, success=False)
             return
             
@@ -13624,6 +13634,7 @@ def _download_track_worker(task_id, batch_id=None):
         print(f"🔍 [Modal Worker] About to start search loop for task {task_id} (track: '{track.name}')")
 
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
+        search_diagnostics = []  # Track what happened per query for detailed error messages
         for query_index, query in enumerate(search_queries):
             # Cancellation check before each query
             with tasks_lock:
@@ -13656,12 +13667,13 @@ def _download_track_worker(task_id, batch_id=None):
                         return
                 
                 if tracks_result:
+                    result_count = len(tracks_result)
                     # Validate candidates using GUI's get_valid_candidates logic
                     candidates = get_valid_candidates(tracks_result, track, query)
                     if candidates:
                         print(f"✅ [Modal Worker] Found {len(candidates)} valid candidates for query '{query}'")
-                        
-                        # CRITICAL: Check cancellation before processing candidates  
+
+                        # CRITICAL: Check cancellation before processing candidates
                         with tasks_lock:
                             if task_id not in download_tasks:
                                 print(f"❌ [Modal Worker] Task {task_id} was deleted before processing candidates")
@@ -13672,7 +13684,7 @@ def _download_track_worker(task_id, batch_id=None):
                                 return
                             # Store candidates for retry fallback (like GUI)
                             download_tasks[task_id]['cached_candidates'] = candidates
-                        
+
                         # Try to download with these candidates
                         success = _attempt_download_with_candidates(task_id, candidates, track, batch_id)
                         if success:
@@ -13686,9 +13698,16 @@ def _download_track_worker(task_id, batch_id=None):
                             if used_filename and used_username:
                                 _store_batch_source(batch_id, used_username, used_filename)
                             return  # Success, exit the worker
-                            
+                        else:
+                            search_diagnostics.append(f'"{query}": {result_count} results, {len(candidates)} passed filters but download failed to start')
+                    else:
+                        search_diagnostics.append(f'"{query}": {result_count} results but none passed quality/artist filters')
+                else:
+                    search_diagnostics.append(f'"{query}": no results on Soulseek')
+
             except Exception as e:
                 print(f"⚠️ [Modal Worker] Search failed for query '{query}': {e}")
+                search_diagnostics.append(f'"{query}": search error — {e}')
                 continue
 
         # If we get here, all search queries failed
@@ -13696,6 +13715,8 @@ def _download_track_worker(task_id, batch_id=None):
         with tasks_lock:
             if task_id in download_tasks:
                 download_tasks[task_id]['status'] = 'failed'
+                _diag_summary = ' | '.join(search_diagnostics) if search_diagnostics else 'no queries attempted'
+                download_tasks[task_id]['error_message'] = f'No match found for "{track_name}" by {artist_name or "Unknown"} after {len(search_queries)} queries. Breakdown: {_diag_summary}'
         
         # Notify batch manager that this task completed (failed) - THREAD SAFE
         if batch_id:
@@ -13717,6 +13738,7 @@ def _download_track_worker(task_id, batch_id=None):
                 try:
                     if task_id in download_tasks:
                         download_tasks[task_id]['status'] = 'failed'
+                        download_tasks[task_id]['error_message'] = f'Unexpected error during download: {type(e).__name__}: {e}'
                         print(f"🔧 [Exception Recovery] Set task {task_id} status to 'failed'")
                 finally:
                     tasks_lock.release()
@@ -14338,9 +14360,10 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
 
             # If task has been running for more than 10 minutes, force it to fail
             if task_age > 600 and task['status'] in ['downloading', 'queued', 'searching']:
+                stuck_state = task['status']
                 print(f"⏰ [Safety Valve] Task {task_id} stuck for {task_age:.1f}s - forcing failure")
                 task['status'] = 'failed'
-                task['error_message'] = f'Task stuck for {task_age:.0f} seconds'
+                task['error_message'] = f'Task stuck in {stuck_state} state for {int(task_age // 60)} minutes — forcibly stopped'
 
             task_status = {
                 'task_id': task_id,
@@ -14353,6 +14376,7 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                 'cancel_timestamp': task.get('cancel_timestamp'),
                 'ui_state': task.get('ui_state', 'normal'),  # normal|cancelling|cancelled
                 'playlist_id': task.get('playlist_id'),      # For V2 system identification
+                'error_message': task.get('error_message'),  # Surface failure reasons to UI
             }
             _ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
             task_filename = task.get('filename') or _ti.get('filename')
@@ -14982,7 +15006,7 @@ def _check_batch_completion_v2(batch_id):
                         if task_age > 600:  # 10 minutes
                             print(f"⏰ [Stuck Detection V2] Task {task_id} stuck in searching for {task_age:.0f}s - forcing failure")
                             task['status'] = 'failed'
-                            task['error_message'] = f'Retry timeout after {task_age:.0f} seconds'
+                            task['error_message'] = f'Search stuck for {int(task_age // 60)} minutes with no results — timed out'
                             finished_count += 1
                         else:
                             retrying_count += 1
