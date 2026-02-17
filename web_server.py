@@ -19,6 +19,7 @@ from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, redirect, send_file, Response
 from utils.logging_config import get_logger
+from utils.async_helpers import run_async
 
 # --- Core Application Imports ---
 # Import the same core clients and config manager used by the GUI app
@@ -337,7 +338,7 @@ def get_cached_transfer_data():
         live_transfers_lookup = {}
         try:
             # First, get Soulseek downloads from API
-            transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
+            transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 all_transfers = []
                 for user_data in transfers_data:
@@ -354,7 +355,7 @@ def get_cached_transfer_data():
 
             # Also add YouTube downloads (through orchestrator)
             try:
-                all_downloads = asyncio.run(soulseek_client.get_all_downloads())
+                all_downloads = run_async(soulseek_client.get_all_downloads())
                 for download in all_downloads:
                     # Only add YouTube downloads (Soulseek ones are already in the lookup)
                     if download.username == 'youtube':
@@ -601,7 +602,7 @@ class WebUIDownloadMonitor:
             live_transfers = {}
 
             # Get Soulseek downloads from API
-            transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
+            transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 for user_data in transfers_data:
                     username = user_data.get('username', 'Unknown')
@@ -614,7 +615,7 @@ class WebUIDownloadMonitor:
 
             # Also get YouTube downloads (through orchestrator)
             try:
-                all_downloads = asyncio.run(soulseek_client.get_all_downloads())
+                all_downloads = run_async(soulseek_client.get_all_downloads())
                 for download in all_downloads:
                     # Only add YouTube downloads (Soulseek ones are already in the lookup)
                     if download.username == 'youtube':
@@ -687,7 +688,7 @@ class WebUIDownloadMonitor:
                 if username and download_id:
                     try:
                         print(f"🚫 Cancelling errored download: {download_id} from {username}")
-                        asyncio.run(soulseek_client.cancel_download(download_id, username, remove=True))
+                        run_async(soulseek_client.cancel_download(download_id, username, remove=True))
                         print(f"✅ Successfully cancelled errored download {download_id}")
                     except Exception as cancel_error:
                         print(f"⚠️ Warning: Failed to cancel errored download {download_id}: {cancel_error}")
@@ -784,7 +785,7 @@ class WebUIDownloadMonitor:
                         if username and download_id:
                             try:
                                 print(f"🚫 Cancelling stuck queued download: {download_id} from {username}")
-                                asyncio.run(soulseek_client.cancel_download(download_id, username, remove=True))
+                                run_async(soulseek_client.cancel_download(download_id, username, remove=True))
                                 print(f"✅ Successfully cancelled stuck download {download_id}")
                             except Exception as cancel_error:
                                 print(f"⚠️ Warning: Failed to cancel stuck download {download_id}: {cancel_error}")
@@ -882,7 +883,7 @@ class WebUIDownloadMonitor:
                         if username and download_id:
                             try:
                                 print(f"🚫 Cancelling stuck 0% download: {download_id} from {username}")
-                                asyncio.run(soulseek_client.cancel_download(download_id, username, remove=True))
+                                run_async(soulseek_client.cancel_download(download_id, username, remove=True))
                                 print(f"✅ Successfully cancelled stuck 0% download {download_id}")
                             except Exception as cancel_error:
                                 print(f"⚠️ Warning: Failed to cancel stuck 0% download {download_id}: {cancel_error}")
@@ -1681,10 +1682,7 @@ def run_service_test(service, test_config):
             # Test the orchestrator's configured download source (not just Soulseek)
             download_mode = config_manager.get('download_source.mode', 'soulseek')
 
-            async def check():
-                return await soulseek_client.check_connection()
-
-            if asyncio.run(check()):
+            if run_async(soulseek_client.check_connection()):
                 # Success message based on active mode
                 mode_messages = {
                     'soulseek': "Successfully connected to slskd.",
@@ -2099,9 +2097,7 @@ def get_status():
         if current_time - _status_cache_timestamps['soulseek'] > STATUS_CACHE_TTL:
             soulseek_start = time.time()
             try:
-                async def _check_soulseek():
-                    return await soulseek_client.check_connection()
-                soulseek_status = asyncio.run(_check_soulseek())
+                soulseek_status = run_async(soulseek_client.check_connection())
             except Exception:
                 soulseek_status = False
             soulseek_response_time = (time.time() - soulseek_start) * 1000
@@ -2235,7 +2231,7 @@ def get_system_stats():
         # Calculate total download speed from active soulseek transfers
         total_download_speed = 0.0
         try:
-            transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
+            transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 for user_data in transfers_data:
                     if 'directories' in user_data:
@@ -3713,7 +3709,7 @@ def search_music():
     add_activity_item("🔍", "Search Started", f"'{query}'", "Now")
     
     try:
-        tracks, albums = asyncio.run(soulseek_client.search(query))
+        tracks, albums = run_async(soulseek_client.search(query))
 
         # Convert to dictionaries for JSON response
         processed_albums = []
@@ -3917,7 +3913,7 @@ def stream_enhanced_search_track():
 
             try:
                 # Search slskd with timeout
-                tracks_result, _ = asyncio.run(soulseek_client.search(query, timeout=15))
+                tracks_result, _ = run_async(soulseek_client.search(query, timeout=15))
 
                 if tracks_result:
                     logger.info(f"✅ Found {len(tracks_result)} results for query: '{query}'")
@@ -3991,7 +3987,7 @@ def start_download():
                     filename = track_data.get('filename')
                     file_size = track_data.get('size', 0)
 
-                    download_id = asyncio.run(soulseek_client.download(
+                    download_id = run_async(soulseek_client.download(
                         username,
                         filename,
                         file_size
@@ -4040,7 +4036,7 @@ def start_download():
             if not username or not filename:
                 return jsonify({"error": "Missing username or filename."}), 400
 
-            download_id = asyncio.run(soulseek_client.download(username, filename, file_size))
+            download_id = run_async(soulseek_client.download(username, filename, file_size))
             logger.info(f"📥 Download ID returned: {download_id}")
 
             if download_id:
@@ -4194,7 +4190,7 @@ def get_download_status():
 
     try:
         global _processed_download_ids
-        transfers_data = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
+        transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
 
         # Don't return early if no Soulseek transfers - YouTube downloads need to be checked too!
         all_transfers = []
@@ -4254,7 +4250,7 @@ def get_download_status():
                                                 transfer_id = file_info.get('id')
                                                 if transfer_id:
                                                     try:
-                                                        asyncio.run(soulseek_client.cancel_download(str(transfer_id), username, remove=True))
+                                                        run_async(soulseek_client.cancel_download(str(transfer_id), username, remove=True))
                                                     except Exception:
                                                         pass
                                                 _orphaned_download_keys.discard(context_key)
@@ -4343,7 +4339,7 @@ def get_download_status():
 
         # Also include YouTube downloads in the response
         try:
-            all_youtube_downloads = asyncio.run(soulseek_client.get_all_downloads())
+            all_youtube_downloads = run_async(soulseek_client.get_all_downloads())
 
             for download in all_youtube_downloads:
                 if download.username == 'youtube':
@@ -4426,7 +4422,7 @@ def cancel_download():
 
     try:
         # Call the same client method the GUI uses
-        success = asyncio.run(soulseek_client.cancel_download(download_id, username, remove=True))
+        success = run_async(soulseek_client.cancel_download(download_id, username, remove=True))
         if success:
             return jsonify({"success": True, "message": "Download cancelled."})
         else:
@@ -4442,7 +4438,7 @@ def clear_finished_downloads():
     """
     try:
         # This single client call handles clearing everything that is no longer active
-        success = asyncio.run(soulseek_client.clear_all_completed_downloads())
+        success = run_async(soulseek_client.clear_all_completed_downloads())
         if success:
             return jsonify({"success": True, "message": "Finished downloads cleared."})
         else:
@@ -4694,7 +4690,7 @@ def clear_all_searches():
     Clear all searches from slskd search history.
     """
     try:
-        success = asyncio.run(soulseek_client.clear_all_searches())
+        success = run_async(soulseek_client.clear_all_searches())
         if success:
             add_activity_item("🧹", "Search Cleanup", "All search history cleared manually", "Now")
             return jsonify({"success": True, "message": "All searches cleared."})
@@ -4714,7 +4710,7 @@ def maintain_search_history():
         keep_searches = data.get('keep_searches', 50)
         trigger_threshold = data.get('trigger_threshold', 200)
         
-        success = asyncio.run(soulseek_client.maintain_search_history_with_buffer(
+        success = run_async(soulseek_client.maintain_search_history_with_buffer(
             keep_searches=keep_searches, trigger_threshold=trigger_threshold
         ))
         if success:
@@ -6576,7 +6572,7 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
                 continue
 
             # Start download
-            download_id = asyncio.run(soulseek_client.download(username, filename, size))
+            download_id = run_async(soulseek_client.download(username, filename, size))
 
             if download_id:
                 context_key = f"{username}::{extract_filename(filename)}"
@@ -6620,7 +6616,7 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
             if not username or not filename:
                 continue
 
-            download_id = asyncio.run(soulseek_client.download(username, filename, size))
+            download_id = run_async(soulseek_client.download(username, filename, size))
 
             if download_id:
                 context_key = f"{username}::{extract_filename(filename)}"
@@ -6705,7 +6701,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
                 'disc_number': corrected_meta.get('disc_number', 1)
             }
 
-            download_id = asyncio.run(soulseek_client.download(username, filename, size))
+            download_id = run_async(soulseek_client.download(username, filename, size))
 
             if download_id:
                 context_key = f"{username}::{extract_filename(filename)}"
@@ -6766,7 +6762,7 @@ def start_matched_download():
             if not username or not filename:
                 return jsonify({"success": False, "error": "Missing username or filename"}), 400
 
-            download_id = asyncio.run(soulseek_client.download(username, filename, size))
+            download_id = run_async(soulseek_client.download(username, filename, size))
 
             if download_id:
                 context_key = f"{username}::{extract_filename(filename)}"
@@ -6826,7 +6822,7 @@ def start_matched_download():
             download_payload['title'] = parsed_meta.get('title') or download_payload.get('title')
             download_payload['artist'] = parsed_meta.get('artist') or download_payload.get('artist')
             
-            download_id = asyncio.run(soulseek_client.download(username, filename, size))
+            download_id = run_async(soulseek_client.download(username, filename, size))
 
             if download_id:
                 context_key = f"{username}::{extract_filename(filename)}"
@@ -9835,7 +9831,7 @@ def _simple_monitor_task():
                     else:
                         print("🔍 [Auto Cleanup] Starting scheduled search cleanup...")
                     
-                    success = asyncio.run(soulseek_client.maintain_search_history_with_buffer(
+                    success = run_async(soulseek_client.maintain_search_history_with_buffer(
                         keep_searches=50, trigger_threshold=200
                     ))
                     if success:
@@ -9862,7 +9858,7 @@ def _simple_monitor_task():
                                 break
 
                     if not has_active_batches:
-                        asyncio.run(soulseek_client.clear_all_completed_downloads())
+                        run_async(soulseek_client.clear_all_completed_downloads())
                         print("✅ [Auto Cleanup] Periodic download cleanup completed")
 
                     last_download_cleanup = current_time
@@ -12512,7 +12508,7 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
         # Auto-cleanup: Clear completed downloads from slskd
         try:
             logger.info(f"🧹 [Auto-Cleanup] Clearing completed downloads from slskd after batch {batch_id}")
-            asyncio.run(soulseek_client.clear_all_completed_downloads())
+            run_async(soulseek_client.clear_all_completed_downloads())
             logger.info(f"✅ [Auto-Cleanup] Completed downloads cleared from slskd")
         except Exception as cleanup_error:
             logger.warning(f"⚠️ [Auto-Cleanup] Failed to clear completed downloads: {cleanup_error}")
@@ -13197,7 +13193,7 @@ def _run_post_processing_worker(task_id, batch_id):
                 # Query the download orchestrator for the status which contains the real file path
                 # CRITICAL FIX: Use the actual download_id designated by the client, not the internal task_id
                 actual_download_id = task.get('download_id') or task_id
-                status = asyncio.run(soulseek_client.get_download_status(actual_download_id))
+                status = run_async(soulseek_client.get_download_status(actual_download_id))
                 if status and status.file_path:
                     real_path = status.file_path
                     if os.path.exists(real_path):
@@ -13590,7 +13586,7 @@ def _download_track_worker(task_id, batch_id=None):
             
             try:
                 # Perform search with timeout
-                tracks_result, _ = asyncio.run(soulseek_client.search(query, timeout=30))
+                tracks_result, _ = run_async(soulseek_client.search(query, timeout=30))
                 print(f"🔍 [DEBUG] Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
                 
                 # CRITICAL: Check cancellation immediately after search returns
@@ -13801,7 +13797,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
 
             # Initiate download
             print(f"🚀 [Modal Worker] Starting download: {username} / {os.path.basename(filename)}")
-            download_id = asyncio.run(soulseek_client.download(username, filename, size))
+            download_id = run_async(soulseek_client.download(username, filename, size))
 
             if download_id:
                 # Store context for post-processing with complete Spotify metadata (GUI PARITY)
@@ -13889,7 +13885,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                             print(f"🚫 [Modal Worker] Task {task_id} cancelled after download {download_id} started - attempting to cancel download")
                             # Try to cancel the download immediately
                             try:
-                                asyncio.run(soulseek_client.cancel_download(download_id, username, remove=True))
+                                run_async(soulseek_client.cancel_download(download_id, username, remove=True))
                                 print(f"✅ Successfully cancelled active download {download_id}")
                             except Exception as cancel_error:
                                 print(f"⚠️ Warning: Failed to cancel active download {download_id}: {cancel_error}")
@@ -14097,7 +14093,7 @@ def _store_batch_source(batch_id, username, filename):
         # Access SoulseekClient directly (soulseek_client is DownloadOrchestrator)
         slsk = soulseek_client.soulseek if hasattr(soulseek_client, 'soulseek') else soulseek_client
         _sr.info(f"Browsing {username}:{folder_path}...")
-        files = asyncio.run(slsk.browse_user_directory(username, folder_path))
+        files = run_async(slsk.browse_user_directory(username, folder_path))
         if not files:
             _sr.info(f"Browse returned no files for {username}:{folder_path}")
             return
@@ -14557,7 +14553,7 @@ def cancel_download_task():
         if download_id and username:
             try:
                 # This is an async call, so we run it and wait
-                asyncio.run(soulseek_client.cancel_download(download_id, username, remove=True))
+                run_async(soulseek_client.cancel_download(download_id, username, remove=True))
                 print(f"✅ Successfully cancelled Soulseek download {download_id} for task {task_id}")
             except Exception as e:
                 print(f"⚠️ Warning: Failed to cancel download on slskd, but worker already moved on. Error: {e}")
@@ -14803,7 +14799,7 @@ def cancel_task_v2():
                         # Step 1: Always search for real download ID first
                         print(f"🔍 [Atomic Cancel] Searching slskd transfers for real download ID")
                         try:
-                            all_transfers = asyncio.run(soulseek_client._make_request('GET', 'transfers/downloads'))
+                            all_transfers = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
                             if all_transfers:
                                 # Look through transfers to find matching download
                                 for user_data in all_transfers:
@@ -14832,7 +14828,7 @@ def cancel_task_v2():
                                 endpoint = f'transfers/downloads/{username}/{real_download_id}?remove=true'
                                 print(f"🌐 [Atomic Cancel] Using slskd web UI format: {endpoint}")
                                 
-                                response = asyncio.run(soulseek_client._make_request('DELETE', endpoint))
+                                response = run_async(soulseek_client._make_request('DELETE', endpoint))
                                 if response is not None:
                                     print(f"✅ [Atomic Cancel] Successfully cancelled with slskd web UI format: {real_download_id}")
                                     success = True
@@ -14841,14 +14837,14 @@ def cancel_task_v2():
                                     
                                     # Fallback: Try without remove parameter
                                     endpoint2 = f'transfers/downloads/{username}/{real_download_id}'
-                                    response2 = asyncio.run(soulseek_client._make_request('DELETE', endpoint2))
+                                    response2 = run_async(soulseek_client._make_request('DELETE', endpoint2))
                                     if response2 is not None:
                                         print(f"✅ [Atomic Cancel] Successfully cancelled without remove param: {real_download_id}")
                                         success = True
                                     else:
                                         # Final fallback: Try simple format (sync.py style)
                                         endpoint3 = f'transfers/downloads/{real_download_id}'
-                                        response3 = asyncio.run(soulseek_client._make_request('DELETE', endpoint3))
+                                        response3 = run_async(soulseek_client._make_request('DELETE', endpoint3))
                                         if response3 is not None:
                                             print(f"✅ [Atomic Cancel] Successfully cancelled with simple format: {real_download_id}")
                                             success = True
@@ -18160,13 +18156,13 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
         sync_start_time = time.time()
         setup_duration = (sync_start_time - task_start_time) * 1000
         print(f"⏱️ [TIMING] Setup completed at {time.strftime('%H:%M:%S')} (took {setup_duration:.1f}ms)")
-        print(f"🚀 Starting actual sync process with asyncio.run()...")
+        print(f"🚀 Starting actual sync process with run_async()...")
 
         # Attach original tracks map to sync_service for wishlist with album images
         sync_service._original_tracks_map = original_tracks_map
 
         # Run the sync (this is a blocking call within this thread)
-        result = asyncio.run(sync_service.sync_playlist(playlist, download_missing=False))
+        result = run_async(sync_service.sync_playlist(playlist, download_missing=False))
         
         sync_duration = (time.time() - sync_start_time) * 1000
         total_duration = (time.time() - task_start_time) * 1000
