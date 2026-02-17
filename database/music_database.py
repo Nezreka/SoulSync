@@ -4018,7 +4018,7 @@ class MusicDatabase:
                 'server_source': server_source
             }
 
-    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50) -> Dict[str, Any]:
+    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all") -> Dict[str, Any]:
         """
         Get artists for the library page with search, filtering, and pagination
 
@@ -4027,6 +4027,7 @@ class MusicDatabase:
             letter: Filter by first letter (a-z, #, or "" for all)
             page: Page number (1-based)
             limit: Number of results per page
+            watchlist_filter: Filter by watchlist status ("all", "watched", "unwatched")
 
         Returns:
             Dict containing artists list, pagination info, and total count
@@ -4062,7 +4063,39 @@ class MusicDatabase:
 
                 where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
 
-                # Get total count (matching dashboard method)
+                # Pre-fetch watchlist data (small table, single fast query)
+                cursor.execute("SELECT spotify_artist_id, itunes_artist_id, LOWER(artist_name) as name_lower FROM watchlist_artists")
+                watchlist_rows = cursor.fetchall()
+                wl_spotify = {r['spotify_artist_id'] for r in watchlist_rows if r['spotify_artist_id']}
+                wl_itunes = {r['itunes_artist_id'] for r in watchlist_rows if r['itunes_artist_id']}
+                wl_names = {r['name_lower'] for r in watchlist_rows if r['name_lower']}
+
+                # Apply watchlist filter as WHERE conditions using IN clauses
+                if watchlist_filter in ("watched", "unwatched"):
+                    match_parts = []
+                    match_params = []
+                    if wl_spotify:
+                        match_parts.append(f"(a.spotify_artist_id IS NOT NULL AND a.spotify_artist_id IN ({','.join('?' * len(wl_spotify))}))")
+                        match_params.extend(wl_spotify)
+                    if wl_itunes:
+                        match_parts.append(f"(a.itunes_artist_id IS NOT NULL AND a.itunes_artist_id IN ({','.join('?' * len(wl_itunes))}))")
+                        match_params.extend(wl_itunes)
+                    if wl_names:
+                        match_parts.append(f"LOWER(a.name) IN ({','.join('?' * len(wl_names))})")
+                        match_params.extend(wl_names)
+
+                    if match_parts:
+                        combined = ' OR '.join(match_parts)
+                        if watchlist_filter == "watched":
+                            where_clause += f" AND ({combined})"
+                        else:
+                            where_clause += f" AND NOT ({combined})"
+                        params.extend(match_params)
+                    elif watchlist_filter == "watched":
+                        # Empty watchlist, no artists can match
+                        where_clause += " AND 0"
+
+                # Get total count
                 count_query = f"""
                     SELECT COUNT(*) as total_count
                     FROM artists a
@@ -4081,17 +4114,13 @@ class MusicDatabase:
                         a.thumb_url,
                         a.genres,
                         a.musicbrainz_id,
+                        a.spotify_artist_id,
+                        a.itunes_artist_id,
                         COUNT(DISTINCT al.id) as album_count,
-                        COUNT(DISTINCT t.id) as track_count,
-                        MAX(CASE WHEN wa.id IS NOT NULL THEN 1 ELSE 0 END) as is_watched
+                        COUNT(DISTINCT t.id) as track_count
                     FROM artists a
                     LEFT JOIN albums al ON a.id = al.artist_id
                     LEFT JOIN tracks t ON al.id = t.album_id
-                    LEFT JOIN watchlist_artists wa ON (
-                        (a.spotify_artist_id IS NOT NULL AND a.spotify_artist_id = wa.spotify_artist_id)
-                        OR (a.itunes_artist_id IS NOT NULL AND a.itunes_artist_id = wa.itunes_artist_id)
-                        OR LOWER(a.name) = LOWER(wa.artist_name)
-                    )
                     WHERE {where_clause}
                     GROUP BY a.id, a.name, a.thumb_url, a.genres, a.musicbrainz_id
                     ORDER BY a.name COLLATE NOCASE
@@ -4124,6 +4153,13 @@ class MusicDatabase:
                         genres=genres
                     )
 
+                    # Determine watchlist status via set lookups
+                    is_watched = (
+                        (row['spotify_artist_id'] and row['spotify_artist_id'] in wl_spotify)
+                        or (row['itunes_artist_id'] and row['itunes_artist_id'] in wl_itunes)
+                        or (row['name'] and row['name'].lower() in wl_names)
+                    )
+
                     # Add stats
                     artist_data = {
                         'id': artist.id,
@@ -4133,7 +4169,7 @@ class MusicDatabase:
                         'musicbrainz_id': row['musicbrainz_id'],
                         'album_count': row['album_count'] or 0,
                         'track_count': row['track_count'] or 0,
-                        'is_watched': bool(row['is_watched'])
+                        'is_watched': bool(is_watched)
                     }
                     artists.append(artist_data)
 

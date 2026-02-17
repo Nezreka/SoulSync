@@ -12620,6 +12620,39 @@ body {
 }
 
 /* Alphabet Selector - Apple Style Design */
+/* Watchlist Filter */
+.watchlist-filter {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    padding: 8px 0;
+}
+
+.watchlist-filter-btn {
+    padding: 6px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+    cursor: pointer;
+    border-radius: 20px;
+    transition: all 0.2s ease-out;
+}
+
+.watchlist-filter-btn:hover {
+    color: rgba(255, 255, 255, 0.8);
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.watchlist-filter-btn.active {
+    color: #fff;
+    border-color: rgba(29, 185, 84, 0.5);
+    background: rgba(29, 185, 84, 0.15);
+}
+
 .alphabet-selector {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;

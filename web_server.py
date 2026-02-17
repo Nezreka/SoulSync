@@ -4850,6 +4850,7 @@ def get_library_artists():
         letter = request.args.get('letter', 'all')
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 75))
+        watchlist_filter = request.args.get('watchlist', 'all')
 
         # Get database instance
         database = get_database()
@@ -4859,7 +4860,8 @@ def get_library_artists():
             search_query=search_query,
             letter=letter,
             page=page,
-            limit=limit
+            limit=limit,
+            watchlist_filter=watchlist_filter
         )
 
         # Fix image URLs for all artists
