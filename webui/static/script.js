@@ -24095,12 +24095,29 @@ async function showWatchlistModal() {
                                oninput="filterWatchlistArtists()">
                     </div>
 
+                    <!-- Batch action bar (hidden until selection) -->
+                    <div class="watchlist-batch-bar" id="watchlist-batch-bar" style="display: none;">
+                        <span class="watchlist-batch-count" id="watchlist-batch-count">0 selected</span>
+                        <button class="playlist-modal-btn playlist-modal-btn-secondary watchlist-batch-remove-btn"
+                                id="watchlist-batch-remove-btn"
+                                onclick="batchRemoveFromWatchlist()">
+                            Remove Selected
+                        </button>
+                    </div>
+
                     <div class="watchlist-artists-list" id="watchlist-artists-list">
                         ${artistsData.artists.map(artist => `
                             <div class="watchlist-artist-item"
                                  data-artist-name="${artist.artist_name.toLowerCase().replace(/"/g, '&quot;')}"
                                  data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}"
                                  style="cursor: pointer;">
+                                <label class="watchlist-checkbox-wrapper" onclick="event.stopPropagation();">
+                                    <input type="checkbox" class="watchlist-select-cb"
+                                           data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}"
+                                           data-artist-name="${escapeHtml(artist.artist_name)}"
+                                           onchange="updateWatchlistBatchBar()">
+                                    <span class="watchlist-checkbox-custom"></span>
+                                </label>
                                 ${artist.image_url ? `
                                     <img src="${artist.image_url}"
                                          alt="${escapeHtml(artist.artist_name)}"
@@ -24147,11 +24164,11 @@ async function showWatchlistModal() {
             });
         });
 
-        // Add click handlers to artist items (except for remove button)
+        // Add click handlers to artist items (except for remove button or checkbox)
         modal.querySelectorAll('.watchlist-artist-item').forEach(item => {
             item.addEventListener('click', (e) => {
-                // Don't trigger if clicking the remove button
-                if (e.target.closest('.watchlist-remove-btn')) {
+                // Don't trigger if clicking the remove button or checkbox
+                if (e.target.closest('.watchlist-remove-btn') || e.target.closest('.watchlist-checkbox-wrapper')) {
                     return;
                 }
 
@@ -24444,6 +24461,9 @@ function filterWatchlistArtists() {
             item.style.display = 'none';
         }
     });
+
+    // Refresh batch bar in case visible selection changed
+    updateWatchlistBatchBar();
 }
 
 /**
@@ -24758,6 +24778,73 @@ async function removeFromWatchlistModal(artistId, artistName) {
     }
 }
 
+
+/**
+ * Get visible checked checkboxes (not hidden by search filter)
+ */
+function getVisibleCheckedWatchlist() {
+    return Array.from(document.querySelectorAll('.watchlist-select-cb:checked')).filter(cb => {
+        const item = cb.closest('.watchlist-artist-item');
+        return item && item.style.display !== 'none';
+    });
+}
+
+/**
+ * Update the batch action bar based on checkbox selection
+ */
+function updateWatchlistBatchBar() {
+    const checked = getVisibleCheckedWatchlist();
+    const bar = document.getElementById('watchlist-batch-bar');
+    const countEl = document.getElementById('watchlist-batch-count');
+
+    if (checked.length > 0) {
+        bar.style.display = 'flex';
+        countEl.textContent = `${checked.length} selected`;
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+/**
+ * Batch remove selected artists from watchlist
+ */
+async function batchRemoveFromWatchlist() {
+    const checked = getVisibleCheckedWatchlist();
+    if (checked.length === 0) return;
+
+    const count = checked.length;
+    if (!confirm(`Remove ${count} artist${count !== 1 ? 's' : ''} from your watchlist?`)) return;
+
+    const artistIds = checked.map(cb => cb.getAttribute('data-artist-id'));
+
+    try {
+        const response = await fetch('/api/watchlist/remove-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_ids: artistIds })
+        });
+
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to remove artists');
+        }
+
+        console.log(`❌ Batch removed ${data.removed} artists from watchlist`);
+
+        // Refresh the modal
+        showWatchlistModal();
+
+        // Update button count
+        updateWatchlistButtonCount();
+
+        // Update any visible artist cards
+        updateArtistCardWatchlistStatus();
+
+    } catch (error) {
+        console.error('Error batch removing from watchlist:', error);
+        alert(`Error removing artists: ${error.message}`);
+    }
+}
 
 // --- Metadata Updater Functions ---
 

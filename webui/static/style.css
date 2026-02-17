@@ -8221,6 +8221,87 @@ body {
     transform: scale(1.05);
 }
 
+/* Watchlist Batch Action Bar */
+.watchlist-batch-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    margin: 0 30px 12px;
+    background: rgba(255, 59, 48, 0.1);
+    border: 1px solid rgba(255, 59, 48, 0.25);
+    border-radius: 10px;
+    animation: batchBarSlideIn 0.2s ease-out;
+}
+
+@keyframes batchBarSlideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.watchlist-batch-count {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.watchlist-batch-remove-btn {
+    border-color: rgba(255, 59, 48, 0.4) !important;
+    color: #ff6b6b !important;
+}
+
+.watchlist-batch-remove-btn:hover {
+    background: rgba(255, 59, 48, 0.2) !important;
+    border-color: rgba(255, 59, 48, 0.6) !important;
+}
+
+/* Watchlist Checkbox */
+.watchlist-checkbox-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 12px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.watchlist-checkbox-wrapper input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.watchlist-checkbox-custom {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.watchlist-checkbox-wrapper:hover .watchlist-checkbox-custom {
+    border-color: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.watchlist-checkbox-wrapper input:checked + .watchlist-checkbox-custom {
+    background: rgba(29, 185, 84, 0.3);
+    border-color: #1db954;
+}
+
+.watchlist-checkbox-wrapper input:checked + .watchlist-checkbox-custom::after {
+    content: '✓';
+    color: #1db954;
+    font-size: 13px;
+    font-weight: 700;
+}
+
 /* ===== WISHLIST OVERVIEW MODAL STYLES ===== */
 
 /* Category Grid */
