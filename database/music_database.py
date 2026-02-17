@@ -162,6 +162,12 @@ class MusicDatabase:
         """Get a NEW database connection for each operation (thread-safe)"""
         connection = sqlite3.connect(str(self.database_path), timeout=30.0)
         connection.row_factory = sqlite3.Row
+        # Register Unicode-normalizing function for diacritics-aware LIKE queries
+        try:
+            from unidecode import unidecode as _ud
+            connection.create_function("unidecode_lower", 1, lambda x: _ud(x).lower() if x else "")
+        except ImportError:
+            connection.create_function("unidecode_lower", 1, lambda x: x.lower() if x else "")
         # Enable foreign key constraints and WAL mode for better concurrency
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA journal_mode = WAL")
@@ -1641,21 +1647,8 @@ class MusicDatabase:
             if basic_results:
                 logger.debug(f"🔍 Basic search found {len(basic_results)} results")
                 return basic_results
-            
-            # STRATEGY 2: If basic search fails and we have Unicode support, try normalized search
-            try:
-                from unidecode import unidecode
-                unicode_support = True
-            except ImportError:
-                unicode_support = False
-            
-            if unicode_support:
-                normalized_results = self._search_tracks_unicode_fallback(cursor, title, artist, limit, server_source)
-                if normalized_results:
-                    logger.debug(f"🔍 Unicode fallback search found {len(normalized_results)} results")
-                    return normalized_results
-            
-            # STRATEGY 3: Last resort - broader fuzzy search with Python filtering
+
+            # STRATEGY 2: Broader fuzzy search - splits into individual words with OR matching
             fuzzy_results = self._search_tracks_fuzzy_fallback(cursor, title, artist, limit, server_source)
             if fuzzy_results:
                 logger.debug(f"🔍 Fuzzy fallback search found {len(fuzzy_results)} results")
@@ -1672,12 +1665,12 @@ class MusicDatabase:
         params = []
         
         if title:
-            where_conditions.append("tracks.title LIKE ?")
-            params.append(f"%{title}%")
-        
+            where_conditions.append("unidecode_lower(tracks.title) LIKE ?")
+            params.append(f"%{self._normalize_for_comparison(title)}%")
+
         if artist:
-            where_conditions.append("artists.name LIKE ?")
-            params.append(f"%{artist}%")
+            where_conditions.append("unidecode_lower(artists.name) LIKE ?")
+            params.append(f"%{self._normalize_for_comparison(artist)}%")
         
         # Add server filter if specified
         if server_source:
@@ -1702,86 +1695,18 @@ class MusicDatabase:
         
         return self._rows_to_tracks(cursor.fetchall())
     
-    def _search_tracks_unicode_fallback(self, cursor, title: str, artist: str, limit: int, server_source: str = None) -> List[DatabaseTrack]:
-        """Unicode-aware fallback search - tries normalized versions"""
-        from unidecode import unidecode
-        
-        # Normalize search terms
-        if _matching_engine:
-            title_norm = _matching_engine.normalize_string(title) if title else ""
-            artist_norm = _matching_engine.normalize_string(artist) if artist else ""
-        else:
-            title_norm = unidecode(title).lower() if title else ""
-            artist_norm = unidecode(artist).lower() if artist else ""
-        
-        # Try searching with normalized versions
-        where_conditions = []
-        params = []
-        
-        if title:
-            where_conditions.append("LOWER(tracks.title) LIKE ?")
-            params.append(f"%{title_norm}%")
-        
-        if artist:
-            where_conditions.append("LOWER(artists.name) LIKE ?")
-            params.append(f"%{artist_norm}%")
-        
-        # Add server filter if specified
-        if server_source:
-            where_conditions.append("tracks.server_source = ?")
-            params.append(server_source)
-        
-        if not where_conditions:
-            return []
-        
-        where_clause = " AND ".join(where_conditions)
-        params.append(limit * 2)  # Get more results for filtering
-        
-        cursor.execute(f"""
-            SELECT tracks.*, artists.name as artist_name, albums.title as album_title
-            FROM tracks
-            JOIN artists ON tracks.artist_id = artists.id
-            JOIN albums ON tracks.album_id = albums.id
-            WHERE {where_clause}
-            ORDER BY tracks.title, artists.name
-            LIMIT ?
-        """, params)
-        
-        rows = cursor.fetchall()
-        
-        # Filter results with proper Unicode normalization
-        filtered_tracks = []
-        for row in rows:
-
-            if _matching_engine:
-                db_title_norm = _matching_engine.normalize_string(row['title']) if row['title'] else ""
-                db_artist_norm = _matching_engine.normalize_string(row['artist_name']) if row['artist_name'] else ""
-            else:
-                db_title_norm = unidecode(row['title'].lower()) if row['title'] else ""
-                db_artist_norm = unidecode(row['artist_name'].lower()) if row['artist_name'] else ""
-            
-            title_matches = not title or title_norm in db_title_norm
-            artist_matches = not artist or artist_norm in db_artist_norm
-            
-            if title_matches and artist_matches:
-                filtered_tracks.append(row)
-                if len(filtered_tracks) >= limit:
-                    break
-        
-        return self._rows_to_tracks(filtered_tracks)
-    
     def _search_tracks_fuzzy_fallback(self, cursor, title: str, artist: str, limit: int, server_source: str = None) -> List[DatabaseTrack]:
         """Broadest fuzzy search - partial word matching"""
         # Get broader results by searching for individual words
         search_terms = []
         if title:
-            # Split title into words and search for each
-            title_words = [w.strip() for w in title.lower().split() if len(w.strip()) >= 3]
+            # Split title into words and search for each (normalized for diacritics)
+            title_words = [w.strip() for w in self._normalize_for_comparison(title).split() if len(w.strip()) >= 3]
             search_terms.extend(title_words)
-        
+
         if artist:
-            # Split artist into words and search for each
-            artist_words = [w.strip() for w in artist.lower().split() if len(w.strip()) >= 3]
+            # Split artist into words and search for each (normalized for diacritics)
+            artist_words = [w.strip() for w in self._normalize_for_comparison(artist).split() if len(w.strip()) >= 3]
             search_terms.extend(artist_words)
         
         if not search_terms:
@@ -1792,7 +1717,7 @@ class MusicDatabase:
         params = []
         
         for term in search_terms[:5]:  # Limit to 5 terms to avoid too broad search
-            like_conditions.append("(LOWER(tracks.title) LIKE ? OR LOWER(artists.name) LIKE ?)")
+            like_conditions.append("(unidecode_lower(tracks.title) LIKE ? OR unidecode_lower(artists.name) LIKE ?)")
             params.extend([f"%{term}%", f"%{term}%"])
         
         if not like_conditions:
@@ -1824,8 +1749,8 @@ class MusicDatabase:
         for row in rows:
             # Simple scoring based on how many search terms match
             score = 0
-            db_title_lower = row['title'].lower()
-            db_artist_lower = row['artist_name'].lower()
+            db_title_lower = self._normalize_for_comparison(row['title'])
+            db_artist_lower = self._normalize_for_comparison(row['artist_name'])
             
             for term in search_terms:
                 if term in db_title_lower or term in db_artist_lower:
@@ -1873,24 +1798,24 @@ class MusicDatabase:
             params = []
             
             if title:
-                where_conditions.append("albums.title LIKE ?")
-                params.append(f"%{title}%")
-            
+                where_conditions.append("unidecode_lower(albums.title) LIKE ?")
+                params.append(f"%{self._normalize_for_comparison(title)}%")
+
             if artist:
-                where_conditions.append("artists.name LIKE ?")
-                params.append(f"%{artist}%")
-            
+                where_conditions.append("unidecode_lower(artists.name) LIKE ?")
+                params.append(f"%{self._normalize_for_comparison(artist)}%")
+
             if server_source:
                 where_conditions.append("albums.server_source = ?")
                 params.append(server_source)
-            
+
             if not where_conditions:
                 # If no search criteria, return empty list
                 return []
-            
+
             where_clause = " AND ".join(where_conditions)
             params.append(limit)
-            
+
             cursor.execute(f"""
                 SELECT albums.*, artists.name as artist_name
                 FROM albums
