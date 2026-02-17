@@ -8153,12 +8153,28 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
     with file_lock:
         print(f"🎵 Enhancing metadata for: {os.path.basename(file_path)}")
         try:
+            # Wipe ALL existing tags first — files from Soulseek carry random metadata
+            # (wrong comments, encoder info, ReplayGain, old album art, random TXXX frames)
+            audio_raw = MutagenFile(file_path)
+            if audio_raw is None:
+                print(f"❌ Could not load audio file with Mutagen: {file_path}")
+                return False
+
+            if hasattr(audio_raw, 'clear_pictures'):
+                audio_raw.clear_pictures()
+
+            if audio_raw.tags is not None:
+                audio_raw.tags.clear()
+            audio_raw.save()
+
+            # Re-open in easy mode for writing standard tags
             audio_file = MutagenFile(file_path, easy=True)
             if audio_file is None:
-                audio_file = MutagenFile(file_path) # Try non-easy mode
-                if audio_file is None:
-                    print(f"❌ Could not load audio file with Mutagen: {file_path}")
-                    return False
+                print(f"❌ Could not reopen audio file in easy mode: {file_path}")
+                return False
+
+            if audio_file.tags is None:
+                audio_file.add_tags()
 
             metadata = _extract_spotify_metadata(context, artist, album_info)
             if not metadata:
@@ -8183,14 +8199,9 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
 
             audio_file.save()
 
-            # Re-open in non-easy mode for MusicBrainz cleanup and album art embedding.
-            # Files from different soulseek sources carry different MusicBrainz Release IDs,
-            # which causes media servers (Navidrome, Plex) to split identically-named albums
-            # into separate entries. Stripping these ensures grouping by album name + artist.
+            # Re-open in non-easy mode for album art and source ID embedding
             audio_file_raw = MutagenFile(file_path)
             if audio_file_raw is not None:
-                _strip_musicbrainz_ids(audio_file_raw)
-
                 if config_manager.get('metadata_enhancement.embed_album_art', True):
                     _embed_album_art_metadata(audio_file_raw, metadata)
 
