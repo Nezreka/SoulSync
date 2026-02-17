@@ -588,13 +588,32 @@ class MusicMatchingEngine:
             elif slskd_track.quality.lower() == 'mp3' and (slskd_track.bitrate or 0) >= 320:
                 quality_bonus = 0.02  # Reduced from 0.05
 
+        # --- Source Type ---
+        is_youtube = slskd_track.username == 'youtube'
+
+        # 4b. Album Bonus: Prefer results from the correct album folder
+        # This ensures "Dark Side of the Moon" sources rank above "Greatest Hits"
+        # when both have the same song. Binary check — album words in path or not.
+        album_bonus = 0.0
+        album_name = getattr(spotify_track, 'album', None)
+        if album_name and not is_youtube:
+            album_words = set(self.clean_album_name(album_name).split())
+            if album_words:
+                path_segments = re.split(r'[/\\]', slskd_track.filename)
+                for segment in path_segments:
+                    if not segment:
+                        continue
+                    seg_words = set(self.normalize_string(segment).split())
+                    if album_words.issubset(seg_words):
+                        album_bonus = 0.10
+                        break
+
         # 5. Special handling for short titles (high false positive risk)
         # Titles like "Run", "Love", "Girls", "Stay" need stricter artist matching
         title_words = spotify_cleaned_title.split()
         is_short_title = len(spotify_cleaned_title) <= 5 or len(title_words) == 1
 
         # --- Final Weighted Score ---
-        is_youtube = slskd_track.username == 'youtube'
         
         if is_youtube:
             # For YouTube, rely more on Title and Duration since Artist is often missing from video titles
@@ -615,8 +634,8 @@ class MusicMatchingEngine:
             logger.debug(f"Short title '{spotify_cleaned_title}' with low artist match ({artist_score:.2f}) - applying 60% penalty")
             final_confidence *= 0.4
 
-        # Add the quality bonus to the final score
-        final_confidence += quality_bonus
+        # Add the quality and album bonuses to the final score
+        final_confidence += quality_bonus + album_bonus
 
         # Store individual scores for debugging (used in enhanced version)
         slskd_track.title_score = title_score
@@ -625,11 +644,12 @@ class MusicMatchingEngine:
 
         # Debug logging to track matching decisions
         if final_confidence > 0.3:  # Only log potential matches
+            album_tag = f", Album: +{album_bonus:.2f}" if album_bonus > 0 else ""
             logger.debug(
                 f"Match scoring ({'YT' if is_youtube else 'SLSK'}): '{spotify_track.name}' by {spotify_track.artists[0] if spotify_track.artists else 'Unknown'} "
                 f"vs '{slskd_track.filename[:60]}...' | "
                 f"Title: {title_score:.2f} (ratio: {title_ratio:.2f}, boundary: {has_word_boundary}), "
-                f"Artist: {artist_score:.2f}, Duration: {duration_score:.2f}, "
+                f"Artist: {artist_score:.2f}, Duration: {duration_score:.2f}{album_tag}, "
                 f"Final: {final_confidence:.2f} {'✅ PASS' if final_confidence > 0.63 else '❌ FAIL'}"
             )
         
