@@ -25299,7 +25299,8 @@ const libraryPageState = {
     currentLetter: "all",
     currentPage: 1,
     limit: 75,
-    debounceTimer: null
+    debounceTimer: null,
+    watchlistFilter: "all"
 };
 
 function initializeLibraryPage() {
@@ -25308,6 +25309,9 @@ function initializeLibraryPage() {
     try {
         // Initialize search functionality
         initializeLibrarySearch();
+
+        // Initialize watchlist filter
+        initializeWatchlistFilter();
 
         // Initialize alphabet selector
         initializeAlphabetSelector();
@@ -25355,6 +25359,25 @@ function initializeLibrarySearch() {
             libraryPageState.currentPage = 1;
             loadLibraryArtists();
         }
+    });
+}
+
+function initializeWatchlistFilter() {
+    const filterButtons = document.querySelectorAll(".watchlist-filter-btn");
+
+    filterButtons.forEach(button => {
+        button.addEventListener("click", () => {
+            const filter = button.getAttribute("data-filter");
+
+            // Update active state
+            filterButtons.forEach(btn => btn.classList.remove("active"));
+            button.classList.add("active");
+
+            // Update state and reload
+            libraryPageState.watchlistFilter = filter;
+            libraryPageState.currentPage = 1;
+            loadLibraryArtists();
+        });
     });
 }
 
@@ -25408,7 +25431,8 @@ async function loadLibraryArtists() {
             search: libraryPageState.currentSearch,
             letter: libraryPageState.currentLetter,
             page: libraryPageState.currentPage,
-            limit: libraryPageState.limit
+            limit: libraryPageState.limit,
+            watchlist: libraryPageState.watchlistFilter
         });
 
         // Fetch artists from API
