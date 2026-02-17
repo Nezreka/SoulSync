@@ -8093,62 +8093,67 @@ from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, TPOS, TXX
 from mutagen.flac import FLAC, Picture
 from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 from mutagen.oggvorbis import OggVorbis
+from mutagen.apev2 import APEv2, APENoHeaderError
 import urllib.request
 
-def _strip_musicbrainz_ids(audio_file) -> None:
+def _strip_all_non_audio_tags(file_path: str) -> dict:
     """
-    Remove MusicBrainz release/album/track IDs from audio file tags.
-    Files from different soulseek sources carry different MusicBrainz IDs,
-    which causes media servers (Navidrome, Plex) to split identically-named
-    albums into separate entries even when album name and artist match.
-    Operates on a non-easy-mode MutagenFile object (caller must save).
+    Strip ALL non-audio tag containers from a file before metadata rewriting.
+    MP3 files from Soulseek commonly carry APEv2 tags (foobar2000 users)
+    with stale metadata that Mutagen's ID3 handler cannot see or clear.
+    Must run BEFORE MutagenFile() opens the file.
     """
+    summary = {'apev2_stripped': False, 'apev2_tag_count': 0}
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext != '.mp3':
+        return summary
     try:
-        removed = []
-
-        # ID3 (MP3): MusicBrainz IDs stored as TXXX custom frames
-        if hasattr(audio_file, 'tags') and audio_file.tags and hasattr(audio_file.tags, 'getall'):
-            mb_descs = [
-                'MusicBrainz Album Id',
-                'MusicBrainz Release Group Id',
-                'MusicBrainz Release Track Id',
-                'MusicBrainz Artist Id',
-                'MusicBrainz Album Artist Id',
-                'MusicBrainz Album Type',
-                'MusicBrainz Album Status',
-                'MusicBrainz Album Release Country',
-                'MUSICBRAINZ_ALBUMID',
-                'MUSICBRAINZ_RELEASEGROUPID',
-            ]
-            for txxx in audio_file.tags.getall('TXXX'):
-                if txxx.desc in mb_descs:
-                    audio_file.tags.delall(f'TXXX:{txxx.desc}')
-                    removed.append(f'TXXX:{txxx.desc}')
-            # Also remove UFID (unique file identifier) MusicBrainz frames
-            for ufid_key in [k for k in audio_file.tags if k.startswith('UFID:')]:
-                if 'musicbrainz' in ufid_key.lower():
-                    del audio_file.tags[ufid_key]
-                    removed.append(ufid_key)
-
-        # FLAC / OGG Vorbis: MusicBrainz IDs stored as vorbis comments
-        if hasattr(audio_file, 'tags') and audio_file.tags and hasattr(audio_file.tags, 'keys'):
-            mb_vorbis_keys = [k for k in audio_file.tags.keys() if 'musicbrainz' in k.lower()]
-            for key in mb_vorbis_keys:
-                del audio_file.tags[key]
-                removed.append(key)
-
-        # MP4 (M4A/AAC): MusicBrainz IDs stored as freeform atoms
-        if hasattr(audio_file, 'tags') and audio_file.tags:
-            mb_mp4_keys = [k for k in audio_file.tags.keys()
-                           if isinstance(k, str) and 'musicbrainz' in k.lower()]
-            for key in mb_mp4_keys:
-                del audio_file.tags[key]
-                removed.append(key)
-
-        if removed:
-            print(f"🧹 Stripped MusicBrainz IDs: {', '.join(removed)}")
+        apev2_tags = APEv2(file_path)
+        tag_count = len(apev2_tags)
+        tag_keys = list(apev2_tags.keys())
+        apev2_tags.delete(file_path)
+        summary['apev2_stripped'] = True
+        summary['apev2_tag_count'] = tag_count
+        print(f"🧹 Stripped {tag_count} APEv2 tags: {', '.join(tag_keys[:10])}")
+    except APENoHeaderError:
+        pass  # No APEv2 tags — common case
     except Exception as e:
-        print(f"⚠️ Error stripping MusicBrainz IDs (non-fatal): {e}")
+        print(f"⚠️ Could not strip APEv2 tags (non-fatal): {e}")
+    return summary
+
+def _verify_metadata_written(file_path: str) -> bool:
+    """Re-open file and verify core metadata fields are present."""
+    try:
+        check = MutagenFile(file_path)
+        if check is None or check.tags is None:
+            print(f"❌ [VERIFY] Tags are None after save: {file_path}")
+            return False
+        title_found = False
+        artist_found = False
+        if isinstance(check.tags, ID3):
+            title_found = bool(check.tags.getall('TIT2'))
+            artist_found = bool(check.tags.getall('TPE1'))
+            # Confirm APEv2 is gone
+            try:
+                APEv2(file_path)
+                print(f"⚠️ [VERIFY] APEv2 tags still present after processing!")
+                return False
+            except APENoHeaderError:
+                pass
+        elif isinstance(check, (FLAC, OggVorbis)):
+            title_found = bool(check.get('title'))
+            artist_found = bool(check.get('artist'))
+        elif isinstance(check, MP4):
+            title_found = bool(check.get('\xa9nam'))
+            artist_found = bool(check.get('\xa9ART'))
+        if not title_found or not artist_found:
+            print(f"❌ [VERIFY] Missing metadata - title:{title_found} artist:{artist_found}")
+            return False
+        print(f"✅ [VERIFY] Metadata verified OK")
+        return True
+    except Exception as e:
+        print(f"⚠️ [VERIFY] Verification error (non-fatal): {e}")
+        return False
 
 def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
     """
@@ -8169,6 +8174,9 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
     with file_lock:
         print(f"🎵 Enhancing metadata for: {os.path.basename(file_path)}")
         try:
+            # Strip APEv2 tags from MP3 (invisible to ID3 handler)
+            strip_summary = _strip_all_non_audio_tags(file_path)
+
             audio_file = MutagenFile(file_path)
             if audio_file is None:
                 print(f"❌ Could not load audio file with Mutagen: {file_path}")
@@ -8181,6 +8189,11 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
                 audio_file.clear_pictures()
 
             if audio_file.tags is not None:
+                # Log what's being cleared for debugging
+                if len(audio_file.tags) > 0:
+                    tag_keys = list(audio_file.tags.keys())[:15]
+                    print(f"🧹 Clearing {len(audio_file.tags)} existing tags: "
+                          f"{', '.join(str(k) for k in tag_keys)}")
                 audio_file.tags.clear()
             else:
                 audio_file.add_tags()
@@ -8188,7 +8201,12 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
             metadata = _extract_spotify_metadata(context, artist, album_info)
             if not metadata:
                 print("⚠️ Could not extract Spotify metadata, saving with cleared tags.")
-                audio_file.save()
+                if isinstance(audio_file.tags, ID3):
+                    audio_file.save(v1=0, v2_version=4)
+                elif isinstance(audio_file, FLAC):
+                    audio_file.save(deleteid3=True)
+                else:
+                    audio_file.save()
                 return True
 
             # ── Write standard tags using format-specific API ──
@@ -8258,9 +8276,19 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
             _embed_source_ids(audio_file, metadata)
 
             # ── Single save for everything ──
-            audio_file.save()
+            if isinstance(audio_file.tags, ID3):
+                audio_file.save(v1=0, v2_version=4)
+            elif isinstance(audio_file, FLAC):
+                audio_file.save(deleteid3=True)
+            else:
+                audio_file.save()
 
-            print("✅ Metadata enhanced successfully.")
+            # Verify metadata was written
+            verified = _verify_metadata_written(file_path)
+            if verified:
+                print("✅ Metadata enhanced successfully.")
+            else:
+                print("⚠️ Metadata saved but verification found issues (see above).")
             return True
         except Exception as e:
             print(f"❌ Error enhancing metadata for {file_path}: {e}")
