@@ -255,7 +255,7 @@ class DatabaseUpdateWorker(QThread):
         """Get all artists from media server library"""
         try:
             if not self.media_client.ensure_connection():
-                logger.error(f"Could not connect to {self.server_type} server")
+                logger.error(f"Could not connect to {self.server_type} server — check URL, credentials, and network (Docker users: use container name or host.docker.internal instead of host IP)")
                 return []
 
             logger.info(f"🎯 _get_all_artists: Calling media_client.get_all_artists() for {self.server_type}")
@@ -271,7 +271,7 @@ class DatabaseUpdateWorker(QThread):
         """Get artists that need processing for incremental update using smart early-stopping logic"""
         try:
             if not self.media_client.ensure_connection():
-                logger.error(f"Could not connect to {self.server_type} server")
+                logger.error(f"Could not connect to {self.server_type} server — check URL, credentials, and network (Docker users: use container name or host.docker.internal instead of host IP)")
                 return []
             
             # Check for music library (Plex-specific check)
