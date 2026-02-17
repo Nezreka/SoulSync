@@ -13004,10 +13004,14 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         # Construct minimal artist context
                         artist_ctx = {}
                         if s_artists and len(s_artists) > 0:
-                            artist_ctx = s_artists[0] # Take first artist
+                            first_artist = s_artists[0]
+                            if isinstance(first_artist, dict):
+                                artist_ctx = first_artist
+                            else:
+                                artist_ctx = {'name': str(first_artist)}
                         else:
                             # Fallback if no artist in spotify_data
-                             artist_ctx = {'name': track_info.get('artist', 'Unknown Artist')}
+                            artist_ctx = {'name': track_info.get('artist', 'Unknown Artist')}
 
                         # Construct minimal album context
                         # Ensure images are preserved (important for artwork)
@@ -13755,6 +13759,9 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                 # Use the real Spotify album/artist data from the UI
                 explicit_album = track_info.get('_explicit_album_context', {})
                 explicit_artist = track_info.get('_explicit_artist_context', {})
+                # Normalize artist context if it's a plain string (e.g. from wishlist spotify_data)
+                if isinstance(explicit_artist, str):
+                    explicit_artist = {'name': explicit_artist}
 
                 spotify_artist_context = {
                     'id': explicit_artist.get('id', 'explicit_artist'),
