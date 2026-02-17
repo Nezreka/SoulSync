@@ -200,13 +200,13 @@ class NavidromeClient:
                 server_version = response.get('version', 'Unknown')
                 logger.info(f"Successfully connected to Navidrome server version: {server_version}")
             else:
-                logger.error("Failed to connect to Navidrome server")
+                logger.error(f"Failed to connect to Navidrome server at {self.base_url}/rest/ping — check URL and network connectivity")
                 self.base_url = None
                 self.username = None
                 self.password = None
 
         except Exception as e:
-            logger.error(f"Failed to connect to Navidrome server: {e}")
+            logger.error(f"Failed to connect to Navidrome server at {self.base_url}/rest/ping: {e}")
             self.base_url = None
             self.username = None
             self.password = None
@@ -259,7 +259,7 @@ class NavidromeClient:
             return subsonic_response
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Navidrome API request failed: {e}")
+            logger.error(f"Navidrome API request failed for {url}: {e}")
             return None
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Navidrome response: {e}")
