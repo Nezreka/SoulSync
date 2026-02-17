@@ -21980,6 +21980,25 @@ body {
     opacity: 1 !important;
 }
 
+.watchlist-card-icon {
+    position: absolute;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(29, 185, 84, 0.4);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.9;
+    z-index: 100;
+    font-size: 14px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+}
+
 /* ============================= */
 /* IMPORT MODAL                  */
 /* ============================= */

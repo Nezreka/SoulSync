@@ -25478,6 +25478,16 @@ function createLibraryArtistCard(artist) {
         card.appendChild(mbIcon);
     }
 
+    // Add watchlist indicator if artist is on the watchlist
+    if (artist.is_watched) {
+        const watchIcon = document.createElement('div');
+        watchIcon.className = 'watchlist-card-icon';
+        watchIcon.title = 'On your watchlist';
+        watchIcon.style.top = artist.musicbrainz_id ? '40px' : '8px';
+        watchIcon.textContent = '👁️';
+        card.appendChild(watchIcon);
+    }
+
     // Create image element
     const imageContainer = document.createElement("div");
     imageContainer.className = "library-artist-image";

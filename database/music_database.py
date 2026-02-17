@@ -4082,10 +4082,16 @@ class MusicDatabase:
                         a.genres,
                         a.musicbrainz_id,
                         COUNT(DISTINCT al.id) as album_count,
-                        COUNT(DISTINCT t.id) as track_count
+                        COUNT(DISTINCT t.id) as track_count,
+                        MAX(CASE WHEN wa.id IS NOT NULL THEN 1 ELSE 0 END) as is_watched
                     FROM artists a
                     LEFT JOIN albums al ON a.id = al.artist_id
                     LEFT JOIN tracks t ON al.id = t.album_id
+                    LEFT JOIN watchlist_artists wa ON (
+                        (a.spotify_artist_id IS NOT NULL AND a.spotify_artist_id = wa.spotify_artist_id)
+                        OR (a.itunes_artist_id IS NOT NULL AND a.itunes_artist_id = wa.itunes_artist_id)
+                        OR LOWER(a.name) = LOWER(wa.artist_name)
+                    )
                     WHERE {where_clause}
                     GROUP BY a.id, a.name, a.thumb_url, a.genres, a.musicbrainz_id
                     ORDER BY a.name COLLATE NOCASE
@@ -4126,7 +4132,8 @@ class MusicDatabase:
                         'genres': artist.genres,
                         'musicbrainz_id': row['musicbrainz_id'],
                         'album_count': row['album_count'] or 0,
-                        'track_count': row['track_count'] or 0
+                        'track_count': row['track_count'] or 0,
+                        'is_watched': bool(row['is_watched'])
                     }
                     artists.append(artist_data)
 
