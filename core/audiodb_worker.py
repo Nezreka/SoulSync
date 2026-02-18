@@ -157,7 +157,7 @@ class AudioDBWorker:
 
             # Priority 2: Unattempted albums
             cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name
+                SELECT a.id, a.title, ar.name AS artist_name, ar.audiodb_id AS artist_audiodb_id
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
                 WHERE a.audiodb_match_status IS NULL
@@ -166,11 +166,11 @@ class AudioDBWorker:
             """)
             row = cursor.fetchone()
             if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2]}
+                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_audiodb_id': row[3]}
 
             # Priority 3: Unattempted tracks
             cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name
+                SELECT t.id, t.title, ar.name AS artist_name, ar.audiodb_id AS artist_audiodb_id
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
                 WHERE t.audiodb_match_status IS NULL
@@ -179,7 +179,7 @@ class AudioDBWorker:
             """)
             row = cursor.fetchone()
             if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2]}
+                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_audiodb_id': row[3]}
 
             # Priority 4: Retry 'not_found' artists after retry_days
             cutoff_date = datetime.now() - timedelta(days=self.retry_days)
@@ -198,7 +198,7 @@ class AudioDBWorker:
 
             # Priority 5: Retry 'not_found' albums
             cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name
+                SELECT a.id, a.title, ar.name AS artist_name, ar.audiodb_id AS artist_audiodb_id
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
                 WHERE a.audiodb_match_status = 'not_found'
@@ -208,11 +208,11 @@ class AudioDBWorker:
             """, (cutoff_date,))
             row = cursor.fetchone()
             if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2]}
+                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_audiodb_id': row[3]}
 
             # Priority 6: Retry 'not_found' tracks
             cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name
+                SELECT t.id, t.title, ar.name AS artist_name, ar.audiodb_id AS artist_audiodb_id
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
                 WHERE t.audiodb_match_status = 'not_found'
@@ -222,7 +222,7 @@ class AudioDBWorker:
             """, (cutoff_date,))
             row = cursor.fetchone()
             if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2]}
+                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_audiodb_id': row[3]}
 
             return None
 
@@ -240,6 +240,58 @@ class AudioDBWorker:
         name = re.sub(r'[^\w\s]', '', name)
         name = re.sub(r'\s+', ' ', name).strip()
         return name
+
+    def _verify_artist_id(self, item: Dict[str, Any], result: Dict[str, Any]) -> bool:
+        """Verify that the result's artist ID matches the parent artist's stored AudioDB ID.
+        If mismatched, the album/track search is more specific (uses artist+title),
+        so we trust it and correct the parent artist's audiodb_id."""
+        parent_audiodb_id = item.get('artist_audiodb_id')
+        if not parent_audiodb_id:
+            return True
+
+        result_artist_id = result.get('idArtist')
+        if not result_artist_id:
+            return True
+
+        if str(result_artist_id) != str(parent_audiodb_id):
+            logger.info(
+                f"Artist ID correction from {item['type']} '{item['name']}': "
+                f"updating parent artist AudioDB ID from {parent_audiodb_id} to {result_artist_id}"
+            )
+            self._correct_artist_audiodb_id(item, str(result_artist_id))
+
+        return True
+
+    def _correct_artist_audiodb_id(self, item: Dict[str, Any], correct_audiodb_id: str):
+        """Correct the parent artist's audiodb_id based on a more specific album/track match"""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+
+            # Find the artist_id from the album/track
+            table = 'albums' if item['type'] == 'album' else 'tracks'
+            cursor.execute(f"SELECT artist_id FROM {table} WHERE id = ?", (item['id'],))
+            row = cursor.fetchone()
+            if not row:
+                return
+
+            artist_id = row[0]
+            cursor.execute("""
+                UPDATE artists SET
+                    audiodb_id = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (correct_audiodb_id, artist_id))
+            conn.commit()
+
+            logger.info(f"Corrected artist #{artist_id} AudioDB ID to {correct_audiodb_id}")
+
+        except Exception as e:
+            logger.error(f"Error correcting artist AudioDB ID: {e}")
+        finally:
+            if conn:
+                conn.close()
 
     def _name_matches(self, query_name: str, result_name: str) -> bool:
         """Check if AudioDB result name matches our query with fuzzy matching"""
@@ -282,6 +334,7 @@ class AudioDBWorker:
                 if result:
                     result_name = result.get('strAlbum', '')
                     if self._name_matches(item_name, result_name):
+                        self._verify_artist_id(item, result)
                         self._update_album(item_id, result)
                         self.stats['matched'] += 1
                         logger.info(f"Matched album '{item_name}' -> AudioDB ID: {result.get('idAlbum')}")
@@ -300,6 +353,7 @@ class AudioDBWorker:
                 if result:
                     result_name = result.get('strTrack', '')
                     if self._name_matches(item_name, result_name):
+                        self._verify_artist_id(item, result)
                         self._update_track(item_id, result)
                         self.stats['matched'] += 1
                         logger.info(f"Matched track '{item_name}' -> AudioDB ID: {result.get('idTrack')}")
