@@ -14382,18 +14382,37 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
             task = download_tasks.get(task_id)
             if not task: continue
 
-            # SAFETY VALVE: Check for downloads stuck too long and force failure
+            # SAFETY VALVE: Check for downloads stuck too long
             import time
             current_time = time.time()
             task_start_time = task.get('status_change_time', current_time)
             task_age = current_time - task_start_time
 
-            # If task has been running for more than 10 minutes, force it to fail
+            # If task has been running for more than 10 minutes, check if file completed
             if task_age > 600 and task['status'] in ['downloading', 'queued', 'searching']:
                 stuck_state = task['status']
-                print(f"⏰ [Safety Valve] Task {task_id} stuck for {task_age:.1f}s - forcing failure")
-                task['status'] = 'failed'
-                task['error_message'] = f'Task stuck in {stuck_state} state for {int(task_age // 60)} minutes — forcibly stopped'
+                task_filename = task.get('filename') or (task.get('track_info') or {}).get('filename')
+
+                # Before failing, check if the file actually downloaded successfully
+                recovered = False
+                if task_filename and stuck_state == 'downloading':
+                    try:
+                        download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
+                        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+                        found_file, file_location = _find_completed_file_robust(download_dir, task_filename, transfer_dir)
+                        if found_file:
+                            print(f"✅ [Safety Valve] Task {task_id} stuck but file found in {file_location} — routing to post-processing")
+                            task['status'] = 'post_processing'
+                            task['status_change_time'] = current_time
+                            missing_download_executor.submit(_run_post_processing_worker, task_id, batch_id)
+                            recovered = True
+                    except Exception as e:
+                        print(f"⚠️ [Safety Valve] Error checking for completed file: {e}")
+
+                if not recovered:
+                    print(f"⏰ [Safety Valve] Task {task_id} stuck for {task_age:.1f}s - forcing failure")
+                    task['status'] = 'failed'
+                    task['error_message'] = f'Task stuck in {stuck_state} state for {int(task_age // 60)} minutes — forcibly stopped'
 
             task_status = {
                 'task_id': task_id,
