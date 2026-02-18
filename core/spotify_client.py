@@ -193,6 +193,10 @@ class SpotifyClient:
         self.sp: Optional[spotipy.Spotify] = None
         self.user_id: Optional[str] = None
         self._itunes_client = None  # Lazy-loaded iTunes fallback
+        self._auth_cache_lock = threading.Lock()
+        self._auth_cached_result: Optional[bool] = None
+        self._auth_cache_time: float = 0
+        self._AUTH_CACHE_TTL = 60  # seconds
         self._setup_client()
 
     def _is_spotify_id(self, id_str: str) -> bool:
@@ -219,6 +223,7 @@ class SpotifyClient:
 
     def reload_config(self):
         """Reload configuration and re-initialize client"""
+        self._invalidate_auth_cache()
         self._setup_client()
     
     def _setup_client(self):
@@ -259,18 +264,53 @@ class SpotifyClient:
         # iTunes fallback is always available
         return True
 
+    def _invalidate_auth_cache(self):
+        """Clear the auth cache so the next check makes a fresh API call"""
+        with self._auth_cache_lock:
+            self._auth_cached_result = None
+            self._auth_cache_time = 0
+
     def is_spotify_authenticated(self) -> bool:
-        """Check if Spotify client is specifically authenticated (not just iTunes fallback)"""
+        """Check if Spotify client is specifically authenticated (not just iTunes fallback).
+        Results are cached for 60 seconds to avoid excessive API calls."""
         if self.sp is None:
             return False
 
+        # Check cache first (lock only for brief read)
+        with self._auth_cache_lock:
+            if self._auth_cached_result is not None and (time.time() - self._auth_cache_time) < self._AUTH_CACHE_TTL:
+                return self._auth_cached_result
+
+        # Cache miss — make API call outside the lock
         try:
-            # Make a simple API call to verify authentication
             self.sp.current_user()
-            return True
+            result = True
         except Exception as e:
             logger.debug(f"Spotify authentication check failed: {e}")
-            return False
+            result = False
+
+        with self._auth_cache_lock:
+            self._auth_cached_result = result
+            self._auth_cache_time = time.time()
+
+        return result
+
+    def disconnect(self):
+        """Disconnect Spotify: clear client, delete cache, invalidate auth cache"""
+        import os
+        self.sp = None
+        self.user_id = None
+        self._invalidate_auth_cache()
+
+        cache_path = 'config/.spotify_cache'
+        try:
+            if os.path.exists(cache_path):
+                os.remove(cache_path)
+                logger.info("Deleted Spotify cache file")
+        except Exception as e:
+            logger.warning(f"Failed to delete Spotify cache: {e}")
+
+        logger.info("Spotify client disconnected")
     
     def _ensure_user_id(self) -> bool:
         """Ensure user_id is loaded (may make API call)"""
