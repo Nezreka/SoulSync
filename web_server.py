@@ -69,6 +69,7 @@ import yt_dlp
 from core.matching_engine import MusicMatchingEngine
 from beatport_unified_scraper import BeatportUnifiedScraper
 from core.musicbrainz_worker import MusicBrainzWorker
+from core.audiodb_worker import AudioDBWorker
 
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -25493,6 +25494,77 @@ def musicbrainz_resume():
 
 # ================================================================================================
 # END MUSICBRAINZ INTEGRATION
+# ================================================================================================
+
+
+# ================================================================================================
+# AUDIODB ENRICHMENT - ARTIST METADATA & IMAGES
+# ================================================================================================
+
+# --- AudioDB Worker Initialization ---
+audiodb_worker = None
+try:
+    from database.music_database import MusicDatabase
+    audiodb_db = MusicDatabase()
+    audiodb_worker = AudioDBWorker(database=audiodb_db)
+    audiodb_worker.start()
+    print("✅ AudioDB enrichment worker initialized and started")
+except Exception as e:
+    print(f"⚠️ AudioDB worker initialization failed: {e}")
+    audiodb_worker = None
+
+# --- AudioDB API Endpoints ---
+
+@app.route('/api/audiodb/status', methods=['GET'])
+def audiodb_status():
+    """Get AudioDB enrichment status for UI polling"""
+    try:
+        if audiodb_worker is None:
+            return jsonify({
+                'enabled': False,
+                'running': False,
+                'paused': False,
+                'current_item': None,
+                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
+                'progress': {}
+            }), 200
+
+        status = audiodb_worker.get_stats()
+        return jsonify(status), 200
+    except Exception as e:
+        logger.error(f"Error getting AudioDB status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/audiodb/pause', methods=['POST'])
+def audiodb_pause():
+    """Pause AudioDB enrichment worker"""
+    try:
+        if audiodb_worker is None:
+            return jsonify({'error': 'AudioDB worker not initialized'}), 400
+
+        audiodb_worker.pause()
+        logger.info("AudioDB worker paused via UI")
+        return jsonify({'status': 'paused'}), 200
+    except Exception as e:
+        logger.error(f"Error pausing AudioDB worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/audiodb/resume', methods=['POST'])
+def audiodb_resume():
+    """Resume AudioDB enrichment worker"""
+    try:
+        if audiodb_worker is None:
+            return jsonify({'error': 'AudioDB worker not initialized'}), 400
+
+        audiodb_worker.resume()
+        logger.info("AudioDB worker resumed via UI")
+        return jsonify({'status': 'running'}), 200
+    except Exception as e:
+        logger.error(f"Error resuming AudioDB worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ================================================================================================
+# END AUDIODB INTEGRATION
 # ================================================================================================
 
 
