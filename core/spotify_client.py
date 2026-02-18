@@ -281,13 +281,23 @@ class SpotifyClient:
             if self._auth_cached_result is not None and (time.time() - self._auth_cache_time) < self._AUTH_CACHE_TTL:
                 return self._auth_cached_result
 
-        # Cache miss — make API call outside the lock
+        # Cache miss — make API call outside the lock.
+        # Use a no-retry client to avoid spotipy blocking for hours on 429s
+        # (Retry-After can be 2+ hours). The main self.sp client keeps its
+        # retries for normal API calls.
         try:
-            self.sp.current_user()
+            probe = spotipy.Spotify(auth_manager=self.sp.auth_manager, retries=0)
+            probe.current_user()
             result = True
         except Exception as e:
-            logger.debug(f"Spotify authentication check failed: {e}")
-            result = False
+            error_str = str(e)
+            # Rate limit means we ARE authenticated — just throttled
+            if "rate" in error_str.lower() or "429" in error_str:
+                logger.warning("Spotify rate limited during auth check — treating as authenticated")
+                result = True
+            else:
+                logger.debug(f"Spotify authentication check failed: {e}")
+                result = False
 
         with self._auth_cache_lock:
             self._auth_cached_result = result
