@@ -306,6 +306,16 @@ class MusicDatabase:
             # Add external ID columns (Spotify/iTunes) to library tables (migration)
             self._add_external_id_columns(cursor)
 
+            # Bubble snapshots table for persisting UI state across page refreshes
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS bubble_snapshots (
+                    type TEXT PRIMARY KEY,
+                    data TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    snapshot_id TEXT NOT NULL
+                )
+            """)
+
             conn.commit()
             logger.info("Database initialized successfully")
             
@@ -2636,6 +2646,57 @@ class MusicDatabase:
     def get_preference(self, key: str) -> Optional[str]:
         """Get a user preference (alias for get_metadata for clarity)"""
         return self.get_metadata(key)
+
+    # --- Bubble Snapshot Methods ---
+
+    def save_bubble_snapshot(self, snapshot_type: str, data_dict: dict):
+        """Save a bubble snapshot (upserts by type).
+
+        Args:
+            snapshot_type: One of 'artist_bubbles', 'search_bubbles', 'discover_downloads'
+            data_dict: The bubbles/downloads dict to persist
+        """
+        from datetime import datetime
+        now = datetime.now()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT OR REPLACE INTO bubble_snapshots (type, data, timestamp, snapshot_id) VALUES (?, ?, ?, ?)",
+                    (snapshot_type, json.dumps(data_dict), now.isoformat(), now.strftime('%Y%m%d_%H%M%S'))
+                )
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error saving bubble snapshot '{snapshot_type}': {e}")
+            raise
+
+    def get_bubble_snapshot(self, snapshot_type: str) -> Optional[Dict[str, Any]]:
+        """Load a bubble snapshot.
+
+        Returns:
+            {'data': dict, 'timestamp': str} or None if not found
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT data, timestamp FROM bubble_snapshots WHERE type = ?", (snapshot_type,))
+                row = cursor.fetchone()
+                if row:
+                    return {'data': json.loads(row['data']), 'timestamp': row['timestamp']}
+                return None
+        except Exception as e:
+            logger.error(f"Error getting bubble snapshot '{snapshot_type}': {e}")
+            return None
+
+    def delete_bubble_snapshot(self, snapshot_type: str):
+        """Delete a bubble snapshot."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM bubble_snapshots WHERE type = ?", (snapshot_type,))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error deleting bubble snapshot '{snapshot_type}': {e}")
 
     # Quality profile management methods
 
