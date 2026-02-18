@@ -21,34 +21,57 @@ _request_queue = queue.Queue()
 _queue_processor_running = False
 
 def rate_limited(func):
-    """Decorator to enforce rate limiting on Spotify API calls"""
+    """Decorator to enforce rate limiting on Spotify API calls with retry and exponential backoff"""
     @wraps(func)
     def wrapper(*args, **kwargs):
         global _last_api_call_time
-        
-        with _api_call_lock:
-            current_time = time.time()
-            time_since_last_call = current_time - _last_api_call_time
-            
-            if time_since_last_call < MIN_API_INTERVAL:
-                sleep_time = MIN_API_INTERVAL - time_since_last_call
-                time.sleep(sleep_time)
-            
-            _last_api_call_time = time.time()
-            
-        try:
-            result = func(*args, **kwargs)
-            return result
-        except Exception as e:
-            # Implement exponential backoff for API errors
-            if "rate limit" in str(e).lower() or "429" in str(e):
-                logger.warning(f"Rate limit hit, implementing backoff: {e}")
-                # Use longer backoff to avoid getting banned
-                time.sleep(3.0)  # Wait 3 seconds before retrying
-            elif "503" in str(e) or "502" in str(e):
-                logger.warning(f"Spotify service error, backing off: {e}")
-                time.sleep(2.0)  # Wait 2 seconds for service errors
-            raise e
+
+        max_retries = 5
+
+        for attempt in range(max_retries + 1):
+            # Enforce minimum interval between API calls
+            with _api_call_lock:
+                current_time = time.time()
+                time_since_last_call = current_time - _last_api_call_time
+
+                if time_since_last_call < MIN_API_INTERVAL:
+                    sleep_time = MIN_API_INTERVAL - time_since_last_call
+                    time.sleep(sleep_time)
+
+                _last_api_call_time = time.time()
+
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                error_str = str(e).lower()
+                is_rate_limit = "rate limit" in error_str or "429" in str(e)
+                is_server_error = "502" in str(e) or "503" in str(e)
+
+                if is_rate_limit and attempt < max_retries:
+                    # Try to extract Retry-After from spotipy exception headers
+                    retry_after = None
+                    if hasattr(e, 'headers') and e.headers:
+                        retry_after = e.headers.get('Retry-After') or e.headers.get('retry-after')
+
+                    if retry_after:
+                        try:
+                            delay = int(retry_after) + 1
+                        except (ValueError, TypeError):
+                            delay = 3.0 * (2 ** attempt)
+                    else:
+                        delay = 3.0 * (2 ** attempt)  # 3, 6, 12, 24, 48
+
+                    logger.warning(f"Spotify rate limit hit, retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries}): {func.__name__}")
+                    time.sleep(delay)
+                    continue
+
+                elif is_server_error and attempt < max_retries:
+                    delay = 2.0 * (2 ** attempt)  # 2, 4, 8, 16, 32
+                    logger.warning(f"Spotify server error, retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries}): {func.__name__}")
+                    time.sleep(delay)
+                    continue
+
+                raise
     return wrapper
 
 @dataclass

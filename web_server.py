@@ -19239,7 +19239,37 @@ def start_watchlist_scan():
                 })
                 
                 scan_results = []
-                
+
+                # Dynamic delay calculation based on scan scope
+                lookback_period = scanner._get_lookback_period_setting()
+                is_full_discography = (lookback_period == 'all')
+                artist_count = len(watchlist_artists)
+
+                base_artist_delay = 2.0
+                base_album_delay = 0.5
+
+                # Scale up for full discography (way more albums per artist)
+                if is_full_discography:
+                    base_artist_delay *= 2.0
+                    base_album_delay *= 2.0
+
+                # Scale up further for large artist counts (sustained API pressure)
+                if artist_count > 200:
+                    base_artist_delay *= 1.5
+                    base_album_delay *= 1.25
+                elif artist_count > 100:
+                    base_artist_delay *= 1.25
+
+                artist_delay = base_artist_delay
+                album_delay = base_album_delay
+                print(f"📊 Scan parameters: {artist_count} artists, lookback={lookback_period}, "
+                      f"delays: {artist_delay:.1f}s/artist, {album_delay:.1f}s/album")
+
+                # Circuit breaker: pause scan on consecutive rate-limit failures
+                consecutive_failures = 0
+                CIRCUIT_BREAKER_THRESHOLD = 3
+                circuit_breaker_pause = 60  # seconds, doubles each trigger, max 600s
+
                 for i, artist in enumerate(watchlist_artists):
                     try:
                         # Fetch artist image using provider-aware method
@@ -19335,14 +19365,14 @@ def start_watchlist_scan():
                                             if len(watchlist_scan_state['recent_wishlist_additions']) > 10:
                                                 watchlist_scan_state['recent_wishlist_additions'].pop()
                                 
-                                # Small delay between albums
+                                # Rate-limited delay between albums
                                 import time
-                                time.sleep(0.5)
-                                
+                                time.sleep(album_delay)
+
                             except Exception as e:
                                 print(f"Error checking album {album.name}: {e}")
                                 continue
-                        
+
                         # Update scan timestamp
                         scanner.update_artist_scan_timestamp(artist)
 
@@ -19381,10 +19411,28 @@ def start_watchlist_scan():
                         # Delay between artists
                         if i < len(watchlist_artists) - 1:
                             watchlist_scan_state['current_phase'] = 'rate_limiting'
-                            time.sleep(2.0)
-                        
+                            time.sleep(artist_delay)
+
+                        # Reset circuit breaker on successful artist scan
+                        consecutive_failures = 0
+                        circuit_breaker_pause = 60
+
                     except Exception as e:
                         print(f"Error scanning artist {artist.artist_name}: {e}")
+
+                        # Circuit breaker: detect consecutive rate-limit failures
+                        error_str = str(e).lower()
+                        if "429" in error_str or "rate limit" in error_str:
+                            consecutive_failures += 1
+                            if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
+                                print(f"🛑 Circuit breaker: {consecutive_failures} consecutive rate-limit failures, pausing {circuit_breaker_pause}s")
+                                watchlist_scan_state['current_phase'] = 'circuit_breaker_pause'
+                                time.sleep(circuit_breaker_pause)
+                                circuit_breaker_pause = min(circuit_breaker_pause * 2, 600)
+                                consecutive_failures = 0
+                        else:
+                            consecutive_failures = 0
+
                         scan_results.append(type('ScanResult', (), {
                             'artist_name': artist.artist_name,
                             'spotify_artist_id': artist.spotify_artist_id,
@@ -19394,7 +19442,7 @@ def start_watchlist_scan():
                             'success': False,
                             'error_message': str(e)
                         })())
-                
+
                 # Store final results
                 watchlist_scan_state['status'] = 'completed'
                 watchlist_scan_state['results'] = scan_results
@@ -19957,6 +20005,36 @@ def _process_watchlist_scan_automatically():
 
             scan_results = []
 
+            # Dynamic delay calculation based on scan scope
+            lookback_period = scanner._get_lookback_period_setting()
+            is_full_discography = (lookback_period == 'all')
+            artist_count = len(watchlist_artists)
+
+            base_artist_delay = 2.0
+            base_album_delay = 0.5
+
+            # Scale up for full discography (way more albums per artist)
+            if is_full_discography:
+                base_artist_delay *= 2.0
+                base_album_delay *= 2.0
+
+            # Scale up further for large artist counts (sustained API pressure)
+            if artist_count > 200:
+                base_artist_delay *= 1.5
+                base_album_delay *= 1.25
+            elif artist_count > 100:
+                base_artist_delay *= 1.25
+
+            artist_delay = base_artist_delay
+            album_delay = base_album_delay
+            print(f"📊 [Auto-Watchlist] Scan parameters: {artist_count} artists, lookback={lookback_period}, "
+                  f"delays: {artist_delay:.1f}s/artist, {album_delay:.1f}s/album")
+
+            # Circuit breaker: pause scan on consecutive rate-limit failures
+            consecutive_failures = 0
+            CIRCUIT_BREAKER_THRESHOLD = 3
+            circuit_breaker_pause = 60  # seconds, doubles each trigger, max 600s
+
             # Scan each artist with detailed tracking
             for i, artist in enumerate(watchlist_artists):
                 try:
@@ -20053,9 +20131,9 @@ def _process_watchlist_scan_automatically():
                                         if len(watchlist_scan_state['recent_wishlist_additions']) > 10:
                                             watchlist_scan_state['recent_wishlist_additions'].pop()
 
-                            # Small delay between albums
+                            # Rate-limited delay between albums
                             import time
-                            time.sleep(0.5)
+                            time.sleep(album_delay)
 
                         except Exception as e:
                             print(f"Error checking album {album.name}: {e}")
@@ -20080,10 +20158,28 @@ def _process_watchlist_scan_automatically():
                     # Delay between artists
                     if i < len(watchlist_artists) - 1:
                         watchlist_scan_state['current_phase'] = 'rate_limiting'
-                        time.sleep(2.0)
+                        time.sleep(artist_delay)
+
+                    # Reset circuit breaker on successful artist scan
+                    consecutive_failures = 0
+                    circuit_breaker_pause = 60
 
                 except Exception as e:
                     print(f"Error scanning artist {artist.artist_name}: {e}")
+
+                    # Circuit breaker: detect consecutive rate-limit failures
+                    error_str = str(e).lower()
+                    if "429" in error_str or "rate limit" in error_str:
+                        consecutive_failures += 1
+                        if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
+                            print(f"🛑 [Auto-Watchlist] Circuit breaker: {consecutive_failures} consecutive rate-limit failures, pausing {circuit_breaker_pause}s")
+                            watchlist_scan_state['current_phase'] = 'circuit_breaker_pause'
+                            time.sleep(circuit_breaker_pause)
+                            circuit_breaker_pause = min(circuit_breaker_pause * 2, 600)
+                            consecutive_failures = 0
+                    else:
+                        consecutive_failures = 0
+
                     scan_results.append(type('ScanResult', (), {
                         'artist_name': artist.artist_name,
                         'spotify_artist_id': artist.spotify_artist_id,
