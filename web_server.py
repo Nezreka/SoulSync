@@ -4289,15 +4289,23 @@ def get_download_status():
                                                 _orphaned_download_keys.discard(context_key)
                                             continue  # Skip normal post-processing either way
 
+                                    # Skip downloads we've already processed (prevents log spam)
+                                    if context_key in _processed_download_ids:
+                                        continue
+
                                     with matched_context_lock:
                                         context = matched_downloads_context.get(context_key)
-                                        if context:
-                                            print(f"✅ [Context Lookup] Found context for key: {context_key}")
-                                        else:
-                                            print(f"⚠️ [Context Lookup] No context found for key: {context_key}")
-                                            print(f"   Available keys: {list(matched_downloads_context.keys())[:5]}...")  # Show first 5 keys
+                                        available_keys = list(matched_downloads_context.keys())[:5] if not context else None
 
-                                    if context and context_key not in _processed_download_ids:
+                                    if context:
+                                        print(f"✅ [Context Lookup] Found context for key: {context_key}")
+                                    elif context_key not in _stale_transfer_keys:
+                                        # Only log once per stale key to avoid spamming every poll cycle
+                                        print(f"⚠️ [Context Lookup] No context found for key: {context_key}")
+                                        print(f"   Available keys: {available_keys}...")
+                                        _stale_transfer_keys.add(context_key)
+
+                                    if context:
                                         download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
                                         # Use the new robust file finder (only search downloads for post-processing candidates)
                                         found_result = _find_completed_file_robust(download_dir, filename_from_api)
@@ -9609,6 +9617,10 @@ def _post_process_matched_download(context_key, context, file_path):
 
 # Keep track of processed downloads to avoid re-processing
 _processed_download_ids = set()
+
+# Track stale transfer keys (completed in slskd but no context — e.g., from before app restart)
+# so we only log the warning once per key instead of spamming every poll cycle
+_stale_transfer_keys = set()
 
 # Per-context-key locks to prevent two threads from processing the same file simultaneously.
 # Without this, the Stream Processor and Verification Worker race to move the same source file,
