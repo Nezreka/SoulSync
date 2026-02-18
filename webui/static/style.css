@@ -1707,6 +1707,17 @@ body {
     box-shadow: 0 6px 16px rgba(29, 185, 84, 0.35);
 }
 
+.disconnect-button {
+    background: linear-gradient(135deg, #e53935, #ef5350) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 12px rgba(229, 57, 53, 0.2) !important;
+}
+
+.disconnect-button:hover {
+    background: linear-gradient(135deg, #ef5350, #f44336) !important;
+    box-shadow: 0 6px 16px rgba(229, 57, 53, 0.35) !important;
+}
+
 .tidal-title+* .auth-button {
     background: linear-gradient(135deg, #ff6600, #ff8833);
     box-shadow: 0 4px 12px rgba(255, 102, 0, 0.2);

@@ -2040,7 +2040,7 @@ def index():
 
 # Status check caching to reduce unnecessary API calls
 _status_cache = {
-    'spotify': {'connected': False, 'response_time': 0},
+    'spotify': {'connected': False, 'response_time': 0, 'source': 'itunes'},
     'media_server': {'connected': False, 'response_time': 0, 'type': None},
     'soulseek': {'connected': False, 'response_time': 0}
 }
@@ -2064,15 +2064,14 @@ def get_status():
         # Test Spotify - with caching to avoid excessive API calls
         if current_time - _status_cache_timestamps['spotify'] > STATUS_CACHE_TTL:
             spotify_start = time.time()
-            # Actually validate authentication (makes API call, but cached for 2 min)
-            spotify_status = spotify_client.is_authenticated()
+            # Single auth check — is_spotify_authenticated() is cached internally (60s TTL)
+            spotify_connected = spotify_client.is_spotify_authenticated()
             spotify_response_time = (time.time() - spotify_start) * 1000
-            
-            # Determine active music source (spotify or itunes)
-            music_source = 'spotify' if spotify_client.is_spotify_authenticated() else 'itunes'
-            
+
+            music_source = 'spotify' if spotify_connected else 'itunes'
+
             _status_cache['spotify'] = {
-                'connected': spotify_status,
+                'connected': True,  # Always true — iTunes fallback is always available
                 'response_time': round(spotify_response_time, 1),
                 'source': music_source
             }
@@ -2501,6 +2500,7 @@ def test_connection_endpoint():
         current_time = time.time()
         if service == 'spotify':
             _status_cache['spotify']['connected'] = True
+            _status_cache['spotify']['source'] = 'spotify' if spotify_client.is_spotify_authenticated() else 'itunes'
             _status_cache_timestamps['spotify'] = current_time
             print("✅ Updated Spotify status cache after successful test")
         elif service in ['plex', 'jellyfin', 'navidrome']:
@@ -2550,6 +2550,7 @@ def test_dashboard_connection_endpoint():
         current_time = time.time()
         if service == 'spotify':
             _status_cache['spotify']['connected'] = True
+            _status_cache['spotify']['source'] = 'spotify' if spotify_client.is_spotify_authenticated() else 'itunes'
             _status_cache_timestamps['spotify'] = current_time
             print("✅ Updated Spotify status cache after successful dashboard test")
         elif service in ['plex', 'jellyfin', 'navidrome']:
@@ -3085,6 +3086,8 @@ def spotify_callback():
         if token_info:
             spotify_client = SpotifyClient()
             if spotify_client.is_authenticated():
+                # Invalidate status cache so next poll picks up the new connection
+                _status_cache_timestamps['spotify'] = 0
                 add_activity_item("✅", "Spotify Auth Complete", "Successfully authenticated with Spotify", "Now")
                 return "<h1>Spotify Authentication Successful!</h1><p>You can close this window.</p>"
             else:
@@ -3095,6 +3098,26 @@ def spotify_callback():
         print(f"🔴 Spotify OAuth callback error: {e}")
         add_activity_item("❌", "Spotify Auth Failed", f"Token processing failed: {str(e)}", "Now")
         return f"<h1>Spotify Authentication Failed</h1><p>{str(e)}</p>", 400
+
+
+@app.route('/api/spotify/disconnect', methods=['POST'])
+def spotify_disconnect():
+    """Disconnect Spotify and fall back to iTunes/Apple Music"""
+    global spotify_client
+    try:
+        spotify_client.disconnect()
+        # Immediately update status cache so UI reflects the change
+        _status_cache['spotify'] = {
+            'connected': True,  # iTunes fallback is always available
+            'response_time': 0,
+            'source': 'itunes'
+        }
+        _status_cache_timestamps['spotify'] = time.time()
+        add_activity_item("🔌", "Spotify Disconnected", "Switched to Apple Music/iTunes metadata source", "Now")
+        return jsonify({'success': True, 'message': 'Spotify disconnected. Now using Apple Music/iTunes.'})
+    except Exception as e:
+        logger.error(f"Error disconnecting Spotify: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/tidal/callback')
@@ -25089,8 +25112,10 @@ def start_oauth_callback_servers():
                         # Reinitialize the global client with new tokens
                         global spotify_client
                         spotify_client = SpotifyClient()
-                        
+
                         if spotify_client.is_authenticated():
+                            # Invalidate status cache so next poll picks up the new connection
+                            _status_cache_timestamps['spotify'] = 0
                             add_activity_item("✅", "Spotify Auth Complete", "Successfully authenticated with Spotify", "Now")
                             self.send_response(200)
                             self.send_header('Content-type', 'text/html')

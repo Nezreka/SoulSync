@@ -353,6 +353,11 @@ document.addEventListener('DOMContentLoaded', function () {
     fetchAndUpdateServiceStatus();
     setInterval(fetchAndUpdateServiceStatus, 10000); // Every 10 seconds
 
+    // Refresh status immediately when user returns to this tab (e.g. after OAuth in new tab)
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) fetchAndUpdateServiceStatus();
+    });
+
     // Start always-on download polling (batched, minimal overhead)
     startGlobalDownloadPolling();
 
@@ -2438,6 +2443,29 @@ async function authenticateSpotify() {
     } catch (error) {
         console.error('Error authenticating Spotify:', error);
         showToast('Failed to start Spotify authentication', 'error');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+async function disconnectSpotify() {
+    if (!confirm('Disconnect Spotify? The app will switch to Apple Music/iTunes for metadata.')) {
+        return;
+    }
+    try {
+        showLoadingOverlay('Disconnecting Spotify...');
+        const response = await fetch('/api/spotify/disconnect', { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            showToast('Spotify disconnected. Now using Apple Music/iTunes.', 'success');
+            // Immediately refresh status to update UI
+            await fetchAndUpdateServiceStatus();
+        } else {
+            showToast(`Failed to disconnect: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error disconnecting Spotify:', error);
+        showToast('Failed to disconnect Spotify', 'error');
     } finally {
         hideLoadingOverlay();
     }
@@ -23656,6 +23684,12 @@ function updateServiceStatus(service, statusData) {
             musicSourceTitleElement.textContent = sourceName;
             // Update global variable for use in discovery modals
             currentMusicSourceName = sourceName;
+        }
+
+        // Show/hide Spotify disconnect button based on connection state
+        const disconnectBtn = document.getElementById('spotify-disconnect-btn');
+        if (disconnectBtn) {
+            disconnectBtn.style.display = statusData.source === 'spotify' ? '' : 'none';
         }
     }
 }
