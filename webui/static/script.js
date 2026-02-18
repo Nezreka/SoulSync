@@ -22935,6 +22935,10 @@ function bulkCompleteSearchDownloads(artistName) {
         if (process && process.modalElement) {
             console.log(`🗑️ Closing modal for: ${download.item.name}`);
             closeDownloadMissingModal(download.virtualPlaylistId);
+        } else {
+            // No modal open — clean up the bubble entry directly
+            console.log(`🧹 Direct cleanup (no modal) for: ${download.item.name}`);
+            cleanupSearchDownload(download.virtualPlaylistId);
         }
     });
 
@@ -23368,7 +23372,9 @@ function bulkCompleteArtistDownloads(artistId) {
             // Trigger the close function which handles cleanup
             closeDownloadMissingModal(download.virtualPlaylistId);
         } else {
-            console.warn(`⚠️ No active process or modal found for: ${download.album.name}`);
+            // No modal open — clean up the bubble entry directly
+            console.log(`🧹 Direct cleanup (no modal) for: ${download.album.name}`);
+            cleanupArtistDownload(download.virtualPlaylistId);
         }
     });
 
