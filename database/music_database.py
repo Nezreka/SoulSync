@@ -306,6 +306,9 @@ class MusicDatabase:
             # Add external ID columns (Spotify/iTunes) to library tables (migration)
             self._add_external_id_columns(cursor)
 
+            # Add AudioDB columns to artists table (migration)
+            self._add_audiodb_columns(cursor)
+
             # Bubble snapshots table for persisting UI state across page refreshes
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bubble_snapshots (
@@ -1065,6 +1068,72 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding external ID columns: {e}")
+            # Don't raise - this is a migration, database can still function
+
+    def _add_audiodb_columns(self, cursor):
+        """Add AudioDB tracking + generic metadata columns for enrichment (artists, albums, tracks)"""
+        try:
+            # --- Artists ---
+            cursor.execute("PRAGMA table_info(artists)")
+            artists_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'audiodb_id' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN audiodb_id TEXT")
+                cursor.execute("ALTER TABLE artists ADD COLUMN audiodb_match_status TEXT")
+                cursor.execute("ALTER TABLE artists ADD COLUMN audiodb_last_attempted TIMESTAMP")
+
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_audiodb_id ON artists (audiodb_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_audiodb_status ON artists (audiodb_match_status)")
+
+                logger.info("Added AudioDB tracking columns to artists table")
+
+            if 'style' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN style TEXT")
+                cursor.execute("ALTER TABLE artists ADD COLUMN mood TEXT")
+                cursor.execute("ALTER TABLE artists ADD COLUMN label TEXT")
+                cursor.execute("ALTER TABLE artists ADD COLUMN banner_url TEXT")
+                logger.info("Added generic artist metadata columns (style, mood, label, banner_url)")
+
+            # --- Albums ---
+            cursor.execute("PRAGMA table_info(albums)")
+            albums_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'audiodb_id' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN audiodb_id TEXT")
+                cursor.execute("ALTER TABLE albums ADD COLUMN audiodb_match_status TEXT")
+                cursor.execute("ALTER TABLE albums ADD COLUMN audiodb_last_attempted TIMESTAMP")
+
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_audiodb_id ON albums (audiodb_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_audiodb_status ON albums (audiodb_match_status)")
+
+                logger.info("Added AudioDB tracking columns to albums table")
+
+            if 'style' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN style TEXT")
+                cursor.execute("ALTER TABLE albums ADD COLUMN mood TEXT")
+                logger.info("Added generic album metadata columns (style, mood)")
+
+            # --- Tracks ---
+            cursor.execute("PRAGMA table_info(tracks)")
+            tracks_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'audiodb_id' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN audiodb_id TEXT")
+                cursor.execute("ALTER TABLE tracks ADD COLUMN audiodb_match_status TEXT")
+                cursor.execute("ALTER TABLE tracks ADD COLUMN audiodb_last_attempted TIMESTAMP")
+
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_audiodb_id ON tracks (audiodb_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_audiodb_status ON tracks (audiodb_match_status)")
+
+                logger.info("Added AudioDB tracking columns to tracks table")
+
+            if 'style' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN style TEXT")
+                cursor.execute("ALTER TABLE tracks ADD COLUMN mood TEXT")
+                logger.info("Added generic track metadata columns (style, mood)")
+
+        except Exception as e:
+            logger.error(f"Error adding AudioDB columns: {e}")
             # Don't raise - this is a migration, database can still function
 
     def close(self):

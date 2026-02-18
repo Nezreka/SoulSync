@@ -202,6 +202,17 @@
         transform: translateY(0);
     }
 
+    /* AudioDB tooltip - reposition for mobile */
+    .audiodb-tooltip {
+        left: 0;
+        right: auto;
+        transform: translateY(-5px);
+    }
+
+    .audiodb-button:hover+.audiodb-tooltip {
+        transform: translateY(0);
+    }
+
     .tooltip-content {
         min-width: auto;
         width: calc(100vw - 60px);
