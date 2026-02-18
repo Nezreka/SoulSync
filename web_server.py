@@ -18464,8 +18464,6 @@ def save_discover_download_snapshot():
     Saves a snapshot of current discover download state for persistence across page refreshes.
     """
     try:
-        import os
-        import json
         from datetime import datetime
 
         data = request.json
@@ -18474,17 +18472,8 @@ def save_discover_download_snapshot():
 
         downloads = data['downloads']
 
-        # Create snapshot with timestamp
-        snapshot = {
-            'downloads': downloads,
-            'timestamp': datetime.now().isoformat(),
-            'snapshot_id': datetime.now().strftime('%Y%m%d_%H%M%S')
-        }
-
-        # Save to file
-        snapshot_file = os.path.join(os.path.dirname(__file__), 'discover_download_snapshots.json')
-        with open(snapshot_file, 'w') as f:
-            json.dump(snapshot, f, indent=2)
+        db = get_database()
+        db.save_bubble_snapshot('discover_downloads', downloads)
 
         download_count = len(downloads)
         print(f"📸 Saved discover download snapshot: {download_count} downloads")
@@ -18492,7 +18481,7 @@ def save_discover_download_snapshot():
         return jsonify({
             'success': True,
             'message': f'Snapshot saved with {download_count} downloads',
-            'timestamp': snapshot['timestamp']
+            'timestamp': datetime.now().isoformat()
         })
 
     except Exception as e:
@@ -18510,25 +18499,21 @@ def hydrate_discover_downloads():
     Loads discover downloads with live status by cross-referencing snapshots with active processes.
     """
     try:
-        import os
-        import json
         from datetime import datetime, timedelta
 
-        snapshot_file = os.path.join(os.path.dirname(__file__), 'discover_download_snapshots.json')
+        db = get_database()
+        snapshot = db.get_bubble_snapshot('discover_downloads')
 
         # Load snapshot if it exists
-        if not os.path.exists(snapshot_file):
+        if not snapshot:
             return jsonify({
                 'success': True,
                 'downloads': {},
                 'message': 'No snapshots found'
             })
 
-        with open(snapshot_file, 'r') as f:
-            snapshot_data = json.load(f)
-
-        saved_downloads = snapshot_data.get('downloads', {})
-        snapshot_time = snapshot_data.get('timestamp', '')
+        saved_downloads = snapshot['data']
+        snapshot_time = snapshot['timestamp']
 
         # Clean up old snapshots (older than 48 hours)
         try:
@@ -18537,13 +18522,13 @@ def hydrate_discover_downloads():
                 cutoff = datetime.now() - timedelta(hours=48)
                 if snapshot_dt < cutoff:
                     print(f"🧹 Cleaning up old discover download snapshot from {snapshot_time}")
-                    os.remove(snapshot_file)
+                    db.delete_bubble_snapshot('discover_downloads')
                     return jsonify({
                         'success': True,
                         'downloads': {},
                         'message': 'Old snapshot cleaned up'
                     })
-        except (ValueError, OSError) as e:
+        except ValueError as e:
             print(f"⚠️ Error checking discover snapshot age: {e}")
 
         # Get current active download processes for live status
@@ -18565,16 +18550,7 @@ def hydrate_discover_downloads():
         # If no active processes exist, the app likely restarted - clean up snapshots
         if not current_processes:
             print(f"🧹 No active processes found - app likely restarted, cleaning up discover download snapshot")
-            try:
-                os.remove(snapshot_file)
-                return jsonify({
-                    'success': True,
-                    'downloads': {},
-                    'message': 'Snapshot cleaned up after app restart'
-                })
-            except OSError as e:
-                print(f"⚠️ Error removing discover snapshot file: {e}")
-
+            db.delete_bubble_snapshot('discover_downloads')
             return jsonify({
                 'success': True,
                 'downloads': {},
@@ -18637,37 +18613,26 @@ def save_artist_bubble_snapshot():
     Saves a snapshot of current artist bubble state for persistence across page refreshes.
     """
     try:
-        import os
-        import json
         from datetime import datetime
-        
+
         data = request.json
         if not data or 'bubbles' not in data:
             return jsonify({'success': False, 'error': 'No bubble data provided'}), 400
-        
+
         bubbles = data['bubbles']
-        
-        # Create snapshot with timestamp
-        snapshot = {
-            'bubbles': bubbles,
-            'timestamp': datetime.now().isoformat(),
-            'snapshot_id': datetime.now().strftime('%Y%m%d_%H%M%S')
-        }
-        
-        # Save to file
-        snapshot_file = os.path.join(os.path.dirname(__file__), 'artist_bubble_snapshots.json')
-        with open(snapshot_file, 'w') as f:
-            json.dump(snapshot, f, indent=2)
-        
+
+        db = get_database()
+        db.save_bubble_snapshot('artist_bubbles', bubbles)
+
         bubble_count = len(bubbles)
         print(f"📸 Saved artist bubble snapshot: {bubble_count} artists")
-        
+
         return jsonify({
             'success': True,
             'message': f'Snapshot saved with {bubble_count} artist bubbles',
-            'timestamp': snapshot['timestamp']
+            'timestamp': datetime.now().isoformat()
         })
-        
+
     except Exception as e:
         print(f"❌ Error saving artist bubble snapshot: {e}")
         import traceback
@@ -18683,26 +18648,22 @@ def hydrate_artist_bubbles():
     Loads artist bubbles with live status by cross-referencing snapshots with active processes.
     """
     try:
-        import os
-        import json
         from datetime import datetime, timedelta
-        
-        snapshot_file = os.path.join(os.path.dirname(__file__), 'artist_bubble_snapshots.json')
-        
+
+        db = get_database()
+        snapshot = db.get_bubble_snapshot('artist_bubbles')
+
         # Load snapshot if it exists
-        if not os.path.exists(snapshot_file):
+        if not snapshot:
             return jsonify({
                 'success': True,
                 'bubbles': {},
                 'message': 'No snapshots found'
             })
-        
-        with open(snapshot_file, 'r') as f:
-            snapshot_data = json.load(f)
-        
-        saved_bubbles = snapshot_data.get('bubbles', {})
-        snapshot_time = snapshot_data.get('timestamp', '')
-        
+
+        saved_bubbles = snapshot['data']
+        snapshot_time = snapshot['timestamp']
+
         # Clean up old snapshots (older than 48 hours)
         try:
             if snapshot_time:
@@ -18710,15 +18671,15 @@ def hydrate_artist_bubbles():
                 cutoff = datetime.now() - timedelta(hours=48)
                 if snapshot_dt < cutoff:
                     print(f"🧹 Cleaning up old snapshot from {snapshot_time}")
-                    os.remove(snapshot_file)
+                    db.delete_bubble_snapshot('artist_bubbles')
                     return jsonify({
                         'success': True,
                         'bubbles': {},
                         'message': 'Old snapshot cleaned up'
                     })
-        except (ValueError, OSError) as e:
+        except ValueError as e:
             print(f"⚠️ Error checking snapshot age: {e}")
-        
+
         # Get current active download processes for live status
         current_processes = {}
         try:
@@ -18734,27 +18695,17 @@ def hydrate_artist_bubbles():
                             }
         except Exception as e:
             print(f"⚠️ Error fetching active processes for hydration: {e}")
-        
+
         # If no active processes exist, the app likely restarted - clean up snapshots
         if not current_processes:
             print(f"🧹 No active processes found - app likely restarted, cleaning up snapshot")
-            try:
-                os.remove(snapshot_file)
-                return jsonify({
-                    'success': True,
-                    'bubbles': {},
-                    'message': 'Snapshot cleaned up after app restart'
-                })
-            except OSError as e:
-                print(f"⚠️ Error removing snapshot file: {e}")
-                # Continue with empty result anyway
-            
+            db.delete_bubble_snapshot('artist_bubbles')
             return jsonify({
                 'success': True,
                 'bubbles': {},
                 'message': 'No active processes - returning empty bubbles'
             })
-        
+
         # Update bubble statuses with live data
         hydrated_bubbles = {}
         for artist_id, bubble_data in saved_bubbles.items():
@@ -18834,8 +18785,6 @@ def save_search_bubble_snapshot():
     Saves a snapshot of current search bubble state for persistence across page refreshes.
     """
     try:
-        import os
-        import json
         from datetime import datetime
 
         data = request.json
@@ -18844,17 +18793,8 @@ def save_search_bubble_snapshot():
 
         bubbles = data['bubbles']
 
-        # Create snapshot with timestamp
-        snapshot = {
-            'bubbles': bubbles,
-            'timestamp': datetime.now().isoformat(),
-            'snapshot_id': datetime.now().strftime('%Y%m%d_%H%M%S')
-        }
-
-        # Save to file
-        snapshot_file = os.path.join(os.path.dirname(__file__), 'search_bubble_snapshots.json')
-        with open(snapshot_file, 'w') as f:
-            json.dump(snapshot, f, indent=2)
+        db = get_database()
+        db.save_bubble_snapshot('search_bubbles', bubbles)
 
         bubble_count = len(bubbles)
         print(f"📸 Saved search bubble snapshot: {bubble_count} albums/tracks")
@@ -18862,7 +18802,7 @@ def save_search_bubble_snapshot():
         return jsonify({
             'success': True,
             'message': f'Snapshot saved with {bubble_count} search bubbles',
-            'timestamp': snapshot['timestamp']
+            'timestamp': datetime.now().isoformat()
         })
 
     except Exception as e:
@@ -18880,25 +18820,21 @@ def hydrate_search_bubbles():
     Loads search bubbles with live status by cross-referencing snapshots with active processes.
     """
     try:
-        import os
-        import json
         from datetime import datetime, timedelta
 
-        snapshot_file = os.path.join(os.path.dirname(__file__), 'search_bubble_snapshots.json')
+        db = get_database()
+        snapshot = db.get_bubble_snapshot('search_bubbles')
 
         # Load snapshot if it exists
-        if not os.path.exists(snapshot_file):
+        if not snapshot:
             return jsonify({
                 'success': True,
                 'bubbles': {},
                 'message': 'No snapshots found'
             })
 
-        with open(snapshot_file, 'r') as f:
-            snapshot_data = json.load(f)
-
-        saved_bubbles = snapshot_data.get('bubbles', {})
-        snapshot_time = snapshot_data.get('timestamp', '')
+        saved_bubbles = snapshot['data']
+        snapshot_time = snapshot['timestamp']
 
         # Clean up old snapshots (older than 48 hours)
         try:
@@ -18907,13 +18843,13 @@ def hydrate_search_bubbles():
                 cutoff = datetime.now() - timedelta(hours=48)
                 if snapshot_dt < cutoff:
                     print(f"🧹 Cleaning up old search snapshot from {snapshot_time}")
-                    os.remove(snapshot_file)
+                    db.delete_bubble_snapshot('search_bubbles')
                     return jsonify({
                         'success': True,
                         'bubbles': {},
                         'message': 'Old snapshot cleaned up'
                     })
-        except (ValueError, OSError) as e:
+        except ValueError as e:
             print(f"⚠️ Error checking snapshot age: {e}")
 
         # Get current active download processes for live status
@@ -18935,16 +18871,7 @@ def hydrate_search_bubbles():
         # If no active processes exist, the app likely restarted - clean up snapshots
         if not current_processes:
             print(f"🧹 No active processes found - app likely restarted, cleaning up search snapshot")
-            try:
-                os.remove(snapshot_file)
-                return jsonify({
-                    'success': True,
-                    'bubbles': {},
-                    'message': 'Snapshot cleaned up after app restart'
-                })
-            except OSError as e:
-                print(f"⚠️ Error removing snapshot file: {e}")
-
+            db.delete_bubble_snapshot('search_bubbles')
             return jsonify({
                 'success': True,
                 'bubbles': {},
