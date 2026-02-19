@@ -25490,7 +25490,7 @@ def get_spotify_artist_discography(artist_name):
 
         for album in all_albums:
             # Skip albums where this artist isn't the primary (first-listed) artist
-            if album.artist_ids and album.artist_ids[0] != spotify_artist_id:
+            if getattr(album, 'artist_ids', None) and album.artist_ids[0] != spotify_artist_id:
                 continue
 
             # Use the Album object properties
