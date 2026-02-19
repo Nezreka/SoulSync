@@ -35385,6 +35385,123 @@ if (document.readyState === 'loading') {
 }
 
 // ===================================================================
+// DEEZER ENRICHMENT STATUS
+// ===================================================================
+
+async function updateDeezerStatus() {
+    try {
+        const response = await fetch('/api/deezer/status');
+        if (!response.ok) {
+            console.warn('Deezer status endpoint unavailable');
+            return;
+        }
+
+        const data = await response.json();
+        const button = document.getElementById('deezer-button');
+        if (!button) return;
+
+        // Update button state classes
+        button.classList.remove('active', 'paused');
+        if (data.running && !data.paused) {
+            button.classList.add('active');
+        } else if (data.paused) {
+            button.classList.add('paused');
+        }
+
+        // Update tooltip content
+        const tooltipStatus = document.getElementById('deezer-tooltip-status');
+        const tooltipCurrent = document.getElementById('deezer-tooltip-current');
+        const tooltipProgress = document.getElementById('deezer-tooltip-progress');
+
+        if (tooltipStatus) {
+            if (data.running && !data.paused) {
+                tooltipStatus.textContent = 'Running';
+            } else if (data.paused) {
+                tooltipStatus.textContent = 'Paused';
+            } else {
+                tooltipStatus.textContent = 'Idle';
+            }
+        }
+
+        if (tooltipCurrent && data.current_item) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        }
+
+        if (data.progress && tooltipProgress) {
+            const artists = data.progress.artists || {};
+            const albums = data.progress.albums || {};
+            const tracks = data.progress.tracks || {};
+
+            const currentType = data.current_item?.type;
+            let progressText = '';
+
+            const artistsComplete = artists.matched >= artists.total;
+            const albumsComplete = albums.matched >= albums.total;
+
+            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+            } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
+                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+            } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
+                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+            } else {
+                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+            }
+
+            tooltipProgress.textContent = progressText;
+        }
+
+    } catch (error) {
+        console.error('Error updating Deezer status:', error);
+    }
+}
+
+async function toggleDeezerEnrichment() {
+    try {
+        const button = document.getElementById('deezer-button');
+        if (!button) return;
+
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/deezer/pause' : '/api/deezer/resume';
+
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Deezer enrichment`);
+        }
+
+        // Immediately update UI
+        await updateDeezerStatus();
+
+        console.log(`✅ Deezer enrichment ${isRunning ? 'paused' : 'resumed'}`);
+
+    } catch (error) {
+        console.error('Error toggling Deezer enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+// Initialize Deezer UI on page load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('deezer-button');
+        if (button) {
+            button.addEventListener('click', toggleDeezerEnrichment);
+            updateDeezerStatus();
+            setInterval(updateDeezerStatus, 2000);
+            console.log('✅ Deezer UI initialized');
+        }
+    });
+} else {
+    const button = document.getElementById('deezer-button');
+    if (button) {
+        button.addEventListener('click', toggleDeezerEnrichment);
+        updateDeezerStatus();
+        setInterval(updateDeezerStatus, 2000);
+        console.log('✅ Deezer UI initialized');
+    }
+}
+
+// ===================================================================
 // IMPORT / STAGING SYSTEM
 // ===================================================================
 

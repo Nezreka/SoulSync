@@ -213,6 +213,17 @@
         transform: translateY(0);
     }
 
+    /* Deezer tooltip - reposition for mobile */
+    .deezer-tooltip {
+        left: 0;
+        right: auto;
+        transform: translateY(-5px);
+    }
+
+    .deezer-button:hover+.deezer-tooltip {
+        transform: translateY(0);
+    }
+
     .tooltip-content {
         min-width: auto;
         width: calc(100vw - 60px);

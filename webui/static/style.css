@@ -22258,6 +22258,230 @@ body {
     border-bottom: 8px solid rgba(30, 30, 30, 0.98);
 }
 
+/* ============================================================================
+   DEEZER ENRICHMENT STATUS BUTTON
+   ============================================================================ */
+
+/* Container for button + tooltip positioning */
+.deezer-button-container {
+    position: relative;
+    display: inline-block;
+    margin-right: 12px;
+}
+
+/* Deezer Button */
+.deezer-button {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg,
+            rgba(162, 56, 255, 0.12) 0%,
+            rgba(120, 30, 200, 0.18) 100%);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1.5px solid rgba(162, 56, 255, 0.25);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow:
+        0 4px 16px rgba(162, 56, 255, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.deezer-button:hover {
+    background: linear-gradient(135deg,
+            rgba(162, 56, 255, 0.18) 0%,
+            rgba(120, 30, 200, 0.25) 100%);
+    border-color: rgba(162, 56, 255, 0.4);
+    transform: scale(1.05);
+    box-shadow:
+        0 6px 20px rgba(162, 56, 255, 0.3),
+        0 3px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.deezer-button:active {
+    transform: scale(0.95);
+    box-shadow:
+        0 2px 8px rgba(162, 56, 255, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Deezer Logo */
+.deezer-logo {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    opacity: 0.85;
+    transition: opacity 0.3s ease;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.deezer-button:hover .deezer-logo {
+    opacity: 1;
+}
+
+/* Loading Spinner - Animated Ring */
+.deezer-spinner {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    border: 3px solid transparent;
+    border-top-color: rgba(162, 56, 255, 0.8);
+    border-right-color: rgba(162, 56, 255, 0.5);
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+/* Active State - Spinner visible and rotating */
+.deezer-button.active .deezer-spinner {
+    opacity: 1;
+    animation: deezer-spin 1.2s linear infinite;
+}
+
+.deezer-button.active {
+    background: linear-gradient(135deg,
+            rgba(162, 56, 255, 0.22) 0%,
+            rgba(120, 30, 200, 0.28) 100%);
+    border-color: rgba(162, 56, 255, 0.5);
+    box-shadow:
+        0 6px 24px rgba(162, 56, 255, 0.4),
+        0 3px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.deezer-button.active .deezer-logo {
+    opacity: 1;
+    filter: drop-shadow(0 0 8px rgba(162, 56, 255, 0.6));
+}
+
+/* Paused State */
+.deezer-button.paused {
+    background: linear-gradient(135deg,
+            rgba(255, 193, 7, 0.12) 0%,
+            rgba(255, 152, 0, 0.18) 100%);
+    border-color: rgba(255, 193, 7, 0.35);
+    box-shadow:
+        0 4px 16px rgba(255, 193, 7, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.deezer-button.paused:hover {
+    border-color: rgba(255, 193, 7, 0.5);
+    box-shadow:
+        0 6px 20px rgba(255, 193, 7, 0.3),
+        0 3px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* Spinner Rotation Animation */
+@keyframes deezer-spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ============================================================================
+   DEEZER HOVER TOOLTIP
+   ============================================================================ */
+
+.deezer-tooltip {
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 12px);
+    transform: translateX(-50%) translateY(-5px);
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+}
+
+.deezer-button:hover+.deezer-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
+
+.deezer-tooltip-content {
+    min-width: 260px;
+    background: linear-gradient(135deg,
+            rgba(30, 30, 30, 0.98) 0%,
+            rgba(20, 20, 20, 0.99) 100%);
+    backdrop-filter: blur(40px) saturate(1.6);
+    -webkit-backdrop-filter: blur(40px) saturate(1.6);
+    border: 1px solid rgba(162, 56, 255, 0.3);
+    border-radius: 16px;
+    padding: 16px 18px;
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.5),
+        0 6px 20px rgba(162, 56, 255, 0.25),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.deezer-tooltip-header {
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(162, 56, 255, 0.95);
+    letter-spacing: -0.2px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.deezer-tooltip-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#deezer-tooltip-status {
+    color: #1ed760;
+    font-weight: 600;
+}
+
+.deezer-button.paused+.deezer-tooltip #deezer-tooltip-status {
+    color: #ffc107;
+}
+
+/* Deezer Tooltip Arrow */
+.deezer-tooltip-content::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -8px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid rgba(162, 56, 255, 0.3);
+}
+
+.deezer-tooltip-content::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -7px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
+}
+
 /* MusicBrainz Integration */
 .release-card {
     position: relative !important;

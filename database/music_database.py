@@ -309,6 +309,9 @@ class MusicDatabase:
             # Add AudioDB columns to artists table (migration)
             self._add_audiodb_columns(cursor)
 
+            # Add Deezer columns to library tables (migration)
+            self._add_deezer_columns(cursor)
+
             # Bubble snapshots table for persisting UI state across page refreshes
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bubble_snapshots (
@@ -1134,6 +1137,75 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding AudioDB columns: {e}")
+            # Don't raise - this is a migration, database can still function
+
+    def _add_deezer_columns(self, cursor):
+        """Add Deezer tracking + generic metadata columns for enrichment (artists, albums, tracks)"""
+        try:
+            # --- Artists ---
+            cursor.execute("PRAGMA table_info(artists)")
+            artists_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'deezer_id' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN deezer_id TEXT")
+                cursor.execute("ALTER TABLE artists ADD COLUMN deezer_match_status TEXT")
+                cursor.execute("ALTER TABLE artists ADD COLUMN deezer_last_attempted TIMESTAMP")
+
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_deezer_id ON artists (deezer_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_deezer_status ON artists (deezer_match_status)")
+
+                logger.info("Added Deezer tracking columns to artists table")
+
+            # --- Albums ---
+            cursor.execute("PRAGMA table_info(albums)")
+            albums_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'deezer_id' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN deezer_id TEXT")
+                cursor.execute("ALTER TABLE albums ADD COLUMN deezer_match_status TEXT")
+                cursor.execute("ALTER TABLE albums ADD COLUMN deezer_last_attempted TIMESTAMP")
+
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_deezer_id ON albums (deezer_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_deezer_status ON albums (deezer_match_status)")
+
+                logger.info("Added Deezer tracking columns to albums table")
+
+            if 'label' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN label TEXT")
+                logger.info("Added label column to albums table")
+
+            if 'explicit' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN explicit INTEGER")
+                logger.info("Added explicit column to albums table")
+
+            if 'record_type' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN record_type TEXT")
+                logger.info("Added record_type column to albums table")
+
+            # --- Tracks ---
+            cursor.execute("PRAGMA table_info(tracks)")
+            tracks_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'deezer_id' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN deezer_id TEXT")
+                cursor.execute("ALTER TABLE tracks ADD COLUMN deezer_match_status TEXT")
+                cursor.execute("ALTER TABLE tracks ADD COLUMN deezer_last_attempted TIMESTAMP")
+
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_deezer_id ON tracks (deezer_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_deezer_status ON tracks (deezer_match_status)")
+
+                logger.info("Added Deezer tracking columns to tracks table")
+
+            if 'bpm' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN bpm REAL")
+                logger.info("Added bpm column to tracks table")
+
+            if 'explicit' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN explicit INTEGER")
+                logger.info("Added explicit column to tracks table")
+
+        except Exception as e:
+            logger.error(f"Error adding Deezer columns: {e}")
             # Don't raise - this is a migration, database can still function
 
     def close(self):
