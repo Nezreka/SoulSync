@@ -1453,11 +1453,28 @@ class SoulseekClient:
             logger.debug(f"Connection check failed: {e}")
             return False
     
+    @staticmethod
+    def _calculate_effective_kbps(size_bytes: int, duration_ms: Optional[int]) -> Optional[float]:
+        """Calculate effective bitrate in kbps from file size and duration."""
+        if not duration_ms or duration_ms <= 0 or not size_bytes or size_bytes <= 0:
+            return None
+        duration_seconds = duration_ms / 1000.0
+        return (size_bytes * 8) / duration_seconds / 1000.0
+
+    # Internal fallback size limits (MB) when duration is unavailable — generous to catch only extreme outliers
+    _FALLBACK_SIZE_LIMITS = {
+        'flac':    (1, 500),
+        'mp3_320': (1, 50),
+        'mp3_256': (1, 40),
+        'mp3_192': (1, 30),
+        'other':   (0, 500),
+    }
+
     def filter_results_by_quality_preference(self, results: List[TrackResult]) -> List[TrackResult]:
         """
-        Filter candidates based on user's quality profile with file size constraints.
+        Filter candidates based on user's quality profile with bitrate density constraints.
         Uses priority waterfall logic: tries highest priority quality first, falls back to lower priorities.
-        Returns candidates matching quality profile constraints, sorted by confidence and size.
+        Returns candidates matching quality profile constraints, sorted by confidence and effective bitrate.
         """
         from database.music_database import MusicDatabase
 
@@ -1470,7 +1487,7 @@ class SoulseekClient:
 
         logger.debug(f"Quality Filter: Using profile preset '{profile.get('preset', 'custom')}', filtering {len(results)} candidates")
 
-        # Categorize candidates by quality with file size constraints
+        # Categorize candidates by quality with bitrate density constraints
         quality_buckets = {
             'flac': [],
             'mp3_320': [],
@@ -1479,8 +1496,8 @@ class SoulseekClient:
             'other': []
         }
 
-        # Track all candidates that pass size checks (for fallback)
-        size_filtered_all = []
+        # Track all candidates that pass checks (for fallback)
+        density_filtered_all = []
 
         for candidate in results:
             if not candidate.quality:
@@ -1489,26 +1506,11 @@ class SoulseekClient:
 
             track_format = candidate.quality.lower()
             track_bitrate = candidate.bitrate or 0
-            file_size_mb = candidate.size / (1024 * 1024)  # Convert bytes to MB
 
-            # Categorize and apply file size constraints
+            # Determine quality key
             if track_format == 'flac':
-                quality_config = profile['qualities'].get('flac', {})
-                min_mb = quality_config.get('min_mb', 0)
-                max_mb = quality_config.get('max_mb', 999)
-
-                # Check if within size range
-                if min_mb <= file_size_mb <= max_mb:
-                    # Add to bucket if enabled
-                    if quality_config.get('enabled', False):
-                        quality_buckets['flac'].append(candidate)
-                    # Always track for fallback
-                    size_filtered_all.append(candidate)
-                else:
-                    logger.debug(f"Quality Filter: FLAC file rejected - {file_size_mb:.1f}MB outside range {min_mb}-{max_mb}MB")
-
+                quality_key = 'flac'
             elif track_format == 'mp3':
-                # Determine MP3 quality tier based on bitrate
                 if track_bitrate >= 320:
                     quality_key = 'mp3_320'
                 elif track_bitrate >= 256:
@@ -1518,31 +1520,44 @@ class SoulseekClient:
                 else:
                     quality_buckets['other'].append(candidate)
                     continue
-
-                quality_config = profile['qualities'].get(quality_key, {})
-                min_mb = quality_config.get('min_mb', 0)
-                max_mb = quality_config.get('max_mb', 999)
-
-                # Check if within size range
-                if min_mb <= file_size_mb <= max_mb:
-                    # Add to bucket if enabled
-                    if quality_config.get('enabled', False):
-                        quality_buckets[quality_key].append(candidate)
-                    # Always track for fallback
-                    size_filtered_all.append(candidate)
-                else:
-                    logger.debug(f"Quality Filter: {quality_key.upper()} file rejected - {file_size_mb:.1f}MB outside range {min_mb}-{max_mb}MB")
             else:
                 quality_buckets['other'].append(candidate)
+                continue
 
-        # Sort each bucket by quality score and size
+            quality_config = profile['qualities'].get(quality_key, {})
+            min_kbps = quality_config.get('min_kbps', 0)
+            max_kbps = quality_config.get('max_kbps', 99999)
+
+            effective_kbps = self._calculate_effective_kbps(candidate.size, candidate.duration)
+
+            if effective_kbps is not None:
+                # Primary: bitrate density check
+                if min_kbps <= effective_kbps <= max_kbps:
+                    if quality_config.get('enabled', False):
+                        quality_buckets[quality_key].append(candidate)
+                    density_filtered_all.append(candidate)
+                else:
+                    logger.debug(f"Quality Filter: {quality_key} rejected - {effective_kbps:.0f} kbps outside {min_kbps}-{max_kbps} kbps range")
+            else:
+                # Fallback: duration unavailable, use generous raw-size sanity check
+                file_size_mb = candidate.size / (1024 * 1024)
+                size_min, size_max = self._FALLBACK_SIZE_LIMITS.get(quality_key, (0, 500))
+                if size_min <= file_size_mb <= size_max:
+                    if quality_config.get('enabled', False):
+                        quality_buckets[quality_key].append(candidate)
+                    density_filtered_all.append(candidate)
+                    logger.debug(f"Quality Filter: {quality_key} accepted via size fallback ({file_size_mb:.1f} MB, no duration available)")
+                else:
+                    logger.debug(f"Quality Filter: {quality_key} rejected via size fallback - {file_size_mb:.1f} MB outside {size_min}-{size_max} MB safety limits")
+
+        # Sort each bucket by quality score and effective bitrate
         for bucket in quality_buckets.values():
-            bucket.sort(key=lambda x: (x.quality_score, x.size), reverse=True)
+            bucket.sort(key=lambda x: (x.quality_score, self._calculate_effective_kbps(x.size, x.duration) or 0), reverse=True)
 
         # Debug logging
         for quality, bucket in quality_buckets.items():
             if bucket:
-                logger.debug(f"Quality Filter: Found {len(bucket)} '{quality}' candidates (after size filtering)")
+                logger.debug(f"Quality Filter: Found {len(bucket)} '{quality}' candidates (after bitrate filtering)")
 
         # Waterfall priority logic: try qualities in priority order
         # Build priority list from enabled qualities
@@ -1564,16 +1579,13 @@ class SoulseekClient:
 
         # If no enabled qualities matched, check if fallback is enabled
         if profile.get('fallback_enabled', True):
-            logger.warning(f"Quality Filter: No enabled qualities matched, falling back to size-filtered candidates")
-            # Return candidates that passed size checks (even if quality disabled)
-            # This respects file size constraints while allowing any quality
-            if size_filtered_all:
-                size_filtered_all.sort(key=lambda x: (x.quality_score, x.size), reverse=True)
-                logger.info(f"Quality Filter: Returning {len(size_filtered_all)} fallback candidates (size-filtered, any quality)")
-                return size_filtered_all
+            logger.warning(f"Quality Filter: No enabled qualities matched, falling back to density-filtered candidates")
+            if density_filtered_all:
+                density_filtered_all.sort(key=lambda x: (x.quality_score, self._calculate_effective_kbps(x.size, x.duration) or 0), reverse=True)
+                logger.info(f"Quality Filter: Returning {len(density_filtered_all)} fallback candidates (bitrate-filtered, any quality)")
+                return density_filtered_all
             else:
-                # All candidates failed size checks - respect user's constraints and fail
-                logger.warning(f"Quality Filter: All candidates failed size checks, returning empty (respecting size constraints)")
+                logger.warning(f"Quality Filter: All candidates failed bitrate checks, returning empty (respecting constraints)")
                 return []
         else:
             logger.warning(f"Quality Filter: No enabled qualities matched and fallback is disabled, returning empty")

@@ -392,13 +392,13 @@ def get_cached_transfer_data():
 # Cache Beatport scraping data to reduce load times and avoid hammering Beatport.com
 beatport_data_cache = {
     'homepage': {
-        'hero_tracks': {'data': None, 'timestamp': 0, 'ttl': 3600},       # 1 hour
-        'top_10_lists': {'data': None, 'timestamp': 0, 'ttl': 3600},      # 1 hour
-        'top_10_releases': {'data': None, 'timestamp': 0, 'ttl': 3600},   # 1 hour
-        'new_releases': {'data': None, 'timestamp': 0, 'ttl': 3600},      # 1 hour
-        'hype_picks': {'data': None, 'timestamp': 0, 'ttl': 3600},        # 1 hour
-        'featured_charts': {'data': None, 'timestamp': 0, 'ttl': 3600},   # 1 hour
-        'dj_charts': {'data': None, 'timestamp': 0, 'ttl': 3600}          # 1 hour
+        'hero_tracks': {'data': None, 'timestamp': 0, 'ttl': 86400},       # 24 hours
+        'top_10_lists': {'data': None, 'timestamp': 0, 'ttl': 86400},      # 24 hours
+        'top_10_releases': {'data': None, 'timestamp': 0, 'ttl': 86400},   # 24 hours
+        'new_releases': {'data': None, 'timestamp': 0, 'ttl': 86400},      # 24 hours
+        'hype_picks': {'data': None, 'timestamp': 0, 'ttl': 86400},        # 24 hours
+        'featured_charts': {'data': None, 'timestamp': 0, 'ttl': 86400},   # 24 hours
+        'dj_charts': {'data': None, 'timestamp': 0, 'ttl': 86400}          # 24 hours
     },
     'genre': {
         # Future expansion for genre-specific caching
