@@ -70,6 +70,7 @@ from core.matching_engine import MusicMatchingEngine
 from beatport_unified_scraper import BeatportUnifiedScraper
 from core.musicbrainz_worker import MusicBrainzWorker
 from core.audiodb_worker import AudioDBWorker
+from core.deezer_worker import DeezerWorker
 
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -25577,6 +25578,77 @@ def audiodb_resume():
 
 # ================================================================================================
 # END AUDIODB INTEGRATION
+# ================================================================================================
+
+
+# ================================================================================================
+# DEEZER ENRICHMENT INTEGRATION
+# ================================================================================================
+
+# --- Deezer Worker Initialization ---
+deezer_worker = None
+try:
+    from database.music_database import MusicDatabase
+    deezer_db = MusicDatabase()
+    deezer_worker = DeezerWorker(database=deezer_db)
+    deezer_worker.start()
+    print("✅ Deezer enrichment worker initialized and started")
+except Exception as e:
+    print(f"⚠️ Deezer worker initialization failed: {e}")
+    deezer_worker = None
+
+# --- Deezer API Endpoints ---
+
+@app.route('/api/deezer/status', methods=['GET'])
+def deezer_status():
+    """Get Deezer enrichment status for UI polling"""
+    try:
+        if deezer_worker is None:
+            return jsonify({
+                'enabled': False,
+                'running': False,
+                'paused': False,
+                'current_item': None,
+                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
+                'progress': {}
+            }), 200
+
+        status = deezer_worker.get_stats()
+        return jsonify(status), 200
+    except Exception as e:
+        logger.error(f"Error getting Deezer status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/deezer/pause', methods=['POST'])
+def deezer_pause():
+    """Pause Deezer enrichment worker"""
+    try:
+        if deezer_worker is None:
+            return jsonify({'error': 'Deezer worker not initialized'}), 400
+
+        deezer_worker.pause()
+        logger.info("Deezer worker paused via UI")
+        return jsonify({'status': 'paused'}), 200
+    except Exception as e:
+        logger.error(f"Error pausing Deezer worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/deezer/resume', methods=['POST'])
+def deezer_resume():
+    """Resume Deezer enrichment worker"""
+    try:
+        if deezer_worker is None:
+            return jsonify({'error': 'Deezer worker not initialized'}), 400
+
+        deezer_worker.resume()
+        logger.info("Deezer worker resumed via UI")
+        return jsonify({'status': 'running'}), 200
+    except Exception as e:
+        logger.error(f"Error resuming Deezer worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ================================================================================================
+# END DEEZER INTEGRATION
 # ================================================================================================
 
 
