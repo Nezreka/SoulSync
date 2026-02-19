@@ -10907,9 +10907,11 @@ function generateWishlistTrackList(tracks, trackOwnership) {
         const artistsString = formatArtists(track.artists) || 'Unknown Artist';
         const duration = formatDuration(track.duration_ms);
 
-        const isOwned = trackOwnership ? trackOwnership[track.name] === true : null;
-        const ownershipClass = isOwned === true ? 'owned' : (isOwned === false ? 'missing' : '');
-        const badge = isOwned === true
+        const trackData = trackOwnership ? trackOwnership[track.name] : null;
+        const isOwned = trackData && (trackData.owned === true || trackData === true);
+        const isKnown = trackData !== null && trackData !== undefined;
+        const ownershipClass = isOwned ? 'owned' : (isKnown && !isOwned ? 'missing' : '');
+        const badge = isOwned
             ? '<div class="wishlist-track-badge owned"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>'
             : '';
 
@@ -11095,10 +11097,26 @@ async function lazyLoadTrackOwnership(artistName, tracks, sourceCard) {
         trackItems.forEach((item, index) => {
             const track = tracks[index];
             if (!track) return;
-            const isOwned = ownership[track.name] === true;
+            const trackData = ownership[track.name];
+            const isOwned = trackData && trackData.owned === true;
             if (isOwned) {
                 ownedCount++;
                 item.classList.add('owned');
+                // Add metadata line below track name
+                const trackInfo = item.querySelector('.wishlist-track-info');
+                if (trackInfo && (trackData.format || trackData.bitrate)) {
+                    const metaDiv = document.createElement('div');
+                    metaDiv.className = 'wishlist-track-meta';
+                    let metaHtml = '';
+                    if (trackData.format) {
+                        metaHtml += `<span class="wishlist-track-format">${trackData.format}</span>`;
+                    }
+                    if (trackData.bitrate) {
+                        metaHtml += `<span class="wishlist-track-bitrate">${trackData.bitrate} kbps</span>`;
+                    }
+                    metaDiv.innerHTML = metaHtml;
+                    trackInfo.appendChild(metaDiv);
+                }
                 const badge = document.createElement('div');
                 badge.className = 'wishlist-track-badge owned';
                 badge.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
@@ -26488,10 +26506,8 @@ function createReleaseCard(release) {
             hideLoadingOverlay();
             await openAddToWishlistModal(albumData, currentArtist, data.tracks, albumType);
 
-            // Lazy-load per-track ownership for partial albums (non-blocking)
-            if (rel.track_completion && typeof rel.track_completion === 'object' && rel.track_completion.missing_tracks > 0) {
-                lazyLoadTrackOwnership(currentArtist.name, data.tracks, card);
-            }
+            // Always lazy-load track ownership + metadata (non-blocking)
+            lazyLoadTrackOwnership(currentArtist.name, data.tracks, card);
 
         } catch (error) {
             hideLoadingOverlay();
