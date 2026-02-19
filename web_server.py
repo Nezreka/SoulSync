@@ -9145,9 +9145,9 @@ def _move_to_quarantine(file_path: str, context: dict, reason: str) -> str:
     from pathlib import Path
     from datetime import datetime
 
-    # Get quarantine directory (parallel to Transfer folder)
-    transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-    quarantine_dir = Path(transfer_dir).parent / "Quarantine"
+    # Get quarantine directory (inside download folder — always writable, even in Docker)
+    download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
+    quarantine_dir = Path(download_dir) / "Quarantine"
     quarantine_dir.mkdir(parents=True, exist_ok=True)
 
     # Create quarantine entry with timestamp
@@ -9353,10 +9353,20 @@ def _post_process_matched_download(context_key, context, file_path):
 
                     if verification_result == VerificationResult.FAIL:
                         # Move to quarantine instead of Transfer
-                        quarantine_path = _move_to_quarantine(file_path, context, verification_msg)
-                        print(f"🚫 File quarantined due to verification failure: {quarantine_path}")
+                        try:
+                            quarantine_path = _move_to_quarantine(file_path, context, verification_msg)
+                            print(f"🚫 File quarantined due to verification failure: {quarantine_path}")
+                        except Exception as quarantine_error:
+                            # Quarantine failed — delete the known-wrong file instead
+                            # NEVER save a file we've confirmed is wrong
+                            logger.error(f"Quarantine failed ({quarantine_error}), deleting wrong file: {file_path}")
+                            print(f"🚫 Quarantine failed, deleting wrong file: {file_path}")
+                            try:
+                                os.remove(file_path)
+                            except Exception as del_error:
+                                logger.error(f"Could not delete wrong file either: {del_error}")
 
-                        # Set flag so the _with_verification wrapper knows we quarantined
+                        # These always execute for FAIL — whether quarantine succeeded or not
                         context['_acoustid_quarantined'] = True
                         context['_acoustid_failure_msg'] = verification_msg
 
@@ -9378,7 +9388,7 @@ def _post_process_matched_download(context_key, context, file_path):
                         if task_id and batch_id:
                             _on_download_completed(batch_id, task_id, success=False)
 
-                        return  # Don't continue with normal processing
+                        return  # NEVER continue processing a known-wrong file
                 else:
                     print(f"⚠️ AcoustID verification skipped: missing track/artist info")
             else:
