@@ -8115,7 +8115,7 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
 # METADATA & COVER ART HELPERS (Ported from downloads.py)
 # ===================================================================
 from mutagen import File as MutagenFile
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, TPOS, TXXX, APIC, UFID, TSRC
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, TPOS, TXXX, APIC, UFID, TSRC, TBPM
 from mutagen.flac import FLAC, Picture
 from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 from mutagen.oggvorbis import OggVorbis
@@ -8518,13 +8518,23 @@ def _embed_album_art_metadata(audio_file, metadata: dict):
 
 def _embed_source_ids(audio_file, metadata: dict):
     """
-    Lookup MusicBrainz recording MBID, ISRC, and genres, then embed them along
+    Lookup MusicBrainz, Deezer, and AudioDB metadata, then embed them along
     with Spotify/iTunes source IDs as custom tags into the audio file.
-    One file write, one shot.  Concurrent calls are safe — the global rate
-    limiter in musicbrainz_client.py serializes all MB API access.
+    Tags written: source IDs, BPM (Deezer), mood/style (AudioDB), ISRC
+    (MB→Deezer fallback), and merged genres (Spotify+MB+AudioDB).
+    One file write, one shot.  Concurrent calls are safe — each service has
+    its own global rate limiter.
     Operates on a non-easy-mode MutagenFile object (caller must save).
     """
     try:
+        # ── Helper: normalize + compare names (same logic as enrichment workers) ──
+        from difflib import SequenceMatcher
+        def _names_match(a: str, b: str, threshold: float = 0.75) -> bool:
+            if not a or not b:
+                return False
+            norm = lambda s: re.sub(r'[^a-z0-9 ]', '', re.sub(r'\(.*?\)', '', s).lower()).strip()
+            return SequenceMatcher(None, norm(a), norm(b)).ratio() >= threshold
+
         # ── 1. Collect Spotify / iTunes IDs already in metadata ──
         id_tags = {}
         if metadata.get('spotify_track_id'):
@@ -8540,7 +8550,7 @@ def _embed_source_ids(audio_file, metadata: dict):
         if metadata.get('itunes_album_id'):
             id_tags['ITUNES_ALBUM_ID'] = metadata['itunes_album_id']
 
-        # ── 2. MusicBrainz lookup for MBID, genres, and ISRC ──
+        # ── 2a. MusicBrainz lookup for MBID, genres, and ISRC ──
         # The global rate limiter in musicbrainz_client.py serializes all API
         # calls (worker + any number of post-processing threads) to 1 req/sec
         # via _api_call_lock, so no pause/resume needed.
@@ -8592,7 +8602,65 @@ def _embed_source_ids(audio_file, metadata: dict):
             except Exception as e:
                 print(f"⚠️ MusicBrainz lookup failed (non-fatal): {e}")
 
-        if not id_tags:
+        # ── 2b. Deezer lookup for BPM, ISRC fallback, and source IDs ──
+        deezer_bpm = None
+        deezer_isrc = None
+        if not config_manager.get('deezer.embed_tags', True):
+            pass
+        elif track_title and artist_name:
+            try:
+                dz_client = deezer_worker.client if deezer_worker else None
+                if dz_client:
+                    dz_result = dz_client.search_track(artist_name, track_title)
+                    if dz_result and _names_match(dz_result.get('title', ''), track_title) and \
+                       _names_match(dz_result.get('artist', {}).get('name', ''), artist_name):
+                        dz_track_id = dz_result['id']
+                        id_tags['DEEZER_TRACK_ID'] = str(dz_track_id)
+                        dz_artist_id = dz_result.get('artist', {}).get('id')
+                        if dz_artist_id:
+                            id_tags['DEEZER_ARTIST_ID'] = str(dz_artist_id)
+                        print(f"🎵 Deezer track matched: {dz_track_id}")
+
+                        # Get full track details for BPM and ISRC
+                        dz_details = dz_client.get_track(dz_track_id)
+                        if dz_details:
+                            bpm_val = dz_details.get('bpm')
+                            if bpm_val and bpm_val > 0:
+                                deezer_bpm = bpm_val
+                            dz_isrc = dz_details.get('isrc')
+                            if dz_isrc:
+                                deezer_isrc = dz_isrc
+                else:
+                    print("⚠️ Deezer worker not available, skipping Deezer lookup")
+            except Exception as e:
+                print(f"⚠️ Deezer lookup failed (non-fatal): {e}")
+
+        # ── 2c. AudioDB lookup for mood, style, genre, and source ID ──
+        audiodb_mood = None
+        audiodb_style = None
+        audiodb_genre = None
+        if not config_manager.get('audiodb.embed_tags', True):
+            pass
+        elif track_title and artist_name:
+            try:
+                adb_client = audiodb_worker.client if audiodb_worker else None
+                if adb_client:
+                    adb_result = adb_client.search_track(artist_name, track_title)
+                    if adb_result and _names_match(adb_result.get('strTrack', ''), track_title) and \
+                       _names_match(adb_result.get('strArtist', ''), artist_name):
+                        adb_track_id = adb_result.get('idTrack')
+                        if adb_track_id:
+                            id_tags['AUDIODB_TRACK_ID'] = str(adb_track_id)
+                            print(f"🎵 AudioDB track matched: {adb_track_id}")
+                        audiodb_mood = adb_result.get('strMood') or None
+                        audiodb_style = adb_result.get('strStyle') or None
+                        audiodb_genre = adb_result.get('strGenre') or None
+                else:
+                    print("⚠️ AudioDB worker not available, skipping AudioDB lookup")
+            except Exception as e:
+                print(f"⚠️ AudioDB lookup failed (non-fatal): {e}")
+
+        if not id_tags and not deezer_bpm and not deezer_isrc and not audiodb_mood and not audiodb_style:
             return
 
         # ── 3. Write all tags into the file ──
@@ -8639,12 +8707,44 @@ def _embed_source_ids(audio_file, metadata: dict):
         if written:
             print(f"🔗 Embedded IDs: {', '.join(written)}")
 
-        # ── 4. Merge genres (Spotify + MusicBrainz) and overwrite tag ──
-        if mb_genres:
+        # ── 3b. Write BPM tag (from Deezer) ──
+        if deezer_bpm and deezer_bpm > 0:
+            bpm_int = int(deezer_bpm)
+            if isinstance(audio_file.tags, ID3):
+                audio_file.tags.add(TBPM(encoding=3, text=[str(bpm_int)]))
+            elif isinstance(audio_file, (FLAC, OggVorbis)):
+                audio_file['BPM'] = [str(bpm_int)]
+            elif isinstance(audio_file, MP4):
+                audio_file['tmpo'] = [bpm_int]
+            print(f"🥁 BPM: {bpm_int}")
+
+        # ── 3c. Write mood tag (from AudioDB) ──
+        if audiodb_mood:
+            if isinstance(audio_file.tags, ID3):
+                audio_file.tags.add(TXXX(encoding=3, desc='MOOD', text=[audiodb_mood]))
+            elif isinstance(audio_file, (FLAC, OggVorbis)):
+                audio_file['MOOD'] = [audiodb_mood]
+            elif isinstance(audio_file, MP4):
+                audio_file['----:com.apple.iTunes:MOOD'] = [MP4FreeForm(audiodb_mood.encode('utf-8'))]
+            print(f"🎭 Mood: {audiodb_mood}")
+
+        # ── 3d. Write style tag (from AudioDB) ──
+        if audiodb_style:
+            if isinstance(audio_file.tags, ID3):
+                audio_file.tags.add(TXXX(encoding=3, desc='STYLE', text=[audiodb_style]))
+            elif isinstance(audio_file, (FLAC, OggVorbis)):
+                audio_file['STYLE'] = [audiodb_style]
+            elif isinstance(audio_file, MP4):
+                audio_file['----:com.apple.iTunes:STYLE'] = [MP4FreeForm(audiodb_style.encode('utf-8'))]
+            print(f"🎨 Style: {audiodb_style}")
+
+        # ── 4. Merge genres (Spotify + MusicBrainz + AudioDB) and overwrite tag ──
+        enrichment_genres = mb_genres + ([audiodb_genre] if audiodb_genre else [])
+        if enrichment_genres:
             spotify_genres = [g.strip() for g in metadata.get('genre', '').split(',') if g.strip()]
             seen = set()
             merged = []
-            for g in spotify_genres + mb_genres:
+            for g in spotify_genres + enrichment_genres:
                 key = g.strip().lower()
                 if key and key not in seen:
                     seen.add(key)
@@ -8662,15 +8762,17 @@ def _embed_source_ids(audio_file, metadata: dict):
                     audio_file['\xa9gen'] = [genre_string]
                 print(f"🎶 Genres merged: {genre_string}")
 
-        # ── 5. Write ISRC if available ──
-        if isrc:
+        # ── 5. Write ISRC if available (MusicBrainz first, Deezer fallback) ──
+        final_isrc = isrc or deezer_isrc
+        if final_isrc:
             if isinstance(audio_file.tags, ID3):
-                audio_file.tags.add(TSRC(encoding=3, text=[isrc]))
+                audio_file.tags.add(TSRC(encoding=3, text=[final_isrc]))
             elif isinstance(audio_file, (FLAC, OggVorbis)):
-                audio_file['ISRC'] = [isrc]
+                audio_file['ISRC'] = [final_isrc]
             elif isinstance(audio_file, MP4):
-                audio_file['----:com.apple.iTunes:ISRC'] = [MP4FreeForm(isrc.encode('utf-8'))]
-            print(f"🔖 ISRC: {isrc}")
+                audio_file['----:com.apple.iTunes:ISRC'] = [MP4FreeForm(final_isrc.encode('utf-8'))]
+            source = "MusicBrainz" if isrc else "Deezer"
+            print(f"🔖 ISRC ({source}): {final_isrc}")
 
     except Exception as e:
         print(f"⚠️ Error embedding source IDs (non-fatal): {e}")
