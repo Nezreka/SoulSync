@@ -2227,7 +2227,7 @@ class MusicDatabase:
         try:
             placeholders = ','.join('?' for _ in sibling_ids)
             cursor.execute(f"""
-                SELECT DISTINCT file_path, bitrate FROM tracks
+                SELECT file_path, bitrate FROM tracks
                 WHERE album_id IN ({placeholders}) AND file_path IS NOT NULL
             """, sibling_ids)
 
@@ -2241,7 +2241,6 @@ class MusicDatabase:
                 elif ext == 'MP3':
                     format_set.add('MP3')
                 else:
-                    # FLAC, OGG, AAC, etc. — just the extension
                     format_set.add(ext)
             return sorted(format_set)
         except Exception as e:

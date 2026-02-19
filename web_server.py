@@ -5760,7 +5760,8 @@ def _check_album_completion(db, album_data: dict, artist_name: str, test_mode: b
                     "completion_percentage": 0,
                     "confidence": 0.0,
                     "found_in_db": False,
-                    "error_message": str(db_error)
+                    "error_message": str(db_error),
+                    "formats": []
                 }
         
         # Calculate completion percentage

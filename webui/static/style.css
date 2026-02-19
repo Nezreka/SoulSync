@@ -13381,6 +13381,10 @@ body {
     /* Fixed height for consistent layout */
 }
 
+.discography-sections .release-card {
+    height: fit-content;
+}
+
 .release-card:hover {
     background: linear-gradient(135deg, rgba(40, 40, 40, 0.95) 0%, rgba(30, 30, 30, 0.98) 100%);
     border-color: rgba(255, 255, 255, 0.15);
