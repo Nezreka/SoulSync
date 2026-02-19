@@ -145,14 +145,15 @@ class Album:
     album_type: str
     image_url: Optional[str] = None
     external_urls: Optional[Dict[str, str]] = None
-    
+    artist_ids: Optional[List[str]] = None
+
     @classmethod
     def from_spotify_album(cls, album_data: Dict[str, Any]) -> 'Album':
         # Get the largest image URL if available
         image_url = None
         if album_data.get('images') and len(album_data['images']) > 0:
             image_url = album_data['images'][0]['url']
-        
+
         return cls(
             id=album_data['id'],
             name=album_data['name'],
@@ -161,7 +162,8 @@ class Album:
             total_tracks=album_data.get('total_tracks', 0),
             album_type=album_data.get('album_type', 'album'),
             image_url=image_url,
-            external_urls=album_data.get('external_urls')
+            external_urls=album_data.get('external_urls'),
+            artist_ids=[artist['id'] for artist in album_data['artists']]
         )
 
 @dataclass
