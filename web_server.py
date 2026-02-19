@@ -5462,17 +5462,10 @@ def get_artist_discography(artist_id):
                 continue
             seen_albums.add(album.id)
 
-            # Handle artist matching for both Spotify (objects) and iTunes (strings) formats
-            if hasattr(album, 'artists') and album.artists:
-                first_artist = album.artists[0]
-                # Check if artists are objects (Spotify) or strings (iTunes)
-                if hasattr(first_artist, 'id'):
-                    # Spotify format: artist is an object with .id and .name
-                    primary_artist_id = first_artist.id
-                    # Skip if the primary artist doesn't match our requested artist
-                    if primary_artist_id and primary_artist_id != artist_id:
-                        continue
-                # iTunes format: artist is a string, can't verify ID match so include all
+            # Skip albums where this artist isn't the primary (first-listed) artist
+            if hasattr(album, 'artist_ids') and album.artist_ids:
+                if album.artist_ids[0] != artist_id:
+                    continue
             
             album_data = {
                 "id": album.id,
@@ -25336,6 +25329,10 @@ def get_spotify_artist_discography(artist_name):
         singles = []
 
         for album in all_albums:
+            # Skip albums where this artist isn't the primary (first-listed) artist
+            if album.artist_ids and album.artist_ids[0] != spotify_artist_id:
+                continue
+
             # Use the Album object properties
             track_count = album.total_tracks
 
