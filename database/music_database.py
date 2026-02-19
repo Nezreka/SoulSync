@@ -4318,13 +4318,14 @@ class MusicDatabase:
                         a.musicbrainz_id,
                         a.spotify_artist_id,
                         a.itunes_artist_id,
+                        a.deezer_id,
                         COUNT(DISTINCT al.id) as album_count,
                         COUNT(DISTINCT t.id) as track_count
                     FROM artists a
                     LEFT JOIN albums al ON a.id = al.artist_id
                     LEFT JOIN tracks t ON al.id = t.album_id
                     WHERE {where_clause}
-                    GROUP BY a.id, a.name, a.thumb_url, a.genres, a.musicbrainz_id
+                    GROUP BY a.id, a.name, a.thumb_url, a.genres, a.musicbrainz_id, a.deezer_id
                     ORDER BY a.name COLLATE NOCASE
                     LIMIT ? OFFSET ?
                 """
@@ -4369,6 +4370,7 @@ class MusicDatabase:
                         'image_url': artist.thumb_url,
                         'genres': artist.genres,
                         'musicbrainz_id': row['musicbrainz_id'],
+                        'deezer_id': row['deezer_id'],
                         'album_count': row['album_count'] or 0,
                         'track_count': row['track_count'] or 0,
                         'is_watched': bool(is_watched)
