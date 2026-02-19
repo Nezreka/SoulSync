@@ -9457,6 +9457,7 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    position: relative;
 
     /* Subtle inner glow */
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
@@ -9466,10 +9467,10 @@ body {
 .download-missing-modal-hero {
     display: flex;
     align-items: center;
-    padding: 20px 28px;
-    gap: 20px;
+    padding: 14px 28px;
+    gap: 16px;
     position: relative;
-    min-height: 110px;
+    min-height: 80px;
 }
 
 /* Hero Background Image (for artist/album context) */
@@ -9623,11 +9624,11 @@ body {
 
 /* Header Actions (close button) */
 .download-missing-modal-header-actions {
-    position: relative;
+    position: absolute;
+    top: 12px;
+    right: 16px;
     z-index: 3;
-    padding: 16px 24px 0 0;
     display: flex;
-    justify-content: flex-end;
 }
 
 /* ===============================
@@ -10153,8 +10154,8 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 16px 28px 25px 28px;
-    gap: 20px;
+    padding: 12px 28px 12px 28px;
+    gap: 10px;
     overflow-y: auto;
     /* Allow vertical scrolling */
     overflow-x: hidden;
@@ -10169,11 +10170,11 @@ body {
     backdrop-filter: blur(10px) saturate(1.1);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-top: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 16px;
-    padding: 24px;
+    border-radius: 12px;
+    padding: 12px 16px;
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 24px;
+    gap: 12px;
 
     /* Premium shadow with subtle glow */
     box-shadow:
@@ -10185,8 +10186,8 @@ body {
 
 .dashboard-stat {
     text-align: center;
-    padding: 8px;
-    border-radius: 12px;
+    padding: 4px;
+    border-radius: 10px;
     transition: all 0.3s ease;
 }
 
@@ -10196,15 +10197,15 @@ body {
 }
 
 .dashboard-stat-number {
-    font-size: 32px;
+    font-size: 22px;
     font-weight: 700;
-    margin-bottom: 8px;
+    margin-bottom: 2px;
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     transition: all 0.3s ease;
 }
 
 .dashboard-stat-label {
-    font-size: 14px;
+    font-size: 11px;
     color: #e0e0e0;
     font-weight: 600;
     text-transform: uppercase;
@@ -10242,11 +10243,11 @@ body {
     backdrop-filter: blur(10px) saturate(1.1);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-top: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 16px;
-    padding: 20px;
+    border-radius: 12px;
+    padding: 12px 16px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 8px;
 
     /* Premium shadow with subtle glow */
     box-shadow:
@@ -10259,24 +10260,24 @@ body {
 .progress-item {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 2px 0;
+    gap: 4px;
+    padding: 0;
 }
 
 .progress-label {
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 600;
     color: #e8e8e8;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .progress-bar {
     background: rgba(64, 64, 64, 0.8);
-    border-radius: 10px;
-    height: 10px;
+    border-radius: 8px;
+    height: 8px;
     overflow: hidden;
     box-shadow:
         inset 0 2px 4px rgba(0, 0, 0, 0.3),
@@ -10344,7 +10345,7 @@ body {
 }
 
 .download-tracks-header {
-    padding: 18px 24px;
+    padding: 10px 16px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     background: linear-gradient(135deg,
             rgba(40, 40, 40, 0.8) 0%,
@@ -10352,13 +10353,13 @@ body {
 }
 
 .download-tracks-title {
-    font-size: 16px;
+    font-size: 13px;
     font-weight: 700;
     color: #ffffff;
     margin: 0;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
@@ -10512,7 +10513,7 @@ body {
             rgba(42, 42, 42, 0.9) 0%,
             rgba(30, 30, 30, 0.95) 100%);
     border-top: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 24px 28px;
+    padding: 14px 28px;
     display: flex;
     align-items: center;
     justify-content: space-between;
