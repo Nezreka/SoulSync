@@ -26081,9 +26081,15 @@ function updateArtistHeroSection(artist, discography) {
 
         imageElement.onerror = () => {
             console.error(`❌ Failed to load artist image: ${artist.image_url}`);
-            imageElement.style.display = "none";
-            if (fallbackElement) {
-                fallbackElement.style.display = "flex";
+            // Try Deezer fallback before emoji
+            if (artist.deezer_id && !imageElement.dataset.triedDeezer) {
+                imageElement.dataset.triedDeezer = 'true';
+                imageElement.src = `https://api.deezer.com/artist/${artist.deezer_id}/image?size=big`;
+            } else {
+                imageElement.style.display = "none";
+                if (fallbackElement) {
+                    fallbackElement.style.display = "flex";
+                }
             }
         };
     } else {
