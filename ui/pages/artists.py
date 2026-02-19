@@ -769,7 +769,7 @@ class DatabaseLibraryWorker(QThread):
                         
                         # Search database for this combination with completeness info
                         print(f"   🔍 Searching database: album='{album_name}', artist='{artist_clean}'")
-                        db_album, confidence, owned_tracks, expected_tracks, is_complete = db.check_album_exists_with_completeness(
+                        db_album, confidence, owned_tracks, expected_tracks, is_complete, *_ = db.check_album_exists_with_completeness(
                             album_name, artist_clean, expected_track_count, confidence_threshold=0.7, server_source=active_server
                         )
                         
@@ -788,7 +788,7 @@ class DatabaseLibraryWorker(QThread):
                         # Backup search with original uncleaned artist name
                         if not db_album and artist and artist != artist_clean:
                             print(f"   🔄 Backup search with original artist: album='{album_name}', artist='{artist}'")
-                            db_album_backup, confidence_backup, owned_backup, expected_backup, complete_backup = db.check_album_exists_with_completeness(
+                            db_album_backup, confidence_backup, owned_backup, expected_backup, complete_backup, *_ = db.check_album_exists_with_completeness(
                                 album_name, artist, expected_track_count, confidence_threshold=0.7, server_source=active_server
                             )
                             
@@ -805,7 +805,7 @@ class DatabaseLibraryWorker(QThread):
                                 artist_no_comma = artist.replace(',', '').strip()
                                 artist_no_comma = ' '.join(artist_no_comma.split())
                                 print(f"   🔄 Comma-removal fallback: album='{album_name}', artist='{artist_no_comma}'")
-                                db_album_comma, confidence_comma, owned_comma, expected_comma, complete_comma = db.check_album_exists_with_completeness(
+                                db_album_comma, confidence_comma, owned_comma, expected_comma, complete_comma, *_ = db.check_album_exists_with_completeness(
                                     album_name, artist_no_comma, expected_track_count, confidence_threshold=0.7, server_source=active_server
                                 )
                                 

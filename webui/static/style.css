@@ -14226,6 +14226,54 @@ body {
     color: rgba(255, 255, 255, 0.45);
 }
 
+/* ── Format tags on release cards ── */
+.release-formats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 0 8px 6px;
+}
+
+.release-format-tag {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(29, 185, 84, 0.15);
+    color: rgba(29, 185, 84, 0.9);
+    line-height: 1.4;
+}
+
+/* ── Format tag in wishlist modal hero ── */
+.modal-format-tag {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: rgba(29, 185, 84, 0.15);
+    color: rgba(29, 185, 84, 0.9);
+}
+
+/* ── Format tags in artist hero section ── */
+.artist-formats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.artist-format-tag {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: rgba(29, 185, 84, 0.15);
+    color: rgba(29, 185, 84, 0.9);
+}
+
 /* Modal Footer */
 .add-to-wishlist-modal-footer {
     background: linear-gradient(135deg,

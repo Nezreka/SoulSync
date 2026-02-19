@@ -11126,6 +11126,31 @@ async function lazyLoadTrackOwnership(artistName, tracks, sourceCard) {
             }
         });
 
+        // Aggregate format summary from owned tracks
+        const formatSet = new Set();
+        for (const trackName of Object.keys(ownership)) {
+            const td = ownership[trackName];
+            if (td && td.owned && td.format) {
+                if (td.format === 'MP3' && td.bitrate) {
+                    formatSet.add(`MP3-${td.bitrate}`);
+                } else {
+                    formatSet.add(td.format);
+                }
+            }
+        }
+        if (formatSet.size > 0) {
+            const heroDetailsContainer = document.querySelector('.add-to-wishlist-modal-hero-details');
+            if (heroDetailsContainer) {
+                // Remove any existing format tag
+                const existing = heroDetailsContainer.querySelector('.modal-format-tag');
+                if (existing) existing.remove();
+                const formatTag = document.createElement('span');
+                formatTag.className = 'modal-format-tag';
+                formatTag.textContent = [...formatSet].sort().join(' / ');
+                heroDetailsContainer.appendChild(formatTag);
+            }
+        }
+
         // Update hero subtitle with missing count
         const missingCount = tracks.length - ownedCount;
         const heroDetails = document.querySelectorAll('.add-to-wishlist-modal-hero-detail');
@@ -26092,6 +26117,10 @@ function updateArtistGenres(genres) {
 
     genresContainer.innerHTML = "";
 
+    // Clear any previous artist format tags (they arrive later via streaming)
+    const oldFormats = genresContainer.parentElement?.querySelector('.artist-formats');
+    if (oldFormats) oldFormats.remove();
+
     if (genres && genres.length > 0) {
         genres.forEach(genre => {
             const genreTag = document.createElement("span");
@@ -26586,6 +26615,7 @@ async function checkLibraryCompletion(artistName, discography) {
         let buffer = '';
         let ownedCounts = { albums: 0, eps: 0, singles: 0 };
         let totalCounts = { albums: 0, eps: 0, singles: 0 };
+        const artistFormatSet = new Set();
 
         while (true) {
             const { done, value } = await reader.read();
@@ -26604,6 +26634,10 @@ async function checkLibraryCompletion(artistName, discography) {
                         totalCounts[eventData.category]++;
                         if (eventData.status !== 'missing' && eventData.status !== 'error') {
                             ownedCounts[eventData.category]++;
+                            // Accumulate formats for artist-level summary
+                            if (eventData.formats) {
+                                eventData.formats.forEach(f => artistFormatSet.add(f));
+                            }
                         }
                         // Update stats incrementally
                         updateCategoryStatsFromStream(
@@ -26614,7 +26648,7 @@ async function checkLibraryCompletion(artistName, discography) {
                     } else if (eventData.type === 'complete') {
                         console.log(`✅ Library completion stream done: ${eventData.processed_count} items`);
                         // Final stats recalculation
-                        recalculateSummaryStats();
+                        recalculateSummaryStats(artistFormatSet);
                     }
                 } catch (parseError) {
                     console.warn('Error parsing SSE event:', parseError, line);
@@ -26701,6 +26735,22 @@ function updateLibraryReleaseCard(data) {
             completionFill.classList.add('missing');
         }
     }
+
+    // Display format tags on owned releases
+    if (isOwned && data.formats && data.formats.length > 0) {
+        // Store formats on release data for modal use
+        if (card._releaseData) {
+            card._releaseData.formats = data.formats;
+        }
+        // Remove any existing format tags
+        const existingFormats = card.querySelector('.release-formats');
+        if (existingFormats) existingFormats.remove();
+
+        const formatsDiv = document.createElement('div');
+        formatsDiv.className = 'release-formats';
+        formatsDiv.innerHTML = data.formats.map(f => `<span class="release-format-tag">${f}</span>`).join('');
+        card.appendChild(formatsDiv);
+    }
 }
 
 function updateCategoryStatsFromStream(category, ownedCount, missingCount) {
@@ -26734,7 +26784,7 @@ function updateCategoryStatsFromStream(category, ownedCount, missingCount) {
     }
 }
 
-function recalculateSummaryStats() {
+function recalculateSummaryStats(artistFormatSet) {
     const disc = artistDetailPageState.currentDiscography;
     if (!disc) return;
 
@@ -26772,6 +26822,29 @@ function recalculateSummaryStats() {
         if (missingEl) missingEl.textContent = missingAlbums;
         const completionEl = document.getElementById("completion-percentage");
         if (completionEl) completionEl.textContent = `${pct}%`;
+    }
+
+    // Display artist-level format summary
+    if (artistFormatSet && artistFormatSet.size > 0) {
+        const heroInfo = document.querySelector('.artist-hero-section .artist-info');
+        if (heroInfo) {
+            // Remove any existing artist format tag
+            const existing = heroInfo.querySelector('.artist-formats');
+            if (existing) existing.remove();
+
+            const formatsDiv = document.createElement('div');
+            formatsDiv.className = 'artist-formats';
+            formatsDiv.innerHTML = [...artistFormatSet].sort()
+                .map(f => `<span class="artist-format-tag">${f}</span>`)
+                .join('');
+            // Insert after genres container
+            const genresContainer = heroInfo.querySelector('.artist-genres-container');
+            if (genresContainer && genresContainer.nextSibling) {
+                heroInfo.insertBefore(formatsDiv, genresContainer.nextSibling);
+            } else {
+                heroInfo.appendChild(formatsDiv);
+            }
+        }
     }
 }
 
