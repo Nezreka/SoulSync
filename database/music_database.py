@@ -2849,37 +2849,45 @@ class MusicDatabase:
 
         if profile_json:
             try:
-                return json.loads(profile_json)
+                profile = json.loads(profile_json)
+                # Migrate v1 profiles (min_mb/max_mb) to v2 (min_kbps/max_kbps)
+                if profile.get('version', 1) < 2:
+                    logger.info("Migrating quality profile from v1 (file size) to v2 (bitrate density)")
+                    return self._get_default_quality_profile()
+                return profile
             except json.JSONDecodeError:
                 logger.error("Failed to parse quality profile JSON, returning default")
 
-        # Return smart defaults (balanced preset)
+        return self._get_default_quality_profile()
+
+    def _get_default_quality_profile(self) -> dict:
+        """Return the default v2 quality profile (balanced preset)"""
         return {
-            "version": 1,
+            "version": 2,
             "preset": "balanced",
             "qualities": {
                 "flac": {
                     "enabled": True,
-                    "min_mb": 0,
-                    "max_mb": 150,
+                    "min_kbps": 500,
+                    "max_kbps": 10000,
                     "priority": 1
                 },
                 "mp3_320": {
                     "enabled": True,
-                    "min_mb": 0,
-                    "max_mb": 20,
+                    "min_kbps": 280,
+                    "max_kbps": 500,
                     "priority": 2
                 },
                 "mp3_256": {
                     "enabled": True,
-                    "min_mb": 0,
-                    "max_mb": 15,
+                    "min_kbps": 200,
+                    "max_kbps": 400,
                     "priority": 3
                 },
                 "mp3_192": {
                     "enabled": False,
-                    "min_mb": 0,
-                    "max_mb": 12,
+                    "min_kbps": 150,
+                    "max_kbps": 300,
                     "priority": 4
                 }
             },
@@ -2903,93 +2911,93 @@ class MusicDatabase:
         """Get a predefined quality preset"""
         presets = {
             "audiophile": {
-                "version": 1,
+                "version": 2,
                 "preset": "audiophile",
                 "qualities": {
                     "flac": {
                         "enabled": True,
-                        "min_mb": 0,
-                        "max_mb": 200,
+                        "min_kbps": 500,
+                        "max_kbps": 10000,
                         "priority": 1
                     },
                     "mp3_320": {
                         "enabled": False,
-                        "min_mb": 0,
-                        "max_mb": 20,
+                        "min_kbps": 280,
+                        "max_kbps": 500,
                         "priority": 2
                     },
                     "mp3_256": {
                         "enabled": False,
-                        "min_mb": 0,
-                        "max_mb": 15,
+                        "min_kbps": 200,
+                        "max_kbps": 400,
                         "priority": 3
                     },
                     "mp3_192": {
                         "enabled": False,
-                        "min_mb": 0,
-                        "max_mb": 12,
+                        "min_kbps": 150,
+                        "max_kbps": 300,
                         "priority": 4
                     }
                 },
                 "fallback_enabled": False
             },
             "balanced": {
-                "version": 1,
+                "version": 2,
                 "preset": "balanced",
                 "qualities": {
                     "flac": {
                         "enabled": True,
-                        "min_mb": 0,
-                        "max_mb": 150,
+                        "min_kbps": 500,
+                        "max_kbps": 10000,
                         "priority": 1
                     },
                     "mp3_320": {
                         "enabled": True,
-                        "min_mb": 0,
-                        "max_mb": 20,
+                        "min_kbps": 280,
+                        "max_kbps": 500,
                         "priority": 2
                     },
                     "mp3_256": {
                         "enabled": True,
-                        "min_mb": 0,
-                        "max_mb": 15,
+                        "min_kbps": 200,
+                        "max_kbps": 400,
                         "priority": 3
                     },
                     "mp3_192": {
                         "enabled": False,
-                        "min_mb": 0,
-                        "max_mb": 12,
+                        "min_kbps": 150,
+                        "max_kbps": 300,
                         "priority": 4
                     }
                 },
                 "fallback_enabled": True
             },
             "space_saver": {
-                "version": 1,
+                "version": 2,
                 "preset": "space_saver",
                 "qualities": {
                     "flac": {
                         "enabled": False,
-                        "min_mb": 0,
-                        "max_mb": 150,
+                        "min_kbps": 500,
+                        "max_kbps": 10000,
                         "priority": 4
                     },
                     "mp3_320": {
                         "enabled": True,
-                        "min_mb": 0,
-                        "max_mb": 15,
+                        "min_kbps": 280,
+                        "max_kbps": 500,
                         "priority": 1
                     },
                     "mp3_256": {
                         "enabled": True,
-                        "min_mb": 0,
-                        "max_mb": 12,
+                        "min_kbps": 200,
+                        "max_kbps": 400,
                         "priority": 2
                     },
                     "mp3_192": {
                         "enabled": True,
-                        "min_mb": 0,
-                        "max_mb": 10,
+                        "min_kbps": 150,
+                        "max_kbps": 300,
                         "priority": 3
                     }
                 },

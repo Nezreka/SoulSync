@@ -568,27 +568,28 @@ async function loadPageData(pageId) {
             case 'library':
                 // Check if we should return to artist detail view instead of list
                 if (artistDetailPageState.currentArtistId && artistDetailPageState.currentArtistName) {
-                    console.log(`🔄 Returning to artist detail: ${artistDetailPageState.currentArtistName}`);
                     navigateToPage('artist-detail');
                     if (!artistDetailPageState.isInitialized) {
                         initializeArtistDetailPage();
+                        loadArtistDetailData(artistDetailPageState.currentArtistId, artistDetailPageState.currentArtistName);
                     }
-                    loadArtistDetailData(artistDetailPageState.currentArtistId, artistDetailPageState.currentArtistName);
+                    // Already initialized — DOM content persists, no reload needed
                 } else {
-                    // Initialize and load library data
                     if (!libraryPageState.isInitialized) {
                         initializeLibraryPage();
-                    } else {
-                        // Refresh data when returning to page
-                        await loadLibraryArtists();
                     }
+                    // Already initialized — DOM content persists, no reload needed
                 }
                 break;
             case 'artist-detail':
                 // Artist detail page is handled separately by navigateToArtistDetail()
                 break;
             case 'discover':
-                await loadDiscoverPage();
+                if (!discoverPageInitialized) {
+                    await loadDiscoverPage();
+                    discoverPageInitialized = true;
+                }
+                // Already initialized — DOM content persists, no reload needed
                 break;
             case 'settings':
                 initializeSettings();
@@ -1944,8 +1945,8 @@ function populateQualityProfileUI(profile) {
             const minSlider = document.getElementById(`${quality}-min`);
             const maxSlider = document.getElementById(`${quality}-max`);
             if (minSlider && maxSlider) {
-                minSlider.value = config.min_mb;
-                maxSlider.value = config.max_mb;
+                minSlider.value = config.min_kbps;
+                maxSlider.value = config.max_kbps;
                 updateQualityRange(quality);
             }
 
@@ -1997,8 +1998,8 @@ function updateQualityRange(quality) {
         maxSlider.value = max;
     }
 
-    minValue.textContent = `${min} MB`;
-    maxValue.textContent = `${max} MB`;
+    minValue.textContent = `${min} kbps`;
+    maxValue.textContent = `${max} kbps`;
 }
 
 function toggleQuality(quality) {
@@ -2049,7 +2050,7 @@ async function applyQualityPreset(presetName) {
 
 function collectQualityProfileFromUI() {
     const profile = {
-        version: 1,
+        version: 2,
         preset: 'custom', // Will be overridden if a preset is active
         qualities: {},
         fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true
@@ -2065,8 +2066,8 @@ function collectQualityProfileFromUI() {
 
         profile.qualities[quality] = {
             enabled: enabled,
-            min_mb: parseInt(minSlider?.value || 0),
-            max_mb: parseInt(maxSlider?.value || 999),
+            min_kbps: parseInt(minSlider?.value || 0),
+            max_kbps: parseInt(maxSlider?.value || 99999),
             priority: index + 1 // 1-4 based on order
         };
     });
@@ -30908,6 +30909,7 @@ async function selectJellyfinLibrary() {
 let discoverHeroIndex = 0;
 let discoverHeroArtists = [];
 let discoverHeroInterval = null;
+let discoverPageInitialized = false;
 
 // Store discover playlist tracks for download/sync functionality
 let discoverReleaseRadarTracks = [];

@@ -3001,20 +3001,20 @@
                                     </div>
                                     <div class="quality-tier-sliders" id="sliders-flac">
                                         <div class="slider-group">
-                                            <label>File Size Range:</label>
+                                            <label>Bitrate Range:</label>
                                             <div class="dual-slider-container">
                                                 <input type="range" class="range-slider range-slider-min" id="flac-min"
-                                                    min="0" max="200" value="0" step="5"
+                                                    min="0" max="10000" value="500" step="100"
                                                     oninput="updateQualityRange('flac')">
                                                 <input type="range" class="range-slider range-slider-max" id="flac-max"
-                                                    min="0" max="200" value="150" step="5"
+                                                    min="0" max="10000" value="10000" step="100"
                                                     oninput="updateQualityRange('flac')">
                                                 <div class="range-slider-track"></div>
                                             </div>
                                             <div class="slider-values">
-                                                <span id="flac-min-value">0 MB</span>
+                                                <span id="flac-min-value">500 kbps</span>
                                                 <span>-</span>
-                                                <span id="flac-max-value">150 MB</span>
+                                                <span id="flac-max-value">10000 kbps</span>
                                             </div>
                                         </div>
                                     </div>
@@ -3032,20 +3032,20 @@
                                     </div>
                                     <div class="quality-tier-sliders" id="sliders-mp3_320">
                                         <div class="slider-group">
-                                            <label>File Size Range:</label>
+                                            <label>Bitrate Range:</label>
                                             <div class="dual-slider-container">
                                                 <input type="range" class="range-slider range-slider-min"
-                                                    id="mp3_320-min" min="0" max="50" value="0" step="1"
+                                                    id="mp3_320-min" min="0" max="500" value="280" step="10"
                                                     oninput="updateQualityRange('mp3_320')">
                                                 <input type="range" class="range-slider range-slider-max"
-                                                    id="mp3_320-max" min="0" max="50" value="20" step="1"
+                                                    id="mp3_320-max" min="0" max="500" value="500" step="10"
                                                     oninput="updateQualityRange('mp3_320')">
                                                 <div class="range-slider-track"></div>
                                             </div>
                                             <div class="slider-values">
-                                                <span id="mp3_320-min-value">0 MB</span>
+                                                <span id="mp3_320-min-value">280 kbps</span>
                                                 <span>-</span>
-                                                <span id="mp3_320-max-value">20 MB</span>
+                                                <span id="mp3_320-max-value">500 kbps</span>
                                             </div>
                                         </div>
                                     </div>
@@ -3063,20 +3063,20 @@
                                     </div>
                                     <div class="quality-tier-sliders" id="sliders-mp3_256">
                                         <div class="slider-group">
-                                            <label>File Size Range:</label>
+                                            <label>Bitrate Range:</label>
                                             <div class="dual-slider-container">
                                                 <input type="range" class="range-slider range-slider-min"
-                                                    id="mp3_256-min" min="0" max="40" value="0" step="1"
+                                                    id="mp3_256-min" min="0" max="400" value="200" step="10"
                                                     oninput="updateQualityRange('mp3_256')">
                                                 <input type="range" class="range-slider range-slider-max"
-                                                    id="mp3_256-max" min="0" max="40" value="15" step="1"
+                                                    id="mp3_256-max" min="0" max="400" value="400" step="10"
                                                     oninput="updateQualityRange('mp3_256')">
                                                 <div class="range-slider-track"></div>
                                             </div>
                                             <div class="slider-values">
-                                                <span id="mp3_256-min-value">0 MB</span>
+                                                <span id="mp3_256-min-value">200 kbps</span>
                                                 <span>-</span>
-                                                <span id="mp3_256-max-value">15 MB</span>
+                                                <span id="mp3_256-max-value">400 kbps</span>
                                             </div>
                                         </div>
                                     </div>
@@ -3094,20 +3094,20 @@
                                     </div>
                                     <div class="quality-tier-sliders disabled" id="sliders-mp3_192">
                                         <div class="slider-group">
-                                            <label>File Size Range:</label>
+                                            <label>Bitrate Range:</label>
                                             <div class="dual-slider-container">
                                                 <input type="range" class="range-slider range-slider-min"
-                                                    id="mp3_192-min" min="0" max="30" value="0" step="1"
+                                                    id="mp3_192-min" min="0" max="300" value="150" step="10"
                                                     oninput="updateQualityRange('mp3_192')">
                                                 <input type="range" class="range-slider range-slider-max"
-                                                    id="mp3_192-max" min="0" max="30" value="12" step="1"
+                                                    id="mp3_192-max" min="0" max="300" value="300" step="10"
                                                     oninput="updateQualityRange('mp3_192')">
                                                 <div class="range-slider-track"></div>
                                             </div>
                                             <div class="slider-values">
-                                                <span id="mp3_192-min-value">0 MB</span>
+                                                <span id="mp3_192-min-value">150 kbps</span>
                                                 <span>-</span>
-                                                <span id="mp3_192-max-value">12 MB</span>
+                                                <span id="mp3_192-max-value">300 kbps</span>
                                             </div>
                                         </div>
                                     </div>
@@ -3124,9 +3124,9 @@
                                 <div class="help-text">
                                     <strong>How it works:</strong> Downloads try each enabled quality in priority order
                                     (1 = highest).
-                                    File size constraints filter out outliers - MAX limits catch fake files (500MB
-                                    "FLACs"), MIN limits (optional) can enforce minimum quality.
-                                    Set MIN to 0 to accept all file sizes (recommended for most users).
+                                    MIN bitrate catches fake/transcoded files (e.g., FLAC below 500 kbps is likely a
+                                    re-encoded MP3). MAX bitrate limits hi-res files if you want to save space.
+                                    When track duration is unavailable, a generous file-size safety net is used instead.
                                 </div>
                             </div>
                         </div>
