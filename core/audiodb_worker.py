@@ -38,6 +38,7 @@ class AudioDBWorker:
 
         # Retry configuration
         self.retry_days = 30
+        self.error_retry_days = 7  # Retry 'error' items after 7 days
 
         # Name matching threshold
         self.name_similarity_threshold = 0.80
@@ -184,45 +185,46 @@ class AudioDBWorker:
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_audiodb_id': row[3]}
 
-            # Priority 4: Retry 'not_found' artists after retry_days
-            cutoff_date = datetime.now() - timedelta(days=self.retry_days)
+            # Priority 4: Retry 'not_found' or 'error' artists after retry_days/error_retry_days
+            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
+            error_cutoff = datetime.now() - timedelta(days=self.error_retry_days)
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE audiodb_match_status = 'not_found'
-                  AND audiodb_last_attempted < ?
+                WHERE (audiodb_match_status = 'not_found' AND audiodb_last_attempted < ?)
+                   OR (audiodb_match_status = 'error' AND audiodb_last_attempted < ?)
                 ORDER BY audiodb_last_attempted ASC
                 LIMIT 1
-            """, (cutoff_date,))
+            """, (not_found_cutoff, error_cutoff))
             row = cursor.fetchone()
             if row:
-                logger.info(f"Retrying artist '{row[1]}' (last attempted before {cutoff_date})")
+                logger.info(f"Retrying artist '{row[1]}' (last attempted before cutoff)")
                 return {'type': 'artist', 'id': row[0], 'name': row[1]}
 
-            # Priority 5: Retry 'not_found' albums
+            # Priority 5: Retry 'not_found' or 'error' albums
             cursor.execute("""
                 SELECT a.id, a.title, ar.name AS artist_name, ar.audiodb_id AS artist_audiodb_id
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.audiodb_match_status = 'not_found'
-                  AND a.audiodb_last_attempted < ?
+                WHERE (a.audiodb_match_status = 'not_found' AND a.audiodb_last_attempted < ?)
+                   OR (a.audiodb_match_status = 'error' AND a.audiodb_last_attempted < ?)
                 ORDER BY a.audiodb_last_attempted ASC
                 LIMIT 1
-            """, (cutoff_date,))
+            """, (not_found_cutoff, error_cutoff))
             row = cursor.fetchone()
             if row:
                 return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_audiodb_id': row[3]}
 
-            # Priority 6: Retry 'not_found' tracks
+            # Priority 6: Retry 'not_found' or 'error' tracks
             cursor.execute("""
                 SELECT t.id, t.title, ar.name AS artist_name, ar.audiodb_id AS artist_audiodb_id
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.audiodb_match_status = 'not_found'
-                  AND t.audiodb_last_attempted < ?
+                WHERE (t.audiodb_match_status = 'not_found' AND t.audiodb_last_attempted < ?)
+                   OR (t.audiodb_match_status = 'error' AND t.audiodb_last_attempted < ?)
                 ORDER BY t.audiodb_last_attempted ASC
                 LIMIT 1
-            """, (cutoff_date,))
+            """, (not_found_cutoff, error_cutoff))
             row = cursor.fetchone()
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_audiodb_id': row[3]}

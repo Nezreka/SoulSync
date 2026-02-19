@@ -34,6 +34,7 @@ class MusicBrainzWorker:
 
         # Retry configuration
         self.retry_days = 30  # Retry 'not_found' items after 30 days
+        self.error_retry_days = 7  # Retry 'error' items after 7 days
 
         logger.info("MusicBrainz background worker initialized")
 
@@ -188,45 +189,46 @@ class MusicBrainzWorker:
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2]}
 
-            # Priority 4: Retry 'not_found' artists after retry_days
-            cutoff_date = datetime.now() - timedelta(days=self.retry_days)
+            # Priority 4: Retry 'not_found' or 'error' artists after retry_days/error_retry_days
+            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
+            error_cutoff = datetime.now() - timedelta(days=self.error_retry_days)
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE musicbrainz_match_status = 'not_found'
-                  AND musicbrainz_last_attempted < ?
+                WHERE (musicbrainz_match_status = 'not_found' AND musicbrainz_last_attempted < ?)
+                   OR (musicbrainz_match_status = 'error' AND musicbrainz_last_attempted < ?)
                 ORDER BY musicbrainz_last_attempted ASC
                 LIMIT 1
-            """, (cutoff_date,))
+            """, (not_found_cutoff, error_cutoff))
             row = cursor.fetchone()
             if row:
-                logger.info(f"Retrying artist '{row[1]}' (last attempted: {cutoff_date})")
+                logger.info(f"Retrying artist '{row[1]}' (last attempted before cutoff)")
                 return {'type': 'artist', 'id': row[0], 'name': row[1]}
 
-            # Priority 5: Retry 'not_found' albums
+            # Priority 5: Retry 'not_found' or 'error' albums
             cursor.execute("""
                 SELECT a.id, a.title, ar.name AS artist_name
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.musicbrainz_match_status = 'not_found'
-                  AND a.musicbrainz_last_attempted < ?
+                WHERE (a.musicbrainz_match_status = 'not_found' AND a.musicbrainz_last_attempted < ?)
+                   OR (a.musicbrainz_match_status = 'error' AND a.musicbrainz_last_attempted < ?)
                 ORDER BY a.musicbrainz_last_attempted ASC
                 LIMIT 1
-            """, (cutoff_date,))
+            """, (not_found_cutoff, error_cutoff))
             row = cursor.fetchone()
             if row:
                 return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2]}
 
-            # Priority 6: Retry 'not_found' tracks
+            # Priority 6: Retry 'not_found' or 'error' tracks
             cursor.execute("""
                 SELECT t.id, t.title, ar.name AS artist_name
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.musicbrainz_match_status = 'not_found'
-                  AND t.musicbrainz_last_attempted < ?
+                WHERE (t.musicbrainz_match_status = 'not_found' AND t.musicbrainz_last_attempted < ?)
+                   OR (t.musicbrainz_match_status = 'error' AND t.musicbrainz_last_attempted < ?)
                 ORDER BY t.musicbrainz_last_attempted ASC
                 LIMIT 1
-            """, (cutoff_date,))
+            """, (not_found_cutoff, error_cutoff))
             row = cursor.fetchone()
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2]}

@@ -38,6 +38,7 @@ class DeezerWorker:
 
         # Retry configuration
         self.retry_days = 30
+        self.error_retry_days = 7  # Retry 'error' items after 7 days
 
         # Name matching threshold
         self.name_similarity_threshold = 0.80
@@ -184,45 +185,46 @@ class DeezerWorker:
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_deezer_id': row[3]}
 
-            # Priority 4: Retry 'not_found' artists after retry_days
-            cutoff_date = datetime.now() - timedelta(days=self.retry_days)
+            # Priority 4: Retry 'not_found' or 'error' artists after retry_days/error_retry_days
+            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
+            error_cutoff = datetime.now() - timedelta(days=self.error_retry_days)
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE deezer_match_status = 'not_found'
-                  AND deezer_last_attempted < ?
+                WHERE (deezer_match_status = 'not_found' AND deezer_last_attempted < ?)
+                   OR (deezer_match_status = 'error' AND deezer_last_attempted < ?)
                 ORDER BY deezer_last_attempted ASC
                 LIMIT 1
-            """, (cutoff_date,))
+            """, (not_found_cutoff, error_cutoff))
             row = cursor.fetchone()
             if row:
-                logger.info(f"Retrying artist '{row[1]}' (last attempted before {cutoff_date})")
+                logger.info(f"Retrying artist '{row[1]}' (last attempted before cutoff)")
                 return {'type': 'artist', 'id': row[0], 'name': row[1]}
 
-            # Priority 5: Retry 'not_found' albums
+            # Priority 5: Retry 'not_found' or 'error' albums
             cursor.execute("""
                 SELECT a.id, a.title, ar.name AS artist_name, ar.deezer_id AS artist_deezer_id
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.deezer_match_status = 'not_found'
-                  AND a.deezer_last_attempted < ?
+                WHERE (a.deezer_match_status = 'not_found' AND a.deezer_last_attempted < ?)
+                   OR (a.deezer_match_status = 'error' AND a.deezer_last_attempted < ?)
                 ORDER BY a.deezer_last_attempted ASC
                 LIMIT 1
-            """, (cutoff_date,))
+            """, (not_found_cutoff, error_cutoff))
             row = cursor.fetchone()
             if row:
                 return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_deezer_id': row[3]}
 
-            # Priority 6: Retry 'not_found' tracks
+            # Priority 6: Retry 'not_found' or 'error' tracks
             cursor.execute("""
                 SELECT t.id, t.title, ar.name AS artist_name, ar.deezer_id AS artist_deezer_id
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.deezer_match_status = 'not_found'
-                  AND t.deezer_last_attempted < ?
+                WHERE (t.deezer_match_status = 'not_found' AND t.deezer_last_attempted < ?)
+                   OR (t.deezer_match_status = 'error' AND t.deezer_last_attempted < ?)
                 ORDER BY t.deezer_last_attempted ASC
                 LIMIT 1
-            """, (cutoff_date,))
+            """, (not_found_cutoff, error_cutoff))
             row = cursor.fetchone()
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_deezer_id': row[3]}
@@ -358,7 +360,20 @@ class DeezerWorker:
 
                 # Fetch full album details for label, genres, explicit
                 deezer_album_id = result.get('id')
-                full_album = self.client.get_album(deezer_album_id) if deezer_album_id else None
+                full_album = None
+                if deezer_album_id:
+                    try:
+                        full_album = self.client.get_album(deezer_album_id)
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch full album details for '{album_name}' (Deezer ID: {deezer_album_id}): {e}")
+
+                if full_album is None:
+                    # Full details fetch failed — mark as error so it retries later
+                    # rather than storing a match without label/genres/explicit
+                    self._mark_status('album', album_id, 'error')
+                    self.stats['errors'] += 1
+                    logger.warning(f"Album '{album_name}' matched but full details unavailable, will retry")
+                    return
 
                 self._update_album(album_id, result, full_album)
                 self.stats['matched'] += 1
@@ -385,7 +400,20 @@ class DeezerWorker:
 
                 # Fetch full track details for BPM
                 deezer_track_id = result.get('id')
-                full_track = self.client.get_track(deezer_track_id) if deezer_track_id else None
+                full_track = None
+                if deezer_track_id:
+                    try:
+                        full_track = self.client.get_track(deezer_track_id)
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch full track details for '{track_name}' (Deezer ID: {deezer_track_id}): {e}")
+
+                if full_track is None:
+                    # Full details fetch failed — mark as error so it retries later
+                    # rather than storing a match without BPM/explicit
+                    self._mark_status('track', track_id, 'error')
+                    self.stats['errors'] += 1
+                    logger.warning(f"Track '{track_name}' matched but full details unavailable, will retry")
+                    return
 
                 self._update_track(track_id, result, full_track)
                 self.stats['matched'] += 1
