@@ -8048,6 +8048,7 @@ function processModalStatusUpdate(playlistId, data) {
         const missingCount = missingTracks.length;
         let completedCount = 0;
         let failedOrCancelledCount = 0;
+        let notFoundCount = 0;
 
         // Verify modal exists before processing tasks
         const modal = document.getElementById(`download-missing-modal-${playlistId}`);
@@ -8107,6 +8108,7 @@ function processModalStatusUpdate(playlistId, data) {
                     case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
                     case 'post_processing': statusText = '⌛ Processing...'; break;
                     case 'completed': statusText = '✅ Completed'; completedCount++; break;
+                    case 'not_found': statusText = '🔇 Not Found'; notFoundCount++; break;
                     case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
                     case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
                     default: statusText = `⚪ ${task.status}`; break;
@@ -8119,7 +8121,7 @@ function processModalStatusUpdate(playlistId, data) {
                 statusEl.removeAttribute('data-error-msg');
                 statusEl.textContent = statusText;
 
-                if ((task.status === 'failed' || task.status === 'cancelled') && task.error_message) {
+                if ((task.status === 'failed' || task.status === 'cancelled' || task.status === 'not_found') && task.error_message) {
                     statusEl.classList.add('has-error-tooltip');
                     statusEl.dataset.errorMsg = task.error_message;
                     _ensureErrorTooltipListeners(statusEl);
@@ -8130,7 +8132,7 @@ function processModalStatusUpdate(playlistId, data) {
             }
 
             // V2 SYSTEM: Smart button management with persistent state awareness
-            if (actionsEl && !['completed', 'failed', 'cancelled', 'post_processing'].includes(task.status)) {
+            if (actionsEl && !['completed', 'failed', 'cancelled', 'not_found', 'post_processing'].includes(task.status)) {
                 // Check if we're in a cancelling state
                 if (isV2Task && uiState === 'cancelling') {
                     actionsEl.innerHTML = '<span style="color: #666;">Cancelling...</span>';
@@ -8139,7 +8141,7 @@ function processModalStatusUpdate(playlistId, data) {
                     const onclickHandler = isV2Task ? 'cancelTrackDownloadV2' : 'cancelTrackDownload';
                     actionsEl.innerHTML = `<button class="cancel-track-btn" title="Cancel this download" onclick="${onclickHandler}('${playlistId}', ${task.track_index})">×</button>`;
                 }
-            } else if (actionsEl && ['completed', 'failed', 'cancelled', 'post_processing'].includes(task.status)) {
+            } else if (actionsEl && ['completed', 'failed', 'cancelled', 'not_found', 'post_processing'].includes(task.status)) {
                 actionsEl.innerHTML = '-'; // No actions available for terminal or processing states
             }
         });
@@ -8168,7 +8170,7 @@ function processModalStatusUpdate(playlistId, data) {
 
         console.debug(`📊 [Worker Status] ${playlistId}: ${serverActiveWorkers}/${maxWorkers} active workers, ${clientActiveWorkers} client-side active tasks`);
 
-        const totalFinished = completedCount + failedOrCancelledCount;
+        const totalFinished = completedCount + failedOrCancelledCount + notFoundCount;
         const progressPercent = missingCount > 0 ? (totalFinished / missingCount) * 100 : 0;
         document.getElementById(`download-progress-fill-${playlistId}`).style.width = `${progressPercent}%`;
         document.getElementById(`download-progress-text-${playlistId}`).textContent = `${completedCount}/${missingCount} completed (${progressPercent.toFixed(0)}%)`;
@@ -8208,7 +8210,10 @@ function processModalStatusUpdate(playlistId, data) {
             autoSavePlaylistM3U(playlistId);
 
             // Show completion message
-            const completionMessage = `Download complete! ${completedCount} downloaded, ${failedOrCancelledCount} failed.`;
+            let completionParts = [`${completedCount} downloaded`];
+            if (notFoundCount > 0) completionParts.push(`${notFoundCount} not found`);
+            if (failedOrCancelledCount > 0) completionParts.push(`${failedOrCancelledCount} failed`);
+            const completionMessage = `Download complete! ${completionParts.join(', ')}.`;
             showToast(completionMessage, 'success');
 
             // Auto-close wishlist modal when completed (for auto-processing)
@@ -8317,7 +8322,7 @@ function processModalStatusUpdate(playlistId, data) {
 
                 // Handle background wishlist processing completion specially
                 if (isBackgroundWishlist) {
-                    console.log(`🎉 Background wishlist processing complete: ${completedCount} downloaded, ${failedOrCancelledCount} failed`);
+                    console.log(`🎉 Background wishlist processing complete: ${completedCount} downloaded, ${notFoundCount} not found, ${failedOrCancelledCount} failed`);
 
                     // Reset modal to idle state to prevent "complete" phase disruption
                     setTimeout(() => {
@@ -8335,7 +8340,10 @@ function processModalStatusUpdate(playlistId, data) {
                 // Check for wishlist summary from backend (added when failed/cancelled tracks are processed)
                 if (data.wishlist_summary) {
                     const summary = data.wishlist_summary;
-                    completionMessage = `Download process complete! Downloaded: ${completedCount}, Failed/Cancelled: ${failedOrCancelledCount}.`;
+                    let summaryParts = [`Downloaded: ${completedCount}`];
+                    if (notFoundCount > 0) summaryParts.push(`Not Found: ${notFoundCount}`);
+                    if (failedOrCancelledCount > 0) summaryParts.push(`Failed: ${failedOrCancelledCount}`);
+                    completionMessage = `Download process complete! ${summaryParts.join(', ')}.`;
 
                     if (summary.tracks_added > 0) {
                         completionMessage += ` Added ${summary.tracks_added} failed track${summary.tracks_added !== 1 ? 's' : ''} to wishlist for automatic retry.`;
@@ -14037,6 +14045,7 @@ function updateCompletedModalResults(playlistId, downloadData) {
         const missingTracks = (downloadData.analysis_results || []).filter(r => !r.found);
         let completedCount = 0;
         let failedOrCancelledCount = 0;
+        let notFoundCount = 0;
 
         (downloadData.tasks || []).forEach(task => {
             const row = document.querySelector(`#download-missing-modal-${CSS.escape(playlistId)} tr[data-track-index="${task.track_index}"]`);
@@ -14053,6 +14062,7 @@ function updateCompletedModalResults(playlistId, downloadData) {
                 case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
                 case 'post_processing': statusText = '⌛ Processing...'; break; // NEW VERIFICATION WORKFLOW
                 case 'completed': statusText = '✅ Completed'; completedCount++; break;
+                case 'not_found': statusText = '🔇 Not Found'; notFoundCount++; break;
                 case 'failed': statusText = '❌ Failed'; failedOrCancelledCount++; break;
                 case 'cancelled': statusText = '🚫 Cancelled'; failedOrCancelledCount++; break;
                 default: statusText = `⚪ ${task.status}`; break;
@@ -14063,7 +14073,7 @@ function updateCompletedModalResults(playlistId, downloadData) {
         });
 
         // Update download progress to final state
-        const totalFinished = completedCount + failedOrCancelledCount;
+        const totalFinished = completedCount + failedOrCancelledCount + notFoundCount;
         const missingCount = missingTracks.length;
         const progressPercent = missingCount > 0 ? (totalFinished / missingCount) * 100 : 100;
 
@@ -14075,7 +14085,7 @@ function updateCompletedModalResults(playlistId, downloadData) {
         if (downloadProgressText) downloadProgressText.textContent = `${completedCount}/${missingCount} completed (${progressPercent.toFixed(0)}%)`;
         if (statDownloaded) statDownloaded.textContent = completedCount;
 
-        console.log(`✅ [Completed Results] Updated modal with ${completedCount} completed, ${failedOrCancelledCount} failed tasks`);
+        console.log(`✅ [Completed Results] Updated modal with ${completedCount} completed, ${notFoundCount} not found, ${failedOrCancelledCount} failed tasks`);
 
     } catch (error) {
         console.error(`❌ [Completed Results] Error updating completed modal results:`, error);

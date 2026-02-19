@@ -992,7 +992,7 @@ class WebUIDownloadMonitor:
                             task_status = download_tasks[task_id]['status']
                             if task_status in ['searching', 'downloading', 'queued', 'post_processing']:
                                 actually_active += 1
-                            elif task_status in ['failed', 'complete', 'cancelled'] and task_id in queue[queue_index:]:
+                            elif task_status in ['failed', 'complete', 'cancelled', 'not_found'] and task_id in queue[queue_index:]:
                                 # These are orphaned tasks - they're done but still in active queue
                                 orphaned_tasks.append(task_id)
                     
@@ -1067,7 +1067,7 @@ def validate_and_heal_batch_states():
                         task_status = download_tasks[task_id]['status']
                         if task_status in ['searching', 'downloading', 'queued', 'post_processing']:
                             actually_active += 1
-                        elif task_status in ['failed', 'completed', 'cancelled']:
+                        elif task_status in ['failed', 'completed', 'cancelled', 'not_found']:
                             orphaned_tasks.append(task_id)
                     else:
                         # Task in queue but not in download_tasks dict
@@ -12953,7 +12953,7 @@ def _on_download_completed(batch_id, task_id, success=True):
                 'artist_name': _get_track_artist_name(original_track_info),
                 'retry_count': task.get('retry_count', 0),
                 'spotify_track': spotify_track_data,  # Properly formatted spotify track for wishlist
-                'failure_reason': 'Download cancelled' if task_status == 'cancelled' else 'Download failed',
+                'failure_reason': 'Download cancelled' if task_status == 'cancelled' else ('Not found on Soulseek' if task_status == 'not_found' else 'Download failed'),
                 'candidates': task.get('cached_candidates', [])  # Include search results if available
             }
             
@@ -12961,10 +12961,14 @@ def _on_download_completed(batch_id, task_id, success=True):
                 download_batches[batch_id]['cancelled_tracks'].add(task.get('track_index', 0))
                 print(f"🚫 [Batch Manager] Added cancelled track to batch tracking: {track_info['track_name']}")
                 add_activity_item("🚫", "Download Cancelled", f"'{track_info['track_name']}'", "Now")
-            elif task_status == 'failed':
+            elif task_status in ('failed', 'not_found'):
                 download_batches[batch_id]['permanently_failed_tracks'].append(track_info)
-                print(f"❌ [Batch Manager] Added failed track to batch tracking: {track_info['track_name']}")
-                add_activity_item("❌", "Download Failed", f"'{track_info['track_name']}'", "Now")
+                if task_status == 'not_found':
+                    print(f"🔇 [Batch Manager] Added not-found track to batch tracking: {track_info['track_name']}")
+                    add_activity_item("🔇", "Not Found", f"'{track_info['track_name']}'", "Now")
+                else:
+                    print(f"❌ [Batch Manager] Added failed track to batch tracking: {track_info['track_name']}")
+                    add_activity_item("❌", "Download Failed", f"'{track_info['track_name']}'", "Now")
             
         # WISHLIST REMOVAL: Handle successful downloads for wishlist removal
         if success and task_id in download_tasks:
@@ -13031,8 +13035,8 @@ def _on_download_completed(batch_id, task_id, success=True):
                 if task_status == 'searching':
                     task_age = current_time - task.get('status_change_time', current_time)
                     if task_age > 600:  # 10 minutes
-                        print(f"⏰ [Stuck Detection] Task {task_id} stuck in searching for {task_age:.0f}s - forcing failure")
-                        task['status'] = 'failed'
+                        print(f"⏰ [Stuck Detection] Task {task_id} stuck in searching for {task_age:.0f}s - forcing not_found")
+                        task['status'] = 'not_found'
                         task['error_message'] = f'Search stuck for {int(task_age // 60)} minutes with no results — timed out'
                         finished_count += 1
                     else:
@@ -13045,7 +13049,7 @@ def _on_download_completed(batch_id, task_id, success=True):
                         finished_count += 1
                     else:
                         retrying_count += 1
-                elif task_status in ['completed', 'failed', 'cancelled']:
+                elif task_status in ['completed', 'failed', 'cancelled', 'not_found']:
                     finished_count += 1
             else:
                 # Task ID in queue but not in download_tasks - treat as completed to prevent blocking
@@ -13960,7 +13964,7 @@ def _download_track_worker(task_id, batch_id=None):
         print(f"❌ [Modal Worker] No valid candidates found for '{track.name}' after trying all {len(search_queries)} queries.")
         with tasks_lock:
             if task_id in download_tasks:
-                download_tasks[task_id]['status'] = 'failed'
+                download_tasks[task_id]['status'] = 'not_found'
                 _diag_summary = ' | '.join(search_diagnostics) if search_diagnostics else 'no queries attempted'
                 download_tasks[task_id]['error_message'] = f'No match found for "{track_name}" by {artist_name or "Unknown"} after {len(search_queries)} queries. Breakdown: {_diag_summary}'
         
@@ -14626,9 +14630,14 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                         print(f"⚠️ [Safety Valve] Error checking for completed file: {e}")
 
                 if not recovered:
-                    print(f"⏰ [Safety Valve] Task {task_id} stuck for {task_age:.1f}s - forcing failure")
-                    task['status'] = 'failed'
-                    task['error_message'] = f'Task stuck in {stuck_state} state for {int(task_age // 60)} minutes — forcibly stopped'
+                    if stuck_state == 'searching':
+                        print(f"⏰ [Safety Valve] Task {task_id} stuck in searching for {task_age:.1f}s - marking not_found")
+                        task['status'] = 'not_found'
+                        task['error_message'] = f'Search stuck for {int(task_age // 60)} minutes with no results — timed out'
+                    else:
+                        print(f"⏰ [Safety Valve] Task {task_id} stuck for {task_age:.1f}s - forcing failure")
+                        task['status'] = 'failed'
+                        task['error_message'] = f'Task stuck in {stuck_state} state for {int(task_age // 60)} minutes — forcibly stopped'
 
             task_status = {
                 'task_id': task_id,
@@ -14654,7 +14663,7 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                     state_str = live_info.get('state', 'Unknown')
                     
                     # Don't override tasks that are already in terminal states or post-processing
-                    if task['status'] not in ['completed', 'failed', 'cancelled', 'post_processing']:
+                    if task['status'] not in ['completed', 'failed', 'cancelled', 'not_found', 'post_processing']:
                         # SYNC.PY PARITY: Prioritized state checking (Errored/Cancelled before Completed)
                         # This prevents "Completed, Errored" states from being marked as completed
                         if 'Cancelled' in state_str or 'Canceled' in state_str:
@@ -15269,8 +15278,8 @@ def _check_batch_completion_v2(batch_id):
                     if task_status == 'searching':
                         task_age = current_time - task.get('status_change_time', current_time)
                         if task_age > 600:  # 10 minutes
-                            print(f"⏰ [Stuck Detection V2] Task {task_id} stuck in searching for {task_age:.0f}s - forcing failure")
-                            task['status'] = 'failed'
+                            print(f"⏰ [Stuck Detection V2] Task {task_id} stuck in searching for {task_age:.0f}s - forcing not_found")
+                            task['status'] = 'not_found'
                             task['error_message'] = f'Search stuck for {int(task_age // 60)} minutes with no results — timed out'
                             finished_count += 1
                         else:
@@ -15283,7 +15292,7 @@ def _check_batch_completion_v2(batch_id):
                             finished_count += 1
                         else:
                             retrying_count += 1
-                    elif task_status in ['completed', 'failed', 'cancelled']:
+                    elif task_status in ['completed', 'failed', 'cancelled', 'not_found']:
                         finished_count += 1
                 else:
                     # Task ID in queue but not in download_tasks - treat as completed to prevent blocking
@@ -15481,7 +15490,7 @@ def cancel_batch(batch_id):
             for task_id in download_batches[batch_id].get('queue', []):
                 if task_id in download_tasks:
                     task = download_tasks[task_id]
-                    if task['status'] not in ['completed', 'cancelled']:
+                    if task['status'] not in ['completed', 'failed', 'not_found', 'cancelled']:
                         task['status'] = 'cancelled'
                         cancelled_count += 1
             
