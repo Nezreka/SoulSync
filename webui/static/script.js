@@ -118,6 +118,8 @@ function observeLazyBackgrounds(container) {
 
 // --- MusicBrainz Integration Constants ---
 const MUSICBRAINZ_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png';
+const DEEZER_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e5/Deezer_logo.svg/120px-Deezer_logo.svg.png';
+const AUDIODB_LOGO_URL = null; // No reliable external logo — uses text fallback
 
 // --- Wishlist Modal Persistence State Management ---
 const WishlistModalState = {
@@ -25615,26 +25617,47 @@ function createLibraryArtistCard(artist) {
     card.style.position = 'relative';
     card.style.transition = 'transform 0.2s, box-shadow 0.2s';
 
-    // Add MusicBrainz icon if ID exists
+    // Add source badges (MusicBrainz, Deezer, AudioDB) stacked on top-right
+    const badgeSources = [];
     if (artist.musicbrainz_id) {
-        const mbIcon = document.createElement('div');
-        mbIcon.className = 'mb-card-icon';
-        mbIcon.title = 'View on MusicBrainz';
-        mbIcon.innerHTML = `<img src="${MUSICBRAINZ_LOGO_URL}" style="width: 20px; height: auto; display: block;">`;
-
-        mbIcon.onclick = (e) => {
-            e.stopPropagation();
-            window.open(`https://musicbrainz.org/artist/${artist.musicbrainz_id}`, '_blank');
-        };
-        card.appendChild(mbIcon);
+        badgeSources.push({ cls: 'mb-card-icon', logo: MUSICBRAINZ_LOGO_URL, fallback: 'MB', title: 'View on MusicBrainz', url: `https://musicbrainz.org/artist/${artist.musicbrainz_id}` });
     }
+    if (artist.deezer_id) {
+        badgeSources.push({ cls: 'deezer-card-icon', logo: DEEZER_LOGO_URL, fallback: 'Dz', title: 'View on Deezer', url: `https://www.deezer.com/artist/${artist.deezer_id}` });
+    }
+    if (artist.audiodb_id) {
+        const adbSlug = artist.name ? artist.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '') : '';
+        badgeSources.push({ cls: 'audiodb-card-icon', logo: AUDIODB_LOGO_URL, fallback: 'ADB', title: 'View on TheAudioDB', url: `https://www.theaudiodb.com/artist/${artist.audiodb_id}-${adbSlug}` });
+    }
+    let badgeOffset = 8;
+    badgeSources.forEach(source => {
+        const icon = document.createElement('div');
+        icon.className = `${source.cls} source-card-icon`;
+        icon.style.top = badgeOffset + 'px';
+        icon.title = source.title;
+        if (source.logo) {
+            const img = document.createElement('img');
+            img.src = source.logo;
+            img.style.cssText = 'width: 20px; height: auto; display: block;';
+            img.onerror = () => { icon.textContent = source.fallback; };
+            icon.appendChild(img);
+        } else {
+            icon.textContent = source.fallback;
+        }
+        icon.onclick = (e) => {
+            e.stopPropagation();
+            window.open(source.url, '_blank');
+        };
+        card.appendChild(icon);
+        badgeOffset += 32;
+    });
 
     // Add watchlist indicator if artist is on the watchlist
     if (artist.is_watched) {
         const watchIcon = document.createElement('div');
         watchIcon.className = 'watchlist-card-icon';
         watchIcon.title = 'On your watchlist';
-        watchIcon.style.top = artist.musicbrainz_id ? '40px' : '8px';
+        watchIcon.style.top = badgeOffset + 'px';
         watchIcon.textContent = '👁️';
         card.appendChild(watchIcon);
     }
@@ -25917,33 +25940,47 @@ function updateArtistDetailPageHeaderWithData(artist) {
     if (mainTitle) {
         mainTitle.textContent = artist.name;
 
-        if (artist.musicbrainz_id) {
-            // Remove existing link if any (to prevent duplicates)
-            const existingMb = mainTitle.querySelector('.mb-link-btn');
-            if (existingMb) existingMb.remove();
+        // Remove existing source links (to prevent duplicates)
+        mainTitle.querySelectorAll('.source-link-btn').forEach(el => el.remove());
 
-            const mbLink = document.createElement('a');
-            mbLink.className = 'mb-link-btn';
-            mbLink.href = `https://musicbrainz.org/artist/${artist.musicbrainz_id}`;
-            mbLink.target = '_blank';
-            mbLink.title = 'View on MusicBrainz';
+        const adbSlug = artist.name ? artist.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '') : '';
+        const sources = [
+            { id: artist.musicbrainz_id, url: `https://musicbrainz.org/artist/${artist.musicbrainz_id}`, logo: MUSICBRAINZ_LOGO_URL, label: 'MusicBrainz' },
+            { id: artist.deezer_id, url: `https://www.deezer.com/artist/${artist.deezer_id}`, logo: DEEZER_LOGO_URL, label: 'Deezer' },
+            { id: artist.audiodb_id, url: `https://www.theaudiodb.com/artist/${artist.audiodb_id}-${adbSlug}`, logo: AUDIODB_LOGO_URL, label: 'TheAudioDB' },
+        ];
 
-            mbLink.innerHTML = `
-                <img src="${MUSICBRAINZ_LOGO_URL}" style="height: 24px; width: auto; vertical-align: middle; display: inline-block;">
-                <span style="color:rgba(255,255,255,0.9); margin-left:10px; font-size: 13px; font-weight: 600; vertical-align: middle;">View on MusicBrainz</span>
-            `;
-            mbLink.style.padding = '5px 14px';
-            mbLink.style.border = '1px solid rgba(255,255,255,0.1)';
-            mbLink.style.background = 'rgba(0,0,0,0.4)';
-            mbLink.style.borderRadius = '20px';
-            mbLink.style.marginLeft = '16px';
-            mbLink.style.display = 'inline-flex';
-            mbLink.style.alignItems = 'center';
-            mbLink.style.textDecoration = 'none';
-            mbLink.style.verticalAlign = 'middle';
+        sources.forEach(source => {
+            if (!source.id) return;
+            const link = document.createElement('a');
+            link.className = 'source-link-btn';
+            link.href = source.url;
+            link.target = '_blank';
+            link.title = `View on ${source.label}`;
+            link.style.padding = '5px 14px';
+            link.style.border = '1px solid rgba(255,255,255,0.1)';
+            link.style.background = 'rgba(0,0,0,0.4)';
+            link.style.borderRadius = '20px';
+            link.style.marginLeft = '16px';
+            link.style.display = 'inline-flex';
+            link.style.alignItems = 'center';
+            link.style.textDecoration = 'none';
+            link.style.verticalAlign = 'middle';
 
-            mainTitle.appendChild(mbLink);
-        }
+            const span = document.createElement('span');
+            span.style.cssText = `color:rgba(255,255,255,0.9); margin-left:${source.logo ? '10px' : '0'}; font-size: 13px; font-weight: 600; vertical-align: middle;`;
+            span.textContent = `View on ${source.label}`;
+
+            if (source.logo) {
+                const img = document.createElement('img');
+                img.src = source.logo;
+                img.style.cssText = 'height: 24px; width: auto; vertical-align: middle; display: inline-block;';
+                img.onerror = () => { img.style.display = 'none'; span.style.marginLeft = '0'; };
+                link.appendChild(img);
+            }
+            link.appendChild(span);
+            mainTitle.appendChild(link);
+        });
     }
 }
 

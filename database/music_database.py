@@ -4319,13 +4319,14 @@ class MusicDatabase:
                         a.spotify_artist_id,
                         a.itunes_artist_id,
                         a.deezer_id,
+                        a.audiodb_id,
                         COUNT(DISTINCT al.id) as album_count,
                         COUNT(DISTINCT t.id) as track_count
                     FROM artists a
                     LEFT JOIN albums al ON a.id = al.artist_id
                     LEFT JOIN tracks t ON al.id = t.album_id
                     WHERE {where_clause}
-                    GROUP BY a.id, a.name, a.thumb_url, a.genres, a.musicbrainz_id, a.deezer_id
+                    GROUP BY a.id, a.name, a.thumb_url, a.genres, a.musicbrainz_id, a.deezer_id, a.audiodb_id
                     ORDER BY a.name COLLATE NOCASE
                     LIMIT ? OFFSET ?
                 """
@@ -4371,6 +4372,7 @@ class MusicDatabase:
                         'genres': artist.genres,
                         'musicbrainz_id': row['musicbrainz_id'],
                         'deezer_id': row['deezer_id'],
+                        'audiodb_id': row['audiodb_id'],
                         'album_count': row['album_count'] or 0,
                         'track_count': row['track_count'] or 0,
                         'is_watched': bool(is_watched)
@@ -4426,7 +4428,7 @@ class MusicDatabase:
                 # Get artist information
                 cursor.execute("""
                     SELECT
-                        id, name, thumb_url, genres, server_source, musicbrainz_id
+                        id, name, thumb_url, genres, server_source, musicbrainz_id, deezer_id, audiodb_id
                     FROM artists
                     WHERE id = ?
                 """, (artist_id,))
@@ -4564,6 +4566,8 @@ class MusicDatabase:
                         'genres': genres,
                         'server_source': artist_row['server_source'],
                         'musicbrainz_id': artist_row['musicbrainz_id'],
+                        'deezer_id': artist_row['deezer_id'],
+                        'audiodb_id': artist_row['audiodb_id'],
                         'album_count': album_count,
                         'track_count': track_count
                     },

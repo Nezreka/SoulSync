@@ -22610,10 +22610,45 @@ body {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
+.source-card-icon {
+    position: absolute;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.9 !important;
+    transition: transform 0.2s;
+    cursor: pointer;
+    z-index: 100 !important;
+    color: white;
+    font-size: 11px;
+    font-weight: 800;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.source-card-icon:hover {
+    transform: scale(1.1);
+    opacity: 1 !important;
+}
+
 .mb-card-icon:hover {
     transform: scale(1.1);
     background: #d466a9;
     opacity: 1 !important;
+}
+
+.deezer-card-icon:hover {
+    background: #a238ff;
+}
+
+.audiodb-card-icon:hover {
+    background: #1a6bc4;
 }
 
 .watchlist-card-icon {
