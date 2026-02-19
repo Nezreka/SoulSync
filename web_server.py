@@ -5524,6 +5524,55 @@ def get_artist_discography(artist_id):
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+def _resolve_db_album_id(album_id, artist_id=None):
+    """Resolve a database album ID to a real Spotify/iTunes album ID.
+
+    When the artist detail page falls back to owned_releases (Spotify artist
+    search failed), the album cards carry a database auto-increment ID.
+    This helper looks up stored external IDs first, then falls back to an
+    iTunes/Spotify search by album title + artist name.
+    """
+    try:
+        database = get_database()
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT a.title, a.spotify_album_id, a.itunes_album_id, ar.name as artist_name
+                FROM albums a
+                JOIN artists ar ON a.artist_id = ar.id
+                WHERE a.id = ?
+            """, (album_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            # Prefer stored external IDs
+            if row['spotify_album_id']:
+                return row['spotify_album_id']
+            if row['itunes_album_id']:
+                return row['itunes_album_id']
+
+            # No stored external ID — search by name
+            album_title = row['title']
+            artist_name = row['artist_name']
+            query = f"{artist_name} {album_title}"
+            print(f"🔍 Searching for album by name: '{query}'")
+            results = spotify_client.search_albums(query, limit=5)
+            if results:
+                # Pick the best match (search already ranks by relevance)
+                for album in results:
+                    if album.name.lower().strip() == album_title.lower().strip():
+                        print(f"✅ Found exact album match: {album.name} (ID: {album.id})")
+                        return album.id
+                # Fall back to first result if no exact title match
+                print(f"⚠️ No exact match, using best result: {results[0].name} (ID: {results[0].id})")
+                return results[0].id
+
+    except Exception as e:
+        print(f"⚠️ Error resolving DB album ID {album_id}: {e}")
+    return None
+
+
 @app.route('/api/artist/<artist_id>/album/<album_id>/tracks', methods=['GET'])
 def get_artist_album_tracks(artist_id, album_id):
     """Get tracks for specific album formatted for download missing tracks modal"""
@@ -5532,14 +5581,23 @@ def get_artist_album_tracks(artist_id, album_id):
             return jsonify({"error": "Spotify not authenticated"}), 401
         
         print(f"🎵 Fetching tracks for album: {album_id} by artist: {artist_id}")
-        
+
         # Get album information first
         album_data = spotify_client.get_album(album_id)
+        resolved_album_id = album_id
+
+        # If direct lookup failed, the album_id might be a database ID — resolve it
+        if not album_data:
+            resolved_album_id = _resolve_db_album_id(album_id, artist_id)
+            if resolved_album_id and resolved_album_id != album_id:
+                print(f"🔄 Resolved DB album ID {album_id} -> external ID {resolved_album_id}")
+                album_data = spotify_client.get_album(resolved_album_id)
+
         if not album_data:
             return jsonify({"error": "Album not found"}), 404
-        
+
         # Get album tracks
-        tracks_data = spotify_client.get_album_tracks(album_id)
+        tracks_data = spotify_client.get_album_tracks(resolved_album_id)
         if not tracks_data or 'items' not in tracks_data:
             return jsonify({"error": "No tracks found for album"}), 404
         
