@@ -21896,6 +21896,27 @@ body {
     filter: drop-shadow(0 0 8px rgba(186, 85, 211, 0.6));
 }
 
+/* Complete/Idle State */
+.musicbrainz-button.complete {
+    background: linear-gradient(135deg,
+            rgba(76, 175, 80, 0.15) 0%,
+            rgba(56, 142, 60, 0.20) 100%);
+    border-color: rgba(76, 175, 80, 0.35);
+    box-shadow:
+        0 4px 16px rgba(76, 175, 80, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.musicbrainz-button.complete .mb-logo {
+    opacity: 0.85;
+    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
+}
+
+.musicbrainz-button.complete .mb-spinner {
+    opacity: 0;
+}
+
 /* Paused State */
 .musicbrainz-button.paused {
     background: linear-gradient(135deg,
@@ -22137,6 +22158,27 @@ body {
     filter: drop-shadow(0 0 8px rgba(0, 188, 212, 0.6));
 }
 
+/* Complete/Idle State */
+.audiodb-button.complete {
+    background: linear-gradient(135deg,
+            rgba(76, 175, 80, 0.15) 0%,
+            rgba(56, 142, 60, 0.20) 100%);
+    border-color: rgba(76, 175, 80, 0.35);
+    box-shadow:
+        0 4px 16px rgba(76, 175, 80, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.audiodb-button.complete .audiodb-logo {
+    opacity: 0.85;
+    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
+}
+
+.audiodb-button.complete .audiodb-spinner {
+    opacity: 0;
+}
+
 /* Paused State */
 .audiodb-button.paused {
     background: linear-gradient(135deg,
@@ -22359,6 +22401,27 @@ body {
 .deezer-button.active .deezer-logo {
     opacity: 1;
     filter: drop-shadow(0 0 8px rgba(162, 56, 255, 0.6));
+}
+
+/* Complete/Idle State */
+.deezer-button.complete {
+    background: linear-gradient(135deg,
+            rgba(76, 175, 80, 0.15) 0%,
+            rgba(56, 142, 60, 0.20) 100%);
+    border-color: rgba(76, 175, 80, 0.35);
+    box-shadow:
+        0 4px 16px rgba(76, 175, 80, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.deezer-button.complete .deezer-logo {
+    opacity: 0.85;
+    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
+}
+
+.deezer-button.complete .deezer-spinner {
+    opacity: 0;
 }
 
 /* Paused State */
