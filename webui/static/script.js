@@ -118,8 +118,8 @@ function observeLazyBackgrounds(container) {
 
 // --- MusicBrainz Integration Constants ---
 const MUSICBRAINZ_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png';
-const DEEZER_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e5/Deezer_logo.svg/120px-Deezer_logo.svg.png';
-const AUDIODB_LOGO_URL = null; // No reliable external logo — uses text fallback
+const DEEZER_LOGO_URL = 'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610';
+function getAudioDBLogoURL() { const el = document.querySelector('img.audiodb-logo'); return el ? el.src : null; }
 
 // --- Wishlist Modal Persistence State Management ---
 const WishlistModalState = {
@@ -25627,7 +25627,7 @@ function createLibraryArtistCard(artist) {
     }
     if (artist.audiodb_id) {
         const adbSlug = artist.name ? artist.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '') : '';
-        badgeSources.push({ cls: 'audiodb-card-icon', logo: AUDIODB_LOGO_URL, fallback: 'ADB', title: 'View on TheAudioDB', url: `https://www.theaudiodb.com/artist/${artist.audiodb_id}-${adbSlug}` });
+        badgeSources.push({ cls: 'audiodb-card-icon', logo: getAudioDBLogoURL(), fallback: 'ADB', title: 'View on TheAudioDB', url: `https://www.theaudiodb.com/artist/${artist.audiodb_id}-${adbSlug}` });
     }
     let badgeOffset = 8;
     badgeSources.forEach(source => {
@@ -25947,7 +25947,7 @@ function updateArtistDetailPageHeaderWithData(artist) {
         const sources = [
             { id: artist.musicbrainz_id, url: `https://musicbrainz.org/artist/${artist.musicbrainz_id}`, logo: MUSICBRAINZ_LOGO_URL, label: 'MusicBrainz' },
             { id: artist.deezer_id, url: `https://www.deezer.com/artist/${artist.deezer_id}`, logo: DEEZER_LOGO_URL, label: 'Deezer' },
-            { id: artist.audiodb_id, url: `https://www.theaudiodb.com/artist/${artist.audiodb_id}-${adbSlug}`, logo: AUDIODB_LOGO_URL, label: 'TheAudioDB' },
+            { id: artist.audiodb_id, url: `https://www.theaudiodb.com/artist/${artist.audiodb_id}-${adbSlug}`, logo: getAudioDBLogoURL(), label: 'TheAudioDB' },
         ];
 
         sources.forEach(source => {
