@@ -6097,7 +6097,7 @@ def library_check_tracks():
 
         if not db_tracks:
             # No tracks by this artist in DB — none owned
-            owned_map = {t.get('name', ''): False for t in tracks if t.get('name')}
+            owned_map = {t.get('name', ''): {"owned": False} for t in tracks if t.get('name')}
             return jsonify({"success": True, "owned_tracks": owned_map})
 
         # Pre-normalize all DB track titles for fast in-memory comparison
@@ -6126,8 +6126,8 @@ def library_check_tracks():
             cleaned = re.sub(r'\s+', ' ', cleaned).strip()
             return cleaned
 
-        # Pre-compute normalized DB titles once
-        db_title_pairs = [(_normalize(t.title), _clean_title(t.title)) for t in db_tracks]
+        # Pre-compute normalized DB titles once (keep reference to db_track for metadata)
+        db_title_entries = [(_normalize(t.title), _clean_title(t.title), t) for t in db_tracks]
 
         owned_map = {}
         for track in tracks:
@@ -6137,12 +6137,12 @@ def library_check_tracks():
 
             search_norm = _normalize(track_name)
             search_clean = _clean_title(track_name)
-            is_owned = False
+            matched_db_track = None
 
-            for db_norm, db_clean in db_title_pairs:
+            for db_norm, db_clean, db_track in db_title_entries:
                 # Check normalized match first (fast path for exact/near-exact)
                 if search_norm == db_norm or search_clean == db_clean:
-                    is_owned = True
+                    matched_db_track = db_track
                     break
                 # Fuzzy match: try both normalized and cleaned
                 sim = max(
@@ -6150,10 +6150,20 @@ def library_check_tracks():
                     SequenceMatcher(None, search_clean, db_clean).ratio()
                 )
                 if sim >= 0.7:
-                    is_owned = True
+                    matched_db_track = db_track
                     break
 
-            owned_map[track_name] = is_owned
+            if matched_db_track:
+                import os
+                file_ext = os.path.splitext(matched_db_track.file_path or '')[1].lstrip('.').upper() or None
+                owned_map[track_name] = {
+                    "owned": True,
+                    "format": file_ext,
+                    "bitrate": matched_db_track.bitrate,
+                    "album": getattr(matched_db_track, 'album_title', None)
+                }
+            else:
+                owned_map[track_name] = {"owned": False}
 
         return jsonify({"success": True, "owned_tracks": owned_map})
 
