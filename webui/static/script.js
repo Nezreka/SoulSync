@@ -35141,8 +35141,10 @@ async function updateMusicBrainzStatus() {
         if (!button) return;
 
         // Update button state classes
-        button.classList.remove('active', 'paused');
-        if (data.running && !data.paused) {
+        button.classList.remove('active', 'paused', 'complete');
+        if (data.idle) {
+            button.classList.add('complete');
+        } else if (data.running && !data.paused) {
             button.classList.add('active');
         } else if (data.paused) {
             button.classList.add('paused');
@@ -35154,7 +35156,9 @@ async function updateMusicBrainzStatus() {
         const tooltipProgress = document.getElementById('mb-tooltip-progress');
 
         if (tooltipStatus) {
-            if (data.running && !data.paused) {
+            if (data.idle) {
+                tooltipStatus.textContent = 'Complete';
+            } else if (data.running && !data.paused) {
                 tooltipStatus.textContent = 'Running';
             } else if (data.paused) {
                 tooltipStatus.textContent = 'Paused';
@@ -35164,7 +35168,9 @@ async function updateMusicBrainzStatus() {
         }
 
         if (tooltipCurrent) {
-            if (data.current_item && data.current_item.name) {
+            if (data.idle) {
+                tooltipCurrent.textContent = 'All items processed';
+            } else if (data.current_item && data.current_item.name) {
                 const type = data.current_item.type || 'item';
                 const name = data.current_item.name;
                 tooltipCurrent.textContent = `${type.charAt(0).toUpperCase() + type.slice(1)}: "${name}"`;
@@ -35280,8 +35286,10 @@ async function updateAudioDBStatus() {
         if (!button) return;
 
         // Update button state classes
-        button.classList.remove('active', 'paused');
-        if (data.running && !data.paused) {
+        button.classList.remove('active', 'paused', 'complete');
+        if (data.idle) {
+            button.classList.add('complete');
+        } else if (data.running && !data.paused) {
             button.classList.add('active');
         } else if (data.paused) {
             button.classList.add('paused');
@@ -35293,7 +35301,9 @@ async function updateAudioDBStatus() {
         const tooltipProgress = document.getElementById('audiodb-tooltip-progress');
 
         if (tooltipStatus) {
-            if (data.running && !data.paused) {
+            if (data.idle) {
+                tooltipStatus.textContent = 'Complete';
+            } else if (data.running && !data.paused) {
                 tooltipStatus.textContent = 'Running';
             } else if (data.paused) {
                 tooltipStatus.textContent = 'Paused';
@@ -35303,7 +35313,9 @@ async function updateAudioDBStatus() {
         }
 
         if (tooltipCurrent) {
-            if (data.current_item && data.current_item.name) {
+            if (data.idle) {
+                tooltipCurrent.textContent = 'All items processed';
+            } else if (data.current_item && data.current_item.name) {
                 const type = data.current_item.type || 'item';
                 const name = data.current_item.name;
                 tooltipCurrent.textContent = `${type.charAt(0).toUpperCase() + type.slice(1)}: "${name}"`;
@@ -35406,8 +35418,10 @@ async function updateDeezerStatus() {
         if (!button) return;
 
         // Update button state classes
-        button.classList.remove('active', 'paused');
-        if (data.running && !data.paused) {
+        button.classList.remove('active', 'paused', 'complete');
+        if (data.idle) {
+            button.classList.add('complete');
+        } else if (data.running && !data.paused) {
             button.classList.add('active');
         } else if (data.paused) {
             button.classList.add('paused');
@@ -35419,7 +35433,9 @@ async function updateDeezerStatus() {
         const tooltipProgress = document.getElementById('deezer-tooltip-progress');
 
         if (tooltipStatus) {
-            if (data.running && !data.paused) {
+            if (data.idle) {
+                tooltipStatus.textContent = 'Complete';
+            } else if (data.running && !data.paused) {
                 tooltipStatus.textContent = 'Running';
             } else if (data.paused) {
                 tooltipStatus.textContent = 'Paused';
@@ -35428,8 +35444,12 @@ async function updateDeezerStatus() {
             }
         }
 
-        if (tooltipCurrent && data.current_item) {
-            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        if (tooltipCurrent) {
+            if (data.idle) {
+                tooltipCurrent.textContent = 'All items processed';
+            } else if (data.current_item && data.current_item.name) {
+                tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+            }
         }
 
         if (data.progress && tooltipProgress) {

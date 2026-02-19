@@ -96,10 +96,13 @@ class DeezerWorker:
 
         is_actually_running = self.running and (self.thread is not None and self.thread.is_alive())
 
+        is_idle = is_actually_running and not self.paused and self.stats['pending'] == 0 and self.current_item is None
+
         return {
             'enabled': True,
             'running': is_actually_running and not self.paused,
             'paused': self.paused,
+            'idle': is_idle,
             'current_item': self.current_item,
             'stats': self.stats.copy(),
             'progress': progress
