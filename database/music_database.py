@@ -2163,12 +2163,13 @@ class MusicDatabase:
         
         return max(0.0, similarity)
     
-    def check_album_completeness(self, album_id: int, expected_track_count: Optional[int] = None) -> Tuple[int, int, bool]:
+    def check_album_completeness(self, album_id: int, expected_track_count: Optional[int] = None) -> Tuple[int, int, bool, List[str]]:
         """
         Check if we have all tracks for an album.
         Merges counts across split album entries (same title+year+artist) so that
         albums split by the media server (e.g. Navidrome) are treated as one.
-        Returns (owned_tracks, expected_tracks, is_complete)
+        Returns (owned_tracks, expected_tracks, is_complete, formats)
+        where formats is a list of distinct format strings like ["FLAC"] or ["FLAC", "MP3-320"]
         """
         try:
             conn = self._get_connection()
@@ -2179,7 +2180,7 @@ class MusicDatabase:
             album_info = cursor.fetchone()
 
             if not album_info:
-                return 0, 0, False
+                return 0, 0, False, []
 
             # Find all album IDs that share the same title, year, and artist
             # This merges split albums (e.g. Navidrome splitting one album into multiple entries)
@@ -2201,7 +2202,7 @@ class MusicDatabase:
 
             # Use provided expected count if available, otherwise use stored count
             expected_tracks = expected_track_count if expected_track_count is not None else stored_track_count
-            
+
             # Determine completeness with refined thresholds
             if expected_tracks and expected_tracks > 0:
                 completion_ratio = owned_tracks / expected_tracks
@@ -2210,34 +2211,64 @@ class MusicDatabase:
             else:
                 # Fallback: if we have any tracks, consider it owned
                 is_complete = owned_tracks > 0
-            
-            return owned_tracks, expected_tracks or 0, is_complete
-            
+
+            # Get distinct format strings for owned tracks
+            formats = self._get_album_formats(cursor, sibling_ids)
+
+            return owned_tracks, expected_tracks or 0, is_complete, formats
+
         except Exception as e:
             logger.error(f"Error checking album completeness for album_id {album_id}: {e}")
-            return 0, 0, False
+            return 0, 0, False, []
+
+    def _get_album_formats(self, cursor, sibling_ids: list) -> List[str]:
+        """Get distinct format strings for tracks in the given album IDs."""
+        import os
+        try:
+            placeholders = ','.join('?' for _ in sibling_ids)
+            cursor.execute(f"""
+                SELECT DISTINCT file_path, bitrate FROM tracks
+                WHERE album_id IN ({placeholders}) AND file_path IS NOT NULL
+            """, sibling_ids)
+
+            format_set = set()
+            for row in cursor.fetchall():
+                ext = os.path.splitext(row['file_path'] or '')[1].lstrip('.').upper()
+                if not ext:
+                    continue
+                if ext == 'MP3' and row['bitrate']:
+                    format_set.add(f"MP3-{row['bitrate']}")
+                elif ext == 'MP3':
+                    format_set.add('MP3')
+                else:
+                    # FLAC, OGG, AAC, etc. — just the extension
+                    format_set.add(ext)
+            return sorted(format_set)
+        except Exception as e:
+            logger.error(f"Error getting album formats: {e}")
+            return []
     
-    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool]:
+    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
         """
         Check if an album exists in the database with completeness information.
         Enhanced to handle edition matching (standard <-> deluxe variants).
-        Returns (album, confidence, owned_tracks, expected_tracks, is_complete)
+        Returns (album, confidence, owned_tracks, expected_tracks, is_complete, formats)
         """
         try:
             # Try enhanced edition-aware matching first with expected track count for Smart Edition Matching
             album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source)
-            
+
             if not album:
-                return None, 0.0, 0, 0, False
-            
-            # Now check completeness
-            owned_tracks, expected_tracks, is_complete = self.check_album_completeness(album.id, expected_track_count)
-            
-            return album, confidence, owned_tracks, expected_tracks, is_complete
-            
+                return None, 0.0, 0, 0, False, []
+
+            # Now check completeness (includes formats)
+            owned_tracks, expected_tracks, is_complete, formats = self.check_album_completeness(album.id, expected_track_count)
+
+            return album, confidence, owned_tracks, expected_tracks, is_complete, formats
+
         except Exception as e:
             logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
-            return None, 0.0, 0, 0, False
+            return None, 0.0, 0, 0, False, []
     
     def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float]:
         """

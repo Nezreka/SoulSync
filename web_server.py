@@ -5727,6 +5727,7 @@ def _check_album_completion(db, album_data: dict, artist_name: str, test_mode: b
         
         print(f"🔍 Checking album: '{album_name}' ({total_tracks} tracks)")
         
+        formats = []
         if test_mode:
             # Generate test data to demonstrate the feature
             import random
@@ -5740,7 +5741,7 @@ def _check_album_completion(db, album_data: dict, artist_name: str, test_mode: b
             try:
                 # Get active server for database checking
                 active_server = config_manager.get_active_media_server()
-                db_album, confidence, owned_tracks, expected_tracks, is_complete = db.check_album_exists_with_completeness(
+                db_album, confidence, owned_tracks, expected_tracks, is_complete, formats = db.check_album_exists_with_completeness(
                     title=album_name,
                     artist=artist_name,
                     expected_track_count=total_tracks if total_tracks > 0 else None,
@@ -5790,9 +5791,10 @@ def _check_album_completion(db, album_data: dict, artist_name: str, test_mode: b
             "expected_tracks": expected_tracks or total_tracks,
             "completion_percentage": round(completion_percentage, 1),
             "confidence": round(confidence, 2) if confidence else 0.0,
-            "found_in_db": db_album is not None
+            "found_in_db": db_album is not None,
+            "formats": formats
         }
-        
+
     except Exception as e:
         print(f"❌ Error checking album completion for '{album_data.get('name', 'Unknown')}': {e}")
         return {
@@ -5803,7 +5805,8 @@ def _check_album_completion(db, album_data: dict, artist_name: str, test_mode: b
             "expected_tracks": album_data.get('total_tracks', 0),
             "completion_percentage": 0,
             "confidence": 0.0,
-            "found_in_db": False
+            "found_in_db": False,
+            "formats": []
         }
 
 def _check_single_completion(db, single_data: dict, artist_name: str, test_mode: bool = False) -> dict:
@@ -5813,14 +5816,15 @@ def _check_single_completion(db, single_data: dict, artist_name: str, test_mode:
         total_tracks = single_data.get('total_tracks', 1)
         single_id = single_data.get('id', '')
         album_type = single_data.get('album_type', 'single')
-        
+        formats = []
+
         print(f"🎵 Checking {album_type}: '{single_name}' ({total_tracks} tracks)")
-        
+
         if test_mode:
             # Generate test data for singles/EPs
             import random
             if album_type == 'ep' or total_tracks > 1:
-                owned_tracks = random.randint(0, total_tracks) 
+                owned_tracks = random.randint(0, total_tracks)
                 expected_tracks = total_tracks
                 confidence = random.uniform(0.7, 1.0)
                 print(f"🧪 TEST MODE: EP with {owned_tracks}/{expected_tracks} tracks")
@@ -5834,7 +5838,7 @@ def _check_single_completion(db, single_data: dict, artist_name: str, test_mode:
             try:
                 # Get active server for database checking
                 active_server = config_manager.get_active_media_server()
-                db_album, confidence, owned_tracks, expected_tracks, is_complete = db.check_album_exists_with_completeness(
+                db_album, confidence, owned_tracks, expected_tracks, is_complete, formats = db.check_album_exists_with_completeness(
                     title=single_name,
                     artist=artist_name,
                     expected_track_count=total_tracks,
@@ -5844,25 +5848,25 @@ def _check_single_completion(db, single_data: dict, artist_name: str, test_mode:
             except Exception as db_error:
                 print(f"⚠️ Database error for EP '{single_name}': {db_error}")
                 owned_tracks, expected_tracks, confidence = 0, total_tracks, 0.0
-            
+
             # Calculate completion percentage
             if expected_tracks > 0:
                 completion_percentage = (owned_tracks / expected_tracks) * 100
             else:
                 completion_percentage = (owned_tracks / total_tracks) * 100
-            
+
             # Determine status
             if completion_percentage >= 90 and owned_tracks > 0:
                 status = "completed"
             elif completion_percentage >= 60:
-                status = "nearly_complete" 
+                status = "nearly_complete"
             elif completion_percentage > 0:
                 status = "partial"
             else:
                 status = "missing"
-                
+
             print(f"  📊 EP Result: {owned_tracks}/{expected_tracks or total_tracks} tracks ({completion_percentage:.1f}%) - {status}")
-        
+
         else:
             # Single track - just check if the track exists
             try:
@@ -5874,15 +5878,24 @@ def _check_single_completion(db, single_data: dict, artist_name: str, test_mode:
             except Exception as db_error:
                 print(f"⚠️ Database error for single '{single_name}': {db_error}")
                 db_track, confidence = None, 0.0
-            
+
             owned_tracks = 1 if db_track else 0
             expected_tracks = 1
             completion_percentage = 100 if db_track else 0
-            
+
             status = "completed" if db_track else "missing"
-            
+
+            # Extract format from single track
+            if db_track and db_track.file_path:
+                import os
+                ext = os.path.splitext(db_track.file_path)[1].lstrip('.').upper()
+                if ext == 'MP3' and db_track.bitrate:
+                    formats = [f"MP3-{db_track.bitrate}"]
+                elif ext:
+                    formats = [ext]
+
             print(f"  🎵 Single Result: {owned_tracks}/1 tracks ({completion_percentage:.1f}%) - {status}")
-        
+
         return {
             "id": single_id,
             "name": single_name,
@@ -5892,9 +5905,10 @@ def _check_single_completion(db, single_data: dict, artist_name: str, test_mode:
             "completion_percentage": round(completion_percentage, 1),
             "confidence": round(confidence, 2) if confidence else 0.0,
             "found_in_db": (db_album if album_type == 'ep' or total_tracks > 1 else db_track) is not None,
-            "type": album_type
+            "type": album_type,
+            "formats": formats
         }
-        
+
     except Exception as e:
         print(f"❌ Error checking single/EP completion for '{single_data.get('name', 'Unknown')}': {e}")
         return {
@@ -5906,7 +5920,8 @@ def _check_single_completion(db, single_data: dict, artist_name: str, test_mode:
             "completion_percentage": 0,
             "confidence": 0.0,
             "found_in_db": False,
-            "type": single_data.get('album_type', 'single')
+            "type": single_data.get('album_type', 'single'),
+            "formats": []
         }
 
 @app.route('/api/artist/<artist_id>/completion-stream', methods=['POST'])
