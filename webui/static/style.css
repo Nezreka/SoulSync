@@ -8246,8 +8246,15 @@ body {
 }
 
 @keyframes batchBarSlideIn {
-    from { opacity: 0; transform: translateY(-8px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .watchlist-batch-count {
@@ -8301,12 +8308,12 @@ body {
     background: rgba(255, 255, 255, 0.06);
 }
 
-.watchlist-checkbox-wrapper input:checked + .watchlist-checkbox-custom {
+.watchlist-checkbox-wrapper input:checked+.watchlist-checkbox-custom {
     background: rgba(29, 185, 84, 0.3);
     border-color: #1db954;
 }
 
-.watchlist-checkbox-wrapper input:checked + .watchlist-checkbox-custom::after {
+.watchlist-checkbox-wrapper input:checked+.watchlist-checkbox-custom::after {
     content: '✓';
     color: #1db954;
     font-size: 13px;
@@ -13210,6 +13217,11 @@ body {
 .artist-image-container {
     position: relative;
     flex-shrink: 0;
+}
+
+#artist-hero-section #artist-detail-image {
+    width: 100%;
+    height: 100%;
 }
 
 .artist-detail-image {

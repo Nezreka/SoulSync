@@ -1542,14 +1542,39 @@ async function copyAddress(address, cryptoName) {
 // SETTINGS FUNCTIONALITY
 // ===============================
 
+let settingsAutoSaveTimer = null;
+
+function debouncedAutoSaveSettings() {
+    if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
+    settingsAutoSaveTimer = setTimeout(() => saveSettings(true), 2000);
+}
+
+function handleManualSaveClick() {
+    if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
+    saveSettings(false);
+}
+
 function initializeSettings() {
     // This function is called when the settings page is loaded.
     // It attaches event listeners to all interactive elements on the page.
 
-    // Main save button
+    // Main save button (manual save, non-quiet)
+    // Uses named function reference so addEventListener deduplicates across repeated calls
     const saveButton = document.getElementById('save-settings');
     if (saveButton) {
-        saveButton.addEventListener('click', saveSettings);
+        saveButton.addEventListener('click', handleManualSaveClick);
+    }
+
+    // Debounced auto-save on all settings inputs
+    // Uses named function reference (debouncedAutoSaveSettings) so addEventListener deduplicates
+    const settingsPage = document.getElementById('settings-page');
+    if (settingsPage) {
+        settingsPage.querySelectorAll('input[type="text"], input[type="url"], input[type="password"], input[type="number"], input[type="range"]').forEach(input => {
+            input.addEventListener('input', debouncedAutoSaveSettings);
+        });
+        settingsPage.querySelectorAll('input[type="checkbox"], select').forEach(input => {
+            input.addEventListener('change', debouncedAutoSaveSettings);
+        });
     }
 
     // Server toggle buttons
@@ -1592,7 +1617,7 @@ function resetFileOrganizationTemplates() {
     document.getElementById('template-single-path').value = defaults.single;
     document.getElementById('template-playlist-path').value = defaults.playlist;
 
-    showToast('Templates reset to defaults. Click "Save Settings" to apply.', 'success');
+    debouncedAutoSaveSettings();
 }
 
 function validateFileOrganizationTemplates() {
@@ -1886,6 +1911,9 @@ function toggleServer(serverType) {
         loadJellyfinUsers();
         loadJellyfinMusicLibraries();
     }
+
+    // Auto-save after server toggle change
+    debouncedAutoSaveSettings();
 }
 
 function updateDownloadSourceUI() {
@@ -2112,11 +2140,11 @@ async function saveQualityProfile() {
 // END QUALITY PROFILE FUNCTIONS
 // ===============================
 
-async function saveSettings() {
+async function saveSettings(quiet = false) {
     // Validate file organization templates before saving
     const validationErrors = validateFileOrganizationTemplates();
     if (validationErrors.length > 0) {
-        showToast('Template validation failed: ' + validationErrors.join(', '), 'error');
+        if (!quiet) showToast('Template validation failed: ' + validationErrors.join(', '), 'error');
         return;
     }
 
@@ -2197,7 +2225,7 @@ async function saveSettings() {
     };
 
     try {
-        showLoadingOverlay('Saving settings...');
+        if (!quiet) showLoadingOverlay('Saving settings...');
 
         // Save main settings
         const response = await fetch(API.settings, {
@@ -2228,8 +2256,7 @@ async function saveSettings() {
         }
 
         if (result.success && qualityProfileSaved && lookbackSaved) {
-            showToast('Settings saved successfully', 'success');
-            // Trigger immediate status update
+            showToast(quiet ? 'Settings auto-saved' : 'Settings saved successfully', 'success');
             setTimeout(updateServiceStatus, 1000);
         } else if (result.success && qualityProfileSaved && !lookbackSaved) {
             showToast('Settings saved, but discovery lookback period failed to save', 'warning');
@@ -2244,7 +2271,7 @@ async function saveSettings() {
         console.error('Error saving settings:', error);
         showToast('Failed to save settings', 'error');
     } finally {
-        hideLoadingOverlay();
+        if (!quiet) hideLoadingOverlay();
     }
 }
 
