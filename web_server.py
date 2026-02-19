@@ -4155,7 +4155,9 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
         highest_similarity = 0.0
 
         # Walk through the entire directory
-        for root, _, files in os.walk(search_dir):
+        for root, dirs, files in os.walk(search_dir):
+            # Skip quarantine folder — contains known-wrong files from AcoustID verification
+            dirs[:] = [d for d in dirs if d != 'ss_quarantine']
             for file in files:
                 # Direct match is the best case
                 if os.path.basename(file) == target_basename:
@@ -9147,7 +9149,7 @@ def _move_to_quarantine(file_path: str, context: dict, reason: str) -> str:
 
     # Get quarantine directory (inside download folder — always writable, even in Docker)
     download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
-    quarantine_dir = Path(download_dir) / "Quarantine"
+    quarantine_dir = Path(download_dir) / "ss_quarantine"
     quarantine_dir.mkdir(parents=True, exist_ok=True)
 
     # Create quarantine entry with timestamp
@@ -9155,8 +9157,10 @@ def _move_to_quarantine(file_path: str, context: dict, reason: str) -> str:
     original_name = Path(file_path).stem
     file_ext = Path(file_path).suffix
 
-    # Build quarantine filename: TIMESTAMP_originalname.ext
-    quarantine_filename = f"{timestamp}_{original_name}{file_ext}"
+    # Build quarantine filename: TIMESTAMP_originalname.ext.quarantined
+    # The .quarantined extension prevents audio file searches and media servers
+    # from picking up known-wrong files sitting in the downloads folder.
+    quarantine_filename = f"{timestamp}_{original_name}{file_ext}.quarantined"
     quarantine_path = quarantine_dir / quarantine_filename
 
     # Move file to quarantine
