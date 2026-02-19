@@ -11116,11 +11116,15 @@ async function lazyLoadTrackOwnership(artistName, tracks, sourceCard) {
                     const metaDiv = document.createElement('div');
                     metaDiv.className = 'wishlist-track-meta';
                     let metaHtml = '';
-                    if (trackData.format) {
-                        metaHtml += `<span class="wishlist-track-format">${trackData.format}</span>`;
-                    }
-                    if (trackData.bitrate) {
-                        metaHtml += `<span class="wishlist-track-bitrate">${trackData.bitrate} kbps</span>`;
+                    if (trackData.format === 'MP3' && trackData.bitrate) {
+                        metaHtml += `<span class="wishlist-track-format">MP3 ${trackData.bitrate}</span>`;
+                    } else {
+                        if (trackData.format) {
+                            metaHtml += `<span class="wishlist-track-format">${trackData.format}</span>`;
+                        }
+                        if (trackData.bitrate) {
+                            metaHtml += `<span class="wishlist-track-bitrate">${trackData.bitrate} kbps</span>`;
+                        }
                     }
                     metaDiv.innerHTML = metaHtml;
                     trackInfo.appendChild(metaDiv);
