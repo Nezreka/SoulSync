@@ -9,11 +9,13 @@ the file is flagged as incorrect.
 """
 
 import re
+import threading
 from difflib import SequenceMatcher
 from typing import Optional, Dict, Any, Tuple, List
 from enum import Enum
 from utils.logging_config import get_logger
 from core.acoustid_client import AcoustIDClient
+from core.musicbrainz_client import MusicBrainzClient
 
 logger = get_logger("acoustid_verification")
 
@@ -92,6 +94,91 @@ def _find_best_title_artist_match(
             best_artist_sim = artist_sim
 
     return best_rec, best_title_sim, best_artist_sim
+
+
+# Shared MusicBrainz client for enrichment lookups
+_mb_client = None
+_mb_client_lock = threading.Lock()
+
+MAX_MB_ENRICHMENT_LOOKUPS = 3
+
+
+def _get_mb_client() -> MusicBrainzClient:
+    """Get or create a shared MusicBrainz client instance."""
+    global _mb_client
+    if _mb_client is None:
+        with _mb_client_lock:
+            if _mb_client is None:
+                _mb_client = MusicBrainzClient()
+    return _mb_client
+
+
+def _enrich_recordings_from_musicbrainz(
+    recordings: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Enrich recordings that are missing title/artist by looking up their
+    MBIDs via MusicBrainz.
+
+    AcoustID often returns recordings with title=None, artist=None even though
+    the MBIDs are valid. This resolves the metadata so verification can compare
+    title/artist instead of skipping.
+
+    Args:
+        recordings: List of recording dicts from fingerprint_and_lookup()
+
+    Returns:
+        The same list, with title/artist filled in where possible.
+    """
+    # Fast path: if any recording already has title AND artist, no enrichment needed
+    if any(rec.get('title') and rec.get('artist') for rec in recordings):
+        return recordings
+
+    logger.info(f"Enriching {len(recordings)} recordings via MusicBrainz (all missing title/artist)...")
+
+    mb = _get_mb_client()
+    enriched_count = 0
+
+    for rec in recordings[:MAX_MB_ENRICHMENT_LOOKUPS]:
+        mbid = rec.get('mbid')
+        if not mbid:
+            continue
+
+        try:
+            data = mb.get_recording(mbid, includes=['artist-credits'])
+            if not data:
+                logger.debug(f"MusicBrainz returned no data for recording {mbid}")
+                continue
+
+            title = data.get('title')
+            artist_credit = data.get('artist-credit', [])
+
+            # Build artist string from artist-credit array
+            # Each entry has {"artist": {"name": "..."}, "joinphrase": "..."}
+            artist_parts = []
+            for credit in artist_credit:
+                name = credit.get('artist', {}).get('name', '')
+                joinphrase = credit.get('joinphrase', '')
+                if name:
+                    artist_parts.append(name + joinphrase)
+            artist = ''.join(artist_parts).strip() if artist_parts else None
+
+            if title:
+                rec['title'] = title
+                logger.debug(f"Enriched {mbid}: title='{title}'")
+            if artist:
+                rec['artist'] = artist
+                logger.debug(f"Enriched {mbid}: artist='{artist}'")
+
+            if title or artist:
+                enriched_count += 1
+
+        except Exception as e:
+            logger.debug(f"Failed to enrich recording {mbid}: {e}")
+            continue
+
+    logger.info(f"Enriched {enriched_count}/{min(len(recordings), MAX_MB_ENRICHMENT_LOOKUPS)} recordings from MusicBrainz")
+    return recordings
 
 
 class AcoustIDVerification:
@@ -174,6 +261,9 @@ class AcoustIDVerification:
                 msg = f"AcoustID fingerprint score too low ({best_score:.2f}) to verify"
                 logger.info(msg)
                 return VerificationResult.SKIP, msg
+
+            # Enrich recordings that are missing title/artist via MusicBrainz lookup
+            recordings = _enrich_recordings_from_musicbrainz(recordings)
 
             # Step 4: Find best title/artist match among AcoustID results
             best_rec, title_sim, artist_sim = _find_best_title_artist_match(
