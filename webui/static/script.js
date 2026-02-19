@@ -25649,9 +25649,14 @@ function createLibraryArtistCard(artist) {
         img.alt = artist.name;
         img.loading = 'lazy';
         img.onerror = () => {
-            console.log(`Failed to load image for ${artist.name}: ${artist.image_url}`);
-            // Replace with fallback on error
-            imageContainer.innerHTML = `<div class="library-artist-image-fallback">🎵</div>`;
+            console.log(`Failed to load image for ${artist.name}: ${img.src}`);
+            // Try Deezer fallback before emoji
+            if (artist.deezer_id && !img.dataset.triedDeezer) {
+                img.dataset.triedDeezer = 'true';
+                img.src = `https://api.deezer.com/artist/${artist.deezer_id}/image?size=big`;
+            } else {
+                imageContainer.innerHTML = `<div class="library-artist-image-fallback">🎵</div>`;
+            }
         };
         img.onload = () => {
             console.log(`Successfully loaded image for ${artist.name}: ${artist.image_url}`);
