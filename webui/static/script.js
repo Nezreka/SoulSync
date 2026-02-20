@@ -5601,6 +5601,65 @@ let currentModalPlaylistId = null;
 // PHASE 2: Local cancelled track management (GUI PARITY)
 let cancelledTracks = new Set(); // Track cancelled track indices like GUI's cancelled_tracks
 
+const TRACK_RENDER_BATCH_SIZE = 100;
+
+function applyProgressiveTrackRendering(playlistId, totalTrackCount) {
+    if (totalTrackCount <= TRACK_RENDER_BATCH_SIZE) return;
+
+    const modal = document.getElementById(`download-missing-modal-${playlistId}`);
+    if (!modal) return;
+
+    const tbody = document.getElementById(`download-tracks-tbody-${playlistId}`);
+    if (!tbody) return;
+
+    const rows = tbody.querySelectorAll('tr[data-track-index]');
+    if (rows.length <= TRACK_RENDER_BATCH_SIZE) return;
+
+    // Hide rows beyond first batch
+    for (let i = TRACK_RENDER_BATCH_SIZE; i < rows.length; i++) {
+        rows[i].classList.add('hidden');
+    }
+
+    let revealedCount = TRACK_RENDER_BATCH_SIZE;
+
+    // Append indicator into .download-tracks-title
+    const titleEl = modal.querySelector('.download-tracks-title');
+    if (titleEl) {
+        const indicator = document.createElement('span');
+        indicator.className = 'track-render-indicator';
+        indicator.id = `track-render-indicator-${playlistId}`;
+        indicator.textContent = `Showing ${revealedCount} of ${totalTrackCount} tracks`;
+        titleEl.appendChild(indicator);
+    }
+
+    // Scroll listener on table container
+    const container = modal.querySelector('.download-tracks-table-container');
+    if (!container) return;
+
+    container.addEventListener('scroll', function onScroll() {
+        const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        if (scrollBottom > 200) return;
+        if (revealedCount >= rows.length) return;
+
+        const nextEnd = Math.min(revealedCount + TRACK_RENDER_BATCH_SIZE, rows.length);
+        for (let i = revealedCount; i < nextEnd; i++) {
+            rows[i].classList.remove('hidden');
+        }
+        revealedCount = nextEnd;
+
+        const indicator = document.getElementById(`track-render-indicator-${playlistId}`);
+        if (indicator) {
+            indicator.textContent = revealedCount >= rows.length
+                ? `Showing all ${totalTrackCount} tracks`
+                : `Showing ${revealedCount} of ${totalTrackCount} tracks`;
+        }
+
+        if (revealedCount >= rows.length) {
+            container.removeEventListener('scroll', onScroll);
+        }
+    });
+}
+
 async function openDownloadMissingModal(playlistId) {
     showLoadingOverlay('Loading playlist...');
 
@@ -5765,6 +5824,7 @@ async function openDownloadMissingModal(playlistId) {
         </div>
     `;
 
+    applyProgressiveTrackRendering(playlistId, tracks.length);
     modal.style.display = 'flex';
     hideLoadingOverlay();
 }
@@ -6123,6 +6183,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
         </div>
     `;
 
+    applyProgressiveTrackRendering(virtualPlaylistId, spotifyTracks.length);
     modal.style.display = 'flex';
     hideLoadingOverlay();
 }
@@ -7326,6 +7387,7 @@ async function openDownloadMissingWishlistModal(category = null) {
         </div>
     `;
 
+    applyProgressiveTrackRendering(playlistId, tracks.length);
     modal.style.display = 'flex';
     hideLoadingOverlay();
     WishlistModalState.setVisible(); // Track that new wishlist modal is now visible
@@ -14989,6 +15051,7 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
         </div>
     `;
 
+    applyProgressiveTrackRendering(virtualPlaylistId, spotifyTracks.length);
     modal.style.display = 'flex';
     hideLoadingOverlay();
 }
@@ -22079,6 +22142,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
         </div>
     `;
 
+    applyProgressiveTrackRendering(virtualPlaylistId, spotifyTracks.length);
     modal.style.display = 'flex';
     hideLoadingOverlay();
 
