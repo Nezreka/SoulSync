@@ -1733,7 +1733,7 @@ def run_service_test(service, test_config):
             if run_async(soulseek_client.check_connection()):
                 # Success message based on active mode
                 mode_messages = {
-                    'soulseek': "Successfully connected to slskd.",
+                    'soulseek': "Successfully connected to Soulseek network via slskd.",
                     'youtube': "YouTube download source ready.",
                     'hybrid': "Download sources ready (Hybrid mode)."
                 }
@@ -1742,7 +1742,7 @@ def run_service_test(service, test_config):
             else:
                 # Failure message based on active mode
                 mode_errors = {
-                    'soulseek': "Could not connect to slskd. Check URL and API Key.",
+                    'soulseek': "slskd is not connected to the Soulseek network. Check slskd status and credentials.",
                     'youtube': "YouTube download source not available.",
                     'hybrid': "Could not connect to download sources. Check configuration."
                 }
