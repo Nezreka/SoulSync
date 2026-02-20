@@ -585,8 +585,15 @@ class WebUIDownloadMonitor:
                             # Trigger post-processing if download is completed but still marked as downloading locally
                             # 'Completed' is used by YouTubeClient, 'Succeeded' by Soulseek
                             if state in ['Completed', 'Succeeded'] and task['status'] == 'downloading':
-                                print(f"✅ Monitor detected completed download for {task_id} ({state}) - deferring completion to outside lock")
-                                # CRITICAL: Collect for handling outside the lock to prevent deadlock.
+                                # CRITICAL FIX: Transition to 'post_processing' HERE so downloads
+                                # don't depend on browser polling to trigger post-processing.
+                                # Previously, post-processing was only submitted by _build_batch_status_data
+                                # (called from browser-polled endpoints), meaning closing the browser
+                                # left tasks stuck in 'downloading' forever.
+                                task['status'] = 'post_processing'
+                                task['status_change_time'] = current_time
+                                print(f"✅ Monitor detected completed download for {task_id} ({state}) - submitting post-processing")
+                                # Collect for handling outside the lock to prevent deadlock.
                                 # _on_download_completed acquires tasks_lock which is non-reentrant.
                                 completed_tasks.append((batch_id, task_id))
 
@@ -617,7 +624,11 @@ class WebUIDownloadMonitor:
         # (_on_download_completed acquires tasks_lock internally)
         for batch_id, task_id in completed_tasks:
             try:
-                print(f"✅ [Monitor] Triggering post-processing for completed task {task_id}")
+                # Submit post-processing worker (file move, tagging, AcoustID verification)
+                # This makes batch downloads fully independent of browser polling.
+                print(f"✅ [Monitor] Submitting post-processing worker for task {task_id}")
+                missing_download_executor.submit(_run_post_processing_worker, task_id, batch_id)
+                # Chain to next download in the batch queue
                 _on_download_completed(batch_id, task_id, success=True)
             except Exception as e:
                 print(f"❌ [Monitor] Error handling completed task {task_id}: {e}")
