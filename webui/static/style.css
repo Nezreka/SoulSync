@@ -1499,6 +1499,64 @@ body {
     pointer-events: none;
 }
 
+.flac-bit-depth-selector {
+    padding: 8px 12px;
+    transition: opacity 0.3s ease;
+}
+
+.flac-bit-depth-selector.disabled {
+    opacity: 0.35;
+    pointer-events: none;
+}
+
+.flac-bit-depth-selector label {
+    display: block;
+    margin-bottom: 6px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+}
+
+.bit-depth-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.bit-depth-btn {
+    flex: 1;
+    padding: 7px 12px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.bit-depth-btn.active {
+    background: linear-gradient(135deg,
+            rgba(29, 185, 84, 0.2) 0%,
+            rgba(30, 215, 96, 0.12) 100%);
+    border-color: rgba(29, 185, 84, 0.4);
+    color: #1ed760;
+    font-weight: 600;
+    box-shadow: 0 4px 16px rgba(29, 185, 84, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.bit-depth-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+    transform: translateY(-1px);
+}
+
+.bit-depth-btn.active:hover {
+    background: linear-gradient(135deg,
+            rgba(29, 185, 84, 0.28) 0%,
+            rgba(30, 215, 96, 0.18) 100%);
+}
+
 .slider-group {
     margin-top: 8px;
 }

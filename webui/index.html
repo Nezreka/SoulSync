@@ -3018,6 +3018,17 @@
                                             </div>
                                         </div>
                                     </div>
+                                    <div class="flac-bit-depth-selector" id="flac-bit-depth-selector">
+                                        <label>Bit Depth:</label>
+                                        <div class="bit-depth-buttons">
+                                            <button class="bit-depth-btn active" data-value="any" onclick="setFlacBitDepth('any')">Any</button>
+                                            <button class="bit-depth-btn" data-value="16" onclick="setFlacBitDepth('16')">16-bit</button>
+                                            <button class="bit-depth-btn" data-value="24" onclick="setFlacBitDepth('24')">24-bit</button>
+                                        </div>
+                                        <div style="color: #888; font-size: 0.75em; margin-top: 4px;">
+                                            Rejects FLAC files that don't match the selected bit depth
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <!-- MP3 320 Quality -->

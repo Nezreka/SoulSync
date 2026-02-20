@@ -2894,7 +2894,8 @@ class MusicDatabase:
                     "enabled": True,
                     "min_kbps": 500,
                     "max_kbps": 10000,
-                    "priority": 1
+                    "priority": 1,
+                    "bit_depth": "any"
                 },
                 "mp3_320": {
                     "enabled": True,
@@ -2942,7 +2943,8 @@ class MusicDatabase:
                         "enabled": True,
                         "min_kbps": 500,
                         "max_kbps": 10000,
-                        "priority": 1
+                        "priority": 1,
+                        "bit_depth": "any"
                     },
                     "mp3_320": {
                         "enabled": False,
@@ -2973,7 +2975,8 @@ class MusicDatabase:
                         "enabled": True,
                         "min_kbps": 500,
                         "max_kbps": 10000,
-                        "priority": 1
+                        "priority": 1,
+                        "bit_depth": "any"
                     },
                     "mp3_320": {
                         "enabled": True,
@@ -3004,7 +3007,8 @@ class MusicDatabase:
                         "enabled": False,
                         "min_kbps": 500,
                         "max_kbps": 10000,
-                        "priority": 4
+                        "priority": 4,
+                        "bit_depth": "any"
                     },
                     "mp3_320": {
                         "enabled": True,
