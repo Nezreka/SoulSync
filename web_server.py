@@ -12652,15 +12652,13 @@ def _ensure_spotify_track_format(track_info):
         else:
             artists_list.append({'name': 'Unknown Artist'})
     
-    # Build album object with images if available
+    # Build album object — preserve ALL fields (id, release_date, total_tracks,
+    # album_type, images, etc.) so wishlist tracks retain full album context
+    # for correct folder placement, multi-disc support, and classification
     album_data = track_info.get('album', {})
     if isinstance(album_data, dict):
-        album = {
-            'name': album_data.get('name', 'Unknown Album')
-        }
-        # Preserve album images if present (important for ListenBrainz tracks)
-        if 'images' in album_data:
-            album['images'] = album_data['images']
+        album = dict(album_data)  # Copy all fields
+        album.setdefault('name', 'Unknown Album')
     else:
         album = {
             'name': str(album_data) if album_data else 'Unknown Album'
