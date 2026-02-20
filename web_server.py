@@ -8145,6 +8145,50 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             new_filename = f"{final_track_name_sanitized}{file_ext}"
             return os.path.join(single_dir, new_filename), True
 
+def _get_audio_quality_string(file_path):
+    """
+    Read audio file and return a quality descriptor string.
+
+    Returns strings like 'FLAC 16bit', 'MP3-320', 'M4A-256', 'OGG-192'.
+    Returns empty string on any error.
+    """
+    try:
+        ext = os.path.splitext(file_path)[1].lower()
+
+        if ext == '.flac':
+            audio = FLAC(file_path)
+            bits = audio.info.bits_per_sample
+            return f"FLAC {bits}bit"
+
+        elif ext == '.mp3':
+            from mutagen.mp3 import MP3, BitrateMode
+            audio = MP3(file_path)
+            bitrate_kbps = audio.info.bitrate // 1000
+            if audio.info.bitrate_mode == BitrateMode.VBR:
+                return "MP3-VBR"
+            return f"MP3-{bitrate_kbps}"
+
+        elif ext in ('.m4a', '.aac', '.mp4'):
+            audio = MP4(file_path)
+            bitrate_kbps = audio.info.bitrate // 1000
+            return f"M4A-{bitrate_kbps}"
+
+        elif ext == '.ogg':
+            audio = OggVorbis(file_path)
+            bitrate_kbps = audio.info.bitrate // 1000
+            return f"OGG-{bitrate_kbps}"
+
+        elif ext == '.opus':
+            from mutagen.oggopus import OggOpus
+            audio = OggOpus(file_path)
+            bitrate_kbps = audio.info.bitrate // 1000
+            return f"OPUS-{bitrate_kbps}"
+
+        return ''
+    except Exception as e:
+        logger.debug(f"Could not determine audio quality for {file_path}: {e}")
+        return ''
+
 def _apply_path_template(template: str, context: dict) -> str:
     """
     Apply template to build file path.
@@ -8423,6 +8467,16 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
 
             # ── Embed source IDs (Spotify, MusicBrainz, etc.) on the same object ──
             _embed_source_ids(audio_file, metadata)
+
+            # ── Embed audio quality tag ──
+            quality = context.get('_audio_quality', '')
+            if quality:
+                if isinstance(audio_file.tags, ID3):
+                    audio_file.tags.add(TXXX(encoding=3, desc='QUALITY', text=[quality]))
+                elif isinstance(audio_file, (FLAC, OggVorbis)):
+                    audio_file['quality'] = [quality]
+                elif isinstance(audio_file, MP4):
+                    audio_file['----:com.apple.iTunes:QUALITY'] = [MP4FreeForm(quality.encode('utf-8'))]
 
             # ── Single save for everything ──
             if isinstance(audio_file.tags, ID3):
@@ -9527,6 +9581,9 @@ def _post_process_matched_download(context_key, context, file_path):
             print(f"📁 [Playlist Folder Mode] Organizing in playlist folder: {playlist_name}")
 
             file_ext = os.path.splitext(file_path)[1]
+            context['_audio_quality'] = _get_audio_quality_string(file_path)
+            if context['_audio_quality']:
+                print(f"🎧 Audio quality detected: {context['_audio_quality']}")
             final_path, _ = _build_final_path_for_track(context, spotify_artist, None, file_ext)
             print(f"📁 Playlist mode final path: '{final_path}'")
 
@@ -9645,6 +9702,9 @@ def _post_process_matched_download(context_key, context, file_path):
         os.makedirs(artist_dir, exist_ok=True)
         
         file_ext = os.path.splitext(file_path)[1]
+        context['_audio_quality'] = _get_audio_quality_string(file_path)
+        if context['_audio_quality']:
+            print(f"🎧 Audio quality detected: {context['_audio_quality']}")
 
         # 2. Build the final path using GUI-style track naming with multiple fallback sources
         if album_info and album_info['is_album']:
