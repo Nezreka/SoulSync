@@ -9906,11 +9906,6 @@ body {
         max-width: 1000px;
     }
 
-    .download-dashboard-stats {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 20px;
-    }
-
     .download-missing-modal-hero {
         min-height: 100px;
         padding: 20px 24px;
@@ -10003,17 +9998,12 @@ body {
     }
 
     .download-dashboard-stats {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 16px;
-        padding: 20px;
-    }
-
-    .dashboard-stat-number {
-        font-size: 28px;
-    }
-
-    .dashboard-stat-label {
-        font-size: 12px;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 4px;
+        width: 100%;
+        padding: 8px 0 0 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        margin-top: 8px;
     }
 
     .download-missing-modal-footer {
@@ -10038,11 +10028,6 @@ body {
     .download-missing-modal-content {
         height: 95vh;
         max-height: 95vh;
-    }
-
-    .download-dashboard-stats {
-        padding: 16px;
-        gap: 16px;
     }
 
     .download-progress-section {
@@ -10070,21 +10055,6 @@ body {
     .download-missing-modal-hero {
         min-height: auto;
         padding: 12px 20px;
-    }
-
-    .download-dashboard-stats {
-        padding: 12px;
-        gap: 12px;
-        grid-template-columns: repeat(2, 1fr);
-        /* 2 columns on very small heights */
-    }
-
-    .dashboard-stat-number {
-        font-size: 24px;
-    }
-
-    .dashboard-stat-label {
-        font-size: 11px;
     }
 
     .download-progress-section {
@@ -10161,56 +10131,49 @@ body {
     overflow-x: hidden;
 }
 
-/* Dashboard Stats Section */
+/* Dashboard Stats Section — sits inside hero header, 2x2 grid */
 .download-dashboard-stats {
-    /* Premium glassmorphic card */
-    background: linear-gradient(135deg,
-            rgba(35, 35, 35, 0.7) 0%,
-            rgba(25, 25, 25, 0.8) 100%);
-    backdrop-filter: blur(10px) saturate(1.1);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-top: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 12px;
-    padding: 12px 16px;
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-
-    /* Premium shadow with subtle glow */
-    box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 4px 16px rgba(0, 0, 0, 0.2),
-        0 0 20px rgba(29, 185, 84, 0.08),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    gap: 4px 16px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 2;
+    padding: 0;
+    background: none;
+    backdrop-filter: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
 }
 
 .dashboard-stat {
     text-align: center;
-    padding: 4px;
-    border-radius: 10px;
+    padding: 2px 8px;
+    border-radius: 8px;
     transition: all 0.3s ease;
 }
 
 .dashboard-stat:hover {
     background: rgba(255, 255, 255, 0.05);
-    transform: translateY(-2px);
 }
 
 .dashboard-stat-number {
-    font-size: 22px;
+    font-size: 18px;
     font-weight: 700;
-    margin-bottom: 2px;
+    margin-bottom: 0;
+    line-height: 1.2;
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     transition: all 0.3s ease;
 }
 
 .dashboard-stat-label {
-    font-size: 11px;
+    font-size: 10px;
     color: #e0e0e0;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    opacity: 0.9;
+    opacity: 0.8;
 }
 
 /* Enhanced stat colors with glow effects */

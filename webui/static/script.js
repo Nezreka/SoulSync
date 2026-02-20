@@ -5571,6 +5571,24 @@ function generateDownloadModalHeroSection(context) {
         <div class="download-missing-modal-hero">
             ${heroBackgroundImage}
             ${heroContent}
+            <div class="download-dashboard-stats">
+                <div class="dashboard-stat stat-total">
+                    <div class="dashboard-stat-number" id="stat-total-${context.playlistId}">${context.trackCount}</div>
+                    <div class="dashboard-stat-label">Total</div>
+                </div>
+                <div class="dashboard-stat stat-found">
+                    <div class="dashboard-stat-number" id="stat-found-${context.playlistId}">-</div>
+                    <div class="dashboard-stat-label">Found</div>
+                </div>
+                <div class="dashboard-stat stat-missing">
+                    <div class="dashboard-stat-number" id="stat-missing-${context.playlistId}">-</div>
+                    <div class="dashboard-stat-label">Missing</div>
+                </div>
+                <div class="dashboard-stat stat-downloaded">
+                    <div class="dashboard-stat-number" id="stat-downloaded-${context.playlistId}">0</div>
+                    <div class="dashboard-stat-label">Downloaded</div>
+                </div>
+            </div>
         </div>
         <div class="download-missing-modal-header-actions">
             <span class="download-missing-modal-close" onclick="closeDownloadMissingModal('${context.playlistId || 'unknown'}')">&times;</span>
@@ -5657,27 +5675,8 @@ async function openDownloadMissingModal(playlistId) {
             <div class="download-missing-modal-header">
                 ${generateDownloadModalHeroSection(heroContext)}
             </div>
-            
+
             <div class="download-missing-modal-body">
-                <div class="download-dashboard-stats">
-                    <div class="dashboard-stat stat-total">
-                        <div class="dashboard-stat-number" id="stat-total-${playlistId}">${tracks.length}</div>
-                        <div class="dashboard-stat-label">Total Tracks</div>
-                    </div>
-                    <div class="dashboard-stat stat-found">
-                        <div class="dashboard-stat-number" id="stat-found-${playlistId}">-</div>
-                        <div class="dashboard-stat-label">Found in Library</div>
-                    </div>
-                    <div class="dashboard-stat stat-missing">
-                        <div class="dashboard-stat-number" id="stat-missing-${playlistId}">-</div>
-                        <div class="dashboard-stat-label">Missing Tracks</div>
-                    </div>
-                    <div class="dashboard-stat stat-downloaded">
-                        <div class="dashboard-stat-number" id="stat-downloaded-${playlistId}">0</div>
-                        <div class="dashboard-stat-label">Downloaded</div>
-                    </div>
-                </div>
-                
                 <div class="download-progress-section">
                     <div class="progress-item">
                         <div class="progress-label">
@@ -6034,27 +6033,8 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
             <div class="download-missing-modal-header">
                 ${generateDownloadModalHeroSection(heroContext)}
             </div>
-            
+
             <div class="download-missing-modal-body">
-                <div class="download-dashboard-stats">
-                    <div class="dashboard-stat stat-total">
-                        <div class="dashboard-stat-number" id="stat-total-${virtualPlaylistId}">${spotifyTracks.length}</div>
-                        <div class="dashboard-stat-label">Total Tracks</div>
-                    </div>
-                    <div class="dashboard-stat stat-found">
-                        <div class="dashboard-stat-number" id="stat-found-${virtualPlaylistId}">-</div>
-                        <div class="dashboard-stat-label">Found in Library</div>
-                    </div>
-                    <div class="dashboard-stat stat-missing">
-                        <div class="dashboard-stat-number" id="stat-missing-${virtualPlaylistId}">-</div>
-                        <div class="dashboard-stat-label">Missing Tracks</div>
-                    </div>
-                    <div class="dashboard-stat stat-downloaded">
-                        <div class="dashboard-stat-number" id="stat-downloaded-${virtualPlaylistId}">0</div>
-                        <div class="dashboard-stat-label">Downloaded</div>
-                    </div>
-                </div>
-                
                 <div class="download-progress-section">
                     <div class="progress-item">
                         <div class="progress-label">
@@ -7262,27 +7242,8 @@ async function openDownloadMissingWishlistModal(category = null) {
             <div class="download-missing-modal-header">
                 ${generateDownloadModalHeroSection(heroContext)}
             </div>
-            
+
             <div class="download-missing-modal-body">
-                <div class="download-dashboard-stats">
-                    <div class="dashboard-stat stat-total">
-                        <div class="dashboard-stat-number" id="stat-total-${playlistId}">${tracks.length}</div>
-                        <div class="dashboard-stat-label">Total Tracks</div>
-                    </div>
-                    <div class="dashboard-stat stat-found">
-                        <div class="dashboard-stat-number" id="stat-found-${playlistId}">-</div>
-                        <div class="dashboard-stat-label">Found in Library</div>
-                    </div>
-                    <div class="dashboard-stat stat-missing">
-                        <div class="dashboard-stat-number" id="stat-missing-${playlistId}">-</div>
-                        <div class="dashboard-stat-label">Missing Tracks</div>
-                    </div>
-                    <div class="dashboard-stat stat-downloaded">
-                        <div class="dashboard-stat-number" id="stat-downloaded-${playlistId}">0</div>
-                        <div class="dashboard-stat-label">Downloaded</div>
-                    </div>
-                </div>
-                
                 <div class="download-progress-section">
                     <div class="progress-item">
                         <div class="progress-label">
@@ -14941,27 +14902,8 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
             <div class="download-missing-modal-header">
                 ${generateDownloadModalHeroSection(heroContext)}
             </div>
-            
+
             <div class="download-missing-modal-body">
-                <div class="download-dashboard-stats">
-                    <div class="dashboard-stat stat-total">
-                        <div class="dashboard-stat-number" id="stat-total-${virtualPlaylistId}">${spotifyTracks.length}</div>
-                        <div class="dashboard-stat-label">Total Tracks</div>
-                    </div>
-                    <div class="dashboard-stat stat-found">
-                        <div class="dashboard-stat-number" id="stat-found-${virtualPlaylistId}">-</div>
-                        <div class="dashboard-stat-label">Found in Library</div>
-                    </div>
-                    <div class="dashboard-stat stat-missing">
-                        <div class="dashboard-stat-number" id="stat-missing-${virtualPlaylistId}">-</div>
-                        <div class="dashboard-stat-label">Missing Tracks</div>
-                    </div>
-                    <div class="dashboard-stat stat-downloaded">
-                        <div class="dashboard-stat-number" id="stat-downloaded-${virtualPlaylistId}">0</div>
-                        <div class="dashboard-stat-label">Downloaded</div>
-                    </div>
-                </div>
-                
                 <div class="download-progress-section">
                     <div class="progress-item">
                         <div class="progress-label">
@@ -22051,27 +21993,8 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
             <div class="download-missing-modal-header">
                 ${generateDownloadModalHeroSection(heroContext)}
             </div>
-            
+
             <div class="download-missing-modal-body">
-                <div class="download-dashboard-stats">
-                    <div class="dashboard-stat stat-total">
-                        <div class="dashboard-stat-number" id="stat-total-${virtualPlaylistId}">${spotifyTracks.length}</div>
-                        <div class="dashboard-stat-label">Total Tracks</div>
-                    </div>
-                    <div class="dashboard-stat stat-found">
-                        <div class="dashboard-stat-number" id="stat-found-${virtualPlaylistId}">-</div>
-                        <div class="dashboard-stat-label">Found in Library</div>
-                    </div>
-                    <div class="dashboard-stat stat-missing">
-                        <div class="dashboard-stat-number" id="stat-missing-${virtualPlaylistId}">-</div>
-                        <div class="dashboard-stat-label">Missing Tracks</div>
-                    </div>
-                    <div class="dashboard-stat stat-downloaded">
-                        <div class="dashboard-stat-number" id="stat-downloaded-${virtualPlaylistId}">0</div>
-                        <div class="dashboard-stat-label">Downloaded</div>
-                    </div>
-                </div>
-                
                 <div class="download-progress-section">
                     <div class="progress-item">
                         <div class="progress-label">
