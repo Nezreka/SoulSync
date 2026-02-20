@@ -1082,20 +1082,22 @@ class MusicDatabase:
 
             if 'audiodb_id' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN audiodb_id TEXT")
+            if 'audiodb_match_status' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN audiodb_match_status TEXT")
+            if 'audiodb_last_attempted' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN audiodb_last_attempted TIMESTAMP")
 
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_audiodb_id ON artists (audiodb_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_audiodb_status ON artists (audiodb_match_status)")
-
-                logger.info("Added AudioDB tracking columns to artists table")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_audiodb_id ON artists (audiodb_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_audiodb_status ON artists (audiodb_match_status)")
 
             if 'style' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN style TEXT")
+            if 'mood' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN mood TEXT")
+            if 'label' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN label TEXT")
+            if 'banner_url' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN banner_url TEXT")
-                logger.info("Added generic artist metadata columns (style, mood, label, banner_url)")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -1103,18 +1105,18 @@ class MusicDatabase:
 
             if 'audiodb_id' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN audiodb_id TEXT")
+            if 'audiodb_match_status' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN audiodb_match_status TEXT")
+            if 'audiodb_last_attempted' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN audiodb_last_attempted TIMESTAMP")
 
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_audiodb_id ON albums (audiodb_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_audiodb_status ON albums (audiodb_match_status)")
-
-                logger.info("Added AudioDB tracking columns to albums table")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_audiodb_id ON albums (audiodb_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_audiodb_status ON albums (audiodb_match_status)")
 
             if 'style' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN style TEXT")
+            if 'mood' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN mood TEXT")
-                logger.info("Added generic album metadata columns (style, mood)")
 
             # --- Tracks ---
             cursor.execute("PRAGMA table_info(tracks)")
@@ -1122,18 +1124,18 @@ class MusicDatabase:
 
             if 'audiodb_id' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN audiodb_id TEXT")
+            if 'audiodb_match_status' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN audiodb_match_status TEXT")
+            if 'audiodb_last_attempted' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN audiodb_last_attempted TIMESTAMP")
 
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_audiodb_id ON tracks (audiodb_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_audiodb_status ON tracks (audiodb_match_status)")
-
-                logger.info("Added AudioDB tracking columns to tracks table")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_audiodb_id ON tracks (audiodb_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_audiodb_status ON tracks (audiodb_match_status)")
 
             if 'style' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN style TEXT")
+            if 'mood' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN mood TEXT")
-                logger.info("Added generic track metadata columns (style, mood)")
 
         except Exception as e:
             logger.error(f"Error adding AudioDB columns: {e}")
@@ -1148,13 +1150,13 @@ class MusicDatabase:
 
             if 'deezer_id' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN deezer_id TEXT")
+            if 'deezer_match_status' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN deezer_match_status TEXT")
+            if 'deezer_last_attempted' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN deezer_last_attempted TIMESTAMP")
 
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_deezer_id ON artists (deezer_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_deezer_status ON artists (deezer_match_status)")
-
-                logger.info("Added Deezer tracking columns to artists table")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_deezer_id ON artists (deezer_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_deezer_status ON artists (deezer_match_status)")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -1162,25 +1164,20 @@ class MusicDatabase:
 
             if 'deezer_id' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN deezer_id TEXT")
+            if 'deezer_match_status' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN deezer_match_status TEXT")
+            if 'deezer_last_attempted' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN deezer_last_attempted TIMESTAMP")
 
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_deezer_id ON albums (deezer_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_deezer_status ON albums (deezer_match_status)")
-
-                logger.info("Added Deezer tracking columns to albums table")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_deezer_id ON albums (deezer_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_deezer_status ON albums (deezer_match_status)")
 
             if 'label' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN label TEXT")
-                logger.info("Added label column to albums table")
-
             if 'explicit' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN explicit INTEGER")
-                logger.info("Added explicit column to albums table")
-
             if 'record_type' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN record_type TEXT")
-                logger.info("Added record_type column to albums table")
 
             # --- Tracks ---
             cursor.execute("PRAGMA table_info(tracks)")
@@ -1188,21 +1185,18 @@ class MusicDatabase:
 
             if 'deezer_id' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN deezer_id TEXT")
+            if 'deezer_match_status' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN deezer_match_status TEXT")
+            if 'deezer_last_attempted' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN deezer_last_attempted TIMESTAMP")
 
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_deezer_id ON tracks (deezer_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_deezer_status ON tracks (deezer_match_status)")
-
-                logger.info("Added Deezer tracking columns to tracks table")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_deezer_id ON tracks (deezer_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_deezer_status ON tracks (deezer_match_status)")
 
             if 'bpm' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN bpm REAL")
-                logger.info("Added bpm column to tracks table")
-
             if 'explicit' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN explicit INTEGER")
-                logger.info("Added explicit column to tracks table")
 
         except Exception as e:
             logger.error(f"Error adding Deezer columns: {e}")
