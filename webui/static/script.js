@@ -1993,6 +1993,22 @@ function populateQualityProfileUI(profile) {
                     sliders.classList.add('disabled');
                 }
             }
+
+            // FLAC-specific: restore bit depth selector
+            if (quality === 'flac') {
+                const bitDepthValue = config.bit_depth || 'any';
+                document.querySelectorAll('.bit-depth-btn').forEach(btn => {
+                    btn.classList.toggle('active', btn.getAttribute('data-value') === bitDepthValue);
+                });
+                const bitDepthSelector = document.getElementById('flac-bit-depth-selector');
+                if (bitDepthSelector) {
+                    if (config.enabled) {
+                        bitDepthSelector.classList.remove('disabled');
+                    } else {
+                        bitDepthSelector.classList.add('disabled');
+                    }
+                }
+            }
         }
     });
 
@@ -2042,6 +2058,18 @@ function toggleQuality(quality) {
         }
     }
 
+    // Also toggle FLAC bit depth selector
+    if (quality === 'flac') {
+        const bitDepthSelector = document.getElementById('flac-bit-depth-selector');
+        if (bitDepthSelector && checkbox) {
+            if (checkbox.checked) {
+                bitDepthSelector.classList.remove('disabled');
+            } else {
+                bitDepthSelector.classList.add('disabled');
+            }
+        }
+    }
+
     // Mark preset as custom when manually changing
     if (currentQualityProfile) {
         currentQualityProfile.preset = 'custom';
@@ -2049,6 +2077,22 @@ function toggleQuality(quality) {
             btn.classList.remove('active');
         });
     }
+}
+
+function setFlacBitDepth(value) {
+    document.querySelectorAll('.bit-depth-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-value') === value);
+    });
+
+    // Mark preset as custom when manually changing
+    if (currentQualityProfile) {
+        currentQualityProfile.preset = 'custom';
+        document.querySelectorAll('.preset-button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+    }
+
+    debouncedAutoSaveSettings();
 }
 
 async function applyQualityPreset(presetName) {
@@ -2100,6 +2144,12 @@ function collectQualityProfileFromUI() {
             max_kbps: parseInt(maxSlider?.value || 99999),
             priority: existingPriority
         };
+
+        // Add FLAC-specific bit_depth setting
+        if (quality === 'flac') {
+            const activeBtn = document.querySelector('.bit-depth-btn.active');
+            profile.qualities[quality].bit_depth = activeBtn ? activeBtn.getAttribute('data-value') : 'any';
+        }
     });
 
     // Check if current profile matches a preset

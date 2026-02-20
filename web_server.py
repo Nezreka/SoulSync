@@ -9221,6 +9221,56 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         _on_download_completed(batch_id, task_id, success=False)
 
 
+def _check_flac_bit_depth(file_path, context, context_key):
+    """
+    Check if a FLAC file matches the user's preferred bit depth.
+    Returns True if the file was rejected (caller should return), False if OK.
+    """
+    if not context.get('_audio_quality', '').startswith('FLAC'):
+        return False
+
+    from database.music_database import MusicDatabase
+    _qp_db = MusicDatabase()
+    _quality_profile = _qp_db.get_quality_profile()
+    _flac_pref = _quality_profile.get('qualities', {}).get('flac', {}).get('bit_depth', 'any')
+
+    if _flac_pref == 'any':
+        return False
+
+    # Parse actual bit depth from quality string like "FLAC 16bit"
+    _actual_bits = context['_audio_quality'].replace('FLAC ', '').replace('bit', '')
+    if _actual_bits == _flac_pref:
+        return False
+
+    # Reject — same pattern as AcoustID verification failure
+    rejection_msg = f"FLAC bit depth mismatch: file is {_actual_bits}-bit, preference is {_flac_pref}-bit"
+    try:
+        quarantine_path = _move_to_quarantine(file_path, context, rejection_msg)
+        print(f"🚫 File quarantined due to bit depth filter: {quarantine_path}")
+    except Exception as quarantine_error:
+        logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+
+    context['_bitdepth_rejected'] = True
+    with matched_context_lock:
+        if context_key in matched_downloads_context:
+            del matched_downloads_context[context_key]
+
+    task_id = context.get('task_id')
+    batch_id = context.get('batch_id')
+    if task_id:
+        with tasks_lock:
+            if task_id in download_tasks:
+                download_tasks[task_id]['status'] = 'failed'
+                download_tasks[task_id]['error_message'] = f"Bit depth filter: {rejection_msg}"
+    if task_id and batch_id:
+        _on_download_completed(batch_id, task_id, success=False)
+    return True
+
+
 def _move_to_quarantine(file_path: str, context: dict, reason: str) -> str:
     """
     Move a file to quarantine folder when AcoustID verification fails.
@@ -9584,6 +9634,11 @@ def _post_process_matched_download(context_key, context, file_path):
             context['_audio_quality'] = _get_audio_quality_string(file_path)
             if context['_audio_quality']:
                 print(f"🎧 Audio quality detected: {context['_audio_quality']}")
+
+            # FLAC bit depth filter
+            if _check_flac_bit_depth(file_path, context, context_key):
+                return
+
             final_path, _ = _build_final_path_for_track(context, spotify_artist, None, file_ext)
             print(f"📁 Playlist mode final path: '{final_path}'")
 
@@ -9711,6 +9766,10 @@ def _post_process_matched_download(context_key, context, file_path):
         context['_audio_quality'] = _get_audio_quality_string(file_path)
         if context['_audio_quality']:
             print(f"🎧 Audio quality detected: {context['_audio_quality']}")
+
+        # FLAC bit depth filter
+        if _check_flac_bit_depth(file_path, context, context_key):
+            return
 
         # 2. Build the final path using GUI-style track naming with multiple fallback sources
         if album_info and album_info['is_album']:
