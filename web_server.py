@@ -9587,6 +9587,12 @@ def _post_process_matched_download(context_key, context, file_path):
             final_path, _ = _build_final_path_for_track(context, spotify_artist, None, file_ext)
             print(f"📁 Playlist mode final path: '{final_path}'")
 
+            # Enhance metadata before moving
+            try:
+                _enhance_file_metadata(file_path, context, spotify_artist, None)
+            except Exception as meta_err:
+                pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}")
+
             # Move file to playlist folder
             print(f"🚚 Moving '{os.path.basename(file_path)}' to '{final_path}'")
             if os.path.exists(final_path):
