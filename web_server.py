@@ -10431,6 +10431,43 @@ def schedule_next_wishlist_processing(retry_count=0, max_retries=3):
             print(f"❌ [FATAL] Failed to schedule wishlist processing after {max_retries} attempts!")
             print("⚠️ MANUAL INTERVENTION REQUIRED - Wishlist auto-processing will not run!")
 
+def _classify_wishlist_track(track):
+    """Classify a wishlist track as 'singles' or 'albums'.
+
+    Uses Spotify's album_type as the primary signal (most authoritative),
+    falls back to total_tracks heuristic, defaults to 'albums'.
+
+    Returns:
+        'singles' or 'albums'
+    """
+    spotify_data = track.get('spotify_data', {})
+    if isinstance(spotify_data, str):
+        try:
+            import json
+            spotify_data = json.loads(spotify_data)
+        except Exception:
+            spotify_data = {}
+
+    album_data = spotify_data.get('album') or {}
+    if not isinstance(album_data, dict):
+        album_data = {}
+    total_tracks = album_data.get('total_tracks')
+    album_type = album_data.get('album_type', '').lower()
+
+    # Prioritize Spotify's album_type classification (most accurate)
+    if album_type in ('single', 'ep'):
+        return 'singles'
+    if album_type in ('album', 'compilation'):
+        return 'albums'
+
+    # Fallback: track count heuristic
+    if total_tracks is not None and total_tracks > 0:
+        return 'singles' if total_tracks < 6 else 'albums'
+
+    # No classification data — default to albums
+    return 'albums'
+
+
 def _process_wishlist_automatically():
     """Main automatic processing logic that runs in background thread."""
     global wishlist_auto_processing, wishlist_auto_processing_timestamp
@@ -10614,48 +10651,12 @@ def _process_wishlist_automatically():
                     conn.commit()
 
             # Filter tracks by current cycle category
-            import json
             filtered_tracks = []
             seen_track_ids_filtering = set()  # Deduplicate during filtering
             for track in wishlist_tracks:
-                # Extract track count from spotify_data JSON (after sanitization)
-                spotify_data = track.get('spotify_data', {})
-                if isinstance(spotify_data, str):
-                    try:
-                        spotify_data = json.loads(spotify_data)
-                    except:
-                        spotify_data = {}
-
-                # CRITICAL FIX: Handle case where album is explicitly null in JSON
-                album_data = spotify_data.get('album') or {}
-                # Ensure album_data is a dict (just in case it's a string/other)
-                if not isinstance(album_data, dict):
-                    album_data = {}
-                total_tracks = album_data.get('total_tracks')
-                album_type = album_data.get('album_type', 'album').lower()
-
-                # CRITICAL FIX: Prioritize Spotify's album_type (most accurate source)
-                # Only fall back to track count heuristic if album_type is missing
-                is_single_or_ep = False
-                is_album = False
-
-                # Use Spotify's album_type classification first
-                if album_type and album_type in ['single', 'ep', 'album', 'compilation']:
-                    # Spotify's classification is authoritative
-                    is_single_or_ep = album_type in ['single', 'ep']
-                    is_album = album_type in ['album', 'compilation']
-                elif total_tracks is not None and total_tracks > 0:
-                    # Fallback: Use track count heuristic only if album_type unavailable
-                    # Single: 1 track, EP: 2-5 tracks, Album: 6+ tracks
-                    is_single_or_ep = total_tracks < 6
-                    is_album = total_tracks >= 6
-                else:
-                    # No classification data available - default to album
-                    is_album = True
-                    is_single_or_ep = False
-
+                track_category = _classify_wishlist_track(track)
                 spotify_track_id = track.get('spotify_track_id') or track.get('id')
-                matches_category = (current_cycle == 'singles' and is_single_or_ep) or (current_cycle == 'albums' and is_album)
+                matches_category = (current_cycle == track_category)
 
                 # Only add if matches category AND not a duplicate
                 if matches_category:
@@ -10871,36 +10872,21 @@ def get_wishlist_stats():
 
         singles_count = 0
         albums_count = 0
+        seen_ids = set()
 
         for track in raw_tracks:
-            # Extract track count from spotify_data JSON
-            spotify_data = track.get('spotify_data', {})
-            if isinstance(spotify_data, str):
-                import json
-                spotify_data = json.loads(spotify_data)
+            # Deduplicate by ID (same as tracks endpoint) so counts match
+            track_id = track.get('spotify_track_id') or track.get('id')
+            if track_id:
+                if track_id in seen_ids:
+                    continue
+                seen_ids.add(track_id)
 
-            # CRITICAL FIX: Handle case where album is explicitly null in JSON
-            album_data = spotify_data.get('album') or {}
-            # Ensure album_data is a dict (just in case)
-            if not isinstance(album_data, dict):
-                album_data = {}
-            total_tracks = album_data.get('total_tracks')
-            album_type = album_data.get('album_type', 'album').lower()
-
-            # Categorize by track count if available, otherwise use album_type
-            # Single: 1 track, EP: 2-5 tracks, Album: 6+ tracks
-            if total_tracks is not None and total_tracks > 0:
-                # Use track count (most accurate)
-                if total_tracks >= 6:
-                    albums_count += 1
-                else:
-                    singles_count += 1
+            category = _classify_wishlist_track(track)
+            if category == 'singles':
+                singles_count += 1
             else:
-                # Fall back to Spotify's album_type
-                if album_type in ['single', 'ep']:
-                    singles_count += 1
-                else:
-                    albums_count += 1
+                albums_count += 1
 
         total_count = singles_count + albums_count
 
@@ -11138,42 +11124,12 @@ def get_wishlist_tracks():
 
         # FILTER by category if specified
         if category:
-            import json
             filtered_tracks = []
             seen_track_ids_filtering = set()  # Deduplicate during filtering
             for track in sanitized_tracks:
-                # Extract track count from spotify_data JSON (same as stats endpoint)
-                spotify_data = track.get('spotify_data', {})
-                if isinstance(spotify_data, str):
-                    try:
-                        spotify_data = json.loads(spotify_data)
-                    except:
-                        spotify_data = {}
-
-                # CRITICAL FIX: Handle case where album is explicitly null in JSON
-                album_data = spotify_data.get('album') or {}
-                # Ensure album_data is a dict (just in case)
-                if not isinstance(album_data, dict):
-                    album_data = {}
-                total_tracks = album_data.get('total_tracks')
-                album_type = album_data.get('album_type', 'album').lower()
-
-                # Categorize by track count if available, otherwise use album_type
-                # Single: 1 track, EP: 2-5 tracks, Album: 6+ tracks
-                is_single_or_ep = False
-                is_album = False
-
-                if total_tracks is not None and total_tracks > 0:
-                    # Use track count (most accurate)
-                    is_single_or_ep = total_tracks < 6
-                    is_album = total_tracks >= 6
-                else:
-                    # Fall back to Spotify's album_type
-                    is_single_or_ep = album_type in ['single', 'ep']
-                    is_album = album_type == 'album'
-
+                track_category = _classify_wishlist_track(track)
                 spotify_track_id = track.get('spotify_track_id') or track.get('id')
-                matches_category = (category == 'singles' and is_single_or_ep) or (category == 'albums' and is_album)
+                matches_category = (category == track_category)
 
                 # Only add if matches category AND not a duplicate
                 if matches_category:
