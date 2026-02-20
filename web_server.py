@@ -582,9 +582,12 @@ class WebUIDownloadMonitor:
 
                         if live_info:
                             state = live_info.get('state', '')
-                            # Trigger post-processing if download is completed but still marked as downloading locally
-                            # 'Completed' is used by YouTubeClient, 'Succeeded' by Soulseek
-                            if state in ['Completed', 'Succeeded'] and task['status'] == 'downloading':
+                            # Trigger post-processing if download is completed successfully
+                            # slskd uses compound states like 'Completed, Succeeded' - use substring matching
+                            # Must exclude error states first (matching _build_batch_status_data's prioritized checking)
+                            has_error = ('Errored' in state or 'Failed' in state or 'Rejected' in state or 'TimedOut' in state)
+                            has_completion = ('Completed' in state or 'Succeeded' in state)
+                            if has_completion and not has_error and task['status'] == 'downloading':
                                 # CRITICAL FIX: Transition to 'post_processing' HERE so downloads
                                 # don't depend on browser polling to trigger post-processing.
                                 # Previously, post-processing was only submitted by _build_batch_status_data
@@ -1001,13 +1004,19 @@ class WebUIDownloadMonitor:
                     # Count actually active tasks based on status
                     actually_active = 0
                     orphaned_tasks = []
+                    # Tasks already processed by _on_download_completed should NOT be counted
+                    # as active, even if their status hasn't been updated yet (race condition
+                    # between stream processor calling _on_download_completed and
+                    # _run_post_processing_worker setting status to 'completed')
+                    completed_task_ids = batch.get('_completed_task_ids', set())
 
                     for task_id in queue:
                         if task_id in download_tasks:
                             task_status = download_tasks[task_id]['status']
                             if task_status in ['searching', 'downloading', 'queued', 'post_processing']:
-                                actually_active += 1
-                            elif task_status in ['failed', 'complete', 'cancelled', 'not_found'] and task_id in queue[queue_index:]:
+                                if task_id not in completed_task_ids:
+                                    actually_active += 1
+                            elif task_status in ['failed', 'completed', 'cancelled', 'not_found'] and task_id in queue[queue_index:]:
                                 # These are orphaned tasks - they're done but still in active queue
                                 orphaned_tasks.append(task_id)
 
@@ -1082,12 +1091,15 @@ def validate_and_heal_batch_states():
                 # Count actually active tasks
                 actually_active = 0
                 orphaned_tasks = []
+                # Respect _on_download_completed dedup set — don't re-inflate active_count
+                completed_task_ids = batch_data.get('_completed_task_ids', set())
 
                 for task_id in queue:
                     if task_id in download_tasks:
                         task_status = download_tasks[task_id]['status']
                         if task_status in ['searching', 'downloading', 'queued', 'post_processing']:
-                            actually_active += 1
+                            if task_id not in completed_task_ids:
+                                actually_active += 1
                         elif task_status in ['failed', 'completed', 'cancelled', 'not_found']:
                             orphaned_tasks.append(task_id)
                     else:
@@ -9795,12 +9807,17 @@ def _post_process_matched_download(context_key, context, file_path):
         if task_id and batch_id:
             print(f"🎯 [Post-Process] Calling completion callback for task {task_id} in batch {batch_id}")
             
-            # Mark task as stream processed to prevent duplicate stream processing
-            # NOTE: Verification workflow will still run to ensure file is in transfer folder
+            # Mark task as stream processed and set terminal status so
+            # _validate_worker_counts won't count this task as active
+            # (prevents active_count inflation race).
+            # NOTE: Only set status here — don't call _mark_task_completed() because
+            # _run_post_processing_worker will call it later with the session counter
+            # increment. Calling it here too would double-count the download.
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id]['stream_processed'] = True
-                    print(f"✅ [Post-Process] Marked task {task_id} as stream processed")
+                    download_tasks[task_id]['status'] = 'completed'
+                    print(f"✅ [Post-Process] Marked task {task_id} as completed")
             
             _on_download_completed(batch_id, task_id, success=True)
 
