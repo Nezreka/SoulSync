@@ -2085,18 +2085,20 @@ function collectQualityProfileFromUI() {
     };
 
     const qualities = ['flac', 'mp3_320', 'mp3_256', 'mp3_192'];
-    let priority = 1;
 
     qualities.forEach((quality, index) => {
         const enabled = document.getElementById(`quality-${quality}-enabled`)?.checked || false;
         const minSlider = document.getElementById(`${quality}-min`);
         const maxSlider = document.getElementById(`${quality}-max`);
 
+        // Preserve priority from the currently loaded profile instead of using array order
+        const existingPriority = currentQualityProfile?.qualities?.[quality]?.priority ?? (index + 1);
+
         profile.qualities[quality] = {
             enabled: enabled,
             min_kbps: parseInt(minSlider?.value || 0),
             max_kbps: parseInt(maxSlider?.value || 99999),
-            priority: index + 1 // 1-4 based on order
+            priority: existingPriority
         };
     });
 
