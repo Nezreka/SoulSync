@@ -1442,11 +1442,22 @@ class SoulseekClient:
         return await self.download(best_result.username, best_result.filename, best_result.size)
     
     async def check_connection(self) -> bool:
-        """Check if slskd is running and accessible"""
+        """Check if slskd is running and connected to the Soulseek network"""
         if not self.base_url:
             return False
-        
+
         try:
+            # Primary check: server/state tells us if slskd is connected to the Soulseek network
+            state = await self._make_request('GET', 'server/state')
+            if state is not None:
+                is_connected = state.get('isConnected') or state.get('IsConnected', False)
+                is_logged_in = state.get('isLoggedIn') or state.get('IsLoggedIn', False)
+                if not (is_connected and is_logged_in):
+                    logger.debug(f"Soulseek not fully connected: isConnected={is_connected}, isLoggedIn={is_logged_in}")
+                return is_connected and is_logged_in
+
+            # Fallback: if server/state endpoint unavailable (older slskd), check API reachability
+            logger.debug("server/state endpoint unavailable, falling back to session check")
             response = await self._make_request('GET', 'session')
             return response is not None
         except Exception as e:
