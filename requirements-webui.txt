@@ -40,3 +40,6 @@ asyncio-mqtt>=0.16.0
 
 # Audio fingerprinting for download verification
 pyacoustid>=1.3.0
+
+# WebSocket client for Hydrabase connection
+websocket-client>=1.7.0

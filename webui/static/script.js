@@ -596,6 +596,17 @@ async function loadPageData(pageId) {
                 await loadSettingsData();
                 await loadQualityProfile();
                 break;
+            case 'hydrabase':
+                // Check connection status on page load
+                try {
+                    const hsResp = await fetch('/api/hydrabase/status');
+                    const hsData = await hsResp.json();
+                    _hydrabaseConnected = hsData.connected;
+                    document.getElementById('hydra-connection-status').textContent = hsData.connected ? 'Connected' : 'Disconnected';
+                    document.getElementById('hydra-connection-status').style.color = hsData.connected ? '#1ed760' : '#888';
+                    document.getElementById('hydra-connect-btn').textContent = hsData.connected ? 'Disconnect' : 'Connect';
+                } catch (e) {}
+                break;
         }
     } catch (error) {
         console.error(`Error loading ${pageId} data:`, error);
@@ -1851,6 +1862,19 @@ async function loadSettingsData() {
             console.error('Error loading log level:', error);
         }
 
+        // Check dev mode status
+        try {
+            const devResponse = await fetch('/api/dev-mode');
+            const devData = await devResponse.json();
+            if (devData.enabled) {
+                document.getElementById('dev-mode-status').textContent = 'Active';
+                document.getElementById('dev-mode-status').style.color = '#1ed760';
+                document.getElementById('hydrabase-nav').style.display = '';
+            }
+        } catch (error) {
+            console.error('Error checking dev mode:', error);
+        }
+
     } catch (error) {
         console.error('Error loading settings:', error);
         showToast('Failed to load settings', 'error');
@@ -2198,6 +2222,131 @@ async function saveQualityProfile() {
 // ===============================
 // END QUALITY PROFILE FUNCTIONS
 // ===============================
+
+async function activateDevMode() {
+    const password = document.getElementById('dev-mode-password').value;
+    try {
+        const response = await fetch('/api/dev-mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password })
+        });
+        const data = await response.json();
+        if (data.success) {
+            document.getElementById('dev-mode-status').textContent = 'Active';
+            document.getElementById('dev-mode-status').style.color = '#1ed760';
+            document.getElementById('hydrabase-nav').style.display = '';
+            document.getElementById('dev-mode-password').value = '';
+            showToast('Dev mode activated', 'success');
+        } else {
+            showToast('Invalid password', 'error');
+        }
+    } catch (e) {
+        showToast('Failed to activate dev mode', 'error');
+    }
+}
+
+// ── Hydrabase Functions ──
+
+let _hydrabaseConnected = false;
+
+async function hydrabaseToggleConnection() {
+    if (_hydrabaseConnected) {
+        await hydrabaseDisconnect();
+    } else {
+        await hydrabaseConnect();
+    }
+}
+
+async function hydrabaseConnect() {
+    const url = document.getElementById('hydra-ws-url').value.trim();
+    const apiKey = document.getElementById('hydra-api-key').value.trim();
+    if (!url || !apiKey) {
+        showToast('URL and API key required', 'error');
+        return;
+    }
+    const statusEl = document.getElementById('hydra-connection-status');
+    const btn = document.getElementById('hydra-connect-btn');
+    statusEl.textContent = 'Connecting...';
+    statusEl.style.color = '#f0ad4e';
+    try {
+        const response = await fetch('/api/hydrabase/connect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, api_key: apiKey })
+        });
+        const data = await response.json();
+        if (data.success) {
+            _hydrabaseConnected = true;
+            statusEl.textContent = 'Connected';
+            statusEl.style.color = '#1ed760';
+            btn.textContent = 'Disconnect';
+            showToast('Connected to Hydrabase', 'success');
+        } else {
+            statusEl.textContent = 'Failed';
+            statusEl.style.color = '#f44336';
+            showToast(data.error || 'Connection failed', 'error');
+        }
+    } catch (e) {
+        statusEl.textContent = 'Error';
+        statusEl.style.color = '#f44336';
+        showToast('Connection error', 'error');
+    }
+}
+
+async function hydrabaseDisconnect() {
+    try {
+        await fetch('/api/hydrabase/disconnect', { method: 'POST' });
+    } catch (e) {}
+    _hydrabaseConnected = false;
+    document.getElementById('hydra-connection-status').textContent = 'Disconnected';
+    document.getElementById('hydra-connection-status').style.color = '#888';
+    document.getElementById('hydra-connect-btn').textContent = 'Connect';
+    showToast('Disconnected from Hydrabase', 'success');
+}
+
+async function hydrabaseSendRaw(textareaId) {
+    const textarea = document.getElementById(textareaId);
+    const raw = textarea.value.trim();
+    if (!raw) {
+        showToast('Payload is empty', 'error');
+        return;
+    }
+    if (!_hydrabaseConnected) {
+        showToast('Not connected to Hydrabase', 'error');
+        return;
+    }
+    let payload;
+    try {
+        payload = JSON.parse(raw);
+    } catch (e) {
+        showToast('Invalid JSON payload', 'error');
+        return;
+    }
+    const responseArea = document.getElementById('hydra-response');
+    responseArea.textContent = 'Sending...';
+    try {
+        const response = await fetch('/api/hydrabase/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ payload })
+        });
+        const data = await response.json();
+        if (data.success) {
+            responseArea.textContent = JSON.stringify(data.data, null, 2);
+        } else {
+            responseArea.textContent = 'Error: ' + (data.error || 'Unknown error');
+            if (data.error && data.error.includes('Not connected')) {
+                _hydrabaseConnected = false;
+                document.getElementById('hydra-connection-status').textContent = 'Disconnected';
+                document.getElementById('hydra-connection-status').style.color = '#888';
+                document.getElementById('hydra-connect-btn').textContent = 'Connect';
+            }
+        }
+    } catch (e) {
+        responseArea.textContent = 'Error: ' + e.message;
+    }
+}
 
 async function saveSettings(quiet = false) {
     // Validate file organization templates before saving
