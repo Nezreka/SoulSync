@@ -26358,6 +26358,79 @@ def hydrabase_worker_resume():
 
 
 # ================================================================================================
+# LIBRARY REPAIR WORKER
+# ================================================================================================
+
+from core.repair_worker import RepairWorker
+
+repair_worker = None
+try:
+    from database.music_database import MusicDatabase
+    repair_db = MusicDatabase()
+    transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+    repair_worker = RepairWorker(database=repair_db, transfer_folder=transfer_path)
+    repair_worker.start()
+    print("✅ Repair worker initialized and started")
+except Exception as e:
+    print(f"⚠️ Repair worker initialization failed: {e}")
+    repair_worker = None
+
+# --- Repair Worker API Endpoints ---
+
+@app.route('/api/repair/status', methods=['GET'])
+def repair_status():
+    """Get repair worker status for UI polling"""
+    try:
+        if repair_worker is None:
+            return jsonify({
+                'enabled': False,
+                'running': False,
+                'paused': False,
+                'current_item': None,
+                'stats': {'scanned': 0, 'repaired': 0, 'skipped': 0, 'errors': 0, 'pending': 0},
+                'progress': {}
+            }), 200
+
+        status = repair_worker.get_stats()
+        return jsonify(status), 200
+    except Exception as e:
+        logger.error(f"Error getting repair status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/pause', methods=['POST'])
+def repair_pause():
+    """Pause repair worker"""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        repair_worker.pause()
+        logger.info("Repair worker paused via UI")
+        return jsonify({'status': 'paused'}), 200
+    except Exception as e:
+        logger.error(f"Error pausing repair worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/resume', methods=['POST'])
+def repair_resume():
+    """Resume repair worker"""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        repair_worker.resume()
+        logger.info("Repair worker resumed via UI")
+        return jsonify({'status': 'running'}), 200
+    except Exception as e:
+        logger.error(f"Error resuming repair worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ================================================================================================
+# END LIBRARY REPAIR WORKER
+# ================================================================================================
+
+
+# ================================================================================================
 # IMPORT / STAGING SYSTEM
 # ================================================================================================
 

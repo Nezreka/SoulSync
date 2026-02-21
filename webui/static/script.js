@@ -36122,6 +36122,117 @@ if (document.readyState === 'loading') {
 }
 
 // ===================================================================
+// LIBRARY REPAIR WORKER
+// ===================================================================
+
+async function updateRepairStatus() {
+    try {
+        const response = await fetch('/api/repair/status');
+        if (!response.ok) {
+            console.warn('Repair status endpoint unavailable');
+            return;
+        }
+
+        const data = await response.json();
+        const button = document.getElementById('repair-button');
+        if (!button) return;
+
+        // Update button state classes
+        button.classList.remove('active', 'paused', 'complete');
+        if (data.idle) {
+            button.classList.add('complete');
+        } else if (data.running && !data.paused) {
+            button.classList.add('active');
+        } else if (data.paused) {
+            button.classList.add('paused');
+        }
+
+        // Update tooltip content
+        const tooltipStatus = document.getElementById('repair-tooltip-status');
+        const tooltipCurrent = document.getElementById('repair-tooltip-current');
+        const tooltipProgress = document.getElementById('repair-tooltip-progress');
+
+        if (tooltipStatus) {
+            if (data.idle) {
+                tooltipStatus.textContent = 'Complete';
+            } else if (data.running && !data.paused) {
+                tooltipStatus.textContent = 'Running';
+            } else if (data.paused) {
+                tooltipStatus.textContent = 'Paused';
+            } else {
+                tooltipStatus.textContent = 'Idle';
+            }
+        }
+
+        if (tooltipCurrent) {
+            if (data.idle) {
+                tooltipCurrent.textContent = 'All items processed';
+            } else if (data.current_item && data.current_item.name) {
+                const type = data.current_item.type || 'item';
+                const name = data.current_item.name;
+                tooltipCurrent.textContent = `${type.charAt(0).toUpperCase() + type.slice(1)}: "${name}"`;
+            } else {
+                tooltipCurrent.textContent = 'No active repairs';
+            }
+        }
+
+        if (tooltipProgress && data.progress) {
+            const tracks = data.progress.tracks || {};
+            tooltipProgress.textContent = `Checked: ${tracks.checked || 0} / ${tracks.total || 0} (${tracks.percent || 0}%) | Repaired: ${tracks.repaired || 0}`;
+        }
+
+    } catch (error) {
+        console.error('Error updating repair status:', error);
+    }
+}
+
+/**
+ * Toggle repair worker pause/resume
+ */
+async function toggleRepairWorker() {
+    try {
+        const button = document.getElementById('repair-button');
+        if (!button) return;
+
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/repair/pause' : '/api/repair/resume';
+
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} repair worker`);
+        }
+
+        // Immediately update UI
+        await updateRepairStatus();
+
+        console.log(`Repair worker ${isRunning ? 'paused' : 'resumed'}`);
+
+    } catch (error) {
+        console.error('Error toggling repair worker:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+// Initialize Repair Worker UI on page load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('repair-button');
+        if (button) {
+            button.addEventListener('click', toggleRepairWorker);
+            updateRepairStatus();
+            setInterval(updateRepairStatus, 2000);
+        }
+    });
+} else {
+    const button = document.getElementById('repair-button');
+    if (button) {
+        button.addEventListener('click', toggleRepairWorker);
+        updateRepairStatus();
+        setInterval(updateRepairStatus, 2000);
+    }
+}
+
+// ===================================================================
 // IMPORT / STAGING SYSTEM
 // ===================================================================
 
