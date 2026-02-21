@@ -10163,6 +10163,25 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+/**
+ * Escape a value for safe use inside a single-quoted JS string literal
+ * within a double-quoted HTML attribute (e.g. onclick="fn('${val}')").
+ *
+ * Layer 1 (JS): escape \ and ' so the JS string parses correctly.
+ * Layer 2 (HTML): escape &, ", <, > so the HTML attribute parses correctly.
+ * The browser applies these in reverse: HTML-decode first, then JS-execute.
+ */
+function escapeForInlineJs(str) {
+    if (str == null) return '';
+    return String(str)
+        .replace(/\\/g, '\\\\')   // JS: literal backslash
+        .replace(/'/g, "\\'")     // JS: single quote
+        .replace(/&/g, '&amp;')   // HTML: ampersand
+        .replace(/"/g, '&quot;')  // HTML: double quote
+        .replace(/</g, '&lt;')    // HTML: less-than
+        .replace(/>/g, '&gt;');   // HTML: greater-than
+}
+
 function formatArtists(artists) {
     if (!artists || !Array.isArray(artists)) {
         return 'Unknown Artist';
@@ -13763,6 +13782,9 @@ async function loadDashboardData() {
     // Check for any active download processes that need rehydration
     await checkForActiveProcesses();
 
+    // Populate the Active Downloads dashboard section with any existing downloads
+    updateDashboardDownloads();
+
     // Automatic wishlist processing now runs server-side
 }
 
@@ -13789,6 +13811,123 @@ async function fetchAndUpdateDbStats() {
 function updateDashboardStatCards(stats) {
     // You can expand this later to update the main stat cards
     // For now, we focus on the updater tool itself.
+}
+
+/**
+ * Update the Active Downloads section on the dashboard.
+ * Called from artist, search, and discover update points (event-driven, no polling).
+ */
+function updateDashboardDownloads() {
+    const section = document.getElementById('dashboard-active-downloads-section');
+    const container = document.getElementById('dashboard-downloads-container');
+    if (!section || !container) return;
+
+    // Collect active entries from each source
+    const activeArtists = Object.keys(artistDownloadBubbles).filter(id =>
+        artistDownloadBubbles[id].downloads.length > 0
+    );
+    const activeSearch = Object.keys(searchDownloadBubbles).filter(name =>
+        searchDownloadBubbles[name].downloads.length > 0
+    );
+    const activeDiscover = Object.keys(discoverDownloads);
+
+    const totalCount = activeArtists.length + activeSearch.length + activeDiscover.length;
+
+    if (totalCount === 0) {
+        section.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+
+    section.style.display = '';
+    let html = '';
+
+    // --- Artists group ---
+    if (activeArtists.length > 0) {
+        html += `
+            <div class="dashboard-downloads-group">
+                <div class="dashboard-downloads-group-header">
+                    <span class="dashboard-downloads-group-label">Artists</span>
+                    <span class="dashboard-downloads-group-count">${activeArtists.length}</span>
+                </div>
+                <div class="dashboard-bubble-container">
+                    ${activeArtists.map(id => createArtistBubbleCard(artistDownloadBubbles[id])).join('')}
+                </div>
+            </div>`;
+    }
+
+    // --- Search group ---
+    if (activeSearch.length > 0) {
+        html += `
+            <div class="dashboard-downloads-group">
+                <div class="dashboard-downloads-group-header">
+                    <span class="dashboard-downloads-group-label">Search</span>
+                    <span class="dashboard-downloads-group-count">${activeSearch.length}</span>
+                </div>
+                <div class="dashboard-bubble-container">
+                    ${activeSearch.map(name => createSearchBubbleCard(searchDownloadBubbles[name])).join('')}
+                </div>
+            </div>`;
+    }
+
+    // --- Discover group ---
+    if (activeDiscover.length > 0) {
+        html += `
+            <div class="dashboard-downloads-group">
+                <div class="dashboard-downloads-group-header">
+                    <span class="dashboard-downloads-group-label">Discover</span>
+                    <span class="dashboard-downloads-group-count">${activeDiscover.length}</span>
+                </div>
+                <div class="dashboard-bubble-container">
+                    ${activeDiscover.map(pid => createDashboardDiscoverBubble(pid)).join('')}
+                </div>
+            </div>`;
+    }
+
+    container.innerHTML = html;
+
+    // Post-render: attach artist bubble click handlers + dynamic glow
+    activeArtists.forEach(artistId => {
+        const card = container.querySelector(`.artist-bubble-card[data-artist-id="${artistId}"]`);
+        if (card) {
+            card.addEventListener('click', () => openArtistDownloadModal(artistId));
+            const artist = artistDownloadBubbles[artistId].artist;
+            if (artist.image_url) {
+                extractImageColors(artist.image_url, (colors) => {
+                    applyDynamicGlow(card, colors);
+                });
+            }
+        }
+    });
+    // Search and discover cards use inline onclick — no post-render needed
+}
+
+/**
+ * Create a 150px circle card for a discover download (dashboard variant).
+ * Matches artist/search bubble sizing.
+ */
+function createDashboardDiscoverBubble(playlistId) {
+    const download = discoverDownloads[playlistId];
+    if (!download) return '';
+
+    const isCompleted = download.status === 'completed';
+    const imageUrl = download.imageUrl || '';
+    const backgroundStyle = imageUrl
+        ? `background-image: url('${imageUrl}');`
+        : `background: linear-gradient(135deg, rgba(29, 185, 84, 0.3) 0%, rgba(24, 156, 71, 0.2) 100%);`;
+
+    return `
+        <div class="dashboard-discover-bubble ${isCompleted ? 'completed' : ''}"
+             onclick="openDiscoverDownloadModal('${playlistId}')"
+             title="${escapeHtml(download.name)} - Click to view">
+            <div class="dashboard-discover-bubble-image" style="${backgroundStyle}"></div>
+            <div class="dashboard-discover-bubble-overlay"></div>
+            <div class="dashboard-discover-bubble-content">
+                <div class="dashboard-discover-bubble-name">${escapeHtml(download.name)}</div>
+                <div class="dashboard-discover-bubble-status">${isCompleted ? 'Completed' : 'In Progress'}</div>
+            </div>
+        </div>
+    `;
 }
 
 
@@ -20669,7 +20808,7 @@ function createArtistCardHTML(artist) {
                     <span>${popularityText}</span>
                 </div>
                 <div class="artist-card-actions">
-                    <button class="watchlist-toggle-btn" data-artist-id="${artist.id}" data-artist-name="${escapeHtml(artist.name)}" onclick="toggleWatchlist(event, '${artist.id}', '${escapeHtml(artist.name)}')">
+                    <button class="watchlist-toggle-btn" data-artist-id="${artist.id}" data-artist-name="${escapeHtml(artist.name)}" onclick="toggleWatchlist(event, '${artist.id}', '${escapeForInlineJs(artist.name)}')">
                         <span class="watchlist-icon">👁️</span>
                         <span class="watchlist-text">Add to Watchlist</span>
                     </button>
@@ -22414,6 +22553,7 @@ function updateArtistDownloadsSection() {
     }
     downloadsUpdateTimeout = setTimeout(() => {
         showArtistDownloadsSection();
+        updateDashboardDownloads();
     }, 300); // 300ms debounce
 }
 
@@ -22713,6 +22853,7 @@ function updateSearchDownloadsSection() {
     }
     window.searchUpdateTimeout = setTimeout(() => {
         showSearchDownloadBubbles();
+        updateDashboardDownloads();
     }, 300);
 }
 
@@ -22825,7 +22966,7 @@ function createSearchBubbleCard(artistBubbleData) {
     return `
         <div class="search-bubble-card ${allCompleted ? 'all-completed' : ''}"
              data-artist-name="${escapeHtml(artist.name)}"
-             onclick="openSearchDownloadModal('${escapeHtml(artist.name)}')"
+             onclick="openSearchDownloadModal('${escapeForInlineJs(artist.name)}')"
              title="Click to manage downloads for ${escapeHtml(artist.name)}">
             <div class="search-bubble-image" style="${backgroundStyle}"></div>
             <div class="search-bubble-overlay"></div>
@@ -22838,7 +22979,7 @@ function createSearchBubbleCard(artistBubbleData) {
             </div>
             ${allCompleted ? `
                 <div class="bulk-complete-indicator"
-                     onclick="event.stopPropagation(); bulkCompleteSearchDownloads('${escapeHtml(artist.name)}')"
+                     onclick="event.stopPropagation(); bulkCompleteSearchDownloads('${escapeForInlineJs(artist.name)}')"
                      title="Complete all downloads">
                     <span class="bulk-complete-icon">✅</span>
                 </div>
@@ -31931,7 +32072,7 @@ async function loadGenreBrowser() {
             const icon = getGenreIcon(genre.name);
             const displayName = capitalizeGenre(genre.name);
             html += `
-                <div class="discover-card genre-card-modern" onclick="openGenrePlaylist('${escapeHtml(genre.name)}')">
+                <div class="discover-card genre-card-modern" onclick="openGenrePlaylist('${escapeForInlineJs(genre.name)}')">
                     <div class="discover-card-image genre-card-image">
                         <div class="genre-icon-large">${icon}</div>
                     </div>
@@ -32479,7 +32620,7 @@ async function loadGenreBrowserTabs() {
             tabsHTML += `
                 <button class="genre-tab ${isActive ? 'active' : ''}"
                         data-genre="${escapeHtml(genreName)}"
-                        onclick="switchGenreTab('${escapeHtml(genreName)}')">
+                        onclick="switchGenreTab('${escapeForInlineJs(genreName)}')">
                     ${icon} ${capitalizeGenre(genreName)}
                 </button>
             `;
@@ -32495,11 +32636,11 @@ async function loadGenreBrowserTabs() {
                                 <p id="${tabId}-subtitle" style="margin: 4px 0 0 0; color: #999; font-size: 13px;">${genre.track_count} tracks</p>
                             </div>
                             <div class="discover-section-actions">
-                                <button class="action-button secondary" onclick="openDownloadModalForGenre('${escapeHtml(genreName)}')" title="Download missing tracks">
+                                <button class="action-button secondary" onclick="openDownloadModalForGenre('${escapeForInlineJs(genreName)}')" title="Download missing tracks">
                                     <span class="button-icon">↓</span>
                                     <span class="button-text">Download</span>
                                 </button>
-                                <button class="action-button primary" id="${tabId}-sync-btn" onclick="startGenreSync('${escapeHtml(genreName)}')" title="Sync to media server">
+                                <button class="action-button primary" id="${tabId}-sync-btn" onclick="startGenreSync('${escapeForInlineJs(genreName)}')" title="Sync to media server">
                                     <span class="button-icon">⟳</span>
                                     <span class="button-text">Sync</span>
                                 </button>
@@ -33006,7 +33147,7 @@ function buildListenBrainzPlaylistsHtml(playlists, tabId) {
                     </div>
                     <div class="discover-section-actions">
                         <button class="action-button secondary"
-                                onclick="openDownloadModalForListenBrainzPlaylist('${identifier}', '${escapeHtml(title)}')"
+                                onclick="openDownloadModalForListenBrainzPlaylist('${identifier}', '${escapeForInlineJs(title)}')"
                                 title="Download missing tracks">
                             <span class="button-icon">↓</span>
                             <span class="button-text">Download</span>
@@ -34795,13 +34936,7 @@ let discoverDownloads = {}; // playlistId -> { name, type, status, virtualPlayli
 function addDiscoverDownload(playlistId, playlistName, playlistType, imageUrl = null) {
     console.log(`📥 [DOWNLOAD SIDEBAR] Adding discover download: ${playlistName} (${playlistId}) type: ${playlistType}, image: ${imageUrl}`);
 
-    // Check if download sidebar exists
-    const downloadSidebar = document.getElementById('discover-download-sidebar');
-    if (!downloadSidebar) {
-        console.warn('⚠️ [DOWNLOAD SIDEBAR] Download sidebar element not found - user might not be on discover page');
-        return;
-    }
-
+    // Always register the download in state (needed for dashboard even when not on discover page)
     discoverDownloads[playlistId] = {
         name: playlistName,
         type: playlistType,
@@ -34812,7 +34947,17 @@ function addDiscoverDownload(playlistId, playlistName, playlistType, imageUrl = 
     };
 
     console.log(`📊 [DOWNLOAD SIDEBAR] Active downloads:`, Object.keys(discoverDownloads));
-    updateDiscoverDownloadBar();
+
+    // Update discover page sidebar if it exists (user is on discover page)
+    const downloadSidebar = document.getElementById('discover-download-sidebar');
+    if (downloadSidebar) {
+        updateDiscoverDownloadBar(); // Also saves snapshot internally
+    } else {
+        console.log('ℹ️ [DOWNLOAD SIDEBAR] Sidebar not present - skipping sidebar UI update');
+        saveDiscoverDownloadSnapshot(); // Persist state even when sidebar is absent
+    }
+
+    updateDashboardDownloads();
     monitorDiscoverDownload(playlistId);
 }
 
@@ -34840,6 +34985,7 @@ function monitorDiscoverDownload(playlistId) {
                     console.log(`✅ [DOWNLOAD BAR] Process completed: ${discoverDownloads[playlistId].name}`);
                     discoverDownloads[playlistId].status = 'completed';
                     updateDiscoverDownloadBar();
+                    updateDashboardDownloads();
                     clearInterval(checkInterval);
 
                     // Auto-remove completed downloads after 30 seconds
@@ -34864,6 +35010,7 @@ function monitorDiscoverDownload(playlistId) {
                     console.log(`✅ [DOWNLOAD BAR] Sync completed: ${discoverDownloads[playlistId].name}`);
                     discoverDownloads[playlistId].status = 'completed';
                     updateDiscoverDownloadBar();
+                    updateDashboardDownloads();
                     clearInterval(checkInterval);
 
                     // Auto-remove completed downloads after 30 seconds
@@ -34897,6 +35044,7 @@ function removeDiscoverDownload(playlistId) {
     console.log(`🗑️ Removing discover download: ${playlistId}`);
     delete discoverDownloads[playlistId];
     updateDiscoverDownloadBar();
+    updateDashboardDownloads();
     saveDiscoverDownloadSnapshot(); // Save state after removal
 }
 

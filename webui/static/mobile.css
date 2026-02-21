@@ -101,6 +101,10 @@
         padding: 15px;
     }
 
+    #artist-hero-section #artist-detail-image {
+        width: 100% !important
+    }
+
     #media-player {
         min-height: fit-content;
     }
