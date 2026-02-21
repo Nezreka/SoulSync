@@ -13171,7 +13171,33 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                                     print(f"🚫 [Wishlist Processing] Added cancelled missing track {cancelled_track_info['track_name']} to failed list for wishlist")
             
             print(f"🔍 [Wishlist Processing] Processed {processed_count} cancelled tracks")
-        
+
+        # STEP 1.5: Recover any failed/not_found tasks not captured in permanently_failed_tracks.
+        # Stuck detection (in _on_download_completed, _check_batch_completion_v2, and the Safety Valve)
+        # can force-mark tasks as not_found/failed without adding them to permanently_failed_tracks,
+        # causing them to silently skip wishlist processing.
+        with tasks_lock:
+            for task_id in batch.get('queue', []):
+                if task_id in download_tasks:
+                    task = download_tasks[task_id]
+                    if task['status'] in ('failed', 'not_found'):
+                        track_index = task.get('track_index', 0)
+                        if not any(t.get('table_index') == track_index for t in permanently_failed_tracks):
+                            original_track_info = task.get('track_info', {})
+                            spotify_track_data = _ensure_spotify_track_format(original_track_info)
+                            recovered_track_info = {
+                                'download_index': track_index,
+                                'table_index': track_index,
+                                'track_name': original_track_info.get('name', 'Unknown Track'),
+                                'artist_name': _get_track_artist_name(original_track_info),
+                                'retry_count': task.get('retry_count', 0),
+                                'spotify_track': spotify_track_data,
+                                'failure_reason': task.get('error_message', 'Download failed'),
+                                'candidates': task.get('cached_candidates', [])
+                            }
+                            permanently_failed_tracks.append(recovered_track_info)
+                            print(f"📋 [Wishlist Processing] Recovered uncaptured failed track for wishlist: {recovered_track_info['track_name']}")
+
         # STEP 2: Add permanently failed tracks to wishlist (exact sync.py logic)
         failed_count = len(permanently_failed_tracks)
         wishlist_added_count = 0
@@ -14126,9 +14152,9 @@ def _run_post_processing_worker(task_id, batch_id):
             
         # File found in downloads folder - attempt post-processing
         try:
-            # Create context for post-processing (similar to existing matched download logic)
-            context_key = f"{task_username}::{task_basename}"
-            
+            # Rebuild the context key using the same function that stored it
+            context_key = _make_context_key(task_username, task_filename)
+
             # Check if this download has matched context for post-processing
             with matched_context_lock:
                 context = matched_downloads_context.get(context_key)
