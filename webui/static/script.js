@@ -1625,9 +1625,9 @@ function validateFileOrganizationTemplates() {
 
     // Valid variables for each template type
     const validVars = {
-        album: ['$artist', '$albumartist', '$album', '$title', '$track', '$year', '$quality'],
-        single: ['$artist', '$albumartist', '$album', '$title', '$year', '$quality'],
-        playlist: ['$artist', '$playlist', '$title', '$year', '$quality']
+        album: ['$artist', '$albumartist', '$artistletter', '$album', '$title', '$track', '$disc', '$year', '$quality'],
+        single: ['$artist', '$albumartist', '$artistletter', '$album', '$title', '$year', '$quality'],
+        playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality']
     };
 
     // Get template values
@@ -1814,6 +1814,7 @@ async function loadSettingsData() {
         document.getElementById('template-album-path').value = settings.file_organization?.templates?.album_path || '$albumartist/$albumartist - $album/$track - $title';
         document.getElementById('template-single-path').value = settings.file_organization?.templates?.single_path || '$artist/$artist - $title/$title';
         document.getElementById('template-playlist-path').value = settings.file_organization?.templates?.playlist_path || '$playlist/$artist - $title';
+        document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
 
         // Populate Playlist Sync settings
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup !== false;
@@ -2268,6 +2269,7 @@ async function saveSettings(quiet = false) {
         },
         file_organization: {
             enabled: document.getElementById('file-organization-enabled').checked,
+            disc_label: document.getElementById('disc-label').value,
             templates: {
                 album_path: document.getElementById('template-album-path').value,
                 single_path: document.getElementById('template-single-path').value,

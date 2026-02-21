@@ -8094,6 +8094,7 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'title': track_name,
             'playlist_name': playlist_name,
             'track_number': 1,
+            'disc_number': 1,
             'year': year,
             'quality': context.get('_audio_quality', '')
         }
@@ -8127,26 +8128,34 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
         if track_number is None or not isinstance(track_number, int) or track_number < 1:
             track_number = 1
 
+        # Multi-disc album subfolder support
+        disc_number = album_info.get('disc_number', 1)
+
         template_context = {
             'artist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
             'albumartist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
             'album': album_info['album_name'],
             'title': clean_track_name,
             'track_number': track_number,
+            'disc_number': disc_number,
             'year': year,
             'quality': context.get('_audio_quality', '')
         }
-
-        # Multi-disc album subfolder support
-        disc_number = album_info.get('disc_number', 1)
         spotify_album = context.get('spotify_album', {})
         total_discs = spotify_album.get('total_discs', 1) if spotify_album else 1
 
+        # Check if user controls disc structure via $disc in their template
+        album_template = config_manager.get('file_organization.templates.album_path', '')
+        user_controls_disc = '$disc' in album_template
+
+        disc_label = config_manager.get('file_organization.disc_label', 'Disc')
+
         folder_path, filename_base = _get_file_path_from_template(template_context, 'album_path')
         if folder_path and filename_base:
-            if total_discs > 1:
-                final_path = os.path.join(transfer_dir, folder_path, f"Disc {disc_number}", filename_base + file_ext)
-                os.makedirs(os.path.join(transfer_dir, folder_path, f"Disc {disc_number}"), exist_ok=True)
+            if total_discs > 1 and not user_controls_disc:
+                disc_folder = f"{disc_label} {disc_number}"
+                final_path = os.path.join(transfer_dir, folder_path, disc_folder, filename_base + file_ext)
+                os.makedirs(os.path.join(transfer_dir, folder_path, disc_folder), exist_ok=True)
             else:
                 final_path = os.path.join(transfer_dir, folder_path, filename_base + file_ext)
                 os.makedirs(os.path.join(transfer_dir, folder_path), exist_ok=True)
@@ -8159,7 +8168,7 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
             album_dir = os.path.join(artist_dir, album_folder_name)
             if total_discs > 1:
-                album_dir = os.path.join(album_dir, f"Disc {disc_number}")
+                album_dir = os.path.join(album_dir, f"{disc_label} {disc_number}")
             os.makedirs(album_dir, exist_ok=True)
             final_track_name_sanitized = _sanitize_filename(clean_track_name)
             new_filename = f"{track_number:02d} - {final_track_name_sanitized}{file_ext}"
@@ -8181,6 +8190,7 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'album': album_info.get('album_name', clean_track_name) if album_info else clean_track_name,
             'title': clean_track_name,
             'track_number': 1,
+            'disc_number': 1,
             'year': year,
             'quality': context.get('_audio_quality', '')
         }
@@ -8332,6 +8342,7 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$playlist', clean_context.get('playlist_name', ''))
 
     # Medium length variables
+    result = result.replace('$artistletter', (clean_context.get('artist', 'U') or 'U')[0].upper())
     result = result.replace('$artist', clean_context.get('artist', 'Unknown Artist'))
     result = result.replace('$album', clean_context.get('album', 'Unknown Album'))
     result = result.replace('$title', clean_context.get('title', 'Unknown Track'))
@@ -8382,20 +8393,22 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
     # Split into folder and filename
     path_parts = full_path.split('/')
 
-    # Handle $quality: only substituted in the filename (last component).
-    # In folder components it becomes empty string to prevent album splits
-    # when tracks arrive in mixed qualities (e.g., FLAC 16bit vs 24bit).
+    # Handle $quality and $disc: only substituted in the filename (last component).
+    # In folder components they become empty string to prevent album splits
+    # when tracks arrive in mixed qualities or disc numbers in folder names.
     import re
     quality_value = context.get('quality', '')
+    disc_value = f"{context.get('disc_number', 1):02d}"
 
     if len(path_parts) > 1:
         folder_parts = path_parts[:-1]
         filename_base = path_parts[-1]
 
-        # Strip $quality from folder parts and clean up artifacts
+        # Strip $quality and $disc from folder parts and clean up artifacts
         cleaned_folders = []
         for part in folder_parts:
             part = part.replace('$quality', '')
+            part = part.replace('$disc', '')
             part = re.sub(r'\s*\[\s*\]', '', part)   # empty []
             part = re.sub(r'\s*\(\s*\)', '', part)   # empty ()
             part = re.sub(r'\s*\{\s*\}', '', part)   # empty {}
@@ -8405,8 +8418,9 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
             if part:
                 cleaned_folders.append(part)
 
-        # Substitute $quality in filename only
+        # Substitute $quality and $disc in filename only
         filename_base = filename_base.replace('$quality', quality_value)
+        filename_base = filename_base.replace('$disc', disc_value)
         # Clean up empty brackets/parens from any variable that resolved to empty
         filename_base = re.sub(r'\s*\[\s*\]', '', filename_base)
         filename_base = re.sub(r'\s*\(\s*\)', '', filename_base)
@@ -8423,8 +8437,9 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
 
         return folder_path, filename
     else:
-        # Single component, treat as filename — substitute $quality
+        # Single component, treat as filename — substitute $quality and $disc
         full_path = full_path.replace('$quality', quality_value)
+        full_path = full_path.replace('$disc', disc_value)
         full_path = re.sub(r'\s*\[\s*\]', '', full_path)
         full_path = re.sub(r'\s*\(\s*\)', '', full_path)
         full_path = re.sub(r'\s*\{\s*\}', '', full_path)
