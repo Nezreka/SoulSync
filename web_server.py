@@ -8094,7 +8094,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'title': track_name,
             'playlist_name': playlist_name,
             'track_number': 1,
-            'year': year
+            'year': year,
+            'quality': context.get('_audio_quality', '')
         }
 
         folder_path, filename_base = _get_file_path_from_template(template_context, 'playlist_path')
@@ -8132,7 +8133,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'album': album_info['album_name'],
             'title': clean_track_name,
             'track_number': track_number,
-            'year': year
+            'year': year,
+            'quality': context.get('_audio_quality', '')
         }
 
         # Multi-disc album subfolder support
@@ -8179,7 +8181,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'album': album_info.get('album_name', clean_track_name) if album_info else clean_track_name,
             'title': clean_track_name,
             'track_number': 1,
-            'year': year
+            'year': year,
+            'quality': context.get('_audio_quality', '')
         }
 
         folder_path, filename_base = _get_file_path_from_template(template_context, 'single_path')
@@ -8316,20 +8319,55 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
 
     # Split into folder and filename
     path_parts = full_path.split('/')
+
+    # Handle $quality: only substituted in the filename (last component).
+    # In folder components it becomes empty string to prevent album splits
+    # when tracks arrive in mixed qualities (e.g., FLAC 16bit vs 24bit).
+    import re
+    quality_value = context.get('quality', '')
+
     if len(path_parts) > 1:
         folder_parts = path_parts[:-1]
         filename_base = path_parts[-1]
 
+        # Strip $quality from folder parts and clean up artifacts
+        cleaned_folders = []
+        for part in folder_parts:
+            part = part.replace('$quality', '')
+            part = re.sub(r'\s*\[\s*\]', '', part)   # empty []
+            part = re.sub(r'\s*\(\s*\)', '', part)   # empty ()
+            part = re.sub(r'\s*\{\s*\}', '', part)   # empty {}
+            part = re.sub(r'\s*-\s*$', '', part)     # trailing dash
+            part = re.sub(r'^\s*-\s*', '', part)     # leading dash
+            part = re.sub(r'\s+', ' ', part).strip()
+            if part:
+                cleaned_folders.append(part)
+
+        # Substitute $quality in filename only
+        filename_base = filename_base.replace('$quality', quality_value)
+        # Clean up empty brackets/parens from any variable that resolved to empty
+        filename_base = re.sub(r'\s*\[\s*\]', '', filename_base)
+        filename_base = re.sub(r'\s*\(\s*\)', '', filename_base)
+        filename_base = re.sub(r'\s*\{\s*\}', '', filename_base)
+        filename_base = re.sub(r'\s*-\s*$', '', filename_base)
+        filename_base = re.sub(r'\s+', ' ', filename_base).strip()
+
         # Sanitize each folder component
-        sanitized_folders = [_sanitize_filename(part) for part in folder_parts]
-        folder_path = os.path.join(*sanitized_folders)
+        sanitized_folders = [_sanitize_filename(part) for part in cleaned_folders]
+        folder_path = os.path.join(*sanitized_folders) if sanitized_folders else ''
 
         # Sanitize filename
         filename = _sanitize_filename(filename_base)
 
         return folder_path, filename
     else:
-        # Single component, treat as filename
+        # Single component, treat as filename — substitute $quality
+        full_path = full_path.replace('$quality', quality_value)
+        full_path = re.sub(r'\s*\[\s*\]', '', full_path)
+        full_path = re.sub(r'\s*\(\s*\)', '', full_path)
+        full_path = re.sub(r'\s*\{\s*\}', '', full_path)
+        full_path = re.sub(r'\s*-\s*$', '', full_path)
+        full_path = re.sub(r'\s+', ' ', full_path).strip()
         return '', _sanitize_filename(full_path)
 
 # METADATA & COVER ART HELPERS (Ported from downloads.py)

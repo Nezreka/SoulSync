@@ -48,7 +48,7 @@
   },
   "file_organization": {
     "enabled": true,
-    "_template_variables": "Available: $artist, $albumartist, $album, $title, $track, $year, $playlist",
+    "_template_variables": "Available: $artist, $albumartist, $album, $title, $track, $year, $playlist, $quality (filename only)",
     "templates": {
       "album_path": "$albumartist/$albumartist - $album/$track - $title",
       "single_path": "$artist/$artist - $title/$title",
