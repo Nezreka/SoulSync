@@ -56,6 +56,10 @@
       "playlist_path": "$playlist/$artist - $title"
     }
   },
+  "lossy_copy": {
+    "enabled": false,
+    "bitrate": "320"
+  },
   "playlist_sync": {
     "create_backup": true
   },

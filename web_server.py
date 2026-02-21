@@ -2451,7 +2451,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'listenbrainz', 'acoustid', 'import']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'listenbrainz', 'acoustid', 'import', 'lossy_copy']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -8245,6 +8245,68 @@ def _get_audio_quality_string(file_path):
         logger.debug(f"Could not determine audio quality for {file_path}: {e}")
         return ''
 
+def _create_lossy_copy(final_path):
+    """Convert a FLAC file to MP3 at the user's configured bitrate.
+
+    Only runs when lossy_copy is enabled and the file is a FLAC.
+    Places the MP3 alongside the FLAC with the same basename.
+    """
+    if not config_manager.get('lossy_copy.enabled', False):
+        return
+
+    ext = os.path.splitext(final_path)[1].lower()
+    if ext != '.flac':
+        return
+
+    bitrate = config_manager.get('lossy_copy.bitrate', '320')
+    mp3_quality = f'MP3-{bitrate}'
+    mp3_path = os.path.splitext(final_path)[0] + '.mp3'
+
+    # If $quality was used in filename, swap FLAC quality for MP3 quality
+    original_quality = _get_audio_quality_string(final_path)
+    if original_quality:
+        mp3_basename = os.path.basename(mp3_path)
+        if original_quality in mp3_basename:
+            mp3_basename = mp3_basename.replace(original_quality, mp3_quality)
+            mp3_path = os.path.join(os.path.dirname(mp3_path), mp3_basename)
+
+    ffmpeg_bin = shutil.which('ffmpeg')
+    if not ffmpeg_bin:
+        local = os.path.join(os.path.dirname(__file__), 'tools', 'ffmpeg')
+        if os.path.isfile(local):
+            ffmpeg_bin = local
+        else:
+            print("⚠️ [Lossy Copy] ffmpeg not found — skipping MP3 conversion")
+            return
+
+    try:
+        print(f"🎵 [Lossy Copy] Converting to MP3-{bitrate}: {os.path.basename(final_path)}")
+        result = subprocess.run([
+            ffmpeg_bin, '-i', final_path,
+            '-codec:a', 'libmp3lame',
+            '-b:a', f'{bitrate}k',
+            '-map_metadata', '0',
+            '-id3v2_version', '3',
+            '-y', mp3_path
+        ], capture_output=True, text=True, timeout=120)
+
+        if result.returncode == 0:
+            print(f"✅ [Lossy Copy] Created MP3-{bitrate} copy: {os.path.basename(mp3_path)}")
+            # Fix QUALITY tag — the FLAC's tag (e.g. "FLAC 24bit") was copied verbatim
+            try:
+                from mutagen.id3 import ID3, TXXX
+                tags = ID3(mp3_path)
+                tags.add(TXXX(encoding=3, desc='QUALITY', text=[f'MP3-{bitrate}']))
+                tags.save()
+            except Exception as tag_err:
+                print(f"⚠️ [Lossy Copy] Could not update QUALITY tag: {tag_err}")
+        else:
+            print(f"⚠️ [Lossy Copy] ffmpeg failed: {result.stderr[:200]}")
+    except subprocess.TimeoutExpired:
+        print(f"⚠️ [Lossy Copy] Conversion timed out for: {os.path.basename(final_path)}")
+    except Exception as e:
+        print(f"⚠️ [Lossy Copy] Conversion error: {e}")
+
 def _apply_path_template(template: str, context: dict) -> str:
     """
     Apply template to build file path.
@@ -9747,6 +9809,9 @@ def _post_process_matched_download(context_key, context, file_path):
 
             _safe_move_file(file_path, final_path)
 
+            # Lossy copy: create MP3 version if enabled
+            _create_lossy_copy(final_path)
+
             # Clean up empty directories in downloads folder
             downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
             _cleanup_empty_directories(downloads_path, file_path)
@@ -10005,6 +10070,9 @@ def _post_process_matched_download(context_key, context, file_path):
 
         # 4. Generate LRC lyrics file at final location (elegant addition)
         _generate_lrc_file(final_path, context, spotify_artist, album_info)
+
+        # Lossy copy: create MP3 version if enabled
+        _create_lossy_copy(final_path)
 
         downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         _cleanup_empty_directories(downloads_path, file_path)

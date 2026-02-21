@@ -3190,6 +3190,35 @@
                                 </div>
                             </div>
 
+                            <!-- Lossy Copy Settings -->
+                            <div class="settings-group">
+                                <h3>📀 Lossy Copy</h3>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="lossy-copy-enabled"
+                                            onchange="document.getElementById('lossy-copy-options').style.display = this.checked ? 'block' : 'none'">
+                                        Create MP3 copy of downloaded FLAC files
+                                    </label>
+                                </div>
+
+                                <div id="lossy-copy-options" style="display: none;">
+                                    <div class="form-group">
+                                        <label>MP3 Bitrate:</label>
+                                        <select id="lossy-copy-bitrate">
+                                            <option value="320">320 kbps</option>
+                                            <option value="256">256 kbps</option>
+                                            <option value="192">192 kbps</option>
+                                            <option value="128">128 kbps</option>
+                                        </select>
+                                    </div>
+                                    <div class="help-text">
+                                        After downloading a FLAC, an MP3 copy at the selected bitrate
+                                        will be created in the same folder. Requires ffmpeg.
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- File Organization Settings -->
                             <div class="settings-group">
                                 <h3>📁 File Organization</h3>
