@@ -220,6 +220,10 @@ class ConfigManager:
             "settings": {
                 "audio_quality": "flac"
             },
+            "lossy_copy": {
+                "enabled": False,
+                "bitrate": "320"
+            },
             "import": {
                 "staging_path": "./Staging"
             }
