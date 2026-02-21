@@ -1202,6 +1202,18 @@ class MusicDatabase:
             logger.error(f"Error adding Deezer columns: {e}")
             # Don't raise - this is a migration, database can still function
 
+        # --- Repair worker columns ---
+        try:
+            if 'repair_status' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN repair_status TEXT")
+            if 'repair_last_checked' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN repair_last_checked TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_repair_status ON tracks (repair_status)")
+
+        except Exception as e:
+            logger.error(f"Error adding repair columns: {e}")
+
     def close(self):
         """Close database connection (no-op since we create connections per operation)"""
         # Each operation creates and closes its own connection, so nothing to do here

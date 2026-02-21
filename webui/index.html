@@ -262,6 +262,28 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Library Repair Worker Status Icon -->
+                            <div class="repair-button-container">
+                                <button class="repair-button" id="repair-button" title="Library Repair Worker">
+                                    <img src="/static/whisoul.png" alt="Repair" class="repair-logo">
+                                    <div class="repair-spinner"></div>
+                                </button>
+                                <!-- Repair Worker Tooltip -->
+                                <div class="repair-tooltip" id="repair-tooltip">
+                                    <div class="repair-tooltip-content">
+                                        <div class="repair-tooltip-header">🔧 Library Repair</div>
+                                        <div class="repair-tooltip-body" id="repair-tooltip-body">
+                                            <div class="tooltip-status">Status: <span
+                                                    id="repair-tooltip-status">Idle</span>
+                                            </div>
+                                            <div class="tooltip-current" id="repair-tooltip-current">No active repairs
+                                            </div>
+                                            <div class="tooltip-progress" id="repair-tooltip-progress">Progress: 0 / 0
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <button class="import-button" id="import-button" onclick="openImportModal()"
                                 title="Import Music from Staging">
                                 <img src="https://cdn-icons-png.flaticon.com/512/8765/8765164.png" alt="Import"
