@@ -131,7 +131,9 @@ class WishlistService:
                     'duration_ms': spotify_data.get('duration_ms', 0),
                     'preview_url': spotify_data.get('preview_url'),
                     'external_urls': spotify_data.get('external_urls', {}),
-                    'popularity': spotify_data.get('popularity', 0)
+                    'popularity': spotify_data.get('popularity', 0),
+                    'track_number': spotify_data.get('track_number', 1),
+                    'disc_number': spotify_data.get('disc_number', 1)
                 }
                 
                 formatted_tracks.append(formatted_track)
