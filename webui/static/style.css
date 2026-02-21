@@ -23676,3 +23676,90 @@ body {
     border: 6px solid transparent;
     border-top-color: rgba(244, 67, 54, 0.3);
 }
+
+/* =====================================
+   HYDRABASE PAGE
+   ===================================== */
+
+.hydrabase-container {
+    display: flex;
+    gap: 24px;
+    height: calc(100% - 80px);
+}
+
+.hydrabase-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+.hydrabase-panel h3 {
+    margin: 0 0 4px 0;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.hydrabase-card {
+    background: linear-gradient(135deg, rgba(35, 35, 35, 0.6), rgba(20, 20, 20, 0.8));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 16px;
+}
+
+.hydrabase-card h4 {
+    margin: 0 0 10px 0;
+    color: #ccc;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.hydrabase-input-group {
+    display: flex;
+    gap: 8px;
+}
+
+.hydrabase-input-group input {
+    flex: 1;
+}
+
+.hydrabase-icon {
+    width: 18px;
+    height: 18px;
+    filter: invert(1);
+    vertical-align: middle;
+}
+
+.hydra-payload {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 10px;
+    color: #ccc;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.hydra-payload:focus {
+    border-color: rgba(29, 185, 84, 0.4);
+    outline: none;
+}
+
+.hydrabase-response-area {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 16px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: #aaa;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}

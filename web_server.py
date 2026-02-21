@@ -2482,6 +2482,109 @@ def handle_settings():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+dev_mode_enabled = False
+
+@app.route('/api/dev-mode', methods=['GET', 'POST'])
+def handle_dev_mode():
+    global dev_mode_enabled
+    if request.method == 'POST':
+        data = request.get_json()
+        if data.get('password') == 'hydratest':
+            dev_mode_enabled = True
+            print("🔧 Dev mode activated")
+            return jsonify({"success": True, "enabled": True})
+        return jsonify({"success": False, "error": "Invalid password"}), 401
+    return jsonify({"enabled": dev_mode_enabled})
+
+# ── Hydrabase WebSocket Connection ──
+_hydrabase_ws = None
+_hydrabase_lock = threading.Lock()
+
+@app.route('/api/hydrabase/connect', methods=['POST'])
+def hydrabase_connect():
+    """Connect to a Hydrabase instance via WebSocket."""
+    global _hydrabase_ws
+    if not dev_mode_enabled:
+        return jsonify({"success": False, "error": "Dev mode not active"}), 403
+    data = request.get_json()
+    url = data.get('url', '').strip()
+    api_key = data.get('api_key', '').strip()
+    if not url or not api_key:
+        return jsonify({"success": False, "error": "URL and API key required"}), 400
+    try:
+        import websocket
+        with _hydrabase_lock:
+            # Close existing connection if any
+            if _hydrabase_ws:
+                try:
+                    _hydrabase_ws.close()
+                except:
+                    pass
+            ws = websocket.create_connection(
+                url,
+                header={"x-api-key": api_key},
+                timeout=10
+            )
+            _hydrabase_ws = ws
+        print(f"🧪 [Hydrabase] Connected to {url}")
+        return jsonify({"success": True, "message": "Connected"})
+    except Exception as e:
+        print(f"⚠️ [Hydrabase] Connection failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/hydrabase/disconnect', methods=['POST'])
+def hydrabase_disconnect():
+    """Disconnect from Hydrabase."""
+    global _hydrabase_ws
+    with _hydrabase_lock:
+        if _hydrabase_ws:
+            try:
+                _hydrabase_ws.close()
+            except:
+                pass
+            _hydrabase_ws = None
+    print("🧪 [Hydrabase] Disconnected")
+    return jsonify({"success": True})
+
+@app.route('/api/hydrabase/status')
+def hydrabase_status():
+    """Check if connected to Hydrabase."""
+    connected = _hydrabase_ws is not None and _hydrabase_ws.connected
+    return jsonify({"connected": connected})
+
+@app.route('/api/hydrabase/send', methods=['POST'])
+def hydrabase_send():
+    """Send a raw JSON payload to Hydrabase and return the response."""
+    global _hydrabase_ws
+    if not dev_mode_enabled:
+        return jsonify({"success": False, "error": "Dev mode not active"}), 403
+    if not _hydrabase_ws or not _hydrabase_ws.connected:
+        return jsonify({"success": False, "error": "Not connected to Hydrabase"}), 400
+    data = request.get_json()
+    payload = data.get('payload')
+    if not payload:
+        return jsonify({"success": False, "error": "No payload provided"}), 400
+    try:
+        message = json.dumps(payload) if isinstance(payload, dict) else str(payload)
+        with _hydrabase_lock:
+            _hydrabase_ws.send(message)
+            response = _hydrabase_ws.recv()
+        try:
+            result = json.loads(response)
+        except json.JSONDecodeError:
+            result = response
+        print(f"🧪 [Hydrabase] Sent payload — got response")
+        return jsonify({"success": True, "data": result})
+    except Exception as e:
+        print(f"⚠️ [Hydrabase] Send failed: {e}")
+        with _hydrabase_lock:
+            try:
+                _hydrabase_ws.close()
+            except:
+                pass
+            _hydrabase_ws = None
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/settings/log-level', methods=['GET', 'POST'])
 def handle_log_level():
     """Get or set the application log level"""

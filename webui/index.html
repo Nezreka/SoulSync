@@ -58,6 +58,10 @@
                     <span class="nav-icon">⚙️</span>
                     <span class="nav-text">Settings</span>
                 </button>
+                <button class="nav-button" data-page="hydrabase" id="hydrabase-nav" style="display: none;">
+                    <span class="nav-icon"><img src="/static/hydrabase.png?v=1" class="hydrabase-icon"></span>
+                    <span class="nav-text">Hydrabase</span>
+                </button>
             </nav>
 
             <!-- Spacer -->
@@ -3298,6 +3302,19 @@
                                     <div class="readonly-field" id="log-path-display">logs/app.log</div>
                                 </div>
                             </div>
+
+                            <!-- Developer Mode -->
+                            <div class="settings-group">
+                                <h3>🔧 Developer Mode</h3>
+                                <div class="form-group">
+                                    <label>Password:</label>
+                                    <div style="display: flex; gap: 8px;">
+                                        <input type="password" id="dev-mode-password" placeholder="Enter dev password">
+                                        <button class="test-button" onclick="activateDevMode()">Activate</button>
+                                    </div>
+                                    <div id="dev-mode-status" style="margin-top: 8px; color: #888;">Inactive</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -3307,6 +3324,85 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Hydrabase Page (Dev Mode Only) -->
+            <div class="page" id="hydrabase-page">
+                <div class="page-header">
+                    <h2><img src="/static/hydrabase.png?v=1" class="hydrabase-icon" style="width: 72px; height: 72px;"> Hydrabase</h2>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span id="hydra-connection-status" style="color: #888; font-size: 13px;">Disconnected</span>
+                        <button class="test-button" id="hydra-connect-btn" onclick="hydrabaseToggleConnection()">Connect</button>
+                    </div>
+                </div>
+
+                <!-- Connection Config -->
+                <div class="hydrabase-card" style="margin-bottom: 16px;">
+                    <div style="display: flex; gap: 12px; align-items: end;">
+                        <div style="flex: 2;">
+                            <label style="font-size: 12px; color: #888; display: block; margin-bottom: 4px;">WebSocket URL</label>
+                            <input type="text" id="hydra-ws-url" placeholder="ws://localhost:4545" value="ws://localhost:4545">
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="font-size: 12px; color: #888; display: block; margin-bottom: 4px;">API Key</label>
+                            <input type="text" id="hydra-api-key" placeholder="Your Hydrabase API key">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="hydrabase-container">
+                    <!-- Left Panel — API Inputs -->
+                    <div class="hydrabase-panel hydrabase-inputs">
+                        <h3>API Calls</h3>
+
+                        <div class="hydrabase-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <h4 style="margin: 0;">Tracks</h4>
+                                <button class="test-button" onclick="hydrabaseSendRaw('hydra-payload-track')">Send</button>
+                            </div>
+                            <textarea class="hydra-payload" id="hydra-payload-track" rows="4">{ "request": { "type": "track", "query": "" } }</textarea>
+                        </div>
+
+                        <div class="hydrabase-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <h4 style="margin: 0;">Albums</h4>
+                                <button class="test-button" onclick="hydrabaseSendRaw('hydra-payload-album')">Send</button>
+                            </div>
+                            <textarea class="hydra-payload" id="hydra-payload-album" rows="4">{ "request": { "type": "album", "query": "" } }</textarea>
+                        </div>
+
+                        <div class="hydrabase-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <h4 style="margin: 0;">Artists</h4>
+                                <button class="test-button" onclick="hydrabaseSendRaw('hydra-payload-artist')">Send</button>
+                            </div>
+                            <textarea class="hydra-payload" id="hydra-payload-artist" rows="4">{ "request": { "type": "artist", "query": "" } }</textarea>
+                        </div>
+
+                        <div class="hydrabase-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <h4 style="margin: 0;">Discography</h4>
+                                <button class="test-button" onclick="hydrabaseSendRaw('hydra-payload-discog')">Send</button>
+                            </div>
+                            <textarea class="hydra-payload" id="hydra-payload-discog" rows="4">{ "request": { "type": "discography", "query": "" } }</textarea>
+                        </div>
+
+                        <div class="hydrabase-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <h4 style="margin: 0;">Album Tracks</h4>
+                                <button class="test-button" onclick="hydrabaseSendRaw('hydra-payload-albumtracks')">Send</button>
+                            </div>
+                            <textarea class="hydra-payload" id="hydra-payload-albumtracks" rows="4">{ "request": { "type": "album_tracks", "query": "" } }</textarea>
+                        </div>
+                    </div>
+
+                    <!-- Right Panel — API Responses -->
+                    <div class="hydrabase-panel hydrabase-responses">
+                        <h3>Response</h3>
+                        <div class="hydrabase-response-area" id="hydra-response">API responses will appear here</div>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </div>
 
