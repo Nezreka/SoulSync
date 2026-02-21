@@ -1870,6 +1870,7 @@ async function loadSettingsData() {
                 document.getElementById('dev-mode-status').textContent = 'Active';
                 document.getElementById('dev-mode-status').style.color = '#1ed760';
                 document.getElementById('hydrabase-nav').style.display = '';
+                document.getElementById('hydrabase-button-container').style.display = '';
             }
         } catch (error) {
             console.error('Error checking dev mode:', error);
@@ -2236,6 +2237,7 @@ async function activateDevMode() {
             document.getElementById('dev-mode-status').textContent = 'Active';
             document.getElementById('dev-mode-status').style.color = '#1ed760';
             document.getElementById('hydrabase-nav').style.display = '';
+            document.getElementById('hydrabase-button-container').style.display = '';
             document.getElementById('dev-mode-password').value = '';
             showToast('Dev mode activated', 'success');
         } else {
@@ -35898,6 +35900,76 @@ if (document.readyState === 'loading') {
         updateDeezerStatus();
         setInterval(updateDeezerStatus, 2000);
         console.log('✅ Deezer UI initialized');
+    }
+}
+
+// ===================================================================
+// HYDRABASE P2P MIRROR WORKER
+// ===================================================================
+
+async function updateHydrabaseStatus() {
+    try {
+        const response = await fetch('/api/hydrabase-worker/status');
+        if (!response.ok) return;
+        const data = await response.json();
+        const button = document.getElementById('hydrabase-button');
+        if (!button) return;
+
+        button.classList.remove('active', 'paused');
+        if (data.running && !data.paused) {
+            button.classList.add('active');
+        } else if (data.paused) {
+            button.classList.add('paused');
+        }
+
+        // Update tooltip
+        const statusEl = document.getElementById('hydrabase-tooltip-status');
+        if (statusEl) {
+            if (data.paused) {
+                statusEl.textContent = 'Paused';
+                statusEl.style.color = '#ffc107';
+            } else if (data.running) {
+                statusEl.textContent = 'Active';
+                statusEl.style.color = '#ffffff';
+            } else {
+                statusEl.textContent = 'Stopped';
+                statusEl.style.color = '#ff5252';
+            }
+        }
+    } catch (error) {
+        // Silently ignore — worker may not be available
+    }
+}
+
+async function toggleHydrabaseWorker() {
+    const button = document.getElementById('hydrabase-button');
+    if (!button) return;
+    const isRunning = button.classList.contains('active');
+    const endpoint = isRunning ? '/api/hydrabase-worker/pause' : '/api/hydrabase-worker/resume';
+    try {
+        await fetch(endpoint, { method: 'POST' });
+        await updateHydrabaseStatus();
+    } catch (error) {
+        console.error('Error toggling Hydrabase worker:', error);
+    }
+}
+
+// Initialize Hydrabase UI on page load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('hydrabase-button');
+        if (button) {
+            button.addEventListener('click', toggleHydrabaseWorker);
+            updateHydrabaseStatus();
+            setInterval(updateHydrabaseStatus, 2000);
+        }
+    });
+} else {
+    const button = document.getElementById('hydrabase-button');
+    if (button) {
+        button.addEventListener('click', toggleHydrabaseWorker);
+        updateHydrabaseStatus();
+        setInterval(updateHydrabaseStatus, 2000);
     }
 }
 

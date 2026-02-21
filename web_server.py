@@ -71,6 +71,7 @@ from beatport_unified_scraper import BeatportUnifiedScraper
 from core.musicbrainz_worker import MusicBrainzWorker
 from core.audiodb_worker import AudioDBWorker
 from core.deezer_worker import DeezerWorker
+from core.hydrabase_worker import HydrabaseWorker
 
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -3941,6 +3942,12 @@ def enhanced_search():
 
     logger.info(f"Enhanced search initiated for: '{query}'")
 
+    # Mirror to Hydrabase P2P network
+    if hydrabase_worker and dev_mode_enabled:
+        hydrabase_worker.enqueue(query, 'track')
+        hydrabase_worker.enqueue(query, 'album')
+        hydrabase_worker.enqueue(query, 'artist')
+
     try:
         # Search local database for artists
         database = get_database()
@@ -5578,6 +5585,10 @@ def get_artist_discography(artist_id):
         # Get optional artist name for fallback searches
         artist_name = request.args.get('artist_name', '')
 
+        # Mirror to Hydrabase P2P network
+        if hydrabase_worker and dev_mode_enabled and artist_name:
+            hydrabase_worker.enqueue(artist_name, 'discography')
+
         # Determine which source to use
         spotify_available = spotify_client and spotify_client.is_spotify_authenticated()
 
@@ -6791,7 +6802,11 @@ def search_match():
         
         if not query:
             return jsonify({"results": []})
-        
+
+        # Mirror to Hydrabase P2P network
+        if hydrabase_worker and dev_mode_enabled:
+            hydrabase_worker.enqueue(query, context)
+
         if context == 'artist':
             # Search for artists
             artist_matches = spotify_client.search_artists(query, limit=8)
@@ -16423,6 +16438,10 @@ def search_spotify():
         if not query:
             return jsonify({"error": "Query parameter 'q' is required"}), 400
 
+        # Mirror to Hydrabase P2P network
+        if hydrabase_worker and dev_mode_enabled:
+            hydrabase_worker.enqueue(query, search_type)
+
         # Search using spotify_client
         tracks = spotify_client.search_tracks(query, limit=limit)
 
@@ -16456,6 +16475,10 @@ def search_spotify_tracks():
         if not query:
             return jsonify({"error": "Query parameter is required"}), 400
 
+        # Mirror to Hydrabase P2P network
+        if hydrabase_worker and dev_mode_enabled:
+            hydrabase_worker.enqueue(query, 'track')
+
         # Search using spotify_client
         tracks = spotify_client.search_tracks(query, limit=limit)
 
@@ -16486,6 +16509,10 @@ def search_itunes_tracks():
 
         if not query:
             return jsonify({"error": "Query parameter is required"}), 400
+
+        # Mirror to Hydrabase P2P network
+        if hydrabase_worker and dev_mode_enabled:
+            hydrabase_worker.enqueue(query, 'track')
 
         # Search using iTunes client
         itunes_client = iTunesClient()
@@ -21804,6 +21831,10 @@ def search_artists_for_playlist():
         if not query:
             return jsonify({"success": False, "error": "Query required"}), 400
 
+        # Mirror to Hydrabase P2P network
+        if hydrabase_worker and dev_mode_enabled:
+            hydrabase_worker.enqueue(query, 'artist')
+
         # Search Spotify for artists
         results = spotify_client.sp.search(q=query, type='artist', limit=10)
 
@@ -26257,6 +26288,76 @@ def deezer_resume():
 
 
 # ================================================================================================
+# HYDRABASE P2P MIRROR WORKER
+# ================================================================================================
+
+# --- Hydrabase Worker Initialization ---
+hydrabase_worker = None
+try:
+    def _get_hydrabase_ws_and_lock():
+        return (_hydrabase_ws, _hydrabase_lock)
+    hydrabase_worker = HydrabaseWorker(get_ws_and_lock=_get_hydrabase_ws_and_lock)
+    hydrabase_worker.start()
+    print("✅ Hydrabase P2P mirror worker initialized and started")
+except Exception as e:
+    print(f"⚠️ Hydrabase worker initialization failed: {e}")
+    hydrabase_worker = None
+
+# --- Hydrabase Worker API Endpoints ---
+
+@app.route('/api/hydrabase-worker/status', methods=['GET'])
+def hydrabase_worker_status():
+    """Get Hydrabase P2P mirror worker status for UI polling"""
+    try:
+        if hydrabase_worker is None:
+            return jsonify({
+                'enabled': False,
+                'running': False,
+                'paused': False,
+                'queue_size': 0,
+                'stats': {'sent': 0, 'dropped': 0, 'errors': 0}
+            }), 200
+
+        status = hydrabase_worker.get_stats()
+        return jsonify(status), 200
+    except Exception as e:
+        logger.error(f"Error getting Hydrabase worker status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/hydrabase-worker/pause', methods=['POST'])
+def hydrabase_worker_pause():
+    """Pause Hydrabase P2P mirror worker"""
+    try:
+        if hydrabase_worker is None:
+            return jsonify({'error': 'Hydrabase worker not initialized'}), 400
+
+        hydrabase_worker.pause()
+        logger.info("Hydrabase worker paused via UI")
+        return jsonify({'status': 'paused'}), 200
+    except Exception as e:
+        logger.error(f"Error pausing Hydrabase worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/hydrabase-worker/resume', methods=['POST'])
+def hydrabase_worker_resume():
+    """Resume Hydrabase P2P mirror worker"""
+    try:
+        if hydrabase_worker is None:
+            return jsonify({'error': 'Hydrabase worker not initialized'}), 400
+
+        hydrabase_worker.resume()
+        logger.info("Hydrabase worker resumed via UI")
+        return jsonify({'status': 'running'}), 200
+    except Exception as e:
+        logger.error(f"Error resuming Hydrabase worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ================================================================================================
+# END HYDRABASE P2P MIRROR WORKER
+# ================================================================================================
+
+
+# ================================================================================================
 # IMPORT / STAGING SYSTEM
 # ================================================================================================
 
@@ -26429,6 +26530,10 @@ def import_search_albums():
         query = request.args.get('q', '').strip()
         if not query:
             return jsonify({'success': False, 'error': 'Missing query parameter'}), 400
+
+        # Mirror to Hydrabase P2P network
+        if hydrabase_worker and dev_mode_enabled:
+            hydrabase_worker.enqueue(query, 'album')
 
         limit = min(int(request.args.get('limit', 12)), 50)
         albums = spotify_client.search_albums(query, limit=limit)
