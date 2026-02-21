@@ -150,6 +150,16 @@ def extract_filename(full_path):
     else:
         return full_path
 
+def _make_context_key(username, filename):
+    """Build a unique context key from username and full Soulseek path.
+
+    Uses the full remote path (not just filename) to prevent collisions
+    when different tracks from the same user share a filename
+    (e.g., two albums both containing '01 - Intro.flac').
+    """
+    normalized = filename.replace('\\', '/').lstrip('/') if filename else ''
+    return f"{username}::{normalized}"
+
 # --- Initialize Core Application Components ---
 print("🚀 Initializing SoulSync services for Web UI...")
 try:
@@ -352,7 +362,7 @@ def get_cached_transfer_data():
                                     file_info['username'] = username
                                     all_transfers.append(file_info)
                 for transfer in all_transfers:
-                    key = f"{transfer.get('username')}::{extract_filename(transfer.get('filename', ''))}"
+                    key = _make_context_key(transfer.get('username'), transfer.get('filename', ''))
                     live_transfers_lookup[key] = transfer
 
             # Also add YouTube downloads (through orchestrator)
@@ -361,7 +371,7 @@ def get_cached_transfer_data():
                 for download in all_downloads:
                     # Only add YouTube downloads (Soulseek ones are already in the lookup)
                     if download.username == 'youtube':
-                        key = f"{download.username}::{extract_filename(download.filename)}"
+                        key = _make_context_key(download.username, download.filename)
                         # Convert DownloadStatus to transfer dict format
                         live_transfers_lookup[key] = {
                             'id': download.id,
@@ -577,7 +587,7 @@ class WebUIDownloadMonitor:
                     task_username = task.get('username') or task.get('track_info', {}).get('username')
 
                     if task_filename and task_username:
-                        lookup_key = f"{task_username}::{extract_filename(task_filename)}"
+                        lookup_key = _make_context_key(task_username, task_filename)
                         live_info = live_transfers_lookup.get(lookup_key)
 
                         if live_info:
@@ -664,7 +674,7 @@ class WebUIDownloadMonitor:
                         for directory in user_data['directories']:
                             if 'files' in directory:
                                 for file_info in directory['files']:
-                                    key = f"{username}::{extract_filename(file_info.get('filename', ''))}"
+                                    key = _make_context_key(username, file_info.get('filename', ''))
                                     live_transfers[key] = file_info
 
             # Also get YouTube downloads (through orchestrator)
@@ -673,7 +683,7 @@ class WebUIDownloadMonitor:
                 for download in all_downloads:
                     # Only add YouTube downloads (Soulseek ones are already in the lookup)
                     if download.username == 'youtube':
-                        key = f"{download.username}::{extract_filename(download.filename)}"
+                        key = _make_context_key(download.username, download.filename)
                         # Convert DownloadStatus to transfer dict format for monitor compatibility
                         live_transfers[key] = {
                             'id': download.id,
@@ -718,7 +728,7 @@ class WebUIDownloadMonitor:
         if not task_filename or not task_username:
             return False
 
-        lookup_key = f"{task_username}::{extract_filename(task_filename)}"
+        lookup_key = _make_context_key(task_username, task_filename)
         live_info = live_transfers_lookup.get(lookup_key)
 
         if not live_info:
@@ -760,7 +770,7 @@ class WebUIDownloadMonitor:
 
                 # Defer orphan cleanup to outside the lock (needs matched_context_lock)
                 if username and filename:
-                    old_context_key = f"{username}::{extract_filename(filename)}"
+                    old_context_key = _make_context_key(username, filename)
                     _orphaned_download_keys.add(old_context_key)
                     deferred_ops.append(('cleanup_orphan', old_context_key))
 
@@ -845,7 +855,7 @@ class WebUIDownloadMonitor:
 
                         # Defer orphan cleanup to outside the lock (needs matched_context_lock)
                         if username and filename:
-                            old_context_key = f"{username}::{extract_filename(filename)}"
+                            old_context_key = _make_context_key(username, filename)
                             _orphaned_download_keys.add(old_context_key)
                             deferred_ops.append(('cleanup_orphan', old_context_key))
 
@@ -932,7 +942,7 @@ class WebUIDownloadMonitor:
 
                         # Defer orphan cleanup to outside the lock (needs matched_context_lock)
                         if username and filename:
-                            old_context_key = f"{username}::{extract_filename(filename)}"
+                            old_context_key = _make_context_key(username, filename)
                             _orphaned_download_keys.add(old_context_key)
                             deferred_ops.append(('cleanup_orphan', old_context_key))
 
@@ -4065,7 +4075,7 @@ def start_download():
                     ))
                     if download_id:
                         # Register download for post-processing (simple transfer to /Transfer)
-                        context_key = f"{username}::{extract_filename(filename)}"
+                        context_key = _make_context_key(username, filename)
                         with matched_context_lock:
                             matched_downloads_context[context_key] = {
                                 'search_result': {
@@ -4112,7 +4122,7 @@ def start_download():
 
             if download_id:
                 # Register download for post-processing (simple transfer to /Transfer)
-                context_key = f"{username}::{extract_filename(filename)}"
+                context_key = _make_context_key(username, filename)
                 is_youtube = username == 'youtube'
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
@@ -4186,21 +4196,35 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
         # Consolidate multiple spaces
         return ' '.join(text.split()).strip()
 
+    def _path_matches_api_dirs(file_path):
+        """Check if ALL api directory components appear in the file's path."""
+        path_parts = set(p.lower() for p in file_path.replace('\\', '/').split('/'))
+        return all(d in path_parts for d in api_dir_parts)
+
     def search_in_directory(search_dir, location_name):
         """Search for the file in a specific directory."""
-        best_match_path = None
-        highest_similarity = 0.0
+        best_fuzzy_path = None
+        highest_fuzzy_similarity = 0.0
+        exact_matches = []
 
         # Walk through the entire directory
         for root, dirs, files in os.walk(search_dir):
             # Skip quarantine folder — contains known-wrong files from AcoustID verification
             dirs[:] = [d for d in dirs if d != 'ss_quarantine']
             for file in files:
-                # Direct match is the best case
+                # Direct basename match
                 if os.path.basename(file) == target_basename:
                     file_path = os.path.join(root, file)
-                    print(f"✅ Found exact match in {location_name}: {file_path}")
-                    return file_path, 1.0
+                    # Fast path: if path aligns with expected directory structure, return now
+                    if api_dir_parts and _path_matches_api_dirs(file_path):
+                        print(f"✅ Found path-confirmed match in {location_name}: {file_path}")
+                        return file_path, 1.0
+                    if not api_dir_parts:
+                        # No directory info to disambiguate — return first match (original behavior)
+                        print(f"✅ Found exact match in {location_name}: {file_path}")
+                        return file_path, 1.0
+                    exact_matches.append(file_path)
+                    continue
 
                 # Check for slskd dedup suffix (e.g. "Song_639067852665564677.flac")
                 # slskd appends _<timestamp> when a file with the same name already exists
@@ -4208,22 +4232,52 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
                 stripped_stem = re.sub(r'_\d{10,}$', '', file_stem)
                 if stripped_stem != file_stem and stripped_stem + file_ext_part == target_basename:
                     file_path = os.path.join(root, file)
-                    print(f"✅ Found dedup-suffix match in {location_name}: {file_path}")
-                    return file_path, 1.0
+                    if api_dir_parts and _path_matches_api_dirs(file_path):
+                        print(f"✅ Found path-confirmed dedup match in {location_name}: {file_path}")
+                        return file_path, 1.0
+                    if not api_dir_parts:
+                        print(f"✅ Found dedup-suffix match in {location_name}: {file_path}")
+                        return file_path, 1.0
+                    exact_matches.append(file_path)
+                    continue
 
                 # Fuzzy matching for variations
                 normalized_file = normalize_for_finding(file)
                 similarity = SequenceMatcher(None, normalized_target, normalized_file).ratio()
 
-                if similarity > highest_similarity:
-                    highest_similarity = similarity
-                    best_match_path = os.path.join(root, file)
-        
-        return best_match_path, highest_similarity
+                if similarity > highest_fuzzy_similarity:
+                    highest_fuzzy_similarity = similarity
+                    best_fuzzy_path = os.path.join(root, file)
+
+        # Return best exact match (disambiguated by path), or fall back to fuzzy
+        if exact_matches:
+            if len(exact_matches) == 1:
+                print(f"✅ Found exact match in {location_name}: {exact_matches[0]}")
+                return exact_matches[0], 1.0
+            # Multiple files share the basename — pick the one whose path best
+            # matches the expected directory structure from the Soulseek remote path
+            best = exact_matches[0]
+            best_score = -1
+            for m in exact_matches:
+                m_parts = set(p.lower() for p in m.replace('\\', '/').split('/'))
+                score = sum(1 for d in api_dir_parts if d in m_parts)
+                if score > best_score:
+                    best_score = score
+                    best = m
+            print(f"⚠️ Found {len(exact_matches)} files named '{target_basename}' in {location_name}, picked best path match: {best}")
+            return best, 1.0
+
+        return best_fuzzy_path, highest_fuzzy_similarity
 
     # Extract filename using the helper function
     target_basename = extract_filename(api_filename)
     normalized_target = normalize_for_finding(target_basename)
+
+    # Extract directory components from the API path for disambiguation.
+    # When multiple downloads produce the same basename (e.g., "01 - Silent Night.flac"
+    # from different albums/users), these let us pick the correct file on disk.
+    api_path_normalized = api_filename.replace('\\', '/') if api_filename else ''
+    api_dir_parts = [p.lower() for p in api_path_normalized.split('/')[:-1] if p]
 
     # First search in downloads directory
     best_downloads_path, downloads_similarity = search_in_directory(download_dir, 'downloads')
@@ -4290,8 +4344,7 @@ def get_download_status():
                                     if not filename_from_api: continue
 
                                     # Check if this completed download has a matched context
-                                    # CRITICAL FIX: Use extract_filename() to match storage key format
-                                    context_key = f"{username}::{extract_filename(filename_from_api)}"
+                                    context_key = _make_context_key(username, filename_from_api)
 
                                     # Check if this is an orphaned download that completed after retry
                                     if context_key in _orphaned_download_keys:
@@ -4440,7 +4493,7 @@ def get_download_status():
 
                     # Check if YouTube download is completed and needs post-processing
                     if download.state and ('succeeded' in download.state.lower() or 'completed' in download.state.lower()):
-                        context_key = f"{download.username}::{extract_filename(download.filename)}"
+                        context_key = _make_context_key(download.username, download.filename)
 
                         with matched_context_lock:
                             context = matched_downloads_context.get(context_key)
@@ -6735,7 +6788,7 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
             download_id = run_async(soulseek_client.download(username, filename, size))
 
             if download_id:
-                context_key = f"{username}::{extract_filename(filename)}"
+                context_key = _make_context_key(username, filename)
                 with matched_context_lock:
                     # Create context with FULL Spotify track metadata (like Download Missing Tracks modal)
                     matched_downloads_context[context_key] = {
@@ -6779,7 +6832,7 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
             download_id = run_async(soulseek_client.download(username, filename, size))
 
             if download_id:
-                context_key = f"{username}::{extract_filename(filename)}"
+                context_key = _make_context_key(username, filename)
                 with matched_context_lock:
                     # Basic context for unmatched tracks (simple cleanup)
                     matched_downloads_context[context_key] = {
@@ -6864,7 +6917,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
             download_id = run_async(soulseek_client.download(username, filename, size))
 
             if download_id:
-                context_key = f"{username}::{extract_filename(filename)}"
+                context_key = _make_context_key(username, filename)
                 with matched_context_lock:
                     # Enhanced context storage with Spotify clean titles (GUI parity)
                     enhanced_context = individual_track_context.copy()
@@ -6925,7 +6978,7 @@ def start_matched_download():
             download_id = run_async(soulseek_client.download(username, filename, size))
 
             if download_id:
-                context_key = f"{username}::{extract_filename(filename)}"
+                context_key = _make_context_key(username, filename)
                 with matched_context_lock:
                     # Create context with FULL Spotify track metadata (like Download Missing Tracks modal)
                     matched_downloads_context[context_key] = {
@@ -6985,7 +7038,7 @@ def start_matched_download():
             download_id = run_async(soulseek_client.download(username, filename, size))
 
             if download_id:
-                context_key = f"{username}::{extract_filename(filename)}"
+                context_key = _make_context_key(username, filename)
                 with matched_context_lock:
                     # THE FIX: We preserve the spotify_album context if it was provided.
                     # For a regular single, spotify_album will be None.
@@ -13559,7 +13612,7 @@ def _run_post_processing_worker(task_id, batch_id):
         
         # Try to get context for generating the correct final filename
         task_basename = extract_filename(task_filename)
-        context_key = f"{task_username}::{task_basename}"
+        context_key = _make_context_key(task_username, task_filename)
         expected_final_filename = None
         
         print(f"🔍 [Post-Processing] Looking up context with key: {context_key}")
@@ -14266,7 +14319,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
 
             if download_id:
                 # Store context for post-processing with complete Spotify metadata (GUI PARITY)
-                context_key = f"{username}::{extract_filename(filename)}"
+                context_key = _make_context_key(username, filename)
                 with matched_context_lock:
                     # Create WebUI equivalent of GUI's SpotifyBasedSearchResult data structure
                     enhanced_payload = download_payload.copy()
@@ -14791,8 +14844,8 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
             task_filename = task.get('filename') or _ti.get('filename')
             task_username = task.get('username') or _ti.get('username')
             if task_filename and task_username:
-                lookup_key = f"{task_username}::{extract_filename(task_filename)}"
-                
+                lookup_key = _make_context_key(task_username, task_filename)
+
                 if lookup_key in live_transfers_lookup:
                     live_info = live_transfers_lookup[lookup_key]
                     state_str = live_info.get('state', 'Unknown')
