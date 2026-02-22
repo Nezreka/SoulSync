@@ -9039,9 +9039,9 @@ def _embed_source_ids(audio_file, metadata: dict):
                         id_tags['MUSICBRAINZ_RECORDING_ID'] = recording_mbid
                         print(f"🎵 MusicBrainz recording matched: {recording_mbid}")
 
-                        # Lookup recording details for ISRC, genres, and release (album) MBID
+                        # Lookup recording details for ISRC and genres
                         details = mb_service.mb_client.get_recording(
-                            recording_mbid, includes=['isrcs', 'genres', 'releases']
+                            recording_mbid, includes=['isrcs', 'genres']
                         )
                         if details:
                             isrcs = details.get('isrcs', [])
@@ -9054,15 +9054,20 @@ def _embed_source_ids(audio_file, metadata: dict):
                                     reverse=True
                                 )
                             ]
-                            releases = details.get('releases', [])
-                            if releases:
-                                id_tags['MUSICBRAINZ_RELEASE_ID'] = releases[0]['id']
 
                     # Also try to get artist MBID (may already be cached from worker)
                     artist_result = mb_service.match_artist(artist_name)
                     if artist_result and artist_result.get('mbid'):
                         artist_mbid = artist_result['mbid']
                         id_tags['MUSICBRAINZ_ARTIST_ID'] = artist_mbid
+
+                    # Get release (album) MBID via dedicated search (not per-recording release lists,
+                    # which return different release variants per track and split albums in players)
+                    album_name_for_mb = metadata.get('album', '')
+                    if album_name_for_mb:
+                        release_result = mb_service.match_release(album_name_for_mb, artist_name)
+                        if release_result and release_result.get('mbid'):
+                            id_tags['MUSICBRAINZ_RELEASE_ID'] = release_result['mbid']
                 else:
                     print("⚠️ MusicBrainz worker not available, skipping MBID lookup")
             except Exception as e:
