@@ -9123,6 +9123,21 @@ def _embed_source_ids(audio_file, metadata: dict):
                         if adb_track_id:
                             id_tags['AUDIODB_TRACK_ID'] = str(adb_track_id)
                             print(f"🎵 AudioDB track matched: {adb_track_id}")
+                        # Use AudioDB's MusicBrainz IDs as fallbacks for any missing from MB lookup
+                        adb_mb_track = adb_result.get('strMusicBrainzID')
+                        if adb_mb_track and 'MUSICBRAINZ_RECORDING_ID' not in id_tags:
+                            id_tags['MUSICBRAINZ_RECORDING_ID'] = adb_mb_track
+                            recording_mbid = adb_mb_track
+                            print(f"🎵 MusicBrainz recording ID from AudioDB fallback: {adb_mb_track}")
+                        adb_mb_album = adb_result.get('strMusicBrainzAlbumID')
+                        if adb_mb_album and 'MUSICBRAINZ_RELEASE_ID' not in id_tags:
+                            id_tags['MUSICBRAINZ_RELEASE_ID'] = adb_mb_album
+                            print(f"🎵 MusicBrainz release ID from AudioDB fallback: {adb_mb_album}")
+                        adb_mb_artist = adb_result.get('strMusicBrainzArtistID')
+                        if adb_mb_artist and 'MUSICBRAINZ_ARTIST_ID' not in id_tags:
+                            id_tags['MUSICBRAINZ_ARTIST_ID'] = adb_mb_artist
+                            artist_mbid = adb_mb_artist
+                            print(f"🎵 MusicBrainz artist ID from AudioDB fallback: {adb_mb_artist}")
                         audiodb_mood = adb_result.get('strMood') or None
                         audiodb_style = adb_result.get('strStyle') or None
                         audiodb_genre = adb_result.get('strGenre') or None
