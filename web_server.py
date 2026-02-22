@@ -9039,9 +9039,9 @@ def _embed_source_ids(audio_file, metadata: dict):
                         id_tags['MUSICBRAINZ_RECORDING_ID'] = recording_mbid
                         print(f"🎵 MusicBrainz recording matched: {recording_mbid}")
 
-                        # Lookup recording details for ISRC and genres
+                        # Lookup recording details for ISRC, genres, and release (album) MBID
                         details = mb_service.mb_client.get_recording(
-                            recording_mbid, includes=['isrcs', 'genres']
+                            recording_mbid, includes=['isrcs', 'genres', 'releases']
                         )
                         if details:
                             isrcs = details.get('isrcs', [])
@@ -9054,6 +9054,9 @@ def _embed_source_ids(audio_file, metadata: dict):
                                     reverse=True
                                 )
                             ]
+                            releases = details.get('releases', [])
+                            if releases:
+                                id_tags['MUSICBRAINZ_RELEASE_ID'] = releases[0]['id']
 
                     # Also try to get artist MBID (may already be cached from worker)
                     artist_result = mb_service.match_artist(artist_name)
@@ -9138,6 +9141,9 @@ def _embed_source_ids(audio_file, metadata: dict):
                 elif tag_name == 'MUSICBRAINZ_ARTIST_ID':
                     audio_file.tags.add(TXXX(encoding=3, desc='MusicBrainz Artist Id', text=[value]))
                     written.append('TXXX:MusicBrainz Artist Id')
+                elif tag_name == 'MUSICBRAINZ_RELEASE_ID':
+                    audio_file.tags.add(TXXX(encoding=3, desc='MusicBrainz Album Id', text=[value]))
+                    written.append('TXXX:MusicBrainz Album Id')
                 else:
                     audio_file.tags.add(TXXX(encoding=3, desc=tag_name, text=[str(value)]))
                     written.append(f'TXXX:{tag_name}')
@@ -9151,6 +9157,9 @@ def _embed_source_ids(audio_file, metadata: dict):
                 elif tag_name == 'MUSICBRAINZ_ARTIST_ID':
                     audio_file['MUSICBRAINZ_ARTISTID'] = [value]
                     written.append('MUSICBRAINZ_ARTISTID')
+                elif tag_name == 'MUSICBRAINZ_RELEASE_ID':
+                    audio_file['MUSICBRAINZ_ALBUMID'] = [value]
+                    written.append('MUSICBRAINZ_ALBUMID')
                 else:
                     audio_file[tag_name] = [str(value)]
                     written.append(tag_name)
@@ -9162,6 +9171,8 @@ def _embed_source_ids(audio_file, metadata: dict):
                     key = '----:com.apple.iTunes:MusicBrainz Track Id'
                 elif tag_name == 'MUSICBRAINZ_ARTIST_ID':
                     key = '----:com.apple.iTunes:MusicBrainz Artist Id'
+                elif tag_name == 'MUSICBRAINZ_RELEASE_ID':
+                    key = '----:com.apple.iTunes:MusicBrainz Album Id'
                 else:
                     key = f'----:com.apple.iTunes:{tag_name}'
                 audio_file[key] = [MP4FreeForm(str(value).encode('utf-8'))]
