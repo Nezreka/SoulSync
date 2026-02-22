@@ -9395,63 +9395,23 @@ def _post_process_matched_download_with_verification(context_key, context, file_
                 _on_download_completed(batch_id, task_id, success=False)
                 return
 
-        # CRITICAL VERIFICATION STEP: Verify the final file exists
-        spotify_artist = context.get("spotify_artist")
-        if not spotify_artist:
-            raise Exception("Missing spotify_artist context for verification")
+        # VERIFICATION: Use the actual path that _post_process_matched_download computed and
+        # moved the file to, instead of recomputing independently. Independent recomputation
+        # can produce path mismatches (e.g., track_number extraction/validation differences)
+        # causing false "file verification failed" errors on successfully processed files.
+        expected_final_path = context.get('_final_processed_path')
+        if not expected_final_path:
+            _pp.info(f"⚠️ No _final_processed_path in context for task {task_id} — cannot verify, assuming success")
+            with tasks_lock:
+                if task_id in download_tasks:
+                    _mark_task_completed(task_id, context.get('track_info'))
+            with matched_context_lock:
+                if context_key in matched_downloads_context:
+                    del matched_downloads_context[context_key]
+            _on_download_completed(batch_id, task_id, success=True)
+            return
 
-        # Get album info for path calculation
-        is_album_download = context.get("is_album_download", False)
-        has_clean_spotify_data = context.get("has_clean_spotify_data", False)
-
-        if is_album_download and has_clean_spotify_data:
-            original_search = context.get("original_search_result", {})
-            spotify_album = context.get("spotify_album", {})
-            clean_track_name = original_search.get('spotify_clean_title', 'Unknown Track')
-            clean_album_name = original_search.get('spotify_clean_album', 'Unknown Album')
-            album_info = {
-                'is_album': True,
-                'album_name': clean_album_name,
-                'track_number': original_search.get('track_number', 1),
-                'disc_number': original_search.get('disc_number', 1),
-                'clean_track_name': clean_track_name,
-                'album_image_url': spotify_album.get('image_url'),
-                'confidence': 1.0,
-                'source': 'clean_spotify_metadata'
-            }
-        elif is_album_download:
-            original_search = context.get("original_search_result", {})
-            spotify_album = context.get("spotify_album", {})
-            clean_track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
-            album_name = (original_search.get('spotify_clean_album') or
-                         spotify_album.get('name') or
-                         'Unknown Album')
-            album_info = {
-                'is_album': True,
-                'album_name': album_name,
-                'track_number': original_search.get('track_number', 1),
-                'disc_number': original_search.get('disc_number', 1),
-                'clean_track_name': clean_track_name,
-                'album_image_url': spotify_album.get('image_url'),
-                'confidence': 0.9,
-                'source': 'enhanced_fallback_album_context'
-            }
-        else:
-            album_info = _detect_album_info_web(context, spotify_artist)
-
-        # Apply album grouping if needed
-        if album_info and album_info.get('is_album'):
-            original_album = None
-            if context.get("original_search_result", {}).get("album"):
-                original_album = context["original_search_result"]["album"]
-            consistent_album_name = _resolve_album_group(spotify_artist, album_info, original_album)
-            album_info['album_name'] = consistent_album_name
-
-        # Use shared path builder to get expected final path
-        file_ext = os.path.splitext(file_path)[1]
-        expected_final_path, _ = _build_final_path_for_track(context, spotify_artist, album_info, file_ext)
-
-        # VERIFICATION: Check if file exists at expected final path
+        # VERIFICATION: Check if file exists at the path processing actually used
         if os.path.exists(expected_final_path):
             # Mark task as completed only after successful verification
             with tasks_lock:
@@ -9470,9 +9430,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
             _pp.info(f"FAILED verification for '{track_name}' (task={task_id})")
             _pp.info(f"  expected_final_path: {expected_final_path}")
             _pp.info(f"  file_path (source): {file_path}, exists={os.path.exists(file_path)}")
-            _pp.info(f"  is_album={is_album_download}, has_clean_data={has_clean_spotify_data}")
-            if album_info:
-                _pp.info(f"  album={album_info.get('album_name')}, track_num={album_info.get('track_number')}, track={album_info.get('clean_track_name')}")
+            _pp.info(f"  is_album={context.get('is_album_download', False)}, has_clean_data={context.get('has_clean_spotify_data', False)}")
             expected_dir = os.path.dirname(expected_final_path)
             if os.path.exists(expected_dir):
                 dir_contents = os.listdir(expected_dir)
@@ -10138,6 +10096,10 @@ def _post_process_matched_download(context_key, context, file_path):
             final_path, _ = _build_final_path_for_track(context, spotify_artist, album_info, file_ext)
             print(f"📁 Single path: '{final_path}'")
 
+        # Store the actual computed path so verification uses this exact path
+        # instead of recomputing independently (which can produce mismatches)
+        context['_final_processed_path'] = final_path
+
         # 3. Enhance metadata, move file, download art, and cleanup
         try:
             _enhance_file_metadata(file_path, context, spotify_artist, album_info)
@@ -10193,9 +10155,28 @@ def _post_process_matched_download(context_key, context, file_path):
                 _generate_lrc_file(final_path, context, spotify_artist, album_info)
                 return
             else:
-                # Source gone, destination not there either - check if dest dir has the file under a slight name variation
-                print(f"⚠️ [Pre-Move] Source file gone and destination not found: {os.path.basename(file_path)}")
-                raise FileNotFoundError(f"Source file vanished before move and destination does not exist: {file_path}")
+                # Source gone, exact destination not found — check if stream processor already
+                # moved it with a quality tag (e.g. "track [FLAC 24bit].flac" vs "track.flac")
+                expected_dir = os.path.dirname(final_path)
+                expected_stem = os.path.splitext(os.path.basename(final_path))[0]
+                expected_ext = os.path.splitext(final_path)[1]
+                found_variant = None
+                if os.path.exists(expected_dir):
+                    for f in os.listdir(expected_dir):
+                        # Match files that start with the expected stem and have the same extension
+                        # This catches "01 - track [FLAC 24bit].flac" when expecting "01 - track.flac"
+                        if f.endswith(expected_ext) and os.path.splitext(f)[0].startswith(expected_stem):
+                            found_variant = os.path.join(expected_dir, f)
+                            break
+                if found_variant:
+                    print(f"✅ [Pre-Move] Source gone but found variant in destination (stream processor handled it): {os.path.basename(found_variant)}")
+                    context['_final_processed_path'] = found_variant
+                    _download_cover_art(album_info, expected_dir)
+                    _generate_lrc_file(found_variant, context, spotify_artist, album_info)
+                    return
+                else:
+                    print(f"⚠️ [Pre-Move] Source file gone and no matching file in destination: {os.path.basename(file_path)}")
+                    raise FileNotFoundError(f"Source file vanished before move and destination does not exist: {file_path}")
 
         _safe_move_file(file_path, final_path)
 
@@ -13853,9 +13834,12 @@ def _run_post_processing_worker(task_id, batch_id):
                 return
             task = download_tasks[task_id].copy()
             
-        # Check if task was cancelled during post-processing
+        # Check if task was cancelled or already completed during post-processing
         if task['status'] == 'cancelled':
             print(f"❌ [Post-Processing] Task {task_id} was cancelled, skipping verification")
+            return
+        if task['status'] == 'completed' or task.get('stream_processed'):
+            print(f"✅ [Post-Processing] Task {task_id} already completed by stream processor, skipping verification")
             return
             
         # Extract file information for verification
@@ -13998,28 +13982,36 @@ def _run_post_processing_worker(task_id, batch_id):
             except Exception as e:
                 logger.error(f"⚠️ [Post-Processing] Failed to retrieve YouTube task status: {e}")
 
-        for retry_count in range(3):
+        _file_search_max_retries = 5
+        for retry_count in range(_file_search_max_retries):
             # If we already resolved the file (e.g. via YouTube status), skip searching
             if found_file:
                 print(f"🎯 [Post-Processing] Skipping search loop, file already resolved: {found_file}")
                 break
 
-            print(f"🔍 [Post-Processing] Attempt {retry_count + 1}/3 to find file")
+            # Check if stream processor already completed this task while we were waiting
+            with tasks_lock:
+                if task_id in download_tasks:
+                    if download_tasks[task_id].get('stream_processed') or download_tasks[task_id]['status'] == 'completed':
+                        print(f"✅ [Post-Processing] Task {task_id} was completed by stream processor during file search - done")
+                        return
+
+            print(f"🔍 [Post-Processing] Attempt {retry_count + 1}/{_file_search_max_retries} to find file")
             print(f"🔍 [Post-Processing] Original filename: {task_basename}")
             if expected_final_filename:
                 print(f"🔍 [Post-Processing] Expected final filename: {expected_final_filename}")
             else:
                 print(f"⚠️ [Post-Processing] No expected final filename available")
-            
+
             # Strategy 1: Try with original filename in both downloads and transfer
             print(f"🔍 [Post-Processing] Strategy 1: Searching with original filename...")
             found_file, file_location = _find_completed_file_robust(download_dir, task_filename, transfer_dir)
-            
+
             if found_file:
                 print(f"✅ [Post-Processing] Strategy 1 SUCCESS: Found file with original filename in {file_location}: {found_file}")
             else:
                 print(f"❌ [Post-Processing] Strategy 1 FAILED: Original filename not found in either location")
-            
+
             # Strategy 2: If not found and we have an expected final filename, try that in transfer folder
             if not found_file and expected_final_filename:
                 print(f"🔍 [Post-Processing] Strategy 2: Searching transfer folder with expected final filename...")
@@ -14031,22 +14023,27 @@ def _run_post_processing_worker(task_id, batch_id):
                     print(f"❌ [Post-Processing] Strategy 2 FAILED: Expected final filename not found in transfer folder")
             elif not expected_final_filename:
                 print(f"⏭️ [Post-Processing] Strategy 2 SKIPPED: No expected final filename available")
-            
+
             if found_file:
                 print(f"🎯 [Post-Processing] FILE FOUND after {retry_count + 1} attempts in {file_location}: {found_file}")
                 break
             else:
-                print(f"❌ [Post-Processing] All search strategies failed on attempt {retry_count + 1}/3")
-                if retry_count < 2:  # Don't sleep on final attempt
-                    print(f"⏳ [Post-Processing] Waiting 3 seconds before next attempt...")
-                    time.sleep(3)
-        
+                print(f"❌ [Post-Processing] All search strategies failed on attempt {retry_count + 1}/{_file_search_max_retries}")
+                if retry_count < _file_search_max_retries - 1:  # Don't sleep on final attempt
+                    print(f"⏳ [Post-Processing] Waiting 5 seconds before next attempt...")
+                    time.sleep(5)
+
         if not found_file:
-            print(f"❌ [Post-Processing] File not found on disk after 3 attempts: {os.path.basename(task_filename)}")
+            # CRITICAL: Before marking as failed, check if stream processor already handled this
+            # The /api/downloads/status polling endpoint processes files independently and may have
+            # already moved/renamed/tagged the file successfully while we were searching
             with tasks_lock:
                 if task_id in download_tasks:
+                    if download_tasks[task_id].get('stream_processed') or download_tasks[task_id]['status'] == 'completed':
+                        print(f"✅ [Post-Processing] Task {task_id} was completed by stream processor - not marking as failed")
+                        return
                     download_tasks[task_id]['status'] = 'failed'
-                    download_tasks[task_id]['error_message'] = f'File not found on disk after 3 search attempts. Expected: {os.path.basename(task_filename)}'
+                    download_tasks[task_id]['error_message'] = f'File not found on disk after {_file_search_max_retries} search attempts. Expected: {os.path.basename(task_filename)}'
             _on_download_completed(batch_id, task_id, success=False)
             return
             
