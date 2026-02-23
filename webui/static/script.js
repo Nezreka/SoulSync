@@ -1833,6 +1833,7 @@ async function loadSettingsData() {
         // Populate Lossy Copy settings
         document.getElementById('lossy-copy-enabled').checked = settings.lossy_copy?.enabled === true;
         document.getElementById('lossy-copy-bitrate').value = settings.lossy_copy?.bitrate || '320';
+        document.getElementById('lossy-copy-delete-original').checked = settings.lossy_copy?.delete_original === true;
         document.getElementById('lossy-copy-options').style.display =
             settings.lossy_copy?.enabled ? 'block' : 'none';
 
@@ -2432,7 +2433,8 @@ async function saveSettings(quiet = false) {
         },
         lossy_copy: {
             enabled: document.getElementById('lossy-copy-enabled').checked,
-            bitrate: document.getElementById('lossy-copy-bitrate').value
+            bitrate: document.getElementById('lossy-copy-bitrate').value,
+            delete_original: document.getElementById('lossy-copy-delete-original').checked
         },
         import: {
             staging_path: document.getElementById('staging-path').value || './Staging'

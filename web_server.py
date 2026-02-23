@@ -8380,13 +8380,15 @@ def _create_lossy_copy(final_path):
 
     Only runs when lossy_copy is enabled and the file is a FLAC.
     Places the MP3 alongside the FLAC with the same basename.
+
+    Returns the MP3 path if Blasphemy Mode deleted the original, else None.
     """
     if not config_manager.get('lossy_copy.enabled', False):
-        return
+        return None
 
     ext = os.path.splitext(final_path)[1].lower()
     if ext != '.flac':
-        return
+        return None
 
     bitrate = config_manager.get('lossy_copy.bitrate', '320')
     mp3_quality = f'MP3-{bitrate}'
@@ -8407,7 +8409,7 @@ def _create_lossy_copy(final_path):
             ffmpeg_bin = local
         else:
             print("⚠️ [Lossy Copy] ffmpeg not found — skipping MP3 conversion")
-            return
+            return None
 
     try:
         print(f"🎵 [Lossy Copy] Converting to MP3-{bitrate}: {os.path.basename(final_path)}")
@@ -8430,12 +8432,39 @@ def _create_lossy_copy(final_path):
                 tags.save()
             except Exception as tag_err:
                 print(f"⚠️ [Lossy Copy] Could not update QUALITY tag: {tag_err}")
+
+            # Blasphemy Mode: delete original FLAC if enabled and MP3 is verified
+            if config_manager.get('lossy_copy.delete_original', False):
+                try:
+                    if os.path.isfile(mp3_path) and os.path.getsize(mp3_path) > 0:
+                        from mutagen import File as MutagenFile
+                        test_audio = MutagenFile(mp3_path)
+                        if test_audio is not None:
+                            os.remove(final_path)
+                            print(f"🔥 [Blasphemy Mode] Deleted original: {os.path.basename(final_path)}")
+                            # Rename LRC file to match the MP3 filename
+                            flac_lrc = os.path.splitext(final_path)[0] + '.lrc'
+                            if os.path.isfile(flac_lrc):
+                                mp3_lrc = os.path.splitext(mp3_path)[0] + '.lrc'
+                                try:
+                                    os.rename(flac_lrc, mp3_lrc)
+                                    print(f"🔥 [Blasphemy Mode] Renamed LRC: {os.path.basename(flac_lrc)} -> {os.path.basename(mp3_lrc)}")
+                                except Exception as lrc_err:
+                                    print(f"⚠️ [Blasphemy Mode] Could not rename LRC: {lrc_err}")
+                            return mp3_path
+                        else:
+                            print(f"⚠️ [Blasphemy Mode] MP3 failed audio validation, keeping original: {os.path.basename(final_path)}")
+                    else:
+                        print(f"⚠️ [Blasphemy Mode] MP3 missing or empty, keeping original: {os.path.basename(final_path)}")
+                except Exception as del_err:
+                    print(f"⚠️ [Blasphemy Mode] Error during original deletion, keeping original: {del_err}")
         else:
             print(f"⚠️ [Lossy Copy] ffmpeg failed: {result.stderr[:200]}")
     except subprocess.TimeoutExpired:
         print(f"⚠️ [Lossy Copy] Conversion timed out for: {os.path.basename(final_path)}")
     except Exception as e:
         print(f"⚠️ [Lossy Copy] Conversion error: {e}")
+    return None
 
 def _apply_path_template(template: str, context: dict) -> str:
     """
@@ -9934,13 +9963,15 @@ def _post_process_matched_download(context_key, context, file_path):
             _safe_move_file(file_path, final_path)
 
             # Lossy copy: create MP3 version if enabled
-            _create_lossy_copy(final_path)
+            blasphemy_path = _create_lossy_copy(final_path)
+            if blasphemy_path:
+                context['_final_processed_path'] = blasphemy_path
 
             # Clean up empty directories in downloads folder
             downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
             _cleanup_empty_directories(downloads_path, file_path)
 
-            print(f"✅ [Playlist Folder Mode] Post-processing complete: {final_path}")
+            print(f"✅ [Playlist Folder Mode] Post-processing complete: {context.get('_final_processed_path', final_path)}")
 
             # WISHLIST REMOVAL: Check if this track should be removed from wishlist
             try:
@@ -10194,11 +10225,17 @@ def _post_process_matched_download(context_key, context, file_path):
                 expected_stem = os.path.splitext(os.path.basename(final_path))[0]
                 expected_ext = os.path.splitext(final_path)[1]
                 found_variant = None
+                # Also check for .mp3 if Blasphemy Mode may have deleted the .flac
+                check_exts = {expected_ext}
+                if expected_ext == '.flac' and config_manager.get('lossy_copy.enabled', False) and config_manager.get('lossy_copy.delete_original', False):
+                    check_exts.add('.mp3')
                 if os.path.exists(expected_dir):
                     for f in os.listdir(expected_dir):
-                        # Match files that start with the expected stem and have the same extension
+                        # Match files that start with the expected stem and have a matching extension
                         # This catches "01 - track [FLAC 24bit].flac" when expecting "01 - track.flac"
-                        if f.endswith(expected_ext) and os.path.splitext(f)[0].startswith(expected_stem):
+                        # and "01 - track [MP3-320].mp3" when Blasphemy Mode deleted the FLAC
+                        f_ext = os.path.splitext(f)[1].lower()
+                        if f_ext in check_exts and os.path.splitext(f)[0].startswith(expected_stem):
                             found_variant = os.path.join(expected_dir, f)
                             break
                 if found_variant:
@@ -10219,13 +10256,15 @@ def _post_process_matched_download(context_key, context, file_path):
         _generate_lrc_file(final_path, context, spotify_artist, album_info)
 
         # Lossy copy: create MP3 version if enabled
-        _create_lossy_copy(final_path)
+        blasphemy_path = _create_lossy_copy(final_path)
+        if blasphemy_path:
+            context['_final_processed_path'] = blasphemy_path
 
         downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         _cleanup_empty_directories(downloads_path, file_path)
 
-        print(f"✅ Post-processing complete for: {final_path}")
-        
+        print(f"✅ Post-processing complete for: {context.get('_final_processed_path', final_path)}")
+
         # WISHLIST REMOVAL: Check if this track should be removed from wishlist after successful download
         try:
             _check_and_remove_from_wishlist(context)
