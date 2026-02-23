@@ -1846,7 +1846,7 @@ async function loadSettingsData() {
             settings.lossy_copy?.enabled ? 'block' : 'none';
 
         // Populate M3U Export settings
-        document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled !== false;
+        document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
 
         // Populate Logging information (read-only)
         document.getElementById('log-level-display').textContent = settings.logging?.level || 'INFO';
