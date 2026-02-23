@@ -13929,7 +13929,12 @@ def _run_post_processing_worker(task_id, batch_id):
         else:
             print(f"❌ [Post-Processing] No context found for key: {context_key}")
             # Try fuzzy matching with similar keys containing the filename
-            similar_keys = [k for k in matched_downloads_context.keys() if task_basename in k]
+            # SAFETY: Constrain to same Soulseek username to prevent cross-album
+            # metadata contamination during mass downloads (e.g., two albums both
+            # having "01 - Intro.flac" would match the wrong context without this)
+            with matched_context_lock:
+                similar_keys = [k for k in matched_downloads_context.keys()
+                                if k.startswith(f"{task_username}::") and task_basename in k]
             if similar_keys:
                 # Use the first similar key found
                 fuzzy_key = similar_keys[0]
