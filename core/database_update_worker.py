@@ -182,7 +182,16 @@ class DatabaseUpdateWorker(QThread):
                 self._emit_signal('phase_changed', "Finding recently added content...")
                 artists_to_process = self._get_artists_for_incremental_update()
                 if not artists_to_process:
-                    logger.info("No new content found - database is up to date")
+                    logger.info("No new content found - checking for duplicate cleanup")
+                    # Still run duplicate merge even when no new content found
+                    if self.database:
+                        try:
+                            merge_results = self.database.merge_duplicate_artists()
+                            merged = merge_results.get('artists_merged', 0)
+                            if merged > 0:
+                                logger.info(f"🧹 Merged {merged} duplicate artists")
+                        except Exception as e:
+                            logger.warning(f"Could not merge duplicate artists: {e}")
                     self._emit_signal('finished', 0, 0, 0, 0, 0)
                     return
                 logger.info(f"Incremental update: Found {len(artists_to_process)} artists to process")
@@ -225,14 +234,23 @@ class DatabaseUpdateWorker(QThread):
                     cleanup_results = self.database.cleanup_orphaned_records()
                     orphaned_artists = cleanup_results.get('orphaned_artists_removed', 0)
                     orphaned_albums = cleanup_results.get('orphaned_albums_removed', 0)
-                    
+
                     if orphaned_artists > 0 or orphaned_albums > 0:
                         logger.info(f"🧹 Cleanup complete: {orphaned_artists} orphaned artists, {orphaned_albums} orphaned albums removed")
                     else:
                         logger.debug("🧹 Cleanup complete: No orphaned records found")
-                        
+
                 except Exception as e:
                     logger.warning(f"Could not cleanup orphaned records: {e}")
+
+                # Merge any remaining duplicate artists (same name + server_source, different IDs)
+                try:
+                    merge_results = self.database.merge_duplicate_artists()
+                    merged = merge_results.get('artists_merged', 0)
+                    if merged > 0:
+                        logger.info(f"🧹 Merged {merged} duplicate artists")
+                except Exception as e:
+                    logger.warning(f"Could not merge duplicate artists: {e}")
             
             # Emit final results
             self._emit_signal('finished',
