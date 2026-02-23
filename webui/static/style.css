@@ -1741,6 +1741,15 @@ body {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
+.path-input-group input[readonly] {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.browse-button.locked {
+    opacity: 0.7;
+}
+
 /* Auth Button - gradient */
 .auth-button {
     background: linear-gradient(135deg, #1db954, #1ed760);
