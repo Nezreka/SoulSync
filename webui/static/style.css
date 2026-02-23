@@ -36,12 +36,10 @@ body {
 .sidebar {
     width: 240px;
 
-    /* Apple-style liquid glassmorphic foundation */
+    /* Opaque dark foundation (GPU-optimized: no backdrop-filter needed on solid dark body) */
     background: linear-gradient(135deg,
-            rgba(20, 20, 20, 0.65) 0%,
-            rgba(12, 12, 12, 0.75) 100%);
-    backdrop-filter: blur(40px) saturate(1.8);
-    -webkit-backdrop-filter: blur(40px) saturate(1.8);
+            rgba(18, 18, 18, 1) 0%,
+            rgba(12, 12, 12, 1) 100%);
 
     /* Soft translucent borders */
     border-right: 1px solid rgba(255, 255, 255, 0.08);
@@ -887,12 +885,11 @@ body {
 
 .main-content {
     flex: 1;
+    /* Opaque dark background (GPU-optimized: no backdrop-filter needed on solid dark body) */
     background: linear-gradient(135deg,
-            rgba(12, 12, 12, 0.6) 0%,
-            rgba(16, 16, 16, 0.7) 50%,
-            rgba(8, 8, 8, 0.6) 100%);
-    backdrop-filter: blur(40px) saturate(1.8);
-    -webkit-backdrop-filter: blur(40px) saturate(1.8);
+            rgba(10, 10, 10, 1) 0%,
+            rgba(15, 15, 15, 1) 50%,
+            rgba(11, 11, 11, 1) 100%);
     overflow: auto;
 }
 

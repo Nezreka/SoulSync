@@ -355,9 +355,17 @@ document.addEventListener('DOMContentLoaded', function () {
     fetchAndUpdateServiceStatus();
     setInterval(fetchAndUpdateServiceStatus, 10000); // Every 10 seconds
 
-    // Refresh status immediately when user returns to this tab (e.g. after OAuth in new tab)
+    // Refresh key data immediately when user returns to this tab
     document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) fetchAndUpdateServiceStatus();
+        if (!document.hidden) {
+            fetchAndUpdateServiceStatus();
+            // Refresh dashboard-specific data if on dashboard
+            const dashboardPage = document.getElementById('dashboard-page');
+            if (dashboardPage && dashboardPage.classList.contains('active')) {
+                fetchAndUpdateSystemStats();
+                fetchAndUpdateActivityFeed();
+            }
+        }
     });
 
     // Start always-on download polling (batched, minimal overhead)
@@ -7970,6 +7978,7 @@ function startGlobalDownloadPolling() {
     console.log('🔄 [Global Polling] Starting batched download status polling');
 
     globalDownloadStatusPoller = setInterval(async () => {
+        if (document.hidden) return; // Skip polling when tab is not visible
         // Get all active processes that need polling
         const activeBatchIds = [];
         const batchToPlaylistMap = {};
@@ -9374,6 +9383,7 @@ function stopDownloadPolling() {
 }
 
 async function updateDownloadQueues() {
+    if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/downloads/status');
         const data = await response.json();
@@ -24077,6 +24087,7 @@ function escapeHtml(text) {
 // --- Service Status and System Stats Functions ---
 
 async function fetchAndUpdateServiceStatus() {
+    if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/status');
         if (!response.ok) return;
@@ -24167,6 +24178,7 @@ function updateSidebarServiceStatus(service, statusData) {
 }
 
 async function fetchAndUpdateSystemStats() {
+    if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/system/stats');
         if (!response.ok) return;
@@ -24202,6 +24214,7 @@ function updateStatCard(cardId, value, subtitle) {
 }
 
 async function fetchAndUpdateActivityFeed() {
+    if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/activity/feed');
         if (!response.ok) {
@@ -24271,6 +24284,7 @@ function updateActivityFeed(activities) {
 }
 
 async function checkForActivityToasts() {
+    if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/activity/toasts');
         if (!response.ok) return;
@@ -24385,6 +24399,7 @@ async function toggleWatchlist(event, artistId, artistName) {
  * Update the watchlist button count on dashboard
  */
 async function updateWatchlistButtonCount() {
+    if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/watchlist/count');
         const data = await response.json();
@@ -35656,6 +35671,7 @@ if (document.readyState === 'loading') {
  * Poll MusicBrainz status every 2 seconds and update UI
  */
 async function updateMusicBrainzStatus() {
+    if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/musicbrainz/status');
         if (!response.ok) {
@@ -35801,6 +35817,7 @@ if (document.readyState === 'loading') {
  * Poll AudioDB status every 2 seconds and update UI
  */
 async function updateAudioDBStatus() {
+    if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/audiodb/status');
         if (!response.ok) {
@@ -35933,6 +35950,7 @@ if (document.readyState === 'loading') {
 // ===================================================================
 
 async function updateDeezerStatus() {
+    if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/deezer/status');
         if (!response.ok) {
@@ -36058,6 +36076,7 @@ if (document.readyState === 'loading') {
 // ===================================================================
 
 async function updateSpotifyEnrichmentStatus() {
+    if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/spotify-enrichment/status');
         if (!response.ok) {
@@ -36191,6 +36210,7 @@ if (document.readyState === 'loading') {
 // ===================================================================
 
 async function updateiTunesEnrichmentStatus() {
+    if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/itunes-enrichment/status');
         if (!response.ok) {
@@ -36312,6 +36332,7 @@ if (document.readyState === 'loading') {
 // ===================================================================
 
 async function updateHydrabaseStatus() {
+    if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/hydrabase-worker/status');
         if (!response.ok) return;
@@ -36382,6 +36403,7 @@ if (document.readyState === 'loading') {
 // ===================================================================
 
 async function updateRepairStatus() {
+    if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/repair/status');
         if (!response.ok) {
