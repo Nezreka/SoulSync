@@ -505,15 +505,37 @@ class SpotifyClient:
             logger.error(f"Error fetching saved tracks: {e}")
             return []
 
+    def _get_playlist_items_page(self, playlist_id: str, limit: int = 100, offset: int = 0) -> dict:
+        """Fetch playlist items using the /items endpoint (Feb 2026 Spotify API migration).
+
+        Spotipy's playlist_items() still uses the deprecated /tracks endpoint internally,
+        which returns 403 for Development Mode apps after the Feb 2026 API changes.
+        Tries the new /items endpoint first, falls back to spotipy's /tracks for
+        Extended Quota Mode apps where /items may not be available yet.
+        """
+        plid = self.sp._get_id("playlist", playlist_id)
+        try:
+            return self.sp._get(
+                f"playlists/{plid}/items",
+                limit=limit,
+                offset=offset,
+                additional_types="track,episode"
+            )
+        except spotipy.SpotifyException as e:
+            if e.http_status in (403, 404):
+                # /items not available — fall back to old /tracks endpoint
+                return self.sp.playlist_items(playlist_id, limit=limit, offset=offset)
+            raise
+
     @rate_limited
     def _get_playlist_tracks(self, playlist_id: str) -> List[Track]:
         if not self.is_spotify_authenticated():
             return []
-        
+
         tracks = []
-        
+
         try:
-            results = self.sp.playlist_items(playlist_id, limit=100)
+            results = self._get_playlist_items_page(playlist_id, limit=100)
 
             while results:
                 for item in results['items']:
@@ -522,11 +544,11 @@ class SpotifyClient:
                     if track_data and track_data.get('id'):
                         track = Track.from_spotify_track(track_data)
                         tracks.append(track)
-                
+
                 results = self.sp.next(results) if results['next'] else None
-            
+
             return tracks
-            
+
         except Exception as e:
             logger.error(f"Error fetching playlist tracks: {e}")
             return []
