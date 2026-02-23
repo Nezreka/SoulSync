@@ -312,6 +312,9 @@ class MusicDatabase:
             # Add Deezer columns to library tables (migration)
             self._add_deezer_columns(cursor)
 
+            # Add Spotify/iTunes enrichment tracking columns (migration)
+            self._add_spotify_itunes_enrichment_columns(cursor)
+
             # Bubble snapshots table for persisting UI state across page refreshes
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bubble_snapshots (
@@ -1213,6 +1216,61 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding repair columns: {e}")
+
+    def _add_spotify_itunes_enrichment_columns(self, cursor):
+        """Add Spotify/iTunes enrichment tracking columns (match_status + last_attempted) to artists, albums, tracks"""
+        try:
+            # --- Artists ---
+            cursor.execute("PRAGMA table_info(artists)")
+            artists_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'spotify_match_status' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN spotify_match_status TEXT")
+            if 'spotify_last_attempted' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN spotify_last_attempted TIMESTAMP")
+            if 'itunes_match_status' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN itunes_match_status TEXT")
+            if 'itunes_last_attempted' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN itunes_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_spotify_match_status ON artists (spotify_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_itunes_match_status ON artists (itunes_match_status)")
+
+            # --- Albums ---
+            cursor.execute("PRAGMA table_info(albums)")
+            albums_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'spotify_match_status' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN spotify_match_status TEXT")
+            if 'spotify_last_attempted' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN spotify_last_attempted TIMESTAMP")
+            if 'itunes_match_status' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN itunes_match_status TEXT")
+            if 'itunes_last_attempted' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN itunes_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_spotify_match_status ON albums (spotify_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_itunes_match_status ON albums (itunes_match_status)")
+
+            # --- Tracks ---
+            cursor.execute("PRAGMA table_info(tracks)")
+            tracks_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'spotify_match_status' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN spotify_match_status TEXT")
+            if 'spotify_last_attempted' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN spotify_last_attempted TIMESTAMP")
+            if 'itunes_match_status' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN itunes_match_status TEXT")
+            if 'itunes_last_attempted' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN itunes_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_spotify_match_status ON tracks (spotify_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_itunes_match_status ON tracks (itunes_match_status)")
+
+        except Exception as e:
+            logger.error(f"Error adding Spotify/iTunes enrichment columns: {e}")
+            # Don't raise - this is a migration, database can still function
 
     def close(self):
         """Close database connection (no-op since we create connections per operation)"""
