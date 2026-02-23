@@ -1845,6 +1845,9 @@ async function loadSettingsData() {
         document.getElementById('lossy-copy-options').style.display =
             settings.lossy_copy?.enabled ? 'block' : 'none';
 
+        // Populate M3U Export settings
+        document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled !== false;
+
         // Populate Logging information (read-only)
         document.getElementById('log-level-display').textContent = settings.logging?.level || 'INFO';
         document.getElementById('log-path-display').textContent = settings.logging?.path || 'logs/app.log';
@@ -2446,6 +2449,9 @@ async function saveSettings(quiet = false) {
         },
         import: {
             staging_path: document.getElementById('staging-path').value || './Staging'
+        },
+        m3u_export: {
+            enabled: document.getElementById('m3u-export-enabled').checked
         }
     };
 
@@ -6072,29 +6078,28 @@ async function openDownloadMissingModal(playlistId) {
 
 async function autoSavePlaylistM3U(playlistId) {
     /**
-     * Automatically save M3U file server-side for playlist modals
-     * Only for Spotify/YouTube/Tidal/Beatport playlists, not artist albums
+     * Automatically save M3U file server-side for playlist and album modals.
+     * The server checks the m3u_export.enabled setting before writing.
      */
     const process = activeDownloadProcesses[playlistId];
     if (!process || !process.tracks || process.tracks.length === 0) {
-        return; // Silently skip if no data
-    }
-
-    // Check if this is a playlist (not an artist album)
-    const modal = document.getElementById(`download-missing-modal-${playlistId}`);
-    if (!modal) return;
-
-    const context = modal.querySelector('.download-missing-modal-content')?.getAttribute('data-context');
-    if (context === 'artist_album') {
-        // Don't auto-save for artist albums
         return;
     }
 
-    // Generate M3U content (reuse logic from exportPlaylistAsM3U)
+    const modal = document.getElementById(`download-missing-modal-${playlistId}`);
+    if (!modal) return;
+
     const m3uContent = generateM3UContent(playlistId);
     if (!m3uContent) return;
 
+    // Determine context type and gather metadata
+    const dataContext = modal.querySelector('.download-missing-modal-content')?.getAttribute('data-context');
+    const isAlbum = dataContext === 'artist_album';
     const playlistName = process.playlist?.name || process.playlistName || 'Playlist';
+    const artistName = process.artist?.name || '';
+    const albumName = process.album?.name || '';
+    const releaseDate = process.album?.release_date || '';
+    const year = releaseDate ? releaseDate.substring(0, 4) : '';
 
     try {
         const response = await fetch('/api/save-playlist-m3u', {
@@ -6102,12 +6107,16 @@ async function autoSavePlaylistM3U(playlistId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 playlist_name: playlistName,
-                m3u_content: m3uContent
+                m3u_content: m3uContent,
+                context_type: isAlbum ? 'album' : 'playlist',
+                artist_name: artistName,
+                album_name: albumName,
+                year: year
             })
         });
 
         if (response.ok) {
-            console.log(`✅ Auto-saved M3U for playlist: ${playlistName}`);
+            console.log(`✅ Auto-saved M3U for ${isAlbum ? 'album' : 'playlist'}: ${playlistName}`);
         } else {
             console.warn(`⚠️ Failed to auto-save M3U for ${playlistName}`);
         }
@@ -6188,10 +6197,10 @@ function generateM3UContent(playlistId) {
     return m3uContent;
 }
 
-function exportPlaylistAsM3U(playlistId) {
+async function exportPlaylistAsM3U(playlistId) {
     /**
-     * Export the tracks from the download missing tracks modal as an M3U playlist file
-     * Includes status information from analysis and download results
+     * Export the tracks from the download missing tracks modal as an M3U playlist file.
+     * Downloads via browser AND saves server-side to the relevant folder (force=true).
      */
     console.log(`📋 Exporting playlist ${playlistId} as M3U`);
 
@@ -6216,16 +6225,41 @@ function exportPlaylistAsM3U(playlistId) {
     const downloadedCount = summaryMatch ? parseInt(summaryMatch[2]) : 0;
     const missingCount = summaryMatch ? parseInt(summaryMatch[3]) : 0;
 
-    // Create a Blob and download it
+    // Create a Blob and download it via browser
     const blob = new Blob([m3uContent], { type: 'audio/x-mpegurl;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${playlistName.replace(/[/\\?%*:|"<>]/g, '-')}.m3u8`;
+    link.download = `${playlistName.replace(/[/\\?%*:|"<>]/g, '-')}.m3u`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+
+    // Also save server-side to the relevant folder (force=true bypasses setting check)
+    const modal = document.getElementById(`download-missing-modal-${playlistId}`);
+    const dataContext = modal?.querySelector('.download-missing-modal-content')?.getAttribute('data-context');
+    const isAlbum = dataContext === 'artist_album';
+
+    try {
+        const releaseDate = process.album?.release_date || '';
+        const year = releaseDate ? releaseDate.substring(0, 4) : '';
+        await fetch('/api/save-playlist-m3u', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                playlist_name: playlistName,
+                m3u_content: m3uContent,
+                context_type: isAlbum ? 'album' : 'playlist',
+                artist_name: process.artist?.name || '',
+                album_name: process.album?.name || '',
+                year: year,
+                force: true
+            })
+        });
+    } catch (error) {
+        console.debug('Server-side M3U save error (non-critical):', error);
+    }
 
     const availableCount = foundCount + downloadedCount;
     showToast(`Exported M3U: ${availableCount} available, ${missingCount} missing`, 'success');
