@@ -2733,8 +2733,26 @@ async function authenticateTidal() {
     }
 }
 
-function browsePath(pathType) {
-    showToast(`Path browser not available in web interface. Please enter path manually.`, 'error');
+const PATH_INPUT_IDS = {
+    download: 'download-path',
+    transfer: 'transfer-path',
+    staging:  'staging-path'
+};
+
+function togglePathLock(pathType, btn) {
+    const input = document.getElementById(PATH_INPUT_IDS[pathType]);
+    if (!input) return;
+    const isLocked = input.hasAttribute('readonly');
+    if (isLocked) {
+        input.removeAttribute('readonly');
+        input.focus();
+        btn.textContent = 'Lock';
+        btn.classList.remove('locked');
+    } else {
+        input.setAttribute('readonly', '');
+        btn.textContent = 'Unlock';
+        btn.classList.add('locked');
+    }
 }
 
 
@@ -10917,7 +10935,7 @@ window.autoDetectSlskd = autoDetectSlskd;
 window.toggleServer = toggleServer;
 window.authenticateSpotify = authenticateSpotify;
 window.authenticateTidal = authenticateTidal;
-window.browsePath = browsePath;
+window.togglePathLock = togglePathLock;
 window.selectResult = selectResult;
 window.startStream = startStream;
 window.streamTrack = streamTrack;

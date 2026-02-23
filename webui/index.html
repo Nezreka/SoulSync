@@ -2960,28 +2960,31 @@
                             <!-- Download Settings -->
                             <div class="settings-group">
                                 <h3>Download Settings</h3>
+                                <div class="setting-help-text">
+                                    These are container-internal paths. Only modify them if you know what you're doing — incorrect values will break downloads.
+                                </div>
 
                                 <div class="form-group">
                                     <label>Slskd Download Dir:</label>
                                     <div class="path-input-group">
-                                        <input type="text" id="download-path" placeholder="./downloads">
-                                        <button class="browse-button" onclick="browsePath('download')">Browse</button>
+                                        <input type="text" id="download-path" placeholder="./downloads" readonly>
+                                        <button class="browse-button locked" onclick="togglePathLock('download', this)">Unlock</button>
                                     </div>
                                 </div>
 
                                 <div class="form-group">
                                     <label>Matched Transfer Dir (Plex Music Dir?):</label>
                                     <div class="path-input-group">
-                                        <input type="text" id="transfer-path" placeholder="./Transfer">
-                                        <button class="browse-button" onclick="browsePath('transfer')">Browse</button>
+                                        <input type="text" id="transfer-path" placeholder="./Transfer" readonly>
+                                        <button class="browse-button locked" onclick="togglePathLock('transfer', this)">Unlock</button>
                                     </div>
                                 </div>
 
                                 <div class="form-group">
                                     <label>Import Staging Dir:</label>
                                     <div class="path-input-group">
-                                        <input type="text" id="staging-path" placeholder="./Staging">
-                                        <button class="browse-button" onclick="browsePath('staging')">Browse</button>
+                                        <input type="text" id="staging-path" placeholder="./Staging" readonly>
+                                        <button class="browse-button locked" onclick="togglePathLock('staging', this)">Unlock</button>
                                     </div>
                                 </div>
 
