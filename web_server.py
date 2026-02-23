@@ -10265,6 +10265,17 @@ def _post_process_matched_download(context_key, context, file_path):
 
         print(f"✅ Post-processing complete for: {context.get('_final_processed_path', final_path)}")
 
+        # REPAIR: Register album folder for repair scanning when batch completes
+        try:
+            completed_path = context.get('_final_processed_path', final_path)
+            batch_id_for_repair = context.get('batch_id')
+            if completed_path and batch_id_for_repair and repair_worker:
+                album_folder = os.path.dirname(str(completed_path))
+                if album_folder:
+                    repair_worker.register_folder(batch_id_for_repair, album_folder)
+        except Exception as repair_err:
+            print(f"⚠️ [Post-Process] Repair folder registration failed: {repair_err}")
+
         # WISHLIST REMOVAL: Check if this track should be removed from wishlist after successful download
         try:
             _check_and_remove_from_wishlist(context)
@@ -13607,6 +13618,10 @@ def _on_download_completed(batch_id, task_id, success=True):
             print(f"🎉 [Batch Manager] Batch {batch_id} complete - stopping monitor")
             download_monitor.stop_monitoring(batch_id)
 
+            # REPAIR: Scan all album folders from this batch for track number issues
+            if repair_worker:
+                repair_worker.process_batch(batch_id)
+
             # Mark that wishlist processing is starting (prevents premature cleanup)
             batch['wishlist_processing_started'] = True
 
@@ -15863,7 +15878,11 @@ def _check_batch_completion_v2(batch_id):
                 
                 print(f"🎉 [Completion Check V2] Batch {batch_id} complete - stopping monitor")
                 download_monitor.stop_monitoring(batch_id)
-                
+
+                # REPAIR: Scan all album folders from this batch for track number issues
+                if repair_worker:
+                    repair_worker.process_batch(batch_id)
+
         # Process wishlist outside of the lock to prevent threading issues
         if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
             # Call wishlist processing outside the lock
