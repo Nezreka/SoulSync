@@ -227,6 +227,9 @@ class ConfigManager:
             },
             "import": {
                 "staging_path": "./Staging"
+            },
+            "m3u_export": {
+                "enabled": True
             }
         }
 

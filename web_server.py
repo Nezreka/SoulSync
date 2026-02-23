@@ -2224,7 +2224,7 @@ def fix_navidrome_urls():
 
 @app.route('/api/save-playlist-m3u', methods=['POST'])
 def save_playlist_m3u():
-    """Save M3U playlist file to transfer folder for playlists"""
+    """Save M3U playlist file to the relevant download folder"""
     try:
         data = request.get_json()
         if not data:
@@ -2232,19 +2232,29 @@ def save_playlist_m3u():
 
         playlist_name = data.get('playlist_name', 'Playlist')
         m3u_content = data.get('m3u_content', '')
+        context_type = data.get('context_type', 'playlist')
+        artist_name = data.get('artist_name', '')
+        album_name = data.get('album_name', '')
+        year = data.get('year', '')
+        force = data.get('force', False)
+
+        # Check if M3U export is enabled (unless force=True from manual Export button)
+        if not force and not config_manager.get('m3u_export.enabled', True):
+            return jsonify({"status": "success", "message": "M3U export disabled in settings", "skipped": True})
 
         if not m3u_content:
             return jsonify({"status": "error", "message": "No M3U content provided"}), 400
 
-        # Get transfer folder path
+        # Compute target folder using the template system
         transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-
-        # Create 'playlist m3u files' subfolder
-        m3u_folder = os.path.join(transfer_dir, 'playlist m3u files')
+        m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name, album_name, year)
         os.makedirs(m3u_folder, exist_ok=True)
 
-        # Sanitize playlist name for filename
-        safe_filename = playlist_name.replace('/', '-').replace('\\', '-').replace(':', '-').replace('*', '-').replace('?', '-').replace('"', '-').replace('<', '-').replace('>', '-').replace('|', '-')
+        # Build M3U filename from playlist or album name
+        if context_type == 'album' and artist_name and album_name:
+            safe_filename = _sanitize_filename(f"{artist_name} - {album_name}")
+        else:
+            safe_filename = _sanitize_filename(playlist_name)
         m3u_filename = f"{safe_filename}.m3u"
         m3u_path = os.path.join(m3u_folder, m3u_filename)
 
@@ -8180,6 +8190,53 @@ def parse_youtube_playlist(url):
 # ===================================================================
 # FILE ORGANIZATION TEMPLATE ENGINE
 # ===================================================================
+
+def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='', album_name='', year=''):
+    """
+    Compute the target folder for an M3U file using the template system.
+
+    For playlists: uses playlist_path template, extracts folder portion.
+    For albums: uses album_path template, extracts folder portion.
+
+    Returns: absolute folder path
+    """
+    if context_type == 'album' and artist_name and album_name:
+        template_context = {
+            'artist': artist_name,
+            'albumartist': artist_name,
+            'album': album_name,
+            'title': 'placeholder',
+            'track_number': 1,
+            'disc_number': 1,
+            'year': year,
+            'quality': ''
+        }
+        folder_path, _ = _get_file_path_from_template(template_context, 'album_path')
+        if folder_path:
+            return os.path.join(transfer_dir, folder_path)
+        # Fallback
+        artist_sanitized = _sanitize_filename(artist_name)
+        album_sanitized = _sanitize_filename(album_name)
+        return os.path.join(transfer_dir, artist_sanitized, f"{artist_sanitized} - {album_sanitized}")
+    else:
+        template_context = {
+            'artist': 'placeholder',
+            'albumartist': 'placeholder',
+            'album': 'placeholder',
+            'title': 'placeholder',
+            'playlist_name': playlist_name,
+            'track_number': 1,
+            'disc_number': 1,
+            'year': '',
+            'quality': ''
+        }
+        folder_path, _ = _get_file_path_from_template(template_context, 'playlist_path')
+        if folder_path:
+            return os.path.join(transfer_dir, folder_path)
+        # Fallback
+        playlist_sanitized = _sanitize_filename(playlist_name)
+        return os.path.join(transfer_dir, playlist_sanitized)
+
 
 def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
     """
