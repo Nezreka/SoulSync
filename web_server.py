@@ -16396,7 +16396,7 @@ def get_playlist_tracks(playlist_id):
 
         # Fetch all tracks with full album data
         tracks = []
-        results = spotify_client.sp.playlist_items(playlist_id, limit=100)
+        results = spotify_client._get_playlist_items_page(playlist_id, limit=100)
 
         while results:
             for item in results['items']:
