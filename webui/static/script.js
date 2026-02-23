@@ -6007,11 +6007,17 @@ async function openDownloadMissingModal(playlistId) {
                 <div class="download-tracks-section">
                     <div class="download-tracks-header">
                         <h3 class="download-tracks-title">📋 Track Analysis & Download Status</h3>
+                        <span class="track-selection-count" id="track-selection-count-${playlistId}">${tracks.length} / ${tracks.length} tracks selected</span>
                     </div>
                     <div class="download-tracks-table-container">
                         <table class="download-tracks-table">
                             <thead>
                                 <tr>
+                                    <th class="track-select-header">
+                                        <input type="checkbox" class="track-select-all"
+                                               id="select-all-${playlistId}" checked
+                                               onchange="toggleAllTrackSelections('${playlistId}', this.checked)">
+                                    </th>
                                     <th>#</th>
                                     <th>Track</th>
                                     <th>Artist</th>
@@ -6024,6 +6030,11 @@ async function openDownloadMissingModal(playlistId) {
                             <tbody id="download-tracks-tbody-${playlistId}">
                                 ${tracks.map((track, index) => `
                                     <tr data-track-index="${index}">
+                                        <td class="track-select-cell">
+                                            <input type="checkbox" class="track-select-cb"
+                                                   data-track-index="${index}" checked
+                                                   onchange="updateTrackSelectionCount('${playlistId}')">
+                                        </td>
                                         <td class="track-number">${index + 1}</td>
                                         <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
@@ -6394,11 +6405,17 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                 <div class="download-tracks-section">
                     <div class="download-tracks-header">
                         <h3 class="download-tracks-title">📋 Track Analysis & Download Status</h3>
+                        <span class="track-selection-count" id="track-selection-count-${virtualPlaylistId}">${spotifyTracks.length} / ${spotifyTracks.length} tracks selected</span>
                     </div>
                     <div class="download-tracks-table-container">
                         <table class="download-tracks-table">
                             <thead>
                                 <tr>
+                                    <th class="track-select-header">
+                                        <input type="checkbox" class="track-select-all"
+                                               id="select-all-${virtualPlaylistId}" checked
+                                               onchange="toggleAllTrackSelections('${virtualPlaylistId}', this.checked)">
+                                    </th>
                                     <th>#</th>
                                     <th>Track</th>
                                     <th>Artist</th>
@@ -6411,6 +6428,11 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                             <tbody id="download-tracks-tbody-${virtualPlaylistId}">
                                 ${spotifyTracks.map((track, index) => `
                                     <tr data-track-index="${index}">
+                                        <td class="track-select-cell">
+                                            <input type="checkbox" class="track-select-cb"
+                                                   data-track-index="${index}" checked
+                                                   onchange="updateTrackSelectionCount('${virtualPlaylistId}')">
+                                        </td>
                                         <td class="track-number">${index + 1}</td>
                                         <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
@@ -7886,9 +7908,34 @@ async function startMissingTracksProcess(playlistId) {
             forceToggleContainer.style.display = 'none';
         }
 
+        // Filter tracks based on checkbox selection (if checkboxes exist in this modal)
+        const tbody = document.getElementById(`download-tracks-tbody-${playlistId}`);
+        let selectedTracks = process.tracks;
+        if (tbody) {
+            const allCbs = tbody.querySelectorAll('.track-select-cb');
+            if (allCbs.length > 0) {
+                // Checkboxes exist — filter to only checked tracks
+                const checkedCbs = tbody.querySelectorAll('.track-select-cb:checked');
+                const selectedIndices = new Set([...checkedCbs].map(cb => parseInt(cb.dataset.trackIndex)));
+                console.log(`🔲 [Track Selection] Total checkboxes: ${allCbs.length}, Checked: ${checkedCbs.length}`);
+                console.log(`🔲 [Track Selection] Checked indices:`, [...selectedIndices]);
+                console.log(`🔲 [Track Selection] process.tracks has ${process.tracks.length} items, first: "${process.tracks[0]?.name}", last: "${process.tracks[process.tracks.length-1]?.name}"`);
+                // Stamp each selected track with its original table index so the backend
+                // maps status updates back to the correct modal row
+                selectedTracks = process.tracks
+                    .map((track, i) => ({ ...track, _original_index: i }))
+                    .filter(track => selectedIndices.has(track._original_index));
+                console.log(`🔲 [Track Selection] Filtered to ${selectedTracks.length} tracks:`, selectedTracks.map(t => `[${t._original_index}] ${t.name}`));
+                // Disable checkboxes once analysis starts
+                allCbs.forEach(cb => { cb.disabled = true; });
+            }
+        }
+        const selectAllCb = document.getElementById(`select-all-${playlistId}`);
+        if (selectAllCb) selectAllCb.disabled = true;
+
         // Prepare request body - add album/artist context for artist album downloads
         const requestBody = {
-            tracks: process.tracks,
+            tracks: selectedTracks,
             force_download_all: forceDownloadAll
         };
 
@@ -8790,6 +8837,52 @@ async function updateModalWithLiveDownloadProgress() {
 
     } catch (error) {
         // Silent fail - don't spam console during normal operation
+    }
+}
+
+function toggleAllTrackSelections(playlistId, checked) {
+    const tbody = document.getElementById(`download-tracks-tbody-${playlistId}`);
+    if (!tbody) return;
+    const checkboxes = tbody.querySelectorAll('.track-select-cb');
+    checkboxes.forEach(cb => { cb.checked = checked; });
+    updateTrackSelectionCount(playlistId);
+}
+
+function updateTrackSelectionCount(playlistId) {
+    const tbody = document.getElementById(`download-tracks-tbody-${playlistId}`);
+    if (!tbody) return;
+    const allCbs = tbody.querySelectorAll('.track-select-cb');
+    const checkedCbs = tbody.querySelectorAll('.track-select-cb:checked');
+    const total = allCbs.length;
+    const selected = checkedCbs.length;
+
+    // Update selection count label
+    const countLabel = document.getElementById(`track-selection-count-${playlistId}`);
+    if (countLabel) {
+        countLabel.textContent = `${selected} / ${total} tracks selected`;
+    }
+
+    // Update select-all checkbox state
+    const selectAll = document.getElementById(`select-all-${playlistId}`);
+    if (selectAll) {
+        selectAll.checked = selected === total;
+        selectAll.indeterminate = selected > 0 && selected < total;
+    }
+
+    // Update row dimming
+    allCbs.forEach(cb => {
+        const row = cb.closest('tr');
+        if (row) row.classList.toggle('track-deselected', !cb.checked);
+    });
+
+    // Disable Begin Analysis and Add to Wishlist buttons when 0 selected
+    const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+    if (beginBtn) {
+        beginBtn.disabled = selected === 0;
+    }
+    const wishlistBtn = document.getElementById(`add-to-wishlist-btn-${playlistId}`);
+    if (wishlistBtn) {
+        wishlistBtn.disabled = selected === 0;
     }
 }
 
@@ -11573,7 +11666,18 @@ async function addModalTracksToWishlist(playlistId) {
         return;
     }
 
-    const tracks = process.tracks;
+    // Filter tracks based on checkbox selection (if checkboxes exist in this modal)
+    const wishlistTbody = document.getElementById(`download-tracks-tbody-${playlistId}`);
+    let tracks = process.tracks;
+    if (wishlistTbody) {
+        const allCbs = wishlistTbody.querySelectorAll('.track-select-cb');
+        if (allCbs.length > 0) {
+            const checkedCbs = wishlistTbody.querySelectorAll('.track-select-cb:checked');
+            const selectedIndices = new Set([...checkedCbs].map(cb => parseInt(cb.dataset.trackIndex)));
+            tracks = process.tracks.filter((_, i) => selectedIndices.has(i));
+        }
+    }
+
     // Get artist/album context if available (for artist album downloads)
     const artist = process.artist || { name: 'Unknown Artist', id: null };
     const album = process.album || process.playlist || { name: 'Playlist', id: playlistId };
@@ -15406,11 +15510,17 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
                 <div class="download-tracks-section">
                     <div class="download-tracks-header">
                         <h3 class="download-tracks-title">📋 Track Analysis & Download Status</h3>
+                        <span class="track-selection-count" id="track-selection-count-${virtualPlaylistId}">${spotifyTracks.length} / ${spotifyTracks.length} tracks selected</span>
                     </div>
                     <div class="download-tracks-table-container">
                         <table class="download-tracks-table">
                             <thead>
                                 <tr>
+                                    <th class="track-select-header">
+                                        <input type="checkbox" class="track-select-all"
+                                               id="select-all-${virtualPlaylistId}" checked
+                                               onchange="toggleAllTrackSelections('${virtualPlaylistId}', this.checked)">
+                                    </th>
                                     <th>#</th>
                                     <th>Track</th>
                                     <th>Artist</th>
@@ -15423,6 +15533,11 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
                             <tbody id="download-tracks-tbody-${virtualPlaylistId}">
                                 ${spotifyTracks.map((track, index) => `
                                     <tr data-track-index="${index}">
+                                        <td class="track-select-cell">
+                                            <input type="checkbox" class="track-select-cb"
+                                                   data-track-index="${index}" checked
+                                                   onchange="updateTrackSelectionCount('${virtualPlaylistId}')">
+                                        </td>
                                         <td class="track-number">${index + 1}</td>
                                         <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
@@ -22498,11 +22613,17 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                 <div class="download-tracks-section">
                     <div class="download-tracks-header">
                         <h3 class="download-tracks-title">📋 Track Analysis & Download Status</h3>
+                        <span class="track-selection-count" id="track-selection-count-${virtualPlaylistId}">${spotifyTracks.length} / ${spotifyTracks.length} tracks selected</span>
                     </div>
                     <div class="download-tracks-table-container">
                         <table class="download-tracks-table">
                             <thead>
                                 <tr>
+                                    <th class="track-select-header">
+                                        <input type="checkbox" class="track-select-all"
+                                               id="select-all-${virtualPlaylistId}" checked
+                                               onchange="toggleAllTrackSelections('${virtualPlaylistId}', this.checked)">
+                                    </th>
                                     <th>#</th>
                                     <th>Track Name</th>
                                     <th>Artist(s)</th>
@@ -22515,6 +22636,11 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                             <tbody id="download-tracks-tbody-${virtualPlaylistId}">
                                 ${spotifyTracks.map((track, index) => `
                                     <tr data-track-index="${index}">
+                                        <td class="track-select-cell">
+                                            <input type="checkbox" class="track-select-cb"
+                                                   data-track-index="${index}" checked
+                                                   onchange="updateTrackSelectionCount('${virtualPlaylistId}')">
+                                        </td>
                                         <td class="track-number">${index + 1}</td>
                                         <td class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
