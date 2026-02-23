@@ -22807,6 +22807,501 @@ body {
     border-bottom: 8px solid rgba(30, 30, 30, 0.98);
 }
 
+/* ============================================================================
+   SPOTIFY ENRICHMENT STATUS BUTTON
+   ============================================================================ */
+
+.spotify-enrich-button-container {
+    position: relative;
+    display: inline-block;
+    margin-right: 12px;
+}
+
+.spotify-enrich-button {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg,
+            rgba(30, 215, 96, 0.12) 0%,
+            rgba(21, 150, 67, 0.18) 100%);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1.5px solid rgba(30, 215, 96, 0.25);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow:
+        0 4px 16px rgba(30, 215, 96, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.spotify-enrich-button:hover {
+    background: linear-gradient(135deg,
+            rgba(30, 215, 96, 0.18) 0%,
+            rgba(21, 150, 67, 0.25) 100%);
+    border-color: rgba(30, 215, 96, 0.4);
+    transform: scale(1.05);
+    box-shadow:
+        0 6px 20px rgba(30, 215, 96, 0.3),
+        0 3px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.spotify-enrich-button:active {
+    transform: scale(0.95);
+    box-shadow:
+        0 2px 8px rgba(30, 215, 96, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.spotify-enrich-logo {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    opacity: 0.85;
+    transition: opacity 0.3s ease;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.spotify-enrich-button:hover .spotify-enrich-logo {
+    opacity: 1;
+}
+
+.spotify-enrich-spinner {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    border: 3px solid transparent;
+    border-top-color: rgba(30, 215, 96, 0.8);
+    border-right-color: rgba(30, 215, 96, 0.5);
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.spotify-enrich-button.active .spotify-enrich-spinner {
+    opacity: 1;
+    animation: spotify-enrich-spin 1.2s linear infinite;
+}
+
+.spotify-enrich-button.active {
+    background: linear-gradient(135deg,
+            rgba(30, 215, 96, 0.22) 0%,
+            rgba(21, 150, 67, 0.28) 100%);
+    border-color: rgba(30, 215, 96, 0.5);
+    box-shadow:
+        0 6px 24px rgba(30, 215, 96, 0.4),
+        0 3px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.spotify-enrich-button.active .spotify-enrich-logo {
+    opacity: 1;
+    filter: drop-shadow(0 0 8px rgba(30, 215, 96, 0.6));
+}
+
+.spotify-enrich-button.complete {
+    background: linear-gradient(135deg,
+            rgba(76, 175, 80, 0.15) 0%,
+            rgba(56, 142, 60, 0.20) 100%);
+    border-color: rgba(76, 175, 80, 0.35);
+    box-shadow:
+        0 4px 16px rgba(76, 175, 80, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.spotify-enrich-button.complete .spotify-enrich-logo {
+    opacity: 0.85;
+    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
+}
+
+.spotify-enrich-button.complete .spotify-enrich-spinner {
+    opacity: 0;
+}
+
+.spotify-enrich-button.paused {
+    background: linear-gradient(135deg,
+            rgba(255, 193, 7, 0.12) 0%,
+            rgba(255, 152, 0, 0.18) 100%);
+    border-color: rgba(255, 193, 7, 0.35);
+    box-shadow:
+        0 4px 16px rgba(255, 193, 7, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.spotify-enrich-button.paused:hover {
+    border-color: rgba(255, 193, 7, 0.5);
+    box-shadow:
+        0 6px 20px rgba(255, 193, 7, 0.3),
+        0 3px 12px rgba(0, 0, 0, 0.2);
+}
+
+.spotify-enrich-button.no-auth {
+    background: linear-gradient(135deg,
+            rgba(120, 120, 120, 0.08) 0%,
+            rgba(80, 80, 80, 0.12) 100%);
+    border-color: rgba(120, 120, 120, 0.25);
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.15),
+        0 2px 8px rgba(0, 0, 0, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.spotify-enrich-button.no-auth .spotify-enrich-logo {
+    filter: grayscale(1) opacity(0.4);
+}
+
+.spotify-enrich-button.no-auth .spotify-enrich-spinner {
+    display: none;
+}
+
+.spotify-enrich-button.no-auth:hover {
+    border-color: rgba(120, 120, 120, 0.35);
+    box-shadow:
+        0 6px 20px rgba(0, 0, 0, 0.2),
+        0 3px 12px rgba(0, 0, 0, 0.15);
+    opacity: 0.55;
+}
+
+.spotify-enrich-button.no-auth+.spotify-enrich-tooltip #spotify-enrich-tooltip-status {
+    color: rgba(120, 120, 120, 0.8);
+}
+
+@keyframes spotify-enrich-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* ============================================================================
+   SPOTIFY ENRICHMENT HOVER TOOLTIP
+   ============================================================================ */
+
+.spotify-enrich-tooltip {
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 12px);
+    transform: translateX(-50%) translateY(-5px);
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+}
+
+.spotify-enrich-button:hover+.spotify-enrich-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
+
+.spotify-enrich-tooltip-content {
+    min-width: 260px;
+    background: linear-gradient(135deg,
+            rgba(30, 30, 30, 0.98) 0%,
+            rgba(20, 20, 20, 0.99) 100%);
+    backdrop-filter: blur(40px) saturate(1.6);
+    -webkit-backdrop-filter: blur(40px) saturate(1.6);
+    border: 1px solid rgba(30, 215, 96, 0.3);
+    border-radius: 16px;
+    padding: 16px 18px;
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.5),
+        0 6px 20px rgba(30, 215, 96, 0.25),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.spotify-enrich-tooltip-header {
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(30, 215, 96, 0.95);
+    letter-spacing: -0.2px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.spotify-enrich-tooltip-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#spotify-enrich-tooltip-status {
+    color: #1ed760;
+    font-weight: 600;
+}
+
+.spotify-enrich-button.paused+.spotify-enrich-tooltip #spotify-enrich-tooltip-status {
+    color: #ffc107;
+}
+
+.spotify-enrich-tooltip-content::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -8px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid rgba(30, 215, 96, 0.3);
+}
+
+.spotify-enrich-tooltip-content::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -7px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
+}
+
+/* ============================================================================
+   ITUNES ENRICHMENT STATUS BUTTON
+   ============================================================================ */
+
+.itunes-enrich-button-container {
+    position: relative;
+    display: inline-block;
+    margin-right: 12px;
+}
+
+.itunes-enrich-button {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg,
+            rgba(251, 91, 137, 0.12) 0%,
+            rgba(164, 69, 178, 0.18) 100%);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1.5px solid rgba(251, 91, 137, 0.25);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow:
+        0 4px 16px rgba(251, 91, 137, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.itunes-enrich-button:hover {
+    background: linear-gradient(135deg,
+            rgba(251, 91, 137, 0.18) 0%,
+            rgba(164, 69, 178, 0.25) 100%);
+    border-color: rgba(251, 91, 137, 0.4);
+    transform: scale(1.05);
+    box-shadow:
+        0 6px 20px rgba(251, 91, 137, 0.3),
+        0 3px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.itunes-enrich-button:active {
+    transform: scale(0.95);
+    box-shadow:
+        0 2px 8px rgba(251, 91, 137, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.itunes-enrich-logo {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    opacity: 0.85;
+    transition: opacity 0.3s ease;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.itunes-enrich-button:hover .itunes-enrich-logo {
+    opacity: 1;
+}
+
+.itunes-enrich-spinner {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    border: 3px solid transparent;
+    border-top-color: rgba(251, 91, 137, 0.8);
+    border-right-color: rgba(164, 69, 178, 0.5);
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.itunes-enrich-button.active .itunes-enrich-spinner {
+    opacity: 1;
+    animation: itunes-enrich-spin 1.2s linear infinite;
+}
+
+.itunes-enrich-button.active {
+    background: linear-gradient(135deg,
+            rgba(251, 91, 137, 0.22) 0%,
+            rgba(164, 69, 178, 0.28) 100%);
+    border-color: rgba(251, 91, 137, 0.5);
+    box-shadow:
+        0 6px 24px rgba(251, 91, 137, 0.4),
+        0 3px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.itunes-enrich-button.active .itunes-enrich-logo {
+    opacity: 1;
+    filter: drop-shadow(0 0 8px rgba(251, 91, 137, 0.6));
+}
+
+.itunes-enrich-button.complete {
+    background: linear-gradient(135deg,
+            rgba(76, 175, 80, 0.15) 0%,
+            rgba(56, 142, 60, 0.20) 100%);
+    border-color: rgba(76, 175, 80, 0.35);
+    box-shadow:
+        0 4px 16px rgba(76, 175, 80, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.itunes-enrich-button.complete .itunes-enrich-logo {
+    opacity: 0.85;
+    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
+}
+
+.itunes-enrich-button.complete .itunes-enrich-spinner {
+    opacity: 0;
+}
+
+.itunes-enrich-button.paused {
+    background: linear-gradient(135deg,
+            rgba(255, 193, 7, 0.12) 0%,
+            rgba(255, 152, 0, 0.18) 100%);
+    border-color: rgba(255, 193, 7, 0.35);
+    box-shadow:
+        0 4px 16px rgba(255, 193, 7, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.itunes-enrich-button.paused:hover {
+    border-color: rgba(255, 193, 7, 0.5);
+    box-shadow:
+        0 6px 20px rgba(255, 193, 7, 0.3),
+        0 3px 12px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes itunes-enrich-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* ============================================================================
+   ITUNES ENRICHMENT HOVER TOOLTIP
+   ============================================================================ */
+
+.itunes-enrich-tooltip {
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 12px);
+    transform: translateX(-50%) translateY(-5px);
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+}
+
+.itunes-enrich-button:hover+.itunes-enrich-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
+
+.itunes-enrich-tooltip-content {
+    min-width: 260px;
+    background: linear-gradient(135deg,
+            rgba(30, 30, 30, 0.98) 0%,
+            rgba(20, 20, 20, 0.99) 100%);
+    backdrop-filter: blur(40px) saturate(1.6);
+    -webkit-backdrop-filter: blur(40px) saturate(1.6);
+    border: 1px solid rgba(251, 91, 137, 0.3);
+    border-radius: 16px;
+    padding: 16px 18px;
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.5),
+        0 6px 20px rgba(251, 91, 137, 0.25),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.itunes-enrich-tooltip-header {
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(251, 91, 137, 0.95);
+    letter-spacing: -0.2px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.itunes-enrich-tooltip-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#itunes-enrich-tooltip-status {
+    color: #1ed760;
+    font-weight: 600;
+}
+
+.itunes-enrich-button.paused+.itunes-enrich-tooltip #itunes-enrich-tooltip-status {
+    color: #ffc107;
+}
+
+.itunes-enrich-tooltip-content::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -8px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid rgba(251, 91, 137, 0.3);
+}
+
+.itunes-enrich-tooltip-content::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -7px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
+}
+
 /* ========================================
    HYDRABASE P2P MIRROR WORKER BUTTON
    ======================================== */

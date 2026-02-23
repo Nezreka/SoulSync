@@ -71,6 +71,8 @@ from beatport_unified_scraper import BeatportUnifiedScraper
 from core.musicbrainz_worker import MusicBrainzWorker
 from core.audiodb_worker import AudioDBWorker
 from core.deezer_worker import DeezerWorker
+from core.spotify_worker import SpotifyWorker
+from core.itunes_worker import iTunesWorker
 from core.hydrabase_worker import HydrabaseWorker
 
 # --- Flask App Setup ---
@@ -26343,6 +26345,148 @@ def deezer_resume():
 
 # ================================================================================================
 # END DEEZER INTEGRATION
+# ================================================================================================
+
+
+# ================================================================================================
+# SPOTIFY ENRICHMENT INTEGRATION
+# ================================================================================================
+
+# --- Spotify Worker Initialization ---
+spotify_enrichment_worker = None
+try:
+    from database.music_database import MusicDatabase
+    spotify_enrichment_db = MusicDatabase()
+    spotify_enrichment_worker = SpotifyWorker(database=spotify_enrichment_db)
+    spotify_enrichment_worker.start()
+    print("✅ Spotify enrichment worker initialized and started")
+except Exception as e:
+    print(f"⚠️ Spotify enrichment worker initialization failed: {e}")
+    spotify_enrichment_worker = None
+
+# --- Spotify API Endpoints ---
+
+@app.route('/api/spotify-enrichment/status', methods=['GET'])
+def spotify_enrichment_status():
+    """Get Spotify enrichment status for UI polling"""
+    try:
+        if spotify_enrichment_worker is None:
+            return jsonify({
+                'enabled': False,
+                'running': False,
+                'paused': False,
+                'current_item': None,
+                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
+                'progress': {}
+            }), 200
+
+        status = spotify_enrichment_worker.get_stats()
+        return jsonify(status), 200
+    except Exception as e:
+        logger.error(f"Error getting Spotify enrichment status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/spotify-enrichment/pause', methods=['POST'])
+def spotify_enrichment_pause():
+    """Pause Spotify enrichment worker"""
+    try:
+        if spotify_enrichment_worker is None:
+            return jsonify({'error': 'Spotify enrichment worker not initialized'}), 400
+
+        spotify_enrichment_worker.pause()
+        logger.info("Spotify enrichment worker paused via UI")
+        return jsonify({'status': 'paused'}), 200
+    except Exception as e:
+        logger.error(f"Error pausing Spotify enrichment worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/spotify-enrichment/resume', methods=['POST'])
+def spotify_enrichment_resume():
+    """Resume Spotify enrichment worker"""
+    try:
+        if spotify_enrichment_worker is None:
+            return jsonify({'error': 'Spotify enrichment worker not initialized'}), 400
+
+        spotify_enrichment_worker.resume()
+        logger.info("Spotify enrichment worker resumed via UI")
+        return jsonify({'status': 'running'}), 200
+    except Exception as e:
+        logger.error(f"Error resuming Spotify enrichment worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ================================================================================================
+# END SPOTIFY ENRICHMENT INTEGRATION
+# ================================================================================================
+
+
+# ================================================================================================
+# ITUNES ENRICHMENT INTEGRATION
+# ================================================================================================
+
+# --- iTunes Worker Initialization ---
+itunes_enrichment_worker = None
+try:
+    from database.music_database import MusicDatabase
+    itunes_enrichment_db = MusicDatabase()
+    itunes_enrichment_worker = iTunesWorker(database=itunes_enrichment_db)
+    itunes_enrichment_worker.start()
+    print("✅ iTunes enrichment worker initialized and started")
+except Exception as e:
+    print(f"⚠️ iTunes enrichment worker initialization failed: {e}")
+    itunes_enrichment_worker = None
+
+# --- iTunes API Endpoints ---
+
+@app.route('/api/itunes-enrichment/status', methods=['GET'])
+def itunes_enrichment_status():
+    """Get iTunes enrichment status for UI polling"""
+    try:
+        if itunes_enrichment_worker is None:
+            return jsonify({
+                'enabled': False,
+                'running': False,
+                'paused': False,
+                'current_item': None,
+                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
+                'progress': {}
+            }), 200
+
+        status = itunes_enrichment_worker.get_stats()
+        return jsonify(status), 200
+    except Exception as e:
+        logger.error(f"Error getting iTunes enrichment status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/itunes-enrichment/pause', methods=['POST'])
+def itunes_enrichment_pause():
+    """Pause iTunes enrichment worker"""
+    try:
+        if itunes_enrichment_worker is None:
+            return jsonify({'error': 'iTunes enrichment worker not initialized'}), 400
+
+        itunes_enrichment_worker.pause()
+        logger.info("iTunes enrichment worker paused via UI")
+        return jsonify({'status': 'paused'}), 200
+    except Exception as e:
+        logger.error(f"Error pausing iTunes enrichment worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/itunes-enrichment/resume', methods=['POST'])
+def itunes_enrichment_resume():
+    """Resume iTunes enrichment worker"""
+    try:
+        if itunes_enrichment_worker is None:
+            return jsonify({'error': 'iTunes enrichment worker not initialized'}), 400
+
+        itunes_enrichment_worker.resume()
+        logger.info("iTunes enrichment worker resumed via UI")
+        return jsonify({'status': 'running'}), 200
+    except Exception as e:
+        logger.error(f"Error resuming iTunes enrichment worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ================================================================================================
+# END ITUNES ENRICHMENT INTEGRATION
 # ================================================================================================
 
 

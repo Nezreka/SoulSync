@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import threading
@@ -7,7 +8,6 @@ from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
-from config.settings import config_manager
 
 logger = get_logger("repair_worker")
 
@@ -28,13 +28,8 @@ class RepairWorker:
     def __init__(self, database: MusicDatabase, transfer_folder: str = None):
         self.db = database
 
-        # Resolve transfer folder
-        if transfer_folder:
-            self.transfer_folder = transfer_folder
-        else:
-            raw = config_manager.get('soulseek.transfer_path', './Transfer')
-            # docker_resolve_path is in web_server — keep it simple here
-            self.transfer_folder = raw
+        # Initial transfer folder (re-read from DB each scan cycle)
+        self.transfer_folder = transfer_folder or './Transfer'
 
         # Worker state
         self.running = False
@@ -172,11 +167,19 @@ class RepairWorker:
                 )
 
                 # Sleep until next scan (check should_stop / paused periodically)
+                # Also re-scan immediately if transfer path changes
                 sleep_until = time.time() + self.rescan_interval_hours * 3600
+                last_path = self.transfer_folder
                 while time.time() < sleep_until and not self.should_stop:
                     if self.paused:
                         time.sleep(1)
                         continue
+                    # Check if transfer path changed in settings
+                    current_path = self._resolve_path(self._get_transfer_path_from_db())
+                    if current_path != last_path:
+                        logger.info("Transfer path changed: %s -> %s — triggering rescan", last_path, current_path)
+                        self.transfer_folder = current_path
+                        break
                     time.sleep(10)
 
             except Exception as e:
@@ -188,8 +191,38 @@ class RepairWorker:
     # ------------------------------------------------------------------
     # Library scanning
     # ------------------------------------------------------------------
+    @staticmethod
+    def _resolve_path(path_str: str) -> str:
+        """Resolve Docker path mapping if running in a container."""
+        if os.path.exists('/.dockerenv') and len(path_str) >= 3 and path_str[1] == ':' and path_str[0].isalpha():
+            drive_letter = path_str[0].lower()
+            rest_of_path = path_str[2:].replace('\\', '/')
+            return f"/host/mnt/{drive_letter}{rest_of_path}"
+        return path_str
+
+    def _get_transfer_path_from_db(self) -> str:
+        """Read transfer path directly from the database app_config."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM metadata WHERE key = 'app_config'")
+            row = cursor.fetchone()
+            if row and row[0]:
+                config = json.loads(row[0])
+                return config.get('soulseek', {}).get('transfer_path', './Transfer')
+        except Exception as e:
+            logger.error("Error reading transfer path from DB: %s", e)
+        finally:
+            if conn:
+                conn.close()
+        return './Transfer'
+
     def _scan_library(self):
         """Walk the transfer folder and process album folders."""
+        # Re-read transfer path from DB each scan so changes take effect without restart
+        raw = self._get_transfer_path_from_db()
+        self.transfer_folder = self._resolve_path(raw)
         transfer = self.transfer_folder
         if not os.path.isdir(transfer):
             logger.warning("Transfer folder does not exist: %s", transfer)

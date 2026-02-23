@@ -36052,6 +36052,260 @@ if (document.readyState === 'loading') {
 }
 
 // ===================================================================
+// SPOTIFY ENRICHMENT STATUS
+// ===================================================================
+
+async function updateSpotifyEnrichmentStatus() {
+    try {
+        const response = await fetch('/api/spotify-enrichment/status');
+        if (!response.ok) {
+            console.warn('Spotify enrichment status endpoint unavailable');
+            return;
+        }
+
+        const data = await response.json();
+        const button = document.getElementById('spotify-enrich-button');
+        if (!button) return;
+
+        const notAuthenticated = data.authenticated === false;
+
+        // Update button state classes
+        button.classList.remove('active', 'paused', 'complete', 'no-auth');
+        if (notAuthenticated) {
+            button.classList.add('no-auth');
+        } else if (data.idle) {
+            button.classList.add('complete');
+        } else if (data.running && !data.paused) {
+            button.classList.add('active');
+        } else if (data.paused) {
+            button.classList.add('paused');
+        }
+
+        // Update tooltip content
+        const tooltipStatus = document.getElementById('spotify-enrich-tooltip-status');
+        const tooltipCurrent = document.getElementById('spotify-enrich-tooltip-current');
+        const tooltipProgress = document.getElementById('spotify-enrich-tooltip-progress');
+
+        if (tooltipStatus) {
+            if (notAuthenticated) {
+                tooltipStatus.textContent = 'Not Authenticated';
+            } else if (data.idle) {
+                tooltipStatus.textContent = 'Complete';
+            } else if (data.running && !data.paused) {
+                tooltipStatus.textContent = 'Running';
+            } else if (data.paused) {
+                tooltipStatus.textContent = 'Paused';
+            } else {
+                tooltipStatus.textContent = 'Idle';
+            }
+        }
+
+        if (tooltipCurrent) {
+            if (notAuthenticated) {
+                tooltipCurrent.textContent = 'Connect Spotify in Settings to enrich';
+            } else if (data.idle) {
+                tooltipCurrent.textContent = 'All items processed';
+            } else if (data.current_item && data.current_item.name) {
+                tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+            }
+        }
+
+        if (data.progress && tooltipProgress) {
+            if (notAuthenticated) {
+                tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
+            } else {
+                const artists = data.progress.artists || {};
+                const albums = data.progress.albums || {};
+                const tracks = data.progress.tracks || {};
+
+                const currentType = data.current_item?.type || '';
+                let progressText = '';
+
+                const artistsComplete = artists.matched >= artists.total;
+                const albumsComplete = albums.matched >= albums.total;
+
+                if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+                    progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+                } else if (currentType.includes('album') || (artistsComplete && !albumsComplete)) {
+                    progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+                } else if (currentType.includes('track') || (artistsComplete && albumsComplete)) {
+                    progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+                } else {
+                    progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+                }
+
+                tooltipProgress.textContent = progressText;
+            }
+        }
+
+    } catch (error) {
+        console.error('Error updating Spotify enrichment status:', error);
+    }
+}
+
+async function toggleSpotifyEnrichment() {
+    try {
+        const button = document.getElementById('spotify-enrich-button');
+        if (!button) return;
+
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/spotify-enrichment/pause' : '/api/spotify-enrichment/resume';
+
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Spotify enrichment`);
+        }
+
+        await updateSpotifyEnrichmentStatus();
+        console.log(`Spotify enrichment ${isRunning ? 'paused' : 'resumed'}`);
+
+    } catch (error) {
+        console.error('Error toggling Spotify enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+// Initialize Spotify Enrichment UI on page load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('spotify-enrich-button');
+        if (button) {
+            button.addEventListener('click', toggleSpotifyEnrichment);
+            updateSpotifyEnrichmentStatus();
+            setInterval(updateSpotifyEnrichmentStatus, 2000);
+        }
+    });
+} else {
+    const button = document.getElementById('spotify-enrich-button');
+    if (button) {
+        button.addEventListener('click', toggleSpotifyEnrichment);
+        updateSpotifyEnrichmentStatus();
+        setInterval(updateSpotifyEnrichmentStatus, 2000);
+    }
+}
+
+// ===================================================================
+// ITUNES ENRICHMENT STATUS
+// ===================================================================
+
+async function updateiTunesEnrichmentStatus() {
+    try {
+        const response = await fetch('/api/itunes-enrichment/status');
+        if (!response.ok) {
+            console.warn('iTunes enrichment status endpoint unavailable');
+            return;
+        }
+
+        const data = await response.json();
+        const button = document.getElementById('itunes-enrich-button');
+        if (!button) return;
+
+        // Update button state classes
+        button.classList.remove('active', 'paused', 'complete');
+        if (data.idle) {
+            button.classList.add('complete');
+        } else if (data.running && !data.paused) {
+            button.classList.add('active');
+        } else if (data.paused) {
+            button.classList.add('paused');
+        }
+
+        // Update tooltip content
+        const tooltipStatus = document.getElementById('itunes-enrich-tooltip-status');
+        const tooltipCurrent = document.getElementById('itunes-enrich-tooltip-current');
+        const tooltipProgress = document.getElementById('itunes-enrich-tooltip-progress');
+
+        if (tooltipStatus) {
+            if (data.idle) {
+                tooltipStatus.textContent = 'Complete';
+            } else if (data.running && !data.paused) {
+                tooltipStatus.textContent = 'Running';
+            } else if (data.paused) {
+                tooltipStatus.textContent = 'Paused';
+            } else {
+                tooltipStatus.textContent = 'Idle';
+            }
+        }
+
+        if (tooltipCurrent) {
+            if (data.idle) {
+                tooltipCurrent.textContent = 'All items processed';
+            } else if (data.current_item && data.current_item.name) {
+                tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+            }
+        }
+
+        if (data.progress && tooltipProgress) {
+            const artists = data.progress.artists || {};
+            const albums = data.progress.albums || {};
+            const tracks = data.progress.tracks || {};
+
+            const currentType = data.current_item?.type || '';
+            let progressText = '';
+
+            const artistsComplete = artists.matched >= artists.total;
+            const albumsComplete = albums.matched >= albums.total;
+
+            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+            } else if (currentType.includes('album') || (artistsComplete && !albumsComplete)) {
+                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+            } else if (currentType.includes('track') || (artistsComplete && albumsComplete)) {
+                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+            } else {
+                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+            }
+
+            tooltipProgress.textContent = progressText;
+        }
+
+    } catch (error) {
+        console.error('Error updating iTunes enrichment status:', error);
+    }
+}
+
+async function toggleiTunesEnrichment() {
+    try {
+        const button = document.getElementById('itunes-enrich-button');
+        if (!button) return;
+
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/itunes-enrichment/pause' : '/api/itunes-enrichment/resume';
+
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} iTunes enrichment`);
+        }
+
+        await updateiTunesEnrichmentStatus();
+        console.log(`iTunes enrichment ${isRunning ? 'paused' : 'resumed'}`);
+
+    } catch (error) {
+        console.error('Error toggling iTunes enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+// Initialize iTunes Enrichment UI on page load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('itunes-enrich-button');
+        if (button) {
+            button.addEventListener('click', toggleiTunesEnrichment);
+            updateiTunesEnrichmentStatus();
+            setInterval(updateiTunesEnrichmentStatus, 2000);
+        }
+    });
+} else {
+    const button = document.getElementById('itunes-enrich-button');
+    if (button) {
+        button.addEventListener('click', toggleiTunesEnrichment);
+        updateiTunesEnrichmentStatus();
+        setInterval(updateiTunesEnrichmentStatus, 2000);
+    }
+}
+
+// ===================================================================
 // HYDRABASE P2P MIRROR WORKER
 // ===================================================================
 
