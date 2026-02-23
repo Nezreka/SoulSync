@@ -1438,6 +1438,122 @@ class MusicDatabase:
             logger.error(f"Error cleaning up orphaned records: {e}")
             return {'orphaned_artists_removed': 0, 'orphaned_albums_removed': 0}
     
+    def merge_duplicate_artists(self) -> Dict[str, int]:
+        """
+        Find and merge duplicate artists that share the same name + server_source.
+        Keeps the artist with the most enrichment data, migrates albums/tracks,
+        and merges enrichment columns.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Find duplicate artist groups (same name + server_source, different IDs)
+                cursor.execute("""
+                    SELECT name, server_source, GROUP_CONCAT(id) as ids, COUNT(*) as cnt
+                    FROM artists
+                    GROUP BY name, server_source
+                    HAVING cnt > 1
+                """)
+                duplicate_groups = cursor.fetchall()
+
+                if not duplicate_groups:
+                    logger.debug("🧹 No duplicate artists found")
+                    return {'artists_merged': 0, 'albums_migrated': 0}
+
+                total_merged = 0
+                total_albums_migrated = 0
+
+                enrichment_cols = [
+                    'musicbrainz_id', 'musicbrainz_last_attempted', 'musicbrainz_match_status',
+                    'spotify_artist_id', 'spotify_match_status', 'spotify_last_attempted',
+                    'itunes_artist_id', 'itunes_match_status', 'itunes_last_attempted',
+                    'audiodb_id', 'audiodb_match_status', 'audiodb_last_attempted',
+                    'style', 'mood', 'label', 'banner_url',
+                    'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
+                ]
+
+                for group in duplicate_groups:
+                    artist_name = group['name']
+                    server_source = group['server_source']
+                    ids = group['ids'].split(',')
+
+                    logger.info(f"🔄 Merging duplicate artist '{artist_name}' ({server_source}): IDs {ids}")
+
+                    # Pick the keeper: the one with the most enrichment data
+                    best_id = ids[0]
+                    best_score = 0
+                    for aid in ids:
+                        cursor.execute("SELECT * FROM artists WHERE id = ?", (aid,))
+                        row = cursor.fetchone()
+                        if row:
+                            score = 0
+                            for col in enrichment_cols:
+                                try:
+                                    if row[col] is not None:
+                                        score += 1
+                                except (IndexError, KeyError):
+                                    continue
+                            if score > best_score:
+                                best_score = score
+                                best_id = aid
+
+                    # Merge enrichment data from all duplicates into the keeper
+                    for aid in ids:
+                        if aid == best_id:
+                            continue
+                        cursor.execute("SELECT * FROM artists WHERE id = ?", (aid,))
+                        donor = cursor.fetchone()
+                        if not donor:
+                            continue
+
+                        # Fill NULL enrichment columns on keeper from this duplicate
+                        set_parts = []
+                        values = []
+                        for col in enrichment_cols:
+                            try:
+                                donor_val = donor[col]
+                                if donor_val is not None:
+                                    # Only fill if keeper's value is NULL
+                                    set_parts.append(f"{col} = COALESCE({col}, ?)")
+                                    values.append(donor_val)
+                            except (IndexError, KeyError):
+                                continue
+
+                        if set_parts:
+                            values.append(best_id)
+                            cursor.execute(f"""
+                                UPDATE artists SET {', '.join(set_parts)}
+                                WHERE id = ?
+                            """, values)
+
+                        # Migrate albums and tracks from duplicate to keeper
+                        cursor.execute("UPDATE albums SET artist_id = ? WHERE artist_id = ?", (best_id, aid))
+                        migrated = cursor.rowcount
+                        total_albums_migrated += migrated
+                        cursor.execute("UPDATE tracks SET artist_id = ? WHERE artist_id = ?", (best_id, aid))
+
+                        # Delete the duplicate artist
+                        cursor.execute("SELECT COUNT(*) FROM albums WHERE artist_id = ?", (aid,))
+                        remaining = cursor.fetchone()[0]
+                        if remaining == 0:
+                            cursor.execute("DELETE FROM artists WHERE id = ?", (aid,))
+                            total_merged += 1
+                            logger.info(f"   Merged '{artist_name}' ID {aid} → {best_id} ({migrated} albums migrated)")
+                        else:
+                            logger.warning(f"   Could not delete duplicate {aid}: {remaining} albums still reference it")
+
+                conn.commit()
+
+                if total_merged > 0:
+                    logger.info(f"🧹 Duplicate merge complete: {total_merged} duplicates merged, {total_albums_migrated} albums migrated")
+
+                return {'artists_merged': total_merged, 'albums_migrated': total_albums_migrated}
+
+        except Exception as e:
+            logger.error(f"Error merging duplicate artists: {e}")
+            return {'artists_merged': 0, 'albums_migrated': 0}
+
     # Artist operations
     def insert_or_update_artist(self, plex_artist) -> bool:
         """Insert or update artist from Plex artist object - DEPRECATED: Use insert_or_update_media_artist instead"""
@@ -1491,7 +1607,7 @@ class MusicDatabase:
                 # Check if artist exists with this ID and server source
                 cursor.execute("SELECT id FROM artists WHERE id = ? AND server_source = ?", (artist_id, server_source))
                 exists = cursor.fetchone()
-                
+
                 if exists:
                     # Update existing artist
                     cursor.execute("""
@@ -1501,12 +1617,80 @@ class MusicDatabase:
                     """, (name, thumb_url, genres_json, summary, artist_id, server_source))
                     logger.debug(f"Updated existing {server_source} artist: {name} (ID: {artist_id})")
                 else:
-                    # Insert new artist
-                    cursor.execute("""
-                        INSERT INTO artists (id, name, thumb_url, genres, summary, server_source)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, (artist_id, name, thumb_url, genres_json, summary, server_source))
-                    logger.debug(f"Inserted new {server_source} artist: {name} (ID: {artist_id})")
+                    # Before inserting, check if an artist with the same name already exists
+                    # for this server source (ratingKey may have changed after a library rescan)
+                    cursor.execute("SELECT id FROM artists WHERE name = ? AND server_source = ?", (name, server_source))
+                    existing_by_name = cursor.fetchone()
+
+                    if existing_by_name:
+                        old_id = existing_by_name['id']
+                        # ratingKey changed — migrate old artist to new ID, preserving enrichment data
+                        logger.info(f"🔄 Artist ratingKey migrated: '{name}' ({old_id} → {artist_id})")
+
+                        # Step 1: Insert new artist record, copying enrichment data from old
+                        enrichment_cols = [
+                            'musicbrainz_id', 'musicbrainz_last_attempted', 'musicbrainz_match_status',
+                            'spotify_artist_id', 'spotify_match_status', 'spotify_last_attempted',
+                            'itunes_artist_id', 'itunes_match_status', 'itunes_last_attempted',
+                            'audiodb_id', 'audiodb_match_status', 'audiodb_last_attempted',
+                            'style', 'mood', 'label', 'banner_url',
+                            'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
+                        ]
+
+                        # Read enrichment data from old artist
+                        cursor.execute("SELECT * FROM artists WHERE id = ? AND server_source = ?", (old_id, server_source))
+                        old_row = cursor.fetchone()
+
+                        # Insert new artist with fresh server metadata + preserved created_at
+                        old_created = old_row['created_at'] if old_row else None
+                        cursor.execute("""
+                            INSERT INTO artists (id, name, thumb_url, genres, summary, server_source, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """, (artist_id, name, thumb_url, genres_json, summary, server_source, old_created))
+
+                        # Copy enrichment data from old record to new record
+                        if old_row:
+                            set_parts = []
+                            values = []
+                            for col in enrichment_cols:
+                                try:
+                                    val = old_row[col]
+                                    if val is not None:
+                                        set_parts.append(f"{col} = ?")
+                                        values.append(val)
+                                except (IndexError, KeyError):
+                                    continue  # Column doesn't exist in this DB version
+
+                            if set_parts:
+                                values.append(artist_id)
+                                cursor.execute(f"""
+                                    UPDATE artists SET {', '.join(set_parts)}
+                                    WHERE id = ?
+                                """, values)
+
+                        # Step 2: Migrate album and track references to new artist ID
+                        cursor.execute("UPDATE albums SET artist_id = ? WHERE artist_id = ?", (artist_id, old_id))
+                        migrated_albums = cursor.rowcount
+                        cursor.execute("UPDATE tracks SET artist_id = ? WHERE artist_id = ?", (artist_id, old_id))
+                        migrated_tracks = cursor.rowcount
+
+                        # Step 3: Safely delete old artist (verify no remaining references first)
+                        cursor.execute("SELECT COUNT(*) FROM albums WHERE artist_id = ?", (old_id,))
+                        remaining = cursor.fetchone()[0]
+                        if remaining == 0:
+                            cursor.execute("DELETE FROM artists WHERE id = ? AND server_source = ?", (old_id, server_source))
+                        else:
+                            logger.warning(f"Could not delete old artist {old_id}: {remaining} albums still reference it")
+
+                        if migrated_albums > 0 or migrated_tracks > 0:
+                            logger.info(f"   Migrated {migrated_albums} albums, {migrated_tracks} tracks to new ID")
+                    else:
+                        # Genuinely new artist — insert fresh record
+                        cursor.execute("""
+                            INSERT INTO artists (id, name, thumb_url, genres, summary, server_source)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        """, (artist_id, name, thumb_url, genres_json, summary, server_source))
+                        logger.debug(f"Inserted new {server_source} artist: {name} (ID: {artist_id})")
 
                 conn.commit()
                 rows_affected = cursor.rowcount
@@ -1602,12 +1786,81 @@ class MusicDatabase:
                     WHERE id = ?
                 """, (artist_id, title, year, thumb_url, genres_json, track_count, duration, server_source, album_id))
             else:
-                # Insert new album
-                cursor.execute("""
-                    INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count, duration, server_source)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (album_id, artist_id, title, year, thumb_url, genres_json, track_count, duration, server_source))
-            
+                # Before inserting, check if an album with the same title already exists
+                # under this artist (ratingKey may have changed after a library rescan)
+                cursor.execute(
+                    "SELECT id FROM albums WHERE title = ? AND artist_id = ? AND server_source = ?",
+                    (title, artist_id, server_source))
+                existing_by_title = cursor.fetchone()
+
+                if existing_by_title:
+                    old_id = existing_by_title['id']
+                    # ratingKey changed — migrate old album to new ID, preserving enrichment data
+                    logger.info(f"🔄 Album ratingKey migrated: '{title}' ({old_id} → {album_id})")
+
+                    enrichment_cols = [
+                        'musicbrainz_release_id', 'musicbrainz_last_attempted', 'musicbrainz_match_status',
+                        'spotify_album_id', 'spotify_match_status', 'spotify_last_attempted',
+                        'itunes_album_id', 'itunes_match_status', 'itunes_last_attempted',
+                        'audiodb_id', 'audiodb_match_status', 'audiodb_last_attempted',
+                        'style', 'mood', 'label', 'explicit', 'record_type',
+                        'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
+                    ]
+
+                    # Read enrichment data from old album
+                    cursor.execute("SELECT * FROM albums WHERE id = ?", (old_id,))
+                    old_row = cursor.fetchone()
+
+                    # Insert new album with fresh server metadata + preserved created_at
+                    old_created = old_row['created_at'] if old_row else None
+                    cursor.execute("""
+                        INSERT INTO albums (id, artist_id, title, year, thumb_url, genres,
+                                            track_count, duration, server_source, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (album_id, artist_id, title, year, thumb_url, genres_json,
+                          track_count, duration, server_source, old_created))
+
+                    # Copy enrichment data from old record to new record
+                    if old_row:
+                        set_parts = []
+                        values = []
+                        for col in enrichment_cols:
+                            try:
+                                val = old_row[col]
+                                if val is not None:
+                                    set_parts.append(f"{col} = ?")
+                                    values.append(val)
+                            except (IndexError, KeyError):
+                                continue  # Column doesn't exist in this DB version
+
+                        if set_parts:
+                            values.append(album_id)
+                            cursor.execute(f"""
+                                UPDATE albums SET {', '.join(set_parts)}
+                                WHERE id = ?
+                            """, values)
+
+                    # Migrate track references to new album ID
+                    cursor.execute("UPDATE tracks SET album_id = ? WHERE album_id = ?", (album_id, old_id))
+                    migrated_tracks = cursor.rowcount
+
+                    # Safely delete old album (verify no remaining references first)
+                    cursor.execute("SELECT COUNT(*) FROM tracks WHERE album_id = ?", (old_id,))
+                    remaining = cursor.fetchone()[0]
+                    if remaining == 0:
+                        cursor.execute("DELETE FROM albums WHERE id = ?", (old_id,))
+                    else:
+                        logger.warning(f"Could not delete old album {old_id}: {remaining} tracks still reference it")
+
+                    if migrated_tracks > 0:
+                        logger.info(f"   Migrated {migrated_tracks} tracks to new album ID")
+                else:
+                    # Genuinely new album — insert fresh record
+                    cursor.execute("""
+                        INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count, duration, server_source)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (album_id, artist_id, title, year, thumb_url, genres_json, track_count, duration, server_source))
+
             conn.commit()
             return True
             
@@ -4403,11 +4656,13 @@ class MusicDatabase:
                         # Empty watchlist, no artists can match
                         where_clause += " AND 0"
 
-                # Get total count
+                # Deduplicate: only count canonical artist rows (one per name+server_source)
                 count_query = f"""
                     SELECT COUNT(*) as total_count
                     FROM artists a
                     WHERE {where_clause}
+                        AND a.id = (SELECT MIN(a2.id) FROM artists a2
+                                    WHERE a2.name = a.name AND a2.server_source = a.server_source)
                 """
                 cursor.execute(count_query, params)
                 total_count = cursor.fetchone()['total_count']
@@ -4415,6 +4670,8 @@ class MusicDatabase:
                 # Get artists with pagination
                 offset = (page - 1) * limit
 
+                # Deduplicate: select canonical row per name, but count albums/tracks
+                # across ALL same-name artist IDs (fixes duplicate artist display)
                 artists_query = f"""
                     SELECT
                         a.id,
@@ -4429,14 +4686,17 @@ class MusicDatabase:
                         COUNT(DISTINCT al.id) as album_count,
                         COUNT(DISTINCT t.id) as track_count
                     FROM artists a
-                    LEFT JOIN albums al ON a.id = al.artist_id
+                    LEFT JOIN albums al ON al.artist_id IN (
+                        SELECT id FROM artists WHERE name = a.name AND server_source = a.server_source
+                    )
                     LEFT JOIN tracks t ON al.id = t.album_id
                     WHERE {where_clause}
+                        AND a.id = (SELECT MIN(a2.id) FROM artists a2
+                                    WHERE a2.name = a.name AND a2.server_source = a.server_source)
                     GROUP BY a.id, a.name, a.thumb_url, a.genres, a.musicbrainz_id, a.deezer_id, a.audiodb_id
                     ORDER BY a.name COLLATE NOCASE
                     LIMIT ? OFFSET ?
                 """
-                # No need for complex query params now
                 query_params = params + [limit, offset]
 
                 cursor.execute(artists_query, query_params)
