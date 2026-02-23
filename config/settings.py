@@ -222,7 +222,8 @@ class ConfigManager:
             },
             "lossy_copy": {
                 "enabled": False,
-                "bitrate": "320"
+                "bitrate": "320",
+                "delete_original": False
             },
             "import": {
                 "staging_path": "./Staging"
