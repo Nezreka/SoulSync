@@ -1141,6 +1141,10 @@
         font-size: 13px;
     }
 
+    .track-selection-count {
+        font-size: 10px;
+    }
+
     .download-tracks-table {
         table-layout: auto;
     }
@@ -1154,14 +1158,35 @@
         text-overflow: ellipsis;
     }
 
+    /* Checkbox column sizing on mobile */
+    .track-select-header,
+    .track-select-cell {
+        width: auto;
+        padding: 6px 4px !important;
+    }
+
+    .track-select-header input[type="checkbox"],
+    .track-select-cell input[type="checkbox"] {
+        width: 14px;
+        height: 14px;
+    }
+
     /* Hide # and Duration columns on mobile */
-    .download-tracks-table th:nth-child(1),
     .download-tracks-table td.track-number {
         display: none;
     }
 
-    .download-tracks-table th:nth-child(4),
     .download-tracks-table td.track-duration {
+        display: none;
+    }
+
+    /* Hide matching th headers — different positions depending on checkbox column */
+    .download-tracks-table:has(.track-select-header) th:nth-child(2),
+    .download-tracks-table:not(:has(.track-select-header)) th:nth-child(1) {
+        display: none;
+    }
+
+    .download-tracks-table:has(.track-select-header) th:nth-child(5) {
         display: none;
     }
 
@@ -1810,8 +1835,12 @@
     }
 
     /* Hide Library Match column too at 480px */
-    .download-tracks-table th:nth-child(5),
     .download-tracks-table td.track-match-status {
+        display: none;
+    }
+
+    .download-tracks-table:has(.track-select-header) th:nth-child(6),
+    .download-tracks-table:not(:has(.track-select-header)) th:nth-child(4) {
         display: none;
     }
 

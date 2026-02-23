@@ -10518,6 +10518,9 @@ body {
     background: linear-gradient(135deg,
             rgba(40, 40, 40, 0.8) 0%,
             rgba(30, 30, 30, 0.9) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
 }
 
 .download-tracks-title {
@@ -10578,16 +10581,16 @@ body {
 .track-number {
     color: #888888;
     font-weight: 500;
-    width: 5%;
-    /* 5% for track numbers */
+    width: 4%;
+    /* 4% for track numbers */
     text-align: center;
 }
 
 .track-name {
     font-weight: 600;
     color: #ffffff;
-    width: 25%;
-    /* 25% for track names */
+    width: 24%;
+    /* 24% for track names */
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -10633,8 +10636,8 @@ body {
 
 .track-download-status {
     text-align: center;
-    width: 20%;
-    /* 20% for download status with progress */
+    width: 19%;
+    /* 19% for download status with progress */
     font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -10665,6 +10668,43 @@ body {
 
 .track-result-card .track-actions {
     width: auto;
+}
+
+.track-select-header,
+.track-select-cell {
+    width: 3%;
+    text-align: center;
+    padding: 12px 6px !important;
+}
+
+.track-select-header input[type="checkbox"],
+.track-select-cell input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #1db954;
+}
+
+.track-select-cell input[type="checkbox"]:disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+
+.track-deselected td:not(.track-select-cell) {
+    opacity: 0.4;
+}
+
+.track-deselected .track-name,
+.track-deselected .track-artist {
+    text-decoration: line-through;
+    text-decoration-color: rgba(255, 255, 255, 0.3);
+}
+
+.track-selection-count {
+    font-size: 12px;
+    color: #999;
+    font-weight: 500;
+    white-space: nowrap;
 }
 
 .cancel-track-btn {

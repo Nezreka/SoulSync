@@ -13724,6 +13724,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
             print(f"🔄 [Force Download] Force download mode enabled for batch {batch_id} - treating all tracks as missing")
 
         for i, track_data in enumerate(tracks_json):
+            # Use original table index if provided (for partial track selection),
+            # otherwise fall back to enumeration index
+            track_index = track_data.get('_original_index', i)
             track_name = track_data.get('name', '')
             artists = track_data.get('artists', [])
             found, confidence = False, 0.0
@@ -13749,7 +13752,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         break
 
             analysis_results.append({
-                'track_index': i, 'track': track_data, 'found': found, 'confidence': confidence
+                'track_index': track_index, 'track': track_data, 'found': found, 'confidence': confidence
             })
             
             # WISHLIST REMOVAL: If track is found in database, check if it should be removed from wishlist
