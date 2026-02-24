@@ -2561,8 +2561,18 @@ class MusicDatabase:
             result = cursor.fetchone()
             stored_track_count = result[0] if result and result[0] else 0
 
-            # Use provided expected count if available, otherwise use stored count
-            expected_tracks = expected_track_count if expected_track_count is not None else stored_track_count
+            # Use provided expected count if available, otherwise use stored count.
+            # However, if the album is complete by its own stored metadata, prefer the stored
+            # count so edition differences don't make a complete album appear incomplete.
+            # e.g. user has standard edition (12 tracks, all present) but Spotify returns
+            # deluxe edition count (20) — should show as complete, not 12/20.
+            if expected_track_count is not None and stored_track_count > 0 and owned_tracks >= stored_track_count:
+                # Album is complete by its own metadata — don't inflate expected with a different edition's count
+                expected_tracks = stored_track_count
+            elif expected_track_count is not None:
+                expected_tracks = expected_track_count
+            else:
+                expected_tracks = stored_track_count
 
             # Determine completeness with refined thresholds
             if expected_tracks and expected_tracks > 0:
@@ -2736,6 +2746,7 @@ class MusicDatabase:
         title_lower = title.lower().strip()
 
         # Define edition patterns and their variations
+        # Specific patterns first, generic catch-alls last (first match wins due to break)
         edition_patterns = {
             r'\s*\(deluxe\s*edition?\)': ['deluxe', 'deluxe edition'],
             r'\s*\(expanded\s*edition?\)': ['expanded', 'expanded edition'],
@@ -2749,6 +2760,9 @@ class MusicDatabase:
             r'\s+special\s*edition?$': ['special', 'special edition'],
             r'\s*-\s*deluxe': ['deluxe'],
             r'\s*-\s*platinum\s*edition?': ['platinum', 'platinum edition'],
+            # Generic catch-alls for any edition in parens/brackets (e.g. Silver Edition, MMXI Special Edition)
+            r'\s*\([^)]*\bedition\b[^)]*\)': ['edition'],
+            r'\s*\[[^\]]*\bedition\b[^\]]*\]': ['edition'],
         }
         
         # Check if title contains any edition indicators
@@ -3068,11 +3082,11 @@ class MusicDatabase:
     def _clean_album_title_for_comparison(self, title: str) -> str:
         """Clean album title by removing edition markers for comparison"""
         cleaned = title.lower()
-        
-        # Remove common edition patterns
+
+        # Remove common edition patterns (specific first, then generic catch-alls)
         patterns = [
             r'\s*\(deluxe\s*edition?\)',
-            r'\s*\(expanded\s*edition?\)', 
+            r'\s*\(expanded\s*edition?\)',
             r'\s*\(platinum\s*edition?\)',
             r'\s*\(special\s*edition?\)',
             r'\s*\(remastered?\)',
@@ -3082,11 +3096,16 @@ class MusicDatabase:
             r'\s*-\s*platinum\s*edition?',
             r'\s+deluxe\s*edition?$',
             r'\s+platinum\s*edition?$',
+            # Generic catch-alls: any parenthesized/bracketed text containing "edition"
+            # Handles "Silver Edition", "MMXI Special Edition", "Limited Edition", etc.
+            r'\s*\([^)]*\bedition\b[^)]*\)',
+            r'\s*\[[^\]]*\bedition\b[^\]]*\]',
+            r'\s*-\s+\w+\s+edition\s*$',
         ]
-        
+
         for pattern in patterns:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
-        
+
         return cleaned.strip()
     
     def get_album_completion_stats(self, artist_name: str) -> Dict[str, int]:
