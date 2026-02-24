@@ -7818,18 +7818,23 @@ def _get_base_album_name(album_name: str) -> str:
     """
     Extract the base album name without edition indicators.
     E.g., 'good kid, m.A.A.d city (Deluxe Edition)' -> 'good kid, m.A.A.d city'
+         'Battle Hymns (MMXI Special Edition)' -> 'Battle Hymns'
     """
     import re
-    
+
     # Remove common edition suffixes
     base_name = album_name
-    
+
     # Remove edition indicators in parentheses or brackets
-    base_name = re.sub(r'\s*[\[\(](deluxe|special|expanded|extended|bonus|remastered|anniversary|collectors?|limited).*?[\]\)]\s*$', '', base_name, flags=re.IGNORECASE)
-    
+    # Allow any prefix before the keyword (e.g. "MMXI Special Edition", "20th Anniversary Edition")
+    base_name = re.sub(r'\s*[\[\(][^)\]]*\b(deluxe|special|expanded|extended|bonus|remaster(?:ed)?|anniversary|collectors?|limited|silver|gold|platinum)\b[^)\]]*[\]\)]\s*$', '', base_name, flags=re.IGNORECASE)
+
+    # Generic: any parenthesized/bracketed text ending with "edition"
+    base_name = re.sub(r'\s*[\[\(][^)\]]*\bedition\b[^)\]]*[\]\)]\s*$', '', base_name, flags=re.IGNORECASE)
+
     # Remove standalone edition words at the end
-    base_name = re.sub(r'\s+(deluxe|special|expanded|extended|bonus|remastered|anniversary|collectors?|limited)\s*(edition)?\s*$', '', base_name, flags=re.IGNORECASE)
-    
+    base_name = re.sub(r'\s+(deluxe|special|expanded|extended|bonus|remastered|anniversary|collectors?|limited|silver|gold|platinum)\s*(edition)?\s*$', '', base_name, flags=re.IGNORECASE)
+
     return base_name.strip()
 
 def _detect_deluxe_edition(album_name: str) -> bool:
@@ -7845,7 +7850,7 @@ def _detect_deluxe_edition(album_name: str) -> bool:
     # Check for deluxe indicators
     deluxe_indicators = [
         'deluxe',
-        'deluxe edition', 
+        'deluxe edition',
         'special edition',
         'expanded edition',
         'extended edition',
@@ -7853,7 +7858,10 @@ def _detect_deluxe_edition(album_name: str) -> bool:
         'remastered',
         'anniversary',
         'collectors edition',
-        'limited edition'
+        'limited edition',
+        'silver edition',
+        'gold edition',
+        'platinum edition',
     ]
     
     for indicator in deluxe_indicators:
