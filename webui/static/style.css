@@ -21497,6 +21497,19 @@ body {
     display: none;
 }
 
+/* Hydrabase badge (dev mode) */
+.enh-badge-hydrabase {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(139, 92, 246, 0.3));
+    border: 1px solid rgba(99, 102, 241, 0.5);
+    color: rgba(139, 92, 246, 1);
+}
+
+.enh-sr-artist-badge-hydrabase {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(139, 92, 246, 0.3));
+    border: 1px solid rgba(99, 102, 241, 0.5);
+    color: rgba(139, 92, 246, 1);
+}
+
 
 /* ========================================= */
 /* ALBUM CARDS - LARGE Spotify Browse Style */
