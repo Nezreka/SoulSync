@@ -605,7 +605,7 @@ async function loadPageData(pageId) {
                 await loadQualityProfile();
                 break;
             case 'hydrabase':
-                // Check connection status on page load
+                // Check connection status and pre-fill saved credentials
                 try {
                     const hsResp = await fetch('/api/hydrabase/status');
                     const hsData = await hsResp.json();
@@ -613,7 +613,20 @@ async function loadPageData(pageId) {
                     document.getElementById('hydra-connection-status').textContent = hsData.connected ? 'Connected' : 'Disconnected';
                     document.getElementById('hydra-connection-status').style.color = hsData.connected ? '#1ed760' : '#888';
                     document.getElementById('hydra-connect-btn').textContent = hsData.connected ? 'Disconnect' : 'Connect';
+                    // Pre-fill saved credentials
+                    if (hsData.saved_url) {
+                        document.getElementById('hydra-ws-url').value = hsData.saved_url;
+                    }
+                    if (hsData.saved_api_key) {
+                        document.getElementById('hydra-api-key').value = hsData.saved_api_key;
+                    }
+                    // Update peer count
+                    if (hsData.peer_count !== null && hsData.peer_count !== undefined) {
+                        document.getElementById('hydra-peer-count').textContent = `Peers: ${hsData.peer_count}`;
+                    }
                 } catch (e) {}
+                // Load comparisons
+                loadHydrabaseComparisons();
                 break;
         }
     } catch (error) {
@@ -2316,7 +2329,56 @@ async function hydrabaseDisconnect() {
     document.getElementById('hydra-connection-status').textContent = 'Disconnected';
     document.getElementById('hydra-connection-status').style.color = '#888';
     document.getElementById('hydra-connect-btn').textContent = 'Connect';
-    showToast('Disconnected from Hydrabase', 'success');
+    // Dev mode is disabled on disconnect — hide Hydrabase nav and update settings status
+    document.getElementById('hydrabase-nav').style.display = 'none';
+    document.getElementById('hydrabase-button-container').style.display = 'none';
+    const devStatus = document.getElementById('dev-mode-status');
+    if (devStatus) {
+        devStatus.textContent = 'Inactive';
+        devStatus.style.color = '#888';
+    }
+    showToast('Disconnected — dev mode disabled', 'success');
+    navigateToPage('settings');
+}
+
+async function loadHydrabaseComparisons() {
+    const container = document.getElementById('hydra-comparisons-container');
+    if (!container) return;
+    try {
+        const response = await fetch('/api/hydrabase/comparisons');
+        const data = await response.json();
+        if (!data.success || !data.comparisons?.length) {
+            container.innerHTML = '<p style="color: #666; font-size: 13px;">No comparisons yet. Search with Hydrabase active to generate comparisons.</p>';
+            return;
+        }
+        let html = '';
+        for (const comp of data.comparisons) {
+            const time = new Date(comp.timestamp * 1000).toLocaleTimeString();
+            html += `<div style="background: rgba(30, 30, 30, 0.6); border-radius: 8px; padding: 10px; margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <strong style="color: #fff;">"${comp.query}"</strong>
+                    <span style="color: #666; font-size: 11px;">${time}</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 12px;">
+                    <div style="padding: 6px 8px; border-radius: 6px; background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.3);">
+                        <div style="color: rgba(139, 92, 246, 1); font-weight: 600; margin-bottom: 2px;">Hydrabase</div>
+                        <div style="color: #aaa;">${comp.hydrabase?.tracks || 0}T / ${comp.hydrabase?.artists || 0}A / ${comp.hydrabase?.albums || 0}Al</div>
+                    </div>
+                    <div style="padding: 6px 8px; border-radius: 6px; background: rgba(29, 185, 84, 0.15); border: 1px solid rgba(29, 185, 84, 0.3);">
+                        <div style="color: #1ed760; font-weight: 600; margin-bottom: 2px;">Spotify</div>
+                        <div style="color: #aaa;">${comp.spotify?.tracks || 0}T / ${comp.spotify?.artists || 0}A / ${comp.spotify?.albums || 0}Al</div>
+                    </div>
+                    <div style="padding: 6px 8px; border-radius: 6px; background: rgba(251, 93, 93, 0.15); border: 1px solid rgba(251, 93, 93, 0.3);">
+                        <div style="color: #fb5d5d; font-weight: 600; margin-bottom: 2px;">iTunes</div>
+                        <div style="color: #aaa;">${comp.itunes?.tracks || 0}T / ${comp.itunes?.artists || 0}A / ${comp.itunes?.albums || 0}Al</div>
+                    </div>
+                </div>
+            </div>`;
+        }
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = '<p style="color: #f44336; font-size: 13px;">Failed to load comparisons.</p>';
+    }
 }
 
 async function hydrabaseSendRaw(textareaId) {
@@ -3013,6 +3075,12 @@ function initializeSearchModeToggle() {
     }
 
     function renderDropdownResults(data) {
+        // Determine source badge
+        const metadataSource = data.metadata_source || 'spotify';
+        const sourceBadge = metadataSource === 'hydrabase'
+            ? { text: 'Hydrabase', class: 'enh-badge-hydrabase' }
+            : { text: 'Spotify', class: 'enh-badge-spotify' };
+
         // Render DB Artists
         renderCompactSection(
             'enh-db-artists-section',
@@ -3033,7 +3101,7 @@ function initializeSearchModeToggle() {
             })
         );
 
-        // Render Spotify Artists
+        // Render Artists (source-aware badge)
         renderCompactSection(
             'enh-spotify-artists-section',
             'enh-spotify-artists-list',
@@ -3044,7 +3112,7 @@ function initializeSearchModeToggle() {
                 placeholder: '🎤',
                 name: artist.name,
                 meta: 'Artist',
-                badge: { text: 'Spotify', class: 'enh-badge-spotify' },
+                badge: sourceBadge,
                 onClick: async () => {
                     console.log(`🎵 Opening Spotify artist detail: ${artist.name} (ID: ${artist.id})`);
                     hideDropdown();

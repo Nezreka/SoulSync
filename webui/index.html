@@ -3556,6 +3556,26 @@
                         <div class="hydrabase-response-area" id="hydra-response">API responses will appear here</div>
                     </div>
                 </div>
+
+                <!-- Network Stats -->
+                <div class="hydrabase-card" style="margin-top: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <h3 style="margin: 0;">Network</h3>
+                        <span id="hydra-peer-count" style="color: #888; font-size: 13px;">Peers: --</span>
+                    </div>
+                </div>
+
+                <!-- Source Comparisons -->
+                <div class="hydrabase-card" style="margin-top: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <h3 style="margin: 0;">Source Comparisons</h3>
+                        <button class="test-button" onclick="loadHydrabaseComparisons()">Refresh</button>
+                    </div>
+                    <p style="color: #888; font-size: 12px; margin: 0 0 8px 0;">When Hydrabase is the active metadata source, searches are compared against Spotify and iTunes in the background.</p>
+                    <div id="hydra-comparisons-container">
+                        <p style="color: #666; font-size: 13px;">No comparisons yet. Search with Hydrabase active to generate comparisons.</p>
+                    </div>
+                </div>
             </div>
 
         </div>

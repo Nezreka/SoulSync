@@ -74,6 +74,7 @@ from core.deezer_worker import DeezerWorker
 from core.spotify_worker import SpotifyWorker
 from core.itunes_worker import iTunesWorker
 from core.hydrabase_worker import HydrabaseWorker
+from core.hydrabase_client import HydrabaseClient
 
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -2526,6 +2527,86 @@ def handle_dev_mode():
 _hydrabase_ws = None
 _hydrabase_lock = threading.Lock()
 
+# ── Hydrabase Comparison Store ──
+import collections as _collections
+_hydrabase_comparisons = _collections.OrderedDict()
+_COMPARISON_MAX_ENTRIES = 50
+_comparison_lock = threading.Lock()
+
+def _is_hydrabase_active():
+    """Check if Hydrabase should be used as the primary metadata source.
+    Returns False when dev mode is off — no behavior change for normal users."""
+    try:
+        return (dev_mode_enabled
+                and hydrabase_client is not None
+                and hydrabase_client.is_connected())
+    except NameError:
+        return False
+
+def _run_background_comparison(query):
+    """Run Spotify + iTunes searches in background and store for comparison."""
+    def _worker():
+        try:
+            result = {'timestamp': time.time(), 'query': query}
+
+            # Hydrabase raw results (already fetched for the primary search)
+            hydra_data = {'tracks': 0, 'artists': 0, 'albums': 0}
+            if hydrabase_client and hydrabase_client.is_connected():
+                raw_t = hydrabase_client.search_raw(query, 'track')
+                raw_ar = hydrabase_client.search_raw(query, 'artist')
+                raw_al = hydrabase_client.search_raw(query, 'album')
+                hydra_data = {
+                    'tracks': len(raw_t) if raw_t else 0,
+                    'artists': len(raw_ar) if raw_ar else 0,
+                    'albums': len(raw_al) if raw_al else 0
+                }
+            result['hydrabase'] = hydra_data
+
+            # Spotify results
+            spotify_data = {'tracks': 0, 'artists': 0, 'albums': 0}
+            if spotify_client and spotify_client.is_authenticated():
+                try:
+                    s_tracks = spotify_client.search_tracks(query, limit=10)
+                    s_artists = spotify_client.search_artists(query, limit=10)
+                    s_albums = spotify_client.search_albums(query, limit=10)
+                    spotify_data = {
+                        'tracks': len(s_tracks),
+                        'artists': len(s_artists),
+                        'albums': len(s_albums)
+                    }
+                except Exception as e:
+                    logger.debug(f"Comparison Spotify search failed: {e}")
+            result['spotify'] = spotify_data
+
+            # iTunes results
+            itunes_data = {'tracks': 0, 'artists': 0, 'albums': 0}
+            try:
+                from core.itunes_client import iTunesClient
+                itunes = iTunesClient()
+                i_tracks = itunes.search_tracks(query, limit=10)
+                i_artists = itunes.search_artists(query, limit=10)
+                i_albums = itunes.search_albums(query, limit=10)
+                itunes_data = {
+                    'tracks': len(i_tracks),
+                    'artists': len(i_artists),
+                    'albums': len(i_albums)
+                }
+            except Exception as e:
+                logger.debug(f"Comparison iTunes search failed: {e}")
+            result['itunes'] = itunes_data
+
+            with _comparison_lock:
+                _hydrabase_comparisons[query] = result
+                while len(_hydrabase_comparisons) > _COMPARISON_MAX_ENTRIES:
+                    _hydrabase_comparisons.popitem(last=False)
+
+            logger.info(f"Background comparison stored for '{query}': H={hydra_data}, S={spotify_data}, I={itunes_data}")
+
+        except Exception as e:
+            logger.error(f"Background comparison failed for '{query}': {e}")
+
+    threading.Thread(target=_worker, daemon=True).start()
+
 @app.route('/api/hydrabase/connect', methods=['POST'])
 def hydrabase_connect():
     """Connect to a Hydrabase instance via WebSocket."""
@@ -2552,6 +2633,10 @@ def hydrabase_connect():
                 timeout=10
             )
             _hydrabase_ws = ws
+        # Save credentials for auto-reconnect
+        config_manager.set('hydrabase.url', url)
+        config_manager.set('hydrabase.api_key', api_key)
+        config_manager.set('hydrabase.auto_connect', True)
         print(f"🧪 [Hydrabase] Connected to {url}")
         return jsonify({"success": True, "message": "Connected"})
     except Exception as e:
@@ -2560,8 +2645,8 @@ def hydrabase_connect():
 
 @app.route('/api/hydrabase/disconnect', methods=['POST'])
 def hydrabase_disconnect():
-    """Disconnect from Hydrabase."""
-    global _hydrabase_ws
+    """Disconnect from Hydrabase and disable dev mode."""
+    global _hydrabase_ws, dev_mode_enabled
     with _hydrabase_lock:
         if _hydrabase_ws:
             try:
@@ -2569,14 +2654,41 @@ def hydrabase_disconnect():
             except:
                 pass
             _hydrabase_ws = None
-    print("🧪 [Hydrabase] Disconnected")
+    config_manager.set('hydrabase.auto_connect', False)
+    dev_mode_enabled = False
+    print("🧪 [Hydrabase] Disconnected — dev mode disabled")
     return jsonify({"success": True})
 
 @app.route('/api/hydrabase/status')
 def hydrabase_status():
     """Check if connected to Hydrabase."""
-    connected = _hydrabase_ws is not None and _hydrabase_ws.connected
-    return jsonify({"connected": connected})
+    try:
+        connected = _hydrabase_ws is not None and _hydrabase_ws.connected
+    except Exception:
+        connected = False
+    hydra_config = config_manager.get_hydrabase_config()
+    peer_count = None
+    try:
+        if hydrabase_client and hydrabase_client.last_peer_count is not None:
+            peer_count = hydrabase_client.last_peer_count
+    except NameError:
+        pass
+    return jsonify({
+        "connected": connected,
+        "saved_url": hydra_config.get('url', ''),
+        "saved_api_key": hydra_config.get('api_key', ''),
+        "auto_connect": hydra_config.get('auto_connect', False),
+        "peer_count": peer_count
+    })
+
+@app.route('/api/hydrabase/comparisons')
+def hydrabase_comparisons():
+    """Get recent comparison results (Hydrabase vs Spotify vs iTunes)."""
+    if not dev_mode_enabled:
+        return jsonify({"success": False, "error": "Dev mode not active"}), 403
+    with _comparison_lock:
+        items = list(reversed(_hydrabase_comparisons.values()))
+    return jsonify({"success": True, "comparisons": items})
 
 @app.route('/api/hydrabase/send', methods=['POST'])
 def hydrabase_send():
@@ -3967,18 +4079,11 @@ def enhanced_search():
 
     logger.info(f"Enhanced search initiated for: '{query}'")
 
-    # Mirror to Hydrabase P2P network
-    if hydrabase_worker and dev_mode_enabled:
-        hydrabase_worker.enqueue(query, 'track')
-        hydrabase_worker.enqueue(query, 'album')
-        hydrabase_worker.enqueue(query, 'artist')
-
     try:
-        # Search local database for artists
+        # Search local database for artists (always)
         database = get_database()
         db_artists_objs = database.search_artists(query, limit=5)
 
-        # Convert database artists to dictionaries
         db_artists = []
         for artist in db_artists_objs:
             image_url = None
@@ -3992,60 +4097,112 @@ def enhanced_search():
             })
             logger.debug(f"DB Artist: {artist.name}, thumb_url: {artist.thumb_url if hasattr(artist, 'thumb_url') else None}, fixed_url: {image_url}")
 
-        # Search Spotify for artists, albums, tracks
         spotify_artists = []
         spotify_albums = []
         spotify_tracks = []
+        metadata_source = "spotify"
 
-        if spotify_client and spotify_client.is_authenticated():
-            # Search for artists
-            artist_objs = spotify_client.search_artists(query, limit=10)
-            for artist in artist_objs:
-                spotify_artists.append({
-                    "id": artist.id,
-                    "name": artist.name,
-                    "image_url": artist.image_url
-                })
+        if _is_hydrabase_active():
+            # ── Hydrabase is primary metadata source ──
+            metadata_source = "hydrabase"
+            try:
+                artist_objs = hydrabase_client.search_artists(query, limit=10)
+                for artist in artist_objs:
+                    spotify_artists.append({
+                        "id": artist.id,
+                        "name": artist.name,
+                        "image_url": artist.image_url
+                    })
 
-            # Search for albums
-            album_objs = spotify_client.search_albums(query, limit=10)
-            for album in album_objs:
-                # Album has 'artists' (list), convert to string
-                artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'
+                album_objs = hydrabase_client.search_albums(query, limit=10)
+                for album in album_objs:
+                    artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'
+                    spotify_albums.append({
+                        "id": album.id,
+                        "name": album.name,
+                        "artist": artist_name,
+                        "image_url": album.image_url,
+                        "release_date": album.release_date,
+                        "total_tracks": album.total_tracks,
+                        "album_type": album.album_type
+                    })
 
-                spotify_albums.append({
-                    "id": album.id,
-                    "name": album.name,
-                    "artist": artist_name,
-                    "image_url": album.image_url,
-                    "release_date": album.release_date,
-                    "total_tracks": album.total_tracks,
-                    "album_type": album.album_type
-                })
+                track_objs = hydrabase_client.search_tracks(query, limit=10)
+                for track in track_objs:
+                    artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
+                    spotify_tracks.append({
+                        "id": track.id,
+                        "name": track.name,
+                        "artist": artist_name,
+                        "album": track.album,
+                        "duration_ms": track.duration_ms,
+                        "image_url": track.image_url,
+                        "release_date": track.release_date
+                    })
 
-            # Search for tracks
-            track_objs = spotify_client.search_tracks(query, limit=10)
-            for track in track_objs:
-                # Track has 'artists' (list), convert to string
-                artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
+                logger.info(f"Hydrabase search results: {len(spotify_artists)} artists, {len(spotify_albums)} albums, {len(spotify_tracks)} tracks")
 
-                spotify_tracks.append({
-                    "id": track.id,
-                    "name": track.name,
-                    "artist": artist_name,
-                    "album": track.album,
-                    "duration_ms": track.duration_ms,
-                    "image_url": track.image_url,
-                    "release_date": track.release_date
-                })
+                # Fire off background comparison
+                _run_background_comparison(query)
 
-        logger.info(f"Enhanced search results: {len(db_artists)} DB artists, {len(spotify_artists)} Spotify artists, {len(spotify_albums)} albums, {len(spotify_tracks)} tracks")
+            except Exception as e:
+                logger.error(f"Hydrabase search failed, falling back to Spotify/iTunes: {e}")
+                metadata_source = "spotify"
+                spotify_artists = []
+                spotify_albums = []
+                spotify_tracks = []
+
+        if metadata_source != "hydrabase":
+            # ── Standard Spotify/iTunes path ──
+            # Mirror to Hydrabase worker (fire-and-forget)
+            if hydrabase_worker and dev_mode_enabled:
+                hydrabase_worker.enqueue(query, 'track')
+                hydrabase_worker.enqueue(query, 'album')
+                hydrabase_worker.enqueue(query, 'artist')
+
+            if spotify_client and spotify_client.is_authenticated():
+                artist_objs = spotify_client.search_artists(query, limit=10)
+                for artist in artist_objs:
+                    spotify_artists.append({
+                        "id": artist.id,
+                        "name": artist.name,
+                        "image_url": artist.image_url
+                    })
+
+                album_objs = spotify_client.search_albums(query, limit=10)
+                for album in album_objs:
+                    artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'
+                    spotify_albums.append({
+                        "id": album.id,
+                        "name": album.name,
+                        "artist": artist_name,
+                        "image_url": album.image_url,
+                        "release_date": album.release_date,
+                        "total_tracks": album.total_tracks,
+                        "album_type": album.album_type
+                    })
+
+                track_objs = spotify_client.search_tracks(query, limit=10)
+                for track in track_objs:
+                    artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
+                    spotify_tracks.append({
+                        "id": track.id,
+                        "name": track.name,
+                        "artist": artist_name,
+                        "album": track.album,
+                        "duration_ms": track.duration_ms,
+                        "image_url": track.image_url,
+                        "release_date": track.release_date
+                    })
+
+        logger.info(f"Enhanced search results ({metadata_source}): {len(db_artists)} DB artists, {len(spotify_artists)} artists, {len(spotify_albums)} albums, {len(spotify_tracks)} tracks")
 
         return jsonify({
             "db_artists": db_artists,
             "spotify_artists": spotify_artists,
             "spotify_albums": spotify_albums,
-            "spotify_tracks": spotify_tracks
+            "spotify_tracks": spotify_tracks,
+            "metadata_source": metadata_source
         })
 
     except Exception as e:
@@ -6829,13 +6986,18 @@ def search_match():
         if not query:
             return jsonify({"results": []})
 
-        # Mirror to Hydrabase P2P network
-        if hydrabase_worker and dev_mode_enabled:
+        use_hydrabase = _is_hydrabase_active()
+
+        # Mirror to Hydrabase P2P network (fire-and-forget when not primary)
+        if not use_hydrabase and hydrabase_worker and dev_mode_enabled:
             hydrabase_worker.enqueue(query, context)
 
         if context == 'artist':
             # Search for artists
-            artist_matches = spotify_client.search_artists(query, limit=8)
+            if use_hydrabase:
+                artist_matches = hydrabase_client.search_artists(query, limit=8)
+            else:
+                artist_matches = spotify_client.search_artists(query, limit=8)
             results = []
             
             for artist in artist_matches:
@@ -17065,8 +17227,10 @@ def get_spotify_track(track_id):
 @app.route('/api/spotify/search', methods=['GET'])
 def search_spotify():
     """Generic Spotify search endpoint - supports tracks, albums, artists"""
-    if not spotify_client or not spotify_client.is_authenticated():
-        return jsonify({"error": "Spotify not authenticated."}), 401
+    use_hydrabase = _is_hydrabase_active()
+    if not use_hydrabase:
+        if not spotify_client or not spotify_client.is_authenticated():
+            return jsonify({"error": "Spotify not authenticated."}), 401
 
     try:
         query = request.args.get('q', '').strip()
@@ -17076,15 +17240,14 @@ def search_spotify():
         if not query:
             return jsonify({"error": "Query parameter 'q' is required"}), 400
 
-        # Mirror to Hydrabase P2P network
-        if hydrabase_worker and dev_mode_enabled:
-            hydrabase_worker.enqueue(query, search_type)
+        if use_hydrabase:
+            tracks = hydrabase_client.search_tracks(query, limit=limit)
+        else:
+            # Mirror to Hydrabase P2P network
+            if hydrabase_worker and dev_mode_enabled:
+                hydrabase_worker.enqueue(query, search_type)
+            tracks = spotify_client.search_tracks(query, limit=limit)
 
-        # Search using spotify_client
-        tracks = spotify_client.search_tracks(query, limit=limit)
-
-        # Convert tracks to Spotify Web API format
-        # Note: t.artists and t.album are already dicts/lists in the right format
         tracks_items = [{
             'id': t.id,
             'name': t.name,
@@ -17103,8 +17266,10 @@ def search_spotify():
 @app.route('/api/spotify/search_tracks', methods=['GET'])
 def search_spotify_tracks():
     """Search for tracks on Spotify - used by discovery fix modal"""
-    if not spotify_client or not spotify_client.is_authenticated():
-        return jsonify({"error": "Spotify not authenticated."}), 401
+    use_hydrabase = _is_hydrabase_active()
+    if not use_hydrabase:
+        if not spotify_client or not spotify_client.is_authenticated():
+            return jsonify({"error": "Spotify not authenticated."}), 401
 
     try:
         query = request.args.get('query', '').strip()
@@ -17113,14 +17278,13 @@ def search_spotify_tracks():
         if not query:
             return jsonify({"error": "Query parameter is required"}), 400
 
-        # Mirror to Hydrabase P2P network
-        if hydrabase_worker and dev_mode_enabled:
-            hydrabase_worker.enqueue(query, 'track')
+        if use_hydrabase:
+            tracks = hydrabase_client.search_tracks(query, limit=limit)
+        else:
+            if hydrabase_worker and dev_mode_enabled:
+                hydrabase_worker.enqueue(query, 'track')
+            tracks = spotify_client.search_tracks(query, limit=limit)
 
-        # Search using spotify_client
-        tracks = spotify_client.search_tracks(query, limit=limit)
-
-        # Convert tracks to dict format
         tracks_dict = [{
             'id': t.id,
             'name': t.name,
@@ -17140,31 +17304,32 @@ def search_spotify_tracks():
 def search_itunes_tracks():
     """Search for tracks on iTunes - used by discovery fix modal when iTunes is the source"""
     try:
-        from core.itunes_client import iTunesClient
-
         query = request.args.get('query', '').strip()
         limit = int(request.args.get('limit', 20))
 
         if not query:
             return jsonify({"error": "Query parameter is required"}), 400
 
-        # Mirror to Hydrabase P2P network
-        if hydrabase_worker and dev_mode_enabled:
-            hydrabase_worker.enqueue(query, 'track')
+        use_hydrabase = _is_hydrabase_active()
+        if use_hydrabase:
+            tracks = hydrabase_client.search_tracks(query, limit=limit)
+            source = 'hydrabase'
+        else:
+            if hydrabase_worker and dev_mode_enabled:
+                hydrabase_worker.enqueue(query, 'track')
+            from core.itunes_client import iTunesClient
+            itunes_client = iTunesClient()
+            tracks = itunes_client.search_tracks(query, limit=limit)
+            source = 'itunes'
 
-        # Search using iTunes client
-        itunes_client = iTunesClient()
-        tracks = itunes_client.search_tracks(query, limit=limit)
-
-        # Convert tracks to dict format matching Spotify structure for frontend compatibility
         tracks_dict = [{
             'id': t.id,
             'name': t.name,
-            'artists': t.artists,  # Already a list
+            'artists': t.artists,
             'album': t.album,
             'duration_ms': t.duration_ms,
             'image_url': t.image_url,
-            'source': 'itunes'
+            'source': source
         } for t in tracks]
 
         return jsonify({'tracks': tracks_dict})
@@ -22510,21 +22675,27 @@ def search_artists_for_playlist():
         if not query:
             return jsonify({"success": False, "error": "Query required"}), 400
 
-        # Mirror to Hydrabase P2P network
-        if hydrabase_worker and dev_mode_enabled:
-            hydrabase_worker.enqueue(query, 'artist')
-
-        # Search Spotify for artists
-        results = spotify_client.sp.search(q=query, type='artist', limit=10)
-
         artists = []
-        if results and 'artists' in results and 'items' in results['artists']:
-            for artist in results['artists']['items']:
+        if _is_hydrabase_active():
+            artist_objs = hydrabase_client.search_artists(query, limit=10)
+            for artist in artist_objs:
                 artists.append({
-                    'id': artist['id'],
-                    'name': artist['name'],
-                    'image_url': artist['images'][0]['url'] if artist.get('images') else None
+                    'id': artist.id,
+                    'name': artist.name,
+                    'image_url': artist.image_url
                 })
+        else:
+            if hydrabase_worker and dev_mode_enabled:
+                hydrabase_worker.enqueue(query, 'artist')
+
+            results = spotify_client.sp.search(q=query, type='artist', limit=10)
+            if results and 'artists' in results and 'items' in results['artists']:
+                for artist in results['artists']['items']:
+                    artists.append({
+                        'id': artist['id'],
+                        'name': artist['name'],
+                        'image_url': artist['images'][0]['url'] if artist.get('images') else None
+                    })
 
         return jsonify({
             "success": True,
@@ -27112,17 +27283,36 @@ def itunes_enrichment_resume():
 # HYDRABASE P2P MIRROR WORKER
 # ================================================================================================
 
-# --- Hydrabase Worker Initialization ---
+# --- Hydrabase Worker & Client Initialization ---
 hydrabase_worker = None
+hydrabase_client = None
 try:
     def _get_hydrabase_ws_and_lock():
         return (_hydrabase_ws, _hydrabase_lock)
     hydrabase_worker = HydrabaseWorker(get_ws_and_lock=_get_hydrabase_ws_and_lock)
     hydrabase_worker.start()
-    print("✅ Hydrabase P2P mirror worker initialized and started")
+    hydrabase_client = HydrabaseClient(get_ws_and_lock=_get_hydrabase_ws_and_lock)
+    print("✅ Hydrabase P2P mirror worker and metadata client initialized")
 except Exception as e:
-    print(f"⚠️ Hydrabase worker initialization failed: {e}")
+    print(f"⚠️ Hydrabase initialization failed: {e}")
     hydrabase_worker = None
+    hydrabase_client = None
+
+# --- Hydrabase Auto-Reconnect ---
+try:
+    _hydra_cfg = config_manager.get_hydrabase_config()
+    if _hydra_cfg.get('auto_connect') and _hydra_cfg.get('url') and _hydra_cfg.get('api_key'):
+        import websocket as _ws_mod
+        _auto_ws = _ws_mod.create_connection(
+            _hydra_cfg['url'],
+            header={"x-api-key": _hydra_cfg['api_key']},
+            timeout=10
+        )
+        _hydrabase_ws = _auto_ws
+        dev_mode_enabled = True
+        print(f"✅ Hydrabase auto-connected to {_hydra_cfg['url']}")
+except Exception as e:
+    print(f"⚠️ Hydrabase auto-reconnect failed: {e}")
 
 # --- Hydrabase Worker API Endpoints ---
 
@@ -27425,12 +27615,14 @@ def import_search_albums():
         if not query:
             return jsonify({'success': False, 'error': 'Missing query parameter'}), 400
 
-        # Mirror to Hydrabase P2P network
-        if hydrabase_worker and dev_mode_enabled:
-            hydrabase_worker.enqueue(query, 'album')
-
         limit = min(int(request.args.get('limit', 12)), 50)
-        albums = spotify_client.search_albums(query, limit=limit)
+
+        if _is_hydrabase_active():
+            albums = hydrabase_client.search_albums(query, limit=limit)
+        else:
+            if hydrabase_worker and dev_mode_enabled:
+                hydrabase_worker.enqueue(query, 'album')
+            albums = spotify_client.search_albums(query, limit=limit)
 
         results = []
         for a in albums:

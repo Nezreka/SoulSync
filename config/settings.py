@@ -230,6 +230,11 @@ class ConfigManager:
             },
             "m3u_export": {
                 "enabled": False
+            },
+            "hydrabase": {
+                "url": "",
+                "api_key": "",
+                "auto_connect": False
             }
         }
 
@@ -331,6 +336,9 @@ class ConfigManager:
 
     def get_soulseek_config(self) -> Dict[str, str]:
         return self.get('soulseek', {})
+
+    def get_hydrabase_config(self) -> Dict[str, str]:
+        return self.get('hydrabase', {})
 
     def get_settings(self) -> Dict[str, Any]:
         return self.get('settings', {})
