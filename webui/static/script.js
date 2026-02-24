@@ -36705,14 +36705,19 @@ async function updateSpotifyEnrichmentStatus() {
                 const artistsComplete = artists.matched >= artists.total;
                 const albumsComplete = albums.matched >= albums.total;
 
-                if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+                // Prioritize currentType over completion-based inference
+                if (currentType === 'artist') {
                     progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-                } else if (currentType.includes('album') || (artistsComplete && !albumsComplete)) {
+                } else if (currentType.includes('album')) {
                     progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-                } else if (currentType.includes('track') || (artistsComplete && albumsComplete)) {
+                } else if (currentType.includes('track')) {
                     progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-                } else {
+                } else if (!artistsComplete) {
                     progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+                } else if (!albumsComplete) {
+                    progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+                } else {
+                    progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
                 }
 
                 tooltipProgress.textContent = progressText;
@@ -36828,14 +36833,19 @@ async function updateiTunesEnrichmentStatus() {
             const artistsComplete = artists.matched >= artists.total;
             const albumsComplete = albums.matched >= albums.total;
 
-            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+            // Prioritize currentType over completion-based inference
+            if (currentType === 'artist') {
                 progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-            } else if (currentType.includes('album') || (artistsComplete && !albumsComplete)) {
+            } else if (currentType.includes('album')) {
                 progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-            } else if (currentType.includes('track') || (artistsComplete && albumsComplete)) {
+            } else if (currentType.includes('track')) {
                 progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-            } else {
+            } else if (!artistsComplete) {
                 progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+            } else if (!albumsComplete) {
+                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+            } else {
+                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
             }
 
             tooltipProgress.textContent = progressText;
