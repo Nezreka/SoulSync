@@ -325,6 +325,9 @@ class MusicDatabase:
                 )
             """)
 
+            # Retag tool tables for tracking processed downloads (migration)
+            self._add_retag_tables(cursor)
+
             conn.commit()
             logger.info("Database initialized successfully")
             
@@ -1271,6 +1274,47 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding Spotify/iTunes enrichment columns: {e}")
             # Don't raise - this is a migration, database can still function
+
+    def _add_retag_tables(self, cursor):
+        """Add retag tool tables for tracking processed downloads"""
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS retag_groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    group_type TEXT NOT NULL DEFAULT 'album',
+                    artist_name TEXT NOT NULL,
+                    album_name TEXT NOT NULL,
+                    image_url TEXT,
+                    spotify_album_id TEXT,
+                    itunes_album_id TEXT,
+                    total_tracks INTEGER DEFAULT 1,
+                    release_date TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS retag_tracks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    group_id INTEGER NOT NULL,
+                    track_number INTEGER,
+                    disc_number INTEGER DEFAULT 1,
+                    title TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    file_format TEXT,
+                    spotify_track_id TEXT,
+                    itunes_track_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (group_id) REFERENCES retag_groups (id) ON DELETE CASCADE
+                )
+            """)
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_retag_groups_artist ON retag_groups (artist_name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_retag_tracks_group ON retag_tracks (group_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_retag_tracks_path ON retag_tracks (file_path)")
+
+        except Exception as e:
+            logger.error(f"Error adding retag tables: {e}")
 
     def close(self):
         """Close database connection (no-op since we create connections per operation)"""
@@ -5003,6 +5047,196 @@ class MusicDatabase:
             return True
         except Exception as e:
             logger.error(f"Error saving discovery cache: {e}")
+            return False
+
+    # ==================== Retag Tool Methods ====================
+
+    def add_retag_group(self, group_type: str, artist_name: str, album_name: str,
+                        image_url: str = None, spotify_album_id: str = None,
+                        itunes_album_id: str = None, total_tracks: int = 1,
+                        release_date: str = None) -> Optional[int]:
+        """Insert a retag group and return its ID."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO retag_groups (group_type, artist_name, album_name, image_url,
+                    spotify_album_id, itunes_album_id, total_tracks, release_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (group_type, artist_name, album_name, image_url,
+                  spotify_album_id, itunes_album_id, total_tracks, release_date))
+            conn.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error adding retag group: {e}")
+            return None
+
+    def add_retag_track(self, group_id: int, track_number: int, disc_number: int,
+                        title: str, file_path: str, file_format: str = None,
+                        spotify_track_id: str = None, itunes_track_id: str = None) -> Optional[int]:
+        """Insert a retag track record and return its ID."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO retag_tracks (group_id, track_number, disc_number, title,
+                    file_path, file_format, spotify_track_id, itunes_track_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (group_id, track_number, disc_number, title, file_path,
+                  file_format, spotify_track_id, itunes_track_id))
+            conn.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error adding retag track: {e}")
+            return None
+
+    def get_retag_groups(self) -> List[Dict[str, Any]]:
+        """Return all retag groups ordered by artist_name, created_at DESC."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT g.*, COUNT(t.id) as track_count
+                FROM retag_groups g
+                LEFT JOIN retag_tracks t ON t.group_id = g.id
+                GROUP BY g.id
+                ORDER BY g.artist_name ASC, g.created_at DESC
+            """)
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting retag groups: {e}")
+            return []
+
+    def get_retag_tracks(self, group_id: int) -> List[Dict[str, Any]]:
+        """Return all tracks for a given group_id ordered by disc_number, track_number."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM retag_tracks
+                WHERE group_id = ?
+                ORDER BY disc_number ASC, track_number ASC
+            """, (group_id,))
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting retag tracks: {e}")
+            return []
+
+    def get_retag_stats(self) -> Dict[str, int]:
+        """Return retag statistics: groups, tracks, artists counts."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM retag_groups")
+            groups = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM retag_tracks")
+            tracks = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(DISTINCT artist_name) FROM retag_groups")
+            artists = cursor.fetchone()[0]
+            return {"groups": groups, "tracks": tracks, "artists": artists}
+        except Exception as e:
+            logger.error(f"Error getting retag stats: {e}")
+            return {"groups": 0, "tracks": 0, "artists": 0}
+
+    def find_retag_group(self, artist_name: str, album_name: str) -> Optional[int]:
+        """Find an existing retag group by artist + album name. Returns group ID or None."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM retag_groups WHERE artist_name = ? AND album_name = ?",
+                (artist_name, album_name)
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Error finding retag group: {e}")
+            return None
+
+    def retag_track_exists(self, group_id: int, file_path: str) -> bool:
+        """Check if a retag track already exists for a group + file path."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT 1 FROM retag_tracks WHERE group_id = ? AND file_path = ?",
+                (group_id, file_path)
+            )
+            return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking retag track existence: {e}")
+            return False
+
+    def update_retag_track_path(self, track_id: int, new_file_path: str) -> bool:
+        """Update file_path for a retag track after re-tag move."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE retag_tracks SET file_path = ? WHERE id = ?",
+                (new_file_path, track_id)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating retag track path: {e}")
+            return False
+
+    def update_retag_group(self, group_id: int, **kwargs) -> bool:
+        """Update retag group fields. Accepts keyword args for columns to update."""
+        allowed = {'group_type', 'artist_name', 'album_name', 'image_url',
+                    'spotify_album_id', 'itunes_album_id', 'total_tracks', 'release_date'}
+        updates = {k: v for k, v in kwargs.items() if k in allowed}
+        if not updates:
+            return False
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            set_clause = ", ".join(f"{k} = ?" for k in updates)
+            values = list(updates.values()) + [group_id]
+            cursor.execute(f"UPDATE retag_groups SET {set_clause} WHERE id = ?", values)
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating retag group: {e}")
+            return False
+
+    def trim_retag_groups(self, max_groups: int = 100):
+        """Remove oldest retag groups if count exceeds max_groups."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM retag_groups")
+            count = cursor.fetchone()[0]
+            if count <= max_groups:
+                return
+            excess = count - max_groups
+            cursor.execute(
+                "SELECT id FROM retag_groups ORDER BY created_at ASC LIMIT ?", (excess,)
+            )
+            old_ids = [row[0] for row in cursor.fetchall()]
+            for gid in old_ids:
+                cursor.execute("DELETE FROM retag_tracks WHERE group_id = ?", (gid,))
+                cursor.execute("DELETE FROM retag_groups WHERE id = ?", (gid,))
+            conn.commit()
+            logger.info(f"Trimmed {len(old_ids)} oldest retag groups (cap: {max_groups})")
+        except Exception as e:
+            logger.error(f"Error trimming retag groups: {e}")
+
+    def delete_retag_group(self, group_id: int) -> bool:
+        """Delete a retag group and its tracks (CASCADE)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            # Manually delete tracks first since SQLite CASCADE requires PRAGMA foreign_keys=ON
+            cursor.execute("DELETE FROM retag_tracks WHERE group_id = ?", (group_id,))
+            cursor.execute("DELETE FROM retag_groups WHERE id = ?", (group_id,))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting retag group: {e}")
             return False
 
 # Thread-safe singleton pattern for database access
