@@ -68,6 +68,7 @@ class Track:
     preview_url: Optional[str] = None
     external_urls: Optional[Dict[str, str]] = None
     image_url: Optional[str] = None
+    release_date: Optional[str] = None
 
     @classmethod
     def from_itunes_track(cls, track_data: Dict[str, Any], clean_artist_name: Optional[str] = None) -> 'Track':
@@ -97,7 +98,8 @@ class Track:
             popularity=0,  # iTunes doesn't provide popularity
             preview_url=track_data.get('previewUrl'),
             external_urls=external_urls if external_urls else None,
-            image_url=album_image_url
+            image_url=album_image_url,
+            release_date=track_data.get('releaseDate', '').split('T')[0] if track_data.get('releaseDate') else None
         )
 
 @dataclass

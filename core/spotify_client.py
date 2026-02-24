@@ -85,6 +85,7 @@ class Track:
     preview_url: Optional[str] = None
     external_urls: Optional[Dict[str, str]] = None
     image_url: Optional[str] = None
+    release_date: Optional[str] = None
 
     @classmethod
     def from_spotify_track(cls, track_data: Dict[str, Any]) -> 'Track':
@@ -105,7 +106,8 @@ class Track:
             popularity=track_data.get('popularity', 0),
             preview_url=track_data.get('preview_url'),
             external_urls=track_data.get('external_urls'),
-            image_url=album_image_url
+            image_url=album_image_url,
+            release_date=track_data.get('album', {}).get('release_date')
         )
 
 @dataclass
