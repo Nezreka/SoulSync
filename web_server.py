@@ -4022,7 +4022,8 @@ def enhanced_search():
                     "artist": artist_name,
                     "album": track.album,
                     "duration_ms": track.duration_ms,
-                    "image_url": track.image_url
+                    "image_url": track.image_url,
+                    "release_date": track.release_date
                 })
 
         logger.info(f"Enhanced search results: {len(db_artists)} DB artists, {len(spotify_artists)} Spotify artists, {len(spotify_albums)} albums, {len(spotify_tracks)} tracks")

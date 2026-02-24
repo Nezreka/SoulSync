@@ -3493,7 +3493,7 @@ function initializeSearchModeToggle() {
                     id: null,
                     album_type: 'single',
                     images: track.image_url ? [{ url: track.image_url }] : [],
-                    release_date: null,
+                    release_date: track.release_date || null,
                     total_tracks: 1
                 },
                 duration_ms: track.duration_ms,
@@ -3520,7 +3520,7 @@ function initializeSearchModeToggle() {
                 id: null,
                 album_type: 'single',
                 images: track.image_url ? [{ url: track.image_url }] : [],
-                release_date: null,
+                release_date: track.release_date || null,
                 total_tracks: 1,
                 artists: [{ name: track.artist }]
             };
@@ -7940,8 +7940,8 @@ async function startMissingTracksProcess(playlistId) {
         };
 
         // If this is an artist album download, use album name and include full context
-        // Match 'artist_album_', 'enhanced_search_album_', 'discover_album_', and 'seasonal_album_' prefixes
-        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('discover_album_') || playlistId.startsWith('seasonal_album_')) {
+        // Match 'artist_album_', 'enhanced_search_album_', 'enhanced_search_track_', 'discover_album_', and 'seasonal_album_' prefixes
+        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('enhanced_search_track_') || playlistId.startsWith('discover_album_') || playlistId.startsWith('seasonal_album_')) {
             requestBody.playlist_name = process.album?.name || process.playlist.name;
             requestBody.is_album_download = true;
             requestBody.album_context = process.album;   // Full Spotify album object
