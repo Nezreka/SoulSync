@@ -258,6 +258,19 @@ duplicate_cleaner_state = {
 duplicate_cleaner_lock = threading.Lock()
 duplicate_cleaner_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DuplicateCleaner")
 
+# --- Retag Tool Globals ---
+retag_state = {
+    "status": "idle",
+    "phase": "Ready",
+    "progress": 0,
+    "current_track": "",
+    "total_tracks": 0,
+    "processed": 0,
+    "error_message": ""
+}
+retag_lock = threading.Lock()
+retag_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="RetagWorker")
+
 # --- Sync Page Globals ---
 sync_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="SyncWorker")
 active_sync_workers = {}  # Key: playlist_id, Value: Future object
@@ -10323,6 +10336,14 @@ def _post_process_matched_download(context_key, context, file_path):
 
         print(f"✅ Post-processing complete for: {context.get('_final_processed_path', final_path)}")
 
+        # RETAG DATA CAPTURE: Record completed album/single downloads for retag tool
+        try:
+            if not playlist_folder_mode:
+                completed_path = context.get('_final_processed_path', final_path)
+                _record_retag_download(context, spotify_artist, album_info, completed_path)
+        except Exception as retag_err:
+            print(f"⚠️ [Post-Process] Retag data capture failed (non-fatal): {retag_err}")
+
         # REPAIR: Register album folder for repair scanning when batch completes
         try:
             completed_path = context.get('_final_processed_path', final_path)
@@ -10409,6 +10430,342 @@ _post_process_locks_lock = threading.Lock()  # protects the dict itself
 _download_retry_attempts = {}  # {context_key: {'count': N, 'first_attempt': timestamp}}
 _download_retry_max = 10  # Max retries before giving up (10 seconds with 1s poll interval)
 _download_retry_lock = threading.Lock()
+
+def _record_retag_download(context, spotify_artist, album_info, final_path):
+    """Record a completed download in the retag tables for later re-tagging."""
+    from database.music_database import get_database
+    db = get_database()
+
+    # Extract artist name
+    if isinstance(spotify_artist, dict):
+        artist_name = spotify_artist.get('name', 'Unknown Artist')
+    else:
+        artist_name = getattr(spotify_artist, 'name', 'Unknown Artist')
+
+    spotify_album = context.get('spotify_album', {})
+    original_search = context.get('original_search_result', {})
+    track_info = context.get('track_info', {})
+
+    is_album = album_info and album_info.get('is_album', False)
+    group_type = 'album' if is_album else 'single'
+    album_name = album_info.get('album_name', '') if album_info else (
+        original_search.get('spotify_clean_title', 'Unknown'))
+
+    # Determine album IDs (Spotify vs iTunes)
+    spotify_album_id = None
+    itunes_album_id = None
+    if spotify_album:
+        album_id_raw = str(spotify_album.get('id', ''))
+        if album_id_raw and album_id_raw.isdigit():
+            itunes_album_id = album_id_raw
+        elif album_id_raw:
+            spotify_album_id = album_id_raw
+
+    image_url = album_info.get('album_image_url') if album_info else None
+    total_tracks = spotify_album.get('total_tracks', 1) if spotify_album else 1
+    release_date = spotify_album.get('release_date', '') if spotify_album else ''
+
+    # Find or create group (avoid duplicating for multi-track albums)
+    group_id = db.find_retag_group(artist_name, album_name)
+    if group_id is None:
+        group_id = db.add_retag_group(
+            group_type=group_type, artist_name=artist_name, album_name=album_name,
+            image_url=image_url, spotify_album_id=spotify_album_id,
+            itunes_album_id=itunes_album_id, total_tracks=total_tracks,
+            release_date=release_date
+        )
+    if group_id is None:
+        return
+
+    # Track details
+    track_number = album_info.get('track_number', 1) if album_info else 1
+    disc_number = original_search.get('disc_number') or (
+        album_info.get('disc_number', 1) if album_info else 1)
+    title = original_search.get('spotify_clean_title') or (
+        album_info.get('clean_track_name', 'Unknown Track') if album_info else 'Unknown Track')
+    file_format = os.path.splitext(str(final_path))[1].lstrip('.').lower()
+
+    # Track IDs (Spotify vs iTunes)
+    spotify_track_id = None
+    itunes_track_id = None
+    if track_info and track_info.get('id'):
+        tid = str(track_info['id'])
+        if tid.isdigit():
+            itunes_track_id = tid
+        else:
+            spotify_track_id = tid
+
+    # Avoid duplicate track entries
+    if not db.retag_track_exists(group_id, str(final_path)):
+        db.add_retag_track(
+            group_id=group_id, track_number=track_number, disc_number=disc_number,
+            title=title, file_path=str(final_path), file_format=file_format,
+            spotify_track_id=spotify_track_id, itunes_track_id=itunes_track_id
+        )
+        print(f"📝 [Retag] Recorded track for retag: '{title}' in '{album_name}'")
+
+    # Cap retag groups at 100, remove oldest
+    db.trim_retag_groups(100)
+
+
+def _execute_retag(group_id, album_id):
+    """Execute a retag operation: re-tag files in a group with metadata from a new album match."""
+    global retag_state
+    from database.music_database import get_database
+
+    try:
+        with retag_lock:
+            retag_state.update({
+                "status": "running",
+                "phase": "Fetching album metadata...",
+                "progress": 0,
+                "current_track": "",
+                "total_tracks": 0,
+                "processed": 0,
+                "error_message": ""
+            })
+
+        # 1. Fetch new album metadata from Spotify/iTunes
+        album_data = spotify_client.get_album(album_id)
+        if not album_data:
+            raise ValueError(f"Could not fetch album data for ID: {album_id}")
+
+        album_tracks_response = spotify_client.get_album_tracks(album_id)
+        if not album_tracks_response:
+            raise ValueError(f"Could not fetch album tracks for ID: {album_id}")
+
+        album_tracks_items = album_tracks_response.get('items', [])
+
+        # Extract artist info
+        album_artists = album_data.get('artists', [])
+        new_artist = album_artists[0] if album_artists else {'name': 'Unknown Artist', 'id': ''}
+        # Ensure artist is a dict with expected fields
+        if not isinstance(new_artist, dict):
+            new_artist = {'name': str(new_artist), 'id': ''}
+        new_album_name = album_data.get('name', 'Unknown Album')
+        new_images = album_data.get('images', [])
+        new_image_url = new_images[0]['url'] if new_images else None
+        new_release_date = album_data.get('release_date', '')
+        total_tracks = album_data.get('total_tracks', len(album_tracks_items))
+
+        # Build spotify track list
+        spotify_tracks = []
+        for item in album_tracks_items:
+            track_artists = item.get('artists', [])
+            spotify_tracks.append({
+                'name': item.get('name', ''),
+                'track_number': item.get('track_number', 1),
+                'disc_number': item.get('disc_number', 1),
+                'id': item.get('id', ''),
+                'artists': track_artists,
+                'duration_ms': item.get('duration_ms', 0)
+            })
+
+        total_discs = max((t['disc_number'] for t in spotify_tracks), default=1)
+
+        # 2. Load existing tracks for this group
+        db = get_database()
+        existing_tracks = db.get_retag_tracks(group_id)
+        if not existing_tracks:
+            raise ValueError(f"No tracks found for retag group {group_id}")
+
+        with retag_lock:
+            retag_state['total_tracks'] = len(existing_tracks)
+            retag_state['phase'] = "Matching tracks..."
+
+        # 3. Match existing files to new tracklist
+        matched_pairs = []
+        for existing_track in existing_tracks:
+            best_match = None
+            best_score = 0
+
+            # Priority 1: Match by track number
+            for st in spotify_tracks:
+                if (st['track_number'] == existing_track.get('track_number') and
+                        st['disc_number'] == existing_track.get('disc_number', 1)):
+                    best_match = st
+                    best_score = 1.0
+                    break
+
+            # Priority 2: Match by title similarity
+            if not best_match:
+                from difflib import SequenceMatcher
+                existing_title = (existing_track.get('title') or '').lower().strip()
+                for st in spotify_tracks:
+                    st_title = (st.get('name') or '').lower().strip()
+                    score = SequenceMatcher(None, existing_title, st_title).ratio()
+                    if score > best_score and score > 0.6:
+                        best_score = score
+                        best_match = st
+
+            if best_match:
+                matched_pairs.append((existing_track, best_match))
+            else:
+                print(f"⚠️ [Retag] No match found for track: '{existing_track.get('title')}'")
+                matched_pairs.append((existing_track, None))
+
+        with retag_lock:
+            retag_state['phase'] = "Retagging files..."
+
+        # 4. Retag each matched track
+        for existing_track, matched_spotify in matched_pairs:
+            current_file_path = existing_track.get('file_path', '')
+            track_title = matched_spotify['name'] if matched_spotify else existing_track.get('title', 'Unknown')
+
+            with retag_lock:
+                retag_state['current_track'] = track_title
+
+            if not matched_spotify:
+                with retag_lock:
+                    retag_state['processed'] += 1
+                    retag_state['progress'] = int(retag_state['processed'] / retag_state['total_tracks'] * 100)
+                continue
+
+            # Verify file exists
+            if not os.path.exists(current_file_path):
+                print(f"⚠️ [Retag] File not found, skipping: {current_file_path}")
+                with retag_lock:
+                    retag_state['processed'] += 1
+                    retag_state['progress'] = int(retag_state['processed'] / retag_state['total_tracks'] * 100)
+                continue
+
+            # Build synthetic context for _enhance_file_metadata
+            track_artists = matched_spotify.get('artists', [])
+            context = {
+                'original_search_result': {
+                    'spotify_clean_title': matched_spotify['name'],
+                    'spotify_clean_album': new_album_name,
+                    'track_number': matched_spotify['track_number'],
+                    'disc_number': matched_spotify.get('disc_number', 1),
+                    'artists': track_artists,
+                    'title': matched_spotify['name']
+                },
+                'spotify_album': {
+                    'id': album_id,
+                    'name': new_album_name,
+                    'release_date': new_release_date,
+                    'total_tracks': total_tracks,
+                    'image_url': new_image_url,
+                    'total_discs': total_discs
+                },
+                'track_info': {'id': matched_spotify['id']},
+                'spotify_artist': new_artist,
+                '_audio_quality': _get_audio_quality_string(current_file_path) or ''
+            }
+
+            album_info = {
+                'is_album': total_tracks > 1,
+                'album_name': new_album_name,
+                'track_number': matched_spotify['track_number'],
+                'disc_number': matched_spotify.get('disc_number', 1),
+                'clean_track_name': matched_spotify['name'],
+                'album_image_url': new_image_url
+            }
+
+            # Re-write metadata tags
+            try:
+                _enhance_file_metadata(current_file_path, context, new_artist, album_info)
+                print(f"✅ [Retag] Re-tagged: '{track_title}'")
+            except Exception as meta_err:
+                print(f"⚠️ [Retag] Metadata write failed for '{track_title}': {meta_err}")
+
+            # Compute new path and move if different
+            file_ext = os.path.splitext(current_file_path)[1]
+            try:
+                new_path, _ = _build_final_path_for_track(context, new_artist, album_info, file_ext)
+
+                if os.path.normpath(current_file_path) != os.path.normpath(new_path):
+                    print(f"🚚 [Retag] Moving '{os.path.basename(current_file_path)}' -> '{new_path}'")
+                    old_dir = os.path.dirname(current_file_path)
+                    os.makedirs(os.path.dirname(new_path), exist_ok=True)
+                    _safe_move_file(current_file_path, new_path)
+
+                    # Move .lrc file alongside audio file if it exists
+                    old_lrc = os.path.splitext(current_file_path)[0] + '.lrc'
+                    if os.path.exists(old_lrc):
+                        new_lrc = os.path.splitext(new_path)[0] + '.lrc'
+                        try:
+                            _safe_move_file(old_lrc, new_lrc)
+                            print(f"📝 [Retag] Moved .lrc file alongside audio")
+                        except Exception as lrc_err:
+                            print(f"⚠️ [Retag] Failed to move .lrc file: {lrc_err}")
+
+                    # Remove old cover.jpg if directory changed and old dir is now empty of audio
+                    new_dir = os.path.dirname(new_path)
+                    if os.path.normpath(old_dir) != os.path.normpath(new_dir):
+                        old_cover = os.path.join(old_dir, 'cover.jpg')
+                        if os.path.exists(old_cover):
+                            # Check if any audio files remain in old directory
+                            audio_exts = {'.flac', '.mp3', '.m4a', '.ogg', '.opus', '.wav', '.aac'}
+                            remaining_audio = [f for f in os.listdir(old_dir)
+                                               if os.path.splitext(f)[1].lower() in audio_exts]
+                            if not remaining_audio:
+                                try:
+                                    os.remove(old_cover)
+                                    print(f"🗑️ [Retag] Removed orphaned cover.jpg from old directory")
+                                except Exception:
+                                    pass
+
+                    # Cleanup old empty directories
+                    transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+                    _cleanup_empty_directories(transfer_dir, current_file_path)
+
+                    # Update DB record
+                    db.update_retag_track_path(existing_track['id'], str(new_path))
+                    current_file_path = new_path
+                else:
+                    print(f"📍 [Retag] Path unchanged for '{track_title}', no move needed")
+            except Exception as move_err:
+                print(f"⚠️ [Retag] Path/move failed for '{track_title}': {move_err}")
+
+            # Download cover art to album directory
+            try:
+                _download_cover_art(album_info, os.path.dirname(current_file_path))
+            except Exception as cover_err:
+                print(f"⚠️ [Retag] Cover art download failed: {cover_err}")
+
+            with retag_lock:
+                retag_state['processed'] += 1
+                retag_state['progress'] = int(retag_state['processed'] / retag_state['total_tracks'] * 100)
+
+        # 5. Update the retag group record with new metadata
+        update_kwargs = {
+            'artist_name': new_artist.get('name', 'Unknown Artist'),
+            'album_name': new_album_name,
+            'image_url': new_image_url,
+            'total_tracks': total_tracks,
+            'release_date': new_release_date
+        }
+        # Set the correct ID field based on Spotify vs iTunes
+        if str(album_id).isdigit():
+            update_kwargs['itunes_album_id'] = album_id
+            update_kwargs['spotify_album_id'] = None
+        else:
+            update_kwargs['spotify_album_id'] = album_id
+            update_kwargs['itunes_album_id'] = None
+
+        db.update_retag_group(group_id, **update_kwargs)
+
+        with retag_lock:
+            retag_state.update({
+                "status": "finished",
+                "phase": "Retag complete!",
+                "progress": 100,
+                "current_track": ""
+            })
+        print(f"✅ [Retag] Retag operation complete for group {group_id}")
+
+    except Exception as e:
+        import traceback
+        print(f"❌ [Retag] Error during retag: {e}")
+        print(traceback.format_exc())
+        with retag_lock:
+            retag_state.update({
+                "status": "error",
+                "phase": "Error",
+                "error_message": str(e)
+            })
+
 
 def _check_and_remove_from_wishlist(context):
     """
@@ -10785,7 +11142,7 @@ def start_simple_background_monitor():
 def _sanitize_track_data_for_processing(track_data):
     """
     Sanitizes track data from wishlist service to ensure consistent format.
-    Handles album field conversion from dict to string and artist field normalization.
+    Preserves album dict to retain full metadata (images, id, etc.) and normalizes artist field.
     """
     if not isinstance(track_data, dict):
         print(f"⚠️ [Sanitize] Unexpected track data type: {type(track_data)}")
@@ -10794,11 +11151,10 @@ def _sanitize_track_data_for_processing(track_data):
     # Create a copy to avoid modifying original data
     sanitized = track_data.copy()
     
-    # Handle album field - convert dictionary to string if needed
+    # Handle album field - preserve dict format to retain full metadata (images, id, etc.)
+    # Downstream code already handles both dict and string formats defensively
     raw_album = sanitized.get('album', '')
-    if isinstance(raw_album, dict) and 'name' in raw_album:
-        sanitized['album'] = raw_album['name']
-    elif not isinstance(raw_album, str):
+    if not isinstance(raw_album, (dict, str)):
         sanitized['album'] = str(raw_album)
 
     # Handle artists field - ensure it's a list of strings
@@ -12915,6 +13271,96 @@ def stop_duplicate_cleaner():
             return jsonify({"success": False, "error": "No scan is currently running"}), 404
 
 # ===============================
+# == RETAG TOOL ENDPOINTS      ==
+# ===============================
+
+@app.route('/api/retag/stats', methods=['GET'])
+def get_retag_stats():
+    """Get retag tool statistics for the dashboard card."""
+    from database.music_database import get_database
+    db = get_database()
+    stats = db.get_retag_stats()
+    return jsonify({"success": True, **stats})
+
+@app.route('/api/retag/groups', methods=['GET'])
+def get_retag_groups():
+    """Get all retag groups sorted by artist name."""
+    from database.music_database import get_database
+    db = get_database()
+    groups = db.get_retag_groups()
+    return jsonify({"success": True, "groups": groups})
+
+@app.route('/api/retag/groups/<int:group_id>/tracks', methods=['GET'])
+def get_retag_group_tracks(group_id):
+    """Get tracks for a specific retag group."""
+    from database.music_database import get_database
+    db = get_database()
+    tracks = db.get_retag_tracks(group_id)
+    return jsonify({"success": True, "tracks": tracks})
+
+@app.route('/api/retag/search', methods=['GET'])
+def search_retag_albums():
+    """Search for albums to use for retagging (uses Spotify/iTunes fallback)."""
+    query = request.args.get('q', '').strip()
+    if not query:
+        return jsonify({"success": False, "error": "Query parameter 'q' is required"}), 400
+
+    limit = min(int(request.args.get('limit', 12)), 50)
+    try:
+        results = spotify_client.search_albums(query, limit=limit)
+        albums = []
+        for a in results:
+            albums.append({
+                'id': str(a.id),
+                'name': a.name,
+                'artist': ', '.join(a.artists) if a.artists else 'Unknown Artist',
+                'release_date': a.release_date or '',
+                'total_tracks': a.total_tracks,
+                'image_url': a.image_url,
+                'album_type': a.album_type or 'album'
+            })
+        return jsonify({"success": True, "albums": albums})
+    except Exception as e:
+        print(f"❌ [Retag] Album search error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/retag/execute', methods=['POST'])
+def execute_retag():
+    """Start a retag operation for a group with a new album match."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "JSON body required"}), 400
+
+    group_id = data.get('group_id')
+    album_id = data.get('album_id')
+    if not group_id or not album_id:
+        return jsonify({"success": False, "error": "group_id and album_id are required"}), 400
+
+    with retag_lock:
+        if retag_state["status"] == "running":
+            return jsonify({"success": False, "error": "A retag operation is already running"}), 409
+
+    retag_executor.submit(_execute_retag, group_id, str(album_id))
+    return jsonify({"success": True, "message": "Retag operation started"})
+
+@app.route('/api/retag/status', methods=['GET'])
+def get_retag_status():
+    """Get the current retag operation status."""
+    with retag_lock:
+        return jsonify(dict(retag_state))
+
+@app.route('/api/retag/groups/<int:group_id>', methods=['DELETE'])
+def delete_retag_group(group_id):
+    """Delete a retag group (files are NOT deleted)."""
+    from database.music_database import get_database
+    db = get_database()
+    success = db.delete_retag_group(group_id)
+    if success:
+        return jsonify({"success": True})
+    else:
+        return jsonify({"success": False, "error": "Group not found"}), 404
+
+# ===============================
 # == DOWNLOAD MISSING TRACKS   ==
 # ===============================
 
@@ -14265,7 +14711,13 @@ def _run_post_processing_worker(task_id, batch_id):
                             # name than the stream processor (e.g. raw API name vs resolved name),
                             # causing media servers to split tracks into separate albums.
                             try:
-                                original_album_ctx = original_search.get('album') if isinstance(original_search.get('album'), str) else None
+                                raw_album_ctx = original_search.get('album')
+                                if isinstance(raw_album_ctx, str):
+                                    original_album_ctx = raw_album_ctx
+                                elif isinstance(raw_album_ctx, dict) and 'name' in raw_album_ctx:
+                                    original_album_ctx = raw_album_ctx['name']
+                                else:
+                                    original_album_ctx = None
                                 consistent_album_name = _resolve_album_group(spotify_artist, album_info, original_album_ctx)
                                 album_info['album_name'] = consistent_album_name
                             except Exception as group_err:

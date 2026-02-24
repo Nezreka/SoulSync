@@ -13558,6 +13558,42 @@ const TOOL_HELP_CONTENT = {
             <p>This tool replicates the same scan process that runs automatically after completing a download modal - ensuring your new tracks are immediately available in your library!</p>
         `
     },
+    'retag-tool': {
+        title: 'Retag Tool',
+        content: `
+            <h4>What does this tool do?</h4>
+            <p>The Retag Tool lets you fix metadata on files that have already been downloaded and processed. If an album was tagged with wrong metadata, you can search for the correct match and re-apply tags.</p>
+
+            <h4>How it works</h4>
+            <ul>
+                <li>Browse your past downloads organized by artist</li>
+                <li>Expand an album or single to see individual tracks</li>
+                <li>Click <strong>Retag</strong> to search for the correct album match</li>
+                <li>Select the right album and confirm &mdash; metadata and file paths are updated automatically</li>
+            </ul>
+
+            <h4>What gets updated?</h4>
+            <ul>
+                <li><strong>File tags:</strong> Title, artist, album, track number, genre, cover art</li>
+                <li><strong>File paths:</strong> Files are moved/renamed to match new metadata (based on your path template)</li>
+                <li><strong>Cover art:</strong> cover.jpg is updated in the album folder</li>
+            </ul>
+
+            <h4>Stats Explained</h4>
+            <ul>
+                <li><strong>Groups:</strong> Number of album/single download groups tracked</li>
+                <li><strong>Tracks:</strong> Total individual track files tracked</li>
+                <li><strong>Artists:</strong> Number of unique artists across all groups</li>
+            </ul>
+
+            <h4>Notes</h4>
+            <ul>
+                <li>Only album and single downloads are tracked (not playlists)</li>
+                <li>Deleting a group from the list does <strong>not</strong> delete the files</li>
+                <li>Only one retag operation can run at a time</li>
+            </ul>
+        `
+    },
     'discover-page': {
         title: 'Discover Page Guide',
         content: `
@@ -13778,6 +13814,340 @@ function closeToolHelpModal() {
     document.body.style.overflow = ''; // Restore scrolling
 }
 
+// ===============================
+// == RETAG TOOL FUNCTIONS      ==
+// ===============================
+
+let retagStatusInterval = null;
+let retagCurrentGroupId = null;
+
+async function loadRetagStats() {
+    try {
+        const response = await fetch('/api/retag/stats');
+        const data = await response.json();
+        if (data.success !== false) {
+            const groupsEl = document.getElementById('retag-stat-groups');
+            const tracksEl = document.getElementById('retag-stat-tracks');
+            const artistsEl = document.getElementById('retag-stat-artists');
+            if (groupsEl) groupsEl.textContent = data.groups || 0;
+            if (tracksEl) tracksEl.textContent = data.tracks || 0;
+            if (artistsEl) artistsEl.textContent = data.artists || 0;
+        }
+    } catch (e) {
+        console.warn('Failed to load retag stats:', e);
+    }
+}
+
+async function openRetagModal() {
+    const modal = document.getElementById('retag-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+
+    const body = document.getElementById('retag-modal-body');
+    body.innerHTML = '<div class="retag-loading">Loading downloads...</div>';
+
+    try {
+        const response = await fetch('/api/retag/groups');
+        const data = await response.json();
+        if (!data.success || !data.groups || data.groups.length === 0) {
+            body.innerHTML = '<p class="retag-empty">No downloads recorded yet. Downloads will appear here after completing album or single downloads.</p>';
+            return;
+        }
+        renderRetagGroups(data.groups, body);
+    } catch (e) {
+        body.innerHTML = '<p class="retag-error">Failed to load downloads.</p>';
+    }
+}
+
+function closeRetagModal() {
+    const modal = document.getElementById('retag-modal');
+    if (modal) modal.style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+function renderRetagGroups(groups, container) {
+    // Group by artist_name
+    const byArtist = {};
+    groups.forEach(g => {
+        const artist = g.artist_name || 'Unknown Artist';
+        if (!byArtist[artist]) byArtist[artist] = [];
+        byArtist[artist].push(g);
+    });
+
+    let html = '';
+    Object.keys(byArtist).sort((a, b) => a.localeCompare(b)).forEach(artist => {
+        html += `<div class="retag-artist-section">
+            <h3 class="retag-artist-name">${escapeHtml(artist)}</h3>
+            <div class="retag-artist-groups">`;
+
+        byArtist[artist].forEach(group => {
+            const imgHtml = group.image_url
+                ? `<img class="retag-group-image" src="${group.image_url}" alt="" loading="lazy">`
+                : '<div class="retag-group-image-placeholder"></div>';
+            const trackCount = group.track_count || group.total_tracks || 0;
+            const typeLabel = (group.group_type || 'album').charAt(0).toUpperCase() + (group.group_type || 'album').slice(1);
+            const releaseDate = group.release_date ? group.release_date.substring(0, 4) : '';
+            const defaultQuery = (artist + ' ' + (group.album_name || '')).trim();
+
+            html += `<div class="retag-group-card" data-group-id="${group.id}">
+                <div class="retag-group-header" onclick="toggleRetagGroup(${group.id})">
+                    ${imgHtml}
+                    <div class="retag-group-info">
+                        <span class="retag-group-album">${escapeHtml(group.album_name || 'Unknown')}</span>
+                        <span class="retag-group-meta">${typeLabel}${releaseDate ? ' \u00b7 ' + releaseDate : ''} \u00b7 ${trackCount} track${trackCount !== 1 ? 's' : ''}</span>
+                    </div>
+                    <button class="retag-group-btn" onclick="event.stopPropagation(); openRetagSearch(${group.id}, '${escapeHtml(defaultQuery).replace(/'/g, "\\'")}')" title="Re-tag with different album">Retag</button>
+                    <button class="retag-group-delete-btn" onclick="event.stopPropagation(); deleteRetagGroup(${group.id})" title="Remove from list">&times;</button>
+                </div>
+                <div class="retag-group-tracks" id="retag-tracks-${group.id}" style="display:none;">
+                    <div class="retag-tracks-loading">Loading tracks...</div>
+                </div>
+            </div>`;
+        });
+
+        html += `</div></div>`;
+    });
+
+    container.innerHTML = html;
+}
+
+async function toggleRetagGroup(groupId) {
+    const tracksDiv = document.getElementById(`retag-tracks-${groupId}`);
+    if (!tracksDiv) return;
+
+    if (tracksDiv.style.display === 'none') {
+        tracksDiv.style.display = 'block';
+        if (tracksDiv.querySelector('.retag-tracks-loading')) {
+            try {
+                const response = await fetch(`/api/retag/groups/${groupId}/tracks`);
+                const data = await response.json();
+                if (data.success && data.tracks && data.tracks.length > 0) {
+                    tracksDiv.innerHTML = data.tracks.map(t => {
+                        const discPrefix = t.disc_number > 1 ? `${t.disc_number}-` : '';
+                        const trackNum = t.track_number != null ? `${discPrefix}${String(t.track_number).padStart(2, '0')}` : '--';
+                        return `<div class="retag-track-item">
+                            <span class="retag-track-number">${trackNum}</span>
+                            <span class="retag-track-title">${escapeHtml(t.title || 'Unknown')}</span>
+                            <span class="retag-track-format">${(t.file_format || '').toUpperCase()}</span>
+                        </div>`;
+                    }).join('');
+                } else {
+                    tracksDiv.innerHTML = '<p class="retag-tracks-empty">No tracks found</p>';
+                }
+            } catch (e) {
+                tracksDiv.innerHTML = '<p class="retag-tracks-empty">Failed to load tracks</p>';
+            }
+        }
+    } else {
+        tracksDiv.style.display = 'none';
+    }
+}
+
+function openRetagSearch(groupId, defaultQuery) {
+    retagCurrentGroupId = groupId;
+    const modal = document.getElementById('retag-search-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+
+    const input = document.getElementById('retag-search-input');
+    if (input) {
+        input.value = defaultQuery || '';
+        input.focus();
+        if (defaultQuery) {
+            searchRetagAlbums(defaultQuery);
+        }
+    }
+}
+
+function closeRetagSearch() {
+    const modal = document.getElementById('retag-search-modal');
+    if (modal) modal.style.display = 'none';
+    retagCurrentGroupId = null;
+}
+
+let retagSearchTimeout = null;
+document.addEventListener('DOMContentLoaded', () => {
+    const retagSearchInput = document.getElementById('retag-search-input');
+    if (retagSearchInput) {
+        retagSearchInput.addEventListener('input', (e) => {
+            clearTimeout(retagSearchTimeout);
+            retagSearchTimeout = setTimeout(() => searchRetagAlbums(e.target.value), 400);
+        });
+        retagSearchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                clearTimeout(retagSearchTimeout);
+                searchRetagAlbums(e.target.value);
+            }
+        });
+    }
+
+    // Close retag modals on escape
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const searchModal = document.getElementById('retag-search-modal');
+            if (searchModal && searchModal.style.display === 'flex') {
+                closeRetagSearch();
+                return;
+            }
+            const mainModal = document.getElementById('retag-modal');
+            if (mainModal && mainModal.style.display === 'flex') {
+                closeRetagModal();
+            }
+        }
+    });
+
+    // Close retag modal on overlay click
+    const retagModal = document.getElementById('retag-modal');
+    if (retagModal) {
+        retagModal.addEventListener('click', (e) => {
+            if (e.target === retagModal) closeRetagModal();
+        });
+    }
+    const retagSearchModal = document.getElementById('retag-search-modal');
+    if (retagSearchModal) {
+        retagSearchModal.addEventListener('click', (e) => {
+            if (e.target === retagSearchModal) closeRetagSearch();
+        });
+    }
+});
+
+async function searchRetagAlbums(query) {
+    if (!query || !query.trim()) return;
+    const resultsDiv = document.getElementById('retag-search-results');
+    if (!resultsDiv) return;
+    resultsDiv.innerHTML = '<div class="retag-search-loading">Searching...</div>';
+
+    try {
+        const response = await fetch(`/api/retag/search?q=${encodeURIComponent(query.trim())}`);
+        const data = await response.json();
+        if (data.success && data.albums && data.albums.length > 0) {
+            resultsDiv.innerHTML = data.albums.map(a => {
+                const imgHtml = a.image_url
+                    ? `<img class="retag-result-image" src="${a.image_url}" alt="" loading="lazy">`
+                    : '<div class="retag-result-image-placeholder"></div>';
+                const typeLabel = (a.album_type || 'album').charAt(0).toUpperCase() + (a.album_type || 'album').slice(1);
+                const releaseYear = a.release_date ? a.release_date.substring(0, 4) : '';
+                return `<div class="retag-search-result" onclick="confirmRetag(${retagCurrentGroupId}, '${a.id}', '${escapeHtml(a.name).replace(/'/g, "\\'")}')">
+                    ${imgHtml}
+                    <div class="retag-result-info">
+                        <span class="retag-result-name">${escapeHtml(a.name || 'Unknown')}</span>
+                        <span class="retag-result-artist">${escapeHtml(a.artist || 'Unknown')}</span>
+                        <span class="retag-result-meta">${typeLabel}${releaseYear ? ' \u00b7 ' + releaseYear : ''} \u00b7 ${a.total_tracks || 0} tracks</span>
+                    </div>
+                </div>`;
+            }).join('');
+        } else {
+            resultsDiv.innerHTML = '<p class="retag-no-results">No albums found.</p>';
+        }
+    } catch (e) {
+        resultsDiv.innerHTML = '<p class="retag-search-error">Search failed.</p>';
+    }
+}
+
+async function confirmRetag(groupId, albumId, albumName) {
+    if (!confirm(`Re-tag this group with "${albumName}"?\n\nThis will overwrite existing file tags and may move/rename files.`)) return;
+
+    closeRetagSearch();
+    closeRetagModal();
+
+    try {
+        const response = await fetch('/api/retag/execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ group_id: groupId, album_id: albumId })
+        });
+        const data = await response.json();
+        if (data.success) {
+            showToast('Retag operation started', 'success');
+            startRetagPolling();
+        } else {
+            showToast(`Error: ${data.error || 'Unknown error'}`, 'error');
+        }
+    } catch (e) {
+        showToast('Failed to start retag operation', 'error');
+    }
+}
+
+function startRetagPolling() {
+    if (retagStatusInterval) return;
+    retagStatusInterval = setInterval(checkRetagStatus, 1000);
+    checkRetagStatus();
+}
+
+async function checkRetagStatus() {
+    try {
+        const response = await fetch('/api/retag/status');
+        const state = await response.json();
+        updateRetagProgressUI(state);
+
+        if (state.status === 'running' && !retagStatusInterval) {
+            startRetagPolling();
+        }
+
+        if (state.status !== 'running' && retagStatusInterval) {
+            clearInterval(retagStatusInterval);
+            retagStatusInterval = null;
+            if (state.status === 'finished') {
+                showToast('Retag completed successfully', 'success');
+                loadRetagStats();
+            } else if (state.status === 'error') {
+                showToast(`Retag error: ${state.error_message || 'Unknown error'}`, 'error');
+            }
+        }
+    } catch (e) {
+        // Ignore fetch errors during polling
+    }
+}
+
+function updateRetagProgressUI(state) {
+    const phaseLabel = document.getElementById('retag-phase-label');
+    const progressBar = document.getElementById('retag-progress-bar');
+    const progressLabel = document.getElementById('retag-progress-label');
+    const statusEl = document.getElementById('retag-stat-status');
+
+    if (phaseLabel) phaseLabel.textContent = state.phase || 'Ready';
+    if (progressBar) progressBar.style.width = `${state.progress || 0}%`;
+    if (progressLabel) {
+        progressLabel.textContent = `${state.processed || 0} / ${state.total_tracks || 0} tracks (${(state.progress || 0).toFixed(1)}%)`;
+    }
+    if (statusEl) {
+        statusEl.textContent = state.status === 'running' ? 'Running' : 'Idle';
+    }
+
+    // Color the progress bar red on error
+    if (progressBar) {
+        progressBar.style.backgroundColor = state.status === 'error' ? '#ff4444' : '';
+    }
+}
+
+async function deleteRetagGroup(groupId) {
+    if (!confirm('Remove this group from the retag list?\n\nYour files will not be deleted.')) return;
+
+    try {
+        const response = await fetch(`/api/retag/groups/${groupId}`, { method: 'DELETE' });
+        const data = await response.json();
+        if (data.success) {
+            // Remove the card from DOM
+            const card = document.querySelector(`.retag-group-card[data-group-id="${groupId}"]`);
+            if (card) {
+                const section = card.closest('.retag-artist-section');
+                card.remove();
+                // If no more groups for this artist, remove the artist section
+                if (section && section.querySelectorAll('.retag-group-card').length === 0) {
+                    section.remove();
+                }
+            }
+            loadRetagStats();
+            showToast('Group removed from retag list', 'success');
+        } else {
+            showToast('Failed to remove group', 'error');
+        }
+    } catch (e) {
+        showToast('Failed to remove group', 'error');
+    }
+}
+
 function stopWishlistCountPolling() {
     if (wishlistCountInterval) {
         clearInterval(wishlistCountInterval);
@@ -13889,6 +14259,12 @@ async function loadDashboardData() {
         duplicateCleanButton.addEventListener('click', handleDuplicateCleanButtonClick);
     }
 
+    // Attach event listener for the retag tool
+    const retagOpenButton = document.getElementById('retag-open-button');
+    if (retagOpenButton) {
+        retagOpenButton.addEventListener('click', openRetagModal);
+    }
+
     // Attach event listener for the media scan tool
     const mediaScanButton = document.getElementById('media-scan-button');
     if (mediaScanButton) {
@@ -13906,6 +14282,12 @@ async function loadDashboardData() {
     if (wishlistButton) {
         wishlistButton.addEventListener('click', handleWishlistButtonClick);
     }
+
+    // Initial load of retag stats
+    loadRetagStats();
+
+    // Check for ongoing retag operation
+    checkRetagStatus();
 
     // Initial load of stats
     await fetchAndUpdateDbStats();

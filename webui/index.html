@@ -584,6 +584,44 @@
                                 </div>
                             </div>
 
+                            <div class="tool-card" id="retag-tool-card">
+                                <div class="tool-card-header">
+                                    <h4 class="tool-card-title">Retag Tool</h4>
+                                    <button class="tool-help-button" data-tool="retag-tool"
+                                        title="Learn more about this tool">?</button>
+                                </div>
+                                <p class="tool-card-info">Fix metadata on previously downloaded albums &amp; singles</p>
+                                <div class="tool-card-stats">
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Groups:</span>
+                                        <span class="stat-item-value" id="retag-stat-groups">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Tracks:</span>
+                                        <span class="stat-item-value" id="retag-stat-tracks">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Artists:</span>
+                                        <span class="stat-item-value" id="retag-stat-artists">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Status:</span>
+                                        <span class="stat-item-value" id="retag-stat-status">Idle</span>
+                                    </div>
+                                </div>
+                                <div class="tool-card-controls">
+                                    <button id="retag-open-button">Open Retag Tool</button>
+                                </div>
+                                <div class="tool-card-progress-section">
+                                    <p class="progress-phase-label" id="retag-phase-label">Ready</p>
+                                    <div class="progress-bar-container">
+                                        <div class="progress-bar-fill" id="retag-progress-bar" style="width: 0%;">
+                                        </div>
+                                    </div>
+                                    <p class="progress-details-label" id="retag-progress-label">0 / 0 tracks (0.0%)</p>
+                                </div>
+                            </div>
+
                             <div class="tool-card" id="media-scan-card" style="display: none;">
                                 <div class="tool-card-header">
                                     <h4 class="tool-card-title">Media Server Scan</h4>
@@ -3925,6 +3963,33 @@
     </div>
 
     <!-- Tool Help Modal -->
+    <!-- Retag Tool Modal -->
+    <div class="retag-modal-overlay" id="retag-modal">
+        <div class="retag-modal-container">
+            <div class="retag-modal-header">
+                <h2 class="retag-modal-title">Retag Tool</h2>
+                <button class="retag-modal-close" onclick="closeRetagModal()">&times;</button>
+            </div>
+            <div class="retag-modal-body" id="retag-modal-body">
+                <div class="retag-loading">Loading downloads...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Retag Search Sub-Modal -->
+    <div class="retag-search-overlay" id="retag-search-modal">
+        <div class="retag-search-container">
+            <div class="retag-search-header">
+                <h3 class="retag-search-title" id="retag-search-title">Search for Correct Album</h3>
+                <button class="retag-search-close" onclick="closeRetagSearch()">&times;</button>
+            </div>
+            <div class="retag-search-input-section">
+                <input type="text" id="retag-search-input" placeholder="Search albums..." autocomplete="off">
+            </div>
+            <div class="retag-search-results" id="retag-search-results"></div>
+        </div>
+    </div>
+
     <div class="tool-help-modal" id="tool-help-modal">
         <div class="tool-help-modal-content">
             <div class="tool-help-modal-header">
