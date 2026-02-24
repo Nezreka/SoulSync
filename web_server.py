@@ -20496,6 +20496,8 @@ def start_watchlist_scan():
         
         # Start the scan in a background thread
         def run_scan():
+            _enrichment_was_running = False
+            _itunes_enrichment_was_running = False
             try:
                 global watchlist_scan_state, watchlist_auto_scanning, watchlist_auto_scanning_timestamp
                 from core.watchlist_scanner import WatchlistScanner
@@ -20560,6 +20562,16 @@ def start_watchlist_scan():
                 })
                 
                 scan_results = []
+
+                # Pause enrichment workers during scan to reduce API contention
+                if spotify_enrichment_worker and not spotify_enrichment_worker.paused:
+                    spotify_enrichment_worker.pause()
+                    _enrichment_was_running = True
+                    print("⏸️ Paused Spotify enrichment worker during watchlist scan")
+                if itunes_enrichment_worker and not itunes_enrichment_worker.paused:
+                    itunes_enrichment_worker.pause()
+                    _itunes_enrichment_was_running = True
+                    print("⏸️ Paused iTunes enrichment worker during watchlist scan")
 
                 # Dynamic delay calculation based on scan scope
                 lookback_period = scanner._get_lookback_period_setting()
@@ -20843,6 +20855,14 @@ def start_watchlist_scan():
                 watchlist_scan_state['error'] = str(e)
 
             finally:
+                # Resume enrichment workers if we paused them
+                if _enrichment_was_running and spotify_enrichment_worker:
+                    spotify_enrichment_worker.resume()
+                    print("▶️ Resumed Spotify enrichment worker after watchlist scan")
+                if _itunes_enrichment_was_running and itunes_enrichment_worker:
+                    itunes_enrichment_worker.resume()
+                    print("▶️ Resumed iTunes enrichment worker after watchlist scan")
+
                 # Always reset flag when scan completes (success or error)
                 with watchlist_timer_lock:
                     watchlist_auto_scanning = False
@@ -21236,6 +21256,9 @@ def _process_watchlist_scan_automatically():
 
     print("🤖 [Auto-Watchlist] Timer triggered - starting automatic watchlist scan...")
 
+    _enrichment_was_running = False
+    _itunes_enrichment_was_running = False
+
     try:
         # CRITICAL FIX: Use smart stuck detection BEFORE acquiring lock
         # This prevents deadlock and handles stuck flags (2-hour timeout)
@@ -21325,6 +21348,16 @@ def _process_watchlist_scan_automatically():
             }
 
             scan_results = []
+
+            # Pause enrichment workers during scan to reduce API contention
+            if spotify_enrichment_worker and not spotify_enrichment_worker.paused:
+                spotify_enrichment_worker.pause()
+                _enrichment_was_running = True
+                print("⏸️ [Auto-Watchlist] Paused Spotify enrichment worker during scan")
+            if itunes_enrichment_worker and not itunes_enrichment_worker.paused:
+                itunes_enrichment_worker.pause()
+                _itunes_enrichment_was_running = True
+                print("⏸️ [Auto-Watchlist] Paused iTunes enrichment worker during scan")
 
             # Dynamic delay calculation based on scan scope
             lookback_period = scanner._get_lookback_period_setting()
@@ -21595,6 +21628,14 @@ def _process_watchlist_scan_automatically():
         watchlist_scan_state['error'] = str(e)
 
     finally:
+        # Resume enrichment workers if we paused them
+        if _enrichment_was_running and spotify_enrichment_worker:
+            spotify_enrichment_worker.resume()
+            print("▶️ [Auto-Watchlist] Resumed Spotify enrichment worker after scan")
+        if _itunes_enrichment_was_running and itunes_enrichment_worker:
+            itunes_enrichment_worker.resume()
+            print("▶️ [Auto-Watchlist] Resumed iTunes enrichment worker after scan")
+
         # Always reset flag and schedule next scan
         with watchlist_timer_lock:
             watchlist_auto_scanning = False
