@@ -3544,13 +3544,19 @@ class MusicDatabase:
             return 0
     
     def clear_wishlist(self) -> bool:
-        """Clear all tracks from the wishlist"""
+        """Clear all tracks from the wishlist and reset scan timestamps so next scan re-discovers everything"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM wishlist_tracks")
+                cleared_count = cursor.rowcount
+                # Reset last_scan_timestamp on all watchlist artists so the next scan
+                # uses the lookback period setting (e.g. "entire discography") instead
+                # of only finding albums released after the old scan date
+                cursor.execute("UPDATE watchlist_artists SET last_scan_timestamp = NULL")
+                reset_count = cursor.rowcount
                 conn.commit()
-                logger.info(f"Cleared {cursor.rowcount} tracks from wishlist")
+                logger.info(f"Cleared {cleared_count} tracks from wishlist, reset scan timestamps on {reset_count} artists")
                 return True
         except Exception as e:
             logger.error(f"Error clearing wishlist: {e}")

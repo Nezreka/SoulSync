@@ -763,7 +763,7 @@ class WatchlistScanner:
 
             # Return all albums if no cutoff (lookback_period = 'all')
             return albums
-            
+
         except Exception as e:
             logger.error(f"Error getting discography for artist {spotify_artist_id}: {e}")
             return None
