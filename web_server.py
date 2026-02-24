@@ -11623,9 +11623,15 @@ def set_discovery_lookback_period():
                 INSERT OR REPLACE INTO metadata (key, value, updated_at)
                 VALUES ('discovery_lookback_period', ?, CURRENT_TIMESTAMP)
             """, (period,))
+
+            # When expanding the lookback window (especially to "entire disco"),
+            # reset scan timestamps so the next scan re-discovers older releases
+            # that were filtered out under the previous narrower setting
+            cursor.execute("UPDATE watchlist_artists SET last_scan_timestamp = NULL")
+            reset_count = cursor.rowcount
             conn.commit()
 
-        print(f"✅ Discovery lookback period set to: {period}")
+        print(f"✅ Discovery lookback period set to: {period}, reset scan timestamps on {reset_count} artists")
         return jsonify({"success": True, "period": period})
 
     except Exception as e:
@@ -20153,7 +20159,7 @@ def start_watchlist_scan():
 
                         # Get artist discography using provider-aware method
                         albums = scanner.get_artist_discography_for_watchlist(artist, artist.last_scan_timestamp)
-                        
+
                         if albums is None:
                             scan_results.append(type('ScanResult', (), {
                                 'artist_name': artist.artist_name,
