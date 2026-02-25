@@ -325,6 +325,9 @@ class MusicDatabase:
                 )
             """)
 
+            # Add last_featured column to similar_artists for hero cycling (migration)
+            self._add_similar_artists_last_featured_column(cursor)
+
             # Retag tool tables for tracking processed downloads (migration)
             self._add_retag_tables(cursor)
 
@@ -875,6 +878,20 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding itunes_artist_id column to watchlist_artists: {e}")
+            # Don't raise - this is a migration, database can still function
+
+    def _add_similar_artists_last_featured_column(self, cursor):
+        """Add last_featured column to similar_artists for hero slider cycling"""
+        try:
+            cursor.execute("PRAGMA table_info(similar_artists)")
+            columns = [column[1] for column in cursor.fetchall()]
+
+            if 'last_featured' not in columns:
+                cursor.execute("ALTER TABLE similar_artists ADD COLUMN last_featured TIMESTAMP")
+                logger.info("Added last_featured column to similar_artists table for hero cycling")
+
+        except Exception as e:
+            logger.error(f"Error adding last_featured column to similar_artists: {e}")
             # Don't raise - this is a migration, database can still function
 
     def _fix_watchlist_spotify_id_nullable(self, cursor):
@@ -4124,24 +4141,34 @@ class MusicDatabase:
             return False  # Default to re-fetching on error
 
     def get_top_similar_artists(self, limit: int = 50) -> List[SimilarArtist]:
-        """Get top similar artists across all watchlist artists, ordered by occurrence count"""
+        """Get top similar artists excluding watchlist artists, with cycling support"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
                 cursor.execute("""
                     SELECT
-                        MAX(id) as id,
-                        MAX(source_artist_id) as source_artist_id,
-                        MAX(similar_artist_spotify_id) as similar_artist_spotify_id,
-                        MAX(similar_artist_itunes_id) as similar_artist_itunes_id,
-                        similar_artist_name,
-                        AVG(similarity_rank) as similarity_rank,
-                        SUM(occurrence_count) as occurrence_count,
-                        MAX(last_updated) as last_updated
-                    FROM similar_artists
-                    GROUP BY similar_artist_name
-                    ORDER BY occurrence_count DESC, similarity_rank ASC
+                        MAX(sa.id) as id,
+                        MAX(sa.source_artist_id) as source_artist_id,
+                        MAX(sa.similar_artist_spotify_id) as similar_artist_spotify_id,
+                        MAX(sa.similar_artist_itunes_id) as similar_artist_itunes_id,
+                        sa.similar_artist_name,
+                        AVG(sa.similarity_rank) as similarity_rank,
+                        SUM(sa.occurrence_count) as occurrence_count,
+                        MAX(sa.last_updated) as last_updated
+                    FROM similar_artists sa
+                    LEFT JOIN watchlist_artists wa ON (
+                        (sa.similar_artist_spotify_id IS NOT NULL AND sa.similar_artist_spotify_id = wa.spotify_artist_id)
+                        OR (sa.similar_artist_itunes_id IS NOT NULL AND sa.similar_artist_itunes_id = wa.itunes_artist_id)
+                        OR LOWER(sa.similar_artist_name) = LOWER(wa.artist_name)
+                    )
+                    WHERE wa.id IS NULL
+                    GROUP BY sa.similar_artist_name
+                    ORDER BY
+                        CASE WHEN MAX(sa.last_featured) IS NULL THEN 0 ELSE 1 END,
+                        MAX(sa.last_featured) ASC,
+                        occurrence_count DESC,
+                        similarity_rank ASC
                     LIMIT ?
                 """, (limit,))
 
@@ -4160,6 +4187,23 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting top similar artists: {e}")
             return []
+
+    def mark_artists_featured(self, artist_names: List[str]):
+        """Update last_featured timestamp for artists shown in the hero slider"""
+        if not artist_names:
+            return
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' for _ in artist_names)
+                cursor.execute(f"""
+                    UPDATE similar_artists
+                    SET last_featured = CURRENT_TIMESTAMP
+                    WHERE similar_artist_name IN ({placeholders})
+                """, artist_names)
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error marking artists as featured: {e}")
 
     def add_to_discovery_pool(self, track_data: Dict[str, Any], source: str = 'spotify') -> bool:
         """Add a track to the discovery pool (supports both Spotify and iTunes sources)"""
