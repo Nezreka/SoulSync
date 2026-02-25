@@ -20850,6 +20850,9 @@ def start_watchlist_scan():
                 database = get_database()
                 watchlist_artists = database.get_watchlist_artists()
 
+                # Apply global overrides if enabled
+                _apply_watchlist_global_overrides(watchlist_artists)
+
                 if not watchlist_artists:
                     watchlist_scan_state['status'] = 'completed'
                     watchlist_scan_state['summary'] = {
@@ -20993,6 +20996,10 @@ def start_watchlist_scan():
 
                                 tracks = album_data['tracks']['items']
 
+                                # Check release type filter (album/EP/single)
+                                if not scanner._should_include_release(len(tracks), artist):
+                                    continue
+
                                 # Get album image
                                 album_image_url = ''
                                 if 'images' in album_data and album_data['images']:
@@ -21007,6 +21014,10 @@ def start_watchlist_scan():
 
                                 # Check each track
                                 for track in tracks:
+                                    # Check content type filter (live/remix/acoustic/compilation)
+                                    if not scanner._should_include_track(track, album_data, artist):
+                                        continue
+
                                     # Update current track being processed
                                     track_name = track.get('name', 'Unknown Track')
                                     watchlist_scan_state['current_track_name'] = track_name
@@ -21033,7 +21044,7 @@ def start_watchlist_scan():
                                             # Keep only last 10
                                             if len(watchlist_scan_state['recent_wishlist_additions']) > 10:
                                                 watchlist_scan_state['recent_wishlist_additions'].pop()
-                                
+
                                 # Rate-limited delay between albums
                                 import time
                                 time.sleep(album_delay)
@@ -21440,6 +21451,100 @@ def watchlist_artist_config(artist_id):
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/watchlist/global-config', methods=['GET', 'POST'])
+def watchlist_global_config():
+    """Get or update global watchlist configuration (overrides per-artist settings)"""
+    try:
+        if request.method == 'GET':
+            config = {
+                'global_override_enabled': config_manager.get('watchlist.global_override_enabled', False),
+                'include_albums': config_manager.get('watchlist.global_include_albums', True),
+                'include_eps': config_manager.get('watchlist.global_include_eps', True),
+                'include_singles': config_manager.get('watchlist.global_include_singles', True),
+                'include_live': config_manager.get('watchlist.global_include_live', False),
+                'include_remixes': config_manager.get('watchlist.global_include_remixes', False),
+                'include_acoustic': config_manager.get('watchlist.global_include_acoustic', False),
+                'include_compilations': config_manager.get('watchlist.global_include_compilations', False),
+            }
+            return jsonify({"success": True, "config": config})
+
+        else:  # POST
+            data = request.get_json()
+            if not data:
+                return jsonify({"success": False, "error": "No data provided"}), 400
+
+            global_override_enabled = data.get('global_override_enabled', False)
+            include_albums = data.get('include_albums', True)
+            include_eps = data.get('include_eps', True)
+            include_singles = data.get('include_singles', True)
+            include_live = data.get('include_live', False)
+            include_remixes = data.get('include_remixes', False)
+            include_acoustic = data.get('include_acoustic', False)
+            include_compilations = data.get('include_compilations', False)
+
+            # When override is enabled, validate at least one release type
+            if global_override_enabled and not (include_albums or include_eps or include_singles):
+                return jsonify({"success": False, "error": "At least one release type must be selected"}), 400
+
+            config_manager.set('watchlist.global_override_enabled', global_override_enabled)
+            config_manager.set('watchlist.global_include_albums', include_albums)
+            config_manager.set('watchlist.global_include_eps', include_eps)
+            config_manager.set('watchlist.global_include_singles', include_singles)
+            config_manager.set('watchlist.global_include_live', include_live)
+            config_manager.set('watchlist.global_include_remixes', include_remixes)
+            config_manager.set('watchlist.global_include_acoustic', include_acoustic)
+            config_manager.set('watchlist.global_include_compilations', include_compilations)
+
+            print(f"✅ Updated global watchlist config: override={global_override_enabled}, "
+                  f"albums={include_albums}, eps={include_eps}, singles={include_singles}, "
+                  f"live={include_live}, remixes={include_remixes}, acoustic={include_acoustic}, "
+                  f"compilations={include_compilations}")
+
+            return jsonify({
+                "success": True,
+                "message": "Global watchlist configuration updated",
+                "config": {
+                    'global_override_enabled': global_override_enabled,
+                    'include_albums': include_albums,
+                    'include_eps': include_eps,
+                    'include_singles': include_singles,
+                    'include_live': include_live,
+                    'include_remixes': include_remixes,
+                    'include_acoustic': include_acoustic,
+                    'include_compilations': include_compilations,
+                }
+            })
+
+    except Exception as e:
+        print(f"Error in watchlist global config: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+def _apply_watchlist_global_overrides(watchlist_artists):
+    """If global override is enabled, overwrite per-artist settings on WatchlistArtist objects."""
+    if not config_manager.get('watchlist.global_override_enabled', False):
+        return
+    # Read global settings once
+    g_albums = config_manager.get('watchlist.global_include_albums', True)
+    g_eps = config_manager.get('watchlist.global_include_eps', True)
+    g_singles = config_manager.get('watchlist.global_include_singles', True)
+    g_live = config_manager.get('watchlist.global_include_live', False)
+    g_remixes = config_manager.get('watchlist.global_include_remixes', False)
+    g_acoustic = config_manager.get('watchlist.global_include_acoustic', False)
+    g_compilations = config_manager.get('watchlist.global_include_compilations', False)
+    print(f"🌐 [Watchlist] Global override is ACTIVE — applying to {len(watchlist_artists)} artists "
+          f"(albums={g_albums}, eps={g_eps}, singles={g_singles}, live={g_live}, "
+          f"remixes={g_remixes}, acoustic={g_acoustic}, compilations={g_compilations})")
+    for artist in watchlist_artists:
+        artist.include_albums = g_albums
+        artist.include_eps = g_eps
+        artist.include_singles = g_singles
+        artist.include_live = g_live
+        artist.include_remixes = g_remixes
+        artist.include_acoustic = g_acoustic
+        artist.include_compilations = g_compilations
+
 def _update_similar_artists_worker():
     """Background worker to update similar artists for all watchlist artists"""
     global similar_artists_update_state
@@ -21661,6 +21766,9 @@ def _process_watchlist_scan_automatically():
             watchlist_artists = database.get_watchlist_artists()
             scanner = get_watchlist_scanner(spotify_client)
 
+            # Apply global overrides if enabled
+            _apply_watchlist_global_overrides(watchlist_artists)
+
             # Initialize detailed progress tracking (same as manual scan)
             watchlist_scan_state = {
                 'status': 'scanning',
@@ -21780,6 +21888,10 @@ def _process_watchlist_scan_automatically():
 
                             tracks = album_data['tracks']['items']
 
+                            # Check release type filter (album/EP/single)
+                            if not scanner._should_include_release(len(tracks), artist):
+                                continue
+
                             # Get album image
                             album_image_url = ''
                             if 'images' in album_data and album_data['images']:
@@ -21794,6 +21906,10 @@ def _process_watchlist_scan_automatically():
 
                             # Check each track
                             for track in tracks:
+                                # Check content type filter (live/remix/acoustic/compilation)
+                                if not scanner._should_include_track(track, album_data, artist):
+                                    continue
+
                                 # Update current track being processed
                                 track_name = track.get('name', 'Unknown Track')
                                 watchlist_scan_state['current_track_name'] = track_name

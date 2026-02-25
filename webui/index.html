@@ -3950,6 +3950,168 @@
         </div>
     </div>
 
+    <!-- Watchlist Global Config Modal -->
+    <div class="modal-overlay hidden" id="watchlist-global-config-modal-overlay">
+        <div class="watchlist-artist-config-modal" id="watchlist-global-config-modal">
+            <div class="watchlist-artist-config-header" style="padding: 24px 28px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 28px;">⚙️</span>
+                    <div>
+                        <h2 style="color: #fff; margin: 0; font-size: 22px;">Global Watchlist Settings</h2>
+                        <p style="color: #b3b3b3; margin: 4px 0 0; font-size: 13px;">
+                            Override per-artist settings for all watchlist scans
+                        </p>
+                    </div>
+                </div>
+                <span class="watchlist-artist-config-close" onclick="closeWatchlistGlobalSettingsModal()">&times;</span>
+            </div>
+
+            <div class="watchlist-artist-config-content">
+                <div class="watchlist-artist-config-body">
+                    <!-- Global Override Toggle -->
+                    <div class="config-section">
+                        <label class="config-option global-override-toggle" id="global-override-toggle-label">
+                            <input type="checkbox" id="global-override-enabled" onchange="toggleGlobalOverrideOptions()">
+                            <div class="config-option-content">
+                                <div class="config-option-icon">🌐</div>
+                                <div class="config-option-text">
+                                    <span class="config-option-title">Enable Global Override</span>
+                                    <span class="config-option-description">When enabled, the settings below apply to ALL
+                                        artists, ignoring individual artist configs</span>
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div id="global-override-options" style="opacity: 0.4; pointer-events: none; transition: opacity 0.3s;">
+                        <!-- Release Types -->
+                        <div class="config-section">
+                            <h3 class="config-section-title">Release Types</h3>
+                            <p class="config-section-subtitle">Select which release types to download for all artists</p>
+
+                            <div class="config-options">
+                                <label class="config-option">
+                                    <input type="checkbox" id="global-include-albums" checked>
+                                    <div class="config-option-content">
+                                        <div class="config-option-icon">💿</div>
+                                        <div class="config-option-text">
+                                            <span class="config-option-title">Albums</span>
+                                            <span class="config-option-description">Full-length studio albums</span>
+                                        </div>
+                                    </div>
+                                </label>
+
+                                <label class="config-option">
+                                    <input type="checkbox" id="global-include-eps" checked>
+                                    <div class="config-option-content">
+                                        <div class="config-option-icon">🎵</div>
+                                        <div class="config-option-text">
+                                            <span class="config-option-title">EPs</span>
+                                            <span class="config-option-description">Extended plays (4-6 tracks)</span>
+                                        </div>
+                                    </div>
+                                </label>
+
+                                <label class="config-option">
+                                    <input type="checkbox" id="global-include-singles" checked>
+                                    <div class="config-option-content">
+                                        <div class="config-option-icon">🎶</div>
+                                        <div class="config-option-text">
+                                            <span class="config-option-title">Singles</span>
+                                            <span class="config-option-description">Single tracks and 2-3 track
+                                                releases</span>
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Content Filters -->
+                        <div class="config-section">
+                            <h3 class="config-section-title">Content Filters</h3>
+                            <p class="config-section-subtitle">Check to INCLUDE, leave unchecked to EXCLUDE (default: all
+                                excluded)</p>
+
+                            <div class="config-options">
+                                <label class="config-option">
+                                    <input type="checkbox" id="global-include-live">
+                                    <div class="config-option-content">
+                                        <div class="config-option-icon">🎤</div>
+                                        <div class="config-option-text">
+                                            <span class="config-option-title">Include Live Versions</span>
+                                            <span class="config-option-description">Live performances and concerts</span>
+                                        </div>
+                                    </div>
+                                </label>
+
+                                <label class="config-option">
+                                    <input type="checkbox" id="global-include-remixes">
+                                    <div class="config-option-content">
+                                        <div class="config-option-icon">🎧</div>
+                                        <div class="config-option-text">
+                                            <span class="config-option-title">Include Remixes</span>
+                                            <span class="config-option-description">Remix versions and edits</span>
+                                        </div>
+                                    </div>
+                                </label>
+
+                                <label class="config-option">
+                                    <input type="checkbox" id="global-include-acoustic">
+                                    <div class="config-option-content">
+                                        <div class="config-option-icon">🎸</div>
+                                        <div class="config-option-text">
+                                            <span class="config-option-title">Include Acoustic Versions</span>
+                                            <span class="config-option-description">Acoustic and stripped versions</span>
+                                        </div>
+                                    </div>
+                                </label>
+
+                                <label class="config-option">
+                                    <input type="checkbox" id="global-include-compilations">
+                                    <div class="config-option-content">
+                                        <div class="config-option-icon">📀</div>
+                                        <div class="config-option-text">
+                                            <span class="config-option-title">Include Compilations</span>
+                                            <span class="config-option-description">Greatest hits and collections</span>
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Include Everything shortcut -->
+                        <div class="config-section">
+                            <label class="config-option include-everything-option">
+                                <input type="checkbox" id="global-include-all" onchange="toggleGlobalIncludeAll()">
+                                <div class="config-option-content">
+                                    <div class="config-option-icon">✅</div>
+                                    <div class="config-option-text">
+                                        <span class="config-option-title">Include Everything</span>
+                                        <span class="config-option-description">Enable all release types AND content filters
+                                            (live, remixes, acoustic, compilations)</span>
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="watchlist-artist-config-footer">
+                <div class="config-modal-actions">
+                    <button class="config-modal-btn config-modal-btn-secondary"
+                        onclick="closeWatchlistGlobalSettingsModal()">
+                        Cancel
+                    </button>
+                    <button class="config-modal-btn config-modal-btn-primary" id="save-global-config-btn"
+                        onclick="saveWatchlistGlobalConfig()">
+                        Save Global Settings
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Genre Browser Modal -->
     <div class="genre-browser-modal-overlay" id="genre-browser-modal">
         <div class="genre-browser-modal-container">

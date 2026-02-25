@@ -25126,10 +25126,19 @@ async function showWatchlistModal() {
             document.body.appendChild(modal);
         }
 
-        // Get scan status
+        // Get scan status and global config
         const statusResponse = await fetch('/api/watchlist/scan/status');
         const statusData = await statusResponse.json();
         const scanStatus = statusData.success ? statusData.status : 'idle';
+
+        let globalOverrideActive = false;
+        try {
+            const globalConfigResponse = await fetch('/api/watchlist/global-config');
+            const globalConfigData = await globalConfigResponse.json();
+            globalOverrideActive = globalConfigData.success && globalConfigData.config.global_override_enabled;
+        } catch (e) {
+            console.debug('Could not fetch global config:', e);
+        }
 
         // Format countdown timer
         const nextRunSeconds = countData.next_run_in_seconds || 0;
@@ -25187,7 +25196,7 @@ async function showWatchlistModal() {
                 </div>
                 
                 <div class="playlist-modal-body">
-                    <div class="watchlist-actions" style="margin-bottom: 20px; display: flex; gap: 12px;">
+                    <div class="watchlist-actions" style="margin-bottom: 20px; display: flex; gap: 12px; align-items: center;">
                         <button class="playlist-modal-btn playlist-modal-btn-primary"
                                 id="scan-watchlist-btn"
                                 onclick="startWatchlistScan()"
@@ -25200,7 +25209,20 @@ async function showWatchlistModal() {
                                 ${scanStatus === 'scanning' ? 'disabled' : ''}>
                             Update Similar Artists
                         </button>
+                        <button class="playlist-modal-btn playlist-modal-btn-secondary ${globalOverrideActive ? 'watchlist-global-settings-active' : ''}"
+                                id="watchlist-global-settings-btn"
+                                onclick="openWatchlistGlobalSettingsModal()"
+                                >
+                            ${globalOverrideActive ? '⚙️ Global Override ON' : '⚙️ Global Settings'}
+                        </button>
                     </div>
+
+                    ${globalOverrideActive ? `
+                    <div class="watchlist-global-override-banner">
+                        <span>⚠️</span>
+                        <span>Global override is active — per-artist settings are being ignored during scans.</span>
+                    </div>
+                    ` : ''}
 
                     <!-- Search Bar -->
                     <div class="watchlist-search-container" style="margin-bottom: 16px;">
@@ -25386,6 +25408,16 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
 
         const { config, artist } = data;
 
+        // Check if global override is active
+        let globalOverrideActive = false;
+        try {
+            const globalResponse = await fetch('/api/watchlist/global-config');
+            const globalData = await globalResponse.json();
+            globalOverrideActive = globalData.success && globalData.config.global_override_enabled;
+        } catch (e) {
+            console.debug('Could not check global config:', e);
+        }
+
         // Generate hero section
         const heroHTML = `
             ${artist.image_url ? `
@@ -25431,6 +25463,18 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
         document.getElementById('config-include-acoustic').checked = config.include_acoustic || false;
         document.getElementById('config-include-compilations').checked = config.include_compilations || false;
 
+        // Show global override notice if active
+        const existingNotice = document.querySelector('.global-override-notice');
+        if (existingNotice) existingNotice.remove();
+
+        if (globalOverrideActive) {
+            const notice = document.createElement('div');
+            notice.className = 'global-override-notice watchlist-global-override-banner';
+            notice.innerHTML = '<span>⚠️</span><span>Global override is active — these per-artist settings are currently ignored during scans.</span>';
+            const configBody = document.querySelector('.watchlist-artist-config-body');
+            if (configBody) configBody.insertBefore(notice, configBody.firstChild);
+        }
+
         // Store artist ID for saving
         const modal = document.getElementById('watchlist-artist-config-modal');
         if (modal) {
@@ -25473,6 +25517,178 @@ function closeWatchlistArtistConfigModal() {
     const heroContainer = document.getElementById('watchlist-artist-config-hero');
     if (heroContainer) {
         heroContainer.innerHTML = '';
+    }
+}
+
+/**
+ * Open global watchlist settings modal
+ */
+async function openWatchlistGlobalSettingsModal() {
+    try {
+        const response = await fetch('/api/watchlist/global-config');
+        const data = await response.json();
+
+        if (!data.success) {
+            showToast(`Error loading global settings: ${data.error}`, 'error');
+            return;
+        }
+
+        const config = data.config;
+
+        // Populate checkboxes
+        document.getElementById('global-override-enabled').checked = config.global_override_enabled;
+        document.getElementById('global-include-albums').checked = config.include_albums;
+        document.getElementById('global-include-eps').checked = config.include_eps;
+        document.getElementById('global-include-singles').checked = config.include_singles;
+        document.getElementById('global-include-live').checked = config.include_live;
+        document.getElementById('global-include-remixes').checked = config.include_remixes;
+        document.getElementById('global-include-acoustic').checked = config.include_acoustic;
+        document.getElementById('global-include-compilations').checked = config.include_compilations;
+
+        // Sync "Include Everything" checkbox
+        syncGlobalIncludeAllCheckbox();
+
+        // Update options visibility based on toggle state
+        toggleGlobalOverrideOptions();
+
+        // Update toggle label border
+        const toggleLabel = document.getElementById('global-override-toggle-label');
+        if (toggleLabel) {
+            toggleLabel.style.border = config.global_override_enabled
+                ? '2px solid rgba(29, 185, 84, 0.5)'
+                : '2px solid rgba(255, 255, 255, 0.1)';
+        }
+
+        // Show modal
+        const overlay = document.getElementById('watchlist-global-config-modal-overlay');
+        if (overlay) overlay.classList.remove('hidden');
+
+    } catch (error) {
+        console.error('Error opening global watchlist settings:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Close global watchlist settings modal
+ */
+function closeWatchlistGlobalSettingsModal() {
+    const overlay = document.getElementById('watchlist-global-config-modal-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+/**
+ * Toggle global override options visibility
+ */
+function toggleGlobalOverrideOptions() {
+    const enabled = document.getElementById('global-override-enabled').checked;
+    const options = document.getElementById('global-override-options');
+    if (options) {
+        options.style.opacity = enabled ? '1' : '0.4';
+        options.style.pointerEvents = enabled ? 'auto' : 'none';
+    }
+
+    // Update toggle label border
+    const toggleLabel = document.getElementById('global-override-toggle-label');
+    if (toggleLabel) {
+        toggleLabel.style.border = enabled
+            ? '2px solid rgba(29, 185, 84, 0.5)'
+            : '2px solid rgba(255, 255, 255, 0.1)';
+    }
+}
+
+/**
+ * Toggle all global include checkboxes
+ */
+function toggleGlobalIncludeAll() {
+    const checked = document.getElementById('global-include-all').checked;
+    ['global-include-albums', 'global-include-eps', 'global-include-singles',
+     'global-include-live', 'global-include-remixes', 'global-include-acoustic',
+     'global-include-compilations'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.checked = checked;
+    });
+}
+
+/**
+ * Sync the "Include Everything" checkbox based on individual checkbox states
+ */
+function syncGlobalIncludeAllCheckbox() {
+    const allIds = ['global-include-albums', 'global-include-eps', 'global-include-singles',
+        'global-include-live', 'global-include-remixes', 'global-include-acoustic',
+        'global-include-compilations'];
+    const allChecked = allIds.every(id => {
+        const el = document.getElementById(id);
+        return el && el.checked;
+    });
+    const includeAllEl = document.getElementById('global-include-all');
+    if (includeAllEl) includeAllEl.checked = allChecked;
+}
+
+/**
+ * Save global watchlist configuration
+ */
+async function saveWatchlistGlobalConfig() {
+    try {
+        const globalOverrideEnabled = document.getElementById('global-override-enabled').checked;
+        const includeAlbums = document.getElementById('global-include-albums').checked;
+        const includeEps = document.getElementById('global-include-eps').checked;
+        const includeSingles = document.getElementById('global-include-singles').checked;
+        const includeLive = document.getElementById('global-include-live').checked;
+        const includeRemixes = document.getElementById('global-include-remixes').checked;
+        const includeAcoustic = document.getElementById('global-include-acoustic').checked;
+        const includeCompilations = document.getElementById('global-include-compilations').checked;
+
+        if (globalOverrideEnabled && !includeAlbums && !includeEps && !includeSingles) {
+            showToast('Please select at least one release type', 'error');
+            return;
+        }
+
+        const saveBtn = document.getElementById('save-global-config-btn');
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+        }
+
+        const response = await fetch('/api/watchlist/global-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                global_override_enabled: globalOverrideEnabled,
+                include_albums: includeAlbums,
+                include_eps: includeEps,
+                include_singles: includeSingles,
+                include_live: includeLive,
+                include_remixes: includeRemixes,
+                include_acoustic: includeAcoustic,
+                include_compilations: includeCompilations,
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showToast('Global watchlist settings saved', 'success');
+            closeWatchlistGlobalSettingsModal();
+
+            // Refresh the watchlist modal to update button and banner
+            const watchlistModal = document.getElementById('watchlist-modal');
+            if (watchlistModal && watchlistModal.style.display === 'flex') {
+                await showWatchlistModal();
+            }
+        } else {
+            showToast(`Error: ${data.error}`, 'error');
+        }
+
+    } catch (error) {
+        console.error('Error saving global config:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    } finally {
+        const saveBtn = document.getElementById('save-global-config-btn');
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Global Settings';
+        }
     }
 }
 
