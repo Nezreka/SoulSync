@@ -19893,12 +19893,12 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
                             artist_name = str(artist)
                         
                         db_track, confidence = db.check_track_exists(
-                            original_title, artist_name, 
-                            confidence_threshold=0.7, 
+                            original_title, artist_name,
+                            confidence_threshold=0.80,
                             server_source=active_server
                         )
-                        
-                        if db_track and confidence >= 0.7:
+
+                        if db_track and confidence >= 0.80:
                             print(f"✅ Database match: '{db_track.title}' (confidence: {confidence:.2f})")
                             
                             # Create mock track object for playlist creation
