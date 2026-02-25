@@ -3364,8 +3364,9 @@ function initializeSearchModeToggle() {
         showLoadingOverlay('Loading album...');
 
         try {
-            // Fetch full album data with tracks from Spotify
-            const response = await fetch(`/api/spotify/album/${album.id}`);
+            // Fetch full album data with tracks (Hydrabase or Spotify)
+            const albumParams = new URLSearchParams({ name: album.name || '', artist: album.artist || '' });
+            const response = await fetch(`/api/spotify/album/${album.id}?${albumParams}`);
 
             if (!response.ok) {
                 if (response.status === 401) {

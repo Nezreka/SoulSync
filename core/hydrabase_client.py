@@ -70,21 +70,35 @@ class HydrabaseClient:
 
             data = json.loads(raw)
 
-            # Check for peer_count in response (future stats messages)
-            if isinstance(data, dict) and 'peer_count' in data:
-                import time
-                self.last_peer_count = data['peer_count']
-                self.last_peer_count_time = time.time()
+            # Extract stats if present (can appear alongside results)
+            if isinstance(data, dict) and 'stats' in data:
+                stats = data['stats']
+                if isinstance(stats, dict) and 'connectedPeers' in stats:
+                    import time
+                    self.last_peer_count = stats['connectedPeers']
+                    self.last_peer_count_time = time.time()
 
             # Handle various response shapes
             if isinstance(data, list):
                 return data
-            if isinstance(data, dict) and 'results' in data:
-                return data['results']
-            if isinstance(data, dict) and 'data' in data:
-                result = data['data']
-                return result if isinstance(result, list) else [result]
-            return [data] if data else []
+            if isinstance(data, dict):
+                # Hydrabase returns results under "response" key
+                if 'response' in data:
+                    resp = data['response']
+                    return resp if isinstance(resp, list) else [resp]
+                if 'results' in data:
+                    return data['results']
+                if 'data' in data:
+                    result = data['data']
+                    return result if isinstance(result, list) else [result]
+                # Stats-only or empty response — no search results
+                if 'stats' in data:
+                    logger.debug(f"Hydrabase stats-only response for ({request_type}, '{query}')")
+                    return []
+
+            # Unknown shape — return empty rather than wrapping garbage
+            logger.debug(f"Hydrabase unexpected response shape for ({request_type}, '{query}'): {list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
+            return []
         except Exception as e:
             logger.error(f"Hydrabase query failed ({request_type}, '{query}'): {e}")
             return None
@@ -170,6 +184,56 @@ class HydrabaseClient:
             except Exception as e:
                 logger.debug(f"Skipping malformed Hydrabase album: {e}")
         return albums
+
+    # ==================== Discography Methods ====================
+
+    def search_discography(self, artist_name: str, limit: int = 50) -> List[Album]:
+        """Fetch an artist's discography (albums + singles) from Hydrabase."""
+        results = self._send_and_recv('discography', artist_name)
+        if not results:
+            return []
+
+        albums = []
+        for item in results[:limit]:
+            try:
+                albums.append(Album(
+                    id=str(item.get('id', '')),
+                    name=item.get('name', ''),
+                    artists=item.get('artists', []),
+                    release_date=self._normalize_release_date(item.get('release_date', '')),
+                    total_tracks=item.get('total_tracks', 0),
+                    album_type=item.get('album_type', 'album'),
+                    image_url=item.get('image_url'),
+                    external_urls=item.get('external_urls')
+                ))
+            except Exception as e:
+                logger.debug(f"Skipping malformed Hydrabase discography album: {e}")
+        return albums
+
+    def get_album_tracks(self, album_query: str, limit: int = 50) -> List[Track]:
+        """Fetch tracks for an album from Hydrabase using the album_tracks type."""
+        results = self._send_and_recv('album_tracks', album_query)
+        if not results:
+            return []
+
+        tracks = []
+        for item in results[:limit]:
+            try:
+                tracks.append(Track(
+                    id=str(item.get('id', '')),
+                    name=item.get('name', ''),
+                    artists=item.get('artists', []),
+                    album=item.get('album', ''),
+                    duration_ms=item.get('duration_ms', 0),
+                    popularity=item.get('popularity', 0),
+                    preview_url=item.get('preview_url'),
+                    external_urls=item.get('external_urls'),
+                    image_url=item.get('image_url'),
+                    release_date=self._normalize_release_date(item.get('release_date', ''))
+                ))
+            except Exception as e:
+                logger.debug(f"Skipping malformed Hydrabase album track: {e}")
+        return tracks
 
     # ==================== Raw access (for comparison) ====================
 

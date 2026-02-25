@@ -2579,23 +2579,32 @@ def _is_hydrabase_active():
     except NameError:
         return False
 
-def _run_background_comparison(query):
-    """Run Spotify + iTunes searches in background and store for comparison."""
+def _run_background_comparison(query, hydrabase_counts=None):
+    """Run Spotify + iTunes searches in background and store for comparison.
+
+    Args:
+        query: Search query string.
+        hydrabase_counts: Optional pre-computed dict {'tracks': N, 'artists': N, 'albums': N}
+                          from the primary search to avoid redundant Hydrabase round-trips.
+    """
     def _worker():
         try:
             result = {'timestamp': time.time(), 'query': query}
 
-            # Hydrabase raw results (already fetched for the primary search)
-            hydra_data = {'tracks': 0, 'artists': 0, 'albums': 0}
-            if hydrabase_client and hydrabase_client.is_connected():
-                raw_t = hydrabase_client.search_raw(query, 'track')
-                raw_ar = hydrabase_client.search_raw(query, 'artist')
-                raw_al = hydrabase_client.search_raw(query, 'album')
-                hydra_data = {
-                    'tracks': len(raw_t) if raw_t else 0,
-                    'artists': len(raw_ar) if raw_ar else 0,
-                    'albums': len(raw_al) if raw_al else 0
-                }
+            # Use pre-computed counts if available, otherwise fetch from Hydrabase
+            if hydrabase_counts is not None:
+                hydra_data = hydrabase_counts
+            else:
+                hydra_data = {'tracks': 0, 'artists': 0, 'albums': 0}
+                if _is_hydrabase_active():
+                    raw_t = hydrabase_client.search_raw(query, 'track')
+                    raw_ar = hydrabase_client.search_raw(query, 'artist')
+                    raw_al = hydrabase_client.search_raw(query, 'album')
+                    hydra_data = {
+                        'tracks': len(raw_t) if raw_t else 0,
+                        'artists': len(raw_ar) if raw_ar else 0,
+                        'albums': len(raw_al) if raw_al else 0
+                    }
             result['hydrabase'] = hydra_data
 
             # Spotify results
@@ -4178,8 +4187,12 @@ def enhanced_search():
 
                 logger.info(f"Hydrabase search results: {len(spotify_artists)} artists, {len(spotify_albums)} albums, {len(spotify_tracks)} tracks")
 
-                # Fire off background comparison
-                _run_background_comparison(query)
+                # Fire off background comparison with pre-computed Hydrabase counts
+                _run_background_comparison(query, hydrabase_counts={
+                    'tracks': len(track_objs),
+                    'artists': len(artist_objs),
+                    'albums': len(album_objs)
+                })
 
             except Exception as e:
                 logger.error(f"Hydrabase search failed, falling back to Spotify/iTunes: {e}")
@@ -5843,11 +5856,21 @@ def get_artist_discography(artist_id):
         albums = []
         active_source = None
 
+        # Try Hydrabase first when active
+        if _is_hydrabase_active() and artist_name:
+            try:
+                albums = hydrabase_client.search_discography(artist_name, limit=50)
+                if albums:
+                    active_source = 'hydrabase'
+                    print(f"📊 Got {len(albums)} albums from Hydrabase")
+            except Exception as e:
+                print(f"Hydrabase discography failed: {e}")
+
         # Try to get albums from the appropriate source
         # Check if the ID looks like Spotify (alphanumeric) or iTunes (numeric only)
         is_numeric_id = artist_id.isdigit()
 
-        if spotify_available and not is_numeric_id:
+        if not albums and spotify_available and not is_numeric_id:
             # Try Spotify first for alphanumeric IDs
             try:
                 albums = spotify_client.get_artist_albums(artist_id, album_type='album,single')
@@ -7082,20 +7105,24 @@ def search_match():
         elif context == 'album':
             # Search for albums by specific artist
             artist_id = data.get('artist_id')
-            if not artist_id:
-                return jsonify({"error": "Artist ID required for album search"}), 400
-            
-            # Get artist's albums and filter by query
-            artist_albums = spotify_client.get_artist_albums(artist_id)
+
+            if use_hydrabase:
+                # Hydrabase: search albums by query directly
+                album_matches = hydrabase_client.search_albums(query, limit=20)
+            else:
+                if not artist_id:
+                    return jsonify({"error": "Artist ID required for album search"}), 400
+                # Get artist's albums and filter by query
+                album_matches = spotify_client.get_artist_albums(artist_id)
+
             results = []
-            
-            for album in artist_albums:
+            for album in album_matches:
                 # Calculate confidence based on query similarity
                 confidence = matching_engine.similarity_score(
                     matching_engine.normalize_string(query),
                     matching_engine.normalize_string(album.name)
                 )
-                
+
                 # Only include results with reasonable similarity
                 if confidence > 0.3:
                     results.append({
@@ -7109,7 +7136,7 @@ def search_match():
                         },
                         "confidence": confidence
                     })
-            
+
             # Sort by confidence
             results.sort(key=lambda x: x['confidence'], reverse=True)
             return jsonify({"results": results[:8]})
@@ -17284,6 +17311,42 @@ def get_playlist_tracks(playlist_id):
 @app.route('/api/spotify/album/<album_id>', methods=['GET'])
 def get_album_tracks(album_id):
     """Fetches full track details for a specific album."""
+    use_hydrabase = _is_hydrabase_active()
+
+    # Try Hydrabase first when active and album name provided
+    if use_hydrabase:
+        album_name = request.args.get('name', '')
+        album_artist = request.args.get('artist', '')
+        if album_name:
+            try:
+                query = f"{album_artist} {album_name}".strip() if album_artist else album_name
+                hydra_tracks = hydrabase_client.get_album_tracks(query, limit=50)
+                if hydra_tracks:
+                    track_items = []
+                    for t in hydra_tracks:
+                        artist_list = t.artists if isinstance(t.artists, list) else [t.artists] if t.artists else []
+                        track_items.append({
+                            'name': t.name,
+                            'track_number': getattr(t, 'track_number', 0) or 0,
+                            'disc_number': getattr(t, 'disc_number', 1) or 1,
+                            'duration_ms': t.duration_ms,
+                            'id': t.id,
+                            'artists': [{'name': a} if isinstance(a, str) else a for a in artist_list],
+                            'uri': ''
+                        })
+                    return jsonify({
+                        'id': album_id,
+                        'name': album_name,
+                        'artists': [{'name': album_artist}] if album_artist else [],
+                        'release_date': '',
+                        'total_tracks': len(track_items),
+                        'album_type': 'album',
+                        'images': [],
+                        'tracks': track_items
+                    })
+            except Exception as e:
+                logger.warning(f"Hydrabase album_tracks failed for '{album_name}', falling back to Spotify: {e}")
+
     if not spotify_client or not spotify_client.is_authenticated():
         return jsonify({"error": "Spotify not authenticated."}), 401
     try:
@@ -27756,37 +27819,76 @@ def import_album_match():
     try:
         data = request.get_json()
         album_id = data.get('album_id')
+        album_name = data.get('album_name', '')
+        album_artist = data.get('album_artist', '')
         if not album_id:
             return jsonify({'success': False, 'error': 'Missing album_id'}), 400
 
-        # Get album info and tracklist from Spotify
-        album_data = spotify_client.get_album(album_id)
-        if not album_data:
-            return jsonify({'success': False, 'error': 'Album not found'}), 404
+        spotify_tracks = None
+        album_info = None
 
-        tracks_data = spotify_client.get_album_tracks(album_id)
-        if not tracks_data or 'items' not in tracks_data:
-            return jsonify({'success': False, 'error': 'Could not get album tracks'}), 500
+        # Try Hydrabase first when active and album_name available
+        if _is_hydrabase_active() and album_name:
+            try:
+                query = f"{album_artist} {album_name}".strip() if album_artist else album_name
+                hydra_tracks = hydrabase_client.get_album_tracks(query, limit=50)
+                if hydra_tracks:
+                    spotify_tracks = []
+                    for t in hydra_tracks:
+                        artist_list = t.artists if isinstance(t.artists, list) else [t.artists] if t.artists else []
+                        spotify_tracks.append({
+                            'name': t.name,
+                            'track_number': getattr(t, 'track_number', 0) or 0,
+                            'disc_number': getattr(t, 'disc_number', 1) or 1,
+                            'duration_ms': t.duration_ms,
+                            'id': t.id,
+                            'artists': [{'name': a} if isinstance(a, str) else a for a in artist_list],
+                            'uri': ''
+                        })
+                    album_info = {
+                        'id': album_id,
+                        'name': album_name,
+                        'artist': album_artist,
+                        'artists': [album_artist] if album_artist else [],
+                        'release_date': '',
+                        'total_tracks': len(spotify_tracks),
+                        'image_url': None,
+                        'genres': []
+                    }
+                    logger.info(f"Hydrabase album_tracks returned {len(spotify_tracks)} tracks for '{query}'")
+            except Exception as e:
+                logger.warning(f"Hydrabase album_tracks failed, falling back to Spotify: {e}")
+                spotify_tracks = None
 
-        spotify_tracks = tracks_data['items']
+        # Fall back to Spotify
+        if spotify_tracks is None:
+            album_data = spotify_client.get_album(album_id)
+            if not album_data:
+                return jsonify({'success': False, 'error': 'Album not found'}), 404
 
-        # Build album summary
-        album_artists = [a['name'] for a in album_data.get('artists', [])]
-        album_info = {
-            'id': album_id,
-            'name': album_data.get('name', 'Unknown Album'),
-            'artist': ', '.join(album_artists),
-            'artists': album_artists,
-            'release_date': album_data.get('release_date', ''),
-            'total_tracks': album_data.get('total_tracks', len(spotify_tracks)),
-            'image_url': (album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None),
-            'genres': album_data.get('genres', [])
-        }
+            tracks_data = spotify_client.get_album_tracks(album_id)
+            if not tracks_data or 'items' not in tracks_data:
+                return jsonify({'success': False, 'error': 'Could not get album tracks'}), 500
 
-        # Get artist info for context building later
-        if album_data.get('artists'):
-            primary_artist = album_data['artists'][0]
-            album_info['artist_id'] = primary_artist.get('id', '')
+            spotify_tracks = tracks_data['items']
+
+            # Build album summary
+            album_artists = [a['name'] for a in album_data.get('artists', [])]
+            album_info = {
+                'id': album_id,
+                'name': album_data.get('name', 'Unknown Album'),
+                'artist': ', '.join(album_artists),
+                'artists': album_artists,
+                'release_date': album_data.get('release_date', ''),
+                'total_tracks': album_data.get('total_tracks', len(spotify_tracks)),
+                'image_url': (album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None),
+                'genres': album_data.get('genres', [])
+            }
+
+            # Get artist info for context building later
+            if album_data.get('artists'):
+                primary_artist = album_data['artists'][0]
+                album_info['artist_id'] = primary_artist.get('id', '')
 
         # Scan staging files
         staging_path = _get_staging_path()
