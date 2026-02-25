@@ -10410,23 +10410,28 @@ def _post_process_matched_download(context_key, context, file_path):
             print("🎵 Single track download - attempting album detection")
             album_info = _detect_album_info_web(context, spotify_artist)
 
-        # --- CRITICAL FIX: Add GUI album grouping resolution ---
-        # This ensures consistent album naming across tracks like the GUI
-        if album_info and album_info['is_album']:
+        # --- Album grouping resolution ---
+        # Only run smart grouping for singles/auto-detected albums.
+        # Explicit album downloads already have the correct Spotify album name —
+        # re-grouping would mangle names like "(Reworked and Remastered)" into "(Deluxe Edition)".
+        if album_info and album_info['is_album'] and not is_album_download:
             print(f"\n🎯 SMART ALBUM GROUPING for track: '{album_info.get('clean_track_name', 'Unknown')}'")
             print(f"   Original album: '{album_info.get('album_name', 'None')}'")
-            
+
             # Get original album name from context if available
             original_album = None
             if context.get("original_search_result", {}).get("album"):
                 original_album = context["original_search_result"]["album"]
-            
+
             # Use the GUI's smart album grouping algorithm
             consistent_album_name = _resolve_album_group(spotify_artist, album_info, original_album)
             album_info['album_name'] = consistent_album_name
-            
+
             print(f"   Final album name: '{consistent_album_name}'")
             print(f"🔗 ✅ Album grouping complete!\n")
+        elif album_info and album_info['is_album'] and is_album_download:
+            print(f"\n🎯 EXPLICIT ALBUM DOWNLOAD - preserving Spotify album name: '{album_info.get('album_name', 'None')}'")
+            print(f"   Skipping smart grouping (not needed for explicit album downloads)\n")
 
         # 1. Get transfer path and create artist directory
         transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
@@ -14997,21 +15002,23 @@ def _run_post_processing_worker(task_id, batch_id):
                             }
 
                             # Apply album grouping for consistency with stream processor path.
-                            # Without this, the verification worker could write a different album
-                            # name than the stream processor (e.g. raw API name vs resolved name),
-                            # causing media servers to split tracks into separate albums.
-                            try:
-                                raw_album_ctx = original_search.get('album')
-                                if isinstance(raw_album_ctx, str):
-                                    original_album_ctx = raw_album_ctx
-                                elif isinstance(raw_album_ctx, dict) and 'name' in raw_album_ctx:
-                                    original_album_ctx = raw_album_ctx['name']
-                                else:
-                                    original_album_ctx = None
-                                consistent_album_name = _resolve_album_group(spotify_artist, album_info, original_album_ctx)
-                                album_info['album_name'] = consistent_album_name
-                            except Exception as group_err:
-                                print(f"⚠️ [Verification] Album grouping failed, using raw name: {group_err}")
+                            # Only for singles/auto-detected — explicit album downloads already
+                            # have the correct Spotify name and re-grouping would mangle it.
+                            if not context.get("is_album_download", False):
+                                try:
+                                    raw_album_ctx = original_search.get('album')
+                                    if isinstance(raw_album_ctx, str):
+                                        original_album_ctx = raw_album_ctx
+                                    elif isinstance(raw_album_ctx, dict) and 'name' in raw_album_ctx:
+                                        original_album_ctx = raw_album_ctx['name']
+                                    else:
+                                        original_album_ctx = None
+                                    consistent_album_name = _resolve_album_group(spotify_artist, album_info, original_album_ctx)
+                                    album_info['album_name'] = consistent_album_name
+                                except Exception as group_err:
+                                    print(f"⚠️ [Verification] Album grouping failed, using raw name: {group_err}")
+                            else:
+                                print(f"🎯 [Verification] Explicit album download - preserving Spotify album name: '{album_info['album_name']}'")
 
                             print(f"🎯 [Verification] Created proper album_info - track_number: {track_number}, album: {album_info['album_name']}")
 
