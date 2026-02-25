@@ -22031,8 +22031,8 @@ def get_discover_hero():
         from core.itunes_client import iTunesClient
         itunes_client = iTunesClient()
 
-        # Get top similar artists (by occurrence count) - get 20 for variety
-        similar_artists = database.get_top_similar_artists(limit=20)
+        # Get top similar artists (excluding watchlist, cycled by last_featured)
+        similar_artists = database.get_top_similar_artists(limit=50)
 
         # FALLBACK: If no similar artists exist, use watchlist artists for Hero section
         if not similar_artists:
@@ -22129,11 +22129,8 @@ def get_discover_hero():
 
         print(f"[Discover Hero] Found {len(valid_artists)} valid artists for source: {active_source}")
 
-        # Shuffle for variety and take top 10
-        import random
-        shuffled = list(valid_artists)
-        random.shuffle(shuffled)
-        similar_artists = shuffled[:10]
+        # Take top 10 (already ordered by least-recently-featured, then quality)
+        similar_artists = valid_artists[:10]
 
         # Convert to JSON format with data enrichment from appropriate source
         hero_artists = []
@@ -22177,6 +22174,10 @@ def get_discover_hero():
                 print(f"Could not fetch artist image: {img_err}")
 
             hero_artists.append(artist_data)
+
+        # Mark these artists as featured so they cycle to the back of the queue
+        featured_names = [a["artist_name"] for a in hero_artists]
+        database.mark_artists_featured(featured_names)
 
         return jsonify({"success": True, "artists": hero_artists, "source": active_source})
 
