@@ -1300,6 +1300,13 @@ album_artists = {}  # album_key -> artist_name
 album_editions = {}  # album_key -> "standard" or "deluxe"
 album_name_cache = {}  # album_key -> cached_final_name
 
+# Thread-safe cache for MusicBrainz release MBID lookups.
+# Prevents concurrent post-processing threads from getting different
+# release IDs for the same album, which causes players like Navidrome
+# to split one album into multiple entries.
+_mb_release_cache = {}  # (album_lower, artist_lower) -> mbid_string_or_empty
+_mb_release_cache_lock = threading.Lock()
+
 def _prepare_stream_task(track_data):
     """
     Background streaming task that downloads track to Stream folder and updates global state.
@@ -9379,19 +9386,34 @@ def _embed_source_ids(audio_file, metadata: dict):
                                 )
                             ]
 
-                    # Also try to get artist MBID (may already be cached from worker)
-                    artist_result = mb_service.match_artist(artist_name)
+                    # Use track artist (not album artist) for artist MBID tag
+                    track_artist_name = metadata.get('artist', '') or artist_name
+                    # For multi-artist tracks, use the first artist only
+                    if ', ' in track_artist_name:
+                        track_artist_name = track_artist_name.split(', ')[0]
+                    artist_result = mb_service.match_artist(track_artist_name)
                     if artist_result and artist_result.get('mbid'):
                         artist_mbid = artist_result['mbid']
                         id_tags['MUSICBRAINZ_ARTIST_ID'] = artist_mbid
 
-                    # Get release (album) MBID via dedicated search (not per-recording release lists,
-                    # which return different release variants per track and split albums in players)
+                    # Get release (album) MBID via thread-safe in-memory cache.
+                    # Without this, concurrent threads each call match_release
+                    # and get different release variants, splitting albums.
                     album_name_for_mb = metadata.get('album', '')
                     if album_name_for_mb:
-                        release_result = mb_service.match_release(album_name_for_mb, artist_name)
-                        if release_result and release_result.get('mbid'):
-                            id_tags['MUSICBRAINZ_RELEASE_ID'] = release_result['mbid']
+                        _rc_key = (album_name_for_mb.lower().strip(), artist_name.lower().strip())
+                        with _mb_release_cache_lock:
+                            if _rc_key in _mb_release_cache:
+                                _rc_mbid = _mb_release_cache[_rc_key]
+                            else:
+                                try:
+                                    _rc_result = mb_service.match_release(album_name_for_mb, artist_name)
+                                    _rc_mbid = _rc_result.get('mbid', '') if _rc_result else ''
+                                except Exception:
+                                    _rc_mbid = ''
+                                _mb_release_cache[_rc_key] = _rc_mbid
+                        if _rc_mbid:
+                            id_tags['MUSICBRAINZ_RELEASE_ID'] = _rc_mbid
                 else:
                     print("⚠️ MusicBrainz worker not available, skipping MBID lookup")
             except Exception as e:
@@ -9453,10 +9475,12 @@ def _embed_source_ids(audio_file, metadata: dict):
                             id_tags['MUSICBRAINZ_RECORDING_ID'] = adb_mb_track
                             recording_mbid = adb_mb_track
                             print(f"🎵 MusicBrainz recording ID from AudioDB fallback: {adb_mb_track}")
-                        adb_mb_album = adb_result.get('strMusicBrainzAlbumID')
-                        if adb_mb_album and 'MUSICBRAINZ_RELEASE_ID' not in id_tags:
-                            id_tags['MUSICBRAINZ_RELEASE_ID'] = adb_mb_album
-                            print(f"🎵 MusicBrainz release ID from AudioDB fallback: {adb_mb_album}")
+                        # NOTE: AudioDB's strMusicBrainzAlbumID is intentionally
+                        # NOT used as a fallback for MUSICBRAINZ_RELEASE_ID.
+                        # AudioDB links each track to its original album in MB,
+                        # which differs per track on compilations and splits
+                        # albums in players like Navidrome. Album MBID must come
+                        # from match_release (cached) to stay consistent.
                         adb_mb_artist = adb_result.get('strMusicBrainzArtistID')
                         if adb_mb_artist and 'MUSICBRAINZ_ARTIST_ID' not in id_tags:
                             id_tags['MUSICBRAINZ_ARTIST_ID'] = adb_mb_artist
