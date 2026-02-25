@@ -12,6 +12,7 @@ import logging
 import queue
 import threading
 import time
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -125,11 +126,13 @@ class HydrabaseWorker:
             self.stats['dropped'] += 1
             return
 
+        nonce = uuid.uuid4().hex
         payload = json.dumps({
             'request': {
                 'type': item['type'],
                 'query': item['query']
-            }
+            },
+            'nonce': nonce
         })
 
         try:
@@ -137,8 +140,31 @@ class HydrabaseWorker:
                 if not ws.connected:
                     self.stats['dropped'] += 1
                     return
+                ws.settimeout(15)
                 ws.send(payload)
-                ws.recv()  # Required by protocol, response discarded
+
+                # Loop to drain stats/heartbeat messages until we get our response
+                deadline = time.time() + 15
+                while True:
+                    remaining = deadline - time.time()
+                    if remaining <= 0:
+                        break
+                    ws.settimeout(remaining)
+                    raw = ws.recv()
+                    data = json.loads(raw)
+
+                    # Got our nonce back — done
+                    if isinstance(data, dict) and data.get('nonce') == nonce:
+                        break
+                    # Got results without nonce — assume it's ours
+                    if isinstance(data, dict) and 'nonce' not in data:
+                        if 'response' in data or 'results' in data or 'data' in data:
+                            break
+                    # Bare list — results
+                    if isinstance(data, list):
+                        break
+                    # Stats/heartbeat — drain and recv again
+
             self.stats['sent'] += 1
         except Exception as e:
             logger.debug(f"Hydrabase send failed: {e}")
