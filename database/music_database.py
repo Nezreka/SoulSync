@@ -2256,7 +2256,7 @@ class MusicDatabase:
         where_parts = [f"({' OR '.join(like_conditions)})"]
         if server_source:
             where_parts.append("tracks.server_source = ?")
-            params.insert(-1 if params else 0, server_source)  # Insert before limit
+            params.append(server_source)  # Append after LIKE params, before LIMIT
         
         where_clause = " AND ".join(where_parts)
         params.append(limit * 3)  # Get more results for scoring
@@ -3035,6 +3035,15 @@ class MusicDatabase:
         """Clean track title for comparison by normalizing brackets/dashes and removing noise"""
         cleaned = title.lower().strip()
 
+        # PRE-STEP: Handle "(with Artist)" featuring BEFORE bracket removal.
+        # This catches "with" only when used as featuring syntax inside brackets,
+        # NOT when "with" is part of the song title like "Stay With Me".
+        # e.g. "Levitating (with DaBaby)" → "Levitating"
+        #      "Stay (with Justin Bieber)" → "Stay"
+        #      "Stay With Me" → unchanged (no brackets around "with")
+        cleaned = re.sub(r'\s*\(with\s+[^)]*\)', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s*\[with\s+[^\]]*\]', '', cleaned, flags=re.IGNORECASE)
+
         # STEP 1: Normalize bracket/dash styles for consistent matching
         # Convert all bracket styles to spaces for better matching
         cleaned = re.sub(r'\s*[\[\(]\s*', ' ', cleaned)  # Convert opening brackets/parens to space
@@ -3054,18 +3063,17 @@ class MusicDatabase:
             r'\s*feat\..*',         # Remove featuring
             r'\s*featuring.*',      # Remove featuring
             r'\s*ft\..*',           # Remove ft.
-            r'\s*with\s+.*',        # Remove "with Artist"
-
-            # Edit versions (same recording, different edit for format)
-            r'\s*radio\s+edit.*',   # Remove "radio edit" - same song, radio format
-            r'\s*single\s+edit.*',  # Remove "single edit" - same song, single format
-            r'\s*album\s+edit.*',   # Remove "album edit" - same song, album format
-            r'\s*edit\s*$',         # Remove trailing "edit"
 
             # Remasters (same recording, different mastering)
             r'\s*\d{4}\s*remaster.*',  # Remove "2015 remaster"
             r'\s*remaster.*',       # Remove "remaster/remastered"
             r'\s*remastered.*',     # Remove "remastered"
+
+            # NOTE: Edit versions (radio edit, single edit, album edit) are NOT
+            # removed here — they are treated as different versions by
+            # matching_engine.similarity_score() which applies a 0.30 penalty.
+            # Removing them here would override that penalty via max() and
+            # cause incorrect matches (e.g. radio edit matched to full version).
 
             # Version clarifications (metadata, not different recordings)
             r'\s*original\s+version.*',  # Remove "original version" - clarification
@@ -3086,6 +3094,7 @@ class MusicDatabase:
         # - instrumental (different version)
         # - demo (different recording)
         # - extended (different length/content)
+        # - radio edit, single edit, album edit (different cuts)
         # These are handled by matching_engine.similarity_score() which applies penalties
 
         for pattern in patterns_to_remove:
