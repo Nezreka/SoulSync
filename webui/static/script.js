@@ -1787,7 +1787,7 @@ async function loadSettingsData() {
         // Populate Jellyfin settings
         document.getElementById('jellyfin-url').value = settings.jellyfin?.base_url || '';
         document.getElementById('jellyfin-api-key').value = settings.jellyfin?.api_key || '';
-        document.getElementById('jellyfin-timeout').value = settings.jellyfin?.api_timeout || 30;
+        document.getElementById('jellyfin-timeout').value = settings.jellyfin?.api_timeout || 120;
 
         // Populate Navidrome settings
         document.getElementById('navidrome-url').value = settings.navidrome?.base_url || '';
