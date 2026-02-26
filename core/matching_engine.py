@@ -238,49 +238,67 @@ class MusicMatchingEngine:
         diff_ratio = abs(duration1 - duration2) / max(duration1, duration2)
         return max(0, 1.0 - diff_ratio * 5)
 
-    def calculate_match_confidence(self, spotify_track: SpotifyTrack, plex_track: PlexTrackInfo) -> Tuple[float, str]:
-        """Calculates a confidence score using a prioritized model, starting with a strict 'core' title check."""
-        
-        # --- Artist Scoring (calculated once) ---
-        spotify_artists_cleaned = [self.clean_artist(a) for a in spotify_track.artists if a]
-        plex_artist_normalized = self.normalize_string(plex_track.artist)
-        plex_artist_cleaned = self.clean_artist(plex_track.artist)
+    def score_track_match(self, source_title: str, source_artists: List[str],
+                          source_duration_ms: int, candidate_title: str,
+                          candidate_artists: List[str], candidate_duration_ms: int) -> Tuple[float, str]:
+        """Generic track matching — same logic as calculate_match_confidence but type-agnostic.
+
+        Works for any two tracks regardless of source (Spotify, iTunes, YouTube, Tidal, etc.).
+        Uses clean_title/clean_artist for proper feat. stripping, core title fast path,
+        duration similarity, and 60/30/10 weighted scoring.
+
+        Returns (confidence, match_type) tuple.
+        """
+        # --- Artist Scoring ---
+        source_artists_cleaned = [self.clean_artist(a) for a in source_artists if a]
 
         best_artist_score = 0.0
-        for spotify_artist in spotify_artists_cleaned:
-            if spotify_artist and spotify_artist in plex_artist_normalized:
-                best_artist_score = 1.0
+        for src_artist in source_artists_cleaned:
+            for raw_cand_artist in candidate_artists:
+                if not raw_cand_artist:
+                    continue
+                cand_artist_normalized = self.normalize_string(raw_cand_artist)
+                cand_artist_cleaned = self.clean_artist(raw_cand_artist)
+                # Check containment (e.g., "drake" in "drake 21 savage")
+                if src_artist and src_artist in cand_artist_normalized:
+                    best_artist_score = 1.0
+                    break
+                score = self.similarity_score(src_artist, cand_artist_cleaned)
+                if score > best_artist_score:
+                    best_artist_score = score
+            if best_artist_score >= 1.0:
                 break
-            score = self.similarity_score(spotify_artist, plex_artist_cleaned)
-            if score > best_artist_score:
-                best_artist_score = score
         artist_score = best_artist_score
-        
-        # --- Priority 1: Core Title Match (for exact matches like "Girls", "APT.", "LIL DEMON") ---
-        spotify_core_title = self.get_core_string(spotify_track.name)
-        plex_core_title = self.get_core_string(plex_track.title)
 
-        if spotify_core_title and spotify_core_title == plex_core_title:
-            # SAFETY CHECK: Only give high confidence if artist also matches reasonably well
-            # This prevents "Artist A - Girls" from matching "Artist Z - Girls" with high confidence
-            if artist_score >= 0.75:  # Require decent artist match
-                # If the core titles are identical and artists match, we are highly confident
-                confidence = 0.90 + (artist_score * 0.09) # Max score of 0.99
+        # --- Priority 1: Core Title Match ---
+        source_core_title = self.get_core_string(source_title)
+        candidate_core_title = self.get_core_string(candidate_title)
+
+        if source_core_title and source_core_title == candidate_core_title:
+            if artist_score >= 0.75:
+                confidence = 0.90 + (artist_score * 0.09)
                 return confidence, "core_title_match"
-            # If artist score is too low, fall through to standard weighted calculation
 
-        # --- Priority 2: Fuzzy Title Match (for variations, typos, etc.) ---
-        spotify_title_cleaned = self.clean_title(spotify_track.name)
-        plex_title_cleaned = self.clean_title(plex_track.title)
-        
-        title_score = self.similarity_score(spotify_title_cleaned, plex_title_cleaned)
-        duration_score = self.duration_similarity(spotify_track.duration_ms, plex_track.duration if plex_track.duration else 0)
+        # --- Priority 2: Fuzzy Title Match ---
+        source_title_cleaned = self.clean_title(source_title)
+        candidate_title_cleaned = self.clean_title(candidate_title)
 
-        # Use a standard weighted calculation if the core titles didn't match
+        title_score = self.similarity_score(source_title_cleaned, candidate_title_cleaned)
+        duration_score = self.duration_similarity(source_duration_ms, candidate_duration_ms)
+
         confidence = (title_score * 0.60) + (artist_score * 0.30) + (duration_score * 0.10)
-        match_type = "standard_match"
+        return confidence, "standard_match"
 
-        return confidence, match_type
+    def calculate_match_confidence(self, spotify_track: SpotifyTrack, plex_track: PlexTrackInfo) -> Tuple[float, str]:
+        """Calculates a confidence score using a prioritized model, starting with a strict 'core' title check."""
+        return self.score_track_match(
+            source_title=spotify_track.name,
+            source_artists=spotify_track.artists,
+            source_duration_ms=spotify_track.duration_ms,
+            candidate_title=plex_track.title,
+            candidate_artists=[plex_track.artist] if plex_track.artist else [],
+            candidate_duration_ms=plex_track.duration if plex_track.duration else 0
+        )
     
     def find_best_match(self, spotify_track: SpotifyTrack, plex_tracks: List[PlexTrackInfo]) -> MatchResult:
         """Finds the best Plex track match from a list of candidates."""
