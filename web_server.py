@@ -4939,11 +4939,43 @@ def clear_finished_downloads():
         # This single client call handles clearing everything that is no longer active
         success = run_async(soulseek_client.clear_all_completed_downloads())
         if success:
+            # Also sweep empty directories left behind by completed downloads
+            _sweep_empty_download_directories()
             return jsonify({"success": True, "message": "Finished downloads cleared."})
         else:
             return jsonify({"success": False, "error": "Backend failed to clear downloads."}), 500
     except Exception as e:
         print(f"Error clearing finished downloads: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/quarantine/clear', methods=['POST'])
+def clear_quarantine():
+    """Delete all files and folders inside the ss_quarantine directory."""
+    import shutil
+    try:
+        download_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
+        quarantine_path = os.path.join(download_path, 'ss_quarantine')
+
+        if not os.path.isdir(quarantine_path):
+            return jsonify({"success": True, "message": "Quarantine folder is already empty."})
+
+        removed_files = 0
+        for entry in os.listdir(quarantine_path):
+            entry_path = os.path.join(quarantine_path, entry)
+            try:
+                if os.path.isfile(entry_path):
+                    os.remove(entry_path)
+                    removed_files += 1
+                elif os.path.isdir(entry_path):
+                    shutil.rmtree(entry_path)
+                    removed_files += 1
+            except Exception as e:
+                print(f"⚠️ [Quarantine] Failed to remove {entry}: {e}")
+
+        print(f"🧹 [Quarantine] Cleared {removed_files} item(s) from quarantine folder")
+        return jsonify({"success": True, "message": f"Quarantine cleared ({removed_files} item{'s' if removed_files != 1 else ''} removed)."})
+    except Exception as e:
+        print(f"❌ [Quarantine] Error clearing quarantine: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/scan/request', methods=['POST'])
@@ -7842,6 +7874,52 @@ def _cleanup_empty_directories(download_path, moved_file_path):
                 break
     except Exception as e:
         print(f"Warning: An error occurred during directory cleanup: {e}")
+
+
+def _sweep_empty_download_directories():
+    """
+    Walk the download directory bottom-up and remove ALL empty directories.
+    Called periodically when no downloads or post-processing are active.
+    Handles the edge case where per-file cleanup misses folders that become
+    empty only after all sibling downloads in a batch have been processed.
+    """
+    import os
+    try:
+        download_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
+        if not os.path.isdir(download_path):
+            return 0
+
+        removed = 0
+        # os.walk bottom-up: deepest directories first so parents become empty after children removed
+        for dirpath, _dirnames, _filenames in os.walk(download_path, topdown=False):
+            # Never remove the root download directory itself
+            if os.path.normpath(dirpath) == os.path.normpath(download_path):
+                continue
+            # Re-read actual contents — os.walk's lists are stale after child removal
+            try:
+                entries = os.listdir(dirpath)
+            except OSError:
+                continue
+            visible = [e for e in entries if not e.startswith('.')]
+            if not visible:
+                try:
+                    # Remove any leftover hidden files (e.g. .DS_Store) before rmdir
+                    for hidden in entries:
+                        try:
+                            os.remove(os.path.join(dirpath, hidden))
+                        except Exception:
+                            pass
+                    os.rmdir(dirpath)
+                    removed += 1
+                except OSError:
+                    pass  # Directory not actually empty or locked — skip silently
+
+        if removed > 0:
+            print(f"🧹 [Folder Cleanup] Removed {removed} empty director{'y' if removed == 1 else 'ies'} from downloads folder")
+        return removed
+    except Exception as e:
+        print(f"⚠️ [Folder Cleanup] Error sweeping empty directories: {e}")
+        return 0
 
 
 # ===================================================================
@@ -11404,14 +11482,24 @@ def _simple_monitor_task():
                 try:
                     # Only clear if no batches are actively downloading
                     has_active_batches = False
+                    has_post_processing = False
                     with tasks_lock:
                         for batch_data in download_batches.values():
                             if batch_data.get('phase') not in ['complete', 'error', 'cancelled', None]:
                                 has_active_batches = True
                                 break
+                        # Also check for any tasks still in post_processing
+                        if not has_active_batches:
+                            for task_data in download_tasks.values():
+                                if task_data.get('status') == 'post_processing':
+                                    has_post_processing = True
+                                    break
 
                     if not has_active_batches:
                         run_async(soulseek_client.clear_all_completed_downloads())
+                        # Sweep empty directories left behind by completed downloads
+                        if not has_post_processing:
+                            _sweep_empty_download_directories()
                         print("✅ [Auto Cleanup] Periodic download cleanup completed")
 
                     last_download_cleanup = current_time
@@ -14141,6 +14229,12 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
             logger.info(f"✅ [Auto-Cleanup] Completed downloads cleared from slskd")
         except Exception as cleanup_error:
             logger.warning(f"⚠️ [Auto-Cleanup] Failed to clear completed downloads: {cleanup_error}")
+
+        # Sweep empty directories left behind by this batch's downloads
+        try:
+            _sweep_empty_download_directories()
+        except Exception as sweep_error:
+            logger.warning(f"⚠️ [Auto-Cleanup] Failed to sweep empty directories: {sweep_error}")
 
         return completion_summary
     
