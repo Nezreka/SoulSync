@@ -27006,7 +27006,7 @@ def get_spotify_artist_discography(artist_name):
         print(f"🎵 Found Spotify artist: {artist.name} (ID: {spotify_artist_id}, confidence: {highest_score:.3f})")
 
         # Get all albums (albums, singles, and compilations)
-        all_albums = spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single,compilation')
+        all_albums = spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single,compilation', limit=50)
 
         if not all_albums:
             return {
