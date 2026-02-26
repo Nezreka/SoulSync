@@ -8417,6 +8417,110 @@ function _ensureErrorTooltipListeners(statusEl) {
     }
 }
 
+function _ensureCandidatesClickListener(statusEl) {
+    if (statusEl._candidatesClickBound) return;
+    statusEl._candidatesClickBound = true;
+    statusEl.addEventListener('click', function (e) {
+        e.stopPropagation();
+        _hideErrorTooltip();
+        const taskId = this.dataset.taskId;
+        if (taskId) showCandidatesModal(taskId);
+    });
+}
+
+async function showCandidatesModal(taskId) {
+    try {
+        const resp = await fetch(`/api/downloads/task/${encodeURIComponent(taskId)}/candidates`);
+        if (!resp.ok) { console.error('Failed to fetch candidates:', resp.status); return; }
+        const data = await resp.json();
+        _renderCandidatesModal(data);
+    } catch (err) {
+        console.error('Error fetching candidates:', err);
+    }
+}
+
+function _renderCandidatesModal(data) {
+    let overlay = document.getElementById('candidates-modal-overlay');
+    if (overlay) overlay.remove();
+
+    const trackName = data.track_info?.name || 'Unknown Track';
+    const trackArtist = data.track_info?.artist || 'Unknown Artist';
+    const candidates = data.candidates || [];
+    const errorMsg = data.error_message || '';
+
+    const fmtSize = (bytes) => {
+        if (!bytes) return '-';
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let s = bytes, u = 0;
+        while (s >= 1024 && u < units.length - 1) { s /= 1024; u++; }
+        return `${s.toFixed(1)} ${units[u]}`;
+    };
+    const fmtDur = (ms) => {
+        if (!ms) return '-';
+        const sec = Math.floor(ms / 1000);
+        return `${Math.floor(sec / 60)}:${(sec % 60).toString().padStart(2, '0')}`;
+    };
+
+    let tableRows = '';
+    if (candidates.length === 0) {
+        tableRows = `<tr><td colspan="6" style="text-align:center; color: rgba(255,255,255,0.5); padding: 30px;">
+            No candidates were found during search.</td></tr>`;
+    } else {
+        candidates.forEach((c, i) => {
+            const shortFile = c.filename ? c.filename.split(/[/\\]/).pop() : '-';
+            const qBadge = c.quality
+                ? `<span class="candidates-quality-badge candidates-quality-${c.quality.toLowerCase()}">${c.quality.toUpperCase()}</span>`
+                : '';
+            tableRows += `<tr>
+                <td class="candidates-col-index">${i + 1}</td>
+                <td class="candidates-col-file" title="${escapeHtml(c.filename || '')}">${escapeHtml(shortFile)}</td>
+                <td class="candidates-col-quality">${qBadge}${c.bitrate ? ` ${c.bitrate}kbps` : ''}</td>
+                <td class="candidates-col-size">${fmtSize(c.size)}</td>
+                <td class="candidates-col-duration">${fmtDur(c.duration)}</td>
+                <td class="candidates-col-user" title="Queue: ${c.queue_length || 0} | Slots: ${c.free_upload_slots || 0}">${escapeHtml(c.username || '-')}</td>
+            </tr>`;
+        });
+    }
+
+    overlay = document.createElement('div');
+    overlay.id = 'candidates-modal-overlay';
+    overlay.className = 'candidates-modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) closeCandidatesModal(); };
+    overlay.innerHTML = `
+        <div class="candidates-modal">
+            <div class="candidates-modal-header">
+                <div>
+                    <h2 class="candidates-modal-title">Search Results</h2>
+                    <div class="candidates-modal-subtitle">${escapeHtml(trackName)} — ${escapeHtml(trackArtist)}</div>
+                </div>
+                <button class="candidates-modal-close" onclick="closeCandidatesModal()">&#x2715;</button>
+            </div>
+            <div class="candidates-modal-body">
+                ${errorMsg ? `<div class="candidates-error-summary">${escapeHtml(errorMsg)}</div>` : ''}
+                <div class="candidates-count">${candidates.length} candidate${candidates.length !== 1 ? 's' : ''} found${candidates.length > 0 ? ' but none passed filters' : ''}</div>
+                <div class="candidates-table-wrapper">
+                    <table class="candidates-table">
+                        <thead><tr>
+                            <th>#</th><th>File</th><th>Quality</th><th>Size</th><th>Duration</th><th>User</th>
+                        </tr></thead>
+                        <tbody>${tableRows}</tbody>
+                    </table>
+                </div>
+            </div>
+        </div>`;
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+}
+
+function closeCandidatesModal() {
+    const overlay = document.getElementById('candidates-modal-overlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+        setTimeout(() => overlay.remove(), 300);
+    }
+}
+
 function processModalStatusUpdate(playlistId, data) {
     // This function contains ALL the existing polling logic from startModalDownloadPolling
     // Extracted so it can be called from both individual and batched polling
@@ -8560,6 +8664,12 @@ function processModalStatusUpdate(playlistId, data) {
                     statusEl.classList.add('has-error-tooltip');
                     statusEl.dataset.errorMsg = task.error_message;
                     _ensureErrorTooltipListeners(statusEl);
+                }
+                // Make not_found cells clickable to review search candidates
+                if (task.status === 'not_found' && task.has_candidates) {
+                    statusEl.classList.add('has-candidates');
+                    statusEl.dataset.taskId = task.task_id;
+                    _ensureCandidatesClickListener(statusEl);
                 }
                 console.debug(`✅ [Status Update] Updated track ${task.track_index} to: ${statusText}${isV2Task ? ' (V2)' : ''}`);
             } else {
@@ -15086,7 +15196,19 @@ function updateCompletedModalResults(playlistId, downloadData) {
                 default: statusText = `⚪ ${task.status}`; break;
             }
 
-            if (statusEl) statusEl.textContent = statusText;
+            if (statusEl) {
+                statusEl.textContent = statusText;
+                if ((task.status === 'failed' || task.status === 'cancelled' || task.status === 'not_found') && task.error_message) {
+                    statusEl.classList.add('has-error-tooltip');
+                    statusEl.dataset.errorMsg = task.error_message;
+                    _ensureErrorTooltipListeners(statusEl);
+                }
+                if (task.status === 'not_found' && task.has_candidates) {
+                    statusEl.classList.add('has-candidates');
+                    statusEl.dataset.taskId = task.task_id;
+                    _ensureCandidatesClickListener(statusEl);
+                }
+            }
             if (actionsEl) actionsEl.innerHTML = '-'; // Remove action buttons for completed tasks
         });
 

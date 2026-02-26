@@ -25289,6 +25289,162 @@ body {
 }
 
 /* =====================================
+   SEARCH CANDIDATES MODAL
+   ===================================== */
+
+.has-candidates {
+    cursor: pointer !important;
+    text-decoration: underline dotted !important;
+}
+.has-candidates:hover {
+    color: #1db954 !important;
+}
+
+.candidates-modal-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    background: rgba(18, 18, 18, 0.85);
+    backdrop-filter: blur(12px);
+    z-index: 100001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+.candidates-modal-overlay.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.candidates-modal {
+    background: linear-gradient(135deg, #1a1a1a 0%, #121212 100%);
+    border-radius: 16px;
+    border: 1px solid rgba(29, 185, 84, 0.2);
+    width: 900px;
+    max-width: 95vw;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 25px 80px rgba(0, 0, 0, 0.7);
+    transform: scale(0.95);
+    transition: transform 0.3s ease;
+}
+.candidates-modal-overlay.visible .candidates-modal {
+    transform: scale(1);
+}
+
+.candidates-modal-header {
+    padding: 20px 28px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.candidates-modal-title {
+    color: #fff;
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0;
+}
+.candidates-modal-subtitle {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    margin-top: 4px;
+}
+.candidates-modal-close {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+    border: none;
+    border-radius: 50%;
+    width: 32px; height: 32px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.candidates-modal-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+
+.candidates-modal-body {
+    padding: 20px 28px;
+    overflow-y: auto;
+    flex: 1;
+}
+.candidates-modal-body::-webkit-scrollbar { width: 8px; }
+.candidates-modal-body::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); border-radius: 4px; }
+.candidates-modal-body::-webkit-scrollbar-thumb { background: rgba(29,185,84,0.3); border-radius: 4px; }
+
+.candidates-error-summary {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 12px 16px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 13px;
+    margin-bottom: 16px;
+    line-height: 1.5;
+    word-break: break-word;
+}
+.candidates-count {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 13px;
+    margin-bottom: 12px;
+}
+
+.candidates-table-wrapper { overflow-x: auto; }
+.candidates-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.candidates-table thead th {
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    text-align: left;
+    white-space: nowrap;
+}
+.candidates-table tbody tr {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    transition: background 0.15s ease;
+}
+.candidates-table tbody tr:hover {
+    background: rgba(29, 185, 84, 0.05);
+}
+.candidates-table td {
+    padding: 10px 12px;
+    color: rgba(255, 255, 255, 0.85);
+    vertical-align: middle;
+}
+.candidates-col-index { color: rgba(255,255,255,0.3); width: 30px; text-align: center; }
+.candidates-col-file { max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.candidates-col-quality, .candidates-col-size, .candidates-col-duration, .candidates-col-user { white-space: nowrap; }
+
+.candidates-quality-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin-right: 4px;
+}
+.candidates-quality-flac { background: rgba(29,185,84,0.2); color: #1db954; }
+.candidates-quality-mp3 { background: rgba(100,149,237,0.2); color: #6495ed; }
+.candidates-quality-ogg, .candidates-quality-aac, .candidates-quality-wma { background: rgba(255,165,0,0.2); color: #ffa500; }
+
+/* =====================================
    HYDRABASE PAGE
    ===================================== */
 

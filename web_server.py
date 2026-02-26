@@ -4948,6 +4948,53 @@ def clear_finished_downloads():
         print(f"Error clearing finished downloads: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/downloads/task/<task_id>/candidates', methods=['GET'])
+def get_task_candidates(task_id):
+    """Returns the cached search candidates for a download task so the UI can show what was found."""
+    try:
+        with tasks_lock:
+            task = download_tasks.get(task_id)
+            if not task:
+                return jsonify({"error": "Task not found"}), 404
+
+            candidates = task.get('cached_candidates', [])
+            track_info = task.get('track_info', {})
+            error_message = task.get('error_message', '')
+
+            serialized = []
+            for c in candidates:
+                if hasattr(c, '__dict__'):
+                    serialized.append({
+                        'username': getattr(c, 'username', ''),
+                        'filename': getattr(c, 'filename', ''),
+                        'size': getattr(c, 'size', 0),
+                        'bitrate': getattr(c, 'bitrate', None),
+                        'duration': getattr(c, 'duration', None),
+                        'quality': getattr(c, 'quality', ''),
+                        'free_upload_slots': getattr(c, 'free_upload_slots', 0),
+                        'upload_speed': getattr(c, 'upload_speed', 0),
+                        'queue_length': getattr(c, 'queue_length', 0),
+                        'artist': getattr(c, 'artist', None),
+                        'title': getattr(c, 'title', None),
+                        'album': getattr(c, 'album', None),
+                    })
+                elif isinstance(c, dict):
+                    serialized.append(c)
+
+        return jsonify({
+            "task_id": task_id,
+            "track_info": {
+                "name": track_info.get('name', 'Unknown') if isinstance(track_info, dict) else 'Unknown',
+                "artist": track_info.get('artist', 'Unknown') if isinstance(track_info, dict) else 'Unknown',
+            },
+            "error_message": error_message,
+            "candidates": serialized,
+            "candidate_count": len(serialized),
+        })
+    except Exception as e:
+        print(f"❌ [Candidates] Error fetching candidates for task {task_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/quarantine/clear', methods=['POST'])
 def clear_quarantine():
     """Delete all files and folders inside the ss_quarantine directory."""
@@ -15361,6 +15408,7 @@ def _download_track_worker(task_id, batch_id=None):
 
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
         search_diagnostics = []  # Track what happened per query for detailed error messages
+        all_raw_results = []  # Collect raw results across queries for candidate review modal
         for query_index, query in enumerate(search_queries):
             # Cancellation check before each query
             with tasks_lock:
@@ -15428,6 +15476,7 @@ def _download_track_worker(task_id, batch_id=None):
                             search_diagnostics.append(f'"{query}": {result_count} results, {len(candidates)} passed filters but download failed to start')
                     else:
                         search_diagnostics.append(f'"{query}": {result_count} results but none passed quality/artist filters')
+                        all_raw_results.extend(tracks_result[:20])  # Keep top results for review
                 else:
                     search_diagnostics.append(f'"{query}": no results on Soulseek')
 
@@ -15443,6 +15492,9 @@ def _download_track_worker(task_id, batch_id=None):
                 download_tasks[task_id]['status'] = 'not_found'
                 _diag_summary = ' | '.join(search_diagnostics) if search_diagnostics else 'no queries attempted'
                 download_tasks[task_id]['error_message'] = f'No match found for "{track_name}" by {artist_name or "Unknown"} after {len(search_queries)} queries. Breakdown: {_diag_summary}'
+                # Store raw results so the user can review what Soulseek returned
+                if all_raw_results and not download_tasks[task_id].get('cached_candidates'):
+                    download_tasks[task_id]['cached_candidates'] = all_raw_results
         
         # Notify batch manager that this task completed (failed) - THREAD SAFE
         if batch_id:
@@ -16127,6 +16179,7 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                 'ui_state': task.get('ui_state', 'normal'),  # normal|cancelling|cancelled
                 'playlist_id': task.get('playlist_id'),      # For V2 system identification
                 'error_message': task.get('error_message'),  # Surface failure reasons to UI
+                'has_candidates': bool(task.get('cached_candidates')),  # Whether search found results (for clickable review)
             }
             _ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
             task_filename = task.get('filename') or _ti.get('filename')
