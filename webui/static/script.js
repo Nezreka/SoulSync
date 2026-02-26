@@ -2601,6 +2601,25 @@ async function testConnection(service) {
     }
 }
 
+async function clearQuarantine() {
+    if (!confirm('Delete all files in the quarantine folder? This cannot be undone.')) return;
+    try {
+        showLoadingOverlay('Clearing quarantine folder...');
+        const response = await fetch('/api/quarantine/clear', { method: 'POST' });
+        const result = await response.json();
+        if (result.success) {
+            showToast(result.message || 'Quarantine cleared', 'success');
+        } else {
+            showToast(`Failed to clear quarantine: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error clearing quarantine:', error);
+        showToast('Failed to clear quarantine', 'error');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
 // Dashboard-specific test functions that create activity items
 async function testDashboardConnection(service) {
     try {
