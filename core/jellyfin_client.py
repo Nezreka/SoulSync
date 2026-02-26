@@ -454,7 +454,7 @@ class JellyfinClient:
         # Use configurable timeout for bulk operations (lots of data)
         is_bulk_operation = params and params.get('Limit', 0) > 1000
         config = config_manager.get_jellyfin_config()
-        bulk_timeout = int(config.get('api_timeout', 30))
+        bulk_timeout = int(config.get('api_timeout', 120))
         timeout = bulk_timeout if is_bulk_operation else max(5, bulk_timeout // 6)
         
         try:
