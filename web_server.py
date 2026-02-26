@@ -14651,9 +14651,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                                 artist_ctx = first_artist
                             else:
                                 artist_ctx = {'name': str(first_artist)}
-                        elif source_info.get('artist_name'):
+                        elif source_info.get('artist_name') or source_info.get('watchlist_artist_name'):
                             # Fallback: album artist name from source_info (set at wishlist add time)
-                            artist_ctx = {'name': source_info['artist_name']}
+                            artist_ctx = {'name': source_info.get('artist_name') or source_info['watchlist_artist_name']}
                         elif s_artists and len(s_artists) > 0:
                             # Last resort: track-level artist (old wishlist entries without album artist data)
                             first_artist = s_artists[0]
