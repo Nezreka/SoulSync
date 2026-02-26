@@ -2945,6 +2945,15 @@
                                         <button class="test-button" onclick="testConnection('jellyfin')">Test</button>
                                     </div>
 
+                                    <div class="form-group">
+                                        <label>API Timeout (seconds):</label>
+                                        <input type="number" id="jellyfin-timeout" placeholder="30" min="15"
+                                            max="300" value="30">
+                                        <small style="color: #888; display: block; margin-top: 5px;">Timeout for
+                                            bulk API requests during database sync (15-300s). Increase if your
+                                            Jellyfin server is slow to respond.</small>
+                                    </div>
+
                                     <div class="form-group" id="jellyfin-user-selector-container"
                                         style="display: none;">
                                         <label>Jellyfin User</label>

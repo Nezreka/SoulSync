@@ -1787,6 +1787,7 @@ async function loadSettingsData() {
         // Populate Jellyfin settings
         document.getElementById('jellyfin-url').value = settings.jellyfin?.base_url || '';
         document.getElementById('jellyfin-api-key').value = settings.jellyfin?.api_key || '';
+        document.getElementById('jellyfin-timeout').value = settings.jellyfin?.api_timeout || 30;
 
         // Populate Navidrome settings
         document.getElementById('navidrome-url').value = settings.navidrome?.base_url || '';
@@ -2456,7 +2457,8 @@ async function saveSettings(quiet = false) {
         },
         jellyfin: {
             base_url: document.getElementById('jellyfin-url').value,
-            api_key: document.getElementById('jellyfin-api-key').value
+            api_key: document.getElementById('jellyfin-api-key').value,
+            api_timeout: parseInt(document.getElementById('jellyfin-timeout').value) || 30
         },
         navidrome: {
             base_url: document.getElementById('navidrome-url').value,
