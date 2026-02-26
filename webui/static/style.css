@@ -25403,6 +25403,7 @@ body {
     width: 100%;
     border-collapse: collapse;
     font-size: 13px;
+    table-layout: fixed;
 }
 .candidates-table thead th {
     color: rgba(255, 255, 255, 0.5);
@@ -25427,9 +25428,13 @@ body {
     color: rgba(255, 255, 255, 0.85);
     vertical-align: middle;
 }
-.candidates-col-index { color: rgba(255,255,255,0.3); width: 30px; text-align: center; }
-.candidates-col-file { max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.candidates-col-quality, .candidates-col-size, .candidates-col-duration, .candidates-col-user { white-space: nowrap; }
+.candidates-col-index { color: rgba(255,255,255,0.3); width: 32px; text-align: center; }
+.candidates-col-file { width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.candidates-col-quality { width: 100px; white-space: nowrap; }
+.candidates-col-size { width: 70px; white-space: nowrap; }
+.candidates-col-duration { width: 60px; white-space: nowrap; }
+.candidates-col-user { width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.candidates-col-action { width: 44px; text-align: center; padding: 6px 4px !important; }
 
 .candidates-quality-badge {
     display: inline-block;
@@ -25443,6 +25448,23 @@ body {
 .candidates-quality-flac { background: rgba(29,185,84,0.2); color: #1db954; }
 .candidates-quality-mp3 { background: rgba(100,149,237,0.2); color: #6495ed; }
 .candidates-quality-ogg, .candidates-quality-aac, .candidates-quality-wma { background: rgba(255,165,0,0.2); color: #ffa500; }
+.candidates-download-btn {
+    background: rgba(29, 185, 84, 0.15);
+    border: 1px solid rgba(29, 185, 84, 0.3);
+    color: #1db954;
+    border-radius: 6px;
+    width: 30px; height: 30px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.candidates-download-btn:hover {
+    background: rgba(29, 185, 84, 0.3);
+    border-color: #1db954;
+}
 
 /* =====================================
    HYDRABASE PAGE
