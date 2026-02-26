@@ -444,16 +444,18 @@ class JellyfinClient:
         """Make authenticated request to Jellyfin API"""
         if not self.base_url or not self.api_key:
             return None
-            
+
         url = f"{self.base_url}{endpoint}"
         headers = {
             'X-Emby-Token': self.api_key,
             'Content-Type': 'application/json'
         }
-        
-        # Use longer timeout for bulk operations (lots of data)
+
+        # Use configurable timeout for bulk operations (lots of data)
         is_bulk_operation = params and params.get('Limit', 0) > 1000
-        timeout = 30 if is_bulk_operation else 5
+        config = config_manager.get_jellyfin_config()
+        bulk_timeout = int(config.get('api_timeout', 30))
+        timeout = bulk_timeout if is_bulk_operation else max(5, bulk_timeout // 6)
         
         try:
             response = requests.get(url, headers=headers, params=params, timeout=timeout)
@@ -505,17 +507,18 @@ class JellyfinClient:
                 
                 if not response:
                     consecutive_failures += 1
-                    if consecutive_failures >= 3:
-                        logger.warning("🚨 Multiple track fetch failures - stopping")
-                        break
-                    
                     if limit > 1000:
                         limit = limit // 2
-                        logger.warning(f"⚠️ Track fetch timeout - reducing batch size to {limit}")
+                        consecutive_failures = 0  # Reset — give the smaller batch a fair chance
+                        logger.warning(f"⚠️ Track fetch failed - reducing batch size to {limit}")
                         continue
-                    else:
+                    elif consecutive_failures >= 2:
+                        logger.warning("🚨 Multiple track fetch failures at minimum batch size - stopping")
                         break
-                
+                    else:
+                        logger.warning("⚠️ Track fetch failed at minimum batch size - retrying once")
+                        continue
+
                 consecutive_failures = 0
                 batch_tracks = response.get('Items', [])
                 if not batch_tracks:
@@ -568,17 +571,18 @@ class JellyfinClient:
                 
                 if not response:
                     consecutive_failures += 1
-                    if consecutive_failures >= 3:
-                        logger.warning("🚨 Multiple album fetch failures - stopping")
-                        break
-                    
                     if limit > 1000:
                         limit = limit // 2
-                        logger.warning(f"⚠️ Album fetch timeout - reducing batch size to {limit}")
+                        consecutive_failures = 0  # Reset — give the smaller batch a fair chance
+                        logger.warning(f"⚠️ Album fetch failed - reducing batch size to {limit}")
                         continue
-                    else:
+                    elif consecutive_failures >= 2:
+                        logger.warning("🚨 Multiple album fetch failures at minimum batch size - stopping")
                         break
-                
+                    else:
+                        logger.warning("⚠️ Album fetch failed at minimum batch size - retrying once")
+                        continue
+
                 consecutive_failures = 0
                 batch_albums = response.get('Items', [])
                 if not batch_albums:
