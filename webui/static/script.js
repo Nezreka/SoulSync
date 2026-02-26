@@ -8463,7 +8463,7 @@ function _renderCandidatesModal(data) {
 
     let tableRows = '';
     if (candidates.length === 0) {
-        tableRows = `<tr><td colspan="6" style="text-align:center; color: rgba(255,255,255,0.5); padding: 30px;">
+        tableRows = `<tr><td colspan="7" style="text-align:center; color: rgba(255,255,255,0.5); padding: 30px;">
             No candidates were found during search.</td></tr>`;
     } else {
         candidates.forEach((c, i) => {
@@ -8478,6 +8478,7 @@ function _renderCandidatesModal(data) {
                 <td class="candidates-col-size">${fmtSize(c.size)}</td>
                 <td class="candidates-col-duration">${fmtDur(c.duration)}</td>
                 <td class="candidates-col-user" title="Queue: ${c.queue_length || 0} | Slots: ${c.free_upload_slots || 0}">${escapeHtml(c.username || '-')}</td>
+                <td class="candidates-col-action"><button class="candidates-download-btn" data-index="${i}" title="Download this file">⬇</button></td>
             </tr>`;
         });
     }
@@ -8501,7 +8502,7 @@ function _renderCandidatesModal(data) {
                 <div class="candidates-table-wrapper">
                     <table class="candidates-table">
                         <thead><tr>
-                            <th>#</th><th>File</th><th>Quality</th><th>Size</th><th>Duration</th><th>User</th>
+                            <th>#</th><th>File</th><th>Quality</th><th>Size</th><th>Duration</th><th>User</th><th></th>
                         </tr></thead>
                         <tbody>${tableRows}</tbody>
                     </table>
@@ -8511,6 +8512,36 @@ function _renderCandidatesModal(data) {
 
     document.body.appendChild(overlay);
     requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    // Bind download buttons
+    overlay.querySelectorAll('.candidates-download-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const idx = parseInt(btn.dataset.index);
+            const c = candidates[idx];
+            if (c) downloadCandidate(data.task_id, c, trackName);
+        });
+    });
+}
+
+async function downloadCandidate(taskId, candidate, trackName) {
+    if (!confirm(`Download this file as "${trackName}"?\n\n${candidate.filename?.split(/[/\\]/).pop() || 'Unknown file'}\nfrom ${candidate.username || 'Unknown user'}`)) return;
+    try {
+        const resp = await fetch(`/api/downloads/task/${encodeURIComponent(taskId)}/download-candidate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(candidate)
+        });
+        const result = await resp.json();
+        if (result.success) {
+            closeCandidatesModal();
+            showToast(result.message || 'Download initiated', 'success');
+        } else {
+            showToast(`Failed: ${result.error}`, 'error');
+        }
+    } catch (err) {
+        console.error('Error initiating manual download:', err);
+        showToast('Failed to initiate download', 'error');
+    }
 }
 
 function closeCandidatesModal() {

@@ -4995,6 +4995,117 @@ def get_task_candidates(task_id):
         print(f"❌ [Candidates] Error fetching candidates for task {task_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/downloads/task/<task_id>/download-candidate', methods=['POST'])
+def download_selected_candidate(task_id):
+    """Restart a not_found/failed task by downloading a user-selected candidate."""
+    try:
+        data = request.get_json()
+        if not data or not data.get('username') or not data.get('filename'):
+            return jsonify({"error": "Missing username or filename"}), 400
+
+        username = data['username']
+        filename = data['filename']
+        size = data.get('size', 0)
+
+        with tasks_lock:
+            task = download_tasks.get(task_id)
+            if not task:
+                return jsonify({"error": "Task not found"}), 404
+            if task['status'] not in ('not_found', 'failed'):
+                return jsonify({"error": f"Task is {task['status']}, not eligible for retry"}), 400
+
+            batch_id = task.get('batch_id')
+            track_info = task.get('track_info', {})
+
+            # Reset task state
+            task['status'] = 'downloading'
+            task['error_message'] = None
+            task['status_change_time'] = time.time()
+            task.pop('download_id', None)
+            task.pop('username', None)
+            task.pop('filename', None)
+            # Clear the selected candidate from used_sources so it won't be skipped
+            used_sources = task.get('used_sources', set())
+            source_key = f"{username}_{os.path.basename(filename)}"
+            used_sources.discard(source_key)
+
+            # Reset batch tracking for this task
+            if batch_id and batch_id in download_batches:
+                batch = download_batches[batch_id]
+                # Remove from completed set so _on_download_completed can fire again
+                completed_set = batch.get('_completed_task_ids', set())
+                completed_set.discard(task_id)
+                # Remove from permanently_failed_tracks
+                track_index = task.get('track_index')
+                batch['permanently_failed_tracks'] = [
+                    t for t in batch.get('permanently_failed_tracks', [])
+                    if t.get('table_index') != track_index and t.get('download_index') != track_index
+                ]
+                # Restore worker slot
+                batch['active_count'] = batch.get('active_count', 0) + 1
+
+        # Build a TrackResult-like candidate object
+        from core.soulseek_client import TrackResult
+        candidate = TrackResult(
+            username=username,
+            filename=filename,
+            size=size,
+            bitrate=data.get('bitrate'),
+            duration=data.get('duration'),
+            quality=data.get('quality', 'unknown'),
+            free_upload_slots=data.get('free_upload_slots', 0),
+            upload_speed=data.get('upload_speed', 0),
+            queue_length=data.get('queue_length', 0),
+            artist=data.get('artist'),
+            title=data.get('title'),
+            album=data.get('album'),
+        )
+        candidate.confidence = 1.0  # Required by _attempt_download_with_candidates sort
+
+        # Reconstruct Track object from task's track_info
+        from core.itunes_client import Track
+        artists = track_info.get('artists', [])
+        artist_names = []
+        for a in (artists if isinstance(artists, list) else []):
+            if isinstance(a, dict):
+                artist_names.append(a.get('name', 'Unknown'))
+            elif isinstance(a, str):
+                artist_names.append(a)
+        if not artist_names:
+            artist_names = [track_info.get('artist', 'Unknown')]
+
+        track = Track(
+            id=track_info.get('id', ''),
+            name=track_info.get('name', 'Unknown'),
+            artists=artist_names,
+            album=track_info.get('album', {}).get('name', '') if isinstance(track_info.get('album'), dict) else track_info.get('album', ''),
+            duration_ms=track_info.get('duration_ms', 0),
+            popularity=0,
+        )
+
+        # Submit to thread pool — don't block the request
+        def _run_manual_download():
+            success = _attempt_download_with_candidates(task_id, [candidate], track, batch_id)
+            if not success:
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['status'] = 'failed'
+                        download_tasks[task_id]['error_message'] = 'Manual download failed to start — user may be offline'
+                if batch_id:
+                    _on_download_completed(batch_id, task_id, success=False)
+
+        missing_download_executor.submit(_run_manual_download)
+
+        track_name = track_info.get('name', 'Unknown')
+        print(f"🎯 [Manual Download] User selected candidate for '{track_name}' from {username}")
+        return jsonify({"success": True, "message": f"Download initiated for '{track_name}'"})
+
+    except Exception as e:
+        print(f"❌ [Manual Download] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/quarantine/clear', methods=['POST'])
 def clear_quarantine():
     """Delete all files and folders inside the ss_quarantine directory."""
