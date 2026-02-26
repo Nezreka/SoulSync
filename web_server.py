@@ -12844,6 +12844,7 @@ def add_album_track_to_wishlist():
             'album': {
                 'id': album.get('id'),
                 'name': album.get('name'),
+                'artists': album.get('artists', []),
                 'images': album_images,
                 'album_type': album.get('album_type', 'album'),
                 'release_date': album.get('release_date', ''),
@@ -14624,21 +14625,44 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                     if not spotify_data:
                         spotify_data = {}
 
-                    s_album = spotify_data.get('album')
+                    s_album = spotify_data.get('album') or {}
                     s_artists = spotify_data.get('artists', [])
-                    
+
                     # We need at least an album name and artist
                     if s_album and s_album.get('name'):
-                        # Construct minimal artist context
+                        # Construct artist context using ALBUM artist (not track artist)
+                        # For compilations, track artists differ per track but the album artist
+                        # (e.g. "Bon Jovi") must be consistent so all tracks land in one folder.
+                        # Priority: 1) album.artists  2) source_info.artist_name  3) track artists
                         artist_ctx = {}
-                        if s_artists and len(s_artists) > 0:
+                        s_album_artists = s_album.get('artists', [])
+                        source_info = track_info.get('source_info') or {}
+                        if isinstance(source_info, str):
+                            try:
+                                import json
+                                source_info = json.loads(source_info)
+                            except:
+                                source_info = {}
+
+                        if s_album_artists and len(s_album_artists) > 0:
+                            # Best: album-level artists stored in spotify_data.album.artists
+                            first_artist = s_album_artists[0]
+                            if isinstance(first_artist, dict):
+                                artist_ctx = first_artist
+                            else:
+                                artist_ctx = {'name': str(first_artist)}
+                        elif source_info.get('artist_name'):
+                            # Fallback: album artist name from source_info (set at wishlist add time)
+                            artist_ctx = {'name': source_info['artist_name']}
+                        elif s_artists and len(s_artists) > 0:
+                            # Last resort: track-level artist (old wishlist entries without album artist data)
                             first_artist = s_artists[0]
                             if isinstance(first_artist, dict):
                                 artist_ctx = first_artist
                             else:
                                 artist_ctx = {'name': str(first_artist)}
                         else:
-                            # Fallback if no artist in spotify_data
+                            # Fallback if no artist at all
                             artist_ctx = {'name': track_info.get('artist', 'Unknown Artist')}
 
                         # Construct minimal album context
