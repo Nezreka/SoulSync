@@ -18078,7 +18078,7 @@ def _get_discovery_cache_key(title, artist):
 def _validate_discovery_cache_artist(source_artist, cached_match):
     """Check if a cached discovery match has a valid artist. Returns False if the
     cached result's artist doesn't match the source artist (stale/wrong cache entry)."""
-    min_artist_similarity = 0.4
+    min_artist_similarity = 0.5
     source_artist_cleaned = matching_engine.clean_artist(source_artist)
     if not source_artist_cleaned:
         return True  # No source artist to validate against
@@ -18108,11 +18108,10 @@ def _validate_discovery_cache_artist(source_artist, cached_match):
 def _discovery_score_candidates(source_title, source_artist, source_duration_ms, search_results):
     """Score search results against a source track using the matching engine.
 
-    Uses matching_engine.score_track_match() which applies clean_title/clean_artist,
-    core title fast path, duration similarity, and 60/30/10 weighted scoring.
-
-    Includes a minimum artist similarity check to prevent "right title, wrong artist"
-    matches (e.g., "Yoga" by bbno$ matching "Yoga" by Sleep Music Lullabies).
+    Both artist AND title must independently pass minimum similarity floors.
+    This prevents weighted scoring from allowing a perfect artist to carry a
+    garbage title (or vice versa). If either dimension doesn't match, the
+    candidate is rejected — no match is better than a wrong match.
 
     Args:
         source_title: The source track title (already cleaned for YouTube, raw for others)
@@ -18126,9 +18125,12 @@ def _discovery_score_candidates(source_title, source_artist, source_duration_ms,
     best_match = None
     best_confidence = 0.0
     best_index = -1
-    min_artist_similarity = 0.4  # Reject candidates where artist doesn't match at all
+    min_artist_similarity = 0.5
+    min_title_similarity = 0.5
 
     source_artist_cleaned = matching_engine.clean_artist(source_artist)
+    source_title_cleaned = matching_engine.clean_title(source_title)
+    source_core_title = matching_engine.get_core_string(source_title)
 
     for idx, result in enumerate(search_results):
         try:
@@ -18136,14 +18138,12 @@ def _discovery_score_candidates(source_title, source_artist, source_duration_ms,
             result_name = result.name if hasattr(result, 'name') else ''
             result_duration = result.duration_ms if hasattr(result, 'duration_ms') else 0
 
-            # Quick artist sanity check — reject if artist doesn't match at all
-            # This prevents "right title, wrong artist" false positives
+            # Artist floor — both must match, not just the weighted score
             best_artist_sim = 0.0
             for cand_artist in result_artists:
                 if not cand_artist:
                     continue
                 cand_cleaned = matching_engine.clean_artist(cand_artist)
-                # Check containment (e.g., "drake" in "drake 21 savage")
                 cand_normalized = matching_engine.normalize_string(cand_artist)
                 if source_artist_cleaned and source_artist_cleaned in cand_normalized:
                     best_artist_sim = 1.0
@@ -18155,6 +18155,23 @@ def _discovery_score_candidates(source_title, source_artist, source_duration_ms,
             if best_artist_sim < min_artist_similarity:
                 continue
 
+            # Title floor — both must match, not just the weighted score
+            cand_title_cleaned = matching_engine.clean_title(result_name)
+            cand_core_title = matching_engine.get_core_string(result_name)
+
+            # Core title exact match bypasses the floor (e.g., "edamame" == "edamame")
+            title_passes = False
+            if source_core_title and cand_core_title and source_core_title == cand_core_title:
+                title_passes = True
+            else:
+                title_sim = matching_engine.similarity_score(source_title_cleaned, cand_title_cleaned)
+                if title_sim >= min_title_similarity:
+                    title_passes = True
+
+            if not title_passes:
+                continue
+
+            # Both floors passed — now do full scoring
             confidence, match_type = matching_engine.score_track_match(
                 source_title=source_title,
                 source_artists=[source_artist],
