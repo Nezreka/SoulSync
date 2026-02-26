@@ -18679,7 +18679,7 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
         best_match = None
         best_match_raw = None
         best_confidence = 0.0
-        min_confidence = 0.7
+        min_confidence = 0.9
 
         for query_idx, search_query in enumerate(search_queries):
             try:
@@ -19200,7 +19200,7 @@ def _run_youtube_discovery_worker(url_hash):
                 matched_track = None
                 best_confidence = 0.0
                 best_raw_track = None
-                min_confidence = 0.6
+                min_confidence = 0.9
                 source_duration = track.get('duration_ms', 0) or 0
 
                 # Strategy 1: Use matching_engine search queries
@@ -19463,7 +19463,7 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
                 matched_track = None
                 best_confidence = 0.0
                 best_raw_track = None
-                min_confidence = 0.6
+                min_confidence = 0.9
                 source_duration = duration_ms or 0
 
                 # Strategy 1: Use matching_engine search queries
@@ -25969,7 +25969,7 @@ def _run_beatport_discovery_worker(url_hash):
                 found_track = None
                 best_confidence = 0.0
                 best_raw_track = None
-                min_confidence = 0.75  # Higher threshold for Beatport to avoid bad matches
+                min_confidence = 0.9  # Higher threshold for Beatport to avoid bad matches
 
                 # Generate search queries using matching engine (with fallback)
                 try:
