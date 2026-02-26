@@ -27085,6 +27085,13 @@ let artistDetailPageState = {
     currentArtistName: null
 };
 
+// Discography filter state
+let discographyFilterState = {
+    categories: { albums: true, eps: true, singles: true },
+    content: { live: true, compilations: true, featured: true },
+    ownership: 'all'  // 'all', 'owned', 'missing'
+};
+
 function navigateToArtistDetail(artistId, artistName) {
     console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId})`);
 
@@ -27140,12 +27147,18 @@ function initializeArtistDetailPage() {
         });
     }
 
+    // Initialize discography filter buttons
+    initializeDiscographyFilters();
+
     artistDetailPageState.isInitialized = true;
     console.log("✅ Artist Detail page initialized successfully");
 }
 
 async function loadArtistDetailData(artistId, artistName) {
     console.log(`🔄 Loading artist detail data for: ${artistName} (ID: ${artistId})`);
+
+    // Reset discography filters to defaults
+    resetDiscographyFilters();
 
     // Show loading state and hide all content
     showArtistDetailLoading(true);
@@ -27491,6 +27504,9 @@ function populateDiscographySections(discography) {
 
     // Populate singles
     populateReleaseSection('singles', discography.singles);
+
+    // Apply any active filters after populating
+    applyDiscographyFilters();
 }
 
 function populateReleaseSection(sectionType, releases) {
@@ -27539,6 +27555,18 @@ function createReleaseCard(release) {
     card.setAttribute("data-spotify-id", release.spotify_id || "");
     // Store mutable reference so stream updates propagate to click handler
     card._releaseData = release;
+
+    // Tag card for content-type filtering
+    const titleLower = (release.title || '').toLowerCase();
+    const livePattern = /\b(live)\b|\(live[^)]*\)|\[live[^]]*\]/i;
+    const compilationPattern = /\b(greatest hits|best of|collection|anthology|essential)\b/i;
+    const featuredPattern = /\(?\bfeat\.?\s|\bft\.?\s|\bfeaturing\b/i;
+    const isLive = livePattern.test(release.title || '') || (release.album_type === 'compilation' && livePattern.test(release.title || ''));
+    const isCompilation = (release.album_type === 'compilation') || compilationPattern.test(release.title || '');
+    const isFeatured = featuredPattern.test(release.title || '');
+    card.setAttribute("data-is-live", isLive ? "true" : "false");
+    card.setAttribute("data-is-compilation", isCompilation ? "true" : "false");
+    card.setAttribute("data-is-featured", isFeatured ? "true" : "false");
 
     // Add MusicBrainz icon if available
     let mbIcon = null;
@@ -27969,6 +27997,9 @@ function updateLibraryReleaseCard(data) {
         formatsDiv.innerHTML = data.formats.map(f => `<span class="release-format-tag">${f}</span>`).join('');
         card.appendChild(formatsDiv);
     }
+
+    // Re-apply filters so newly resolved cards respect active filters
+    applyDiscographyFilters();
 }
 
 function updateCategoryStatsFromStream(category, ownedCount, missingCount) {
@@ -28063,6 +28094,125 @@ function recalculateSummaryStats(artistFormatSet) {
                 heroInfo.appendChild(formatsDiv);
             }
         }
+    }
+}
+
+// ===============================================
+// Discography Filter Functions
+// ===============================================
+
+function initializeDiscographyFilters() {
+    const container = document.getElementById('discography-filters');
+    if (!container) return;
+
+    container.addEventListener('click', (e) => {
+        const btn = e.target.closest('.discography-filter-btn');
+        if (!btn) return;
+
+        const filterType = btn.dataset.filter;
+        const value = btn.dataset.value;
+
+        if (filterType === 'category') {
+            // Multi-toggle: toggle this category on/off
+            btn.classList.toggle('active');
+            discographyFilterState.categories[value] = btn.classList.contains('active');
+        } else if (filterType === 'content') {
+            // Multi-toggle: toggle this content type on/off
+            btn.classList.toggle('active');
+            discographyFilterState.content[value] = btn.classList.contains('active');
+        } else if (filterType === 'ownership') {
+            // Single-select: deactivate siblings, activate this one
+            container.querySelectorAll('[data-filter="ownership"]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            discographyFilterState.ownership = value;
+        }
+
+        applyDiscographyFilters();
+    });
+}
+
+function resetDiscographyFilters() {
+    discographyFilterState.categories = { albums: true, eps: true, singles: true };
+    discographyFilterState.content = { live: true, compilations: true, featured: true };
+    discographyFilterState.ownership = 'all';
+
+    // Reset button visual states
+    const container = document.getElementById('discography-filters');
+    if (!container) return;
+    container.querySelectorAll('.discography-filter-btn').forEach(btn => {
+        const filterType = btn.dataset.filter;
+        const value = btn.dataset.value;
+        if (filterType === 'ownership') {
+            btn.classList.toggle('active', value === 'all');
+        } else {
+            btn.classList.add('active');
+        }
+    });
+}
+
+function applyDiscographyFilters() {
+    const categories = ['albums', 'eps', 'singles'];
+
+    for (const cat of categories) {
+        const section = document.getElementById(`${cat}-section`);
+        if (!section) continue;
+
+        // Category toggle — hide entire section
+        if (!discographyFilterState.categories[cat]) {
+            section.style.display = 'none';
+            continue;
+        }
+        section.style.display = '';
+
+        // Filter individual cards within the section
+        const grid = document.getElementById(`${cat}-grid`);
+        if (!grid) continue;
+
+        let visibleOwned = 0;
+        let visibleMissing = 0;
+        let visibleCount = 0;
+
+        grid.querySelectorAll('.release-card').forEach(card => {
+            let hidden = false;
+
+            // Content filters
+            if (!discographyFilterState.content.live && card.getAttribute('data-is-live') === 'true') {
+                hidden = true;
+            }
+            if (!discographyFilterState.content.compilations && card.getAttribute('data-is-compilation') === 'true') {
+                hidden = true;
+            }
+            if (!discographyFilterState.content.featured && card.getAttribute('data-is-featured') === 'true') {
+                hidden = true;
+            }
+
+            // Ownership filter (only apply if card is not still checking)
+            if (!hidden && discographyFilterState.ownership !== 'all' && card._releaseData) {
+                const owned = card._releaseData.owned;
+                if (owned !== null) {  // Don't hide cards still being checked
+                    if (discographyFilterState.ownership === 'owned' && !owned) hidden = true;
+                    if (discographyFilterState.ownership === 'missing' && owned) hidden = true;
+                }
+            }
+
+            card.style.display = hidden ? 'none' : '';
+
+            // Count visible cards for stats
+            if (!hidden && card._releaseData) {
+                visibleCount++;
+                if (card._releaseData.owned === true) visibleOwned++;
+                else if (card._releaseData.owned === false) visibleMissing++;
+            }
+        });
+
+        // Update section stats to reflect filtered view
+        const ownedEl = document.getElementById(`${cat}-owned-count`);
+        const missingEl = document.getElementById(`${cat}-missing-count`);
+        if (ownedEl) ownedEl.textContent = `${visibleOwned} owned`;
+        if (missingEl) missingEl.textContent = `${visibleMissing} missing`;
+
+        // Hide section entirely if all cards are hidden
+        section.style.display = visibleCount === 0 ? 'none' : '';
     }
 }
 

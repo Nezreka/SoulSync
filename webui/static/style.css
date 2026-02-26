@@ -13566,6 +13566,62 @@ body {
     letter-spacing: 0.5px;
 }
 
+/* Discography Filters */
+.discography-filters {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0 20px;
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.filter-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.35);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: 4px;
+}
+
+.filter-divider {
+    width: 1px;
+    height: 24px;
+    background: rgba(255, 255, 255, 0.1);
+    margin: 0 4px;
+}
+
+.discography-filter-btn {
+    padding: 5px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 12px;
+    font-weight: 600;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+    cursor: pointer;
+    border-radius: 16px;
+    transition: all 0.2s ease-out;
+}
+
+.discography-filter-btn:hover {
+    color: rgba(255, 255, 255, 0.8);
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.discography-filter-btn.active {
+    color: #fff;
+    border-color: rgba(29, 185, 84, 0.5);
+    background: rgba(29, 185, 84, 0.15);
+}
+
 /* Discography Sections */
 .discography-sections {
     display: flex;
