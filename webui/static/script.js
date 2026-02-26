@@ -1804,8 +1804,7 @@ async function loadSettingsData() {
 
         // Load Jellyfin users and music libraries if Jellyfin is the active server
         if (activeServer === 'jellyfin') {
-            loadJellyfinUsers();
-            loadJellyfinMusicLibraries();
+            loadJellyfinUsers().then(() => loadJellyfinMusicLibraries());
         }
 
         // Populate Soulseek settings
@@ -1965,8 +1964,7 @@ function toggleServer(serverType) {
 
     // Load Jellyfin users and music libraries when switching to Jellyfin
     if (serverType === 'jellyfin') {
-        loadJellyfinUsers();
-        loadJellyfinMusicLibraries();
+        loadJellyfinUsers().then(() => loadJellyfinMusicLibraries());
     }
 
     // Auto-save after server toggle change
@@ -2588,8 +2586,7 @@ async function testConnection(service) {
             if (service === 'plex') {
                 loadPlexMusicLibraries();
             } else if (service === 'jellyfin') {
-                loadJellyfinUsers();
-                loadJellyfinMusicLibraries();
+                loadJellyfinUsers().then(() => loadJellyfinMusicLibraries());
             }
         } else {
             showToast(`${service} connection failed: ${result.error}`, 'error');
