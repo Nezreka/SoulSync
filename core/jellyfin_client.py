@@ -1,4 +1,5 @@
 import requests
+import time
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
@@ -159,7 +160,18 @@ class JellyfinClient:
     def set_progress_callback(self, callback):
         """Set callback function for cache progress updates: callback(message)"""
         self._progress_callback = callback
-        
+
+    def reload_config(self):
+        """Reset connection state so next ensure_connection() re-reads config.
+        Called when settings are saved to pick up URL/API key changes."""
+        self.base_url = None
+        self.api_key = None
+        self.user_id = None
+        self.music_library_id = None
+        self._connection_attempted = False
+        self.clear_cache()
+        logger.info("🔄 Jellyfin client config reset — will reconnect with new settings")
+
     def ensure_connection(self) -> bool:
         """Ensure connection to Jellyfin server with lazy initialization."""
         if self._connection_attempted:
@@ -507,6 +519,8 @@ class JellyfinClient:
                 
                 if not response:
                     consecutive_failures += 1
+                    # Wait before retrying — the server may still be processing the timed-out request
+                    time.sleep(5)
                     if limit > 1000:
                         limit = limit // 2
                         consecutive_failures = 0  # Reset — give the smaller batch a fair chance
@@ -571,6 +585,8 @@ class JellyfinClient:
                 
                 if not response:
                     consecutive_failures += 1
+                    # Wait before retrying — the server may still be processing the timed-out request
+                    time.sleep(5)
                     if limit > 1000:
                         limit = limit // 2
                         consecutive_failures = 0  # Reset — give the smaller batch a fair chance
