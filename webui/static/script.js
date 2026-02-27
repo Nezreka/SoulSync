@@ -1808,6 +1808,11 @@ async function loadSettingsData() {
             loadJellyfinUsers().then(() => loadJellyfinMusicLibraries());
         }
 
+        // Load Navidrome music folders if Navidrome is the active server
+        if (activeServer === 'navidrome') {
+            loadNavidromeMusicFolders();
+        }
+
         // Populate Soulseek settings
         document.getElementById('soulseek-url').value = settings.soulseek?.slskd_url || '';
         document.getElementById('soulseek-api-key').value = settings.soulseek?.api_key || '';
@@ -1966,6 +1971,11 @@ function toggleServer(serverType) {
     // Load Jellyfin users and music libraries when switching to Jellyfin
     if (serverType === 'jellyfin') {
         loadJellyfinUsers().then(() => loadJellyfinMusicLibraries());
+    }
+
+    // Load Navidrome music folders when switching to Navidrome
+    if (serverType === 'navidrome') {
+        loadNavidromeMusicFolders();
     }
 
     // Auto-save after server toggle change
@@ -2589,6 +2599,8 @@ async function testConnection(service) {
                 loadPlexMusicLibraries();
             } else if (service === 'jellyfin') {
                 loadJellyfinUsers().then(() => loadJellyfinMusicLibraries());
+            } else if (service === 'navidrome') {
+                loadNavidromeMusicFolders();
             }
         } else {
             showToast(`${service} connection failed: ${result.error}`, 'error');
@@ -32709,6 +32721,66 @@ async function selectJellyfinLibrary() {
     } catch (error) {
         console.error('Error selecting Jellyfin library:', error);
         alert('Error selecting library. Please try again.');
+    }
+}
+
+// ============ Navidrome Music Folder Selection ============
+
+async function loadNavidromeMusicFolders() {
+    try {
+        const response = await fetch('/api/navidrome/music-folders');
+        const data = await response.json();
+
+        if (data.success && data.folders && data.folders.length > 0) {
+            const selector = document.getElementById('navidrome-music-folder');
+            const container = document.getElementById('navidrome-folder-selector-container');
+
+            selector.innerHTML = '<option value="">All Libraries</option>';
+
+            data.folders.forEach(folder => {
+                const option = document.createElement('option');
+                option.value = folder.title;
+                option.textContent = folder.title;
+
+                if (folder.title === data.current || folder.title === data.selected) {
+                    option.selected = true;
+                }
+
+                selector.appendChild(option);
+            });
+
+            container.style.display = 'block';
+        } else {
+            document.getElementById('navidrome-folder-selector-container').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading Navidrome music folders:', error);
+        document.getElementById('navidrome-folder-selector-container').style.display = 'none';
+    }
+}
+
+async function selectNavidromeMusicFolder() {
+    const selector = document.getElementById('navidrome-music-folder');
+    const selectedFolder = selector.value;
+
+    try {
+        const response = await fetch('/api/navidrome/select-music-folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder_name: selectedFolder })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showToast(data.message, 'success');
+        } else {
+            console.error('Failed to set music folder:', data.error);
+            showToast(`Failed to set music folder: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error selecting Navidrome music folder:', error);
+        showToast('Error selecting music folder. Please try again.', 'error');
     }
 }
 

@@ -2531,6 +2531,7 @@ def handle_settings():
             spotify_client.reload_config()
             plex_client.server = None
             jellyfin_client.reload_config()
+            navidrome_client.reload_config()
             # Reload orchestrator settings (download source mode, hybrid_primary, etc.)
             soulseek_client.reload_settings()
             # FIX: Re-instantiate the global tidal_client to pick up new settings
@@ -3072,6 +3073,56 @@ def select_jellyfin_music_library():
 
     except Exception as e:
         logger.error(f"Error setting Jellyfin music library: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/navidrome/music-folders', methods=['GET'])
+def get_navidrome_music_folders():
+    """Get list of available music folders from Navidrome"""
+    try:
+        folders = navidrome_client.get_music_folders()
+
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        selected_folder = db.get_preference('navidrome_music_folder')
+
+        current_folder = None
+        if navidrome_client.music_folder_id:
+            for f in folders:
+                if f['key'] == navidrome_client.music_folder_id:
+                    current_folder = f['title']
+                    break
+
+        return jsonify({
+            "success": True,
+            "folders": folders,
+            "selected": selected_folder,
+            "current": current_folder
+        })
+    except Exception as e:
+        logger.error(f"Error getting Navidrome music folders: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/navidrome/select-music-folder', methods=['POST'])
+def select_navidrome_music_folder():
+    """Set the active Navidrome music folder"""
+    try:
+        data = request.get_json()
+        folder_name = data.get('folder_name', '')
+
+        success = navidrome_client.set_music_folder_by_name(folder_name)
+
+        if success:
+            if folder_name:
+                add_activity_item("📚", "Library Selected", f"Navidrome music folder set to: {folder_name}", "Now")
+                return jsonify({"success": True, "message": f"Music folder set to: {folder_name}"})
+            else:
+                add_activity_item("📚", "Library Selection Cleared", "Navidrome will use all libraries", "Now")
+                return jsonify({"success": True, "message": "Music folder selection cleared — using all libraries"})
+        else:
+            return jsonify({"success": False, "error": f"Folder '{folder_name}' not found"}), 404
+
+    except Exception as e:
+        logger.error(f"Error setting Navidrome music folder: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================
