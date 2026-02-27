@@ -9887,9 +9887,13 @@ async function loadDownloadsData() {
 
     // Event listeners are already set up in initializeSearch() - don't duplicate them
     const clearButton = document.querySelector('.controls-panel__clear-btn');
+    const cancelAllButton = document.querySelector('.controls-panel__cancel-all-btn');
 
     if (clearButton) {
         clearButton.addEventListener('click', clearFinishedDownloads);
+    }
+    if (cancelAllButton) {
+        cancelAllButton.addEventListener('click', cancelAllDownloads);
     }
 
     // Start sophisticated polling system (1-second interval like GUI)
@@ -10154,6 +10158,28 @@ async function clearFinishedDownloads() {
     } catch (error) {
         console.error('Error clearing finished downloads:', error);
         showToast('Error sending clear request', 'error');
+    }
+}
+
+async function cancelAllDownloads() {
+    if (!confirm('Cancel ALL active downloads and clear the transfer list? This cannot be undone.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/downloads/cancel-all', {
+            method: 'POST'
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            showToast('All downloads cancelled and cleared', 'success');
+        } else {
+            showToast(`Failed to cancel: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error cancelling all downloads:', error);
+        showToast('Error cancelling downloads', 'error');
     }
 }
 
