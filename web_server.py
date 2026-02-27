@@ -2530,7 +2530,7 @@ def handle_settings():
             
             spotify_client.reload_config()
             plex_client.server = None
-            jellyfin_client.server = None
+            jellyfin_client.reload_config()
             # Reload orchestrator settings (download source mode, hybrid_primary, etc.)
             soulseek_client.reload_settings()
             # FIX: Re-instantiate the global tidal_client to pick up new settings
