@@ -17388,41 +17388,23 @@ def start_missing_downloads():
 # ===============================
 
 def _load_sync_status_file():
-    """Helper function to read the sync status JSON file."""
-    # Storage folder is at the same level as web_server.py
-    status_file = os.path.join(os.path.dirname(__file__), 'storage', 'sync_status.json')
-    print(f"🔍 Loading sync status from: {status_file}")
-    
-    if not os.path.exists(status_file): 
-        print(f"❌ Sync status file does not exist: {status_file}")
-        return {}
-    
+    """Load sync statuses from database."""
     try:
-        with open(status_file, 'r') as f:
-            content = f.read()
-            if not content:
-                print(f"⚠️ Sync status file is empty")
-                return {}
-            
-            data = json.loads(content)
-            print(f"✅ Loaded {len(data)} sync statuses from file")
-            for playlist_id, status in list(data.items())[:3]:  # Show first 3
-                print(f"   - {playlist_id}: {status.get('name', 'N/A')} -> {status.get('last_synced', 'N/A')}")
+        database = get_database()
+        raw = database.get_preference('sync_statuses')
+        if raw:
+            data = json.loads(raw)
             return data
-    except (json.JSONDecodeError, FileNotFoundError) as e:
+        return {}
+    except Exception as e:
         print(f"❌ Error loading sync status: {e}")
         return {}
 
 def _save_sync_status_file(sync_statuses):
-    """Helper function to save the sync status JSON file."""
+    """Save sync statuses to database."""
     try:
-        # Storage folder is at the same level as web_server.py
-        storage_dir = os.path.join(os.path.dirname(__file__), 'storage')
-        os.makedirs(storage_dir, exist_ok=True)
-        status_file = os.path.join(storage_dir, 'sync_status.json')
-        with open(status_file, 'w') as f:
-            json.dump(sync_statuses, f, indent=4)
-        print(f"✅ Sync status saved to {status_file}")
+        database = get_database()
+        database.set_preference('sync_statuses', json.dumps(sync_statuses))
     except Exception as e:
         print(f"❌ Error saving sync status: {e}")
 
