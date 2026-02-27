@@ -3012,6 +3012,14 @@
                                         <label>Password:</label>
                                         <input type="password" id="navidrome-password" placeholder="Password">
                                     </div>
+                                    <div class="form-group" id="navidrome-folder-selector-container"
+                                        style="display: none;">
+                                        <label>Music Library</label>
+                                        <select id="navidrome-music-folder" onchange="selectNavidromeMusicFolder()">
+                                            <option value="">All Libraries</option>
+                                        </select>
+                                        <small>Select which music library to import from</small>
+                                    </div>
                                     <div class="form-actions">
                                         <button class="detect-button"
                                             onclick="autoDetectNavidrome()">Auto-detect</button>

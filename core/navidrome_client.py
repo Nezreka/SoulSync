@@ -146,6 +146,7 @@ class NavidromeClient:
         self.base_url: Optional[str] = None
         self.username: Optional[str] = None
         self.password: Optional[str] = None
+        self.music_folder_id: Optional[str] = None
         self._connection_attempted = False
         self._is_connecting = False
 
@@ -160,6 +161,61 @@ class NavidromeClient:
     def set_progress_callback(self, callback):
         """Set callback function for progress updates"""
         self._progress_callback = callback
+
+    def reload_config(self):
+        """Reset connection state so next ensure_connection() re-reads config."""
+        self.base_url = None
+        self.username = None
+        self.password = None
+        self.music_folder_id = None
+        self._connection_attempted = False
+        self._artist_cache.clear()
+        self._album_cache.clear()
+        self._track_cache.clear()
+        logger.info("🔄 Navidrome client config reset — will reconnect with new settings")
+
+    def get_music_folders(self) -> list:
+        """Get available music folders from Navidrome."""
+        if not self.ensure_connection():
+            return []
+        try:
+            response = self._make_request('getMusicFolders')
+            if not response:
+                return []
+            folders_data = response.get('musicFolders', {})
+            folder_list = folders_data.get('musicFolder', [])
+            if isinstance(folder_list, dict):
+                folder_list = [folder_list]
+            return [{'title': f.get('name', 'Unknown'), 'key': str(f.get('id', ''))} for f in folder_list]
+        except Exception as e:
+            logger.error(f"Error getting music folders: {e}")
+            return []
+
+    def set_music_folder_by_name(self, folder_name: str) -> bool:
+        """Set the active music folder by name."""
+        try:
+            folders = self.get_music_folders()
+            for folder in folders:
+                if folder['title'] == folder_name:
+                    self.music_folder_id = folder['key']
+                    logger.info(f"Set music folder to: {folder_name} (ID: {self.music_folder_id})")
+                    from database.music_database import MusicDatabase
+                    db = MusicDatabase()
+                    db.set_preference('navidrome_music_folder', folder_name)
+                    return True
+            # If folder_name is empty, clear the selection
+            if not folder_name:
+                self.music_folder_id = None
+                from database.music_database import MusicDatabase
+                db = MusicDatabase()
+                db.set_preference('navidrome_music_folder', '')
+                logger.info("Cleared music folder selection — will use all libraries")
+                return True
+            logger.warning(f"Music folder '{folder_name}' not found")
+            return False
+        except Exception as e:
+            logger.error(f"Error setting music folder: {e}")
+            return False
 
     def ensure_connection(self) -> bool:
         """Ensure connection to Navidrome server with lazy initialization."""
@@ -199,6 +255,21 @@ class NavidromeClient:
             if response and response.get('status') == 'ok':
                 server_version = response.get('version', 'Unknown')
                 logger.info(f"Successfully connected to Navidrome server version: {server_version}")
+
+                # Restore saved music folder preference
+                try:
+                    from database.music_database import MusicDatabase
+                    db = MusicDatabase()
+                    saved_folder = db.get_preference('navidrome_music_folder')
+                    if saved_folder:
+                        folders = self.get_music_folders()
+                        for folder in folders:
+                            if folder['title'] == saved_folder:
+                                self.music_folder_id = folder['key']
+                                logger.info(f"Restored music folder preference: {saved_folder} (ID: {self.music_folder_id})")
+                                break
+                except Exception as e:
+                    logger.warning(f"Could not restore music folder preference: {e}")
             else:
                 logger.error(f"Failed to connect to Navidrome server at {self.base_url}/rest/ping — check URL and network connectivity")
                 self.base_url = None
@@ -284,7 +355,10 @@ class NavidromeClient:
             if self._progress_callback:
                 self._progress_callback("Fetching artists from Navidrome...")
 
-            response = self._make_request('getArtists')
+            params = {}
+            if self.music_folder_id:
+                params['musicFolderId'] = self.music_folder_id
+            response = self._make_request('getArtists', params if params else None)
             if not response:
                 return []
 
@@ -371,11 +445,14 @@ class NavidromeClient:
             offset = 0
 
             while len(albums) < limit:
-                response = self._make_request('getAlbumList2', {
+                params = {
                     'type': 'newest',
                     'size': page_size,
                     'offset': offset
-                })
+                }
+                if self.music_folder_id:
+                    params['musicFolderId'] = self.music_folder_id
+                response = self._make_request('getAlbumList2', params)
                 if not response:
                     break
 
@@ -819,12 +896,15 @@ class NavidromeClient:
         try:
             # Use Subsonic search3 API for music search
             query = f"{artist} {title}".strip()
-            response = self._make_request('search3', {
+            params = {
                 'query': query,
                 'songCount': limit,
                 'artistCount': 0,
                 'albumCount': 0
-            })
+            }
+            if self.music_folder_id:
+                params['musicFolderId'] = self.music_folder_id
+            response = self._make_request('search3', params)
 
             if not response:
                 return []
