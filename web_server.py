@@ -13054,6 +13054,35 @@ def remove_album_from_wishlist():
         logger.error(f"Error removing album from wishlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/wishlist/remove-batch', methods=['POST'])
+def remove_batch_from_wishlist():
+    """Endpoint to remove multiple tracks from the wishlist."""
+    try:
+        from core.wishlist_service import get_wishlist_service
+
+        data = request.get_json()
+        spotify_track_ids = data.get('spotify_track_ids', [])
+
+        if not spotify_track_ids or not isinstance(spotify_track_ids, list):
+            return jsonify({"success": False, "error": "Missing or invalid spotify_track_ids"}), 400
+
+        wishlist_service = get_wishlist_service()
+        removed = 0
+        for track_id in spotify_track_ids:
+            if wishlist_service.remove_track_from_wishlist(track_id):
+                removed += 1
+
+        logger.info(f"Batch removed {removed} track(s) from wishlist")
+        return jsonify({
+            "success": True,
+            "removed": removed,
+            "message": f"Removed {removed} track{'s' if removed != 1 else ''} from wishlist"
+        })
+
+    except Exception as e:
+        logger.error(f"Error batch removing from wishlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/add-album-to-wishlist', methods=['POST'])
 def add_album_track_to_wishlist():
     """Endpoint to add a single track from an album to the wishlist."""

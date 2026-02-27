@@ -6995,6 +6995,14 @@ async function openWishlistOverviewModal() {
                         <div class="wishlist-category-header">
                             <button class="wishlist-back-btn" onclick="backToCategories()">← Back</button>
                             <span id="wishlist-category-name" class="wishlist-category-name"></span>
+                            <button class="wishlist-select-all-btn" id="wishlist-select-all-btn" onclick="toggleWishlistSelectAll()">Select All</button>
+                        </div>
+                        <div class="wishlist-batch-bar" id="wishlist-batch-bar" style="display: none;">
+                            <span class="wishlist-batch-count" id="wishlist-batch-count">0 selected</span>
+                            <button class="playlist-modal-btn playlist-modal-btn-secondary wishlist-batch-remove-btn"
+                                    onclick="batchRemoveFromWishlist()">
+                                Remove Selected
+                            </button>
                         </div>
                         <div id="wishlist-tracks-list" class="playlist-tracks-scroll">
                             <div class="loading-indicator">Loading tracks...</div>
@@ -7312,6 +7320,12 @@ async function selectWishlistCategory(category) {
 
                 const tracksListHTML = albumData.tracks.map(track => `
                     <div class="wishlist-album-track wishlist-track-item">
+                        <label class="wishlist-checkbox-wrapper" onclick="event.stopPropagation();">
+                            <input type="checkbox" class="wishlist-select-cb"
+                                   data-track-id="${track.spotifyTrackId}"
+                                   onchange="updateWishlistBatchBar()">
+                            <span class="wishlist-checkbox-custom"></span>
+                        </label>
                         <span class="wishlist-album-track-name">${track.name}</span>
                         <button class="wishlist-delete-btn wishlist-delete-btn-small" onclick="removeTrackFromWishlist('${track.spotifyTrackId}', event)" title="Remove from wishlist">
                             🗑️
@@ -7328,6 +7342,12 @@ async function selectWishlistCategory(category) {
                 albumsHTML += `
                     <div class="wishlist-album-card">
                         <div class="wishlist-album-header" onclick="toggleAlbumTracks('${albumId}')">
+                            <label class="wishlist-checkbox-wrapper" onclick="event.stopPropagation();">
+                                <input type="checkbox" class="wishlist-album-select-all-cb"
+                                       data-album-id="${albumId}"
+                                       onchange="toggleWishlistAlbumSelection('${albumId}', this.checked)">
+                                <span class="wishlist-checkbox-custom"></span>
+                            </label>
                             <div class="wishlist-album-image" style="${albumImageStyle}">${albumImageContent}</div>
                             <div class="wishlist-album-info">
                                 <div class="wishlist-album-name">${albumData.albumName}</div>
@@ -7389,6 +7409,12 @@ async function selectWishlistCategory(category) {
 
                 tracksHTML += `
                     <div class="playlist-track-item-with-image wishlist-track-item">
+                        <label class="wishlist-checkbox-wrapper" onclick="event.stopPropagation();">
+                            <input type="checkbox" class="wishlist-select-cb"
+                                   data-track-id="${spotifyTrackId}"
+                                   onchange="updateWishlistBatchBar()">
+                            <span class="wishlist-checkbox-custom"></span>
+                        </label>
                         <div class="playlist-track-image" style="background-image: url('${albumImage}')"></div>
                         <div class="playlist-track-info">
                             <div class="playlist-track-name">${trackName}</div>
@@ -7414,10 +7440,12 @@ function backToCategories() {
     const categoryTracksSection = document.getElementById('wishlist-category-tracks');
     const categoryGrid = document.querySelector('.wishlist-category-grid');
     const downloadBtn = document.getElementById('wishlist-download-btn');
+    const batchBar = document.getElementById('wishlist-batch-bar');
 
     categoryTracksSection.style.display = 'none';
     categoryGrid.style.display = 'grid';
     downloadBtn.style.display = 'none';
+    if (batchBar) batchBar.style.display = 'none';
     window.selectedWishlistCategory = null;
 }
 
@@ -7431,6 +7459,132 @@ function toggleAlbumTracks(albumId) {
     } else {
         tracksElement.style.display = 'none';
         expandIcon.textContent = '▼';
+    }
+}
+
+/**
+ * Get all checked wishlist track checkboxes
+ */
+function getCheckedWishlistTracks() {
+    return Array.from(document.querySelectorAll('.wishlist-select-cb:checked'));
+}
+
+/**
+ * Toggle select all / deselect all tracks in the current wishlist category
+ */
+function toggleWishlistSelectAll() {
+    const allCheckboxes = document.querySelectorAll('.wishlist-select-cb');
+    const albumCheckboxes = document.querySelectorAll('.wishlist-album-select-all-cb');
+    const btn = document.getElementById('wishlist-select-all-btn');
+    const allChecked = allCheckboxes.length > 0 && Array.from(allCheckboxes).every(cb => cb.checked);
+
+    const newState = !allChecked;
+
+    allCheckboxes.forEach(cb => { cb.checked = newState; });
+    albumCheckboxes.forEach(cb => { cb.checked = newState; });
+
+    // Expand all albums when selecting all
+    if (newState) {
+        document.querySelectorAll('.wishlist-album-tracks').forEach(el => {
+            el.style.display = 'block';
+        });
+        document.querySelectorAll('[id^="expand-icon-"]').forEach(icon => {
+            icon.textContent = '▲';
+        });
+    }
+
+    if (btn) btn.textContent = newState ? 'Deselect All' : 'Select All';
+    updateWishlistBatchBar();
+}
+
+/**
+ * Update the wishlist batch action bar based on checkbox selection
+ */
+function updateWishlistBatchBar() {
+    const checked = getCheckedWishlistTracks();
+    const bar = document.getElementById('wishlist-batch-bar');
+    const countEl = document.getElementById('wishlist-batch-count');
+
+    if (!bar || !countEl) return;
+
+    if (checked.length > 0) {
+        bar.style.display = 'flex';
+        countEl.textContent = `${checked.length} selected`;
+    } else {
+        bar.style.display = 'none';
+    }
+
+    // Sync the Select All button text
+    const btn = document.getElementById('wishlist-select-all-btn');
+    if (btn) {
+        const allCheckboxes = document.querySelectorAll('.wishlist-select-cb');
+        const allChecked = allCheckboxes.length > 0 && Array.from(allCheckboxes).every(cb => cb.checked);
+        btn.textContent = allChecked ? 'Deselect All' : 'Select All';
+    }
+}
+
+/**
+ * Toggle all track checkboxes within an album when album header checkbox is clicked
+ */
+function toggleWishlistAlbumSelection(albumId, checked) {
+    const tracksContainer = document.getElementById(`tracks-${albumId}`);
+    if (tracksContainer) {
+        // Expand the album tracks if selecting
+        if (checked) {
+            tracksContainer.style.display = 'block';
+            const expandIcon = document.getElementById(`expand-icon-${albumId}`);
+            if (expandIcon) expandIcon.textContent = '▲';
+        }
+        tracksContainer.querySelectorAll('.wishlist-select-cb').forEach(cb => {
+            cb.checked = checked;
+        });
+    }
+    updateWishlistBatchBar();
+}
+
+/**
+ * Batch remove selected tracks from wishlist
+ */
+async function batchRemoveFromWishlist() {
+    const checked = getCheckedWishlistTracks();
+    if (checked.length === 0) return;
+
+    const count = checked.length;
+    const confirmed = await showConfirmationModal(
+        'Remove Tracks',
+        `Remove ${count} track${count !== 1 ? 's' : ''} from your wishlist?`,
+        '🗑️'
+    );
+
+    if (!confirmed) return;
+
+    const trackIds = checked.map(cb => cb.getAttribute('data-track-id'));
+
+    try {
+        const response = await fetch('/api/wishlist/remove-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ spotify_track_ids: trackIds })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showToast(`Removed ${data.removed} track(s) from wishlist`, 'success');
+
+            // Reload the current category to refresh the list
+            if (window.selectedWishlistCategory) {
+                await selectWishlistCategory(window.selectedWishlistCategory);
+            }
+
+            // Update wishlist count in sidebar
+            await updateWishlistCount();
+        } else {
+            showToast(`Failed to remove tracks: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error batch removing from wishlist:', error);
+        showToast('Failed to remove tracks from wishlist', 'error');
     }
 }
 
