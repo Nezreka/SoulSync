@@ -40,8 +40,10 @@ def _normalize(text: str) -> str:
     s = text.lower().strip()
     # Remove common parenthetical suffixes like (Live), (Remastered), (2025 Remaster), (Radio Edit)
     s = re.sub(r'\s*\((?:live|(?:\d{4}\s*)?remaster(?:ed)?(?:\s*\d{4})?|deluxe|bonus|radio\s*edit|single\s*edit|album\s*edit|single\s*version|visualize.*?)\)', '', s, flags=re.IGNORECASE)
-    # Remove featuring info: "(feat. ...)", "(ft. ...)", "(featuring ...)"
+    # Remove featuring info in parentheses: "(feat. ...)", "(ft. ...)", "(featuring ...)"
     s = re.sub(r'\s*\((?:feat\.?|ft\.?|featuring)\s+[^)]*\)', '', s, flags=re.IGNORECASE)
+    # Remove featuring info in square brackets: "[feat. ...]", "[ft. ...]", "[W/ ...]", "[with ...]"
+    s = re.sub(r'\s*\[(?:feat\.?|ft\.?|featuring|w/|with)\s+[^\]]*\]', '', s, flags=re.IGNORECASE)
     # Remove trailing featuring info: "feat. ...", "ft. ...", "featuring ..."
     s = re.sub(r'\s+(?:feat\.?|ft\.?|featuring)\s+.*$', '', s, flags=re.IGNORECASE)
     # Remove non-alphanumeric except spaces
