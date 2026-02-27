@@ -4981,6 +4981,28 @@ def cancel_download():
         print(f"Error cancelling download: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/downloads/cancel-all', methods=['POST'])
+def cancel_all_downloads():
+    """
+    Cancel all active downloads from slskd, then clear completed ones.
+    """
+    try:
+        # First cancel all active downloads
+        cancel_success = run_async(soulseek_client.cancel_all_downloads())
+        if not cancel_success:
+            return jsonify({"success": False, "error": "Failed to cancel active downloads."}), 500
+
+        # Then clear the now-cancelled/completed downloads
+        clear_success = run_async(soulseek_client.clear_all_completed_downloads())
+
+        # Sweep empty directories
+        _sweep_empty_download_directories()
+
+        return jsonify({"success": True, "message": "All downloads cancelled and cleared."})
+    except Exception as e:
+        print(f"Error cancelling all downloads: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/downloads/clear-finished', methods=['POST'])
 def clear_finished_downloads():
     """

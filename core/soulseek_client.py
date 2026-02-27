@@ -1187,6 +1187,33 @@ class SoulseekClient:
             ))
         return results
 
+    async def cancel_all_downloads(self) -> bool:
+        """Cancel and remove ALL downloads (active + completed) from slskd.
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.base_url:
+            logger.error("Soulseek client not configured")
+            return False
+
+        try:
+            endpoint = 'transfers/downloads/all'
+            logger.debug(f"Cancelling all downloads with endpoint: {endpoint}")
+            response = await self._make_request('DELETE', endpoint)
+            success = response is not None
+
+            if success:
+                logger.info("Successfully cancelled all downloads from slskd")
+            else:
+                logger.error("Failed to cancel all downloads from slskd")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error cancelling all downloads: {e}")
+            return False
+
     async def clear_all_completed_downloads(self) -> bool:
         """Clear all completed/finished downloads from slskd backend
         
