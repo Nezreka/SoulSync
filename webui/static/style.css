@@ -8437,8 +8437,9 @@ body {
     transform: scale(1.05);
 }
 
-/* Watchlist Batch Action Bar */
-.watchlist-batch-bar {
+/* Watchlist & Wishlist Batch Action Bar */
+.watchlist-batch-bar,
+.wishlist-batch-bar {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -8462,24 +8463,28 @@ body {
     }
 }
 
-.watchlist-batch-count {
+.watchlist-batch-count,
+.wishlist-batch-count {
     font-size: 13px;
     font-weight: 600;
     color: rgba(255, 255, 255, 0.8);
 }
 
-.watchlist-batch-remove-btn {
+.watchlist-batch-remove-btn,
+.wishlist-batch-remove-btn {
     border-color: rgba(255, 59, 48, 0.4) !important;
     color: #ff6b6b !important;
 }
 
-.watchlist-batch-remove-btn:hover {
+.watchlist-batch-remove-btn:hover,
+.wishlist-batch-remove-btn:hover {
     background: rgba(255, 59, 48, 0.2) !important;
     border-color: rgba(255, 59, 48, 0.6) !important;
 }
 
-/* Watchlist Checkbox */
-.watchlist-checkbox-wrapper {
+/* Watchlist & Wishlist Checkbox */
+.watchlist-checkbox-wrapper,
+.wishlist-checkbox-wrapper {
     position: relative;
     display: flex;
     align-items: center;
@@ -8489,14 +8494,16 @@ body {
     cursor: pointer;
 }
 
-.watchlist-checkbox-wrapper input[type="checkbox"] {
+.watchlist-checkbox-wrapper input[type="checkbox"],
+.wishlist-checkbox-wrapper input[type="checkbox"] {
     position: absolute;
     opacity: 0;
     width: 0;
     height: 0;
 }
 
-.watchlist-checkbox-custom {
+.watchlist-checkbox-custom,
+.wishlist-checkbox-custom {
     width: 20px;
     height: 20px;
     border: 2px solid rgba(255, 255, 255, 0.2);
@@ -8508,17 +8515,20 @@ body {
     justify-content: center;
 }
 
-.watchlist-checkbox-wrapper:hover .watchlist-checkbox-custom {
+.watchlist-checkbox-wrapper:hover .watchlist-checkbox-custom,
+.wishlist-checkbox-wrapper:hover .wishlist-checkbox-custom {
     border-color: rgba(255, 255, 255, 0.4);
     background: rgba(255, 255, 255, 0.06);
 }
 
-.watchlist-checkbox-wrapper input:checked+.watchlist-checkbox-custom {
+.watchlist-checkbox-wrapper input:checked+.watchlist-checkbox-custom,
+.wishlist-checkbox-wrapper input:checked+.wishlist-checkbox-custom {
     background: rgba(29, 185, 84, 0.3);
     border-color: #1db954;
 }
 
-.watchlist-checkbox-wrapper input:checked+.watchlist-checkbox-custom::after {
+.watchlist-checkbox-wrapper input:checked+.watchlist-checkbox-custom::after,
+.wishlist-checkbox-wrapper input:checked+.wishlist-checkbox-custom::after {
     content: '✓';
     color: #1db954;
     font-size: 13px;
@@ -8784,6 +8794,30 @@ body {
     font-size: 18px;
     font-weight: 600;
     color: #ffffff;
+    flex: 1;
+}
+
+.wishlist-select-all-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #e0e0e0;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.wishlist-select-all-btn:hover {
+    background: rgba(29, 185, 84, 0.15);
+    border-color: rgba(29, 185, 84, 0.4);
+    color: #1db954;
+}
+
+.wishlist-batch-bar {
+    margin: 0 0 12px;
 }
 
 .loading-indicator {
