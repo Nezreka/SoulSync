@@ -9447,7 +9447,13 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
                 print("⚠️ Metadata saved but verification found issues (see above).")
             return True
         except Exception as e:
+            import traceback
             print(f"❌ Error enhancing metadata for {file_path}: {e}")
+            print(f"❌ [Metadata Debug] Exception type: {type(e).__name__}")
+            print(f"❌ [Metadata Debug] File exists: {os.path.exists(file_path)}")
+            print(f"❌ [Metadata Debug] Artist: {artist.get('name', 'MISSING') if artist else 'None'}")
+            print(f"❌ [Metadata Debug] Album info: {album_info.get('album_name', 'MISSING') if album_info else 'None'}")
+            print(f"❌ [Metadata Debug] Traceback:\n{traceback.format_exc()}")
             return False
 
 def _generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
@@ -9605,6 +9611,9 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
             metadata['itunes_album_id'] = album_id
         else:
             metadata['spotify_album_id'] = album_id
+
+    # Summary log for debugging metadata issues (e.g. wrong album_artist / track_number)
+    print(f"📋 [Metadata Summary] title='{metadata.get('title')}' | artist='{metadata.get('artist')}' | album_artist='{metadata.get('album_artist')}' | album='{metadata.get('album')}' | track={metadata.get('track_number')}/{metadata.get('total_tracks')} | disc={metadata.get('disc_number')}")
 
     return metadata
 
@@ -10620,9 +10629,11 @@ def _post_process_matched_download(context_key, context, file_path):
 
             # Enhance metadata before moving
             try:
+                print(f"🔍 [Metadata Input] Playlist mode - artist: '{spotify_artist.get('name', 'MISSING')}' (id: {spotify_artist.get('id', 'MISSING')})")
                 _enhance_file_metadata(file_path, context, spotify_artist, None)
             except Exception as meta_err:
-                pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}")
+                import traceback
+                pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
 
             # Move file to playlist folder
             print(f"🚚 Moving '{os.path.basename(file_path)}' to '{final_path}'")
@@ -10841,9 +10852,15 @@ def _post_process_matched_download(context_key, context, file_path):
 
         # 3. Enhance metadata, move file, download art, and cleanup
         try:
+            print(f"🔍 [Metadata Input] artist: '{spotify_artist.get('name', 'MISSING')}' (id: {spotify_artist.get('id', 'MISSING')})")
+            if album_info:
+                print(f"🔍 [Metadata Input] album: '{album_info.get('album_name', 'MISSING')}', track#: {album_info.get('track_number', 'MISSING')}, disc#: {album_info.get('disc_number', 'MISSING')}, source: {album_info.get('source', 'unknown')}")
+            else:
+                print(f"🔍 [Metadata Input] album_info: None (single track)")
             _enhance_file_metadata(file_path, context, spotify_artist, album_info)
         except Exception as meta_err:
-            pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}")
+            import traceback
+            pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
             # Continue anyway - file can still be moved
 
         print(f"🚚 Moving '{os.path.basename(file_path)}' to '{final_path}'")
@@ -15401,19 +15418,23 @@ def _run_post_processing_worker(task_id, batch_id):
                             print(f"🎯 [Verification] Created proper album_info - track_number: {track_number}, album: {album_info['album_name']}")
 
                             print(f"🎵 [Post-Processing] Attempting metadata enhancement for: {found_file}")
+                            print(f"🔍 [Metadata Input] Verification worker - artist: '{spotify_artist.get('name', 'MISSING')}' (id: {spotify_artist.get('id', 'MISSING')})")
+                            print(f"🔍 [Metadata Input] Verification worker - album: '{album_info.get('album_name', 'MISSING')}', track#: {album_info.get('track_number', 'MISSING')}, source: {album_info.get('source', 'unknown')}")
                             enhancement_success = _enhance_file_metadata(found_file, context, spotify_artist, album_info)
-                            
+
                             if enhancement_success:
                                 with tasks_lock:
                                     if task_id in download_tasks:
                                         download_tasks[task_id]['metadata_enhanced'] = True
                                 print(f"✅ [Post-Processing] Successfully completed metadata enhancement for: {os.path.basename(found_file)}")
                             else:
-                                print(f"⚠️ [Post-Processing] Metadata enhancement failed for: {os.path.basename(found_file)}")
+                                print(f"⚠️ [Post-Processing] Metadata enhancement returned False for: {os.path.basename(found_file)}")
                         else:
                             print(f"⚠️ [Post-Processing] Missing spotify_artist or spotify_album in context")
+                            print(f"⚠️ [Post-Processing] spotify_artist: {spotify_artist is not None}, spotify_album: {spotify_album is not None}")
                     except Exception as enhancement_error:
-                        print(f"❌ [Post-Processing] Error during metadata enhancement: {enhancement_error}")
+                        import traceback
+                        print(f"❌ [Post-Processing] Error during metadata enhancement: {enhancement_error}\n{traceback.format_exc()}")
                 else:
                     print(f"⚠️ [Post-Processing] Cannot complete metadata enhancement - missing context or expected filename")
             else:
