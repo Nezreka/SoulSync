@@ -3079,6 +3079,9 @@ def select_jellyfin_music_library():
 def get_navidrome_music_folders():
     """Get list of available music folders from Navidrome"""
     try:
+        if not navidrome_client:
+            return jsonify({"success": False, "error": "Navidrome client not configured"}), 400
+
         folders = navidrome_client.get_music_folders()
 
         from database.music_database import MusicDatabase
