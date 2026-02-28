@@ -33,7 +33,7 @@ class RepairWorker:
 
         # Worker state
         self.running = False
-        self.paused = False
+        self.paused = True
         self.should_stop = False
         self.thread = None
 
