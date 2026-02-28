@@ -603,6 +603,10 @@ class SpotifyClient:
                     artist = Artist.from_spotify_artist(artist_data)
                     artists.append(artist)
 
+                # Re-rank: boost exact name matches to the top
+                query_lower = query.lower().strip()
+                artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
+
                 return artists
 
             except Exception as e:
@@ -611,7 +615,10 @@ class SpotifyClient:
 
         # iTunes fallback
         logger.debug(f"Using iTunes fallback for artist search: {query}")
-        return self._itunes.search_artists(query, limit)
+        artists = self._itunes.search_artists(query, limit)
+        query_lower = query.lower().strip()
+        artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
+        return artists
 
     @rate_limited
     def search_albums(self, query: str, limit: int = 10) -> List[Album]:

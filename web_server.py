@@ -23358,6 +23358,9 @@ def search_artists_for_playlist():
                         'name': artist['name'],
                         'image_url': artist['images'][0]['url'] if artist.get('images') else None
                     })
+                # Re-rank: boost exact name matches to the top
+                query_lower = query.lower().strip()
+                artists.sort(key=lambda a: (0 if a['name'].lower().strip() == query_lower else 1))
 
         return jsonify({
             "success": True,
