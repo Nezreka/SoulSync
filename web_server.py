@@ -23350,7 +23350,8 @@ def search_artists_for_playlist():
             if hydrabase_worker and dev_mode_enabled:
                 hydrabase_worker.enqueue(query, 'artist')
 
-            results = spotify_client.sp.search(q=query, type='artist', limit=10)
+            search_query = f'artist:{query}' if len(query.strip()) <= 4 else query
+            results = spotify_client.sp.search(q=search_query, type='artist', limit=10)
             if results and 'artists' in results and 'items' in results['artists']:
                 for artist in results['artists']['items']:
                     artists.append({
