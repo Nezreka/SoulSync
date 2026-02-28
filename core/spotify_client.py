@@ -596,7 +596,8 @@ class SpotifyClient:
         """Search for artists - falls back to iTunes if Spotify not authenticated"""
         if self.is_spotify_authenticated():
             try:
-                results = self.sp.search(q=query, type='artist', limit=min(limit, 10))
+                search_query = f'artist:{query}' if len(query.strip()) <= 4 else query
+                results = self.sp.search(q=search_query, type='artist', limit=min(limit, 10))
                 artists = []
 
                 for artist_data in results['artists']['items']:
