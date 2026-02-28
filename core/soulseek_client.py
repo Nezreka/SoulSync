@@ -1190,6 +1190,9 @@ class SoulseekClient:
     async def cancel_all_downloads(self) -> bool:
         """Cancel and remove ALL downloads (active + completed) from slskd.
 
+        Lists all current downloads and cancels each one individually,
+        since slskd has no bulk cancel endpoint.
+
         Returns:
             bool: True if successful, False otherwise
         """
@@ -1198,17 +1201,39 @@ class SoulseekClient:
             return False
 
         try:
-            endpoint = 'transfers/downloads/all'
-            logger.debug(f"Cancelling all downloads with endpoint: {endpoint}")
-            response = await self._make_request('DELETE', endpoint)
-            success = response is not None
+            # Get all current downloads grouped by user
+            response = await self._make_request('GET', 'transfers/downloads')
+            if not response:
+                logger.info("No downloads to cancel")
+                return True
 
-            if success:
-                logger.info("Successfully cancelled all downloads from slskd")
+            from urllib.parse import quote
+            cancelled = 0
+            failed = 0
+
+            for user_data in response:
+                username = user_data.get('username', '')
+                if not username:
+                    continue
+                for directory in user_data.get('directories', []):
+                    for file_data in directory.get('files', []):
+                        file_id = file_data.get('id', '')
+                        if not file_id:
+                            continue
+                        encoded_id = quote(str(file_id), safe='')
+                        endpoint = f'transfers/downloads/{username}/{encoded_id}?remove=true'
+                        result = await self._make_request('DELETE', endpoint)
+                        if result is not None:
+                            cancelled += 1
+                        else:
+                            failed += 1
+
+            if failed:
+                logger.warning(f"Cancelled {cancelled} downloads, {failed} failed")
             else:
-                logger.error("Failed to cancel all downloads from slskd")
+                logger.info(f"Successfully cancelled {cancelled} downloads from slskd")
 
-            return success
+            return failed == 0 or cancelled > 0
 
         except Exception as e:
             logger.error(f"Error cancelling all downloads: {e}")

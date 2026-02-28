@@ -351,3 +351,7 @@ class DownloadOrchestrator:
             True if successful
         """
         return await self.soulseek.maintain_search_history_with_buffer(keep_searches, trigger_threshold)
+
+    async def cancel_all_downloads(self) -> bool:
+        """Cancel and remove all downloads from slskd."""
+        return await self.soulseek.cancel_all_downloads()
