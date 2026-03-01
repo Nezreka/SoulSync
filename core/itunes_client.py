@@ -69,6 +69,8 @@ class Track:
     external_urls: Optional[Dict[str, str]] = None
     image_url: Optional[str] = None
     release_date: Optional[str] = None
+    track_number: Optional[int] = None
+    disc_number: Optional[int] = None
 
     @classmethod
     def from_itunes_track(cls, track_data: Dict[str, Any], clean_artist_name: Optional[str] = None) -> 'Track':

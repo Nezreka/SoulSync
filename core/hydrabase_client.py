@@ -160,7 +160,7 @@ class HydrabaseClient:
         for item in results[:limit]:
             try:
                 tracks.append(Track(
-                    id=str(item.get('id', '')),
+                    id=str(item.get('soul_id', item.get('id', ''))),
                     name=item.get('name', ''),
                     artists=item.get('artists', []),
                     album=item.get('album', ''),
@@ -186,7 +186,7 @@ class HydrabaseClient:
         for item in results[:limit]:
             try:
                 artists.append(Artist(
-                    id=str(item.get('id', '')),
+                    id=str(item.get('soul_id', item.get('id', ''))),
                     name=item.get('name', ''),
                     popularity=item.get('popularity', 0),
                     genres=item.get('genres', []),
@@ -209,7 +209,7 @@ class HydrabaseClient:
         for item in results[:limit]:
             try:
                 albums.append(Album(
-                    id=str(item.get('id', '')),
+                    id=str(item.get('soul_id', item.get('id', ''))),
                     name=item.get('name', ''),
                     artists=item.get('artists', []),
                     release_date=self._normalize_release_date(item.get('release_date', '')),
@@ -234,7 +234,7 @@ class HydrabaseClient:
         for item in results[:limit]:
             try:
                 albums.append(Album(
-                    id=str(item.get('id', '')),
+                    id=str(item.get('soul_id', item.get('id', ''))),
                     name=item.get('name', ''),
                     artists=item.get('artists', []),
                     release_date=self._normalize_release_date(item.get('release_date', '')),
@@ -247,9 +247,9 @@ class HydrabaseClient:
                 logger.debug(f"Skipping malformed Hydrabase discography album: {e}")
         return albums
 
-    def get_album_tracks(self, album_query: str, limit: int = 50) -> List[Track]:
-        """Fetch tracks for an album from Hydrabase using the album_tracks type."""
-        results = self._send_and_recv('album_tracks', album_query)
+    def get_album_tracks(self, album_id: str, limit: int = 50) -> List[Track]:
+        """Fetch tracks for an album from Hydrabase by soul_id."""
+        results = self._send_and_recv('album_tracks', album_id)
         if not results:
             return []
 
@@ -257,7 +257,7 @@ class HydrabaseClient:
         for item in results[:limit]:
             try:
                 tracks.append(Track(
-                    id=str(item.get('id', '')),
+                    id=str(item.get('soul_id', item.get('id', ''))),
                     name=item.get('name', ''),
                     artists=item.get('artists', []),
                     album=item.get('album', ''),
@@ -266,7 +266,9 @@ class HydrabaseClient:
                     preview_url=item.get('preview_url'),
                     external_urls=item.get('external_urls'),
                     image_url=item.get('image_url'),
-                    release_date=self._normalize_release_date(item.get('release_date', ''))
+                    release_date=self._normalize_release_date(item.get('release_date', '')),
+                    track_number=item.get('track_number'),
+                    disc_number=item.get('disc_number'),
                 ))
             except Exception as e:
                 logger.debug(f"Skipping malformed Hydrabase album track: {e}")
