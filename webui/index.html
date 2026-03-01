@@ -3354,6 +3354,31 @@
 
                         <!-- Third Column - Database, Metadata, Playlist Sync, Logging -->
                         <div class="settings-third-column">
+                            <!-- UI Appearance -->
+                            <div class="settings-group">
+                                <h3>UI Appearance</h3>
+                                <div class="form-group">
+                                    <label>Accent Color:</label>
+                                    <div class="accent-color-selector">
+                                        <select id="accent-preset" class="form-select">
+                                            <option value="#1db954">Spotify Green</option>
+                                            <option value="#1d8ab9">Ocean Blue</option>
+                                            <option value="#8b5cf6">Purple</option>
+                                            <option value="#f59e0b">Sunset Orange</option>
+                                            <option value="#f43f5e">Rose</option>
+                                            <option value="#14b8a6">Teal</option>
+                                            <option value="custom">Custom</option>
+                                        </select>
+                                        <div class="accent-preview-swatch" id="accent-preview-swatch"></div>
+                                    </div>
+                                    <small style="color: #888;">Changes the accent color across the entire UI</small>
+                                </div>
+                                <div class="form-group" id="custom-color-group" style="display:none;">
+                                    <label>Custom Color:</label>
+                                    <input type="color" id="accent-custom-color" value="#1db954">
+                                </div>
+                            </div>
+
                             <!-- Database Settings -->
                             <div class="settings-group">
                                 <h3>Database Settings</h3>
