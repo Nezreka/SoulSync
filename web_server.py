@@ -6123,6 +6123,10 @@ def get_artist_image(artist_id):
     For Spotify, returns the artist's image directly.
     """
     try:
+        # Soul IDs from Hydrabase can't be looked up on Spotify/iTunes
+        if artist_id.startswith('soul_'):
+            return jsonify({"success": True, "image_url": None})
+
         if spotify_client and spotify_client.is_spotify_authenticated():
             # Use Spotify directly
             artist_data = spotify_client.sp.artist(artist_id)
@@ -13740,6 +13744,7 @@ def _run_quality_scanner(scope='watchlist'):
                             'artists': [{'name': artist} for artist in best_match.artists],
                             'album': {
                                 'name': best_match.album,
+                                'artists': [{'name': artist} for artist in best_match.artists],
                                 'album_type': 'album'  # Default to 'album' for quality scanner matches
                             },
                             'duration_ms': best_match.duration_ms,
@@ -16888,14 +16893,23 @@ def cancel_download_task():
                     # Fallback for any other type
                     formatted_artists.append({'name': str(artist)})
             
+            # Build album data - preserve all fields (including artists) for correct folder placement
+            album_raw = track_info.get('album', {})
+            if isinstance(album_raw, dict):
+                album_data = dict(album_raw)  # Copy all fields including artists
+                album_data.setdefault('name', 'Unknown Album')
+                album_data.setdefault('album_type', track_info.get('album_type', 'album'))
+            else:
+                album_data = {
+                    'name': str(album_raw) if album_raw else 'Unknown Album',
+                    'album_type': track_info.get('album_type', 'album')
+                }
+
             spotify_track_data = {
                 'id': track_info.get('id'),
                 'name': track_info.get('name'),
                 'artists': formatted_artists,
-                'album': {
-                    'name': track_info.get('album'),
-                    'album_type': track_info.get('album_type', 'album')  # Use track's album type if available
-                },
+                'album': album_data,
                 'duration_ms': track_info.get('duration_ms')
             }
             
@@ -17335,18 +17349,14 @@ def _add_cancelled_task_to_wishlist(task):
             else:
                 formatted_artists.append({'name': str(artist)})
         
-        # Build album data with all available info
+        # Build album data - preserve all fields (including artists) for correct folder placement
         album_raw = track_info.get('album', {})
         if isinstance(album_raw, dict):
-            album_data = {
-                'name': album_raw.get('name', 'Unknown Album'),
-                'album_type': track_info.get('album_type', 'album')
-            }
-            # Preserve images if present in album object
-            if 'images' in album_raw:
-                album_data['images'] = album_raw['images']
-            # Otherwise, try to get from album_image_url
-            elif track_info.get('album_image_url'):
+            album_data = dict(album_raw)  # Copy all fields including artists
+            album_data.setdefault('name', 'Unknown Album')
+            album_data.setdefault('album_type', track_info.get('album_type', 'album'))
+            # Add images fallback if not present
+            if 'images' not in album_data and track_info.get('album_image_url'):
                 album_data['images'] = [{'url': track_info.get('album_image_url')}]
         else:
             # album is a string (album name)
