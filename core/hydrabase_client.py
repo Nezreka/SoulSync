@@ -160,7 +160,7 @@ class HydrabaseClient:
         for item in results[:limit]:
             try:
                 tracks.append(Track(
-                    id=str(item.get('soul_id', item.get('id', ''))),
+                    id=str(item.get('id', '')),
                     name=item.get('name', ''),
                     artists=item.get('artists', []),
                     album=item.get('album', ''),
@@ -186,7 +186,7 @@ class HydrabaseClient:
         for item in results[:limit]:
             try:
                 artists.append(Artist(
-                    id=str(item.get('soul_id', item.get('id', ''))),
+                    id=str(item.get('id', '')),
                     name=item.get('name', ''),
                     popularity=item.get('popularity', 0),
                     genres=item.get('genres', []),
@@ -257,7 +257,7 @@ class HydrabaseClient:
         for item in results[:limit]:
             try:
                 tracks.append(Track(
-                    id=str(item.get('soul_id', item.get('id', ''))),
+                    id=str(item.get('id', '')),
                     name=item.get('name', ''),
                     artists=item.get('artists', []),
                     album=item.get('album', ''),
