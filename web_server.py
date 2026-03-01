@@ -10558,7 +10558,21 @@ def _post_process_matched_download(context_key, context, file_path):
                     track_info.get('name') or
                     original_search.get('title', '')
                 )
-                expected_artist = spotify_artist.get('name', '')
+
+                # Use track-level artist for verification, NOT album artist.
+                # For compilations, spotify_artist is "Various Artists" which
+                # will never match AcoustID's actual track artist.
+                expected_artist = ''
+                track_artists = track_info.get('artists', [])
+                if track_artists:
+                    first = track_artists[0]
+                    if isinstance(first, dict):
+                        expected_artist = first.get('name', '')
+                    elif isinstance(first, str):
+                        expected_artist = first
+                # Fallback to album artist if no track artists available
+                if not expected_artist:
+                    expected_artist = spotify_artist.get('name', '')
 
                 if expected_track and expected_artist:
                     print(f"🔍 Running AcoustID verification for: '{expected_track}' by '{expected_artist}'")
