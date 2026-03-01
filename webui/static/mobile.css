@@ -101,6 +101,13 @@
         padding: 15px;
     }
 
+    .dashboard-header {
+        margin: -15px -15px 15px -15px;
+        padding: 15px;
+        border-top-left-radius: 20px;
+        border-top-right-radius: 20px;
+    }
+
     #artist-hero-section #artist-detail-image {
         width: 100% !important
     }
