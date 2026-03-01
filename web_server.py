@@ -137,8 +137,8 @@ def extract_filename(full_path):
     Extract filename by working backwards from the end until we hit a separator.
     This is cross-platform compatible and handles both Windows and Unix path separators.
 
-    Special handling for YouTube: If the filename contains '||' (YouTube encoding format),
-    treat it as a filename, not a path, to avoid splitting on '/' in video titles.
+    Special handling for YouTube/Tidal: If the filename contains '||' (encoded format),
+    treat it as a filename, not a path, to avoid splitting on '/' in titles.
     """
     if not full_path:
         return ""
@@ -177,11 +177,14 @@ try:
     matching_engine = MusicMatchingEngine()
     sync_service = PlaylistSyncService(spotify_client, plex_client, soulseek_client, jellyfin_client, navidrome_client)
     
-    # Inject shutdown check callback into YouTube client (avoids circular imports)
+    # Inject shutdown check callback into YouTube and Tidal clients (avoids circular imports)
     # The callback uses the global IS_SHUTTING_DOWN flag from this module
     if hasattr(soulseek_client, 'youtube'):
          soulseek_client.youtube.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
          print("✅ Configured YouTube client shutdown callback")
+    if hasattr(soulseek_client, 'tidal'):
+         soulseek_client.tidal.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
+         print("✅ Configured Tidal download client shutdown callback")
 
     # Initialize web scan manager for automatic post-download scanning
     media_clients = {
@@ -382,12 +385,12 @@ def get_cached_transfer_data():
                     key = _make_context_key(transfer.get('username'), transfer.get('filename', ''))
                     live_transfers_lookup[key] = transfer
 
-            # Also add YouTube downloads (through orchestrator)
+            # Also add YouTube/Tidal downloads (through orchestrator)
             try:
                 all_downloads = run_async(soulseek_client.get_all_downloads())
                 for download in all_downloads:
-                    # Only add YouTube downloads (Soulseek ones are already in the lookup)
-                    if download.username == 'youtube':
+                    # Only add YouTube/Tidal downloads (Soulseek ones are already in the lookup)
+                    if download.username in ('youtube', 'tidal'):
                         key = _make_context_key(download.username, download.filename)
                         # Convert DownloadStatus to transfer dict format
                         live_transfers_lookup[key] = {
@@ -401,7 +404,7 @@ def get_cached_transfer_data():
                             'averageSpeed': download.speed,
                         }
             except Exception as e:
-                print(f"⚠️ Could not fetch YouTube downloads: {e}")
+                print(f"⚠️ Could not fetch YouTube/Tidal downloads: {e}")
 
             # Update cache
             transfer_data_cache['data'] = live_transfers_lookup
@@ -706,12 +709,12 @@ class WebUIDownloadMonitor:
                                     key = _make_context_key(username, file_info.get('filename', ''))
                                     live_transfers[key] = file_info
 
-            # Also get YouTube downloads (through orchestrator)
+            # Also get YouTube/Tidal downloads (through orchestrator)
             try:
                 all_downloads = run_async(soulseek_client.get_all_downloads())
                 for download in all_downloads:
-                    # Only add YouTube downloads (Soulseek ones are already in the lookup)
-                    if download.username == 'youtube':
+                    # Only add YouTube/Tidal downloads (Soulseek ones are already in the lookup)
+                    if download.username in ('youtube', 'tidal'):
                         key = _make_context_key(download.username, download.filename)
                         # Convert DownloadStatus to transfer dict format for monitor compatibility
                         live_transfers[key] = {
@@ -725,7 +728,7 @@ class WebUIDownloadMonitor:
                             'averageSpeed': download.speed,
                         }
             except Exception as yt_error:
-                print(f"⚠️ Monitor: Could not fetch YouTube downloads: {yt_error}")
+                print(f"⚠️ Monitor: Could not fetch YouTube/Tidal downloads: {yt_error}")
 
             return live_transfers
         except Exception as e:
@@ -1568,7 +1571,7 @@ def _prepare_stream_task(track_data):
 
 def _find_streaming_download_in_all_downloads(all_downloads, track_data):
     """
-    Find streaming download in DownloadStatus list (works for both Soulseek and YouTube).
+    Find streaming download in DownloadStatus list (works for Soulseek, YouTube, and Tidal).
     Replaces the old _find_streaming_download_in_transfers function.
     """
     try:
@@ -1600,26 +1603,34 @@ def _find_streaming_download_in_all_downloads(all_downloads, track_data):
         return None
 
 def _find_downloaded_file(download_path, track_data):
-    """Find the downloaded audio file in the downloads directory tree (works for Soulseek and YouTube)"""
+    """Find the downloaded audio file in the downloads directory tree (works for Soulseek, YouTube, and Tidal)"""
     # Ensure path is accessible in Docker (handles E:/ -> /host/mnt/e/)
     download_path = docker_resolve_path(download_path)
     
     audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
     target_filename = extract_filename(track_data.get('filename', ''))
 
-    # YOUTUBE SUPPORT: Handle encoded filename format "video_id||title"
-    # The file on disk will be "title.mp3", not "video_id||title"
+    # YOUTUBE/TIDAL SUPPORT: Handle encoded filename format "id||title"
+    # The file on disk will be "title.ext", not "id||title"
     is_youtube = track_data.get('username') == 'youtube'
+    is_tidal = track_data.get('username') == 'tidal'
+    is_streaming_source = is_youtube or is_tidal
     target_filename_youtube = None
-    if is_youtube and '||' in target_filename:
+    if is_streaming_source and '||' in target_filename:
         _, title = target_filename.split('||', 1)
-        # yt-dlp will create "Title.mp3" from "Title"
-        target_filename_youtube = f"{title}.mp3"
-        print(f"🎵 [YouTube Stream] Looking for file: {target_filename_youtube}")
-    elif is_youtube:
-        # Fallback: if YouTube but no encoded format, use as-is
+        if is_tidal:
+            # Tidal files can be flac or m4a — match any audio extension
+            safe_title = re.sub(r'[<>:"/\\|?*]', '_', title)
+            target_filename_youtube = safe_title  # Extension-less for flexible matching
+            print(f"🎵 [Tidal Stream] Looking for file starting with: {target_filename_youtube}")
+        else:
+            # yt-dlp will create "Title.mp3" from "Title"
+            target_filename_youtube = f"{title}.mp3"
+            print(f"🎵 [YouTube Stream] Looking for file: {target_filename_youtube}")
+    elif is_streaming_source:
+        # Fallback: if streaming source but no encoded format, use as-is
         target_filename_youtube = target_filename
-        print(f"🎵 [YouTube Stream] Using direct filename: {target_filename_youtube}")
+        print(f"🎵 [Stream] Using direct filename: {target_filename_youtube}")
 
     try:
         # Walk through the downloads directory to find the file
@@ -1642,15 +1653,18 @@ def _find_downloaded_file(download_path, track_data):
                     continue
 
                 # Check if this is our target file
-                if is_youtube and target_filename_youtube:
-                    # For YouTube, use fuzzy matching (case-insensitive, flexible)
-                    # Because yt-dlp might sanitize the filename differently
+                if is_streaming_source and target_filename_youtube:
+                    # For YouTube/Tidal, use fuzzy matching (case-insensitive, flexible)
                     from difflib import SequenceMatcher
-                    similarity = SequenceMatcher(None,
-                                                file.lower(),
-                                                target_filename_youtube.lower()).ratio()
+                    # For Tidal, compare without extension (file could be .flac or .m4a)
+                    compare_target = target_filename_youtube.lower()
+                    compare_file = file.lower()
+                    if is_tidal:
+                        compare_file = os.path.splitext(compare_file)[0]
+                    similarity = SequenceMatcher(None, compare_file, compare_target).ratio()
 
-                    print(f"🔍 [YouTube Stream] Comparing: '{file}' vs '{target_filename_youtube}' = {similarity:.2f}")
+                    source_label = 'Tidal' if is_tidal else 'YouTube'
+                    print(f"🔍 [{source_label} Stream] Comparing: '{file}' vs '{target_filename_youtube}' = {similarity:.2f}")
 
                     # Keep track of best match
                     if similarity > best_similarity:
@@ -1667,13 +1681,14 @@ def _find_downloaded_file(download_path, track_data):
                         print(f"✅ Found streaming file: {file_path}")
                         return file_path
 
-        # For YouTube, if we found a good enough match (80%+), use it
-        if is_youtube and best_match and best_similarity >= 0.80:
-            print(f"✅ Found good match ({best_similarity:.2f}) for YouTube streaming file: {best_match}")
+        # For YouTube/Tidal, if we found a good enough match (80%+), use it
+        if is_streaming_source and best_match and best_similarity >= 0.80:
+            source_label = 'Tidal' if is_tidal else 'YouTube'
+            print(f"✅ Found good match ({best_similarity:.2f}) for {source_label} streaming file: {best_match}")
             return best_match
 
         print(f"❌ Could not find downloaded file: {target_filename}")
-        if is_youtube:
+        if is_streaming_source:
             print(f"   Looking for: {target_filename_youtube}")
             print(f"   Best similarity: {best_similarity:.2f}")
         return None
@@ -1798,6 +1813,7 @@ def run_service_test(service, test_config):
                 mode_messages = {
                     'soulseek': "Successfully connected to Soulseek network via slskd.",
                     'youtube': "YouTube download source ready.",
+                    'tidal': "Tidal download source ready.",
                     'hybrid': "Download sources ready (Hybrid mode)."
                 }
                 message = mode_messages.get(download_mode, "Download source connected.")
@@ -1807,6 +1823,7 @@ def run_service_test(service, test_config):
                 mode_errors = {
                     'soulseek': "slskd is not connected to the Soulseek network. Check slskd status and credentials.",
                     'youtube': "YouTube download source not available.",
+                    'tidal': "Tidal download source not available. Check authentication.",
                     'hybrid': "Could not connect to download sources. Check configuration."
                 }
                 error = mode_errors.get(download_mode, "Download source connection failed.")
@@ -2217,6 +2234,10 @@ def get_status():
             }
             _status_cache_timestamps['soulseek'] = current_time
 
+        # Include download source mode so frontend can update labels
+        download_mode = config_manager.get('download_source.mode', 'soulseek')
+        _status_cache['soulseek']['source'] = download_mode
+
         status_data = {
             'spotify': _status_cache['spotify'],
             'media_server': _status_cache['media_server'],
@@ -2514,7 +2535,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'listenbrainz', 'acoustid', 'import', 'lossy_copy']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'listenbrainz', 'acoustid', 'import', 'lossy_copy']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -4346,8 +4367,8 @@ def stream_enhanced_search_track():
         search_queries = []
         import re
 
-        if download_mode == 'youtube' or (download_mode == 'hybrid' and config_manager.get('download_source.hybrid_primary') == 'youtube'):
-            # YouTube mode: Include artist for better context
+        if download_mode in ('youtube', 'tidal') or (download_mode == 'hybrid' and config_manager.get('download_source.hybrid_primary') in ('youtube', 'tidal')):
+            # YouTube/Tidal mode: Include artist for better context
             # Primary query: Artist + Track
             if artist_name and track_name:
                 search_queries.append(f"{artist_name} {track_name}".strip())
@@ -4358,7 +4379,7 @@ def stream_enhanced_search_track():
             if cleaned_name and cleaned_name.lower() != track_name.lower():
                 search_queries.append(f"{artist_name} {cleaned_name}".strip())
 
-            logger.info(f"🔍 YouTube mode: Searching with artist + track name: {search_queries}")
+            logger.info(f"🔍 {download_mode.title()} mode: Searching with artist + track name: {search_queries}")
         else:
             # Soulseek mode: Track name only to avoid keyword filtering
             # Primary query: Full track name
@@ -4519,7 +4540,7 @@ def start_download():
             if download_id:
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
-                is_youtube = username == 'youtube'
+                is_streaming_source = username in ('youtube', 'tidal')
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
                         'search_result': {
@@ -4535,7 +4556,8 @@ def start_download():
                         'spotify_album': None,
                         'track_info': None
                     }
-                    logger.info(f"{'[YouTube]' if is_youtube else '[Soulseek]'} Registered simple download for post-processing: {context_key}")
+                    source_label = username.title() if is_streaming_source else 'Soulseek'
+                    logger.info(f"[{source_label}] Registered simple download for post-processing: {context_key}")
 
                 # Extract track name from filename for activity
                 track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
@@ -4574,7 +4596,7 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
     from difflib import SequenceMatcher
     from unidecode import unidecode
 
-    # YOUTUBE SUPPORT: Handle encoded filename format "video_id||title"
+    # YOUTUBE/TIDAL SUPPORT: Handle encoded filename format "id||title"
     # Extract just the title part for file matching
     if '||' in api_filename:
         _, title = api_filename.split('||', 1)
@@ -4715,7 +4737,7 @@ def get_download_status():
         global _processed_download_ids
         transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
 
-        # Don't return early if no Soulseek transfers - YouTube downloads need to be checked too!
+        # Don't return early if no Soulseek transfers - YouTube/Tidal downloads need to be checked too!
         all_transfers = []
         completed_matched_downloads = []
         # Track files already claimed this poll cycle to prevent two contexts from
@@ -4724,7 +4746,7 @@ def get_download_status():
         _files_claimed_this_cycle = set()
 
         if not transfers_data:
-            # No Soulseek transfers, but continue to check YouTube downloads below
+            # No Soulseek transfers, but continue to check YouTube/Tidal downloads below
             pass
         else:
             # This logic now correctly processes the nested structure from the slskd API
@@ -4882,17 +4904,18 @@ def get_download_status():
             processing_thread.daemon = True
             processing_thread.start()
 
-        # Also include YouTube downloads in the response
+        # Also include YouTube/Tidal downloads in the response
         try:
-            all_youtube_downloads = run_async(soulseek_client.get_all_downloads())
+            all_streaming_downloads = run_async(soulseek_client.get_all_downloads())
 
-            for download in all_youtube_downloads:
-                if download.username == 'youtube':
+            for download in all_streaming_downloads:
+                if download.username in ('youtube', 'tidal'):
+                    source_label = download.username.title()
                     # Convert DownloadStatus to transfer format that frontend expects
-                    youtube_transfer = {
+                    streaming_transfer = {
                         'id': download.id,
                         'filename': download.filename,
-                        'username': 'youtube',
+                        'username': download.username,
                         'state': download.state,
                         'percentComplete': download.progress,
                         'size': download.size,
@@ -4900,12 +4923,12 @@ def get_download_status():
                         'averageSpeed': download.speed,
                         'direction': 'Download',  # Required by frontend
                     }
-                    all_transfers.append(youtube_transfer)
+                    all_transfers.append(streaming_transfer)
 
-                    # Check if YouTube download is completed and needs post-processing
+                    # Check if download is completed and needs post-processing
                     # Verify bytes match before trusting state string
-                    _yt_bytes_ok = download.size <= 0 or download.transferred >= download.size
-                    if _yt_bytes_ok and download.state and ('succeeded' in download.state.lower() or 'completed' in download.state.lower()):
+                    _st_bytes_ok = download.size <= 0 or download.transferred >= download.size
+                    if _st_bytes_ok and download.state and ('succeeded' in download.state.lower() or 'completed' in download.state.lower()):
                         context_key = _make_context_key(download.username, download.filename)
 
                         with matched_context_lock:
@@ -4918,34 +4941,34 @@ def get_download_status():
 
                             if found_path:
                                 # Prevent two contexts from claiming the same physical file
-                                _yt_norm = os.path.normpath(found_path)
-                                if _yt_norm in _files_claimed_this_cycle:
-                                    print(f"⚠️ [YouTube] File already claimed this cycle: {os.path.basename(found_path)} — deferring")
+                                _st_norm = os.path.normpath(found_path)
+                                if _st_norm in _files_claimed_this_cycle:
+                                    print(f"⚠️ [{source_label}] File already claimed this cycle: {os.path.basename(found_path)} — deferring")
                                     continue
-                                _files_claimed_this_cycle.add(_yt_norm)
-                                print(f"🎯 [YouTube] Found completed matched file on disk: {found_path}")
+                                _files_claimed_this_cycle.add(_st_norm)
+                                print(f"🎯 [{source_label}] Found completed matched file on disk: {found_path}")
                                 # Start post-processing thread
-                                def process_youtube_download():
+                                def process_streaming_download(_ctx_key=context_key, _ctx=context, _path=found_path, _label=source_label):
                                     try:
-                                        print(f"🚀 [YouTube] Starting post-processing thread for: {context_key}")
-                                        thread = threading.Thread(target=_post_process_matched_download, args=(context_key, context, found_path))
+                                        print(f"🚀 [{_label}] Starting post-processing thread for: {_ctx_key}")
+                                        thread = threading.Thread(target=_post_process_matched_download, args=(_ctx_key, _ctx, _path))
                                         thread.daemon = True
                                         thread.start()
-                                        _processed_download_ids.add(context_key)
-                                        print(f"✅ [YouTube] Marked as processed: {context_key}")
+                                        _processed_download_ids.add(_ctx_key)
+                                        print(f"✅ [{_label}] Marked as processed: {_ctx_key}")
                                     except Exception as e:
-                                        print(f"❌ [YouTube] Error starting post-processing thread for {context_key}: {e}")
+                                        print(f"❌ [{_label}] Error starting post-processing thread for {_ctx_key}: {e}")
 
-                                processing_thread = threading.Thread(target=process_youtube_download)
+                                processing_thread = threading.Thread(target=process_streaming_download)
                                 processing_thread.daemon = True
                                 processing_thread.start()
                             else:
                                 # File not found - likely already processed and moved to library
                                 # Mark as processed to prevent infinite checking
                                 _processed_download_ids.add(context_key)
-        except Exception as yt_error:
+        except Exception as streaming_error:
             import traceback
-            print(f"⚠️ Could not fetch YouTube downloads for status: {yt_error}")
+            print(f"⚠️ Could not fetch YouTube/Tidal downloads for status: {streaming_error}")
             traceback.print_exc()
 
         return jsonify({"transfers": all_transfers})
@@ -14100,11 +14123,12 @@ def get_valid_candidates(results, spotify_track, query):
     if not initial_candidates:
         return []
 
-    # Skip quality filtering for YouTube results (always MP3 320kbps - no quality options)
-    is_youtube_source = initial_candidates[0].username == "youtube" if initial_candidates else False
+    # Skip quality filtering for YouTube/Tidal results (quality is fixed by source, not user-selectable per-result)
+    is_streaming_source = initial_candidates[0].username in ("youtube", "tidal") if initial_candidates else False
 
-    if is_youtube_source:
-        print(f"🎵 [YouTube] Skipping quality filter - YouTube always provides MP3 320kbps")
+    if is_streaming_source:
+        source_label = initial_candidates[0].username.title()
+        print(f"🎵 [{source_label}] Skipping quality filter - streaming source handles quality internally")
         quality_filtered_candidates = initial_candidates
     else:
         # Filter by user's quality profile before artist verification (Soulseek only)
@@ -14132,8 +14156,8 @@ def get_valid_candidates(results, spotify_track, query):
             artist_word_sets.append(words)
 
     for candidate in quality_filtered_candidates:
-        # Skip artist check for YouTube results (title matching is sufficient as processed by matching engine)
-        if is_youtube_source:
+        # Skip artist check for streaming results (title matching is sufficient as processed by matching engine)
+        if is_streaming_source:
             verified_candidates.append(candidate)
             continue
 
@@ -16211,8 +16235,8 @@ def _store_batch_source(batch_id, username, filename):
     """Browse the successful download's folder and store results on the batch for reuse."""
     _sr = source_reuse_logger
     _sr.info(f"_store_batch_source called: batch={batch_id}, user={username}, file={filename}")
-    if not batch_id or username == 'youtube':
-        _sr.info(f"Skipped — no batch_id or youtube")
+    if not batch_id or username in ('youtube', 'tidal'):
+        _sr.info(f"Skipped — no batch_id or streaming source ({username})")
         return
 
     with tasks_lock:
@@ -18151,6 +18175,46 @@ def get_discover_album(source, album_id):
     except Exception as e:
         logger.error(f"Error fetching discover album: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# ===================================================================
+# TIDAL DOWNLOAD AUTH ENDPOINTS
+# ===================================================================
+
+@app.route('/api/tidal/download/auth/start', methods=['POST'])
+def tidal_download_auth_start():
+    """Start Tidal device-code OAuth flow for download client."""
+    try:
+        tidal_dl = soulseek_client.tidal
+        result = tidal_dl.start_device_auth()
+        if result:
+            return jsonify({"success": True, **result})
+        else:
+            return jsonify({"error": "Failed to start Tidal auth. Is tidalapi installed?"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/tidal/download/auth/check', methods=['GET'])
+def tidal_download_auth_check():
+    """Check status of Tidal device-code OAuth flow."""
+    try:
+        tidal_dl = soulseek_client.tidal
+        result = tidal_dl.check_device_auth()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/tidal/download/auth/status', methods=['GET'])
+def tidal_download_auth_status():
+    """Check if Tidal download client is authenticated."""
+    try:
+        tidal_dl = soulseek_client.tidal
+        authenticated = tidal_dl.is_authenticated()
+        return jsonify({"authenticated": authenticated})
+    except Exception as e:
+        return jsonify({"authenticated": False, "error": str(e)})
 
 
 # ===================================================================

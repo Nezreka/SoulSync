@@ -1835,6 +1835,7 @@ async function loadSettingsData() {
         document.getElementById('download-source-mode').value = settings.download_source?.mode || 'soulseek';
         document.getElementById('hybrid-primary-source').value = settings.download_source?.hybrid_primary || 'soulseek';
         document.getElementById('youtube-min-confidence').value = settings.download_source?.youtube_min_confidence || 0.65;
+        document.getElementById('tidal-download-quality').value = settings.tidal_download?.quality || 'lossless';
 
         // Update UI based on download source mode
         updateDownloadSourceUI();
@@ -1985,12 +1986,17 @@ function toggleServer(serverType) {
 function updateDownloadSourceUI() {
     const mode = document.getElementById('download-source-mode').value;
     const hybridContainer = document.getElementById('hybrid-settings-container');
+    const tidalContainer = document.getElementById('tidal-download-settings-container');
 
     // Show hybrid settings only when hybrid mode is selected
-    if (mode === 'hybrid') {
-        hybridContainer.style.display = 'block';
-    } else {
-        hybridContainer.style.display = 'none';
+    hybridContainer.style.display = mode === 'hybrid' ? 'block' : 'none';
+
+    // Show Tidal download settings when tidal mode is selected
+    tidalContainer.style.display = mode === 'tidal' ? 'block' : 'none';
+
+    // Check Tidal download auth status when switching to tidal mode
+    if (mode === 'tidal') {
+        checkTidalDownloadAuthStatus();
     }
 }
 
@@ -2495,6 +2501,9 @@ async function saveSettings(quiet = false) {
             hybrid_primary: document.getElementById('hybrid-primary-source').value,
             youtube_min_confidence: parseFloat(document.getElementById('youtube-min-confidence').value) || 0.65
         },
+        tidal_download: {
+            quality: document.getElementById('tidal-download-quality').value || 'lossless'
+        },
         database: {
             max_workers: parseInt(document.getElementById('max-workers').value)
         },
@@ -2836,6 +2845,97 @@ async function authenticateTidal() {
         showToast('Failed to start Tidal authentication', 'error');
     } finally {
         hideLoadingOverlay();
+    }
+}
+
+// ===== Tidal Download Auth (Device Flow) =====
+
+async function checkTidalDownloadAuthStatus() {
+    const statusEl = document.getElementById('tidal-download-auth-status');
+    const btn = document.getElementById('tidal-download-auth-btn');
+    try {
+        const resp = await fetch('/api/tidal/download/auth/status');
+        const data = await resp.json();
+        if (data.authenticated) {
+            statusEl.textContent = 'Authenticated';
+            statusEl.style.color = '#4caf50';
+            btn.textContent = 'Re-link Tidal Account';
+        } else {
+            statusEl.textContent = 'Not authenticated';
+            statusEl.style.color = '#ff9800';
+            btn.textContent = 'Link Tidal Account';
+        }
+    } catch (e) {
+        statusEl.textContent = '';
+    }
+}
+
+let _tidalAuthPollTimer = null;
+
+async function startTidalDownloadAuth() {
+    const btn = document.getElementById('tidal-download-auth-btn');
+    const statusEl = document.getElementById('tidal-download-auth-status');
+    const codeEl = document.getElementById('tidal-download-auth-code');
+
+    btn.disabled = true;
+    btn.textContent = 'Starting...';
+    statusEl.textContent = '';
+
+    try {
+        const resp = await fetch('/api/tidal/download/auth/start', { method: 'POST' });
+        const data = await resp.json();
+
+        if (!resp.ok || !data.success) {
+            throw new Error(data.error || 'Failed to start auth');
+        }
+
+        // Show the link/code to the user
+        const uri = data.verification_uri || '';
+        const code = data.user_code || '';
+        codeEl.style.display = 'block';
+        codeEl.innerHTML = `Go to <a href="${uri}" target="_blank" style="color:#1db954;">${uri}</a> and enter code: <strong>${code}</strong>`;
+        btn.textContent = 'Waiting for approval...';
+        statusEl.textContent = 'Waiting...';
+        statusEl.style.color = '#ff9800';
+
+        // Poll for completion
+        if (_tidalAuthPollTimer) clearInterval(_tidalAuthPollTimer);
+        _tidalAuthPollTimer = setInterval(async () => {
+            try {
+                const checkResp = await fetch('/api/tidal/download/auth/check');
+                const checkData = await checkResp.json();
+
+                if (checkData.status === 'completed') {
+                    clearInterval(_tidalAuthPollTimer);
+                    _tidalAuthPollTimer = null;
+                    codeEl.style.display = 'none';
+                    statusEl.textContent = 'Authenticated';
+                    statusEl.style.color = '#4caf50';
+                    btn.disabled = false;
+                    btn.textContent = 'Re-link Tidal Account';
+                    showToast('Tidal download account linked successfully', 'success');
+                } else if (checkData.status === 'error') {
+                    clearInterval(_tidalAuthPollTimer);
+                    _tidalAuthPollTimer = null;
+                    codeEl.style.display = 'none';
+                    statusEl.textContent = 'Auth failed';
+                    statusEl.style.color = '#f44336';
+                    btn.disabled = false;
+                    btn.textContent = 'Link Tidal Account';
+                    showToast('Tidal auth failed: ' + (checkData.message || 'Unknown error'), 'error');
+                }
+                // status === 'pending' — keep polling
+            } catch (pollErr) {
+                console.error('Tidal auth poll error:', pollErr);
+            }
+        }, 3000);
+
+    } catch (error) {
+        console.error('Tidal download auth error:', error);
+        showToast('Failed to start Tidal auth: ' + error.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Link Tidal Account';
+        codeEl.style.display = 'none';
     }
 }
 
@@ -3532,9 +3632,9 @@ function initializeSearchModeToggle() {
 
             const slskdResult = data.result;
 
-            // Check if audio format is supported (YouTube is always MP3, so skip check)
-            const isYouTube = slskdResult.username === 'youtube';
-            if (!isYouTube && slskdResult.filename && !isAudioFormatSupported(slskdResult.filename)) {
+            // Check if audio format is supported (YouTube/Tidal use encoded filenames, skip check)
+            const isStreamingSource = slskdResult.username === 'youtube' || slskdResult.username === 'tidal';
+            if (!isStreamingSource && slskdResult.filename && !isAudioFormatSupported(slskdResult.filename)) {
                 const format = getFileExtension(slskdResult.filename);
                 hideLoadingOverlay();
                 showToast(`Sorry, ${format.toUpperCase()} format is not supported in your browser. Try downloading instead.`, 'error');
@@ -9199,7 +9299,7 @@ async function updateModalWithLiveDownloadProgress() {
                 // Extract display title from filename (handle YouTube encoding)
                 let downloadTitle = '';
                 if (downloadInfo.filename) {
-                    if (downloadInfo.username === 'youtube' && downloadInfo.filename.includes('||')) {
+                    if ((downloadInfo.username === 'youtube' || downloadInfo.username === 'tidal') && downloadInfo.filename.includes('||')) {
                         const parts = downloadInfo.filename.split('||');
                         downloadTitle = parts[1] || parts[0];
                     } else {
@@ -9996,10 +10096,10 @@ function renderQueue(containerId, downloads, isActiveQueue) {
         // Extract display title from filename
         let title = 'Unknown File';
         if (item.filename) {
-            // YouTube filenames are encoded as "video_id||title"
-            if (item.username === 'youtube' && item.filename.includes('||')) {
+            // YouTube/Tidal filenames are encoded as "id||title"
+            if ((item.username === 'youtube' || item.username === 'tidal') && item.filename.includes('||')) {
                 const parts = item.filename.split('||');
-                title = parts[1] || parts[0];  // Use title part, fallback to video_id
+                title = parts[1] || parts[0];  // Use title part, fallback to id
             } else {
                 // Regular Soulseek filename - extract last part of path
                 title = item.filename.split(/[\\/]/).pop();
@@ -10555,9 +10655,9 @@ async function streamTrack(index) {
         const result = window.currentSearchResults[index];
         console.log(`🎵 Streaming track:`, result);
 
-        // Check for unsupported formats before streaming (YouTube is always MP3, so skip check)
-        const isYouTube = result.username === 'youtube';
-        if (!isYouTube && result.filename) {
+        // Check for unsupported formats before streaming (YouTube/Tidal use encoded filenames, skip check)
+        const isStreamingSource = result.username === 'youtube' || result.username === 'tidal';
+        if (!isStreamingSource && result.filename) {
             const format = getFileExtension(result.filename);
             console.log(`🎵 [STREAM CHECK] File: ${result.filename}, Extension: ${format}`);
 
@@ -10594,13 +10694,13 @@ async function streamAlbumTrack(albumIndex, trackIndex) {
         const album = window.currentSearchResults[albumIndex];
         console.log(`🎵 Album data:`, album);
 
-        // Surgical Fix: Handle YouTube results which are "flat" (no tracks array)
-        if (album.username === 'youtube') {
-            // For YouTube results, the "album" is actually the track itself
+        // Surgical Fix: Handle YouTube/Tidal results which are "flat" (no tracks array)
+        if (album.username === 'youtube' || album.username === 'tidal') {
+            // For YouTube/Tidal results, the "album" is actually the track itself
             const track = album;
             const trackData = {
                 ...track,
-                username: 'youtube',
+                username: track.username,
                 filename: track.filename,
                 artist: track.artist,
                 album: track.title, // Use title as album name for player
@@ -10631,9 +10731,9 @@ async function streamAlbumTrack(albumIndex, trackIndex) {
 
         console.log(`🎵 Enhanced track data:`, trackData);
 
-        // Check for unsupported formats before streaming (YouTube is always MP3, so skip check)
-        const isYouTube = trackData.username === 'youtube';
-        if (!isYouTube && trackData.filename && !isAudioFormatSupported(trackData.filename)) {
+        // Check for unsupported formats before streaming (YouTube/Tidal use encoded filenames, skip check)
+        const isStreamingSource2 = trackData.username === 'youtube' || trackData.username === 'tidal';
+        if (!isStreamingSource2 && trackData.filename && !isAudioFormatSupported(trackData.filename)) {
             const format = getFileExtension(trackData.filename);
             showToast(`Sorry, ${format.toUpperCase()} format is not supported in web browsers. Try downloading instead.`, 'error');
             return;
@@ -25137,6 +25237,14 @@ function updateServiceStatus(service, statusData) {
             disconnectBtn.style.display = statusData.source === 'spotify' ? '' : 'none';
         }
     }
+
+    // Update download source title on dashboard card
+    if (service === 'soulseek' && statusData.source) {
+        const sourceNames = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', hybrid: 'Hybrid' };
+        const displayName = sourceNames[statusData.source] || 'Soulseek';
+        const titleEl = document.getElementById('download-source-title');
+        if (titleEl) titleEl.textContent = displayName;
+    }
 }
 
 function updateSidebarServiceStatus(service, statusData) {
@@ -25169,6 +25277,14 @@ function updateSidebarServiceStatus(service, statusData) {
                 const sourceName = statusData.source === 'itunes' ? 'Apple Music' : 'Spotify';
                 musicSourceNameElement.textContent = sourceName;
             }
+        }
+
+        // Update download source name based on configured mode
+        if (service === 'soulseek' && statusData.source) {
+            const sourceNames = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', hybrid: 'Hybrid' };
+            const displayName = sourceNames[statusData.source] || 'Soulseek';
+            const sidebarName = document.getElementById('download-source-name');
+            if (sidebarName) sidebarName.textContent = displayName;
         }
     }
 }

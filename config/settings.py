@@ -188,9 +188,18 @@ class ConfigManager:
                 "transfer_path": "./Transfer"
             },
             "download_source": {
-                "mode": "soulseek",  # Options: "soulseek", "youtube", "hybrid"
+                "mode": "soulseek",  # Options: "soulseek", "youtube", "tidal", "hybrid"
                 "hybrid_primary": "soulseek",  # Which source to try first in hybrid mode
                 "youtube_min_confidence": 0.65  # Minimum confidence for YouTube matches
+            },
+            "tidal_download": {
+                "quality": "lossless",  # Options: "low", "high", "lossless", "hires"
+                "session": {
+                    "token_type": "",
+                    "access_token": "",
+                    "refresh_token": "",
+                    "expiry_time": 0
+                }
             },
             "listenbrainz": {
                 "token": ""

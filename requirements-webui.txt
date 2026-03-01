@@ -43,3 +43,6 @@ pyacoustid>=1.3.0
 
 # WebSocket client for Hydrabase connection
 websocket-client>=1.7.0
+
+# Tidal download support
+tidalapi>=0.7.6
