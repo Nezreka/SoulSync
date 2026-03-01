@@ -28411,13 +28411,13 @@ def import_staging_files():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/import/staging/suggestions', methods=['GET'])
-def import_staging_suggestions():
-    """Suggest albums based on staging folder contents (tags + folder names)."""
+@app.route('/api/import/staging/hints', methods=['GET'])
+def import_staging_hints():
+    """Extract album search hints from staging folder (tags + folder names). Fast — no Spotify calls."""
     try:
         staging_path = _get_staging_path()
         if not os.path.isdir(staging_path):
-            return jsonify({'success': True, 'suggestions': []})
+            return jsonify({'success': True, 'hints': []})
 
         # Collect hints from tags and folder structure
         tag_albums = {}   # (album, artist) -> file count
@@ -28463,7 +28463,6 @@ def import_staging_suggestions():
 
         # Folder-based: parse "Artist - Album" pattern or use as-is
         for folder, count in sorted(folder_hints.items(), key=lambda x: -x[1]):
-            # Try to parse "Artist - Album" folder name
             q = folder.replace('_', ' ')
             if q.lower() not in seen_queries_lower:
                 seen_queries_lower.add(q.lower())
@@ -28472,34 +28471,9 @@ def import_staging_suggestions():
         # Cap at 5 queries to keep it fast
         queries = queries[:5]
 
-        if not queries:
-            return jsonify({'success': True, 'suggestions': []})
-
-        # Search Spotify for each hint, take top 1-2 results per query
-        suggestions = []
-        seen_ids = set()
-        for q in queries:
-            try:
-                albums = spotify_client.search_albums(q, limit=2)
-                for a in albums:
-                    if a.id not in seen_ids:
-                        seen_ids.add(a.id)
-                        suggestions.append({
-                            'id': a.id,
-                            'name': a.name,
-                            'artist': ', '.join(a.artists) if a.artists else 'Unknown Artist',
-                            'release_date': a.release_date or '',
-                            'total_tracks': a.total_tracks,
-                            'image_url': a.image_url,
-                            'album_type': a.album_type or 'album',
-                            'hint_query': q
-                        })
-            except Exception as search_err:
-                logger.warning(f"Suggestion search failed for '{q}': {search_err}")
-
-        return jsonify({'success': True, 'suggestions': suggestions[:8]})
+        return jsonify({'success': True, 'hints': queries})
     except Exception as e:
-        logger.error(f"Error getting staging suggestions: {e}")
+        logger.error(f"Error getting staging hints: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -28837,6 +28811,10 @@ def import_album_process():
 
         add_activity_item("📥", "Album Imported", f"{album_name} by {artist_name} ({processed}/{len(matches)} tracks)", "Now")
 
+        # Rebuild suggestions cache since staging contents changed
+        if processed > 0:
+            refresh_import_suggestions_cache()
+
         return jsonify({
             'success': True,
             'processed': processed,
@@ -28845,6 +28823,42 @@ def import_album_process():
         })
     except Exception as e:
         logger.error(f"Error processing album import: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/import/search/tracks', methods=['GET'])
+def import_search_tracks():
+    """Search Spotify for individual tracks (used for manual singles identification)."""
+    try:
+        query = request.args.get('q', '').strip()
+        if not query:
+            return jsonify({'success': False, 'error': 'Missing query parameter'}), 400
+
+        limit = min(int(request.args.get('limit', 10)), 30)
+
+        if _is_hydrabase_active():
+            tracks = hydrabase_client.search_tracks(query, limit=limit)
+        else:
+            if hydrabase_worker and dev_mode_enabled:
+                hydrabase_worker.enqueue(query, 'track')
+            tracks = spotify_client.search_tracks(query, limit=limit)
+
+        results = []
+        for t in tracks:
+            results.append({
+                'id': t.id,
+                'name': t.name,
+                'artist': ', '.join(t.artists) if hasattr(t, 'artists') and t.artists else 'Unknown Artist',
+                'album': t.album if hasattr(t, 'album') else '',
+                'album_id': t.album_id if hasattr(t, 'album_id') else '',
+                'duration_ms': t.duration_ms if hasattr(t, 'duration_ms') else 0,
+                'image_url': t.image_url if hasattr(t, 'image_url') else '',
+                'track_number': t.track_number if hasattr(t, 'track_number') else 1,
+            })
+
+        return jsonify({'success': True, 'tracks': results})
+    except Exception as e:
+        logger.error(f"Error searching tracks for import: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -28869,9 +28883,10 @@ def import_singles_process():
 
             title = file_info.get('title', '')
             artist = file_info.get('artist', '')
+            spotify_override = file_info.get('spotify_override', None)
 
             # Fallback to filename parsing if no metadata
-            if not title:
+            if not title and not spotify_override:
                 parsed = _parse_filename_metadata(file_info.get('filename', ''))
                 title = parsed.get('title', os.path.splitext(file_info.get('filename', 'Unknown'))[0])
                 if not artist:
@@ -28882,7 +28897,51 @@ def import_singles_process():
             spotify_artist_data = None
             spotify_album_data = None
 
-            if title:
+            # If a manual spotify_override is provided, look up that specific track
+            if spotify_override and spotify_override.get('id'):
+                try:
+                    override_id = spotify_override['id']
+                    sp_track = spotify_client.sp.track(override_id) if hasattr(spotify_client, 'sp') and spotify_client.sp else None
+                    if sp_track:
+                        sp_track_artists = sp_track.get('artists', [])
+                        spotify_track_data = {
+                            'name': sp_track.get('name', ''),
+                            'id': override_id,
+                            'track_number': sp_track.get('track_number', 1),
+                            'disc_number': sp_track.get('disc_number', 1),
+                            'duration_ms': sp_track.get('duration_ms', 0),
+                            'artists': [{'name': a.get('name', '')} for a in sp_track_artists],
+                            'uri': sp_track.get('uri', f"spotify:track:{override_id}")
+                        }
+                        title = sp_track.get('name', title)
+                        artist = sp_track_artists[0].get('name', artist) if sp_track_artists else artist
+                        # Get album info
+                        sp_album_info = sp_track.get('album', {})
+                        if sp_album_info:
+                            spotify_album_data = {
+                                'id': sp_album_info.get('id', ''),
+                                'name': sp_album_info.get('name', ''),
+                                'release_date': sp_album_info.get('release_date', ''),
+                                'total_tracks': sp_album_info.get('total_tracks', 1),
+                                'image_url': (sp_album_info.get('images', [{}])[0].get('url') if sp_album_info.get('images') else '')
+                            }
+                            album_artists = sp_album_info.get('artists', [])
+                            if album_artists:
+                                spotify_artist_data = {
+                                    'name': album_artists[0].get('name', artist),
+                                    'id': album_artists[0].get('id', ''),
+                                    'genres': []
+                                }
+                                try:
+                                    sp_a = spotify_client.sp.artist(album_artists[0]['id']) if hasattr(spotify_client, 'sp') and spotify_client.sp else None
+                                    if sp_a:
+                                        spotify_artist_data['genres'] = sp_a.get('genres', [])
+                                except Exception:
+                                    pass
+                except Exception as override_err:
+                    logger.warning(f"Spotify override lookup failed for track {spotify_override.get('id')}: {override_err}")
+
+            if not spotify_track_data and title:
                 try:
                     search_q = f"{title} {artist}" if artist else title
                     tracks = spotify_client.search_tracks(search_q, limit=1)
@@ -28997,6 +29056,10 @@ def import_singles_process():
 
         add_activity_item("📥", "Singles Imported", f"{processed}/{len(files)} tracks processed", "Now")
 
+        # Rebuild suggestions cache since staging contents changed
+        if processed > 0:
+            refresh_import_suggestions_cache()
+
         return jsonify({
             'success': True,
             'processed': processed,
@@ -29006,6 +29069,138 @@ def import_singles_process():
     except Exception as e:
         logger.error(f"Error processing singles import: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+# --- Import Suggestion Cache (server-side background builder) ---
+
+_import_suggestions_cache = {
+    'suggestions': [],
+    'building': False,
+    'built': False,
+}
+
+def _build_import_suggestions_background():
+    """Background thread: extract hints from staging folder, search Spotify, cache results."""
+    cache = _import_suggestions_cache
+    if cache['building']:
+        return
+    cache['building'] = True
+
+    try:
+        staging_path = _get_staging_path()
+        if not os.path.isdir(staging_path):
+            cache['suggestions'] = []
+            cache['built'] = True
+            cache['building'] = False
+            return
+
+        # Reuse the hint extraction logic
+        tag_albums = {}
+        folder_hints = {}
+
+        for root, _dirs, filenames in os.walk(staging_path):
+            audio_files = [f for f in filenames if os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
+            if not audio_files:
+                continue
+            rel_dir = os.path.relpath(root, staging_path)
+            if rel_dir != '.':
+                top_folder = rel_dir.split(os.sep)[0]
+                folder_hints[top_folder] = folder_hints.get(top_folder, 0) + len(audio_files)
+            for fname in audio_files:
+                full_path = os.path.join(root, fname)
+                try:
+                    from mutagen import File as MutagenFile
+                    tags = MutagenFile(full_path, easy=True)
+                    if tags:
+                        album = (tags.get('album') or [None])[0]
+                        artist = (tags.get('artist') or (tags.get('albumartist') or [None]))[0]
+                        if album:
+                            key = (album.strip(), (artist or '').strip())
+                            tag_albums[key] = tag_albums.get(key, 0) + 1
+                except Exception:
+                    pass
+
+        queries = []
+        seen_lower = set()
+        for (album, artist), _ in sorted(tag_albums.items(), key=lambda x: -x[1]):
+            q = f"{album} {artist}".strip() if artist else album
+            if q.lower() not in seen_lower:
+                seen_lower.add(q.lower())
+                queries.append(q)
+        for folder, _ in sorted(folder_hints.items(), key=lambda x: -x[1]):
+            q = folder.replace('_', ' ')
+            if q.lower() not in seen_lower:
+                seen_lower.add(q.lower())
+                queries.append(q)
+        queries = queries[:5]
+
+        if not queries:
+            cache['suggestions'] = []
+            cache['built'] = True
+            cache['building'] = False
+            return
+
+        suggestions = []
+        seen_ids = set()
+        for q in queries:
+            try:
+                if not spotify_client:
+                    break
+                albums = spotify_client.search_albums(q, limit=2)
+                for a in albums:
+                    if a.id not in seen_ids:
+                        seen_ids.add(a.id)
+                        suggestions.append({
+                            'id': a.id,
+                            'name': a.name,
+                            'artist': ', '.join(a.artists) if a.artists else 'Unknown Artist',
+                            'release_date': a.release_date or '',
+                            'total_tracks': a.total_tracks,
+                            'image_url': a.image_url,
+                            'album_type': a.album_type or 'album',
+                        })
+            except Exception as e:
+                logger.warning(f"Import suggestion search failed for '{q}': {e}")
+
+        cache['suggestions'] = suggestions[:8]
+        cache['built'] = True
+        logger.info(f"Import suggestions cache built: {len(cache['suggestions'])} suggestions from {len(queries)} hints")
+    except Exception as e:
+        logger.error(f"Error building import suggestions cache: {e}")
+        cache['suggestions'] = []
+        cache['built'] = True
+    finally:
+        cache['building'] = False
+
+
+def start_import_suggestions_cache():
+    """Start building the import suggestions cache in a background thread (called on server startup)."""
+    threading.Thread(
+        target=_build_import_suggestions_background,
+        daemon=True,
+        name='import-suggestions-cache'
+    ).start()
+
+
+def refresh_import_suggestions_cache():
+    """Invalidate and rebuild the suggestions cache (called after imports change staging contents)."""
+    _import_suggestions_cache['built'] = False
+    threading.Thread(
+        target=_build_import_suggestions_background,
+        daemon=True,
+        name='import-suggestions-cache'
+    ).start()
+
+
+@app.route('/api/import/staging/suggestions', methods=['GET'])
+def import_staging_suggestions():
+    """Return cached import suggestions. If cache isn't built yet, returns partial/empty with a flag."""
+    cache = _import_suggestions_cache
+    return jsonify({
+        'success': True,
+        'suggestions': cache['suggestions'],
+        'ready': cache['built'],
+    })
+
 
 # ================================================================================================
 # END IMPORT / STAGING SYSTEM
@@ -29049,6 +29244,10 @@ if __name__ == '__main__':
     start_watchlist_auto_scanning()
     print("✅ Automatic watchlist scanning started (5 minute initial delay, 24 hour cycles)")
     
+    # Pre-build import suggestions cache in background
+    print("🔧 Pre-building import suggestions cache...")
+    start_import_suggestions_cache()
+
     # Initialize app start time for uptime tracking
     import time
     app.start_time = time.time()

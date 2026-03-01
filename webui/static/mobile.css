@@ -1925,41 +1925,82 @@
         transition: opacity 0.1s ease;
     }
 
-    /* Import Modal - Mobile */
-    .import-modal {
-        width: 100vw;
-        max-width: 100vw;
-        max-height: 100vh;
-        border-radius: 0;
-        height: 100vh;
+    /* Import Page - Touch fallback */
+    .import-page-file-chip {
+        cursor: pointer;
     }
 
-    .import-album-grid {
+    .import-page-match-row {
+        cursor: pointer;
+    }
+}
+
+/* Import Page — small screen */
+@media (max-width: 768px) {
+    .import-page-container {
+        padding: 16px;
+    }
+
+    .import-page-title {
+        font-size: 22px;
+    }
+
+    .import-page-album-grid {
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
         gap: 10px;
     }
 
-    .import-singles-header {
+    .import-page-album-hero {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .import-page-album-hero img {
+        width: 100px;
+        height: 100px;
+    }
+
+    .import-page-match-row {
+        grid-template-columns: 28px 1fr;
+        gap: 8px;
+    }
+
+    .import-page-match-file {
+        grid-column: 1 / -1;
+        padding-left: 28px;
+    }
+
+    .import-page-match-unmatch {
+        grid-column: 1 / -1;
+        justify-self: end;
+    }
+
+    .import-page-singles-header {
         flex-direction: column;
         align-items: flex-start;
     }
 
-    .import-singles-actions {
+    .import-page-singles-actions {
         width: 100%;
         flex-wrap: wrap;
     }
 
-    .import-match-item {
-        flex-wrap: wrap;
+    .import-page-single-item {
+        grid-template-columns: 28px 1fr;
     }
 
-    .import-match-file {
-        text-align: left;
-        flex-basis: 100%;
+    .import-page-single-actions {
+        grid-column: 1 / -1;
+        justify-self: end;
     }
 
-    .import-album-hero {
+    .import-page-single-search-panel {
+        padding-left: 0;
+    }
+
+    .import-page-staging-bar {
         flex-direction: column;
-        text-align: center;
+        gap: 4px;
+        align-items: flex-start;
     }
 }

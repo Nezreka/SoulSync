@@ -604,6 +604,9 @@ async function loadPageData(pageId) {
                 await loadSettingsData();
                 await loadQualityProfile();
                 break;
+            case 'import':
+                initializeImportPage();
+                break;
             case 'hydrabase':
                 // Check connection status and pre-fill saved credentials
                 try {
@@ -38062,74 +38065,128 @@ if (document.readyState === 'loading') {
 }
 
 // ===================================================================
-// IMPORT / STAGING SYSTEM
+// IMPORT PAGE (full page, replaces old modal)
 // ===================================================================
 
-let currentImportAlbumData = null;
-let currentImportStagingFiles = [];
-let selectedStagingFiles = new Set();
+let importJobIdCounter = 0;
 
-function openImportModal() {
-    document.getElementById('import-modal-overlay').classList.remove('hidden');
-    // Always refresh suggestions when opening — staging path or contents may have changed
-    loadImportSuggestions();
-}
+const importPageState = {
+    stagingFiles: [],
+    selectedSingles: new Set(),
+    albumData: null,          // response from /api/import/album/match
+    matchOverrides: {},       // { trackIndex: stagingFileIndex }  — manual drag-drop overrides
+    singlesManualMatches: {}, // { stagingFileIndex: { id, name, artist, album, ... } }
+    initialized: false,
+    activeTab: 'album',
+    tapSelectedChip: null,    // for mobile tap-to-assign fallback
+};
 
-function closeImportModal() {
-    document.getElementById('import-modal-overlay').classList.add('hidden');
-}
+// --- Initialization ---
 
-function switchImportTab(tab) {
-    // Toggle tab buttons
-    document.getElementById('import-tab-album-btn').classList.toggle('active', tab === 'album');
-    document.getElementById('import-tab-singles-btn').classList.toggle('active', tab === 'singles');
-    // Toggle tab content
-    document.getElementById('import-tab-album').classList.toggle('active', tab === 'album');
-    document.getElementById('import-tab-singles').classList.toggle('active', tab === 'singles');
-    // Auto-load staging files when switching to singles tab
-    if (tab === 'singles' && currentImportStagingFiles.length === 0) {
-        loadStagingFiles();
+function initializeImportPage() {
+    if (!importPageState.initialized) {
+        importPageState.initialized = true;
+        importPageRefreshStaging();
+        importPageLoadSuggestions();
     }
 }
 
-// --- Album Tab ---
+async function importPageRefreshStaging() {
+    // Clear finished jobs from the queue
+    importPageClearFinishedJobs();
 
-async function loadImportSuggestions() {
-    const section = document.getElementById('import-suggestions-section');
-    const grid = document.getElementById('import-suggestions-grid');
-    grid.innerHTML = '';
-    section.classList.add('hidden');
+    // Re-fetch suggestions (server rebuilds cache after imports)
+    importPageLoadSuggestions();
+
+    try {
+        const resp = await fetch('/api/import/staging/files');
+        const data = await resp.json();
+        if (!data.success) {
+            document.getElementById('import-page-staging-path').textContent = `Staging folder: error`;
+            return;
+        }
+
+        importPageState.stagingFiles = data.files || [];
+        document.getElementById('import-page-staging-path').textContent = `Staging: ${data.staging_path || 'Not configured'}`;
+
+        const totalSize = importPageState.stagingFiles.reduce((s, f) => s + (f.size || 0), 0);
+        const sizeStr = totalSize > 1073741824 ? `${(totalSize / 1073741824).toFixed(1)} GB`
+            : totalSize > 1048576 ? `${(totalSize / 1048576).toFixed(0)} MB`
+            : `${(totalSize / 1024).toFixed(0)} KB`;
+        document.getElementById('import-page-staging-stats').textContent =
+            `${importPageState.stagingFiles.length} file${importPageState.stagingFiles.length !== 1 ? 's' : ''}${totalSize ? ' · ' + sizeStr : ''}`;
+
+        // Refresh the current tab view
+        if (importPageState.activeTab === 'singles') {
+            importPageRenderSinglesList();
+        }
+    } catch (err) {
+        console.error('Failed to refresh staging:', err);
+    }
+}
+
+function importPageSwitchTab(tab) {
+    importPageState.activeTab = tab;
+    document.getElementById('import-page-tab-album').classList.toggle('active', tab === 'album');
+    document.getElementById('import-page-tab-singles').classList.toggle('active', tab === 'singles');
+    document.getElementById('import-page-album-content').classList.toggle('active', tab === 'album');
+    document.getElementById('import-page-singles-content').classList.toggle('active', tab === 'singles');
+
+    if (tab === 'singles' && importPageState.stagingFiles.length > 0) {
+        importPageRenderSinglesList();
+    }
+}
+
+// --- Album Tab: Suggestions (server-side cache, just fetch and render) ---
+
+async function importPageLoadSuggestions() {
+    const section = document.getElementById('import-page-suggestions');
+    const grid = document.getElementById('import-page-suggestions-grid');
+    if (!section || !grid) return;
 
     try {
         const resp = await fetch('/api/import/staging/suggestions');
+        if (!resp.ok) return;
         const data = await resp.json();
-        if (!data.success || !data.suggestions || data.suggestions.length === 0) return;
 
-        section.classList.remove('hidden');
-        grid.innerHTML = data.suggestions.map(a => `
-            <div class="import-album-card" onclick="selectImportAlbum('${a.id}')">
-                <img src="${a.image_url || '/static/placeholder.png'}" alt="${a.name}" loading="lazy" onerror="this.src='/static/placeholder.png'">
-                <div class="import-album-card-info">
-                    <div class="import-album-card-title" title="${a.name}">${a.name}</div>
-                    <div class="import-album-card-artist" title="${a.artist}">${a.artist}</div>
-                    <div class="import-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0,4) : ''}</div>
-                </div>
-            </div>
-        `).join('');
+        if (!data.success || !data.suggestions || data.suggestions.length === 0) {
+            if (!data.ready) {
+                // Server is still building cache — show placeholder, retry shortly
+                section.style.display = '';
+                grid.innerHTML = '<div style="color:#888;font-size:13px;padding:8px;">Loading suggestions...</div>';
+                setTimeout(() => importPageLoadSuggestions(), 3000);
+            } else {
+                section.style.display = 'none';
+                grid.innerHTML = '';
+            }
+            return;
+        }
+
+        section.style.display = '';
+        grid.innerHTML = data.suggestions.map(a => _renderSuggestionCard(a)).join('');
     } catch (err) {
-        // Silently fail - suggestions are optional
+        // Network error or server not ready — fail silently
         console.warn('Failed to load import suggestions:', err);
     }
 }
 
-async function searchImportAlbum() {
-    const query = document.getElementById('import-album-search-input').value.trim();
+function _renderSuggestionCard(a) {
+    return `<div class="import-page-album-card" onclick="importPageSelectAlbum('${a.id}')">
+        <img src="${a.image_url || '/static/placeholder.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder.png'">
+        <div class="import-page-album-card-title" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
+        <div class="import-page-album-card-artist" title="${_escAttr(a.artist)}">${_esc(a.artist)}</div>
+        <div class="import-page-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0,4) : ''}</div>
+    </div>`;
+}
+
+// --- Album Tab: Search ---
+
+async function importPageSearchAlbum() {
+    const query = document.getElementById('import-page-album-search-input').value.trim();
     if (!query) return;
 
-    // Hide suggestions once user searches manually
-    document.getElementById('import-suggestions-section').classList.add('hidden');
-
-    const grid = document.getElementById('import-album-results');
+    document.getElementById('import-page-suggestions').style.display = 'none';
+    const grid = document.getElementById('import-page-album-results');
     grid.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">Searching...</div>';
 
     try {
@@ -38140,40 +38197,26 @@ async function searchImportAlbum() {
             return;
         }
         grid.innerHTML = data.albums.map(a => `
-            <div class="import-album-card" onclick="selectImportAlbum('${a.id}')">
-                <img src="${a.image_url || '/static/placeholder.png'}" alt="${a.name}" loading="lazy" onerror="this.src='/static/placeholder.png'">
-                <div class="import-album-card-info">
-                    <div class="import-album-card-title" title="${a.name}">${a.name}</div>
-                    <div class="import-album-card-artist" title="${a.artist}">${a.artist}</div>
-                    <div class="import-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0,4) : ''}</div>
-                </div>
+            <div class="import-page-album-card" onclick="importPageSelectAlbum('${a.id}')">
+                <img src="${a.image_url || '/static/placeholder.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder.png'">
+                <div class="import-page-album-card-title" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
+                <div class="import-page-album-card-artist" title="${_escAttr(a.artist)}">${_esc(a.artist)}</div>
+                <div class="import-page-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0,4) : ''}</div>
             </div>
         `).join('');
-        // Show clear button
-        document.getElementById('import-album-clear-btn').classList.remove('hidden');
+        document.getElementById('import-page-album-clear-btn').classList.remove('hidden');
     } catch (err) {
         grid.innerHTML = `<div style="color:#ef4444;text-align:center;padding:20px;">Error: ${err.message}</div>`;
     }
 }
 
-function clearImportAlbumSearch() {
-    document.getElementById('import-album-search-input').value = '';
-    document.getElementById('import-album-results').innerHTML = '';
-    document.getElementById('import-album-clear-btn').classList.add('hidden');
-    // Re-show suggestions
-    const sugGrid = document.getElementById('import-suggestions-grid');
-    if (sugGrid && sugGrid.children.length > 0) {
-        document.getElementById('import-suggestions-section').classList.remove('hidden');
-    }
-}
+// --- Album Tab: Select Album & Match ---
 
-async function selectImportAlbum(albumId) {
-    // Show match section, hide search
-    document.getElementById('import-album-search-section').classList.add('hidden');
-    document.getElementById('import-album-match-section').classList.remove('hidden');
-    document.getElementById('import-album-progress-section').classList.add('hidden');
+async function importPageSelectAlbum(albumId) {
+    document.getElementById('import-page-album-search-section').classList.add('hidden');
+    document.getElementById('import-page-album-match-section').classList.remove('hidden');
 
-    const matchList = document.getElementById('import-match-list');
+    const matchList = document.getElementById('import-page-match-list');
     matchList.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">Matching files to tracklist...</div>';
 
     try {
@@ -38188,293 +38231,603 @@ async function selectImportAlbum(albumId) {
             return;
         }
 
-        currentImportAlbumData = data;
+        importPageState.albumData = data;
+        importPageState.matchOverrides = {};
 
         // Render hero
         const album = data.album;
-        document.getElementById('import-album-hero').innerHTML = `
-            <img src="${album.image_url || '/static/placeholder.png'}" alt="${album.name}" loading="lazy" onerror="this.src='/static/placeholder.png'">
-            <div class="import-album-hero-info">
-                <h3>${album.name}</h3>
-                <p>${album.artist} · ${album.total_tracks} tracks · ${album.release_date ? album.release_date.substring(0,4) : ''}</p>
+        document.getElementById('import-page-album-hero').innerHTML = `
+            <img src="${album.image_url || '/static/placeholder.png'}" alt="${_escAttr(album.name)}" loading="lazy" onerror="this.src='/static/placeholder.png'">
+            <div class="import-page-album-hero-info">
+                <div class="import-page-album-hero-title">${_esc(album.name)}</div>
+                <div class="import-page-album-hero-artist">${_esc(album.artist)}</div>
+                <div class="import-page-album-hero-meta">${album.total_tracks} tracks · ${album.release_date ? album.release_date.substring(0,4) : ''}</div>
             </div>
         `;
 
-        // Render match list
-        const matchedCount = data.matches.filter(m => m.staging_file).length;
-        matchList.innerHTML = data.matches.map(m => {
-            const hasFile = m.staging_file !== null;
-            const confClass = m.confidence >= 0.7 ? 'high' : m.confidence >= 0.5 ? 'medium' : 'low';
-            return `
-                <div class="import-match-item ${hasFile ? 'matched' : 'unmatched'}">
-                    <span class="import-match-number">${m.spotify_track.track_number}</span>
-                    <span class="import-match-track">${m.spotify_track.name}</span>
-                    <span class="import-match-arrow">${hasFile ? '←' : '✗'}</span>
-                    <span class="import-match-file">${hasFile ? m.staging_file.filename : 'No match'}</span>
-                    ${hasFile ? `<span class="import-match-confidence ${confClass}">${Math.round(m.confidence * 100)}%</span>` : ''}
-                </div>
-            `;
-        }).join('');
-
-        // Stats
-        document.getElementById('import-match-stats').textContent = `${matchedCount} of ${data.matches.length} tracks matched`;
-        const processBtn = document.getElementById('import-album-process-btn');
-        processBtn.disabled = matchedCount === 0;
-        processBtn.textContent = `Process ${matchedCount} Track${matchedCount !== 1 ? 's' : ''}`;
-
+        importPageRenderMatchList();
     } catch (err) {
         matchList.innerHTML = `<div style="color:#ef4444;padding:20px;">Error: ${err.message}</div>`;
     }
 }
 
-function resetImportAlbumSearch() {
-    currentImportAlbumData = null;
-    document.getElementById('import-album-search-section').classList.remove('hidden');
-    document.getElementById('import-album-match-section').classList.add('hidden');
-    document.getElementById('import-album-progress-section').classList.add('hidden');
-    // Reset progress bar state
-    const progressFill = document.getElementById('import-album-progress-fill');
-    const progressBar = document.getElementById('import-album-progress-bar');
-    progressFill.style.width = '0%';
-    progressFill.classList.remove('processing');
-    progressBar.classList.remove('processing');
-    document.getElementById('import-album-progress-actions').classList.add('hidden');
-    // Re-show suggestions if they were loaded
-    const sugGrid = document.getElementById('import-suggestions-grid');
-    if (sugGrid && sugGrid.children.length > 0) {
-        document.getElementById('import-suggestions-section').classList.remove('hidden');
-    }
-    // Refresh suggestions since files may have changed
-    loadImportSuggestions();
-    // Clear search results and hide clear button
-    document.getElementById('import-album-results').innerHTML = '';
-    document.getElementById('import-album-search-input').value = '';
-    document.getElementById('import-album-clear-btn').classList.add('hidden');
-}
+function importPageRenderMatchList() {
+    const data = importPageState.albumData;
+    if (!data) return;
 
-async function processImportAlbum() {
-    if (!currentImportAlbumData) return;
+    const matchList = document.getElementById('import-page-match-list');
+    const overrides = importPageState.matchOverrides;
 
-    const matched = currentImportAlbumData.matches.filter(m => m.staging_file);
-    if (matched.length === 0) return;
+    // Build effective matches: auto-match overridden by manual overrides
+    // Also track which staging files are used (auto or override)
+    const usedStagingFiles = new Set();
 
-    // Show progress
-    document.getElementById('import-album-match-section').classList.add('hidden');
-    document.getElementById('import-album-progress-section').classList.remove('hidden');
-    const progressText = document.getElementById('import-album-progress-text');
-    const progressBar = document.getElementById('import-album-progress-bar');
-    const progressFill = document.getElementById('import-album-progress-fill');
-    const progressResult = document.getElementById('import-album-progress-result');
-    const progressActions = document.getElementById('import-album-progress-actions');
+    // First pass: collect overridden indices
+    Object.values(overrides).forEach(sfIdx => usedStagingFiles.add(sfIdx));
 
-    const total = matched.length;
-    let processed = 0;
-    let errors = [];
-    progressFill.style.width = '0%';
-    progressFill.classList.remove('processing');
-    progressBar.classList.remove('processing');
-    progressResult.textContent = '';
-    progressActions.classList.add('hidden');
+    // Build rows
+    let matchedCount = 0;
+    const rows = data.matches.map((m, idx) => {
+        let file = null;
+        let confidence = m.confidence;
+        let isOverride = false;
 
-    // Process one track at a time for real progress
-    for (let i = 0; i < total; i++) {
-        const trackName = matched[i].spotify_track?.name || `Track ${i + 1}`;
-        progressText.textContent = `Processing ${i + 1}/${total}: ${trackName}`;
-        progressFill.style.width = `${Math.round((i / total) * 100)}%`;
-
-        try {
-            const resp = await fetch('/api/import/album/process', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    album: currentImportAlbumData.album,
-                    matches: [matched[i]]
-                })
+        if (overrides.hasOwnProperty(idx)) {
+            const sfIdx = overrides[idx];
+            if (sfIdx === -1) {
+                // Forcibly unmatched — no file
+                file = null;
+            } else {
+                // Manual override
+                file = importPageState.stagingFiles[sfIdx] || null;
+                confidence = 1.0;
+                isOverride = true;
+                usedStagingFiles.add(sfIdx);
+            }
+        } else if (m.staging_file) {
+            file = m.staging_file;
+            // Check if this file was reassigned to another track via override
+            const autoFileName = m.staging_file.filename;
+            const reassigned = Object.entries(overrides).some(([tIdx, sfIdx]) => {
+                const sf = importPageState.stagingFiles[sfIdx];
+                return sf && sf.filename === autoFileName && parseInt(tIdx) !== idx;
             });
-            const data = await resp.json();
-            if (data.success) {
-                processed += data.processed;
+            if (!reassigned) {
+                usedStagingFiles.add(-1); // placeholder — auto-matched file
+            } else {
+                file = null; // file was reassigned elsewhere
             }
-            if (data.errors && data.errors.length > 0) {
-                errors.push(...data.errors);
-            }
-        } catch (err) {
-            errors.push(`${trackName}: ${err.message}`);
         }
 
-        // Update bar after each track
-        progressFill.style.width = `${Math.round(((i + 1) / total) * 100)}%`;
+        if (file) matchedCount++;
+        const confPercent = Math.round(confidence * 100);
+        const confClass = confidence >= 0.7 ? '' : 'low';
+
+        return `
+            <div class="import-page-match-row ${file ? 'matched' : ''}"
+                 ondragover="importPageHandleDragOver(event)" ondragleave="this.classList.remove('drag-over')" ondrop="importPageHandleDrop(event, ${idx})"
+                 onclick="importPageTapAssign(${idx})">
+                <span class="import-page-match-num">${m.spotify_track.track_number}</span>
+                <span class="import-page-match-track">${_esc(m.spotify_track.name)}</span>
+                <span class="import-page-match-file ${file ? 'has-file' : ''}">
+                    ${file
+                        ? `<span class="import-page-match-file-name">${_esc(file.filename)}</span>
+                           <span class="import-page-match-confidence ${confClass}">${confPercent}%</span>`
+                        : `<span class="import-page-match-drop-zone">Drop a file here</span>`}
+                </span>
+                <span>${file ? `<button class="import-page-match-unmatch" onclick="event.stopPropagation(); importPageUnmatchTrack(${idx})">✕</button>` : ''}</span>
+            </div>
+        `;
+    });
+
+    matchList.innerHTML = rows.join('');
+
+    // Unmatched file pool
+    const unmatchedFiles = [];
+    importPageState.stagingFiles.forEach((f, i) => {
+        // Check if used by override
+        if (Object.values(overrides).includes(i)) return;
+        // Check if used by auto-match (not overridden away)
+        const autoUsed = data.matches.some((m, mIdx) => {
+            if (overrides.hasOwnProperty(mIdx)) return false;
+            return m.staging_file && m.staging_file.filename === f.filename;
+        });
+        if (autoUsed) return;
+        unmatchedFiles.push({file: f, index: i});
+    });
+
+    const poolChips = document.getElementById('import-page-pool-chips');
+    document.getElementById('import-page-unmatched-count').textContent = unmatchedFiles.length;
+
+    if (unmatchedFiles.length === 0) {
+        poolChips.innerHTML = '<span class="import-page-pool-empty">All files matched</span>';
+    } else {
+        poolChips.innerHTML = unmatchedFiles.map(({file, index}) => `
+            <span class="import-page-file-chip ${importPageState.tapSelectedChip === index ? 'selected' : ''}"
+                  draggable="true" ondragstart="importPageStartDrag(event, ${index})"
+                  onclick="event.stopPropagation(); importPageTapSelectChip(${index})">
+                ${_esc(file.filename)}
+            </span>
+        `).join('');
     }
 
-    // Done
-    progressFill.style.width = '100%';
-    if (processed === total) {
-        progressText.textContent = 'Import Complete';
+    // Stats & button
+    document.getElementById('import-page-match-stats').textContent = `${matchedCount} of ${data.matches.length} tracks matched`;
+    const processBtn = document.getElementById('import-page-album-process-btn');
+    processBtn.disabled = matchedCount === 0;
+    processBtn.textContent = `Process ${matchedCount} Track${matchedCount !== 1 ? 's' : ''}`;
+}
+
+// --- Album Tab: Drag and Drop ---
+
+function importPageStartDrag(event, stagingFileIndex) {
+    event.dataTransfer.setData('text/plain', stagingFileIndex.toString());
+    event.dataTransfer.effectAllowed = 'move';
+}
+
+function importPageHandleDragOver(event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    event.currentTarget.classList.add('drag-over');
+    // Remove drag-over from others
+    document.querySelectorAll('.import-page-match-row.drag-over').forEach(el => {
+        if (el !== event.currentTarget) el.classList.remove('drag-over');
+    });
+}
+
+function importPageHandleDrop(event, trackIndex) {
+    event.preventDefault();
+    event.currentTarget.classList.remove('drag-over');
+    const stagingFileIndex = parseInt(event.dataTransfer.getData('text/plain'));
+    if (isNaN(stagingFileIndex)) return;
+
+    // Remove this staging file from any other track it was assigned to
+    Object.keys(importPageState.matchOverrides).forEach(k => {
+        if (importPageState.matchOverrides[k] === stagingFileIndex) {
+            delete importPageState.matchOverrides[k];
+        }
+    });
+
+    importPageState.matchOverrides[trackIndex] = stagingFileIndex;
+    importPageState.tapSelectedChip = null;
+    importPageRenderMatchList();
+}
+
+// Mobile tap-to-assign fallback
+function importPageTapSelectChip(stagingFileIndex) {
+    if (importPageState.tapSelectedChip === stagingFileIndex) {
+        importPageState.tapSelectedChip = null;
     } else {
-        progressText.textContent = `Import Complete (${processed}/${total})`;
+        importPageState.tapSelectedChip = stagingFileIndex;
     }
-    progressResult.innerHTML = `<span style="color:#1ed760">${processed}/${total} tracks processed successfully</span>`;
-    if (errors.length > 0) {
-        progressResult.innerHTML += `<br><span style="color:#ef4444;font-size:12px">${errors.length} error(s): ${errors.join(', ')}</span>`;
+    importPageRenderMatchList();
+}
+
+function importPageTapAssign(trackIndex) {
+    if (importPageState.tapSelectedChip === null) return;
+    const stagingFileIndex = importPageState.tapSelectedChip;
+
+    // Remove from any other track
+    Object.keys(importPageState.matchOverrides).forEach(k => {
+        if (importPageState.matchOverrides[k] === stagingFileIndex) {
+            delete importPageState.matchOverrides[k];
+        }
+    });
+
+    importPageState.matchOverrides[trackIndex] = stagingFileIndex;
+    importPageState.tapSelectedChip = null;
+    importPageRenderMatchList();
+}
+
+function importPageUnmatchTrack(trackIndex) {
+    delete importPageState.matchOverrides[trackIndex];
+    // Also remove auto-match by setting override to -1 special value? No — just delete override and let auto-match stay.
+    // Actually, to truly unmatch: we need to suppress the auto-match too.
+    // We'll use a sentinel: override = -1 means "forcibly unmatched"
+    const m = importPageState.albumData?.matches[trackIndex];
+    if (m && m.staging_file) {
+        importPageState.matchOverrides[trackIndex] = -1; // sentinel: force no match
     }
-    progressActions.classList.remove('hidden');
+    importPageRenderMatchList();
+}
+
+function importPageAutoRematch() {
+    importPageState.matchOverrides = {};
+    importPageState.tapSelectedChip = null;
+    importPageRenderMatchList();
+}
+
+// --- Album Tab: Process ---
+
+function importPageProcessAlbum() {
+    const data = importPageState.albumData;
+    if (!data) return;
+
+    // Build effective matches with overrides applied
+    const overrides = importPageState.matchOverrides;
+    const effectiveMatches = [];
+    data.matches.forEach((m, idx) => {
+        if (overrides.hasOwnProperty(idx)) {
+            if (overrides[idx] === -1) return; // forcibly unmatched — skip
+            const sf = importPageState.stagingFiles[overrides[idx]];
+            effectiveMatches.push({ ...m, staging_file: sf, confidence: 1.0 });
+        } else if (m.staging_file !== null) {
+            effectiveMatches.push(m);
+        }
+    });
+
+    if (effectiveMatches.length === 0) return;
+
+    // Add to queue and reset search immediately so user can queue more
+    const album = data.album;
+    _importQueueAdd({
+        type: 'album',
+        label: album.name,
+        sublabel: `${album.artist} · ${effectiveMatches.length} tracks`,
+        imageUrl: album.image_url,
+        items: effectiveMatches,
+        albumData: album,
+    });
+
+    importPageResetAlbumSearch();
+}
+
+function importPageResetAlbumSearch() {
+    importPageState.albumData = null;
+    importPageState.matchOverrides = {};
+    importPageState.tapSelectedChip = null;
+
+    document.getElementById('import-page-album-search-section').classList.remove('hidden');
+    document.getElementById('import-page-album-match-section').classList.add('hidden');
+
+    // Clear search
+    document.getElementById('import-page-album-results').innerHTML = '';
+    document.getElementById('import-page-album-search-input').value = '';
+    document.getElementById('import-page-album-clear-btn').classList.add('hidden');
+
+    // Refresh suggestions & staging
+    importPageLoadSuggestions();
+    importPageRefreshStaging();
 }
 
 // --- Singles Tab ---
 
-async function loadStagingFiles() {
-    const list = document.getElementById('import-singles-list');
-    list.innerHTML = '<div class="import-singles-empty">Scanning staging folder...</div>';
-    selectedStagingFiles.clear();
-    updateSinglesProcessButton();
+function importPageRenderSinglesList() {
+    const list = document.getElementById('import-page-singles-list');
+    const files = importPageState.stagingFiles;
 
-    try {
-        const resp = await fetch('/api/import/staging/files');
-        const data = await resp.json();
+    if (files.length === 0) {
+        list.innerHTML = '<div class="import-page-empty-state">No audio files found in staging folder</div>';
+        return;
+    }
 
-        if (!data.success) {
-            list.innerHTML = `<div class="import-singles-empty" style="color:#ef4444">Error: ${data.error}</div>`;
-            return;
-        }
+    list.innerHTML = files.map((f, i) => {
+        const isSelected = importPageState.selectedSingles.has(i);
+        const manualMatch = importPageState.singlesManualMatches[i];
+        const searchOpen = document.querySelector(`[data-singles-search="${i}"]`);
 
-        // Show staging path
-        const pathDisplay = document.getElementById('import-staging-path-display');
-        if (pathDisplay) pathDisplay.textContent = `Staging: ${data.staging_path}`;
-
-        currentImportStagingFiles = data.files;
-
-        if (data.files.length === 0) {
-            list.innerHTML = '<div class="import-singles-empty">No audio files found in staging folder</div>';
-            return;
-        }
-
-        list.innerHTML = data.files.map((f, i) => `
-            <div class="import-single-item ${selectedStagingFiles.has(i) ? 'selected' : ''}" onclick="toggleStagingFile(${i})">
-                <input type="checkbox" ${selectedStagingFiles.has(i) ? 'checked' : ''} onclick="event.stopPropagation(); toggleStagingFile(${i})">
-                <div class="import-single-info">
-                    <div class="import-single-title">${f.title || f.filename}</div>
-                    <div class="import-single-artist">${f.artist || 'Unknown Artist'}${f.album ? ' · ' + f.album : ''}</div>
+        let html = `
+            <div class="import-page-single-item ${manualMatch ? 'matched' : ''}" data-single-idx="${i}">
+                <div class="import-page-single-checkbox ${isSelected ? 'checked' : ''}"
+                     onclick="importPageToggleSingle(${i})"></div>
+                <div class="import-page-single-info">
+                    <div class="import-page-single-filename">${_esc(f.filename)}</div>
+                    <div class="import-page-single-meta">
+                        ${f.title ? `<span>${_esc(f.title)}</span>` : ''}
+                        ${f.artist ? `<span>${_esc(f.artist)}</span>` : ''}
+                        ${f.extension ? `<span>${f.extension}</span>` : ''}
+                    </div>
+                    ${manualMatch ? `
+                        <div class="import-page-single-matched-info">
+                            &#10003; ${_esc(manualMatch.name)} - ${_esc(manualMatch.artist)}
+                            <span class="import-page-single-matched-change" onclick="event.stopPropagation(); importPageOpenSingleSearch(${i})">change</span>
+                        </div>
+                    ` : ''}
                 </div>
-                <span class="import-single-ext">${f.extension}</span>
+                <div class="import-page-single-actions">
+                    <button class="import-page-identify-btn" onclick="event.stopPropagation(); importPageOpenSingleSearch(${i})">
+                        &#128269; Identify
+                    </button>
+                </div>
             </div>
-        `).join('');
-    } catch (err) {
-        list.innerHTML = `<div class="import-singles-empty" style="color:#ef4444">Error: ${err.message}</div>`;
-    }
+        `;
+        return html;
+    }).join('');
+
+    importPageUpdateSinglesProcessButton();
 }
 
-function toggleStagingFile(idx) {
-    if (selectedStagingFiles.has(idx)) {
-        selectedStagingFiles.delete(idx);
+function importPageToggleSingle(idx) {
+    if (importPageState.selectedSingles.has(idx)) {
+        importPageState.selectedSingles.delete(idx);
     } else {
-        selectedStagingFiles.add(idx);
+        importPageState.selectedSingles.add(idx);
     }
-    // Update UI
-    const items = document.querySelectorAll('#import-singles-list .import-single-item');
-    items.forEach((item, i) => {
-        item.classList.toggle('selected', selectedStagingFiles.has(i));
-        const cb = item.querySelector('input[type="checkbox"]');
-        if (cb) cb.checked = selectedStagingFiles.has(i);
-    });
-    updateSinglesProcessButton();
+    // Update checkbox UI without full re-render
+    const item = document.querySelector(`[data-single-idx="${idx}"]`);
+    if (item) {
+        const cb = item.querySelector('.import-page-single-checkbox');
+        if (cb) cb.classList.toggle('checked', importPageState.selectedSingles.has(idx));
+    }
+    importPageUpdateSinglesProcessButton();
 }
 
-function selectAllStagingFiles() {
-    if (selectedStagingFiles.size === currentImportStagingFiles.length) {
-        // Deselect all
-        selectedStagingFiles.clear();
+function importPageSelectAllSingles() {
+    const allSelected = importPageState.selectedSingles.size === importPageState.stagingFiles.length;
+    if (allSelected) {
+        importPageState.selectedSingles.clear();
     } else {
-        // Select all
-        currentImportStagingFiles.forEach((_, i) => selectedStagingFiles.add(i));
+        importPageState.stagingFiles.forEach((_, i) => importPageState.selectedSingles.add(i));
     }
-    // Update UI
-    const items = document.querySelectorAll('#import-singles-list .import-single-item');
-    items.forEach((item, i) => {
-        item.classList.toggle('selected', selectedStagingFiles.has(i));
-        const cb = item.querySelector('input[type="checkbox"]');
-        if (cb) cb.checked = selectedStagingFiles.has(i);
+    document.getElementById('import-page-select-all-text').textContent = allSelected ? 'Select All' : 'Deselect All';
+    // Update all checkboxes
+    document.querySelectorAll('.import-page-single-checkbox').forEach((cb, i) => {
+        cb.classList.toggle('checked', importPageState.selectedSingles.has(i));
     });
-    updateSinglesProcessButton();
+    importPageUpdateSinglesProcessButton();
 }
 
-function updateSinglesProcessButton() {
-    const btn = document.getElementById('import-singles-process-btn');
-    const count = selectedStagingFiles.size;
+function importPageUpdateSinglesProcessButton() {
+    const btn = document.getElementById('import-page-singles-process-btn');
+    const count = importPageState.selectedSingles.size;
     btn.textContent = `Process Selected (${count})`;
     btn.disabled = count === 0;
 }
 
-async function processImportSingles() {
-    if (selectedStagingFiles.size === 0) return;
+function importPageOpenSingleSearch(fileIdx) {
+    const item = document.querySelector(`[data-single-idx="${fileIdx}"]`);
+    if (!item) return;
 
-    const filesToProcess = Array.from(selectedStagingFiles).map(i => currentImportStagingFiles[i]);
-
-    // Show progress
-    document.getElementById('import-singles-progress-section').classList.remove('hidden');
-    const progressText = document.getElementById('import-singles-progress-text');
-    const progressBar = document.getElementById('import-singles-progress-bar');
-    const progressFill = document.getElementById('import-singles-progress-fill');
-    const progressResult = document.getElementById('import-singles-progress-result');
-    const progressActions = document.getElementById('import-singles-progress-actions');
-
-    const total = filesToProcess.length;
-    let processed = 0;
-    let errors = [];
-    progressFill.style.width = '0%';
-    progressFill.classList.remove('processing');
-    progressBar.classList.remove('processing');
-    progressResult.textContent = '';
-    progressActions.classList.add('hidden');
-
-    // Process one file at a time for real progress
-    for (let i = 0; i < total; i++) {
-        const fileName = filesToProcess[i].title || filesToProcess[i].filename || `File ${i + 1}`;
-        progressText.textContent = `Processing ${i + 1}/${total}: ${fileName}`;
-        progressFill.style.width = `${Math.round((i / total) * 100)}%`;
-
-        try {
-            const resp = await fetch('/api/import/singles/process', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({files: [filesToProcess[i]]})
-            });
-            const data = await resp.json();
-            if (data.success) {
-                processed += data.processed;
-            }
-            if (data.errors && data.errors.length > 0) {
-                errors.push(...data.errors);
-            }
-        } catch (err) {
-            errors.push(`${fileName}: ${err.message}`);
-        }
-
-        progressFill.style.width = `${Math.round(((i + 1) / total) * 100)}%`;
+    // Remove any existing search panel
+    const existing = item.querySelector('.import-page-single-search-panel');
+    if (existing) {
+        existing.remove();
+        return;
     }
 
-    // Done
-    progressFill.style.width = '100%';
-    selectedStagingFiles.clear();
-    updateSinglesProcessButton();
+    // Close other open panels
+    document.querySelectorAll('.import-page-single-search-panel').forEach(p => p.remove());
 
-    if (processed === total) {
-        progressText.textContent = 'Import Complete';
-    } else {
-        progressText.textContent = `Import Complete (${processed}/${total})`;
-    }
-    progressResult.innerHTML = `<span style="color:#1ed760">${processed}/${total} tracks processed successfully</span>`;
-    if (errors.length > 0) {
-        progressResult.innerHTML += `<br><span style="color:#ef4444;font-size:12px">${errors.length} error(s): ${errors.join(', ')}</span>`;
-    }
-    progressActions.classList.remove('hidden');
+    const f = importPageState.stagingFiles[fileIdx];
+    const defaultQuery = [f.artist, f.title].filter(Boolean).join(' ') || f.filename.replace(/\.[^.]+$/, '');
 
-    // Pre-refresh the file list in the background so it's ready when user clicks "Import More"
-    loadStagingFiles();
-    // Also refresh album suggestions since staging contents changed
-    loadImportSuggestions();
+    const panel = document.createElement('div');
+    panel.className = 'import-page-single-search-panel';
+    panel.innerHTML = `
+        <div class="import-page-single-search-bar">
+            <input type="text" class="import-page-single-search-input"
+                   value="${_escAttr(defaultQuery)}" placeholder="Search artist - title..."
+                   onkeydown="if(event.key==='Enter')importPageSearchSingleTrack(${fileIdx}, this.value)">
+            <button class="import-page-single-search-go"
+                    onclick="importPageSearchSingleTrack(${fileIdx}, this.previousElementSibling.value)">Search</button>
+        </div>
+        <div class="import-page-single-search-results" id="import-single-results-${fileIdx}"></div>
+    `;
+    item.appendChild(panel);
+
+    // Auto-search
+    const input = panel.querySelector('input');
+    input.focus();
+    if (defaultQuery) {
+        importPageSearchSingleTrack(fileIdx, defaultQuery);
+    }
 }
 
-function resetImportSingles() {
-    document.getElementById('import-singles-progress-section').classList.add('hidden');
-    loadStagingFiles();
+async function importPageSearchSingleTrack(fileIdx, query) {
+    if (!query || !query.trim()) return;
+
+    const resultsDiv = document.getElementById(`import-single-results-${fileIdx}`);
+    if (!resultsDiv) return;
+    resultsDiv.innerHTML = '<div style="color:#888;padding:8px;font-size:12px;">Searching...</div>';
+
+    try {
+        const resp = await fetch(`/api/import/search/tracks?q=${encodeURIComponent(query.trim())}&limit=6`);
+        const data = await resp.json();
+        if (!data.success || !data.tracks.length) {
+            resultsDiv.innerHTML = '<div style="color:#888;padding:8px;font-size:12px;">No results found</div>';
+            return;
+        }
+        // Store results in a temp cache so we can reference by index
+        window._importSingleSearchResults = window._importSingleSearchResults || {};
+        window._importSingleSearchResults[fileIdx] = data.tracks;
+
+        resultsDiv.innerHTML = data.tracks.map((t, tIdx) => {
+            const dur = t.duration_ms ? `${Math.floor(t.duration_ms / 60000)}:${String(Math.floor((t.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '';
+            return `
+                <div class="import-page-single-result-item" onclick="importPageSelectSingleMatch(${fileIdx}, ${tIdx})">
+                    ${t.image_url ? `<img class="import-page-single-result-img" src="${t.image_url}" onerror="this.src='/static/placeholder.png'">` : ''}
+                    <div class="import-page-single-result-info">
+                        <div class="import-page-single-result-name">${_esc(t.name)} - ${_esc(t.artist)}</div>
+                        <div class="import-page-single-result-detail">${_esc(t.album)}${dur ? ' · ' + dur : ''}</div>
+                    </div>
+                    <button class="import-page-single-result-select">Select</button>
+                </div>
+            `;
+        }).join('');
+    } catch (err) {
+        resultsDiv.innerHTML = `<div style="color:#ef4444;padding:8px;font-size:12px;">Error: ${err.message}</div>`;
+    }
+}
+
+function importPageSelectSingleMatch(fileIdx, trackIdx) {
+    const trackData = window._importSingleSearchResults?.[fileIdx]?.[trackIdx];
+    if (!trackData) return;
+    importPageState.singlesManualMatches[fileIdx] = trackData;
+
+    // Auto-select this file
+    importPageState.selectedSingles.add(fileIdx);
+
+    // Close search panel and re-render this item
+    importPageRenderSinglesList();
+}
+
+// --- Singles Tab: Process ---
+
+function importPageProcessSingles() {
+    if (importPageState.selectedSingles.size === 0) return;
+
+    const filesToProcess = Array.from(importPageState.selectedSingles).map(i => {
+        const f = importPageState.stagingFiles[i];
+        const manualMatch = importPageState.singlesManualMatches[i];
+        if (manualMatch) {
+            return { ...f, spotify_override: manualMatch };
+        }
+        return f;
+    });
+
+    // Add to queue and reset immediately
+    _importQueueAdd({
+        type: 'singles',
+        label: `${filesToProcess.length} Single${filesToProcess.length !== 1 ? 's' : ''}`,
+        sublabel: filesToProcess.map(f => f.title || f.filename).slice(0, 3).join(', ') + (filesToProcess.length > 3 ? '...' : ''),
+        imageUrl: null,
+        items: filesToProcess,
+    });
+
+    importPageState.selectedSingles.clear();
+    importPageState.singlesManualMatches = {};
+    importPageUpdateSinglesProcessButton();
+    importPageRefreshStaging();
+}
+
+// --- Processing Queue ---
+
+const _importQueue = []; // { id, type, label, sublabel, imageUrl, status, processed, total, errors }
+
+function _importQueueAdd(job) {
+    const id = ++importJobIdCounter;
+    const entry = {
+        id,
+        type: job.type,
+        label: job.label,
+        sublabel: job.sublabel,
+        imageUrl: job.imageUrl,
+        status: 'running',   // running | done | error
+        processed: 0,
+        total: job.items.length,
+        errors: [],
+    };
+    _importQueue.push(entry);
+    _importQueueRender();
+
+    // Fire and forget — runs in background
+    _importQueueRunJob(entry, job);
+}
+
+async function _importQueueRunJob(entry, job) {
+    for (let i = 0; i < job.items.length; i++) {
+        try {
+            let resp;
+            if (job.type === 'album') {
+                resp = await fetch('/api/import/album/process', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        album: job.albumData,
+                        matches: [job.items[i]]
+                    })
+                });
+            } else {
+                resp = await fetch('/api/import/singles/process', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ files: [job.items[i]] })
+                });
+            }
+
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            if (data.success) entry.processed += (data.processed || 0);
+            if (data.errors && data.errors.length > 0) entry.errors.push(...data.errors);
+        } catch (err) {
+            const itemName = job.type === 'album'
+                ? (job.items[i].spotify_track?.name || `Track ${i + 1}`)
+                : (job.items[i].title || job.items[i].filename || `File ${i + 1}`);
+            entry.errors.push(`${itemName}: ${err.message}`);
+        }
+
+        _importQueueRender();
+    }
+
+    entry.status = entry.errors.length > 0 && entry.processed === 0 ? 'error' : 'done';
+    _importQueueRender();
+
+    // Refresh staging and suggestions since files moved
+    importPageRefreshStaging();
+    importPageLoadSuggestions();
+}
+
+function _importQueueRender() {
+    const container = document.getElementById('import-page-queue');
+    const list = document.getElementById('import-page-queue-list');
+    const clearBtn = document.getElementById('import-page-queue-clear');
+    if (!container || !list) return;
+
+    if (_importQueue.length === 0) {
+        container.classList.add('hidden');
+        return;
+    }
+
+    container.classList.remove('hidden');
+
+    // Show clear button only if there are finished jobs
+    const hasFinished = _importQueue.some(j => j.status !== 'running');
+    clearBtn.style.display = hasFinished ? '' : 'none';
+
+    list.innerHTML = _importQueue.map(j => {
+        const pct = j.total > 0 ? Math.round((j.processed / j.total) * 100) : 0;
+        const fillClass = j.status === 'error' ? 'error' : '';
+        let statusText, statusClass;
+        if (j.status === 'running') {
+            statusText = `${j.processed}/${j.total}`;
+            statusClass = '';
+        } else if (j.status === 'done') {
+            statusText = j.errors.length > 0 ? `${j.processed}/${j.total} (${j.errors.length} err)` : 'Done';
+            statusClass = j.errors.length > 0 ? 'error' : 'done';
+        } else {
+            statusText = 'Failed';
+            statusClass = 'error';
+        }
+
+        return `
+            <div class="import-page-queue-item">
+                ${j.imageUrl
+                    ? `<img class="import-page-queue-art" src="${j.imageUrl}" onerror="this.src='/static/placeholder.png'">`
+                    : `<div class="import-page-queue-art" style="background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;font-size:18px;color:rgba(255,255,255,0.3);">&#9834;</div>`}
+                <div class="import-page-queue-info">
+                    <div class="import-page-queue-name">${_esc(j.label)}</div>
+                    <div class="import-page-queue-detail">${_esc(j.sublabel)}</div>
+                </div>
+                <div class="import-page-queue-progress">
+                    <div class="import-page-queue-bar">
+                        <div class="import-page-queue-fill ${fillClass}" style="width:${j.status === 'done' || j.status === 'error' ? 100 : pct}%"></div>
+                    </div>
+                    <div class="import-page-queue-status ${statusClass}">${statusText}</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function importPageClearFinishedJobs() {
+    for (let i = _importQueue.length - 1; i >= 0; i--) {
+        if (_importQueue[i].status !== 'running') {
+            _importQueue.splice(i, 1);
+        }
+    }
+    _importQueueRender();
+}
+
+// --- Helpers ---
+
+function _esc(str) {
+    if (!str) return '';
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+}
+
+function _escAttr(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
