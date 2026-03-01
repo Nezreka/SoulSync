@@ -4307,11 +4307,12 @@ async function rehydrateEnhancedSearchModal(virtualPlaylistId, playlistName, bat
         const { item, type } = downloadData;
 
         if (type === 'album') {
-            // For albums, fetch tracks from Spotify API
+            // For albums, fetch tracks (pass name/artist for Hydrabase support)
             console.log(`💧 Album download - fetching album ${item.id}...`);
 
             try {
-                const response = await fetch(`/api/spotify/album/${item.id}`);
+                const _sap1 = new URLSearchParams({ name: item.name || '', artist: item.artist || '' });
+                const response = await fetch(`/api/spotify/album/${item.id}?${_sap1}`);
                 if (!response.ok) {
                     console.error(`❌ Failed to fetch album: ${response.status}`);
                     return;
@@ -13307,10 +13308,11 @@ async function confirmMatch() {
             console.log('🎵 Fetching Spotify tracklist for album:', currentMatchingData.selectedAlbum.name);
 
             try {
-                // Fetch Spotify album tracks
+                // Fetch album tracks (pass name/artist for Hydrabase support)
                 const artistId = currentMatchingData.selectedArtist.id;
                 const albumId = currentMatchingData.selectedAlbum.id;
-                const tracksResponse = await fetch(`/api/artist/${artistId}/album/${albumId}/tracks`);
+                const _aat3 = new URLSearchParams({ name: currentMatchingData.selectedAlbum.name || '', artist: currentMatchingData.selectedArtist.name || '' });
+                const tracksResponse = await fetch(`/api/artist/${artistId}/album/${albumId}/tracks?${_aat3}`);
 
                 if (!tracksResponse.ok) {
                     throw new Error(`Failed to fetch Spotify tracks: ${tracksResponse.status}`);
@@ -23289,8 +23291,9 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
     try {
         // Loading overlay already shown by handleArtistAlbumClick
 
-        // Fetch album tracks from backend
-        const response = await fetch(`/api/artist/${artist.id}/album/${album.id}/tracks`);
+        // Fetch album tracks from backend (pass name/artist for Hydrabase support)
+        const _aat1 = new URLSearchParams({ name: album.name || '', artist: artist.name || '' });
+        const response = await fetch(`/api/artist/${artist.id}/album/${album.id}/tracks?${_aat1}`);
 
         if (!response.ok) {
             if (response.status === 401) {
@@ -24148,11 +24151,12 @@ async function reopenDownloadModal(virtualPlaylistId) {
         // For albums, we need to fetch the tracks
         console.log(`📥 [REOPEN] Recreating album modal for: ${item.name}`);
 
-        // Fetch album tracks from Spotify API
+        // Fetch album tracks (pass name/artist for Hydrabase support)
         showLoadingOverlay(`Loading ${item.name}...`);
 
         try {
-            const response = await fetch(`/api/spotify/album/${item.id}`);
+            const _sap2 = new URLSearchParams({ name: item.name || '', artist: item.artist || '' });
+            const response = await fetch(`/api/spotify/album/${item.id}?${_sap2}`);
             if (!response.ok) {
                 throw new Error('Failed to fetch album tracks');
             }
@@ -28127,8 +28131,9 @@ function createReleaseCard(release) {
                 return;
             }
 
-            // Load tracks for the album
-            const response = await fetch(`/api/artist/${currentArtist.id}/album/${albumData.id}/tracks`);
+            // Load tracks for the album (pass name/artist for Hydrabase support)
+            const _aat2 = new URLSearchParams({ name: albumData.name || '', artist: currentArtist.name || '' });
+            const response = await fetch(`/api/artist/${currentArtist.id}/album/${albumData.id}/tracks?${_aat2}`);
             if (!response.ok) {
                 throw new Error(`Failed to load album tracks: ${response.status}`);
             }
@@ -35380,8 +35385,9 @@ async function openDownloadModalForSeasonalAlbum(albumIndex) {
             throw new Error('No album ID available');
         }
 
-        // Fetch album tracks from appropriate source via backend
-        const response = await fetch(`/api/discover/album/${source}/${albumId}`);
+        // Fetch album tracks from appropriate source (pass name/artist for Hydrabase support)
+        const _dap1 = new URLSearchParams({ name: album.album_name || '', artist: album.artist_name || '' });
+        const response = await fetch(`/api/discover/album/${source}/${albumId}?${_dap1}`);
         if (!response.ok) {
             throw new Error('Failed to fetch album tracks');
         }
@@ -36291,8 +36297,9 @@ async function openDownloadModalForRecentAlbum(albumIndex) {
             throw new Error(`No ${source} album ID available`);
         }
 
-        // Fetch album tracks from appropriate source via backend
-        const response = await fetch(`/api/discover/album/${source}/${albumId}`);
+        // Fetch album tracks from appropriate source (pass name/artist for Hydrabase support)
+        const _dap2 = new URLSearchParams({ name: album.album_name || '', artist: album.artist_name || '' });
+        const response = await fetch(`/api/discover/album/${source}/${albumId}?${_dap2}`);
         if (!response.ok) {
             throw new Error('Failed to fetch album tracks');
         }
