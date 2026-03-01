@@ -325,6 +325,104 @@ const API = {
 // INITIALIZATION
 // ===============================
 
+// ---- Accent Color System ----
+
+function getAccentFallbackColors() {
+    const accent = localStorage.getItem('soulsync-accent') || '#1db954';
+    // Compute a lighter variant for the second color
+    const r = parseInt(accent.slice(1, 3), 16), g = parseInt(accent.slice(3, 5), 16), b = parseInt(accent.slice(5, 7), 16);
+    const lighter = '#' + [Math.min(r + 20, 255), Math.min(g + 30, 255), Math.min(b + 12, 255)]
+        .map(v => v.toString(16).padStart(2, '0')).join('');
+    return [accent, lighter];
+}
+
+function applyAccentColor(hex) {
+    // Convert hex to RGB
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+
+    // Convert RGB to HSL
+    const rn = r / 255, gn = g / 255, bn = b / 255;
+    const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
+    const l = (max + min) / 2;
+    let h = 0, s = 0;
+    if (max !== min) {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6;
+        else if (max === gn) h = ((bn - rn) / d + 2) / 6;
+        else h = ((rn - gn) / d + 4) / 6;
+    }
+
+    // Compute light variant: +16% lightness
+    const lightL = Math.min(l + 0.16, 0.95);
+    // Compute neon variant: high lightness + boosted saturation
+    const neonL = Math.min(l + 0.30, 0.95);
+    const neonS = Math.min(s + 0.1, 1.0);
+
+    function hslToRgb(h, s, l) {
+        if (s === 0) { const v = Math.round(l * 255); return [v, v, v]; }
+        const hue2rgb = (p, q, t) => {
+            if (t < 0) t += 1; if (t > 1) t -= 1;
+            if (t < 1/6) return p + (q - p) * 6 * t;
+            if (t < 1/2) return q;
+            if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+            return p;
+        };
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        return [Math.round(hue2rgb(p, q, h + 1/3) * 255),
+                Math.round(hue2rgb(p, q, h) * 255),
+                Math.round(hue2rgb(p, q, h - 1/3) * 255)];
+    }
+
+    const light = hslToRgb(h, s, lightL);
+    const neon = hslToRgb(h, neonS, neonL);
+
+    const root = document.documentElement.style;
+    root.setProperty('--accent-rgb', `${r}, ${g}, ${b}`);
+    root.setProperty('--accent-light-rgb', `${light[0]}, ${light[1]}, ${light[2]}`);
+    root.setProperty('--accent-neon-rgb', `${neon[0]}, ${neon[1]}, ${neon[2]}`);
+
+    // Store for instant restore on next page load
+    localStorage.setItem('soulsync-accent', hex);
+
+    // Update preview swatch if it exists
+    const swatch = document.getElementById('accent-preview-swatch');
+    if (swatch) swatch.style.background = hex;
+}
+
+function initAccentColorListeners() {
+    const presetSelect = document.getElementById('accent-preset');
+    const customGroup = document.getElementById('custom-color-group');
+    const customPicker = document.getElementById('accent-custom-color');
+    if (!presetSelect) return;
+
+    presetSelect.addEventListener('change', () => {
+        const val = presetSelect.value;
+        if (val === 'custom') {
+            customGroup.style.display = '';
+            applyAccentColor(customPicker.value);
+        } else {
+            customGroup.style.display = 'none';
+            applyAccentColor(val);
+        }
+    });
+
+    if (customPicker) {
+        customPicker.addEventListener('input', () => {
+            applyAccentColor(customPicker.value);
+        });
+    }
+}
+
+// Bootstrap accent from localStorage instantly (prevents default-color flash)
+(function() {
+    const saved = localStorage.getItem('soulsync-accent');
+    if (saved) applyAccentColor(saved);
+})();
+
 document.addEventListener('DOMContentLoaded', function () {
     console.log('SoulSync WebUI initializing...');
 
@@ -614,7 +712,7 @@ async function loadPageData(pageId) {
                     const hsData = await hsResp.json();
                     _hydrabaseConnected = hsData.connected;
                     document.getElementById('hydra-connection-status').textContent = hsData.connected ? 'Connected' : 'Disconnected';
-                    document.getElementById('hydra-connection-status').style.color = hsData.connected ? '#1ed760' : '#888';
+                    document.getElementById('hydra-connection-status').style.color = hsData.connected ? 'rgb(var(--accent-light-rgb))' : '#888';
                     document.getElementById('hydra-connect-btn').textContent = hsData.connected ? 'Disconnect' : 'Connect';
                     // Pre-fill saved credentials
                     if (hsData.saved_url) {
@@ -1593,6 +1691,9 @@ function initializeSettings() {
     // This function is called when the settings page is loaded.
     // It attaches event listeners to all interactive elements on the page.
 
+    // Accent color listeners (live preview + custom picker toggle)
+    initAccentColorListeners();
+
     // Main save button (manual save, non-quiet)
     // Uses named function reference so addEventListener deduplicates across repeated calls
     const saveButton = document.getElementById('save-settings');
@@ -1870,6 +1971,30 @@ async function loadSettingsData() {
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
 
+        // Populate UI Appearance settings
+        const accentPreset = settings.ui_appearance?.accent_preset || '#1db954';
+        const accentCustom = settings.ui_appearance?.accent_color || '#1db954';
+        const presetSelect = document.getElementById('accent-preset');
+        const customPicker = document.getElementById('accent-custom-color');
+        const customGroup = document.getElementById('custom-color-group');
+        if (presetSelect) {
+            // Check if the saved preset matches a dropdown option
+            const presetOptions = Array.from(presetSelect.options).map(o => o.value);
+            if (presetOptions.includes(accentPreset)) {
+                presetSelect.value = accentPreset;
+            } else {
+                presetSelect.value = 'custom';
+            }
+            if (presetSelect.value === 'custom') {
+                if (customGroup) customGroup.style.display = '';
+                if (customPicker) customPicker.value = accentCustom;
+                applyAccentColor(accentCustom);
+            } else {
+                if (customGroup) customGroup.style.display = 'none';
+                applyAccentColor(accentPreset);
+            }
+        }
+
         // Populate Logging information (read-only)
         document.getElementById('log-level-display').textContent = settings.logging?.level || 'INFO';
         document.getElementById('log-path-display').textContent = settings.logging?.path || 'logs/app.log';
@@ -1902,7 +2027,7 @@ async function loadSettingsData() {
             const devData = await devResponse.json();
             if (devData.enabled) {
                 document.getElementById('dev-mode-status').textContent = 'Active';
-                document.getElementById('dev-mode-status').style.color = '#1ed760';
+                document.getElementById('dev-mode-status').style.color = 'rgb(var(--accent-light-rgb))';
                 document.getElementById('hydrabase-nav').style.display = '';
                 document.getElementById('hydrabase-button-container').style.display = '';
             }
@@ -2278,7 +2403,7 @@ async function activateDevMode() {
         const data = await response.json();
         if (data.success) {
             document.getElementById('dev-mode-status').textContent = 'Active';
-            document.getElementById('dev-mode-status').style.color = '#1ed760';
+            document.getElementById('dev-mode-status').style.color = 'rgb(var(--accent-light-rgb))';
             document.getElementById('hydrabase-nav').style.display = '';
             document.getElementById('hydrabase-button-container').style.display = '';
             document.getElementById('dev-mode-password').value = '';
@@ -2324,7 +2449,7 @@ async function hydrabaseConnect() {
         if (data.success) {
             _hydrabaseConnected = true;
             statusEl.textContent = 'Connected';
-            statusEl.style.color = '#1ed760';
+            statusEl.style.color = 'rgb(var(--accent-light-rgb))';
             btn.textContent = 'Disconnect';
             showToast('Connected to Hydrabase', 'success');
         } else {
@@ -2383,7 +2508,7 @@ async function loadHydrabaseComparisons() {
                         <div style="color: #aaa;">${comp.hydrabase?.tracks || 0}T / ${comp.hydrabase?.artists || 0}A / ${comp.hydrabase?.albums || 0}Al</div>
                     </div>
                     <div style="padding: 6px 8px; border-radius: 6px; background: rgba(29, 185, 84, 0.15); border: 1px solid rgba(29, 185, 84, 0.3);">
-                        <div style="color: #1ed760; font-weight: 600; margin-bottom: 2px;">Spotify</div>
+                        <div style="color: rgb(var(--accent-light-rgb)); font-weight: 600; margin-bottom: 2px;">Spotify</div>
                         <div style="color: #aaa;">${comp.spotify?.tracks || 0}T / ${comp.spotify?.artists || 0}A / ${comp.spotify?.albums || 0}Al</div>
                     </div>
                     <div style="padding: 6px 8px; border-radius: 6px; background: rgba(251, 93, 93, 0.15); border: 1px solid rgba(251, 93, 93, 0.3);">
@@ -2536,6 +2661,10 @@ async function saveSettings(quiet = false) {
         },
         m3u_export: {
             enabled: document.getElementById('m3u-export-enabled').checked
+        },
+        ui_appearance: {
+            accent_preset: document.getElementById('accent-preset')?.value || '#1db954',
+            accent_color: document.getElementById('accent-custom-color')?.value || '#1db954'
         }
     };
 
@@ -2896,7 +3025,7 @@ async function startTidalDownloadAuth() {
         const uri = data.verification_uri || '';
         const code = data.user_code || '';
         codeEl.style.display = 'block';
-        codeEl.innerHTML = `Go to <a href="${uri}" target="_blank" style="color:#1db954;">${uri}</a> and enter code: <strong>${code}</strong>`;
+        codeEl.innerHTML = `Go to <a href="${uri}" target="_blank" style="color:rgb(var(--accent-rgb));">${uri}</a> and enter code: <strong>${code}</strong>`;
         btn.textContent = 'Waiting for approval...';
         statusEl.textContent = 'Waiting...';
         statusEl.style.color = '#ff9800';
@@ -5388,7 +5517,7 @@ function getPhaseColor(phase) {
     switch (phase) {
         case 'fresh': return '#999';
         case 'discovering': case 'syncing': case 'downloading': return '#ffa500';
-        case 'discovered': case 'sync_complete': case 'download_complete': return '#1db954';
+        case 'discovered': case 'sync_complete': case 'download_complete': return 'rgb(var(--accent-rgb))';
         default: return '#999';
     }
 }
@@ -11053,9 +11182,9 @@ const additionalStyles = `
 }
 
 .stream-button {
-    background: rgba(29, 185, 84, 0.1);
-    color: #1ed760;
-    border: 1px solid rgba(29, 185, 84, 0.3);
+    background: rgba(var(--accent-rgb), 0.1);
+    color: rgb(var(--accent-light-rgb));
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
 }
 
 .stream-button:hover {
@@ -11082,7 +11211,7 @@ const additionalStyles = `
 }
 
 .result-quality {
-    color: #1ed760;
+    color: rgb(var(--accent-light-rgb));
     font-weight: 500;
 }
 
@@ -13760,7 +13889,7 @@ function updateQualityScanProgressUI(state) {
             progressBar.style.backgroundColor = '#ff4444'; // Red for error
         } else {
             phaseLabel.textContent = state.phase || 'Ready to scan';
-            progressBar.style.backgroundColor = '#1db954'; // Green for normal
+            progressBar.style.backgroundColor = 'rgb(var(--accent-rgb))'; // Green for normal
         }
 
         if (state.status === 'finished') {
@@ -13892,7 +14021,7 @@ function updateDuplicateCleanProgressUI(state) {
             progressBar.style.backgroundColor = '#ff4444'; // Red for error
         } else {
             phaseLabel.textContent = state.phase || 'Ready to scan';
-            progressBar.style.backgroundColor = '#1db954'; // Green for normal
+            progressBar.style.backgroundColor = 'rgb(var(--accent-rgb))'; // Green for normal
         }
 
         if (state.status === 'finished') {
@@ -15166,7 +15295,7 @@ function updateDbProgressUI(state) {
             progressBar.style.backgroundColor = '#ff4444'; // Red for error
         } else {
             phaseLabel.textContent = state.phase || 'Idle';
-            progressBar.style.backgroundColor = '#1db954'; // Green for normal
+            progressBar.style.backgroundColor = 'rgb(var(--accent-rgb))'; // Green for normal
         }
 
         if (state.status === 'finished' || state.status === 'error') {
@@ -19750,7 +19879,7 @@ function updateYouTubeCardPhase(urlHash, phase) {
 
         case 'discovered':
             phaseTextElement.textContent = 'Discovery Complete';
-            phaseTextElement.style.color = '#1db954'; // Green
+            phaseTextElement.style.color = 'rgb(var(--accent-rgb))'; // Green
             actionBtn.textContent = 'View Details';
             actionBtn.disabled = false;
             progressElement.classList.add('hidden');
@@ -19766,7 +19895,7 @@ function updateYouTubeCardPhase(urlHash, phase) {
 
         case 'sync_complete':
             phaseTextElement.textContent = 'Sync Complete';
-            phaseTextElement.style.color = '#1db954'; // Green
+            phaseTextElement.style.color = 'rgb(var(--accent-rgb))'; // Green
             actionBtn.textContent = 'View Details';
             actionBtn.disabled = false;
             progressElement.classList.add('hidden');
@@ -19782,7 +19911,7 @@ function updateYouTubeCardPhase(urlHash, phase) {
 
         case 'download_complete':
             phaseTextElement.textContent = 'Download Complete';
-            phaseTextElement.style.color = '#1db954'; // Green
+            phaseTextElement.style.color = 'rgb(var(--accent-rgb))'; // Green
             actionBtn.textContent = 'View Results';
             actionBtn.disabled = false;
             progressElement.classList.add('hidden');
@@ -25001,7 +25130,7 @@ function refreshAllArtistDownloadStatuses() {
  */
 async function extractImageColors(imageUrl, callback) {
     if (!imageUrl) {
-        callback(['#1db954', '#1ed760']); // Fallback to Spotify green
+        callback(getAccentFallbackColors()); // Fallback to Spotify green
         return;
     }
 
@@ -25048,7 +25177,7 @@ async function extractImageColors(imageUrl, callback) {
                 }
 
                 if (colors.length === 0) {
-                    callback(['#1db954', '#1ed760']); // Fallback
+                    callback(getAccentFallbackColors()); // Fallback
                     return;
                 }
 
@@ -25067,19 +25196,19 @@ async function extractImageColors(imageUrl, callback) {
 
             } catch (e) {
                 console.warn('Color extraction failed, using fallback colors:', e);
-                callback(['#1db954', '#1ed760']);
+                callback(getAccentFallbackColors());
             }
         };
 
         img.onerror = function () {
-            callback(['#1db954', '#1ed760']); // Fallback on error
+            callback(getAccentFallbackColors()); // Fallback on error
         };
 
         img.src = imageUrl;
 
     } catch (error) {
         console.warn('Image color extraction error:', error);
-        callback(['#1db954', '#1ed760']);
+        callback(getAccentFallbackColors());
     }
 }
 
@@ -25645,7 +25774,7 @@ async function showWatchlistModal() {
                             <div id="watchlist-live-activity" style="display: ${scanStatus === 'scanning' ? 'flex' : 'none'}; gap: 15px; margin-top: 15px; padding: 15px; background: #2a2a2a; border-radius: 8px; border: 1px solid #444; justify-content: center; align-items: flex-start;">
                                 <!-- Artist Photo -->
                                 <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
-                                    <img id="watchlist-artist-img" src="" alt="Artist" style="width: 80px; height: 80px; border-radius: 50%; border: 2px solid #1db954; object-fit: cover; background: #1a1a1a;" onerror="this.style.display='none';" />
+                                    <img id="watchlist-artist-img" src="" alt="Artist" style="width: 80px; height: 80px; border-radius: 50%; border: 2px solid rgb(var(--accent-rgb)); object-fit: cover; background: #1a1a1a;" onerror="this.style.display='none';" />
                                     <div id="watchlist-artist-name" style="font-size: 11px; font-weight: bold; color: #fff; text-align: center; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Waiting...</div>
                                 </div>
 
@@ -25658,7 +25787,7 @@ async function showWatchlistModal() {
                                 <!-- Track and Wishlist Feed -->
                                 <div style="display: flex; flex-direction: column; gap: 6px; min-width: 250px; max-width: 300px;">
                                     <div style="font-size: 10px; color: #b3b3b3; text-transform: uppercase;">Current Track:</div>
-                                    <div id="watchlist-track-name" style="font-size: 11px; font-weight: bold; color: #1ed760; margin-bottom: 8px;">Waiting...</div>
+                                    <div id="watchlist-track-name" style="font-size: 11px; font-weight: bold; color: rgb(var(--accent-light-rgb)); margin-bottom: 8px;">Waiting...</div>
 
                                     <div style="font-size: 10px; color: #ff9800; text-transform: uppercase;">✨ Recently Added:</div>
                                     <div id="watchlist-additions-feed" style="max-height: 80px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-size: 10px;">
@@ -26377,7 +26506,7 @@ async function pollWatchlistScanStatus() {
                             <div style="display: flex; gap: 6px; align-items: center; padding: 3px; background: #1a1a1a; border-radius: 4px;">
                                 <img src="${item.album_image_url || ''}" alt="" style="width: 24px; height: 24px; border-radius: 3px; object-fit: cover;" onerror="this.style.display='none';" />
                                 <div style="flex: 1; overflow: hidden;">
-                                    <div style="font-weight: bold; color: #1ed760; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.track_name}</div>
+                                    <div style="font-weight: bold; color: rgb(var(--accent-light-rgb)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.track_name}</div>
                                     <div style="font-size: 9px; color: #b3b3b3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.artist_name}</div>
                                 </div>
                             </div>
@@ -26422,7 +26551,7 @@ async function pollWatchlistScanStatus() {
                     // Update the scan status display with completion message and summary
                     statusDiv.innerHTML = `
                         <div style="text-align: center; padding: 15px; background: #2a2a2a; border-radius: 8px; border: 1px solid #444;">
-                            <div style="font-size: 14px; color: #1ed760; margin-bottom: 10px;">${completionMessage}</div>
+                            <div style="font-size: 14px; color: rgb(var(--accent-light-rgb)); margin-bottom: 10px;">${completionMessage}</div>
                             <div style="font-size: 13px; opacity: 0.8;">
                                 <span class="sync-stat">Artists: ${totalArtists}</span>
                                 <span class="sync-separator"> • </span>
@@ -26938,7 +27067,7 @@ async function handleMediaScanButtonClick() {
         progressBar.style.width = '30%';
         progressLabel.textContent = 'Sending scan request to Plex';
         statusValue.textContent = 'Scanning...';
-        statusValue.style.color = '#1db954';
+        statusValue.style.color = 'rgb(var(--accent-rgb))';
 
         // Request scan
         const response = await fetch('/api/scan/request', {
