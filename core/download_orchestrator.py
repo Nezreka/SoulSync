@@ -1,10 +1,11 @@
 """
 Download Orchestrator
-Routes downloads between Soulseek and YouTube based on configuration.
+Routes downloads between Soulseek, YouTube, and Tidal based on configuration.
 
-Supports three modes:
+Supports four modes:
 - Soulseek Only: Traditional behavior
 - YouTube Only: YouTube-exclusive downloads
+- Tidal Only: Tidal-exclusive downloads
 - Hybrid: Try primary source first, fallback to secondary if it fails
 """
 
@@ -16,6 +17,7 @@ from utils.logging_config import get_logger
 from config.settings import config_manager
 from core.soulseek_client import SoulseekClient, TrackResult, AlbumResult, DownloadStatus
 from core.youtube_client import YouTubeClient
+from core.tidal_download_client import TidalDownloadClient
 
 logger = get_logger("download_orchestrator")
 
@@ -29,9 +31,10 @@ class DownloadOrchestrator:
     """
 
     def __init__(self):
-        """Initialize orchestrator with both clients"""
+        """Initialize orchestrator with all clients"""
         self.soulseek = SoulseekClient()
         self.youtube = YouTubeClient()
+        self.tidal = TidalDownloadClient()
 
         # Load mode from config
         self.mode = config_manager.get('download_source.mode', 'soulseek')
@@ -64,9 +67,11 @@ class DownloadOrchestrator:
             return self.soulseek.is_configured()
         elif self.mode == 'youtube':
             return self.youtube.is_configured()
+        elif self.mode == 'tidal':
+            return self.tidal.is_configured()
         elif self.mode == 'hybrid':
             # In hybrid mode, at least one source must be configured
-            return self.soulseek.is_configured() or self.youtube.is_configured()
+            return self.soulseek.is_configured() or self.youtube.is_configured() or self.tidal.is_configured()
 
         return False
 
@@ -80,15 +85,18 @@ class DownloadOrchestrator:
             return await self.soulseek.check_connection()
         elif self.mode == 'youtube':
             return await self.youtube.check_connection()
+        elif self.mode == 'tidal':
+            return await self.tidal.check_connection()
         elif self.mode == 'hybrid':
-            # In hybrid mode, check both sources
+            # In hybrid mode, check all sources
             soulseek_ok = await self.soulseek.check_connection()
             youtube_ok = await self.youtube.check_connection()
+            tidal_ok = await self.tidal.check_connection()
 
-            logger.info(f"   Soulseek: {'✅' if soulseek_ok else '❌'} | YouTube: {'✅' if youtube_ok else '❌'}")
+            logger.info(f"   Soulseek: {'✅' if soulseek_ok else '❌'} | YouTube: {'✅' if youtube_ok else '❌'} | Tidal: {'✅' if tidal_ok else '❌'}")
 
             # At least one must be available
-            return soulseek_ok or youtube_ok
+            return soulseek_ok or youtube_ok or tidal_ok
 
         return False
 
@@ -112,33 +120,38 @@ class DownloadOrchestrator:
             logger.info(f"🔍 Searching YouTube: {query}")
             return await self.youtube.search(query, timeout, progress_callback)
 
+        elif self.mode == 'tidal':
+            logger.info(f"🔍 Searching Tidal: {query}")
+            return await self.tidal.search(query, timeout, progress_callback)
+
         elif self.mode == 'hybrid':
+            # Build ordered client list: primary first, then remaining as fallbacks
+            clients = {
+                'soulseek': self.soulseek,
+                'youtube': self.youtube,
+                'tidal': self.tidal,
+            }
+            primary = self.hybrid_primary if self.hybrid_primary in clients else 'soulseek'
+            fallbacks = [name for name in clients if name != primary]
+
             # Try primary source first
-            if self.hybrid_primary == 'soulseek':
-                logger.info(f"🔍 Hybrid search - trying Soulseek first: {query}")
-                tracks, albums = await self.soulseek.search(query, timeout, progress_callback)
+            logger.info(f"🔍 Hybrid search - trying {primary} first: {query}")
+            tracks, albums = await clients[primary].search(query, timeout, progress_callback)
+            if tracks:
+                logger.info(f"✅ {primary} found {len(tracks)} tracks")
+                return (tracks, albums)
 
-                # If Soulseek found good results, return them
+            # Try fallbacks in order
+            for fallback_name in fallbacks:
+                logger.info(f"🔄 {primary} found nothing, trying {fallback_name} fallback")
+                tracks, albums = await clients[fallback_name].search(query, timeout, progress_callback)
                 if tracks:
-                    logger.info(f"✅ Soulseek found {len(tracks)} tracks")
+                    logger.info(f"✅ {fallback_name} found {len(tracks)} tracks")
                     return (tracks, albums)
 
-                # Otherwise, try YouTube as fallback
-                logger.info(f"🔄 Soulseek found nothing, trying YouTube fallback")
-                return await self.youtube.search(query, timeout, progress_callback)
-
-            else:  # YouTube first
-                logger.info(f"🔍 Hybrid search - trying YouTube first: {query}")
-                tracks, albums = await self.youtube.search(query, timeout, progress_callback)
-
-                # If YouTube found good results, return them
-                if tracks:
-                    logger.info(f"✅ YouTube found {len(tracks)} tracks")
-                    return (tracks, albums)
-
-                # Otherwise, try Soulseek as fallback
-                logger.info(f"🔄 YouTube found nothing, trying Soulseek fallback")
-                return await self.soulseek.search(query, timeout, progress_callback)
+            # Nothing found from any source
+            logger.warning(f"❌ Hybrid search exhausted all sources for: {query}")
+            return ([], [])
 
         # Fallback: empty results
         return ([], [])
@@ -203,6 +216,9 @@ class DownloadOrchestrator:
         if username == 'youtube':
             logger.info(f"📥 Downloading from YouTube: {filename}")
             return await self.youtube.download(username, filename, file_size)
+        elif username == 'tidal':
+            logger.info(f"📥 Downloading from Tidal: {filename}")
+            return await self.tidal.download(username, filename, file_size)
         else:
             logger.info(f"📥 Downloading from Soulseek: {filename}")
             return await self.soulseek.download(username, filename, file_size)
@@ -214,12 +230,13 @@ class DownloadOrchestrator:
         Returns:
             List of DownloadStatus objects
         """
-        # Get downloads from both sources
+        # Get downloads from all sources
         soulseek_downloads = await self.soulseek.get_all_downloads()
         youtube_downloads = await self.youtube.get_all_downloads()
+        tidal_downloads = await self.tidal.get_all_downloads()
 
         # Combine and return
-        return soulseek_downloads + youtube_downloads
+        return soulseek_downloads + youtube_downloads + tidal_downloads
 
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
         """
@@ -241,6 +258,11 @@ class DownloadOrchestrator:
         if status:
             return status
 
+        # Try Tidal
+        status = await self.tidal.get_download_status(download_id)
+        if status:
+            return status
+
         return None
 
     async def cancel_download(self, download_id: str, username: str = None, remove: bool = False) -> bool:
@@ -258,16 +280,22 @@ class DownloadOrchestrator:
         # If username is provided, route directly
         if username == 'youtube':
             return await self.youtube.cancel_download(download_id, username, remove)
+        elif username == 'tidal':
+            return await self.tidal.cancel_download(download_id, username, remove)
         elif username:
             return await self.soulseek.cancel_download(download_id, username, remove)
 
-        # Otherwise, try both sources
+        # Otherwise, try all sources
         soulseek_cancelled = await self.soulseek.cancel_download(download_id, username, remove)
         if soulseek_cancelled:
             return True
 
         youtube_cancelled = await self.youtube.cancel_download(download_id, username, remove)
-        return youtube_cancelled
+        if youtube_cancelled:
+            return True
+
+        tidal_cancelled = await self.tidal.cancel_download(download_id, username, remove)
+        return tidal_cancelled
 
     async def signal_download_completion(self, download_id: str, username: str, remove: bool = True) -> bool:
         """
@@ -292,10 +320,11 @@ class DownloadOrchestrator:
             True if successful
         """
         soulseek_cleared = await self.soulseek.clear_all_completed_downloads()
-        # YouTube downloads must also be cleared from memory
+        # YouTube and Tidal downloads must also be cleared from memory
         youtube_cleared = await self.youtube.clear_all_completed_downloads()
+        tidal_cleared = await self.tidal.clear_all_completed_downloads()
 
-        return soulseek_cleared and youtube_cleared
+        return soulseek_cleared and youtube_cleared and tidal_cleared
 
     # ===== Soulseek-specific methods (for backwards compatibility) =====
     # These are internal methods that some parts of the codebase use directly
@@ -353,5 +382,8 @@ class DownloadOrchestrator:
         return await self.soulseek.maintain_search_history_with_buffer(keep_searches, trigger_threshold)
 
     async def cancel_all_downloads(self) -> bool:
-        """Cancel and remove all downloads from slskd."""
-        return await self.soulseek.cancel_all_downloads()
+        """Cancel and remove all downloads from all sources."""
+        soulseek_ok = await self.soulseek.cancel_all_downloads()
+        # Clear Tidal active downloads too
+        tidal_ok = await self.tidal.clear_all_completed_downloads()
+        return soulseek_ok

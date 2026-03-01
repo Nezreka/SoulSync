@@ -162,7 +162,7 @@
                 </div>
                 <div class="status-indicator" id="soulseek-indicator">
                     <span class="status-dot disconnected"></span>
-                    <span class="status-name">Soulseek</span>
+                    <span class="status-name" id="download-source-name">Soulseek</span>
                 </div>
             </div>
         </div>
@@ -372,7 +372,7 @@
                             </div>
                             <div class="service-card" id="soulseek-service-card">
                                 <div class="service-card-header">
-                                    <span class="service-card-title">Soulseek</span>
+                                    <span class="service-card-title" id="download-source-title">Soulseek</span>
                                     <span class="service-card-indicator disconnected"
                                         id="soulseek-status-indicator">●</span>
                                 </div>
@@ -3075,6 +3075,7 @@
                                         onchange="updateDownloadSourceUI()">
                                         <option value="soulseek">Soulseek Only</option>
                                         <option value="youtube">YouTube Only</option>
+                                        <option value="tidal">Tidal Only</option>
                                         <option value="hybrid">Hybrid (Try both with fallback)</option>
                                     </select>
                                     <div class="setting-help-text">
@@ -3090,6 +3091,7 @@
                                         <select id="hybrid-primary-source" class="form-select">
                                             <option value="soulseek">Try Soulseek First</option>
                                             <option value="youtube">Try YouTube First</option>
+                                            <option value="tidal">Try Tidal First</option>
                                         </select>
                                         <div class="setting-help-text">
                                             Which source to try first when hybrid mode is enabled.
@@ -3103,6 +3105,33 @@
                                         <div class="setting-help-text">
                                             Minimum match confidence for YouTube downloads (0.5-1.0). Higher = stricter
                                             matching.
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Tidal Download Settings (shown only when tidal mode is selected) -->
+                                <div id="tidal-download-settings-container" style="display: none;">
+                                    <div class="form-group">
+                                        <label>Tidal Download Quality:</label>
+                                        <select id="tidal-download-quality" class="form-select">
+                                            <option value="low">Low (AAC 96kbps)</option>
+                                            <option value="high">High (AAC 320kbps)</option>
+                                            <option value="lossless">Lossless (FLAC 16-bit/44.1kHz)</option>
+                                            <option value="hires">HiRes (FLAC 24-bit/96kHz)</option>
+                                        </select>
+                                        <div class="setting-help-text">
+                                            Audio quality for Tidal downloads. HiRes requires a Tidal HiFi Plus subscription.
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Tidal Download Auth:</label>
+                                        <div class="form-actions" style="margin-top: 4px;">
+                                            <button class="auth-button" id="tidal-download-auth-btn" onclick="startTidalDownloadAuth()">
+                                                Link Tidal Account
+                                            </button>
+                                            <span id="tidal-download-auth-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                        </div>
+                                        <div id="tidal-download-auth-code" style="display: none; margin-top: 8px;" class="setting-help-text">
                                         </div>
                                     </div>
                                 </div>
