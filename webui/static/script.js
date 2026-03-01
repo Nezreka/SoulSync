@@ -328,7 +328,8 @@ const API = {
 // ---- Accent Color System ----
 
 function getAccentFallbackColors() {
-    const accent = localStorage.getItem('soulsync-accent') || '#1db954';
+    let accent = localStorage.getItem('soulsync-accent') || '#1db954';
+    if (!/^#[0-9a-fA-F]{6}$/.test(accent)) accent = '#1db954';
     // Compute a lighter variant for the second color
     const r = parseInt(accent.slice(1, 3), 16), g = parseInt(accent.slice(3, 5), 16), b = parseInt(accent.slice(5, 7), 16);
     const lighter = '#' + [Math.min(r + 20, 255), Math.min(g + 30, 255), Math.min(b + 12, 255)]
@@ -337,6 +338,10 @@ function getAccentFallbackColors() {
 }
 
 function applyAccentColor(hex) {
+    // Validate hex format — reject corrupt values
+    if (typeof hex !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(hex)) {
+        hex = '#1db954'; // fallback to default
+    }
     // Convert hex to RGB
     const r = parseInt(hex.slice(1, 3), 16);
     const g = parseInt(hex.slice(3, 5), 16);
@@ -402,10 +407,10 @@ function initAccentColorListeners() {
     presetSelect.addEventListener('change', () => {
         const val = presetSelect.value;
         if (val === 'custom') {
-            customGroup.style.display = '';
-            applyAccentColor(customPicker.value);
+            if (customGroup) customGroup.style.display = '';
+            if (customPicker) applyAccentColor(customPicker.value);
         } else {
-            customGroup.style.display = 'none';
+            if (customGroup) customGroup.style.display = 'none';
             applyAccentColor(val);
         }
     });

@@ -25884,7 +25884,7 @@ body {
 }
 .candidates-modal-body::-webkit-scrollbar { width: 8px; }
 .candidates-modal-body::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); border-radius: 4px; }
-.candidates-modal-body::-webkit-scrollbar-thumb { background: rgba(29,185,84,0.3); border-radius: 4px; }
+.candidates-modal-body::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb),0.3); border-radius: 4px; }
 
 .candidates-error-summary {
     background: rgba(255, 255, 255, 0.05);
@@ -25950,7 +25950,7 @@ body {
     letter-spacing: 0.5px;
     margin-right: 4px;
 }
-.candidates-quality-flac { background: rgba(29,185,84,0.2); color: rgb(var(--accent-rgb)); }
+.candidates-quality-flac { background: rgba(var(--accent-rgb),0.2); color: rgb(var(--accent-rgb)); }
 .candidates-quality-mp3 { background: rgba(100,149,237,0.2); color: #6495ed; }
 .candidates-quality-ogg, .candidates-quality-aac, .candidates-quality-wma { background: rgba(255,165,0,0.2); color: #ffa500; }
 .candidates-download-btn {
