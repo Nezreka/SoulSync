@@ -11706,45 +11706,131 @@ def get_version_info():
     This provides the same data that the GUI version modal displays.
     """
     version_data = {
-        "version": "1.6",
+        "version": "1.7",
         "title": "What's New in SoulSync",
-        "subtitle": "Version 1.6 - Local Import, Enhanced Tagging & Mobile Support",
+        "subtitle": "Version 1.7 - Tidal Downloads, Hydrabase & Library Tools",
         "sections": [
             {
-                "title": "📂 Local Music Import",
-                "description": "Import music directly from a local staging folder into your library",
+                "title": "🎵 Tidal Download Source",
+                "description": "Download music directly from Tidal as an alternative to Soulseek and YouTube",
                 "features": [
-                    "• Import music files from a configurable local staging directory",
-                    "• Automatic metadata detection and library integration",
-                    "• Redesigned import button for easier access"
+                    "• Full Tidal integration with device-flow authentication via tidalapi",
+                    "• Configurable quality: Low (AAC 96k), High (AAC 320k), Lossless (FLAC 16-bit), HiRes (FLAC 24-bit)",
+                    "• Automatic quality fallback chain when higher tiers are unavailable",
+                    "• Works in all download modes: Tidal Only, Hybrid with fallback to other sources",
+                    "• HiRes FLAC extraction from MP4 containers via FFmpeg",
+                    "• Dynamic sidebar and dashboard labels reflect the active download source"
                 ]
             },
             {
-                "title": "🏷️ Enhanced Audio File Tagging",
-                "description": "Richer metadata embedded directly into your audio files",
+                "title": "🌐 Hydrabase P2P Metadata",
+                "description": "Peer-to-peer metadata network for enhanced search results",
                 "features": [
-                    "• MusicBrainz, Spotify, and iTunes IDs embedded into file tags",
-                    "• ISRC codes written to audio files for universal track identification",
-                    "• Merged genres from multiple sources for more complete genre tagging",
-                    "• iTunes metadata parity for consistent tagging across providers"
+                    "• Hydrabase P2P metadata client with WebSocket connection",
+                    "• Background comparison engine between local and P2P search results",
+                    "• Hydrabase admin page with comparison UI",
+                    "• P2P mirror worker for background metadata sharing",
+                    "• Dev mode activation with Hydrabase credentials"
                 ]
             },
             {
-                "title": "📱 Mobile Responsive Layout",
-                "description": "Full mobile support for managing your library on the go",
+                "title": "🔧 Library Repair & Retag Tools",
+                "description": "New tools for maintaining and fixing your music library",
                 "features": [
-                    "• Responsive WebUI layout optimized for phones and tablets",
-                    "• Mobile-friendly sync page with improved controls",
-                    "• CSS fixes for consistent rendering across screen sizes"
+                    "• Library repair worker with scanning UI and progress tracking",
+                    "• Retag tool to re-process audio file metadata from the database",
+                    "• Quarantine system for AcoustID mismatches with folder sweeper and clear API",
+                    "• Candidates review modal for manual download selection",
+                    "• Blasphemy Mode: optionally delete FLAC originals after MP3 conversion"
                 ]
             },
             {
-                "title": "⚡ Performance & Reliability",
-                "description": "Caching, compatibility fixes, and proactive maintenance",
+                "title": "💿 Multi-Disc & Album Improvements",
+                "description": "Better handling of complex album structures",
                 "features": [
-                    "• Discovery match cache for faster repeated lookups",
-                    "• Proactive fix for upcoming Spotify API changes (February 2026)",
-                    "• Docker Compose configuration updates"
+                    "• Multi-disc album support with automatic Disc N/ subfolder organization",
+                    "• $artistletter and $quality template variables for file paths",
+                    "• Improved edition detection and album completion logic",
+                    "• Lossy MP3 copy option for downloaded FLACs",
+                    "• FLAC bit depth filter in post-download quality gate"
+                ]
+            },
+            {
+                "title": "🎯 Matching & Search Engine",
+                "description": "Smarter search and matching for more accurate downloads",
+                "features": [
+                    "• Refactored matching engine with improved discovery scoring",
+                    "• Quality filter uses bitrate density instead of file size",
+                    "• Whole-word matching for Soulseek search results",
+                    "• Boost exact artist name matches to top of search results",
+                    "• Short artist name handling with Spotify field filter",
+                    "• AcoustID fix for tracks with featured artists in square brackets",
+                    "• Title similarity floor and raised confidence thresholds"
+                ]
+            },
+            {
+                "title": "🎨 Metadata Enrichment",
+                "description": "Richer metadata from more sources",
+                "features": [
+                    "• Deezer enrichment for artists, albums, and tracks (BPM, mood, style, ISRC)",
+                    "• AudioDB enrichment for artists, albums, and tracks",
+                    "• MusicBrainz release MBID embedded in audio tags",
+                    "• Fallback MusicBrainz IDs from AudioDB",
+                    "• Format summary tags on library release cards, wishlist modal, and artist hero",
+                    "• Track ownership indicators and file metadata in wishlist modal"
+                ]
+            },
+            {
+                "title": "📋 Watchlist & Wishlist",
+                "description": "Improved monitoring and queue management",
+                "features": [
+                    "• Global watchlist override and UI",
+                    "• Wishlist batch remove API and UI",
+                    "• Album artists used for wishlist track grouping",
+                    "• Watchlist filter on library page with artist indicators",
+                    "• Discography filters on artist detail page",
+                    "• Batch remove from watchlist modal"
+                ]
+            },
+            {
+                "title": "🖥️ Dashboard & UI",
+                "description": "New dashboard features and interface improvements",
+                "features": [
+                    "• Active Downloads section on dashboard",
+                    "• Hero image cycling for similar artists",
+                    "• Progressive track list rendering for large playlists",
+                    "• Debounced auto-save on all settings page controls",
+                    "• Server-side M3U playlist export with UI toggle",
+                    "• Track selection UI with backend mapping",
+                    "• Error reason tooltips on failed downloads in missing tracks modal"
+                ]
+            },
+            {
+                "title": "🔌 Server & Connectivity",
+                "description": "Media server and API improvements",
+                "features": [
+                    "• Navidrome music library selection support",
+                    "• Configurable Jellyfin API timeout and retries",
+                    "• Jellyfin connection fix and chained loads",
+                    "• Spotify API compatibility updates for February 2026 changes",
+                    "• Spotify disconnect button with cached auth checks",
+                    "• Lock toggle for container path fields in Docker mode",
+                    "• Fix false positive Soulseek connection test by checking network state"
+                ]
+            },
+            {
+                "title": "🐛 Stability & Bug Fixes",
+                "description": "Reliability improvements across the board",
+                "features": [
+                    "• Fix downloads stalling/halting when browser is closed",
+                    "• Fix intermittent deadlock in download monitor",
+                    "• Fix metadata cross-contamination when downloading concurrent albums",
+                    "• Fix database migrations to check each column individually",
+                    "• Fix quality profile priorities being reset on save",
+                    "• Fix Unicode diacritics breaking album/track matching",
+                    "• Fix file descriptor leak from per-call event loop creation",
+                    "• Sync status stored in database instead of JSON file",
+                    "• Verify bytes before marking downloads complete"
                 ]
             }
         ]
