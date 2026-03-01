@@ -6,6 +6,11 @@ __pycache__/
 **/__pycache__/
 *.pyc
 *.pyo
+.idea
 
 # Auto-downloaded binaries
 bin/
+*.exe
+*.db-shm
+*.db-wal
+logs/*
