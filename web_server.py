@@ -12459,6 +12459,8 @@ def _process_wishlist_automatically():
                     # Track state management (replicating sync.py)
                     'permanently_failed_tracks': [],
                     'cancelled_tracks': set(),
+                    # Wishlist tracks are already known-missing — skip the expensive library check
+                    'force_download_all': True,
                     # Mark as auto-initiated
                     'auto_initiated': True,
                     'auto_processing_timestamp': time.time(),
@@ -13109,7 +13111,8 @@ def start_wishlist_missing_downloads():
                 # Track state management (replicating sync.py)
                 'permanently_failed_tracks': [],
                 'cancelled_tracks': set(),
-                'force_download_all': force_download_all  # Pass the force flag to the batch
+                # Wishlist tracks are already known-missing — always skip the library check
+                'force_download_all': True
             }
 
         # Submit the wishlist processing job using the same processing function
