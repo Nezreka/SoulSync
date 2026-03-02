@@ -21884,7 +21884,7 @@ def start_watchlist_scan():
                 watchlist_scan_state['current_phase'] = 'updating_listenbrainz'
                 try:
                     from core.listenbrainz_manager import ListenBrainzManager
-                    lb_manager = ListenBrainzManager("database/music_library.db")
+                    lb_manager = ListenBrainzManager(str(get_database().database_path))
                     lb_result = lb_manager.update_all_playlists()
                     if lb_result.get('success'):
                         summary = lb_result.get('summary', {})
@@ -22755,7 +22755,7 @@ def _process_watchlist_scan_automatically():
             watchlist_scan_state['current_phase'] = 'updating_listenbrainz'
             try:
                 from core.listenbrainz_manager import ListenBrainzManager
-                lb_manager = ListenBrainzManager("database/music_library.db")
+                lb_manager = ListenBrainzManager(str(get_database().database_path))
                 lb_result = lb_manager.update_all_playlists()
                 if lb_result.get('success'):
                     summary = lb_result.get('summary', {})
@@ -23916,7 +23916,7 @@ def get_listenbrainz_created_for():
     try:
         from core.listenbrainz_manager import ListenBrainzManager
 
-        lb_manager = ListenBrainzManager("database/music_library.db")
+        lb_manager = ListenBrainzManager(str(get_database().database_path))
 
         # Check if cache is empty - if so, populate it on first load
         if not lb_manager.has_cached_playlists():
@@ -23966,7 +23966,7 @@ def get_listenbrainz_user_playlists():
     try:
         from core.listenbrainz_manager import ListenBrainzManager
 
-        lb_manager = ListenBrainzManager("database/music_library.db")
+        lb_manager = ListenBrainzManager(str(get_database().database_path))
 
         # Check if cache is empty - if so, populate it on first load
         if not lb_manager.has_cached_playlists():
@@ -24016,7 +24016,7 @@ def get_listenbrainz_collaborative():
     try:
         from core.listenbrainz_manager import ListenBrainzManager
 
-        lb_manager = ListenBrainzManager("database/music_library.db")
+        lb_manager = ListenBrainzManager(str(get_database().database_path))
 
         # Check if cache is empty - if so, populate it on first load
         if not lb_manager.has_cached_playlists():
@@ -24066,7 +24066,7 @@ def get_listenbrainz_playlist_tracks(playlist_mbid):
     try:
         from core.listenbrainz_manager import ListenBrainzManager
 
-        lb_manager = ListenBrainzManager("database/music_library.db")
+        lb_manager = ListenBrainzManager(str(get_database().database_path))
         tracks = lb_manager.get_cached_tracks(playlist_mbid)
 
         if not tracks:
@@ -24095,7 +24095,7 @@ def refresh_listenbrainz():
     try:
         from core.listenbrainz_manager import ListenBrainzManager
 
-        lb_manager = ListenBrainzManager("database/music_library.db")
+        lb_manager = ListenBrainzManager(str(get_database().database_path))
         result = lb_manager.update_all_playlists()
 
         return jsonify(result)
