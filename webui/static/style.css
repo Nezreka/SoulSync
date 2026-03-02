@@ -20179,6 +20179,48 @@ body {
     border-radius: 4px;
 }
 
+/* Watch All Button */
+.discover-hero-watch-all {
+    position: absolute;
+    bottom: 24px;
+    right: 24px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 20px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.discover-hero-watch-all:hover {
+    background: rgba(0, 0, 0, 0.5);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.discover-hero-watch-all .watch-all-icon {
+    font-size: 14px;
+}
+
+.discover-hero-watch-all.all-watched {
+    background: rgba(var(--accent-rgb), 0.15);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: rgb(var(--accent-rgb));
+    cursor: default;
+}
+
+.discover-hero-watch-all:disabled:not(.all-watched) {
+    opacity: 0.6;
+    cursor: wait;
+}
+
 /* Discover Sections */
 .discover-section {
     margin-bottom: 50px;

@@ -21480,6 +21480,67 @@ def remove_from_watchlist():
         print(f"Error removing from watchlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/watchlist/add-batch', methods=['POST'])
+def add_batch_to_watchlist():
+    """Add multiple artists to the watchlist at once"""
+    try:
+        data = request.get_json()
+        artists = data.get('artists', [])
+
+        if not artists or not isinstance(artists, list):
+            return jsonify({"success": False, "error": "Missing or invalid artists list"}), 400
+
+        database = get_database()
+        added = 0
+        skipped = 0
+
+        for artist in artists:
+            artist_id = artist.get('artist_id')
+            artist_name = artist.get('artist_name')
+            if not artist_id or not artist_name:
+                continue
+
+            # Check if already watched
+            if database.is_artist_in_watchlist(artist_id):
+                skipped += 1
+                continue
+
+            success = database.add_artist_to_watchlist(artist_id, artist_name)
+            if success:
+                added += 1
+                # Cache artist image
+                try:
+                    is_itunes_id = artist_id.isdigit()
+                    if is_itunes_id:
+                        itunes_url = f"https://itunes.apple.com/lookup?id={artist_id}&entity=album&limit=5"
+                        resp = requests.get(itunes_url, timeout=5)
+                        if resp.status_code == 200:
+                            results = resp.json().get('results', [])
+                            for res in results:
+                                if 'artworkUrl100' in res:
+                                    image_url = res['artworkUrl100'].replace('100x100', '600x600')
+                                    database.update_watchlist_artist_image(artist_id, image_url)
+                                    break
+                    elif spotify_client and spotify_client.is_authenticated():
+                        artist_data = spotify_client.get_artist(artist_id)
+                        if artist_data and 'images' in artist_data and artist_data['images']:
+                            image_url = artist_data['images'][1]['url'] if len(artist_data['images']) > 1 else artist_data['images'][0]['url']
+                            if image_url:
+                                database.update_watchlist_artist_image(artist_id, image_url)
+                except Exception as img_error:
+                    print(f"⚠️ Could not fetch artist image for {artist_name}: {img_error}")
+
+        return jsonify({
+            "success": True,
+            "added": added,
+            "skipped": skipped,
+            "message": f"Added {added} artist{'s' if added != 1 else ''} to watchlist ({skipped} already watched)"
+        })
+
+    except Exception as e:
+        print(f"Error batch adding to watchlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/watchlist/remove-batch', methods=['POST'])
 def remove_batch_from_watchlist():
     """Remove multiple artists from the watchlist"""
