@@ -15192,10 +15192,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
 
                     # We need at least an album name and artist
                     if s_album and s_album.get('name'):
-                        # Construct artist context using ALBUM artist (not track artist)
-                        # For compilations, track artists differ per track but the album artist
-                        # (e.g. "Bon Jovi") must be consistent so all tracks land in one folder.
-                        # Priority: 1) album.artists  2) source_info.artist_name  3) track artists
+                        # Construct artist context for folder path.
+                        # Priority: 1) watchlist artist name (the artist the user monitors)
+                        #           2) album.artists[0]  3) track artists
+                        # Watchlist artist is preferred because collab singles have combined
+                        # album artists like "Y2K & Ro Ransom" — but the user is monitoring
+                        # just "Y2K", so the folder should be "Y2K".
                         artist_ctx = {}
                         s_album_artists = s_album.get('artists', [])
                         source_info = track_info.get('source_info') or {}
@@ -15206,16 +15208,20 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                             except:
                                 source_info = {}
 
-                        if s_album_artists and len(s_album_artists) > 0:
-                            # Best: album-level artists stored in spotify_data.album.artists
+                        if source_info.get('watchlist_artist_name'):
+                            # Best for watchlist tracks: the individual artist being monitored
+                            artist_ctx = {'name': source_info['watchlist_artist_name'],
+                                          'id': source_info.get('watchlist_artist_id', '')}
+                        elif source_info.get('artist_name'):
+                            # Other sources that set an explicit artist name
+                            artist_ctx = {'name': source_info['artist_name']}
+                        elif s_album_artists and len(s_album_artists) > 0:
+                            # Album-level artists from Spotify (may be combined for collabs)
                             first_artist = s_album_artists[0]
                             if isinstance(first_artist, dict):
                                 artist_ctx = first_artist
                             else:
                                 artist_ctx = {'name': str(first_artist)}
-                        elif source_info.get('artist_name') or source_info.get('watchlist_artist_name'):
-                            # Fallback: album artist name from source_info (set at wishlist add time)
-                            artist_ctx = {'name': source_info.get('artist_name') or source_info['watchlist_artist_name']}
                         elif s_artists and len(s_artists) > 0:
                             # Last resort: track-level artist (old wishlist entries without album artist data)
                             first_artist = s_artists[0]
