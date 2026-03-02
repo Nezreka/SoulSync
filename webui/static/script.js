@@ -25766,7 +25766,7 @@ async function showWatchlistModal() {
 
         // Build modal content
         modal.innerHTML = `
-            <div class="modal-container playlist-modal">
+            <div class="modal-container playlist-modal watchlist-fullscreen">
                 <div class="playlist-modal-header">
                     <div class="playlist-header-content" style="width: 100%;">
                         <h2>👁️ Watchlist</h2>
@@ -25814,9 +25814,9 @@ async function showWatchlistModal() {
                     </div>
                     <span class="playlist-modal-close" onclick="closeWatchlistModal()">&times;</span>
                 </div>
-                
+
                 <div class="playlist-modal-body">
-                    <div class="watchlist-actions" style="margin-bottom: 20px; display: flex; gap: 12px; align-items: center;">
+                    <div class="watchlist-actions" style="margin-bottom: 16px; display: flex; gap: 12px; align-items: center; padding: 0 32px; flex-wrap: wrap;">
                         <button class="playlist-modal-btn playlist-modal-btn-primary"
                                 id="scan-watchlist-btn"
                                 onclick="startWatchlistScan()"
@@ -25838,14 +25838,14 @@ async function showWatchlistModal() {
                     </div>
 
                     ${globalOverrideActive ? `
-                    <div class="watchlist-global-override-banner">
+                    <div class="watchlist-global-override-banner" style="margin: 0 32px 12px;">
                         <span>⚠️</span>
                         <span>Global override is active — per-artist settings are being ignored during scans.</span>
                     </div>
                     ` : ''}
 
                     <!-- Search Bar -->
-                    <div class="watchlist-search-container" style="margin-bottom: 16px;">
+                    <div class="watchlist-search-container" style="margin-bottom: 12px;">
                         <input type="text"
                                id="watchlist-search-input"
                                class="watchlist-search-input"
@@ -25863,58 +25863,50 @@ async function showWatchlistModal() {
                         </button>
                     </div>
 
-                    <div class="watchlist-artists-list" id="watchlist-artists-list">
+                    <div class="watchlist-artists-grid" id="watchlist-artists-list">
                         ${artistsData.artists.map(artist => `
-                            <div class="watchlist-artist-item"
+                            <div class="watchlist-artist-card"
                                  data-artist-name="${artist.artist_name.toLowerCase().replace(/"/g, '&quot;')}"
-                                 data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}"
-                                 style="cursor: pointer;">
-                                <label class="watchlist-checkbox-wrapper" onclick="event.stopPropagation();">
+                                 data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}">
+
+                                <label class="watchlist-card-checkbox" onclick="event.stopPropagation();">
                                     <input type="checkbox" class="watchlist-select-cb"
                                            data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}"
                                            data-artist-name="${escapeHtml(artist.artist_name)}"
                                            onchange="updateWatchlistBatchBar()">
                                     <span class="watchlist-checkbox-custom"></span>
                                 </label>
-                                ${artist.image_url ? `
-                                    <img src="${artist.image_url}"
-                                         alt="${escapeHtml(artist.artist_name)}"
-                                         class="watchlist-artist-image"
-                                         loading="lazy"
-                                         onerror="this.style.display='none'">
-                                ` : `
-                                    <div class="watchlist-artist-image-placeholder">
-                                        🎤
-                                    </div>
-                                `}
-                                <div class="watchlist-artist-info">
-                                    <span class="watchlist-artist-name">${escapeHtml(artist.artist_name)}</span>
-                                    <span class="watchlist-artist-date">Added ${new Date(artist.date_added).toLocaleDateString()}</span>
-                                    ${artist.last_scan_timestamp ? `
-                                        <span class="watchlist-artist-scan">Last scanned ${new Date(artist.last_scan_timestamp).toLocaleDateString()}</span>
-                                    ` : ''}
-                                </div>
-                                <button class="playlist-modal-btn playlist-modal-btn-secondary watchlist-remove-btn"
+
+                                <button class="watchlist-card-remove"
                                         data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}"
                                         data-artist-name="${escapeHtml(artist.artist_name)}"
-                                        onclick="event.stopPropagation();">
-                                    Remove
-                                </button>
+                                        onclick="event.stopPropagation();"
+                                        title="Remove from watchlist">&times;</button>
+
+                                <div class="watchlist-card-image">
+                                    ${artist.image_url ? `
+                                        <img src="${artist.image_url}"
+                                             alt="${escapeHtml(artist.artist_name)}"
+                                             loading="lazy"
+                                             onerror="this.parentElement.innerHTML='<div class=\\'watchlist-card-image-fallback\\'>🎤</div>';">
+                                    ` : `
+                                        <div class="watchlist-card-image-fallback">🎤</div>
+                                    `}
+                                </div>
+
+                                <div class="watchlist-card-info">
+                                    <span class="watchlist-card-name">${escapeHtml(artist.artist_name)}</span>
+                                    <span class="watchlist-card-meta">Added ${new Date(artist.date_added).toLocaleDateString()}</span>
+                                </div>
                             </div>
                         `).join('')}
                     </div>
-                </div>
-                
-                <div class="playlist-modal-footer">
-                    <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeWatchlistModal()">
-                        Close
-                    </button>
                 </div>
             </div>
         `;
 
         // Add event listeners for remove buttons
-        modal.querySelectorAll('.watchlist-remove-btn').forEach(button => {
+        modal.querySelectorAll('.watchlist-card-remove').forEach(button => {
             button.addEventListener('click', () => {
                 const artistId = button.getAttribute('data-artist-id');
                 const artistName = button.getAttribute('data-artist-name');
@@ -25922,16 +25914,16 @@ async function showWatchlistModal() {
             });
         });
 
-        // Add click handlers to artist items (except for remove button or checkbox)
-        modal.querySelectorAll('.watchlist-artist-item').forEach(item => {
+        // Add click handlers to artist cards (except for remove button or checkbox)
+        modal.querySelectorAll('.watchlist-artist-card').forEach(item => {
             item.addEventListener('click', (e) => {
                 // Don't trigger if clicking the remove button or checkbox
-                if (e.target.closest('.watchlist-remove-btn') || e.target.closest('.watchlist-checkbox-wrapper')) {
+                if (e.target.closest('.watchlist-card-remove') || e.target.closest('.watchlist-card-checkbox')) {
                     return;
                 }
 
                 const artistId = item.getAttribute('data-artist-id');
-                const artistName = item.querySelector('.watchlist-artist-name').textContent;
+                const artistName = item.querySelector('.watchlist-card-name').textContent;
 
                 console.log(`🎵 Artist card clicked: ${artistName} (${artistId})`);
                 openWatchlistArtistConfigModal(artistId, artistName);
@@ -26402,13 +26394,13 @@ function filterWatchlistArtists() {
     if (!searchInput || !artistsList) return;
 
     const searchTerm = searchInput.value.toLowerCase().trim();
-    const artistItems = artistsList.querySelectorAll('.watchlist-artist-item');
+    const artistItems = artistsList.querySelectorAll('.watchlist-artist-card');
 
     artistItems.forEach(item => {
         const artistName = item.getAttribute('data-artist-name');
 
         if (!searchTerm || artistName.includes(searchTerm)) {
-            item.style.display = 'flex';
+            item.style.display = '';
         } else {
             item.style.display = 'none';
         }
@@ -26736,7 +26728,7 @@ async function removeFromWatchlistModal(artistId, artistName) {
  */
 function getVisibleCheckedWatchlist() {
     return Array.from(document.querySelectorAll('.watchlist-select-cb:checked')).filter(cb => {
-        const item = cb.closest('.watchlist-artist-item');
+        const item = cb.closest('.watchlist-artist-card');
         return item && item.style.display !== 'none';
     });
 }

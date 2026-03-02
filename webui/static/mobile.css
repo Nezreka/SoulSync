@@ -1405,36 +1405,37 @@
         text-align: center;
     }
 
-    /* Inline remove buttons - compact sizing */
-    .watchlist-remove-btn {
-        width: auto;
-        min-height: auto;
-        padding: 6px 12px;
-        font-size: 12px;
-        min-width: auto;
-        flex-shrink: 0;
+    /* Watchlist fullscreen modal on mobile */
+    .watchlist-fullscreen {
+        max-width: 100vw;
+        width: 100vw;
+        max-height: 100vh;
+        border-radius: 0;
     }
 
-    /* Watchlist artist items */
-    .watchlist-artist-item {
-        padding: 12px 14px;
-        gap: 10px;
+    /* Watchlist card grid on mobile */
+    .watchlist-artists-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 16px;
+        padding: 16px;
     }
 
-    .watchlist-artist-image,
-    .watchlist-artist-image-placeholder {
-        width: 44px;
-        height: 44px;
-        margin-right: 10px;
+    .watchlist-card-info {
+        padding: 10px 12px;
     }
 
-    .watchlist-artist-name {
-        font-size: 14px;
+    .watchlist-card-name {
+        font-size: 13px;
     }
 
-    .watchlist-artist-date,
-    .watchlist-artist-scan {
-        font-size: 11px;
+    .watchlist-card-meta {
+        font-size: 10px;
+    }
+
+    /* Show checkbox and remove always on mobile (no hover) */
+    .watchlist-card-checkbox,
+    .watchlist-artist-card .watchlist-card-remove {
+        opacity: 1;
     }
 
     .watchlist-search-container {
@@ -1510,7 +1511,7 @@
     /* --- Phase 9: Touch & Hover Adaptations --- */
 
     /* Global touch targets - only standalone/action buttons, not inline */
-    button:not(.watchlist-remove-btn):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close) {
+    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close) {
         min-height: 38px;
     }
 
@@ -1790,25 +1791,19 @@
         font-size: 13px;
     }
 
-    /* Watchlist items even tighter */
-    .watchlist-artist-item {
-        padding: 10px 12px;
+    /* Watchlist cards — tighter grid on small screens */
+    .watchlist-artists-grid {
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+        gap: 12px;
+        padding: 12px;
     }
 
-    .watchlist-artist-image,
-    .watchlist-artist-image-placeholder {
-        width: 38px;
-        height: 38px;
-        margin-right: 8px;
+    .watchlist-card-name {
+        font-size: 12px;
     }
 
-    .watchlist-artist-name {
-        font-size: 13px;
-    }
-
-    .watchlist-remove-btn {
-        padding: 5px 10px;
-        font-size: 11px;
+    .watchlist-card-info {
+        padding: 8px 10px;
     }
 
     /* Download modal - even more compact */
