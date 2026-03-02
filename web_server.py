@@ -23087,6 +23087,108 @@ def get_discover_hero():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/discover/similar-artists', methods=['GET'])
+def get_discover_similar_artists():
+    """Get all recommended similar artists (basic data, no enrichment for speed)"""
+    try:
+        database = get_database()
+        active_source = _get_active_discovery_source()
+
+        similar_artists = database.get_top_similar_artists(limit=200)
+
+        if not similar_artists:
+            return jsonify({"success": True, "artists": [], "source": active_source, "count": 0})
+
+        # Filter to artists with valid ID for active source
+        result_artists = []
+        for artist in similar_artists:
+            has_spotify = bool(artist.similar_artist_spotify_id)
+            has_itunes = bool(artist.similar_artist_itunes_id)
+
+            if active_source == 'spotify' and not has_spotify and not has_itunes:
+                continue
+            if active_source == 'itunes' and not has_itunes and not has_spotify:
+                continue
+
+            if active_source == 'spotify':
+                artist_id = artist.similar_artist_spotify_id or artist.similar_artist_itunes_id
+            else:
+                artist_id = artist.similar_artist_itunes_id or artist.similar_artist_spotify_id
+
+            result_artists.append({
+                "artist_id": artist_id,
+                "spotify_artist_id": artist.similar_artist_spotify_id,
+                "itunes_artist_id": artist.similar_artist_itunes_id,
+                "artist_name": artist.similar_artist_name,
+                "occurrence_count": artist.occurrence_count,
+                "similarity_rank": artist.similarity_rank,
+                "source": active_source,
+            })
+
+        print(f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for {active_source}")
+
+        return jsonify({
+            "success": True,
+            "artists": result_artists,
+            "source": active_source,
+            "count": len(result_artists)
+        })
+
+    except Exception as e:
+        print(f"Error getting similar artists: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/similar-artists/enrich', methods=['POST'])
+def enrich_similar_artists():
+    """Enrich a batch of artist IDs with images/genres from Spotify or iTunes"""
+    try:
+        data = request.get_json()
+        artist_ids = data.get('artist_ids', [])
+        source = data.get('source', 'spotify')
+
+        if not artist_ids:
+            return jsonify({"success": True, "artists": {}})
+
+        enriched = {}
+
+        if source == 'spotify' and spotify_client and spotify_client.is_authenticated():
+            try:
+                batch_result = spotify_client.sp.artists(artist_ids[:50])
+                if batch_result and 'artists' in batch_result:
+                    for sp_artist in batch_result['artists']:
+                        if sp_artist:
+                            enriched[sp_artist['id']] = {
+                                "artist_name": sp_artist.get('name'),
+                                "image_url": sp_artist['images'][0]['url'] if sp_artist.get('images') else None,
+                                "genres": sp_artist.get('genres', [])[:3],
+                                "popularity": sp_artist.get('popularity', 0)
+                            }
+            except Exception as e:
+                print(f"Error enriching Spotify batch: {e}")
+        else:
+            from core.itunes_client import iTunesClient
+            itunes_client = iTunesClient()
+            for aid in artist_ids[:50]:
+                try:
+                    itunes_artist = itunes_client.get_artist(aid)
+                    if itunes_artist:
+                        enriched[aid] = {
+                            "artist_name": itunes_artist.get('name'),
+                            "image_url": itunes_artist.get('images', [{}])[0].get('url') if itunes_artist.get('images') else None,
+                            "genres": itunes_artist.get('genres', [])[:3],
+                            "popularity": 0
+                        }
+                except Exception:
+                    pass
+
+        return jsonify({"success": True, "artists": enriched})
+
+    except Exception as e:
+        print(f"Error enriching similar artists: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/discover/recent-releases', methods=['GET'])
 def get_discover_recent_releases():
     """Get cached recent albums from watchlist and similar artists"""

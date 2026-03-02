@@ -33596,6 +33596,311 @@ async function watchAllHeroArtists(btn) {
     }
 }
 
+// Cache for recommended artists data so reopening is instant
+let _recommendedArtistsCache = null;
+
+async function openRecommendedArtistsModal() {
+    let modal = document.getElementById('recommended-artists-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'recommended-artists-modal';
+        modal.className = 'modal-overlay';
+        document.body.appendChild(modal);
+
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) closeRecommendedArtistsModal();
+        });
+    }
+
+    // If cached, render instantly and refresh watchlist statuses
+    if (_recommendedArtistsCache) {
+        modal.style.display = 'flex';
+        renderRecommendedArtistsModal(modal, _recommendedArtistsCache);
+        checkRecommendedWatchlistStatuses(_recommendedArtistsCache);
+        return;
+    }
+
+    // Show loading
+    modal.innerHTML = `
+        <div class="modal-container playlist-modal recommended-modal">
+            <div class="playlist-modal-header">
+                <div class="playlist-header-content" style="width: 100%;">
+                    <h2>Recommended Artists</h2>
+                    <div class="playlist-quick-info">
+                        <span class="playlist-track-count">Loading...</span>
+                    </div>
+                </div>
+                <span class="playlist-modal-close" onclick="closeRecommendedArtistsModal()">&times;</span>
+            </div>
+            <div class="playlist-modal-body">
+                <div class="recommended-loading">Loading recommended artists...</div>
+            </div>
+        </div>
+    `;
+    modal.style.display = 'flex';
+
+    try {
+        // Phase 1: Fetch basic data (instant — no API enrichment)
+        const response = await fetch('/api/discover/similar-artists');
+        const data = await response.json();
+
+        if (!data.success || !data.artists || data.artists.length === 0) {
+            modal.querySelector('.playlist-modal-body').innerHTML = `
+                <div class="recommended-empty-state">
+                    No recommended artists yet.<br>
+                    Run a watchlist scan to generate recommendations.
+                </div>
+            `;
+            modal.querySelector('.playlist-track-count').textContent = '0 artists';
+            return;
+        }
+
+        // Render cards immediately with fallback images
+        _recommendedArtistsCache = data.artists;
+        renderRecommendedArtistsModal(modal, data.artists);
+
+        // Phase 2: Enrich with images/genres progressively in batches of 50
+        const source = data.source || 'spotify';
+        const idKey = source === 'spotify' ? 'spotify_artist_id' : 'itunes_artist_id';
+        const allIds = data.artists.map(a => a[idKey]).filter(Boolean);
+
+        for (let i = 0; i < allIds.length; i += 50) {
+            const batchIds = allIds.slice(i, i + 50);
+            try {
+                const enrichResp = await fetch('/api/discover/similar-artists/enrich', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ artist_ids: batchIds, source })
+                });
+                const enrichData = await enrichResp.json();
+                if (enrichData.success && enrichData.artists) {
+                    // Update cards and cache as each batch arrives
+                    for (const [aid, info] of Object.entries(enrichData.artists)) {
+                        // Update the card in DOM
+                        const card = modal.querySelector(`.recommended-artist-card[data-artist-id="${aid}"]`);
+                        if (card && info.image_url) {
+                            const imgContainer = card.querySelector('.recommended-card-image');
+                            if (imgContainer) {
+                                imgContainer.innerHTML = `<img src="${info.image_url}" alt="" loading="lazy"
+                                    onerror="this.parentElement.innerHTML='<div class=\\'recommended-card-image-fallback\\'>🎤</div>';">`;
+                            }
+                        }
+                        if (card && info.genres && info.genres.length > 0) {
+                            const genresContainer = card.querySelector('.recommended-card-genres');
+                            if (genresContainer) {
+                                genresContainer.innerHTML = info.genres.map(g =>
+                                    `<span class="recommended-card-genre">${escapeHtml(g)}</span>`
+                                ).join('');
+                            } else {
+                                const infoDiv = card.querySelector('.recommended-card-info');
+                                if (infoDiv) {
+                                    const genreDiv = document.createElement('div');
+                                    genreDiv.className = 'recommended-card-genres';
+                                    genreDiv.innerHTML = info.genres.map(g =>
+                                        `<span class="recommended-card-genre">${escapeHtml(g)}</span>`
+                                    ).join('');
+                                    infoDiv.appendChild(genreDiv);
+                                }
+                            }
+                        }
+
+                        // Update cache
+                        const cached = _recommendedArtistsCache.find(a => a.artist_id === aid || a.spotify_artist_id === aid || a.itunes_artist_id === aid);
+                        if (cached) {
+                            if (info.image_url) cached.image_url = info.image_url;
+                            if (info.genres) cached.genres = info.genres;
+                            if (info.artist_name) cached.artist_name = info.artist_name;
+                        }
+                    }
+                }
+            } catch (enrichErr) {
+                console.error('Error enriching batch:', enrichErr);
+            }
+        }
+
+        // Phase 3: Check watchlist statuses
+        checkRecommendedWatchlistStatuses(data.artists);
+
+    } catch (error) {
+        console.error('Error loading recommended artists:', error);
+        modal.querySelector('.playlist-modal-body').innerHTML = `
+            <div class="recommended-empty-state">Error loading recommended artists.</div>
+        `;
+    }
+}
+
+function renderRecommendedArtistsModal(modal, artists) {
+    modal.innerHTML = `
+        <div class="modal-container playlist-modal recommended-modal">
+            <div class="playlist-modal-header">
+                <div class="playlist-header-content" style="width: 100%;">
+                    <h2>Recommended Artists</h2>
+                    <div class="playlist-quick-info">
+                        <span class="playlist-track-count">${artists.length} artist${artists.length !== 1 ? 's' : ''}</span>
+                    </div>
+                </div>
+                <span class="playlist-modal-close" onclick="closeRecommendedArtistsModal()">&times;</span>
+            </div>
+            <div class="playlist-modal-body">
+                <div class="recommended-search-container">
+                    <input type="text"
+                           class="recommended-search-input"
+                           id="recommended-search-input"
+                           placeholder="Search recommended artists..."
+                           oninput="filterRecommendedArtists()">
+                </div>
+                <div class="recommended-artists-grid" id="recommended-artists-grid">
+                    ${artists.map(artist => {
+                        const genreTags = (artist.genres || []).slice(0, 3).map(g =>
+                            `<span class="recommended-card-genre">${escapeHtml(g)}</span>`
+                        ).join('');
+                        const similarText = artist.occurrence_count > 1
+                            ? `Similar to ${artist.occurrence_count} in your watchlist`
+                            : 'Similar to an artist in your watchlist';
+                        return `
+                            <div class="recommended-artist-card"
+                                 data-artist-name="${escapeHtml(artist.artist_name).toLowerCase()}"
+                                 data-artist-id="${artist.artist_id}">
+                                <button class="recommended-card-watchlist-btn"
+                                        data-artist-id="${artist.artist_id}"
+                                        data-artist-name="${escapeHtml(artist.artist_name)}">
+                                    Add to Watchlist
+                                </button>
+                                <div class="recommended-card-image">
+                                    ${artist.image_url ? `
+                                        <img src="${artist.image_url}"
+                                             alt="${escapeHtml(artist.artist_name)}"
+                                             loading="lazy"
+                                             onerror="this.parentElement.innerHTML='<div class=\\'recommended-card-image-fallback\\'>🎤</div>';">
+                                    ` : `
+                                        <div class="recommended-card-image-fallback">🎤</div>
+                                    `}
+                                </div>
+                                <div class="recommended-card-info">
+                                    <span class="recommended-card-name">${escapeHtml(artist.artist_name)}</span>
+                                    <span class="recommended-card-similarity">${similarText}</span>
+                                    <div class="recommended-card-genres">${genreTags}</div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Event delegation for card clicks and watchlist buttons
+    const grid = modal.querySelector('#recommended-artists-grid');
+    if (grid) {
+        grid.addEventListener('click', function(e) {
+            const watchlistBtn = e.target.closest('.recommended-card-watchlist-btn');
+            if (watchlistBtn) {
+                e.stopPropagation();
+                toggleRecommendedWatchlist(watchlistBtn);
+                return;
+            }
+
+            const card = e.target.closest('.recommended-artist-card');
+            if (card) {
+                const artistId = card.getAttribute('data-artist-id');
+                const nameEl = card.querySelector('.recommended-card-name');
+                const artistName = nameEl ? nameEl.textContent : '';
+                viewRecommendedArtistDiscography(artistId, artistName);
+            }
+        });
+    }
+}
+
+function closeRecommendedArtistsModal() {
+    const modal = document.getElementById('recommended-artists-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function filterRecommendedArtists() {
+    const query = (document.getElementById('recommended-search-input')?.value || '').toLowerCase();
+    const cards = document.querySelectorAll('.recommended-artist-card');
+    cards.forEach(card => {
+        const name = card.getAttribute('data-artist-name') || '';
+        card.style.display = name.includes(query) ? '' : 'none';
+    });
+}
+
+async function toggleRecommendedWatchlist(btn) {
+    const artistId = btn.getAttribute('data-artist-id');
+    const artistName = btn.getAttribute('data-artist-name');
+    if (!artistId || !artistName) return;
+
+    btn.disabled = true;
+    const wasWatching = btn.classList.contains('watching');
+
+    try {
+        if (wasWatching) {
+            const resp = await fetch('/api/watchlist/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artist_id: artistId })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                btn.classList.remove('watching');
+                btn.textContent = 'Add to Watchlist';
+            }
+        } else {
+            const resp = await fetch('/api/watchlist/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artist_id: artistId, artist_name: artistName })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                btn.classList.add('watching');
+                btn.textContent = 'Watching';
+            }
+        }
+        if (typeof updateWatchlistButtonCount === 'function') updateWatchlistButtonCount();
+    } catch (error) {
+        console.error('Error toggling recommended watchlist:', error);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function checkRecommendedWatchlistStatuses(artists) {
+    for (const artist of artists) {
+        try {
+            const resp = await fetch('/api/watchlist/check', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artist_id: artist.artist_id })
+            });
+            const data = await resp.json();
+            if (data.success && data.is_watching) {
+                const btn = document.querySelector(`.recommended-card-watchlist-btn[data-artist-id="${artist.artist_id}"]`);
+                if (btn) {
+                    btn.classList.add('watching');
+                    btn.textContent = 'Watching';
+                }
+            }
+        } catch (e) {
+            // Non-critical
+        }
+    }
+}
+
+async function viewRecommendedArtistDiscography(artistId, artistName) {
+    closeRecommendedArtistsModal();
+
+    const artist = {
+        id: artistId,
+        name: artistName
+    };
+
+    // Use same navigation pattern as hero slider
+    navigateToPage('artists');
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await selectArtistForDetail(artist);
+}
+
 async function checkAllHeroWatchlistStatus() {
     const btn = document.getElementById('discover-hero-watch-all');
     if (!btn || !discoverHeroArtists || discoverHeroArtists.length === 0) return;

@@ -20179,12 +20179,19 @@ body {
     border-radius: 4px;
 }
 
-/* Watch All Button */
-.discover-hero-watch-all {
+/* Hero Bottom Action Buttons */
+.discover-hero-bottom-actions {
     position: absolute;
     bottom: 24px;
     right: 24px;
     z-index: 10;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.discover-hero-watch-all,
+.discover-hero-view-all {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -20200,7 +20207,8 @@ body {
     transition: background 0.2s ease, border-color 0.2s ease;
 }
 
-.discover-hero-watch-all:hover {
+.discover-hero-watch-all:hover,
+.discover-hero-view-all:hover {
     background: rgba(0, 0, 0, 0.5);
     border-color: rgba(255, 255, 255, 0.3);
 }
@@ -20219,6 +20227,168 @@ body {
 .discover-hero-watch-all:disabled:not(.all-watched) {
     opacity: 0.6;
     cursor: wait;
+}
+
+/* Recommended Artists Modal */
+.recommended-modal {
+    max-width: 95vw;
+    width: 95vw;
+    max-height: 95vh;
+}
+
+.recommended-modal .playlist-modal-body {
+    overflow-y: auto;
+    padding: 0;
+    min-height: 0;
+}
+
+.recommended-artists-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 20px;
+    padding: 20px 28px;
+}
+
+.recommended-artist-card {
+    position: relative;
+    border-radius: 14px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.recommended-artist-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(var(--accent-rgb), 0.3);
+}
+
+.recommended-card-image {
+    width: 100%;
+    aspect-ratio: 1;
+    overflow: hidden;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15), rgba(var(--accent-rgb), 0.05));
+}
+
+.recommended-card-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.recommended-card-image-fallback {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+    opacity: 0.3;
+}
+
+.recommended-card-info {
+    padding: 12px 14px;
+}
+
+.recommended-card-name {
+    display: block;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.recommended-card-similarity {
+    display: block;
+    font-size: 11px;
+    color: rgba(var(--accent-rgb), 0.8);
+    margin-bottom: 6px;
+}
+
+.recommended-card-genres {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.recommended-card-genre {
+    padding: 2px 8px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.recommended-card-watchlist-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 3;
+    padding: 5px 10px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s ease, background 0.2s ease;
+}
+
+.recommended-artist-card:hover .recommended-card-watchlist-btn {
+    opacity: 1;
+}
+
+.recommended-card-watchlist-btn.watching {
+    background: rgba(var(--accent-rgb), 0.2);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    color: rgb(var(--accent-rgb));
+    opacity: 1;
+}
+
+.recommended-search-container {
+    padding: 0 28px;
+    margin-bottom: 12px;
+}
+
+.recommended-search-input {
+    width: 100%;
+    padding: 10px 16px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    color: #fff;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.recommended-search-input:focus {
+    border-color: rgba(var(--accent-rgb), 0.4);
+}
+
+.recommended-search-input::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.recommended-empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 15px;
+}
+
+.recommended-loading {
+    text-align: center;
+    padding: 60px 20px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 15px;
 }
 
 /* Discover Sections */

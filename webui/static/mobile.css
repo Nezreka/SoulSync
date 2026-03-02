@@ -913,6 +913,40 @@
         padding: 16px;
     }
 
+    .discover-hero-bottom-actions {
+        bottom: 12px;
+        right: 12px;
+        gap: 6px;
+    }
+
+    .discover-hero-watch-all,
+    .discover-hero-view-all {
+        padding: 6px 12px;
+        font-size: 11px;
+    }
+
+    /* Recommended Artists Modal - Mobile */
+    .recommended-modal {
+        max-width: 100vw;
+        width: 100vw;
+        max-height: 100vh;
+        border-radius: 0;
+    }
+
+    .recommended-artists-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 12px;
+        padding: 12px 16px;
+    }
+
+    .recommended-search-container {
+        padding: 0 16px;
+    }
+
+    .recommended-card-watchlist-btn {
+        opacity: 1;
+    }
+
     .discover-section-header {
         flex-direction: column;
         gap: 12px;
