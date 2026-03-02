@@ -33393,6 +33393,9 @@ async function loadDiscoverHero() {
             }, 8000);
         }
 
+        // Check if all hero artists are already watched
+        checkAllHeroWatchlistStatus();
+
     } catch (error) {
         console.error('Error loading discover hero:', error);
         showDiscoverHeroEmpty();
@@ -33541,6 +33544,90 @@ function toggleDiscoverHeroWatchlist(event) {
 
     // Call the existing toggleWatchlist function
     toggleWatchlist(event, artistId, artistName);
+}
+
+async function watchAllHeroArtists(btn) {
+    if (!discoverHeroArtists || discoverHeroArtists.length === 0) return;
+    if (btn.classList.contains('all-watched')) return;
+
+    const textEl = btn.querySelector('.watch-all-text');
+    const originalText = textEl ? textEl.textContent : '';
+
+    // Loading state
+    btn.disabled = true;
+    if (textEl) textEl.textContent = 'Adding...';
+
+    try {
+        const artists = discoverHeroArtists.map(a => ({
+            artist_id: a.artist_id,
+            artist_name: a.artist_name
+        }));
+
+        const response = await fetch('/api/watchlist/add-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artists })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            if (textEl) textEl.textContent = 'All Watched';
+            btn.classList.add('all-watched');
+            btn.disabled = true;
+
+            // Sync the per-slide watchlist button for current artist
+            const currentArtist = discoverHeroArtists[discoverHeroIndex];
+            if (currentArtist) {
+                checkAndUpdateDiscoverHeroWatchlistButton(currentArtist.artist_id);
+            }
+
+            // Update watchlist count badge
+            if (typeof updateWatchlistButtonCount === 'function') {
+                updateWatchlistButtonCount();
+            }
+        } else {
+            if (textEl) textEl.textContent = originalText;
+            btn.disabled = false;
+        }
+    } catch (error) {
+        console.error('Error watching all hero artists:', error);
+        if (textEl) textEl.textContent = originalText;
+        btn.disabled = false;
+    }
+}
+
+async function checkAllHeroWatchlistStatus() {
+    const btn = document.getElementById('discover-hero-watch-all');
+    if (!btn || !discoverHeroArtists || discoverHeroArtists.length === 0) return;
+
+    try {
+        let allWatched = true;
+        for (const artist of discoverHeroArtists) {
+            const response = await fetch('/api/watchlist/check', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artist_id: artist.artist_id })
+            });
+            const data = await response.json();
+            if (!data.success || !data.is_watching) {
+                allWatched = false;
+                break;
+            }
+        }
+
+        const textEl = btn.querySelector('.watch-all-text');
+        if (allWatched) {
+            if (textEl) textEl.textContent = 'All Watched';
+            btn.classList.add('all-watched');
+            btn.disabled = true;
+        } else {
+            if (textEl) textEl.textContent = 'Watch All';
+            btn.classList.remove('all-watched');
+            btn.disabled = false;
+        }
+    } catch (error) {
+        console.error('Error checking hero watchlist status:', error);
+    }
 }
 
 function navigateDiscoverHero(direction) {
