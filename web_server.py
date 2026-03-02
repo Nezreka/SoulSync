@@ -14211,6 +14211,29 @@ def delete_retag_group(group_id):
     else:
         return jsonify({"success": False, "error": "Group not found"}), 404
 
+@app.route('/api/retag/groups/delete-batch', methods=['POST'])
+def delete_retag_groups_batch():
+    """Delete multiple retag groups at once."""
+    from database.music_database import get_database
+    data = request.get_json() or {}
+    group_ids = data.get('group_ids', [])
+    if not group_ids:
+        return jsonify({"success": False, "error": "No group IDs provided"}), 400
+    db = get_database()
+    removed = 0
+    for gid in group_ids:
+        if db.delete_retag_group(int(gid)):
+            removed += 1
+    return jsonify({"success": True, "removed": removed})
+
+@app.route('/api/retag/groups/clear-all', methods=['POST'])
+def clear_all_retag_groups():
+    """Delete all retag groups."""
+    from database.music_database import get_database
+    db = get_database()
+    count = db.delete_all_retag_groups()
+    return jsonify({"success": True, "removed": count})
+
 # ===============================
 # == DOWNLOAD MISSING TRACKS   ==
 # ===============================
