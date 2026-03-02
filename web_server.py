@@ -21541,6 +21541,81 @@ def add_batch_to_watchlist():
         print(f"Error batch adding to watchlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/library/watchlist-all-unwatched', methods=['POST'])
+def watchlist_all_unwatched_library_artists():
+    """Add all unwatched library artists (that have valid external IDs) to the watchlist"""
+    try:
+        database = get_database()
+        active_source = _get_active_discovery_source()
+
+        # Get ALL unwatched artists from library (no pagination)
+        result = database.get_library_artists(
+            search_query='',
+            letter='all',
+            page=1,
+            limit=99999,
+            watchlist_filter='unwatched'
+        )
+
+        unwatched_artists = result.get('artists', [])
+        added = 0
+        skipped_no_id = 0
+        skipped_already = 0
+
+        for artist in unwatched_artists:
+            # Determine the external ID to use based on active source
+            artist_id = None
+            if active_source == 'spotify' and artist.get('spotify_artist_id'):
+                artist_id = artist['spotify_artist_id']
+            elif artist.get('itunes_artist_id'):
+                artist_id = artist['itunes_artist_id']
+            elif artist.get('spotify_artist_id'):
+                # Fallback: use spotify if itunes not available
+                artist_id = artist['spotify_artist_id']
+
+            if not artist_id:
+                skipped_no_id += 1
+                continue
+
+            artist_name = artist.get('name', '')
+            if not artist_name:
+                continue
+
+            # Check if already watched (shouldn't be since we filtered, but safety check)
+            if database.is_artist_in_watchlist(artist_id):
+                skipped_already += 1
+                continue
+
+            success = database.add_artist_to_watchlist(artist_id, artist_name)
+            if success:
+                added += 1
+                # Use library thumb_url if available (no HTTP calls needed)
+                if artist.get('image_url'):
+                    try:
+                        database.update_watchlist_artist_image(artist_id, artist['image_url'])
+                    except Exception:
+                        pass
+
+        total_unwatched = len(unwatched_artists)
+        message_parts = [f"Added {added} artist{'s' if added != 1 else ''} to watchlist"]
+        if skipped_no_id > 0:
+            message_parts.append(f"{skipped_no_id} skipped (no matching ID yet)")
+
+        return jsonify({
+            "success": True,
+            "added": added,
+            "skipped_no_id": skipped_no_id,
+            "skipped_already": skipped_already,
+            "total_unwatched": total_unwatched,
+            "message": " — ".join(message_parts)
+        })
+
+    except Exception as e:
+        print(f"Error bulk watchlisting library artists: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/watchlist/remove-batch', methods=['POST'])
 def remove_batch_from_watchlist():
     """Remove multiple artists from the watchlist"""

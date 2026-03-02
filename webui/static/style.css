@@ -13509,6 +13509,50 @@ body {
     background: rgba(var(--accent-rgb), 0.15);
 }
 
+.library-watchlist-all-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 16px;
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: rgba(var(--accent-rgb), 1);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+    cursor: pointer;
+    border-radius: 20px;
+    transition: all 0.2s ease-out;
+    margin-left: 4px;
+}
+
+.library-watchlist-all-btn:hover {
+    background: rgba(var(--accent-rgb), 0.25);
+    border-color: rgba(var(--accent-rgb), 0.6);
+    transform: scale(1.02);
+}
+
+.library-watchlist-all-btn.adding {
+    opacity: 0.7;
+    pointer-events: none;
+    cursor: wait;
+}
+
+.library-watchlist-all-btn.all-added {
+    background: rgba(var(--accent-rgb), 0.2);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    color: #fff;
+    pointer-events: none;
+}
+
+.library-watchlist-all-btn .watchlist-all-icon {
+    font-size: 14px;
+}
+
+.library-watchlist-all-btn.hidden {
+    display: none;
+}
+
 .alphabet-selector {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
@@ -25408,6 +25452,66 @@ body {
     font-size: 14px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
     pointer-events: none;
+}
+
+.library-card-watchlist-btn {
+    position: absolute;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    color: #e0e0e0;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    cursor: pointer;
+    z-index: 100;
+    transition: all 0.2s ease;
+    opacity: 0;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.library-artist-card:hover .library-card-watchlist-btn {
+    opacity: 1;
+}
+
+.library-card-watchlist-btn:hover {
+    background: rgba(var(--accent-rgb), 0.25);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: #fff;
+    transform: scale(1.05);
+}
+
+.library-card-watchlist-btn.watching {
+    background: rgba(255, 193, 7, 0.2);
+    color: #ffc107;
+    border-color: rgba(255, 193, 7, 0.4);
+    opacity: 1;
+}
+
+.library-card-watchlist-btn.watching:hover {
+    background: rgba(255, 193, 7, 0.35);
+    border-color: rgba(255, 193, 7, 0.6);
+    color: #fff;
+}
+
+.library-card-watchlist-btn:disabled {
+    opacity: 0.5;
+    cursor: wait;
+    transform: none;
+}
+
+.library-card-watchlist-btn .watchlist-icon {
+    font-size: 12px;
+}
+
+.library-card-watchlist-btn .watchlist-text {
+    line-height: 1;
 }
 
 /* ============================= */
