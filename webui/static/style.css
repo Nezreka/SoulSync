@@ -5082,8 +5082,17 @@ body {
 }
 
 .stat-card-dashboard:hover::before {
-    left: 10%;
-    right: 10%;
+    left: 0%;
+    right: 0%;
+    height: 3px;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(var(--accent-rgb), 0.6) 20%,
+        rgba(var(--accent-light-rgb), 0.9) 50%,
+        rgba(var(--accent-rgb), 0.6) 80%,
+        transparent 100%);
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.4),
+        0 0 24px rgba(var(--accent-rgb), 0.15);
 }
 
 .stat-card-title {
