@@ -14503,6 +14503,12 @@ async function openRetagModal() {
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
 
+    // Reset batch bar and clear-all button
+    const batchBar = document.getElementById('retag-batch-bar');
+    if (batchBar) batchBar.style.display = 'none';
+    const clearBtn = document.getElementById('retag-clear-all-btn');
+    if (clearBtn) { clearBtn.textContent = 'Clear All'; clearBtn.dataset.confirming = ''; clearBtn.style.background = ''; }
+
     const body = document.getElementById('retag-modal-body');
     body.innerHTML = '<div class="retag-loading">Loading downloads...</div>';
 
@@ -14511,8 +14517,10 @@ async function openRetagModal() {
         const data = await response.json();
         if (!data.success || !data.groups || data.groups.length === 0) {
             body.innerHTML = '<p class="retag-empty">No downloads recorded yet. Downloads will appear here after completing album or single downloads.</p>';
+            if (clearBtn) clearBtn.style.display = 'none';
             return;
         }
+        if (clearBtn) clearBtn.style.display = '';
         renderRetagGroups(data.groups, body);
     } catch (e) {
         body.innerHTML = '<p class="retag-error">Failed to load downloads.</p>';
@@ -14551,13 +14559,19 @@ function renderRetagGroups(groups, container) {
 
             html += `<div class="retag-group-card" data-group-id="${group.id}">
                 <div class="retag-group-header" onclick="toggleRetagGroup(${group.id})">
+                    <label class="retag-group-checkbox" onclick="event.stopPropagation();">
+                        <input type="checkbox" class="retag-select-cb" data-group-id="${group.id}" onchange="updateRetagBatchBar()">
+                        <span class="retag-checkbox-custom"></span>
+                    </label>
                     ${imgHtml}
                     <div class="retag-group-info">
                         <span class="retag-group-album">${escapeHtml(group.album_name || 'Unknown')}</span>
                         <span class="retag-group-meta">${typeLabel}${releaseDate ? ' \u00b7 ' + releaseDate : ''} \u00b7 ${trackCount} track${trackCount !== 1 ? 's' : ''}</span>
                     </div>
                     <button class="retag-group-btn" onclick="event.stopPropagation(); openRetagSearch(${group.id}, '${escapeHtml(defaultQuery).replace(/'/g, "\\'")}')" title="Re-tag with different album">Retag</button>
-                    <button class="retag-group-delete-btn" onclick="event.stopPropagation(); deleteRetagGroup(${group.id})" title="Remove from list">&times;</button>
+                    <div class="retag-group-delete-area" id="retag-delete-area-${group.id}">
+                        <button class="retag-group-delete-btn" onclick="event.stopPropagation(); showRetagDeleteConfirm(${group.id})" title="Remove from list">&times;</button>
+                    </div>
                 </div>
                 <div class="retag-group-tracks" id="retag-tracks-${group.id}" style="display:none;">
                     <div class="retag-tracks-loading">Loading tracks...</div>
@@ -14687,7 +14701,7 @@ async function searchRetagAlbums(query) {
                     : '<div class="retag-result-image-placeholder"></div>';
                 const typeLabel = (a.album_type || 'album').charAt(0).toUpperCase() + (a.album_type || 'album').slice(1);
                 const releaseYear = a.release_date ? a.release_date.substring(0, 4) : '';
-                return `<div class="retag-search-result" onclick="confirmRetag(${retagCurrentGroupId}, '${a.id}', '${escapeHtml(a.name).replace(/'/g, "\\'")}')">
+                return `<div class="retag-search-result" id="retag-result-${a.id}" onclick="showRetagConfirm(this, ${retagCurrentGroupId}, '${a.id}', '${escapeHtml(a.name).replace(/'/g, "\\'")}')">
                     ${imgHtml}
                     <div class="retag-result-info">
                         <span class="retag-result-name">${escapeHtml(a.name || 'Unknown')}</span>
@@ -14704,8 +14718,46 @@ async function searchRetagAlbums(query) {
     }
 }
 
-async function confirmRetag(groupId, albumId, albumName) {
-    if (!confirm(`Re-tag this group with "${albumName}"?\n\nThis will overwrite existing file tags and may move/rename files.`)) return;
+/**
+ * Show inline confirmation on a search result before retagging
+ */
+function showRetagConfirm(el, groupId, albumId, albumName) {
+    // Clear any other confirming states
+    document.querySelectorAll('.retag-search-result.retag-confirming').forEach(r => {
+        r.classList.remove('retag-confirming');
+        const bar = r.querySelector('.retag-result-confirm-bar');
+        if (bar) bar.remove();
+        r.onclick = r._originalOnclick || null;
+    });
+
+    el.classList.add('retag-confirming');
+    el._originalOnclick = el.onclick;
+    el.onclick = null; // Disable clicking the row again
+
+    const confirmBar = document.createElement('div');
+    confirmBar.className = 'retag-result-confirm-bar';
+    confirmBar.innerHTML = `
+        <span>Re-tag with "${escapeHtml(albumName)}"?</span>
+        <div class="retag-result-confirm-actions">
+            <button class="retag-result-confirm-yes" onclick="event.stopPropagation(); executeRetag(${groupId}, '${albumId}', '${albumName.replace(/'/g, "\\'")}')">Confirm</button>
+            <button class="retag-result-confirm-cancel" onclick="event.stopPropagation(); cancelRetagConfirm(this)">Cancel</button>
+        </div>
+    `;
+    el.appendChild(confirmBar);
+}
+
+function cancelRetagConfirm(cancelBtn) {
+    const result = cancelBtn.closest('.retag-search-result');
+    if (!result) return;
+    result.classList.remove('retag-confirming');
+    const bar = result.querySelector('.retag-result-confirm-bar');
+    if (bar) bar.remove();
+    if (result._originalOnclick) {
+        result.onclick = result._originalOnclick;
+    }
+}
+
+async function executeRetag(groupId, albumId, albumName) {
 
     closeRetagSearch();
     closeRetagModal();
@@ -14780,30 +14832,134 @@ function updateRetagProgressUI(state) {
     }
 }
 
-async function deleteRetagGroup(groupId) {
-    if (!confirm('Remove this group from the retag list?\n\nYour files will not be deleted.')) return;
+/**
+ * Show inline delete confirmation for a retag group
+ */
+function showRetagDeleteConfirm(groupId) {
+    const area = document.getElementById(`retag-delete-area-${groupId}`);
+    if (!area) return;
+    area.innerHTML = `<div class="retag-confirm-inline">
+        <span>Remove?</span>
+        <button class="retag-confirm-yes" onclick="event.stopPropagation(); executeRetagGroupDelete(${groupId})">Yes</button>
+        <button class="retag-confirm-no" onclick="event.stopPropagation(); cancelRetagDeleteConfirm(${groupId})">No</button>
+    </div>`;
+}
 
+function cancelRetagDeleteConfirm(groupId) {
+    const area = document.getElementById(`retag-delete-area-${groupId}`);
+    if (!area) return;
+    area.innerHTML = `<button class="retag-group-delete-btn" onclick="event.stopPropagation(); showRetagDeleteConfirm(${groupId})" title="Remove from list">&times;</button>`;
+}
+
+async function executeRetagGroupDelete(groupId) {
     try {
         const response = await fetch(`/api/retag/groups/${groupId}`, { method: 'DELETE' });
         const data = await response.json();
         if (data.success) {
-            // Remove the card from DOM
             const card = document.querySelector(`.retag-group-card[data-group-id="${groupId}"]`);
             if (card) {
                 const section = card.closest('.retag-artist-section');
                 card.remove();
-                // If no more groups for this artist, remove the artist section
                 if (section && section.querySelectorAll('.retag-group-card').length === 0) {
                     section.remove();
                 }
             }
             loadRetagStats();
-            showToast('Group removed from retag list', 'success');
+            updateRetagBatchBar();
+            showToast('Group removed', 'success');
         } else {
             showToast('Failed to remove group', 'error');
         }
     } catch (e) {
         showToast('Failed to remove group', 'error');
+    }
+}
+
+/**
+ * Update the retag batch action bar based on checkbox selection
+ */
+function updateRetagBatchBar() {
+    const checked = document.querySelectorAll('.retag-select-cb:checked');
+    const bar = document.getElementById('retag-batch-bar');
+    const countEl = document.getElementById('retag-batch-count');
+    if (!bar) return;
+
+    if (checked.length > 0) {
+        bar.style.display = 'flex';
+        countEl.textContent = `${checked.length} selected`;
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+/**
+ * Batch remove selected retag groups
+ */
+async function batchRemoveRetagGroups() {
+    const checked = document.querySelectorAll('.retag-select-cb:checked');
+    if (checked.length === 0) return;
+
+    const groupIds = Array.from(checked).map(cb => parseInt(cb.getAttribute('data-group-id')));
+
+    try {
+        const response = await fetch('/api/retag/groups/delete-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ group_ids: groupIds })
+        });
+        const data = await response.json();
+        if (data.success) {
+            showToast(`Removed ${data.removed} group${data.removed !== 1 ? 's' : ''}`, 'success');
+            openRetagModal(); // Refresh
+        } else {
+            showToast('Failed to remove groups', 'error');
+        }
+    } catch (e) {
+        showToast('Failed to remove groups', 'error');
+    }
+}
+
+/**
+ * Clear all retag groups — inline confirm on the button itself
+ */
+function clearAllRetagGroups(btn) {
+    if (!btn) return;
+    if (btn.dataset.confirming === 'true') {
+        // Already confirming — execute
+        btn.dataset.confirming = '';
+        btn.textContent = 'Clear All';
+        executeClearAllRetag();
+        return;
+    }
+    // First click — show confirm state
+    btn.dataset.confirming = 'true';
+    btn.textContent = 'Confirm Clear?';
+    btn.style.background = 'rgba(255, 59, 48, 0.15)';
+    // Auto-reset after 3 seconds if not clicked again
+    setTimeout(() => {
+        if (btn.dataset.confirming === 'true') {
+            btn.dataset.confirming = '';
+            btn.textContent = 'Clear All';
+            btn.style.background = '';
+        }
+    }, 3000);
+}
+
+async function executeClearAllRetag() {
+    try {
+        const response = await fetch('/api/retag/groups/clear-all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await response.json();
+        if (data.success) {
+            showToast(`Cleared ${data.removed} group${data.removed !== 1 ? 's' : ''}`, 'success');
+            openRetagModal(); // Refresh
+        } else {
+            showToast('Failed to clear groups', 'error');
+        }
+    } catch (e) {
+        showToast('Failed to clear groups', 'error');
     }
 }
 

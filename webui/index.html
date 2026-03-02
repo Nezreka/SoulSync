@@ -4250,8 +4250,17 @@
     <div class="retag-modal-overlay" id="retag-modal">
         <div class="retag-modal-container">
             <div class="retag-modal-header">
-                <h2 class="retag-modal-title">Retag Tool</h2>
-                <button class="retag-modal-close" onclick="closeRetagModal()">&times;</button>
+                <div class="retag-modal-header-left">
+                    <h2 class="retag-modal-title">Retag Tool</h2>
+                </div>
+                <div class="retag-header-actions">
+                    <button class="retag-clear-all-btn" id="retag-clear-all-btn" onclick="clearAllRetagGroups(this)">Clear All</button>
+                    <button class="retag-modal-close" onclick="closeRetagModal()">&times;</button>
+                </div>
+            </div>
+            <div class="retag-batch-bar" id="retag-batch-bar" style="display: none;">
+                <span class="retag-batch-count" id="retag-batch-count">0 selected</span>
+                <button class="retag-batch-remove-btn" onclick="batchRemoveRetagGroups()">Remove Selected</button>
             </div>
             <div class="retag-modal-body" id="retag-modal-body">
                 <div class="retag-loading">Loading downloads...</div>

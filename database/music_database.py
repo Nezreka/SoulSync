@@ -5311,6 +5311,21 @@ class MusicDatabase:
             logger.error(f"Error deleting retag group: {e}")
             return False
 
+    def delete_all_retag_groups(self) -> int:
+        """Delete all retag groups and tracks. Returns count deleted."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM retag_groups")
+            count = cursor.fetchone()[0]
+            cursor.execute("DELETE FROM retag_tracks")
+            cursor.execute("DELETE FROM retag_groups")
+            conn.commit()
+            return count
+        except Exception as e:
+            logger.error(f"Error clearing all retag groups: {e}")
+            return 0
+
 # Thread-safe singleton pattern for database access
 _database_instances: Dict[int, MusicDatabase] = {}  # Thread ID -> Database instance
 _database_lock = threading.Lock()
