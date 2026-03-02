@@ -29050,7 +29050,6 @@ if __name__ == '__main__':
     print("✅ Automatic watchlist scanning started (5 minute initial delay, 24 hour cycles)")
     
     # Initialize app start time for uptime tracking
-    import time
     app.start_time = time.time()
 
     # Add startup activity
@@ -29059,4 +29058,5 @@ if __name__ == '__main__':
     # Add a test activity to verify the system is working
     add_activity_item("🔧", "Debug Test", "Activity feed system test", "Now")
 
+    _logging.getLogger("werkzeug").setLevel(_logging.WARNING)
     app.run(host='0.0.0.0', port=8008, debug=False)
