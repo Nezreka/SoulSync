@@ -33742,12 +33742,18 @@ function renderRecommendedArtistsModal(modal, artists) {
                 <span class="playlist-modal-close" onclick="closeRecommendedArtistsModal()">&times;</span>
             </div>
             <div class="playlist-modal-body">
-                <div class="recommended-search-container">
-                    <input type="text"
-                           class="recommended-search-input"
-                           id="recommended-search-input"
-                           placeholder="Search recommended artists..."
-                           oninput="filterRecommendedArtists()">
+                <div class="recommended-actions-bar">
+                    <div class="recommended-search-container">
+                        <input type="text"
+                               class="recommended-search-input"
+                               id="recommended-search-input"
+                               placeholder="Search recommended artists..."
+                               oninput="filterRecommendedArtists()">
+                    </div>
+                    <button class="recommended-add-all-btn" id="recommended-add-all-btn"
+                            onclick="addAllRecommendedToWatchlist(this)">
+                        Add All to Watchlist
+                    </button>
                 </div>
                 <div class="recommended-artists-grid" id="recommended-artists-grid">
                     ${artists.map(artist => {
@@ -33808,6 +33814,50 @@ function renderRecommendedArtistsModal(modal, artists) {
                 viewRecommendedArtistDiscography(artistId, artistName);
             }
         });
+    }
+}
+
+async function addAllRecommendedToWatchlist(btn) {
+    if (!_recommendedArtistsCache || _recommendedArtistsCache.length === 0) return;
+    if (btn.classList.contains('all-added')) return;
+
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Adding...';
+
+    try {
+        const artists = _recommendedArtistsCache.map(a => ({
+            artist_id: a.artist_id,
+            artist_name: a.artist_name
+        }));
+
+        const resp = await fetch('/api/watchlist/add-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artists })
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            btn.textContent = `All Added (${data.added} new)`;
+            btn.classList.add('all-added');
+            btn.disabled = true;
+
+            // Update all watchlist buttons in the modal to "Watching"
+            document.querySelectorAll('.recommended-card-watchlist-btn').forEach(wBtn => {
+                wBtn.classList.add('watching');
+                wBtn.textContent = 'Watching';
+            });
+
+            if (typeof updateWatchlistButtonCount === 'function') updateWatchlistButtonCount();
+        } else {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    } catch (error) {
+        console.error('Error adding all recommended to watchlist:', error);
+        btn.textContent = originalText;
+        btn.disabled = false;
     }
 }
 

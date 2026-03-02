@@ -939,8 +939,15 @@
         padding: 12px 16px;
     }
 
-    .recommended-search-container {
-        padding: 0 16px;
+    .recommended-actions-bar {
+        padding: 12px 16px 0;
+        flex-wrap: wrap;
+    }
+
+    .recommended-add-all-btn {
+        width: 100%;
+        text-align: center;
+        padding: 10px;
     }
 
     .recommended-card-watchlist-btn {
