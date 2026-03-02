@@ -10,7 +10,6 @@ import json
 import logging
 import re
 import time
-import uuid
 from typing import List, Optional, Callable, Tuple
 
 from core.itunes_client import Track, Artist, Album
@@ -84,7 +83,7 @@ class HydrabaseClient:
         except Exception:
             return None
 
-        nonce = uuid.uuid4().hex
+        nonce = int(time.time() * 1000)
         payload = json.dumps({
             'request': {
                 'type': request_type,
@@ -249,7 +248,7 @@ class HydrabaseClient:
 
     def get_album_tracks(self, album_id: str, limit: int = 50) -> List[Track]:
         """Fetch tracks for an album from Hydrabase by soul_id."""
-        results = self._send_and_recv('album_tracks', album_id)
+        results = self._send_and_recv('album.tracks', album_id)
         if not results:
             return []
 
