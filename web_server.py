@@ -14843,6 +14843,9 @@ def _on_download_completed(batch_id, task_id, success=True):
         completed_tasks = download_batches[batch_id].setdefault('_completed_task_ids', set())
         if task_id in completed_tasks:
             print(f"⚠️ [Batch Manager] Task {task_id} already completed — skipping duplicate _on_download_completed call")
+            # Set terminal status so the monitor loop stops re-processing this task
+            if task_id in download_tasks and download_tasks[task_id].get('status') in ('downloading', 'queued'):
+                download_tasks[task_id]['status'] = 'completed'
             return
         completed_tasks.add(task_id)
 
