@@ -4859,6 +4859,8 @@ class MusicDatabase:
                         'image_url': artist.thumb_url,
                         'genres': artist.genres,
                         'musicbrainz_id': row['musicbrainz_id'],
+                        'spotify_artist_id': row['spotify_artist_id'],
+                        'itunes_artist_id': row['itunes_artist_id'],
                         'deezer_id': row['deezer_id'],
                         'audiodb_id': row['audiodb_id'],
                         'album_count': row['album_count'] or 0,

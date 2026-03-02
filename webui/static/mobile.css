@@ -870,6 +870,19 @@
         max-width: 100%;
     }
 
+    .watchlist-filter {
+        flex-wrap: wrap;
+    }
+
+    .library-watchlist-all-btn {
+        font-size: 12px;
+        padding: 5px 12px;
+    }
+
+    .library-card-watchlist-btn {
+        opacity: 1;
+    }
+
     .alphabet-selector-inner {
         flex-wrap: wrap;
         min-width: 0;

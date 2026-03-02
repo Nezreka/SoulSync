@@ -27551,6 +27551,7 @@ function initializeLibrarySearch() {
 
 function initializeWatchlistFilter() {
     const filterButtons = document.querySelectorAll(".watchlist-filter-btn");
+    const watchAllBtn = document.getElementById("library-watchlist-all-btn");
 
     filterButtons.forEach(button => {
         button.addEventListener("click", () => {
@@ -27559,6 +27560,15 @@ function initializeWatchlistFilter() {
             // Update active state
             filterButtons.forEach(btn => btn.classList.remove("active"));
             button.classList.add("active");
+
+            // Show/hide "Watch All Unwatched" button
+            if (watchAllBtn) {
+                if (filter === "unwatched") {
+                    watchAllBtn.classList.remove("hidden");
+                } else {
+                    watchAllBtn.classList.add("hidden");
+                }
+            }
 
             // Update state and reload
             libraryPageState.watchlistFilter = filter;
@@ -27710,7 +27720,8 @@ function createLibraryArtistCard(artist) {
         badgeOffset += 32;
     });
 
-    // Add watchlist indicator if artist is on the watchlist
+    // Add watchlist button/indicator on the card
+    const hasExternalId = artist.itunes_artist_id || artist.spotify_artist_id;
     if (artist.is_watched) {
         const watchIcon = document.createElement('div');
         watchIcon.className = 'watchlist-card-icon';
@@ -27718,6 +27729,17 @@ function createLibraryArtistCard(artist) {
         watchIcon.style.top = badgeOffset + 'px';
         watchIcon.textContent = '👁️';
         card.appendChild(watchIcon);
+    } else if (hasExternalId) {
+        const watchBtn = document.createElement('button');
+        watchBtn.className = 'library-card-watchlist-btn';
+        watchBtn.style.top = badgeOffset + 'px';
+        watchBtn.title = 'Add to Watchlist';
+        watchBtn.innerHTML = '<span class="watchlist-icon">👁️</span><span class="watchlist-text">Watch</span>';
+        watchBtn.onclick = (e) => {
+            e.stopPropagation();
+            toggleLibraryCardWatchlist(watchBtn, artist);
+        };
+        card.appendChild(watchBtn);
     }
 
     // Create image element
@@ -27840,6 +27862,113 @@ function showLibraryEmpty(show) {
         } else {
             emptyElement.classList.add("hidden");
         }
+    }
+}
+
+async function addAllUnwatchedToWatchlist(btn) {
+    if (btn.classList.contains('adding') || btn.classList.contains('all-added')) return;
+
+    btn.classList.add('adding');
+    const textSpan = btn.querySelector('.watchlist-all-text');
+    const originalText = textSpan.textContent;
+    textSpan.textContent = 'Adding...';
+
+    try {
+        const response = await fetch('/api/library/watchlist-all-unwatched', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            btn.classList.remove('adding');
+            btn.classList.add('all-added');
+
+            let resultText = `Added ${data.added}`;
+            if (data.skipped_no_id > 0) {
+                resultText += ` (${data.skipped_no_id} unmatched)`;
+            }
+            textSpan.textContent = resultText;
+
+            if (data.added > 0) {
+                showToast(data.message, 'success');
+                // Reload the library to reflect changes
+                setTimeout(() => {
+                    loadLibraryArtists();
+                }, 1500);
+            } else if (data.skipped_no_id > 0) {
+                showToast(`No artists could be added — ${data.skipped_no_id} don't have matching IDs yet. Background workers will match them over time.`, 'warning');
+            } else {
+                showToast('No unwatched artists found', 'info');
+            }
+
+            // Reset button after a delay
+            setTimeout(() => {
+                btn.classList.remove('all-added');
+                textSpan.textContent = originalText;
+            }, 5000);
+        } else {
+            throw new Error(data.error || 'Failed to add artists');
+        }
+    } catch (error) {
+        console.error('Error bulk adding unwatched artists:', error);
+        btn.classList.remove('adding');
+        textSpan.textContent = originalText;
+        showToast('Failed to add artists to watchlist', 'error');
+    }
+}
+
+async function toggleLibraryCardWatchlist(btn, artist) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+
+    const icon = btn.querySelector('.watchlist-icon');
+    const text = btn.querySelector('.watchlist-text');
+    const isWatching = btn.classList.contains('watching');
+
+    text.textContent = '...';
+
+    try {
+        // Determine external ID: prefer iTunes, fallback Spotify
+        const artistId = artist.itunes_artist_id || artist.spotify_artist_id;
+
+        if (isWatching) {
+            const response = await fetch('/api/watchlist/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artist_id: artistId })
+            });
+            const data = await response.json();
+            if (!data.success) throw new Error(data.error);
+
+            btn.classList.remove('watching');
+            btn.title = 'Add to Watchlist';
+            text.textContent = 'Watch';
+            showToast(`Removed ${artist.name} from watchlist`, 'success');
+        } else {
+            const response = await fetch('/api/watchlist/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artist_id: artistId, artist_name: artist.name })
+            });
+            const data = await response.json();
+            if (!data.success) throw new Error(data.error);
+
+            btn.classList.add('watching');
+            btn.title = 'Remove from Watchlist';
+            text.textContent = 'Watching';
+            showToast(`Added ${artist.name} to watchlist`, 'success');
+        }
+
+        if (typeof updateWatchlistCount === 'function') {
+            updateWatchlistCount();
+        }
+    } catch (error) {
+        console.error('Error toggling library card watchlist:', error);
+        text.textContent = isWatching ? 'Watching' : 'Watch';
+        showToast(`Error: ${error.message}`, 'error');
+    } finally {
+        btn.disabled = false;
     }
 }
 
