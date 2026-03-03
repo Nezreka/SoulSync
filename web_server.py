@@ -247,7 +247,10 @@ db_update_state = {
     "current_item": "",
     "processed": 0,
     "total": 0,
-    "error_message": ""
+    "error_message": "",
+    "removed_artists": 0,
+    "removed_albums": 0,
+    "removed_tracks": 0
 }
 
 # Quality Scanner state
@@ -12626,12 +12629,30 @@ def _db_update_phase_callback(phase):
         db_update_state["phase"] = phase
 
 def _db_update_finished_callback(total_artists, total_albums, total_tracks, successful, failed):
+    # Check for removal results from the worker
+    removed_artists = 0
+    removed_albums = 0
+    removed_tracks = 0
+    if db_update_worker:
+        removed_artists = getattr(db_update_worker, 'removed_artists', 0)
+        removed_albums = getattr(db_update_worker, 'removed_albums', 0)
+        removed_tracks = getattr(db_update_worker, 'removed_tracks', 0)
+
+    removal_msg = ""
+    if removed_artists > 0 or removed_albums > 0:
+        removal_msg = f" | Removed: {removed_artists} artists, {removed_albums} albums"
+
     with db_update_lock:
         db_update_state["status"] = "finished"
-        db_update_state["phase"] = f"Completed: {successful} successful, {failed} failed."
-    
+        db_update_state["phase"] = f"Completed: {successful} successful, {failed} failed{removal_msg}."
+        db_update_state["removed_artists"] = removed_artists
+        db_update_state["removed_albums"] = removed_albums
+        db_update_state["removed_tracks"] = removed_tracks
+
     # Add activity for database update completion
     summary = f"{total_tracks} tracks, {total_albums} albums, {total_artists} artists processed"
+    if removed_artists > 0 or removed_albums > 0:
+        summary += f" | {removed_artists} artists, {removed_albums} albums removed"
     add_activity_item("✅", "Database Update Complete", summary, "Now")
     
     # WISHLIST CLEANUP: Automatically clean up wishlist after database update

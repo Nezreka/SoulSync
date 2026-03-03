@@ -390,6 +390,64 @@ class NavidromeClient:
             logger.error(f"Error getting artists from Navidrome: {e}")
             return []
 
+    def get_all_artist_ids(self) -> set:
+        """Get all artist IDs from Navidrome (lightweight, for removal detection)."""
+        if not self.ensure_connection():
+            return set()
+        try:
+            params = {}
+            if self.music_folder_id:
+                params['musicFolderId'] = self.music_folder_id
+            response = self._make_request('getArtists', params if params else None)
+            if not response:
+                return set()
+            ids = set()
+            for index in response.get('artists', {}).get('index', []):
+                for artist_data in index.get('artist', []):
+                    aid = artist_data.get('id')
+                    if aid:
+                        ids.add(str(aid))
+            logger.info(f"Retrieved {len(ids)} artist IDs from Navidrome (lightweight)")
+            return ids
+        except Exception as e:
+            logger.error(f"Error getting artist IDs from Navidrome: {e}")
+            return set()
+
+    def get_all_album_ids(self) -> set:
+        """Get all album IDs from Navidrome (lightweight, paginated, for removal detection)."""
+        if not self.ensure_connection():
+            return set()
+        try:
+            all_ids = set()
+            page_size = 500
+            offset = 0
+            while True:
+                params = {
+                    'type': 'alphabeticalByName',
+                    'size': page_size,
+                    'offset': offset
+                }
+                if self.music_folder_id:
+                    params['musicFolderId'] = self.music_folder_id
+                response = self._make_request('getAlbumList2', params)
+                if not response:
+                    break
+                album_list = response.get('albumList2', {}).get('album', [])
+                if not album_list:
+                    break
+                for album_data in album_list:
+                    aid = album_data.get('id')
+                    if aid:
+                        all_ids.add(str(aid))
+                if len(album_list) < page_size:
+                    break
+                offset += page_size
+            logger.info(f"Retrieved {len(all_ids)} album IDs from Navidrome (lightweight)")
+            return all_ids
+        except Exception as e:
+            logger.error(f"Error getting album IDs from Navidrome: {e}")
+            return set()
+
     def get_albums_for_artist(self, artist_id: str) -> List[NavidromeAlbum]:
         """Get all albums for a specific artist"""
         # Check cache first

@@ -740,6 +740,65 @@ class JellyfinClient:
             logger.error(f"Error getting artists from Jellyfin: {e}")
             return []
     
+    def get_all_artist_ids(self) -> set:
+        """Get all artist IDs from Jellyfin (lightweight, for removal detection).
+        Does NOT trigger _populate_aggressive_cache()."""
+        if not self.ensure_connection() or not self.music_library_id:
+            return set()
+        try:
+            params = {
+                'ParentId': self.music_library_id,
+                'Recursive': True,
+                'Fields': '',
+                'EnableTotalRecordCount': False
+            }
+            response = self._make_request('/Artists/AlbumArtists', params)
+            if not response:
+                return set()
+            ids = {item['Id'] for item in response.get('Items', []) if 'Id' in item}
+            logger.info(f"Retrieved {len(ids)} artist IDs from Jellyfin (lightweight)")
+            return ids
+        except Exception as e:
+            logger.error(f"Error getting artist IDs from Jellyfin: {e}")
+            return set()
+
+    def get_all_album_ids(self) -> set:
+        """Get all album IDs from Jellyfin (lightweight, paginated, for removal detection).
+        Does NOT trigger _populate_aggressive_cache()."""
+        if not self.ensure_connection() or not self.music_library_id:
+            return set()
+        try:
+            all_ids = set()
+            start_index = 0
+            limit = 10000
+            while True:
+                params = {
+                    'ParentId': self.music_library_id,
+                    'IncludeItemTypes': 'MusicAlbum',
+                    'Recursive': True,
+                    'Fields': '',
+                    'SortBy': 'SortName',
+                    'SortOrder': 'Ascending',
+                    'StartIndex': start_index,
+                    'Limit': limit,
+                    'EnableTotalRecordCount': False
+                }
+                response = self._make_request(f'/Users/{self.user_id}/Items', params)
+                if not response:
+                    break
+                items = response.get('Items', [])
+                if not items:
+                    break
+                all_ids.update(item['Id'] for item in items if 'Id' in item)
+                if len(items) < limit:
+                    break
+                start_index += limit
+            logger.info(f"Retrieved {len(all_ids)} album IDs from Jellyfin (lightweight)")
+            return all_ids
+        except Exception as e:
+            logger.error(f"Error getting album IDs from Jellyfin: {e}")
+            return set()
+
     def get_albums_for_artist(self, artist_id: str) -> List[JellyfinAlbum]:
         """Get all albums for a specific artist"""
         # Use cache if available

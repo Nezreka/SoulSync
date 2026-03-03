@@ -228,6 +228,20 @@ class DatabaseUpdateWorker(QThread):
                 except Exception as e:
                     logger.warning(f"Could not clear {self.server_type} cache: {e}")
             
+            # Detect and remove content deleted from the media server
+            if not self.full_refresh and self.database:
+                try:
+                    removal_results = self._detect_and_remove_stale_content()
+                    if removal_results:
+                        r_artists = removal_results.get('artists_removed', 0)
+                        r_albums = removal_results.get('albums_removed', 0)
+                        r_tracks = removal_results.get('tracks_removed', 0)
+                        if r_artists > 0 or r_albums > 0:
+                            logger.info(f"🗑️ Removal detection: {r_artists} artists, "
+                                       f"{r_albums} albums, {r_tracks} tracks removed")
+                except Exception as e:
+                    logger.warning(f"Removal detection failed (non-fatal): {e}")
+
             # Cleanup orphaned records after incremental updates (catches fixed matches)
             if not self.full_refresh and self.database:
                 try:
@@ -252,15 +266,21 @@ class DatabaseUpdateWorker(QThread):
                 except Exception as e:
                     logger.warning(f"Could not merge duplicate artists: {e}")
             
+            # Store removal counts as instance attributes for the web server to access
+            removal = getattr(self, '_removal_results', None)
+            self.removed_artists = removal.get('artists_removed', 0) if removal else 0
+            self.removed_albums = removal.get('albums_removed', 0) if removal else 0
+            self.removed_tracks = removal.get('tracks_removed', 0) if removal else 0
+
             # Emit final results
             self._emit_signal('finished',
                 self.processed_artists,
-                self.processed_albums, 
+                self.processed_albums,
                 self.processed_tracks,
                 self.successful_operations,
                 self.failed_operations
             )
-            
+
             update_type = "Full refresh" if self.full_refresh else "Incremental update"
             logger.info(f"{update_type} completed: {self.processed_artists} artists, "
                        f"{self.processed_albums} albums, {self.processed_tracks} tracks processed")
@@ -835,6 +855,113 @@ class DatabaseUpdateWorker(QThread):
             logger.debug(f"Error checking for metadata changes: {e}")
             return False  # Assume no changes if we can't check
     
+    def _detect_and_remove_stale_content(self):
+        """Detect and remove content that was deleted from the media server.
+
+        Compares the set of artist/album IDs in the database against what the
+        media server currently reports. Any IDs in the database but NOT on the
+        server are considered removed and are deleted.
+
+        Includes safety checks to prevent accidental mass deletion if the server
+        returns suspiciously few results.
+        """
+        self._emit_signal('phase_changed', "Checking for removed content...")
+
+        # Check that the media client supports removal detection
+        if not hasattr(self.media_client, 'get_all_artist_ids') or not hasattr(self.media_client, 'get_all_album_ids'):
+            logger.info(f"Removal detection not supported for {self.server_type} — skipping")
+            return None
+
+        # Fetch current IDs from media server (lightweight calls)
+        logger.info(f"🔍 Removal detection: fetching current IDs from {self.server_type}...")
+        server_artist_ids = self.media_client.get_all_artist_ids()
+        server_album_ids = self.media_client.get_all_album_ids()
+
+        # Safety: if both come back empty, the server is unreachable
+        if not server_artist_ids and not server_album_ids:
+            logger.warning("🛡️ SAFETY: Server returned zero artists AND zero albums — "
+                          "skipping removal detection")
+            return None
+
+        # Get current DB counts for safety threshold
+        try:
+            db_stats = self.database.get_statistics_for_server(self.server_type)
+            db_artist_count = db_stats.get('artists', 0)
+            db_album_count = db_stats.get('albums', 0)
+        except Exception:
+            db_artist_count = 0
+            db_album_count = 0
+
+        # Per-type safety: skip removal for any type where the server returned
+        # empty or suspiciously few results. An empty set means the API call
+        # failed, not that the server has zero items.
+        check_artists = bool(server_artist_ids)
+        check_albums = bool(server_album_ids)
+
+        if check_artists and db_artist_count > 100:
+            if len(server_artist_ids) < db_artist_count * 0.5:
+                logger.warning(
+                    f"🛡️ SAFETY: Server reported {len(server_artist_ids)} artists but "
+                    f"database has {db_artist_count} — skipping artist removal check")
+                check_artists = False
+
+        if check_albums and db_album_count > 100:
+            if len(server_album_ids) < db_album_count * 0.5:
+                logger.warning(
+                    f"🛡️ SAFETY: Server reported {len(server_album_ids)} albums but "
+                    f"database has {db_album_count} — skipping album removal check")
+                check_albums = False
+
+        if not check_artists and not check_albums:
+            logger.warning("🛡️ SAFETY: Both artist and album checks disabled — "
+                          "skipping removal detection")
+            return None
+
+        # Get stored IDs from database
+        db_artist_ids = self.database.get_all_artist_ids_for_server(self.server_type) if check_artists else set()
+        db_album_ids = self.database.get_all_album_ids_for_server(self.server_type) if check_albums else set()
+
+        # Compute removal sets (only for types we have valid server data for)
+        removed_artist_ids = (db_artist_ids - server_artist_ids) if check_artists else set()
+        removed_album_ids = (db_album_ids - server_album_ids) if check_albums else set()
+
+        # Filter out albums that will already be cascade-deleted with their artist
+        if removed_artist_ids and removed_album_ids:
+            try:
+                with self.database._get_connection() as conn:
+                    cursor = conn.cursor()
+                    artist_list = list(removed_artist_ids)
+                    cascade_album_ids = set()
+                    batch_size = 500
+                    for i in range(0, len(artist_list), batch_size):
+                        batch = artist_list[i:i + batch_size]
+                        placeholders = ','.join('?' * len(batch))
+                        cursor.execute(
+                            f"SELECT id FROM albums WHERE artist_id IN ({placeholders}) "
+                            f"AND server_source = ?",
+                            batch + [self.server_type])
+                        cascade_album_ids.update(row[0] for row in cursor.fetchall())
+                    removed_album_ids -= cascade_album_ids
+            except Exception:
+                pass  # If this optimization fails, double-delete is harmless
+
+        if not removed_artist_ids and not removed_album_ids:
+            logger.info("🔍 Removal detection: no stale content found")
+            return {'artists_removed': 0, 'albums_removed': 0, 'tracks_removed': 0}
+
+        logger.info(f"🗑️ Removal detection: found {len(removed_artist_ids)} removed artists, "
+                    f"{len(removed_album_ids)} removed albums")
+
+        self._emit_signal('phase_changed',
+                         f"Removing {len(removed_artist_ids)} artists, "
+                         f"{len(removed_album_ids)} albums no longer on server...")
+
+        results = self.database.delete_removed_content(
+            removed_artist_ids, removed_album_ids, self.server_type)
+
+        self._removal_results = results
+        return results
+
     def _get_recent_albums_for_server(self) -> List:
         """Get recently added albums using server-specific methods"""
         try:

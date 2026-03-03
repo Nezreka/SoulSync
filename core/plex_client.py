@@ -617,7 +617,7 @@ class PlexClient:
         if not self.ensure_connection() or not self.music_library:
             logger.error("Not connected to Plex server or no music library")
             return []
-        
+
         try:
             artists = self.music_library.searchArtists()
             logger.info(f"Found {len(artists)} artists in Plex library")
@@ -625,7 +625,33 @@ class PlexClient:
         except Exception as e:
             logger.error(f"Error getting all artists: {e}")
             return []
-    
+
+    def get_all_artist_ids(self) -> set:
+        """Get all artist IDs from Plex library (lightweight, for removal detection)."""
+        if not self.ensure_connection() or not self.music_library:
+            return set()
+        try:
+            artists = self.music_library.searchArtists()
+            ids = {str(a.ratingKey) for a in artists}
+            logger.info(f"Retrieved {len(ids)} artist IDs from Plex")
+            return ids
+        except Exception as e:
+            logger.error(f"Error getting artist IDs from Plex: {e}")
+            return set()
+
+    def get_all_album_ids(self) -> set:
+        """Get all album IDs from Plex library (lightweight, for removal detection)."""
+        if not self.ensure_connection() or not self.music_library:
+            return set()
+        try:
+            albums = self.music_library.albums()
+            ids = {str(a.ratingKey) for a in albums}
+            logger.info(f"Retrieved {len(ids)} album IDs from Plex")
+            return ids
+        except Exception as e:
+            logger.error(f"Error getting album IDs from Plex: {e}")
+            return set()
+
     def update_artist_genres(self, artist: PlexArtist, genres: List[str]):
         """Update artist genres"""
         try:
