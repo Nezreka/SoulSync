@@ -198,6 +198,25 @@ except Exception as e:
     print(f"🔴 FATAL: Error initializing service clients: {e}")
     spotify_client = plex_client = jellyfin_client = navidrome_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
 
+# --- Register Public REST API Blueprint (v1) ---
+try:
+    from api import create_api_blueprint, limiter
+    limiter.init_app(app)
+    api_bp = create_api_blueprint()
+    app.register_blueprint(api_bp, url_prefix='/api/v1')
+    app.soulsync = {
+        'spotify_client': spotify_client,
+        'soulseek_client': soulseek_client,
+        'tidal_client': tidal_client,
+        'matching_engine': matching_engine,
+        'config_manager': config_manager,
+        'hydrabase_client': None,       # updated after Hydrabase init
+        'hydrabase_worker': None,       # updated after Hydrabase init
+    }
+    print("✅ Public REST API v1 registered at /api/v1")
+except Exception as e:
+    print(f"⚠️ Public REST API v1 failed to register: {e}")
+
 # --- Global Streaming State Management ---
 # Thread-safe state tracking for streaming functionality
 stream_state = {
@@ -2520,6 +2539,53 @@ def add_activity_item(icon: str, title: str, subtitle: str, time_ago: str = "Now
         print(f"📝 Activity: {icon} {title} - {subtitle}")
     except Exception as e:
         print(f"Error adding activity item: {e}")
+
+# --- Internal API Key Management (browser-only, no auth) ---
+@app.route('/api/v1/api-keys-internal', methods=['GET'])
+def list_api_keys_internal():
+    """List API keys for the settings page (no auth required — same as all UI routes)."""
+    keys = config_manager.get('api_keys', [])
+    safe_keys = [
+        {
+            "id": k.get("id"),
+            "label": k.get("label", ""),
+            "key_prefix": k.get("key_prefix", ""),
+            "created_at": k.get("created_at"),
+            "last_used_at": k.get("last_used_at"),
+        }
+        for k in keys
+    ]
+    return jsonify({"success": True, "data": {"keys": safe_keys}})
+
+@app.route('/api/v1/api-keys-internal/generate', methods=['POST'])
+def generate_api_key_internal():
+    """Generate API key from settings page (no auth required)."""
+    from api.auth import generate_api_key
+    body = request.get_json(silent=True) or {}
+    label = body.get("label", "")
+    raw_key, record = generate_api_key(label)
+    keys = config_manager.get('api_keys', [])
+    keys.append(record)
+    config_manager.set('api_keys', keys)
+    return jsonify({"success": True, "data": {
+        "key": raw_key,
+        "id": record["id"],
+        "label": record["label"],
+        "key_prefix": record["key_prefix"],
+        "created_at": record["created_at"],
+    }}), 201
+
+@app.route('/api/v1/api-keys-internal/revoke/<key_id>', methods=['DELETE'])
+def revoke_api_key_internal(key_id):
+    """Revoke API key from settings page (no auth required)."""
+    keys = config_manager.get('api_keys', [])
+    original_len = len(keys)
+    keys = [k for k in keys if k.get("id") != key_id]
+    if len(keys) == original_len:
+        return jsonify({"success": False, "error": {"message": "Key not found"}}), 404
+    config_manager.set('api_keys', keys)
+    return jsonify({"success": True, "data": {"message": "API key revoked"}})
+
 
 @app.route('/api/settings', methods=['GET', 'POST'])
 def handle_settings():
@@ -28462,6 +28528,10 @@ try:
     hydrabase_worker.start()
     hydrabase_client = HydrabaseClient(get_ws_and_lock=_get_hydrabase_ws_and_lock)
     print("✅ Hydrabase P2P mirror worker and metadata client initialized")
+    # Update API blueprint references
+    if hasattr(app, 'soulsync'):
+        app.soulsync['hydrabase_client'] = hydrabase_client
+        app.soulsync['hydrabase_worker'] = hydrabase_worker
 except Exception as e:
     print(f"⚠️ Hydrabase initialization failed: {e}")
     hydrabase_worker = None

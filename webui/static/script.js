@@ -706,6 +706,7 @@ async function loadPageData(pageId) {
                 initializeSettings();
                 await loadSettingsData();
                 await loadQualityProfile();
+                loadApiKeys();
                 break;
             case 'import':
                 initializeImportPage();
@@ -2775,6 +2776,118 @@ async function clearQuarantine() {
         showToast('Failed to clear quarantine', 'error');
     } finally {
         hideLoadingOverlay();
+    }
+}
+
+// ======================== API Key Management ========================
+
+async function loadApiKeys() {
+    const container = document.getElementById('api-keys-list');
+    if (!container) return;
+
+    try {
+        const response = await fetch('/api/v1/api-keys-internal');
+        if (response.ok) {
+            const data = await response.json();
+            renderApiKeys(data.data?.keys || []);
+        } else {
+            container.innerHTML = '<div style="color: #666; font-size: 13px;">No API keys configured.</div>';
+        }
+    } catch (e) {
+        container.innerHTML = '<div style="color: #666; font-size: 13px;">No API keys configured.</div>';
+    }
+}
+
+function renderApiKeys(keys) {
+    const container = document.getElementById('api-keys-list');
+    if (!container) return;
+
+    if (!keys || keys.length === 0) {
+        container.innerHTML = '<div style="color: #666; font-size: 13px; padding: 4px 0;">No API keys yet. Generate one below.</div>';
+        return;
+    }
+
+    container.innerHTML = keys.map(k => `
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; margin-bottom: 4px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px;">
+            <div style="flex: 1; min-width: 0;">
+                <div style="font-size: 13px; color: #e0e0e0; font-weight: 500;">${k.label || 'Unnamed'}</div>
+                <div style="font-size: 11px; color: #666; margin-top: 2px;">
+                    <code>${k.key_prefix || 'sk_...'}...</code>
+                    &middot; Created ${k.created_at ? new Date(k.created_at).toLocaleDateString() : 'unknown'}
+                    ${k.last_used_at ? '&middot; Last used ' + new Date(k.last_used_at).toLocaleDateString() : ''}
+                </div>
+            </div>
+            <button onclick="revokeApiKey('${k.id}', '${(k.label || 'this key').replace(/'/g, "\\'")}')"
+                style="padding: 4px 10px; background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.2); color: #ff5252; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap;">
+                Revoke
+            </button>
+        </div>
+    `).join('');
+}
+
+async function generateApiKey() {
+    const labelInput = document.getElementById('api-key-label');
+    const label = labelInput ? labelInput.value.trim() : '';
+
+    try {
+        const response = await fetch('/api/v1/api-keys-internal/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ label: label || 'Default' })
+        });
+        const data = await response.json();
+
+        if (data.success && data.data?.key) {
+            const keyDisplay = document.getElementById('api-key-generated');
+            const keyValue = document.getElementById('api-key-value');
+            if (keyDisplay && keyValue) {
+                keyValue.textContent = data.data.key;
+                keyDisplay.style.display = 'block';
+            }
+            if (labelInput) labelInput.value = '';
+            showToast('API key generated! Copy it now.', 'success');
+            loadApiKeys();
+        } else {
+            showToast(data.error?.message || 'Failed to generate API key', 'error');
+        }
+    } catch (error) {
+        console.error('Error generating API key:', error);
+        showToast('Failed to generate API key', 'error');
+    }
+}
+
+function copyApiKey() {
+    const keyValue = document.getElementById('api-key-value');
+    if (keyValue) {
+        navigator.clipboard.writeText(keyValue.textContent).then(() => {
+            showToast('API key copied to clipboard', 'success');
+        }).catch(() => {
+            // Fallback for older browsers
+            const range = document.createRange();
+            range.selectNode(keyValue);
+            window.getSelection().removeAllRanges();
+            window.getSelection().addRange(range);
+            document.execCommand('copy');
+            showToast('API key copied', 'success');
+        });
+    }
+}
+
+async function revokeApiKey(keyId, label) {
+    if (!confirm(`Revoke API key "${label}"? Any apps using this key will stop working.`)) return;
+
+    try {
+        const response = await fetch(`/api/v1/api-keys-internal/revoke/${keyId}`, { method: 'DELETE' });
+        const data = await response.json();
+        if (data.success) {
+            showToast('API key revoked', 'success');
+            loadApiKeys();
+        } else {
+            showToast(data.error?.message || 'Failed to revoke key', 'error');
+        }
+    } catch (error) {
+        console.error('Error revoking API key:', error);
+        showToast('Failed to revoke key', 'error');
     }
 }
 
