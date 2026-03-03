@@ -3334,72 +3334,111 @@ def auth_spotify():
         if temp_spotify_client.sp and temp_spotify_client.sp.auth_manager:
             # Get the authorization URL
             auth_url = temp_spotify_client.sp.auth_manager.get_authorize_url()
+            configured_uri = config_manager.get_spotify_config().get('redirect_uri', 'http://127.0.0.1:8888/callback')
+            print(f"🎵 Spotify auth initiated — redirect_uri: {configured_uri}")
             add_activity_item("🔐", "Spotify Auth Started", "Please complete OAuth in browser", "Now")
 
             # Detect if accessing remotely
             host = request.host.split(':')[0]
             is_remote = host not in ['127.0.0.1', 'localhost']
             is_docker = os.path.exists('/.dockerenv')
-            
+
             # If in Docker and accessing via 127.0.0.1, recommend localhost
             if is_docker and host == '127.0.0.1':
                 host = 'localhost'
 
+            # Check if the redirect_uri uses port 8008 (main app) vs 8888 (standalone)
+            uses_main_port = ':8008' in configured_uri or ':8888' not in configured_uri
+
             if is_remote or is_docker:
                 # Show instructions for remote/docker access
-                page_title = "🔐 Spotify Authentication (Remote/Docker)"
-                step_1_text = "Click the link below to authenticate with Spotify"
-                
-                return f'''
-                <html>
-                <head>
-                    <style>
-                        body {{ font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }}
-                        code {{ background: #f0f0f0; padding: 10px; display: block; margin: 10px 0; }}
-                        .highlight {{ background: #e8f5e9; }}
-                        .copy-btn {{
-                            background: #1DB954;
-                            color: white;
-                            border: none;
-                            padding: 8px 16px;
-                            cursor: pointer;
-                            border-radius: 4px;
-                            font-size: 14px;
-                            margin-left: 10px;
-                        }}
-                        .copy-btn:hover {{ background: #1ed760; }}
-                        .copied {{ background: #4CAF50 !important; }}
-                    </style>
-                </head>
-                <body>
-                    <h1>{page_title}</h1>
-                    <p><strong>Step 1:</strong> {step_1_text}</p>
-                    <p><a href="{auth_url}" target="_blank" style="font-size: 18px; color: #1DB954;">{auth_url}</a></p>
-                    <hr>
-                    <p><strong>Step 2:</strong> After authorizing, you'll see a blank page. The URL will look like:</p>
-                    <code>http://127.0.0.1:8888/callback?code=...</code>
-                    <p><strong>Step 3:</strong> Change <code style="display: inline; background: #ffe6e6; padding: 2px 6px;">127.0.0.1</code> to <code style="display: inline; background: #e8f5e9; padding: 2px 6px;">{host}</code> and press Enter:
-                        <button class="copy-btn" onclick="copyIP()">Copy IP</button>
-                    </p>
-                    <code class="highlight">http://{host}:8888/callback?code=...</code>
-                    <p>Authentication will then complete!</p>
+                if uses_main_port:
+                    # redirect_uri already points to port 8008 or a custom domain —
+                    # callback will come through the main Flask app, no manual steps needed
+                    return f'''
+                    <html>
+                    <head>
+                        <style>
+                            body {{ font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }}
+                            code {{ background: #f0f0f0; padding: 4px 8px; border-radius: 3px; }}
+                            .info {{ background: #e3f2fd; border-left: 4px solid #2196F3; padding: 12px 16px; margin: 16px 0; border-radius: 4px; }}
+                        </style>
+                    </head>
+                    <body>
+                        <h1>🔐 Spotify Authentication</h1>
+                        <p>Click the link below to authenticate with Spotify:</p>
+                        <p><a href="{auth_url}" target="_blank" style="font-size: 18px; color: #1DB954;">Authenticate with Spotify</a></p>
+                        <div class="info">
+                            <strong>Redirect URI:</strong> <code>{configured_uri}</code><br>
+                            <small>After authorizing, Spotify will redirect back automatically. Make sure this URL matches your Spotify Dashboard redirect URI.</small>
+                        </div>
+                        <p>After authentication completes, you can close this window and return to SoulSync.</p>
+                    </body>
+                    </html>
+                    '''
+                else:
+                    # redirect_uri still points to port 8888 — show manual steps AND suggest switching
+                    return f'''
+                    <html>
+                    <head>
+                        <style>
+                            body {{ font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }}
+                            code {{ background: #f0f0f0; padding: 10px; display: block; margin: 10px 0; }}
+                            .highlight {{ background: #e8f5e9; }}
+                            .warning {{ background: #fff3e0; border-left: 4px solid #ff9800; padding: 12px 16px; margin: 16px 0; border-radius: 4px; }}
+                            .copy-btn {{
+                                background: #1DB954;
+                                color: white;
+                                border: none;
+                                padding: 8px 16px;
+                                cursor: pointer;
+                                border-radius: 4px;
+                                font-size: 14px;
+                                margin-left: 10px;
+                            }}
+                            .copy-btn:hover {{ background: #1ed760; }}
+                            .copied {{ background: #4CAF50 !important; }}
+                        </style>
+                    </head>
+                    <body>
+                        <h1>🔐 Spotify Authentication (Remote/Docker)</h1>
 
-                    <script>
-                        function copyIP() {{
-                            navigator.clipboard.writeText('{host}').then(() => {{
-                                const btn = event.target;
-                                btn.textContent = '✓ Copied!';
-                                btn.classList.add('copied');
-                                setTimeout(() => {{
-                                    btn.textContent = 'Copy IP';
-                                    btn.classList.remove('copied');
-                                }}, 2000);
-                            }});
-                        }}
-                    </script>
-                </body>
-                </html>
-                '''
+                        <div class="warning">
+                            <strong>Using a reverse proxy?</strong> Your redirect URI is set to <code style="display:inline; padding: 2px 6px;">{configured_uri}</code>
+                            which uses port 8888. If you're behind a reverse proxy (Caddy, Nginx, Traefik), change the
+                            redirect URI in SoulSync settings to use your proxy URL on the main port instead, e.g.:<br>
+                            <code style="display:inline; padding: 2px 6px; background: #e8f5e9;">https://{host}/callback</code><br>
+                            Then update the same URI in your <a href="https://developer.spotify.com/dashboard" target="_blank">Spotify Dashboard</a>.
+                            This avoids the need for manual URL editing below.
+                        </div>
+
+                        <p><strong>Step 1:</strong> Click the link below to authenticate with Spotify</p>
+                        <p><a href="{auth_url}" target="_blank" style="font-size: 18px; color: #1DB954;">{auth_url}</a></p>
+                        <hr>
+                        <p><strong>Step 2:</strong> After authorizing, you'll see a blank page. The URL will look like:</p>
+                        <code>http://127.0.0.1:8888/callback?code=...</code>
+                        <p><strong>Step 3:</strong> Change <code style="display: inline; background: #ffe6e6; padding: 2px 6px;">127.0.0.1</code> to <code style="display: inline; background: #e8f5e9; padding: 2px 6px;">{host}</code> and press Enter:
+                            <button class="copy-btn" onclick="copyIP()">Copy IP</button>
+                        </p>
+                        <code class="highlight">http://{host}:8888/callback?code=...</code>
+                        <p>Authentication will then complete!</p>
+
+                        <script>
+                            function copyIP() {{
+                                navigator.clipboard.writeText('{host}').then(() => {{
+                                    const btn = event.target;
+                                    btn.textContent = 'Copied!';
+                                    btn.classList.add('copied');
+                                    setTimeout(() => {{
+                                        btn.textContent = 'Copy IP';
+                                        btn.classList.remove('copied');
+                                    }}, 2000);
+                                }});
+                            }}
+                        </script>
+                    </body>
+                    </html>
+                    '''
             else:
                 # Local access - simple message
                 return f'<h1>🔐 Spotify Authentication</h1><p>Click the link below to authenticate:</p><p><a href="{auth_url}" target="_blank">{auth_url}</a></p><p>After authentication, return to the app.</p>'
@@ -3530,18 +3569,28 @@ def auth_tidal():
 def spotify_callback():
     """
     Handles Spotify OAuth callback via the main Flask app (port 8008).
-    This allows reverse proxy users to use a redirect_uri pointing at the main app.
-    The dedicated HTTPServer on port 8888 continues to work for direct access.
+    This is the recommended callback for reverse proxy / Docker setups.
+    The dedicated HTTPServer on port 8888 continues to work for direct/local access.
     """
     global spotify_client
     auth_code = request.args.get('code')
 
     if not auth_code:
-        error = request.args.get('error', 'Unknown error')
-        if 'error' not in request.args:
-            # Spurious request (e.g., healthcheck) - ignore silently
-            return '', 204
-        return f"<h1>Spotify Authentication Failed</h1><p>OAuth error: {error}</p>", 400
+        error = request.args.get('error')
+        if error:
+            print(f"🔴 Spotify OAuth error on port 8008: Spotify returned error: {error}")
+            add_activity_item("❌", "Spotify Auth Failed", f"Spotify returned error: {error}", "Now")
+            return f"<h1>Spotify Authentication Failed</h1><p>Spotify returned error: {error}</p>", 400
+
+        # No code AND no error — check if query params were stripped
+        if request.args:
+            print(f"🔴 Spotify callback on port 8008 received unexpected params: {dict(request.args)}")
+        else:
+            # Completely empty — likely a healthcheck or spurious request
+            pass
+        return '', 204
+
+    print(f"🎵 Spotify callback received on port 8008 with authorization code")
 
     try:
         from core.spotify_client import SpotifyClient
@@ -3549,10 +3598,13 @@ def spotify_callback():
         from config.settings import config_manager
 
         config = config_manager.get_spotify_config()
+        configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
+        print(f"🎵 Using redirect_uri for token exchange: {configured_uri}")
+
         auth_manager = SpotifyOAuth(
             client_id=config['client_id'],
             client_secret=config['client_secret'],
-            redirect_uri=config.get('redirect_uri', "http://127.0.0.1:8888/callback"),
+            redirect_uri=configured_uri,
             scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
             cache_path='config/.spotify_cache'
         )
@@ -3571,7 +3623,7 @@ def spotify_callback():
         else:
             raise Exception("Failed to exchange authorization code for access token")
     except Exception as e:
-        print(f"🔴 Spotify OAuth callback error: {e}")
+        print(f"🔴 Spotify OAuth callback error on port 8008: {e}")
         add_activity_item("❌", "Spotify Auth Failed", f"Token processing failed: {str(e)}", "Now")
         return f"<h1>Spotify Authentication Failed</h1><p>{str(e)}</p>", 400
 
@@ -27806,38 +27858,49 @@ def start_oauth_callback_servers():
     from http.server import HTTPServer, BaseHTTPRequestHandler
     import urllib.parse
     
-    # Spotify callback server
+    # Spotify callback server (port 8888 — for direct/local access only)
     class SpotifyCallbackHandler(BaseHTTPRequestHandler):
         def do_GET(self):
-            print(f"🎵 Spotify callback received: {self.path}")
             parsed_url = urllib.parse.urlparse(self.path)
+
+            # Only process requests to /callback — ignore everything else
+            if parsed_url.path != '/callback':
+                self.send_response(404)
+                self.send_header('Content-type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(b'Not found. Spotify callback is at /callback')
+                return
+
             query_params = urllib.parse.parse_qs(parsed_url.query)
-            
+            print(f"🎵 Spotify callback received on port 8888: {self.path}")
+
             if 'code' in query_params:
                 auth_code = query_params['code'][0]
                 print(f"🎵 Received Spotify authorization code: {auth_code[:10]}...")
-                
+
                 # Manually trigger the token exchange using spotipy's auth manager
                 try:
                     from core.spotify_client import SpotifyClient
                     from spotipy.oauth2 import SpotifyOAuth
                     from config.settings import config_manager
-                    
+
                     # Get Spotify config
                     config = config_manager.get_spotify_config()
-                    
+                    configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
+                    print(f"🎵 Using redirect_uri for token exchange: {configured_uri}")
+
                     # Create auth manager and exchange code for token
                     auth_manager = SpotifyOAuth(
                         client_id=config['client_id'],
                         client_secret=config['client_secret'],
-                        redirect_uri=config.get('redirect_uri', "http://127.0.0.1:8888/callback"),
+                        redirect_uri=configured_uri,
                         scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
                         cache_path='config/.spotify_cache'
                     )
-                    
+
                     # Extract the authorization code and exchange it for tokens
                     token_info = auth_manager.get_access_token(auth_code, as_dict=True)
-                    
+
                     if token_info:
                         # Reinitialize the global client with new tokens
                         global spotify_client
@@ -27862,22 +27925,31 @@ def start_oauth_callback_servers():
                     self.send_header('Content-type', 'text/html')
                     self.end_headers()
                     self.wfile.write(f'<h1>Spotify Authentication Failed</h1><p>{str(e)}</p>'.encode())
-            else:
-                error = query_params.get('error', ['Unknown error'])[0]
-                print(f"🔴 Spotify OAuth error: {error}")
-                print(f"🔴 Full Spotify callback URL: {self.path}")
-                print(f"🔴 All query params: {query_params}")
-                
-                # Only show error toast if it's not just a spurious request
-                if 'error' in query_params:
-                    add_activity_item("❌", "Spotify Auth Failed", f"OAuth error: {error}", "Now")
-                else:
-                    print("🔴 Spurious Spotify callback without code or error - ignoring")
-                
+            elif 'error' in query_params:
+                error = query_params['error'][0]
+                print(f"🔴 Spotify OAuth error returned by Spotify: {error}")
+                print(f"🔴 Full callback URL: {self.path}")
+                add_activity_item("❌", "Spotify Auth Failed", f"Spotify returned error: {error}", "Now")
                 self.send_response(400)
                 self.send_header('Content-type', 'text/html')
                 self.end_headers()
-                self.wfile.write(f'<h1>Spotify Authentication Failed</h1><p>{error}</p>'.encode())
+                self.wfile.write(f'<h1>Spotify Authentication Failed</h1><p>Spotify returned error: {error}</p>'.encode())
+            else:
+                # No code AND no error — callback was hit without OAuth params
+                print(f"🔴 Spotify callback received without OAuth parameters (no code or error)")
+                print(f"🔴 Path: {self.path} | Query params: {query_params}")
+                print(f"🔴 This usually means the redirect lost its query parameters (reverse proxy issue)")
+                self.send_response(400)
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                msg = (
+                    '<h1>Spotify Authentication Failed</h1>'
+                    '<p>The callback was received but no authorization code or error was included.</p>'
+                    '<p><strong>If you are using a reverse proxy:</strong> Your proxy may be stripping query parameters '
+                    'during the redirect. Try setting your Spotify redirect URI to use port 8008 instead '
+                    '(e.g. <code>https://yourdomain.com/callback</code>) — the main app handles callbacks too.</p>'
+                )
+                self.wfile.write(msg.encode())
         
         def log_message(self, format, *args):
             pass  # Suppress server logs
