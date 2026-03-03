@@ -4713,7 +4713,7 @@ body {
 /* Header Styling */
 .dashboard-header {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     padding: 20px 24px;
     margin: -28px -24px 20px -24px;
