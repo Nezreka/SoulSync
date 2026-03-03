@@ -49,16 +49,66 @@ If you can access SoulSync directly from the Docker host machine:
 - Set OAuth redirect URIs to localhost (as above)
 - No SSH tunnel needed
 
-## 🔧 For Advanced Users: Reverse Proxy
+## 🔧 Reverse Proxy Setup (Caddy, Nginx, Traefik)
 
-Set up nginx/traefik with proper SSL certificates for true HTTPS support. See community guides for Docker reverse proxy setups.
+If you're running SoulSync behind a reverse proxy with HTTPS, you can use the **main app port (8008)** for OAuth callbacks instead of the standalone port 8888. This is the recommended approach for reverse proxy setups.
+
+### Step 1: Set your redirect URI to your proxy URL
+
+**In SoulSync Settings:**
+- Set Spotify redirect URI to: `https://yourdomain.com/callback`
+
+**In your Spotify Developer Dashboard:**
+- Add the same redirect URI: `https://yourdomain.com/callback`
+
+### Step 2: Ensure your reverse proxy forwards to port 8008
+
+Your reverse proxy should forward traffic to SoulSync's main port (8008). The `/callback` path is handled by the main Flask app — no need to expose port 8888.
+
+**Example Caddy config:**
+```
+soulsync.yourdomain.com {
+    reverse_proxy localhost:8008
+}
+```
+
+**Example Nginx config:**
+```nginx
+server {
+    listen 443 ssl;
+    server_name soulsync.yourdomain.com;
+
+    location / {
+        proxy_pass http://localhost:8008;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+### Step 3: Authenticate normally
+
+Click "Connect Spotify" in SoulSync settings. After authorizing on Spotify, you'll be redirected back through your reverse proxy automatically.
+
+### Important notes for reverse proxy users
+
+- The redirect URI **must use HTTPS** for non-localhost domains (Spotify requirement)
+- The redirect URI in SoulSync settings **must exactly match** the one in your Spotify Dashboard
+- Port 8888 is only needed for direct/local access — you do **not** need to expose it through your proxy
+- Make sure your proxy passes query parameters through unmodified (most do by default)
 
 ## 📝 Summary
 
-The core issue is that **Spotify requires HTTPS for non-localhost** OAuth redirects. The SSH tunnel makes remote devices appear as localhost to bypass this requirement.
+The core issue is that **Spotify requires HTTPS for non-localhost** OAuth redirects.
+
+**Choose your approach:**
+- **Reverse proxy with HTTPS**: Set redirect URI to `https://yourdomain.com/callback` (recommended for production)
+- **SSH tunnel**: Makes remote devices appear as localhost — set redirect URI to `http://127.0.0.1:8888/callback`
+- **Local access**: No special config needed — default `http://127.0.0.1:8888/callback` works
 
 **Key points:**
-- ✅ Always use `127.0.0.1` in OAuth redirect URIs  
-- ✅ Use SSH tunnel when accessing from different device
-- ✅ Keep tunnel open during authentication
-- ✅ Works with existing Docker setup - no changes needed
+- ✅ Reverse proxy users: use `https://yourdomain.com/callback` on port 8008
+- ✅ SSH tunnel users: use `http://127.0.0.1:8888/callback` on port 8888
+- ✅ Redirect URI must match exactly in SoulSync settings AND Spotify Dashboard
+- ✅ Query parameters must be preserved through the redirect chain
