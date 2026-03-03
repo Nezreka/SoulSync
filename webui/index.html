@@ -2925,6 +2925,43 @@
                                 </div>
                             </div>
 
+                            <!-- SoulSync API Keys -->
+                            <div class="settings-group">
+                                <h3>SoulSync API</h3>
+                                <div class="api-service-frame">
+                                    <h4 class="service-title" style="color: #64ffda;">REST API Keys</h4>
+                                    <div class="setting-help-text" style="margin-bottom: 12px; color: #888; font-size: 12px;">
+                                        Generate API keys to access SoulSync remotely via the <code>/api/v1/</code> endpoints.
+                                        Keys are shown once at creation — store them securely.
+                                    </div>
+
+                                    <!-- Existing API Keys List -->
+                                    <div id="api-keys-list" style="margin-bottom: 12px;">
+                                        <div style="color: #666; font-size: 13px; padding: 8px 0;">Loading...</div>
+                                    </div>
+
+                                    <!-- Generate New Key -->
+                                    <div class="form-group" style="margin-bottom: 8px;">
+                                        <label>New Key Label:</label>
+                                        <input type="text" id="api-key-label" placeholder="e.g. Discord Bot, Home Assistant">
+                                    </div>
+                                    <div class="form-actions">
+                                        <button class="auth-button" onclick="generateApiKey()">🔑 Generate API Key</button>
+                                    </div>
+
+                                    <!-- Newly Generated Key Display (hidden by default) -->
+                                    <div id="api-key-generated" style="display: none; margin-top: 12px; padding: 12px; background: rgba(100, 255, 218, 0.08); border: 1px solid rgba(100, 255, 218, 0.2); border-radius: 8px;">
+                                        <div style="font-size: 11px; color: #64ffda; margin-bottom: 6px; font-weight: 600;">
+                                            Copy this key now — it won't be shown again!
+                                        </div>
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <code id="api-key-value" style="flex: 1; font-size: 12px; word-break: break-all; color: #fff; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;"></code>
+                                            <button onclick="copyApiKey()" style="padding: 6px 12px; background: rgba(100,255,218,0.15); border: 1px solid rgba(100,255,218,0.3); color: #64ffda; border-radius: 4px; cursor: pointer; white-space: nowrap;">Copy</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Server Connections -->
                             <div class="settings-group">
                                 <h3>Server Connections</h3>

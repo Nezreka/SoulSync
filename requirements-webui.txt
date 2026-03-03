@@ -3,6 +3,7 @@
 
 # Core web framework
 Flask>=3.0.0
+Flask-Limiter>=3.5.0
 
 # Music service APIs
 spotipy>=2.23.0
