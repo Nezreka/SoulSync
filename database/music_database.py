@@ -1615,6 +1615,115 @@ class MusicDatabase:
             logger.error(f"Error merging duplicate artists: {e}")
             return {'artists_merged': 0, 'albums_migrated': 0}
 
+    # --- Removal detection helpers ---
+
+    def get_all_artist_ids_for_server(self, server_source: str) -> set:
+        """Get all artist IDs stored in the database for a specific server."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM artists WHERE server_source = ?", (server_source,))
+                return {row[0] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Error getting artist IDs for {server_source}: {e}")
+            return set()
+
+    def get_all_album_ids_for_server(self, server_source: str) -> set:
+        """Get all album IDs stored in the database for a specific server."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM albums WHERE server_source = ?", (server_source,))
+                return {row[0] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Error getting album IDs for {server_source}: {e}")
+            return set()
+
+    def delete_removed_content(self, removed_artist_ids: set, removed_album_ids: set,
+                               server_source: str):
+        """Delete artists and albums that were removed from the media server.
+        Manually cascades deletes (tracks -> albums -> artists) to match existing patterns."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                batch_size = 500
+
+                artists_removed = 0
+                albums_removed = 0
+                tracks_removed = 0
+
+                # Remove artists and their children
+                if removed_artist_ids:
+                    artist_list = list(removed_artist_ids)
+                    for i in range(0, len(artist_list), batch_size):
+                        batch = artist_list[i:i + batch_size]
+                        placeholders = ','.join('?' * len(batch))
+                        params = batch + [server_source]
+
+                        # Delete tracks belonging to these artists
+                        cursor.execute(
+                            f"SELECT COUNT(*) FROM tracks WHERE artist_id IN ({placeholders}) AND server_source = ?",
+                            params)
+                        tracks_removed += cursor.fetchone()[0]
+                        cursor.execute(
+                            f"DELETE FROM tracks WHERE artist_id IN ({placeholders}) AND server_source = ?",
+                            params)
+
+                        # Delete albums belonging to these artists
+                        cursor.execute(
+                            f"SELECT COUNT(*) FROM albums WHERE artist_id IN ({placeholders}) AND server_source = ?",
+                            params)
+                        albums_removed += cursor.fetchone()[0]
+                        cursor.execute(
+                            f"DELETE FROM albums WHERE artist_id IN ({placeholders}) AND server_source = ?",
+                            params)
+
+                        # Delete the artists themselves
+                        cursor.execute(
+                            f"DELETE FROM artists WHERE id IN ({placeholders}) AND server_source = ?",
+                            params)
+                        artists_removed += cursor.rowcount
+
+                # Remove albums (not already handled by artist cascade above)
+                if removed_album_ids:
+                    album_list = list(removed_album_ids)
+                    for i in range(0, len(album_list), batch_size):
+                        batch = album_list[i:i + batch_size]
+                        placeholders = ','.join('?' * len(batch))
+                        params = batch + [server_source]
+
+                        # Delete tracks belonging to these albums
+                        cursor.execute(
+                            f"SELECT COUNT(*) FROM tracks WHERE album_id IN ({placeholders}) AND server_source = ?",
+                            params)
+                        tracks_removed += cursor.fetchone()[0]
+                        cursor.execute(
+                            f"DELETE FROM tracks WHERE album_id IN ({placeholders}) AND server_source = ?",
+                            params)
+
+                        # Delete the albums themselves
+                        cursor.execute(
+                            f"DELETE FROM albums WHERE id IN ({placeholders}) AND server_source = ?",
+                            params)
+                        albums_removed += cursor.rowcount
+
+                conn.commit()
+
+                if artists_removed > 0 or albums_removed > 0:
+                    logger.info(f"Removal cleanup for {server_source}: "
+                                f"{artists_removed} artists, {albums_removed} albums, "
+                                f"{tracks_removed} tracks removed")
+
+                return {
+                    'artists_removed': artists_removed,
+                    'albums_removed': albums_removed,
+                    'tracks_removed': tracks_removed
+                }
+
+        except Exception as e:
+            logger.error(f"Error deleting removed content for {server_source}: {e}")
+            return {'artists_removed': 0, 'albums_removed': 0, 'tracks_removed': 0}
+
     # Artist operations
     def insert_or_update_artist(self, plex_artist) -> bool:
         """Insert or update artist from Plex artist object - DEPRECATED: Use insert_or_update_media_artist instead"""
