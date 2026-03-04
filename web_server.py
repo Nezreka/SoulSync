@@ -18,6 +18,7 @@ from urllib.parse import urljoin
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, redirect, send_file, Response
+from flask_socketio import SocketIO, emit, join_room, leave_room
 from utils.logging_config import get_logger
 from utils.async_helpers import run_async
 
@@ -118,6 +119,9 @@ app = Flask(
     template_folder=os.path.join(base_dir, 'webui'),
     static_folder=os.path.join(base_dir, 'webui', 'static')
 )
+
+# --- WebSocket (Socket.IO) Setup ---
+socketio = SocketIO(app, async_mode='threading', cors_allowed_origins='*')
 
 # --- Docker Helper Functions ---
 def docker_resolve_path(path_str):
@@ -2366,85 +2370,88 @@ def save_playlist_m3u():
         logger.error(f"❌ Error saving M3U file: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+def _build_system_stats():
+    """Build system statistics dict — shared by HTTP handler and WebSocket emitter."""
+    import psutil
+    import time
+    from datetime import timedelta
+
+    # Calculate uptime
+    start_time = getattr(app, 'start_time', time.time())
+    uptime_seconds = time.time() - start_time
+    uptime = str(timedelta(seconds=int(uptime_seconds)))
+
+    # Get memory usage
+    memory = psutil.virtual_memory()
+    memory_usage = f"{memory.percent}%"
+
+    # Count active downloads from download_batches (batches that are currently downloading)
+    active_downloads = len([batch_id for batch_id, batch_data in download_batches.items()
+                           if batch_data.get('phase') == 'downloading'])
+
+    # Count finished downloads (completed this session) - use session counter like dashboard.py
+    with session_stats_lock:
+        finished_downloads = session_completed_downloads
+
+    # Calculate total download speed from active soulseek transfers
+    total_download_speed = 0.0
+    try:
+        transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
+        if transfers_data:
+            for user_data in transfers_data:
+                if 'directories' in user_data:
+                    for directory in user_data['directories']:
+                        if 'files' in directory:
+                            for file_info in directory['files']:
+                                state = file_info.get('state', '').lower()
+                                # Only count actively downloading files
+                                if 'inprogress' in state or 'downloading' in state or 'transferring' in state:
+                                    speed = file_info.get('averageSpeed', 0)
+                                    if isinstance(speed, (int, float)) and speed > 0:
+                                        total_download_speed += float(speed)
+    except Exception as e:
+        print(f"Warning: Could not fetch download speeds: {e}")
+
+    # Convert bytes/sec to KB/s and format
+    if total_download_speed > 0:
+        speed_kb_s = total_download_speed / 1024
+        if speed_kb_s >= 1024:
+            speed_mb_s = speed_kb_s / 1024
+            download_speed_str = f"{speed_mb_s:.1f} MB/s"
+        else:
+            download_speed_str = f"{speed_kb_s:.1f} KB/s"
+    else:
+        download_speed_str = "0 KB/s"
+
+    # Count active syncs (playlists currently syncing)
+    active_syncs = 0
+    # Count Spotify playlist syncs
+    for playlist_id, sync_state in sync_states.items():
+        if sync_state.get('status') == 'syncing':
+            active_syncs += 1
+    # Count YouTube playlist syncs
+    for url_hash, state in youtube_playlist_states.items():
+        if state.get('phase') == 'syncing':
+            active_syncs += 1
+    # Count Tidal playlist syncs
+    for playlist_id, state in tidal_discovery_states.items():
+        if state.get('phase') == 'syncing':
+            active_syncs += 1
+
+    return {
+        'active_downloads': active_downloads,
+        'finished_downloads': finished_downloads,
+        'download_speed': download_speed_str,
+        'active_syncs': active_syncs,
+        'uptime': uptime,
+        'memory_usage': memory_usage
+    }
+
 @app.route('/api/system/stats')
 def get_system_stats():
     """Get system statistics for dashboard"""
     try:
-        import psutil
-        import time
-        from datetime import timedelta
-        
-        # Calculate uptime
-        start_time = getattr(app, 'start_time', time.time())
-        uptime_seconds = time.time() - start_time
-        uptime = str(timedelta(seconds=int(uptime_seconds)))
-        
-        # Get memory usage
-        memory = psutil.virtual_memory()
-        memory_usage = f"{memory.percent}%"
-        
-        # Count active downloads from download_batches (batches that are currently downloading)
-        active_downloads = len([batch_id for batch_id, batch_data in download_batches.items() 
-                               if batch_data.get('phase') == 'downloading'])
-        
-        # Count finished downloads (completed this session) - use session counter like dashboard.py
-        with session_stats_lock:
-            finished_downloads = session_completed_downloads
-        
-        # Calculate total download speed from active soulseek transfers
-        total_download_speed = 0.0
-        try:
-            transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
-            if transfers_data:
-                for user_data in transfers_data:
-                    if 'directories' in user_data:
-                        for directory in user_data['directories']:
-                            if 'files' in directory:
-                                for file_info in directory['files']:
-                                    state = file_info.get('state', '').lower()
-                                    # Only count actively downloading files
-                                    if 'inprogress' in state or 'downloading' in state or 'transferring' in state:
-                                        speed = file_info.get('averageSpeed', 0)
-                                        if isinstance(speed, (int, float)) and speed > 0:
-                                            total_download_speed += float(speed)
-        except Exception as e:
-            print(f"Warning: Could not fetch download speeds: {e}")
-        
-        # Convert bytes/sec to KB/s and format
-        if total_download_speed > 0:
-            speed_kb_s = total_download_speed / 1024
-            if speed_kb_s >= 1024:
-                speed_mb_s = speed_kb_s / 1024
-                download_speed_str = f"{speed_mb_s:.1f} MB/s"
-            else:
-                download_speed_str = f"{speed_kb_s:.1f} KB/s"
-        else:
-            download_speed_str = "0 KB/s"
-        
-        # Count active syncs (playlists currently syncing)
-        active_syncs = 0
-        # Count Spotify playlist syncs
-        for playlist_id, sync_state in sync_states.items():
-            if sync_state.get('status') == 'syncing':
-                active_syncs += 1
-        # Count YouTube playlist syncs
-        for url_hash, state in youtube_playlist_states.items():
-            if state.get('phase') == 'syncing':
-                active_syncs += 1
-        # Count Tidal playlist syncs
-        for playlist_id, state in tidal_discovery_states.items():
-            if state.get('phase') == 'syncing':
-                active_syncs += 1
-        
-        stats_data = {
-            'active_downloads': active_downloads,
-            'finished_downloads': finished_downloads,
-            'download_speed': download_speed_str,
-            'active_syncs': active_syncs,
-            'uptime': uptime,
-            'memory_usage': memory_usage
-        }
-        return jsonify(stats_data)
+        return jsonify(_build_system_stats())
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -2532,13 +2539,20 @@ def add_activity_item(icon: str, title: str, subtitle: str, time_ago: str = "Now
             'timestamp': time.time(),
             'show_toast': show_toast
         }
-        
+
         with activity_feed_lock:
             activity_feed.append(activity_item)
             # Keep only last 20 items to prevent memory growth
             if len(activity_feed) > 20:
                 activity_feed.pop(0)
-        
+
+        # Instant toast push via WebSocket (replaces 3-second polling)
+        if show_toast:
+            try:
+                socketio.emit('dashboard:toast', activity_item)
+            except Exception:
+                pass
+
         print(f"📝 Activity: {icon} {title} - {subtitle}")
     except Exception as e:
         print(f"Error adding activity item: {e}")
@@ -21595,6 +21609,11 @@ def add_to_watchlist():
                 # Don't fail the add operation if image fetch fails
                 print(f"⚠️ Could not fetch artist image for {artist_name}: {img_error}")
 
+            # Push updated count to all WebSocket clients immediately
+            try:
+                socketio.emit('watchlist:count', _build_watchlist_count_payload())
+            except Exception:
+                pass
             return jsonify({"success": True, "message": f"Added {artist_name} to watchlist"})
         else:
             return jsonify({"success": False, "error": "Failed to add artist to watchlist"}), 500
@@ -21609,14 +21628,19 @@ def remove_from_watchlist():
     try:
         data = request.get_json()
         artist_id = data.get('artist_id')
-        
+
         if not artist_id:
             return jsonify({"success": False, "error": "Missing artist_id"}), 400
-        
+
         database = get_database()
         success = database.remove_artist_from_watchlist(artist_id)
-        
+
         if success:
+            # Push updated count to all WebSocket clients immediately
+            try:
+                socketio.emit('watchlist:count', _build_watchlist_count_payload())
+            except Exception:
+                pass
             return jsonify({"success": True, "message": "Removed artist from watchlist"})
         else:
             return jsonify({"success": False, "error": "Failed to remove artist from watchlist"}), 500
@@ -29643,6 +29667,355 @@ def import_staging_suggestions():
 # ================================================================================================
 
 
+# ================================================================================================
+# WEBSOCKET (SOCKET.IO) EVENT HANDLERS AND BACKGROUND EMITTERS
+# ================================================================================================
+
+def _build_status_payload():
+    """Build the same status payload used by GET /status, reading from the cache."""
+    download_mode = config_manager.get('download_source.mode', 'soulseek')
+    soulseek_data = dict(_status_cache.get('soulseek', {}))
+    soulseek_data['source'] = download_mode
+    return {
+        'spotify': _status_cache.get('spotify', {}),
+        'media_server': _status_cache.get('media_server', {}),
+        'soulseek': soulseek_data,
+        'active_media_server': config_manager.get_active_media_server()
+    }
+
+def _build_watchlist_count_payload():
+    """Build the same payload used by GET /api/watchlist/count."""
+    try:
+        database = get_database()
+        count = database.get_watchlist_count()
+    except Exception:
+        count = 0
+    next_run_in_seconds = 0
+    with watchlist_timer_lock:
+        if watchlist_next_run_time > 0:
+            next_run_in_seconds = max(0, int(watchlist_next_run_time - time.time()))
+    return {
+        'success': True,
+        'count': count,
+        'next_run_in_seconds': next_run_in_seconds
+    }
+
+def _emit_service_status_loop():
+    """Background thread that pushes service status every 10 seconds."""
+    while True:
+        socketio.sleep(10)
+        try:
+            socketio.emit('status:update', _build_status_payload())
+        except Exception as e:
+            logger.debug(f"Error emitting service status: {e}")
+
+def _emit_watchlist_count_loop():
+    """Background thread that pushes watchlist count every 30 seconds."""
+    while True:
+        socketio.sleep(30)
+        try:
+            socketio.emit('watchlist:count', _build_watchlist_count_payload())
+        except Exception as e:
+            logger.debug(f"Error emitting watchlist count: {e}")
+
+def _emit_download_status_loop():
+    """Background thread that pushes download batch status every 2 seconds to subscribed rooms."""
+    while True:
+        socketio.sleep(2)
+        try:
+            live_transfers_lookup = get_cached_transfer_data()
+            with tasks_lock:
+                for batch_id, batch in download_batches.items():
+                    try:
+                        status_data = _build_batch_status_data(
+                            batch_id, batch, live_transfers_lookup
+                        )
+                        socketio.emit('downloads:batch_update', {
+                            'batch_id': batch_id,
+                            'data': status_data
+                        }, room=f'batch:{batch_id}')
+                    except Exception as e:
+                        logger.debug(f"Error building batch status for {batch_id}: {e}")
+        except Exception as e:
+            logger.debug(f"Error in download status emit loop: {e}")
+
+# --- Socket.IO event handlers ---
+
+@socketio.on('connect')
+def handle_connect():
+    logger.info("WebSocket client connected")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    logger.info("WebSocket client disconnected")
+
+@socketio.on('downloads:subscribe')
+def handle_download_subscribe(data):
+    """Client subscribes to download batch updates by joining rooms."""
+    batch_ids = data.get('batch_ids', [])
+    for bid in batch_ids:
+        join_room(f'batch:{bid}')
+    logger.debug(f"Client subscribed to batches: {batch_ids}")
+
+@socketio.on('downloads:unsubscribe')
+def handle_download_unsubscribe(data):
+    """Client unsubscribes from download batch updates by leaving rooms."""
+    batch_ids = data.get('batch_ids', [])
+    for bid in batch_ids:
+        leave_room(f'batch:{bid}')
+    logger.debug(f"Client unsubscribed from batches: {batch_ids}")
+
+# --- Phase 2: Dashboard emitters ---
+
+def _emit_system_stats_loop():
+    """Background thread that pushes system stats every 10 seconds."""
+    while True:
+        socketio.sleep(10)
+        try:
+            socketio.emit('dashboard:stats', _build_system_stats())
+        except Exception as e:
+            logger.debug(f"Error emitting system stats: {e}")
+
+def _emit_activity_feed_loop():
+    """Background thread that pushes activity feed every 5 seconds."""
+    while True:
+        socketio.sleep(5)
+        try:
+            with activity_feed_lock:
+                activities = activity_feed[-10:][::-1]
+            socketio.emit('dashboard:activity', {'activities': activities})
+        except Exception as e:
+            logger.debug(f"Error emitting activity feed: {e}")
+
+def _emit_db_stats_loop():
+    """Background thread that pushes database stats every 30 seconds."""
+    while True:
+        socketio.sleep(30)
+        try:
+            db = get_database()
+            stats = db.get_database_info_for_server()
+            socketio.emit('dashboard:db_stats', stats)
+        except Exception as e:
+            logger.debug(f"Error emitting db stats: {e}")
+
+def _emit_wishlist_count_loop():
+    """Background thread that pushes wishlist count every 30 seconds."""
+    while True:
+        socketio.sleep(30)
+        try:
+            from core.wishlist_service import get_wishlist_service
+            count = get_wishlist_service().get_wishlist_count()
+            socketio.emit('dashboard:wishlist_count', {'count': count})
+        except Exception as e:
+            logger.debug(f"Error emitting wishlist count: {e}")
+
+# Note: Toasts are NOT on a timer — they emit instantly from add_activity_item()
+
+# --- Phase 3: Enrichment sidebar worker emitters ---
+
+def _emit_enrichment_status_loop():
+    """Background thread that pushes all enrichment worker statuses every 2 seconds."""
+    workers = {
+        'musicbrainz': lambda: mb_worker,
+        'audiodb': lambda: audiodb_worker,
+        'deezer': lambda: deezer_worker,
+        'spotify-enrichment': lambda: spotify_enrichment_worker,
+        'itunes-enrichment': lambda: itunes_enrichment_worker,
+        'hydrabase': lambda: hydrabase_worker,
+        'repair': lambda: repair_worker,
+    }
+    while True:
+        socketio.sleep(2)
+        for name, get_worker in workers.items():
+            try:
+                worker = get_worker()
+                if worker is None:
+                    continue
+                status = worker.get_stats()
+                socketio.emit(f'enrichment:{name}', status)
+            except Exception as e:
+                logger.debug(f"Error emitting {name} status: {e}")
+
+def _emit_tool_progress_loop():
+    """Background thread that pushes all tool progress statuses every 1 second."""
+    while True:
+        socketio.sleep(1)
+        # Stream status
+        try:
+            with stream_lock:
+                socketio.emit('tool:stream', {
+                    "status": stream_state["status"],
+                    "progress": stream_state["progress"],
+                    "track_info": stream_state["track_info"],
+                    "error_message": stream_state["error_message"]
+                })
+        except Exception as e:
+            logger.debug(f"Error emitting stream status: {e}")
+        # Quality Scanner
+        try:
+            with quality_scanner_lock:
+                socketio.emit('tool:quality-scanner', dict(quality_scanner_state))
+        except Exception as e:
+            logger.debug(f"Error emitting quality scanner status: {e}")
+        # Duplicate Cleaner (add computed space_freed_mb)
+        try:
+            with duplicate_cleaner_lock:
+                state_copy = duplicate_cleaner_state.copy()
+                state_copy["space_freed_mb"] = duplicate_cleaner_state["space_freed"] / (1024 * 1024)
+                socketio.emit('tool:duplicate-cleaner', state_copy)
+        except Exception as e:
+            logger.debug(f"Error emitting duplicate cleaner status: {e}")
+        # Retag
+        try:
+            with retag_lock:
+                socketio.emit('tool:retag', dict(retag_state))
+        except Exception as e:
+            logger.debug(f"Error emitting retag status: {e}")
+        # DB Update
+        try:
+            with db_update_lock:
+                socketio.emit('tool:db-update', dict(db_update_state))
+        except Exception as e:
+            logger.debug(f"Error emitting db update status: {e}")
+        # Metadata Update (match HTTP wrapper: {success, status})
+        try:
+            state_copy = metadata_update_state.copy()
+            if state_copy.get('started_at'):
+                state_copy['started_at'] = state_copy['started_at'].isoformat()
+            if state_copy.get('completed_at'):
+                state_copy['completed_at'] = state_copy['completed_at'].isoformat()
+            socketio.emit('tool:metadata', {"success": True, "status": state_copy})
+        except Exception as e:
+            logger.debug(f"Error emitting metadata status: {e}")
+        # Logs (format activity_feed same as HTTP endpoint)
+        try:
+            with activity_feed_lock:
+                recent = activity_feed[-50:][::-1]
+                formatted = []
+                for a in recent:
+                    ts = a.get('time', 'Unknown')
+                    icon = a.get('icon', '•')
+                    title = a.get('title', 'Activity')
+                    sub = a.get('subtitle', '')
+                    formatted.append(f"[{ts}] {icon} {title} - {sub}" if sub else f"[{ts}] {icon} {title}")
+                if not formatted:
+                    formatted = ["No recent activity.", "Sync and download operations..."]
+                socketio.emit('tool:logs', {'logs': formatted})
+        except Exception as e:
+            logger.debug(f"Error emitting logs: {e}")
+
+@socketio.on('sync:subscribe')
+def handle_sync_subscribe(data):
+    for pid in data.get('playlist_ids', []):
+        join_room(f'sync:{pid}')
+
+@socketio.on('sync:unsubscribe')
+def handle_sync_unsubscribe(data):
+    for pid in data.get('playlist_ids', []):
+        leave_room(f'sync:{pid}')
+
+@socketio.on('discovery:subscribe')
+def handle_discovery_subscribe(data):
+    for pid in data.get('ids', []):
+        join_room(f'discovery:{pid}')
+
+@socketio.on('discovery:unsubscribe')
+def handle_discovery_unsubscribe(data):
+    for pid in data.get('ids', []):
+        leave_room(f'discovery:{pid}')
+
+def _emit_sync_progress_loop():
+    """Push sync progress to subscribed rooms every 1 second."""
+    while True:
+        socketio.sleep(1)
+        try:
+            with sync_lock:
+                for pid, state in list(sync_states.items()):
+                    try:
+                        socketio.emit('sync:progress', {
+                            'playlist_id': pid, **state
+                        }, room=f'sync:{pid}')
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.debug(f"Error in sync progress loop: {e}")
+
+def _emit_discovery_progress_loop():
+    """Push discovery progress to subscribed rooms every 1 second."""
+    platform_states = {
+        'tidal': lambda: tidal_discovery_states,
+        'youtube': lambda: youtube_playlist_states,
+        'beatport': lambda: beatport_chart_states,
+        'listenbrainz': lambda: listenbrainz_playlist_states,
+    }
+    while True:
+        socketio.sleep(1)
+        for platform, get_states in platform_states.items():
+            try:
+                states_dict = get_states()
+                for pid, state in list(states_dict.items()):
+                    try:
+                        phase = state.get('phase', '')
+                        if phase in ('', 'idle'):
+                            continue
+                        payload = {
+                            'platform': platform,
+                            'id': pid,
+                            'phase': state.get('phase'),
+                            'status': state.get('status', 'unknown'),
+                            'progress': state.get('discovery_progress', 0),
+                            'discovery_progress': state.get('discovery_progress', {}),
+                            'spotify_matches': state.get('spotify_matches', 0),
+                            'spotify_total': state.get('spotify_total', 0),
+                            'results': state.get('discovery_results', state.get('results', [])),
+                            'complete': state.get('phase') == 'discovered',
+                        }
+                        socketio.emit('discovery:progress', payload, room=f'discovery:{pid}')
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug(f"Error in {platform} discovery loop: {e}")
+
+def _emit_scan_status_loop():
+    """Push watchlist and media scan status every 2 seconds."""
+    while True:
+        socketio.sleep(2)
+        # Watchlist scan
+        try:
+            state = watchlist_scan_state.copy()
+            if state.get('started_at'):
+                state['started_at'] = state['started_at'].isoformat()
+            if state.get('completed_at'):
+                state['completed_at'] = state['completed_at'].isoformat()
+            state.pop('results', None)
+            socketio.emit('scan:watchlist', {"success": True, **state})
+        except Exception as e:
+            logger.debug(f"Error emitting watchlist scan: {e}")
+        # Media scan
+        try:
+            if web_scan_manager:
+                scan_status = web_scan_manager.get_scan_status()
+                socketio.emit('scan:media', {"success": True, "status": scan_status})
+        except Exception as e:
+            logger.debug(f"Error emitting media scan: {e}")
+        # Wishlist stats (auto-processing detection + countdown refresh)
+        try:
+            next_run = 0
+            with wishlist_timer_lock:
+                if wishlist_next_run_time > 0:
+                    next_run = max(0, int(wishlist_next_run_time - time.time()))
+            socketio.emit('wishlist:stats', {
+                "is_auto_processing": is_wishlist_actually_processing(),
+                "next_run_in_seconds": next_run,
+            })
+        except Exception as e:
+            logger.debug(f"Error emitting wishlist stats: {e}")
+
+# ================================================================================================
+# END WEBSOCKET HANDLERS
+# ================================================================================================
+
+
 if __name__ == '__main__':
     # Initialize logging for web server
     from utils.logging_config import setup_logging
@@ -29694,4 +30067,25 @@ if __name__ == '__main__':
     # Add a test activity to verify the system is working
     add_activity_item("🔧", "Debug Test", "Activity feed system test", "Now")
 
-    app.run(host='0.0.0.0', port=8008, debug=False)
+    # Start WebSocket background emitters
+    print("🔧 Starting WebSocket background emitters...")
+    # Phase 1: Global pollers
+    socketio.start_background_task(_emit_service_status_loop)
+    socketio.start_background_task(_emit_watchlist_count_loop)
+    socketio.start_background_task(_emit_download_status_loop)
+    # Phase 2: Dashboard pollers
+    socketio.start_background_task(_emit_system_stats_loop)
+    socketio.start_background_task(_emit_activity_feed_loop)
+    socketio.start_background_task(_emit_db_stats_loop)
+    socketio.start_background_task(_emit_wishlist_count_loop)
+    # Phase 3: Enrichment sidebar workers
+    socketio.start_background_task(_emit_enrichment_status_loop)
+    # Phase 4: Tool progress pollers
+    socketio.start_background_task(_emit_tool_progress_loop)
+    # Phase 5: Sync/discovery progress + scans
+    socketio.start_background_task(_emit_sync_progress_loop)
+    socketio.start_background_task(_emit_discovery_progress_loop)
+    socketio.start_background_task(_emit_scan_status_loop)
+    print("✅ WebSocket emitters started (Phase 1-5: global/dashboard/enrichment/tools/sync)")
+
+    socketio.run(app, host='0.0.0.0', port=8008, debug=False, allow_unsafe_werkzeug=True)

@@ -38,6 +38,12 @@ let watchlistCountdownInterval = null;  // Countdown timer for watchlist overvie
 let spotifyPlaylists = [];
 let selectedPlaylists = new Set();
 let activeSyncPollers = {}; // Key: playlist_id, Value: intervalId
+// Phase 5: WebSocket sync/discovery/scan state
+let _syncProgressCallbacks = {};
+let _discoveryProgressCallbacks = {};
+let _lastWatchlistScanStatus = null;
+let _lastMediaScanStatus = null;
+let _lastWishlistStats = null;
 let playlistTrackCache = {}; // Key: playlist_id, Value: tracks array
 let spotifyPlaylistsLoaded = false;
 let activeDownloadProcesses = {};
@@ -115,6 +121,209 @@ function observeLazyBackgrounds(container) {
     const elements = container.querySelectorAll('[data-bg-src]');
     elements.forEach(el => lazyBgObserver.observe(el));
 }
+
+// ===============================
+// WEBSOCKET CONNECTION MANAGER
+// ===============================
+let socket = null;
+let socketConnected = false;
+
+function initializeWebSocket() {
+    if (typeof io === 'undefined') {
+        console.warn('Socket.IO client not loaded — falling back to HTTP polling');
+        return;
+    }
+
+    socket = io({
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 10000,
+        timeout: 20000
+    });
+
+    socket.on('connect', () => {
+        console.log('WebSocket connected');
+        socketConnected = true;
+        resubscribeDownloadBatches();
+    });
+
+    socket.on('disconnect', (reason) => {
+        console.warn('WebSocket disconnected:', reason);
+        socketConnected = false;
+    });
+
+    socket.on('reconnect', (attemptNumber) => {
+        console.log(`WebSocket reconnected after ${attemptNumber} attempts`);
+        // Phase 1: Full state refresh on reconnect
+        fetchAndUpdateServiceStatus();
+        updateWatchlistButtonCount();
+        resubscribeDownloadBatches();
+        // Phase 2: Refresh dashboard data if on dashboard page
+        if (currentPage === 'dashboard') {
+            fetchAndUpdateSystemStats();
+            fetchAndUpdateActivityFeed();
+            fetchAndUpdateDbStats();
+            updateWishlistCount();
+        }
+    });
+
+    // Phase 1 event listeners
+    socket.on('status:update', handleServiceStatusUpdate);
+    socket.on('watchlist:count', handleWatchlistCountUpdate);
+    socket.on('downloads:batch_update', handleDownloadBatchUpdate);
+
+    // Phase 2 event listeners (dashboard pollers)
+    socket.on('dashboard:stats', handleDashboardStats);
+    socket.on('dashboard:activity', handleDashboardActivity);
+    socket.on('dashboard:toast', handleDashboardToast);
+    socket.on('dashboard:db_stats', handleDashboardDbStats);
+    socket.on('dashboard:wishlist_count', handleDashboardWishlistCount);
+
+    // Phase 3 event listeners (enrichment sidebar workers)
+    socket.on('enrichment:musicbrainz', (data) => updateMusicBrainzStatusFromData(data));
+    socket.on('enrichment:audiodb', (data) => updateAudioDBStatusFromData(data));
+    socket.on('enrichment:deezer', (data) => updateDeezerStatusFromData(data));
+    socket.on('enrichment:spotify-enrichment', (data) => updateSpotifyEnrichmentStatusFromData(data));
+    socket.on('enrichment:itunes-enrichment', (data) => updateiTunesEnrichmentStatusFromData(data));
+    socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
+    socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
+
+    // Phase 4 event listeners (tool progress)
+    socket.on('tool:stream', (data) => updateStreamStatusFromData(data));
+    socket.on('tool:quality-scanner', (data) => updateQualityScanProgressFromData(data));
+    socket.on('tool:duplicate-cleaner', (data) => updateDuplicateCleanProgressFromData(data));
+    socket.on('tool:retag', (data) => updateRetagStatusFromData(data));
+    socket.on('tool:db-update', (data) => updateDbProgressFromData(data));
+    socket.on('tool:metadata', (data) => updateMetadataStatusFromData(data));
+    socket.on('tool:logs', (data) => updateLogsFromData(data));
+
+    // Phase 5 event listeners (sync/discovery progress + scans)
+    socket.on('sync:progress', (data) => updateSyncProgressFromData(data));
+    socket.on('discovery:progress', (data) => updateDiscoveryProgressFromData(data));
+    socket.on('scan:watchlist', (data) => updateWatchlistScanFromData(data));
+    socket.on('scan:media', (data) => updateMediaScanFromData(data));
+    socket.on('wishlist:stats', (data) => updateWishlistStatsFromData(data));
+}
+
+function handleServiceStatusUpdate(data) {
+    // Same logic as fetchAndUpdateServiceStatus response handler
+    updateServiceStatus('spotify', data.spotify);
+    updateServiceStatus('media-server', data.media_server);
+    updateServiceStatus('soulseek', data.soulseek);
+
+    updateSidebarServiceStatus('spotify', data.spotify);
+    updateSidebarServiceStatus('media-server', data.media_server);
+    updateSidebarServiceStatus('soulseek', data.soulseek);
+}
+
+function handleWatchlistCountUpdate(data) {
+    if (data.success) {
+        const watchlistButton = document.getElementById('watchlist-button');
+        if (watchlistButton) {
+            const countdownText = data.next_run_in_seconds ? formatCountdownTime(data.next_run_in_seconds) : '';
+            watchlistButton.textContent = `\u{1F441}\uFE0F Watchlist (${data.count})`;
+            if (countdownText) {
+                watchlistButton.title = `Next auto-scan in ${countdownText}`;
+            }
+        }
+    }
+}
+
+function handleDownloadBatchUpdate(payload) {
+    const { batch_id, data } = payload;
+    // Find which playlistId maps to this batch_id
+    for (const [playlistId, process] of Object.entries(activeDownloadProcesses)) {
+        if (process.batchId === batch_id) {
+            processModalStatusUpdate(playlistId, data);
+            break;
+        }
+    }
+}
+
+function resubscribeDownloadBatches() {
+    if (!socket || !socketConnected) return;
+    const activeBatchIds = [];
+    Object.entries(activeDownloadProcesses).forEach(([playlistId, process]) => {
+        if (process.batchId && process.status === 'running') {
+            activeBatchIds.push(process.batchId);
+        }
+    });
+    if (activeBatchIds.length > 0) {
+        socket.emit('downloads:subscribe', { batch_ids: activeBatchIds });
+        console.log(`WebSocket subscribed to ${activeBatchIds.length} download batches`);
+    }
+}
+
+function subscribeToDownloadBatch(batchId) {
+    if (socket && socketConnected && batchId) {
+        socket.emit('downloads:subscribe', { batch_ids: [batchId] });
+    }
+}
+
+function unsubscribeFromDownloadBatch(batchId) {
+    if (socket && socketConnected && batchId) {
+        socket.emit('downloads:unsubscribe', { batch_ids: [batchId] });
+    }
+}
+
+// --- Phase 2: Dashboard event handlers ---
+
+function handleDashboardStats(data) {
+    // Same logic as fetchAndUpdateSystemStats response handler
+    updateStatCard('active-downloads-card', data.active_downloads, 'Currently downloading');
+    updateStatCard('finished-downloads-card', data.finished_downloads, 'Completed this session');
+    updateStatCard('download-speed-card', data.download_speed, 'Combined speed');
+    updateStatCard('active-syncs-card', data.active_syncs, 'Playlists syncing');
+    updateStatCard('uptime-card', data.uptime, 'Application runtime');
+    updateStatCard('memory-card', data.memory_usage, 'Current usage');
+}
+
+function handleDashboardActivity(data) {
+    // Same logic as fetchAndUpdateActivityFeed response handler
+    updateActivityFeed(data.activities || []);
+}
+
+function handleDashboardToast(activity) {
+    // Same logic as checkForActivityToasts response handler
+    let toastType = 'info';
+    if (activity.icon === '\u2705' || activity.title.includes('Complete')) {
+        toastType = 'success';
+    } else if (activity.icon === '\u274C' || activity.title.includes('Failed') || activity.title.includes('Error')) {
+        toastType = 'error';
+    } else if (activity.icon === '\uD83D\uDEAB' || activity.title.includes('Cancelled')) {
+        toastType = 'warning';
+    }
+    showToast(`${activity.title}: ${activity.subtitle}`, toastType);
+}
+
+function handleDashboardDbStats(stats) {
+    // Same logic as fetchAndUpdateDbStats response handler
+    updateDashboardStatCards(stats);
+    updateDbUpdaterCardInfo(stats);
+}
+
+function handleDashboardWishlistCount(data) {
+    // Same logic as updateWishlistCount response handler
+    const count = data.count || 0;
+    const wishlistButton = document.getElementById('wishlist-button');
+    if (wishlistButton) {
+        wishlistButton.textContent = `\uD83C\uDFB5 Wishlist (${count})`;
+        if (count === 0) {
+            wishlistButton.classList.remove('wishlist-active');
+            wishlistButton.classList.add('wishlist-inactive');
+        } else {
+            wishlistButton.classList.remove('wishlist-inactive');
+            wishlistButton.classList.add('wishlist-active');
+        }
+    }
+    checkForAutoInitiatedWishlistProcess();
+}
+
+// ===============================
+// END WEBSOCKET CONNECTION MANAGER
+// ===============================
 
 // --- MusicBrainz Integration Constants ---
 const MUSICBRAINZ_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png';
@@ -454,9 +663,13 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
 
+    // Initialize WebSocket connection (falls back to HTTP polling if unavailable)
+    initializeWebSocket();
+
     // Start global service status polling for sidebar (works on all pages)
+    // Initial fetch for immediate data, then setInterval as fallback when WebSocket is disconnected
     fetchAndUpdateServiceStatus();
-    setInterval(fetchAndUpdateServiceStatus, 10000); // Every 10 seconds
+    setInterval(fetchAndUpdateServiceStatus, 10000); // Every 10 seconds (no-op when WebSocket active)
 
     // Refresh key data immediately when user returns to this tab
     document.addEventListener('visibilitychange', () => {
@@ -1134,7 +1347,73 @@ function stopStreamStatusPolling() {
     }
 }
 
+// Phase 4: Track last known tool statuses to prevent repeated toasts on terminal states
+let _lastToolStatus = {};
+
+// Phase 5: Sync/Discovery/Scan WebSocket router functions
+function updateSyncProgressFromData(data) {
+    const pid = data.playlist_id;
+    const callback = _syncProgressCallbacks[pid];
+    if (callback) callback(data);
+}
+
+function updateDiscoveryProgressFromData(data) {
+    const id = data.id;
+    const callback = _discoveryProgressCallbacks[id];
+    if (callback) callback(data);
+}
+
+function updateWatchlistScanFromData(data) {
+    if (!data.success) return;
+    if (_lastWatchlistScanStatus === data.status && data.status !== 'scanning') return;
+    _lastWatchlistScanStatus = data.status;
+    handleWatchlistScanData(data);
+}
+
+function updateMediaScanFromData(data) {
+    if (!data.success || !data.status) return;
+    const status = data.status;
+    const statusKey = status.is_scanning ? 'scanning' : (status.status || 'unknown');
+    if (_lastMediaScanStatus === statusKey && statusKey !== 'scanning') return;
+    _lastMediaScanStatus = statusKey;
+
+    const phaseLabel = document.getElementById('media-scan-phase-label');
+    const progressLabel = document.getElementById('media-scan-progress-label');
+    const button = document.getElementById('media-scan-btn');
+    const progressBar = document.getElementById('media-scan-progress-bar');
+    const statusValue = document.getElementById('media-scan-status');
+
+    if (status.is_scanning) {
+        if (phaseLabel) phaseLabel.textContent = 'Media server scanning...';
+        if (progressLabel) progressLabel.textContent = status.progress_message || 'Scan in progress';
+    } else if (status.status === 'idle') {
+        if (button) button.disabled = false;
+        if (phaseLabel) phaseLabel.textContent = 'Scan completed successfully';
+        if (progressBar) progressBar.style.width = '0%';
+        if (progressLabel) progressLabel.textContent = 'Ready for next scan';
+        if (statusValue) {
+            statusValue.textContent = 'Idle';
+            statusValue.style.color = '#b3b3b3';
+        }
+        showToast('✅ Media scan completed', 'success', 3000);
+    }
+}
+
+function updateWishlistStatsFromData(data) {
+    // Auto-processing detection: close modal and notify
+    if (data.is_auto_processing) {
+        if (typeof closeWishlistOverviewModal === 'function') {
+            closeWishlistOverviewModal();
+            showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
+        }
+        return;
+    }
+    // Store latest stats for countdown timer refresh
+    _lastWishlistStats = data;
+}
+
 async function updateStreamStatus() {
+    if (socketConnected) return; // WebSocket handles this
     // Poll server for streaming progress and handle state changes with enhanced error recovery
     try {
         const controller = new AbortController();
@@ -1226,6 +1505,51 @@ async function updateStreamStatus() {
                 console.log(`🔄 Retrying stream status polling with ${streamPollingInterval}ms interval`);
             }
         }
+    }
+}
+
+function updateStreamStatusFromData(data) {
+    const prev = _lastToolStatus['stream'];
+    _lastToolStatus['stream'] = data.status;
+    // Skip repeated terminal states to avoid duplicate toasts/actions
+    if (prev !== undefined && data.status === prev && data.status !== 'loading' && data.status !== 'queued') return;
+
+    currentStream.status = data.status;
+    currentStream.progress = data.progress;
+
+    switch (data.status) {
+        case 'loading':
+            setLoadingProgress(data.progress);
+            const loadingText = document.querySelector('.loading-text');
+            if (loadingText && data.progress > 0) {
+                loadingText.textContent = `Downloading... ${Math.round(data.progress)}%`;
+            }
+            break;
+        case 'queued':
+            const queueText = document.querySelector('.loading-text');
+            if (queueText) {
+                queueText.textContent = 'Queuing with uploader...';
+            }
+            setLoadingProgress(0);
+            break;
+        case 'ready':
+            console.log('🎵 Stream ready, starting audio playback');
+            stopStreamStatusPolling();
+            startAudioPlayback();
+            break;
+        case 'error':
+            console.error('❌ Streaming error:', data.error_message);
+            stopStreamStatusPolling();
+            hideLoadingAnimation();
+            showToast(`Streaming error: ${data.error_message || 'Unknown error'}`, 'error');
+            clearTrack();
+            break;
+        case 'stopped':
+            console.log('🛑 Stream stopped');
+            stopStreamStatusPolling();
+            hideLoadingAnimation();
+            clearTrack();
+            break;
     }
 }
 
@@ -4422,6 +4746,7 @@ async function rehydrateArtistAlbumModal(virtualPlaylistId, playlistName, batchI
             if (process) {
                 process.status = 'running';
                 process.batchId = batchId;
+                subscribeToDownloadBatch(batchId);
 
                 // Update button states to reflect running status
                 const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
@@ -4506,6 +4831,7 @@ async function rehydrateDiscoverPlaylistModal(virtualPlaylistId, playlistName, b
                 if (process) {
                     process.status = 'running';
                     process.batchId = batchId;
+                    subscribeToDownloadBatch(batchId);
                     const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
                     const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
                     if (beginBtn) beginBtn.style.display = 'none';
@@ -4607,6 +4933,7 @@ async function rehydrateDiscoverPlaylistModal(virtualPlaylistId, playlistName, b
         if (process) {
             process.status = 'running';
             process.batchId = batchId;
+            subscribeToDownloadBatch(batchId);
 
             // Update button states to reflect running status
             const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
@@ -4702,6 +5029,7 @@ async function rehydrateEnhancedSearchModal(virtualPlaylistId, playlistName, bat
                 if (process) {
                     process.status = 'running';
                     process.batchId = batchId;
+                    subscribeToDownloadBatch(batchId);
 
                     const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
                     const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
@@ -4753,6 +5081,7 @@ async function rehydrateEnhancedSearchModal(virtualPlaylistId, playlistName, bat
             if (process) {
                 process.status = 'running';
                 process.batchId = batchId;
+                subscribeToDownloadBatch(batchId);
 
                 const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
                 const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
@@ -7419,6 +7748,23 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
 
         // Check if auto-processing has started (every 2 seconds to avoid overwhelming backend)
         if (remainingSeconds % 2 === 0 || remainingSeconds <= 0) {
+            // Use WebSocket data if available, otherwise fall back to HTTP
+            if (socketConnected && _lastWishlistStats) {
+                const data = _lastWishlistStats;
+                if (data.is_auto_processing) {
+                    closeWishlistOverviewModal();
+                    showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
+                    return;
+                }
+                if (remainingSeconds <= 0) {
+                    remainingSeconds = data.next_run_in_seconds || 0;
+                    const timerElement = document.getElementById('wishlist-next-auto-timer');
+                    if (timerElement) {
+                        const countdownText = formatCountdownTime(remainingSeconds);
+                        timerElement.textContent = `Next Auto: ${nextCycleText}${countdownText ? ' in ' + countdownText : ''}`;
+                    }
+                }
+            } else {
             try {
                 const response = await fetch('/api/wishlist/stats');
                 const data = await response.json();
@@ -7448,6 +7794,7 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
             } catch (error) {
                 console.debug('Error updating wishlist countdown:', error);
             }
+            } // end else (HTTP fallback)
         }
 
         // Always update the display countdown
@@ -8673,6 +9020,10 @@ let globalPollingFailureCount = 0; // Track consecutive failures for exponential
 let globalPollingBaseInterval = 2000; // Base polling interval in ms - MATCHES sync.py exactly
 
 function startGlobalDownloadPolling() {
+    if (socketConnected) {
+        console.debug('🔄 [Global Polling] WebSocket active, skipping HTTP polling');
+        return; // WebSocket handles download updates via room subscriptions
+    }
     if (globalDownloadStatusPoller) {
         console.debug('🔄 [Global Polling] Already running, skipping start');
         return; // Prevent duplicate pollers
@@ -9971,9 +10322,26 @@ function startSyncPolling(playlistId) {
         clearInterval(activeSyncPollers[playlistId]);
     }
 
+    // Phase 5: Subscribe via WebSocket
+    if (socketConnected) {
+        socket.emit('sync:subscribe', { playlist_ids: [playlistId] });
+        _syncProgressCallbacks[playlistId] = (data) => {
+            if (data.status === 'syncing') {
+                const progress = data.progress;
+                updateCardToSyncing(playlistId, progress.progress, progress);
+                updateModalSyncProgress(playlistId, progress);
+            } else if (data.status === 'finished' || data.status === 'error' || data.status === 'cancelled') {
+                stopSyncPolling(playlistId);
+                updateCardToDefault(playlistId, data);
+                closePlaylistDetailsModal();
+            }
+        };
+    }
+
     // Start a new poller that checks every 2 seconds
     console.log(`🔄 Starting sync polling for playlist: ${playlistId}`);
     activeSyncPollers[playlistId] = setInterval(async () => {
+        if (socketConnected) return; // Phase 5: WS handles updates
         try {
             console.log(`📊 Polling sync status for: ${playlistId}`);
             const response = await fetch(`/api/sync/status/${playlistId}`);
@@ -10010,6 +10378,11 @@ function stopSyncPolling(playlistId) {
     if (activeSyncPollers[playlistId]) {
         clearInterval(activeSyncPollers[playlistId]);
         delete activeSyncPollers[playlistId];
+    }
+    // Phase 5: Unsubscribe and clean up callback
+    if (_syncProgressCallbacks[playlistId]) {
+        if (socketConnected) socket.emit('sync:unsubscribe', { playlist_ids: [playlistId] });
+        delete _syncProgressCallbacks[playlistId];
     }
     updateRefreshButtonState();
 }
@@ -13945,6 +14318,7 @@ async function handleQualityScanButtonClick() {
 }
 
 async function checkAndUpdateQualityScanProgress() {
+    if (socketConnected) return; // WebSocket handles this
     try {
         const response = await fetch('/api/quality-scanner/status', {
             signal: AbortSignal.timeout(10000) // 10 second timeout
@@ -13965,6 +14339,13 @@ async function checkAndUpdateQualityScanProgress() {
         console.warn('Could not fetch quality scanner status:', error);
         // Don't stop polling on network errors - keep trying
     }
+}
+
+function updateQualityScanProgressFromData(data) {
+    const prev = _lastToolStatus['quality-scanner'];
+    _lastToolStatus['quality-scanner'] = data.status;
+    if (prev !== undefined && data.status === prev && data.status !== 'running') return;
+    updateQualityScanProgressUI(data);
 }
 
 function updateQualityScanProgressUI(state) {
@@ -14073,6 +14454,7 @@ async function handleDuplicateCleanButtonClick() {
 }
 
 async function checkAndUpdateDuplicateCleanProgress() {
+    if (socketConnected) return; // WebSocket handles this
     try {
         const response = await fetch('/api/duplicate-cleaner/status', {
             signal: AbortSignal.timeout(10000) // 10 second timeout
@@ -14093,6 +14475,13 @@ async function checkAndUpdateDuplicateCleanProgress() {
         console.warn('Could not fetch duplicate cleaner status:', error);
         // Don't stop polling on network errors - keep trying
     }
+}
+
+function updateDuplicateCleanProgressFromData(data) {
+    const prev = _lastToolStatus['duplicate-cleaner'];
+    _lastToolStatus['duplicate-cleaner'] = data.status;
+    if (prev !== undefined && data.status === prev && data.status !== 'running') return;
+    updateDuplicateCleanProgressUI(data);
 }
 
 function updateDuplicateCleanProgressUI(state) {
@@ -14900,6 +15289,7 @@ function startRetagPolling() {
 }
 
 async function checkRetagStatus() {
+    if (socketConnected) return; // WebSocket handles this
     try {
         const response = await fetch('/api/retag/status');
         const state = await response.json();
@@ -14921,6 +15311,22 @@ async function checkRetagStatus() {
         }
     } catch (e) {
         // Ignore fetch errors during polling
+    }
+}
+
+function updateRetagStatusFromData(data) {
+    const prev = _lastToolStatus['retag'];
+    _lastToolStatus['retag'] = data.status;
+    if (prev !== undefined && data.status === prev && data.status !== 'running') return;
+    updateRetagProgressUI(data);
+    // Handle terminal state toasts (only on transition)
+    if (prev === 'running' || prev === undefined) {
+        if (data.status === 'finished') {
+            showToast('Retag completed successfully', 'success');
+            loadRetagStats();
+        } else if (data.status === 'error') {
+            showToast(`Retag error: ${data.error_message || 'Unknown error'}`, 'error');
+        }
     }
 }
 
@@ -15269,6 +15675,7 @@ async function loadDashboardData() {
 // --- Data Fetching and UI Updates ---
 
 async function fetchAndUpdateDbStats() {
+    if (socketConnected) return; // WebSocket handles this
     try {
         const response = await fetch('/api/database/stats');
         if (!response.ok) return;
@@ -15443,6 +15850,7 @@ function updateDbUpdaterCardInfo(stats) {
 // --- Wishlist Count Functions ---
 
 async function updateWishlistCount() {
+    if (socketConnected) return; // WebSocket handles this
     try {
         const response = await fetch('/api/wishlist/count');
         if (!response.ok) return;
@@ -15519,6 +15927,7 @@ async function checkForAutoInitiatedWishlistProcess() {
 }
 
 async function checkAndUpdateDbProgress() {
+    if (socketConnected) return; // WebSocket handles this
     try {
         const response = await fetch('/api/database/update/status', {
             signal: AbortSignal.timeout(10000) // 10 second timeout
@@ -15539,6 +15948,13 @@ async function checkAndUpdateDbProgress() {
         console.warn('Could not fetch DB update status:', error);
         // Don't stop polling on network errors - keep trying
     }
+}
+
+function updateDbProgressFromData(data) {
+    const prev = _lastToolStatus['db-update'];
+    _lastToolStatus['db-update'] = data.status;
+    if (prev !== undefined && data.status === prev && data.status !== 'running') return;
+    updateDbProgressUI(data);
 }
 
 function updateDbProgressUI(state) {
@@ -16128,7 +16544,56 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
         clearInterval(activeYouTubePollers[fakeUrlHash]);
     }
 
+    // Phase 5: Subscribe via WebSocket
+    if (socketConnected) {
+        socket.emit('discovery:subscribe', { ids: [playlistId] });
+        _discoveryProgressCallbacks[playlistId] = (data) => {
+            if (data.error) {
+                if (activeYouTubePollers[fakeUrlHash]) { clearInterval(activeYouTubePollers[fakeUrlHash]); delete activeYouTubePollers[fakeUrlHash]; }
+                socket.emit('discovery:unsubscribe', { ids: [playlistId] }); delete _discoveryProgressCallbacks[playlistId];
+                return;
+            }
+            // Transform to YouTube modal format
+            const transformed = {
+                progress: data.progress, spotify_matches: data.spotify_matches, spotify_total: data.spotify_total,
+                results: (data.results || []).map((r, i) => {
+                    const isFound = r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found' || r.spotify_data || r.spotify_track;
+                    return {
+                        index: i, yt_track: r.tidal_track ? r.tidal_track.name : 'Unknown',
+                        yt_artist: r.tidal_track ? (r.tidal_track.artists ? r.tidal_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                        status: isFound ? '✅ Found' : '❌ Not Found', status_class: isFound ? 'found' : 'not-found',
+                        spotify_track: r.spotify_data ? r.spotify_data.name : (r.spotify_track || '-'),
+                        spotify_artist: r.spotify_data && r.spotify_data.artists ? (Array.isArray(r.spotify_data.artists) ? r.spotify_data.artists.join(', ') : r.spotify_data.artists) : (r.spotify_artist || '-'),
+                        spotify_album: r.spotify_data ? (typeof r.spotify_data.album === 'object' ? r.spotify_data.album.name : r.spotify_data.album) : (r.spotify_album || '-'),
+                        spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match
+                    };
+                })
+            };
+            const st = youtubePlaylistStates[fakeUrlHash];
+            if (st) {
+                st.discovery_progress = data.progress; st.discoveryProgress = data.progress;
+                st.spotify_matches = data.spotify_matches; st.spotifyMatches = data.spotify_matches;
+                st.discovery_results = data.results; st.discoveryResults = transformed.results;
+                st.phase = data.phase;
+                updateYouTubeDiscoveryModal(fakeUrlHash, transformed);
+            }
+            if (tidalPlaylistStates[playlistId]) {
+                tidalPlaylistStates[playlistId].phase = data.phase;
+                tidalPlaylistStates[playlistId].discovery_results = data.results;
+                tidalPlaylistStates[playlistId].spotify_matches = data.spotify_matches;
+                tidalPlaylistStates[playlistId].discovery_progress = data.progress;
+                updateTidalCardPhase(playlistId, data.phase);
+            }
+            updateTidalCardProgress(playlistId, data);
+            if (data.complete) {
+                if (activeYouTubePollers[fakeUrlHash]) { clearInterval(activeYouTubePollers[fakeUrlHash]); delete activeYouTubePollers[fakeUrlHash]; }
+                socket.emit('discovery:unsubscribe', { ids: [playlistId] }); delete _discoveryProgressCallbacks[playlistId];
+            }
+        };
+    }
+
     const pollInterval = setInterval(async () => {
+        if (socketConnected) return; // Phase 5: WS handles updates
         try {
             const response = await fetch(`/api/tidal/discovery/status/${playlistId}`);
             const status = await response.json();
@@ -16439,6 +16904,10 @@ async function startTidalPlaylistSync(urlHash) {
             return;
         }
 
+        // Capture sync_playlist_id for WebSocket subscription
+        const syncPlaylistId = result.sync_playlist_id;
+        if (state) state.syncPlaylistId = syncPlaylistId;
+
         // Update card and modal to syncing phase
         updateTidalCardPhase(playlistId, 'syncing');
 
@@ -16446,7 +16915,7 @@ async function startTidalPlaylistSync(urlHash) {
         updateTidalModalButtons(urlHash, 'syncing');
 
         // Start sync polling
-        startTidalSyncPolling(urlHash);
+        startTidalSyncPolling(urlHash, syncPlaylistId);
 
         showToast('Tidal playlist sync started!', 'success');
 
@@ -16456,7 +16925,7 @@ async function startTidalPlaylistSync(urlHash) {
     }
 }
 
-function startTidalSyncPolling(urlHash) {
+function startTidalSyncPolling(urlHash, syncPlaylistId) {
     // Stop any existing polling
     if (activeYouTubePollers[urlHash]) {
         clearInterval(activeYouTubePollers[urlHash]);
@@ -16465,8 +16934,42 @@ function startTidalSyncPolling(urlHash) {
     const state = youtubePlaylistStates[urlHash];
     const playlistId = state.tidal_playlist_id;
 
-    // Define the polling function
+    // Resolve syncPlaylistId from argument or stored state
+    syncPlaylistId = syncPlaylistId || (state && state.syncPlaylistId);
+
+    // Phase 6: Subscribe via WebSocket
+    if (socketConnected && syncPlaylistId) {
+        socket.emit('sync:subscribe', { playlist_ids: [syncPlaylistId] });
+        _syncProgressCallbacks[syncPlaylistId] = (data) => {
+            const progress = data.progress || {};
+            updateTidalCardSyncProgress(playlistId, progress);
+            updateTidalModalSyncProgress(urlHash, progress);
+
+            if (data.status === 'finished') {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                if (tidalPlaylistStates[playlistId]) tidalPlaylistStates[playlistId].phase = 'sync_complete';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'sync_complete';
+                updateTidalCardPhase(playlistId, 'sync_complete');
+                updateTidalModalButtons(urlHash, 'sync_complete');
+                showToast('Tidal playlist sync complete!', 'success');
+            } else if (data.status === 'error' || data.status === 'cancelled') {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                if (tidalPlaylistStates[playlistId]) tidalPlaylistStates[playlistId].phase = 'discovered';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'discovered';
+                updateTidalCardPhase(playlistId, 'discovered');
+                updateTidalModalButtons(urlHash, 'discovered');
+                showToast(`Sync failed: ${data.error || 'Unknown error'}`, 'error');
+            }
+        };
+    }
+
+    // Define the polling function (HTTP fallback)
     const pollFunction = async () => {
+        if (socketConnected) return; // Phase 6: WS handles updates
         try {
             const response = await fetch(`/api/tidal/sync/status/${playlistId}`);
             const status = await response.json();
@@ -16478,52 +16981,26 @@ function startTidalSyncPolling(urlHash) {
                 return;
             }
 
-            // Update card progress with sync stats
             updateTidalCardSyncProgress(playlistId, status.progress);
-
-            // Update modal sync display if open
             updateTidalModalSyncProgress(urlHash, status.progress);
 
-            // Check if complete
             if (status.complete) {
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[urlHash];
-
-                // Update both states to sync_complete
-                if (tidalPlaylistStates[playlistId]) {
-                    tidalPlaylistStates[playlistId].phase = 'sync_complete';
-                }
-                if (youtubePlaylistStates[urlHash]) {
-                    youtubePlaylistStates[urlHash].phase = 'sync_complete';
-                }
-
-                // Update card phase to sync complete
+                if (tidalPlaylistStates[playlistId]) tidalPlaylistStates[playlistId].phase = 'sync_complete';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'sync_complete';
                 updateTidalCardPhase(playlistId, 'sync_complete');
-
-                // Update modal buttons
                 updateTidalModalButtons(urlHash, 'sync_complete');
-
-                console.log('✅ Tidal sync complete:', urlHash);
                 showToast('Tidal playlist sync complete!', 'success');
             } else if (status.sync_status === 'error') {
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[urlHash];
-
-                // Update both states to discovered (revert on error)
-                if (tidalPlaylistStates[playlistId]) {
-                    tidalPlaylistStates[playlistId].phase = 'discovered';
-                }
-                if (youtubePlaylistStates[urlHash]) {
-                    youtubePlaylistStates[urlHash].phase = 'discovered';
-                }
-
-                // Revert to discovered phase on error
+                if (tidalPlaylistStates[playlistId]) tidalPlaylistStates[playlistId].phase = 'discovered';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'discovered';
                 updateTidalCardPhase(playlistId, 'discovered');
                 updateTidalModalButtons(urlHash, 'discovered');
-
                 showToast(`Sync failed: ${status.error || 'Unknown error'}`, 'error');
             }
-
         } catch (error) {
             console.error('❌ Error polling Tidal sync:', error);
             if (activeYouTubePollers[urlHash]) {
@@ -16533,8 +17010,8 @@ function startTidalSyncPolling(urlHash) {
         }
     };
 
-    // Run immediately to get current status
-    pollFunction();
+    // Run immediately to get current status (skip if WS active)
+    if (!socketConnected) pollFunction();
 
     // Then continue polling at regular intervals
     const pollInterval = setInterval(pollFunction, 1000);
@@ -16567,6 +17044,13 @@ async function cancelTidalSync(urlHash) {
         if (activeYouTubePollers[urlHash]) {
             clearInterval(activeYouTubePollers[urlHash]);
             delete activeYouTubePollers[urlHash];
+        }
+
+        // Phase 6: Clean up WS subscription
+        const syncId = state && state.syncPlaylistId;
+        if (syncId && _syncProgressCallbacks[syncId]) {
+            if (socketConnected) socket.emit('sync:unsubscribe', { playlist_ids: [syncId] });
+            delete _syncProgressCallbacks[syncId];
         }
 
         // Revert to discovered phase
@@ -17889,7 +18373,50 @@ function startBeatportDiscoveryPolling(urlHash) {
         clearInterval(activeYouTubePollers[urlHash]);
     }
 
+    // Phase 5: Subscribe via WebSocket
+    if (socketConnected) {
+        socket.emit('discovery:subscribe', { ids: [urlHash] });
+        _discoveryProgressCallbacks[urlHash] = (data) => {
+            if (data.error) {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('discovery:unsubscribe', { ids: [urlHash] }); delete _discoveryProgressCallbacks[urlHash];
+                return;
+            }
+            if (youtubePlaylistStates[urlHash]) {
+                const transformed = {
+                    progress: data.progress || 0, spotify_matches: data.spotify_matches || 0, spotify_total: data.spotify_total || 0,
+                    results: (data.results || []).map((r, i) => ({
+                        index: r.index !== undefined ? r.index : i,
+                        yt_track: r.beatport_track ? r.beatport_track.title : 'Unknown',
+                        yt_artist: r.beatport_track ? r.beatport_track.artist : 'Unknown',
+                        status: (r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found') ? '✅ Found' : (r.status === 'error' ? '❌ Error' : '❌ Not Found'),
+                        status_class: r.status_class || ((r.status === 'found' || r.status === '✅ Found') ? 'found' : (r.status === 'error' ? 'error' : 'not-found')),
+                        spotify_track: r.spotify_data ? r.spotify_data.name : (r.spotify_track || '-'),
+                        spotify_artist: r.spotify_data && r.spotify_data.artists ? r.spotify_data.artists.map(a => a.name || a).join(', ') : (r.spotify_artist || '-'),
+                        spotify_album: r.spotify_data ? (typeof r.spotify_data.album === 'object' ? r.spotify_data.album.name : r.spotify_data.album) : (r.spotify_album || '-'),
+                        spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match
+                    }))
+                };
+                const st = youtubePlaylistStates[urlHash];
+                st.discovery_progress = data.progress; st.discoveryProgress = data.progress;
+                st.spotify_matches = data.spotify_matches; st.spotifyMatches = data.spotify_matches;
+                st.discovery_results = data.results; st.discoveryResults = transformed.results;
+                st.phase = data.phase || 'discovering';
+                const chartHash = st.beatport_chart_hash || urlHash;
+                updateBeatportCardPhase(chartHash, data.phase || 'discovering');
+                updateBeatportCardProgress(chartHash, { spotify_total: data.spotify_total || 0, spotify_matches: data.spotify_matches || 0, failed: (data.spotify_total || 0) - (data.spotify_matches || 0) });
+                if (beatportChartStates[chartHash]) beatportChartStates[chartHash].phase = data.phase || 'discovering';
+                updateYouTubeDiscoveryModal(urlHash, transformed);
+            }
+            if (data.phase === 'discovered' || data.phase === 'error') {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('discovery:unsubscribe', { ids: [urlHash] }); delete _discoveryProgressCallbacks[urlHash];
+            }
+        };
+    }
+
     const pollInterval = setInterval(async () => {
+        if (socketConnected) return; // Phase 5: WS handles updates
         try {
             const response = await fetch(`/api/beatport/discovery/status/${urlHash}`);
             const status = await response.json();
@@ -18536,13 +19063,17 @@ async function startBeatportPlaylistSync(urlHash) {
             return;
         }
 
+        // Capture sync_playlist_id for WebSocket subscription (Beatport returns sync_id)
+        const syncPlaylistId = result.sync_id || result.sync_playlist_id;
+        if (state) state.syncPlaylistId = syncPlaylistId;
+
         // Update state to syncing
         state.phase = 'syncing';
         updateBeatportCardPhase(state.beatport_chart_hash || urlHash, 'syncing');
 
         // Update modal buttons and start polling
         updateBeatportModalButtons(urlHash, 'syncing');
-        startBeatportSyncPolling(urlHash);
+        startBeatportSyncPolling(urlHash, syncPlaylistId);
 
         showToast('Starting Beatport playlist sync...', 'success');
 
@@ -18552,14 +19083,49 @@ async function startBeatportPlaylistSync(urlHash) {
     }
 }
 
-function startBeatportSyncPolling(urlHash) {
+function startBeatportSyncPolling(urlHash, syncPlaylistId) {
     // Stop any existing polling (reuse activeYouTubePollers for Beatport)
     if (activeYouTubePollers[urlHash]) {
         clearInterval(activeYouTubePollers[urlHash]);
     }
 
-    // Define the polling function
+    // Resolve syncPlaylistId from argument or stored state
+    const bpState = youtubePlaylistStates[urlHash];
+    syncPlaylistId = syncPlaylistId || (bpState && bpState.syncPlaylistId);
+
+    // Phase 6: Subscribe via WebSocket
+    if (socketConnected && syncPlaylistId) {
+        socket.emit('sync:subscribe', { playlist_ids: [syncPlaylistId] });
+        _syncProgressCallbacks[syncPlaylistId] = (data) => {
+            const progress = data.progress || {};
+            updateBeatportModalSyncProgress(urlHash, progress);
+
+            if (data.status === 'finished' || data.status === 'error' || data.status === 'cancelled') {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+
+                const state = youtubePlaylistStates[urlHash];
+                if (state) {
+                    const chartHash = state.beatport_chart_hash || urlHash;
+                    if (data.status === 'finished') {
+                        state.phase = 'sync_complete';
+                        updateBeatportCardPhase(chartHash, 'sync_complete');
+                        updateBeatportModalButtons(urlHash, 'sync_complete');
+                        if (beatportChartStates[chartHash]) beatportChartStates[chartHash].phase = 'sync_complete';
+                    } else {
+                        state.phase = 'discovered';
+                        updateBeatportCardPhase(chartHash, 'discovered');
+                        if (beatportChartStates[chartHash]) beatportChartStates[chartHash].phase = 'discovered';
+                    }
+                }
+            }
+        };
+    }
+
+    // Define the polling function (HTTP fallback)
     const pollFunction = async () => {
+        if (socketConnected) return; // Phase 6: WS handles updates
         try {
             const response = await fetch(`/api/beatport/sync/status/${urlHash}`);
             const status = await response.json();
@@ -18567,18 +19133,13 @@ function startBeatportSyncPolling(urlHash) {
             if (status.error) {
                 console.error('❌ Error polling Beatport sync:', status.error);
                 clearInterval(pollInterval);
-                delete activeTidalPollers[urlHash];
+                delete activeYouTubePollers[urlHash];
                 return;
             }
 
-            // Update modal with sync progress
             updateBeatportModalSyncProgress(urlHash, status.progress);
 
-            // Stop polling when sync is complete
             if (status.complete || status.status === 'error') {
-                console.log(`✅ Beatport sync polling complete for: ${urlHash}`);
-
-                // Update final state
                 const state = youtubePlaylistStates[urlHash];
                 if (state) {
                     const chartHash = state.beatport_chart_hash || urlHash;
@@ -18587,28 +19148,16 @@ function startBeatportSyncPolling(urlHash) {
                         state.convertedSpotifyPlaylistId = status.converted_spotify_playlist_id;
                         updateBeatportCardPhase(chartHash, 'sync_complete');
                         updateBeatportModalButtons(urlHash, 'sync_complete');
-
-                        // Sync with backend Beatport chart state
-                        if (beatportChartStates[chartHash]) {
-                            beatportChartStates[chartHash].phase = 'sync_complete';
-                        }
-
-                        console.log('✅ Beatport sync complete:', urlHash);
+                        if (beatportChartStates[chartHash]) beatportChartStates[chartHash].phase = 'sync_complete';
                     } else {
-                        state.phase = 'discovered'; // Revert on error
+                        state.phase = 'discovered';
                         updateBeatportCardPhase(chartHash, 'discovered');
-
-                        // Sync with backend Beatport chart state
-                        if (beatportChartStates[chartHash]) {
-                            beatportChartStates[chartHash].phase = 'discovered';
-                        }
+                        if (beatportChartStates[chartHash]) beatportChartStates[chartHash].phase = 'discovered';
                     }
                 }
-
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[urlHash];
             }
-
         } catch (error) {
             console.error('❌ Error polling Beatport sync:', error);
             if (activeYouTubePollers[urlHash]) {
@@ -18618,11 +19167,11 @@ function startBeatportSyncPolling(urlHash) {
         }
     };
 
-    // Run immediately to get current status
-    pollFunction();
+    // Run immediately to get current status (skip if WS active)
+    if (!socketConnected) pollFunction();
 
     // Then continue polling at regular intervals
-    const pollInterval = setInterval(pollFunction, 2000); // Poll every 2 seconds
+    const pollInterval = setInterval(pollFunction, 2000);
     activeYouTubePollers[urlHash] = pollInterval;
 }
 
@@ -18651,6 +19200,13 @@ async function cancelBeatportSync(urlHash) {
         if (activeYouTubePollers[urlHash]) {
             clearInterval(activeYouTubePollers[urlHash]);
             delete activeYouTubePollers[urlHash];
+        }
+
+        // Phase 6: Clean up WS subscription
+        const bpSyncId = state && state.syncPlaylistId;
+        if (bpSyncId && _syncProgressCallbacks[bpSyncId]) {
+            if (socketConnected) socket.emit('sync:unsubscribe', { playlist_ids: [bpSyncId] });
+            delete _syncProgressCallbacks[bpSyncId];
         }
 
         // Revert to discovered phase
@@ -20338,7 +20894,31 @@ function startYouTubeDiscoveryPolling(urlHash) {
         clearInterval(activeYouTubePollers[urlHash]);
     }
 
+    // Phase 5: Subscribe via WebSocket
+    if (socketConnected) {
+        socket.emit('discovery:subscribe', { ids: [urlHash] });
+        _discoveryProgressCallbacks[urlHash] = (data) => {
+            if (data.error) {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('discovery:unsubscribe', { ids: [urlHash] }); delete _discoveryProgressCallbacks[urlHash];
+                return;
+            }
+            updateYouTubeCardProgress(urlHash, data);
+            const st = youtubePlaylistStates[urlHash];
+            if (st) { st.discoveryResults = data.results || []; st.discoveryProgress = data.progress || 0; st.spotifyMatches = data.spotify_matches || 0; }
+            updateYouTubeDiscoveryModal(urlHash, data);
+            if (data.complete) {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('discovery:unsubscribe', { ids: [urlHash] }); delete _discoveryProgressCallbacks[urlHash];
+                updateYouTubeCardPhase(urlHash, 'discovered');
+                updateYouTubeModalButtons(urlHash, 'discovered');
+                showToast('YouTube discovery complete!', 'success');
+            }
+        };
+    }
+
     const pollInterval = setInterval(async () => {
+        if (socketConnected) return; // Phase 5: WS handles updates
         try {
             const response = await fetch(`/api/youtube/discovery/status/${urlHash}`);
             const status = await response.json();
@@ -21103,6 +21683,11 @@ async function startYouTubePlaylistSync(urlHash) {
             return;
         }
 
+        // Capture sync_playlist_id for WebSocket subscription
+        const syncPlaylistId = result.sync_playlist_id;
+        const ytState = youtubePlaylistStates[urlHash];
+        if (ytState) ytState.syncPlaylistId = syncPlaylistId;
+
         // Update card and modal to syncing phase
         updateYouTubeCardPhase(urlHash, 'syncing');
 
@@ -21110,7 +21695,7 @@ async function startYouTubePlaylistSync(urlHash) {
         updateYouTubeModalButtons(urlHash, 'syncing');
 
         // Start sync polling
-        startYouTubeSyncPolling(urlHash);
+        startYouTubeSyncPolling(urlHash, syncPlaylistId);
 
         showToast('YouTube playlist sync started!', 'success');
 
@@ -21120,14 +21705,45 @@ async function startYouTubePlaylistSync(urlHash) {
     }
 }
 
-function startYouTubeSyncPolling(urlHash) {
+function startYouTubeSyncPolling(urlHash, syncPlaylistId) {
     // Stop any existing polling
     if (activeYouTubePollers[urlHash]) {
         clearInterval(activeYouTubePollers[urlHash]);
     }
 
-    // Define the polling function
+    // Resolve syncPlaylistId from argument or stored state
+    const ytState = youtubePlaylistStates[urlHash];
+    syncPlaylistId = syncPlaylistId || (ytState && ytState.syncPlaylistId);
+
+    // Phase 6: Subscribe via WebSocket
+    if (socketConnected && syncPlaylistId) {
+        socket.emit('sync:subscribe', { playlist_ids: [syncPlaylistId] });
+        _syncProgressCallbacks[syncPlaylistId] = (data) => {
+            const progress = data.progress || {};
+            updateYouTubeCardSyncProgress(urlHash, progress);
+            updateYouTubeModalSyncProgress(urlHash, progress);
+
+            if (data.status === 'finished') {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                updateYouTubeCardPhase(urlHash, 'sync_complete');
+                updateYouTubeModalButtons(urlHash, 'sync_complete');
+                showToast('YouTube playlist sync complete!', 'success');
+            } else if (data.status === 'error' || data.status === 'cancelled') {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                updateYouTubeCardPhase(urlHash, 'discovered');
+                updateYouTubeModalButtons(urlHash, 'discovered');
+                showToast(`Sync failed: ${data.error || 'Unknown error'}`, 'error');
+            }
+        };
+    }
+
+    // Define the polling function (HTTP fallback)
     const pollFunction = async () => {
+        if (socketConnected) return; // Phase 6: WS handles updates
         try {
             const response = await fetch(`/api/youtube/sync/status/${urlHash}`);
             const status = await response.json();
@@ -21139,36 +21755,22 @@ function startYouTubeSyncPolling(urlHash) {
                 return;
             }
 
-            // Update card progress with sync stats
             updateYouTubeCardSyncProgress(urlHash, status.progress);
-
-            // Update modal sync display if open
             updateYouTubeModalSyncProgress(urlHash, status.progress);
 
-            // Check if complete
             if (status.complete) {
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[urlHash];
-
-                // Update card phase to sync complete
                 updateYouTubeCardPhase(urlHash, 'sync_complete');
-
-                // Update modal buttons
                 updateYouTubeModalButtons(urlHash, 'sync_complete');
-
-                console.log('✅ YouTube sync complete:', urlHash);
                 showToast('YouTube playlist sync complete!', 'success');
             } else if (status.sync_status === 'error') {
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[urlHash];
-
-                // Revert to discovered phase on error
                 updateYouTubeCardPhase(urlHash, 'discovered');
                 updateYouTubeModalButtons(urlHash, 'discovered');
-
                 showToast(`Sync failed: ${status.error || 'Unknown error'}`, 'error');
             }
-
         } catch (error) {
             console.error('❌ Error polling YouTube sync:', error);
             if (activeYouTubePollers[urlHash]) {
@@ -21178,8 +21780,8 @@ function startYouTubeSyncPolling(urlHash) {
         }
     };
 
-    // Run immediately to get current status
-    pollFunction();
+    // Run immediately to get current status (skip if WS active)
+    if (!socketConnected) pollFunction();
 
     // Then continue polling at regular intervals
     const pollInterval = setInterval(pollFunction, 1000);
@@ -21205,6 +21807,14 @@ async function cancelYouTubeSync(urlHash) {
         if (activeYouTubePollers[urlHash]) {
             clearInterval(activeYouTubePollers[urlHash]);
             delete activeYouTubePollers[urlHash];
+        }
+
+        // Phase 6: Clean up WS subscription
+        const ytCancelState = youtubePlaylistStates[urlHash];
+        const ytSyncId = ytCancelState && ytCancelState.syncPlaylistId;
+        if (ytSyncId && _syncProgressCallbacks[ytSyncId]) {
+            if (socketConnected) socket.emit('sync:unsubscribe', { playlist_ids: [ytSyncId] });
+            delete _syncProgressCallbacks[ytSyncId];
         }
 
         // Revert to discovered phase
@@ -21509,7 +22119,53 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
         clearInterval(activeYouTubePollers[playlistMbid]);
     }
 
+    // Phase 5: Subscribe via WebSocket
+    if (socketConnected) {
+        socket.emit('discovery:subscribe', { ids: [playlistMbid] });
+        _discoveryProgressCallbacks[playlistMbid] = (data) => {
+            if (data.error) {
+                if (activeYouTubePollers[playlistMbid]) { clearInterval(activeYouTubePollers[playlistMbid]); delete activeYouTubePollers[playlistMbid]; }
+                socket.emit('discovery:unsubscribe', { ids: [playlistMbid] }); delete _discoveryProgressCallbacks[playlistMbid];
+                return;
+            }
+            if (listenbrainzPlaylistStates[playlistMbid]) {
+                const transformed = {
+                    progress: data.progress || 0, spotify_matches: data.spotify_matches || 0, spotify_total: data.spotify_total || 0,
+                    results: (data.results || []).map((r, i) => ({
+                        index: r.index !== undefined ? r.index : i,
+                        yt_track: r.lb_track || r.track_name || 'Unknown',
+                        yt_artist: r.lb_artist || r.artist_name || 'Unknown',
+                        status: (r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found') ? '✅ Found' : (r.status === 'error' ? '❌ Error' : '❌ Not Found'),
+                        status_class: r.status_class || ((r.status === 'found' || r.status === '✅ Found') ? 'found' : (r.status === 'error' ? 'error' : 'not-found')),
+                        spotify_track: r.spotify_data ? r.spotify_data.name : (r.spotify_track || '-'),
+                        spotify_artist: r.spotify_data ? (r.spotify_data.artists && r.spotify_data.artists[0] ? r.spotify_data.artists[0] : '-') : (r.spotify_artist || '-'),
+                        spotify_album: r.spotify_data ? (typeof r.spotify_data.album === 'object' ? r.spotify_data.album.name : r.spotify_data.album) || '-' : (r.spotify_album || '-'),
+                        spotify_data: r.spotify_data, duration: r.duration || '0:00'
+                    })),
+                    complete: data.complete || data.phase === 'discovered'
+                };
+                const st = listenbrainzPlaylistStates[playlistMbid];
+                st.discovery_results = data.results || []; st.discoveryResults = transformed.results;
+                st.discovery_progress = data.progress || 0; st.discoveryProgress = data.progress || 0;
+                st.spotify_matches = data.spotify_matches || 0; st.spotifyMatches = data.spotify_matches || 0;
+                st.spotify_total = data.spotify_total || 0; st.spotifyTotal = data.spotify_total || 0;
+                updateYouTubeDiscoveryModal(playlistMbid, transformed);
+            }
+            if (data.complete || data.phase === 'discovered') {
+                if (activeYouTubePollers[playlistMbid]) { clearInterval(activeYouTubePollers[playlistMbid]); delete activeYouTubePollers[playlistMbid]; }
+                socket.emit('discovery:unsubscribe', { ids: [playlistMbid] }); delete _discoveryProgressCallbacks[playlistMbid];
+                if (listenbrainzPlaylistStates[playlistMbid]) listenbrainzPlaylistStates[playlistMbid].phase = 'discovered';
+                updateYouTubeModalButtons(playlistMbid, 'discovered');
+                const playlistIdEl = `discover-lb-playlist-${playlistMbid}`;
+                const syncBtn = document.getElementById(`${playlistIdEl}-sync-btn`);
+                if (syncBtn) syncBtn.style.display = 'inline-block';
+                showToast('ListenBrainz discovery complete!', 'success');
+            }
+        };
+    }
+
     const pollInterval = setInterval(async () => {
+        if (socketConnected) return; // Phase 5: WS handles updates
         try {
             const response = await fetch(`/api/listenbrainz/discovery/status/${playlistMbid}`);
             const status = await response.json();
@@ -21604,14 +22260,42 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
     activeYouTubePollers[playlistMbid] = pollInterval;
 }
 
-function startListenBrainzSyncPolling(playlistMbid) {
+function startListenBrainzSyncPolling(playlistMbid, syncPlaylistId) {
     // Stop any existing polling
     if (activeYouTubePollers[playlistMbid]) {
         clearInterval(activeYouTubePollers[playlistMbid]);
     }
 
-    // Define the polling function
+    // Resolve syncPlaylistId from argument or stored state
+    const lbState = listenbrainzPlaylistStates[playlistMbid];
+    syncPlaylistId = syncPlaylistId || (lbState && lbState.syncPlaylistId);
+
+    // Phase 6: Subscribe via WebSocket
+    if (socketConnected && syncPlaylistId) {
+        socket.emit('sync:subscribe', { playlist_ids: [syncPlaylistId] });
+        _syncProgressCallbacks[syncPlaylistId] = (data) => {
+            const progress = data.progress || {};
+            updateYouTubeModalSyncProgress(playlistMbid, progress);
+
+            if (data.status === 'finished') {
+                if (activeYouTubePollers[playlistMbid]) { clearInterval(activeYouTubePollers[playlistMbid]); delete activeYouTubePollers[playlistMbid]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                updateYouTubeModalButtons(playlistMbid, 'sync_complete');
+                showToast('ListenBrainz playlist sync complete!', 'success');
+            } else if (data.status === 'error' || data.status === 'cancelled') {
+                if (activeYouTubePollers[playlistMbid]) { clearInterval(activeYouTubePollers[playlistMbid]); delete activeYouTubePollers[playlistMbid]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                updateYouTubeModalButtons(playlistMbid, 'discovered');
+                showToast(`Sync failed: ${data.error || 'Unknown error'}`, 'error');
+            }
+        };
+    }
+
+    // Define the polling function (HTTP fallback)
     const pollFunction = async () => {
+        if (socketConnected) return; // Phase 6: WS handles updates
         try {
             const response = await fetch(`/api/listenbrainz/sync/status/${playlistMbid}`);
             const status = await response.json();
@@ -21623,29 +22307,19 @@ function startListenBrainzSyncPolling(playlistMbid) {
                 return;
             }
 
-            // Update modal sync display if open
             updateYouTubeModalSyncProgress(playlistMbid, status.progress);
 
-            // Check if complete
             if (status.complete) {
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[playlistMbid];
-
-                // Update modal buttons
                 updateYouTubeModalButtons(playlistMbid, 'sync_complete');
-
-                console.log('✅ ListenBrainz sync complete:', playlistMbid);
                 showToast('ListenBrainz playlist sync complete!', 'success');
             } else if (status.sync_status === 'error') {
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[playlistMbid];
-
-                // Revert to discovered phase on error
                 updateYouTubeModalButtons(playlistMbid, 'discovered');
-
                 showToast(`Sync failed: ${status.error || 'Unknown error'}`, 'error');
             }
-
         } catch (error) {
             console.error('❌ Error polling ListenBrainz sync:', error);
             if (activeYouTubePollers[playlistMbid]) {
@@ -21655,8 +22329,8 @@ function startListenBrainzSyncPolling(playlistMbid) {
         }
     };
 
-    // Run immediately to get current status
-    pollFunction();
+    // Run immediately to get current status (skip if WS active)
+    if (!socketConnected) pollFunction();
 
     // Then continue polling at regular intervals
     const pollInterval = setInterval(pollFunction, 1000);
@@ -21751,14 +22425,19 @@ async function startListenBrainzPlaylistSync(playlistMbid) {
             throw new Error(error.error || 'Failed to start sync');
         }
 
+        // Capture sync_playlist_id for WebSocket subscription
+        const result = await response.json();
+        const syncPlaylistId = result.sync_playlist_id;
+        if (state) state.syncPlaylistId = syncPlaylistId;
+
         // Update phase to syncing
         state.phase = 'syncing';
 
         // Start polling for sync progress
         if (isFromListing) {
-            startListenBrainzListingSyncPolling(playlistMbid, listingPlaylistId);
+            startListenBrainzListingSyncPolling(playlistMbid, listingPlaylistId, syncPlaylistId);
         } else {
-            startListenBrainzSyncPolling(playlistMbid);
+            startListenBrainzSyncPolling(playlistMbid, syncPlaylistId);
             updateYouTubeModalButtons(playlistMbid, 'syncing');
         }
 
@@ -21770,7 +22449,7 @@ async function startListenBrainzPlaylistSync(playlistMbid) {
     }
 }
 
-function startListenBrainzListingSyncPolling(playlistMbid, listingPlaylistId) {
+function startListenBrainzListingSyncPolling(playlistMbid, listingPlaylistId, syncPlaylistId) {
     console.log(`🔄 Starting listing sync polling for: ${playlistMbid} (UI: ${listingPlaylistId})`);
 
     // Stop any existing polling
@@ -21778,7 +22457,56 @@ function startListenBrainzListingSyncPolling(playlistMbid, listingPlaylistId) {
         clearInterval(activeYouTubePollers[playlistMbid]);
     }
 
+    // Resolve syncPlaylistId from argument or stored state
+    const lbState = listenbrainzPlaylistStates[playlistMbid];
+    syncPlaylistId = syncPlaylistId || (lbState && lbState.syncPlaylistId);
+
+    // Phase 6: Subscribe via WebSocket
+    if (socketConnected && syncPlaylistId) {
+        socket.emit('sync:subscribe', { playlist_ids: [syncPlaylistId] });
+        _syncProgressCallbacks[syncPlaylistId] = (data) => {
+            const progress = data.progress || {};
+            const total = progress.total_tracks || 0;
+            const matched = progress.matched_tracks || 0;
+            const failed = progress.failed_tracks || 0;
+            const percentage = total > 0 ? Math.round((matched / total) * 100) : 0;
+
+            const totalEl = document.getElementById(`${listingPlaylistId}-sync-total`);
+            const matchedEl = document.getElementById(`${listingPlaylistId}-sync-matched`);
+            const failedEl = document.getElementById(`${listingPlaylistId}-sync-failed`);
+            const percentageEl = document.getElementById(`${listingPlaylistId}-sync-percentage`);
+
+            if (totalEl) totalEl.textContent = total;
+            if (matchedEl) matchedEl.textContent = matched;
+            if (failedEl) failedEl.textContent = failed;
+            if (percentageEl) percentageEl.textContent = percentage;
+
+            if (data.status === 'finished') {
+                if (activeYouTubePollers[playlistMbid]) { clearInterval(activeYouTubePollers[playlistMbid]); delete activeYouTubePollers[playlistMbid]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+
+                const statusDisplay = document.getElementById(`${listingPlaylistId}-sync-status`);
+                const syncButton = document.getElementById(`${listingPlaylistId}-sync-btn`);
+                if (statusDisplay) setTimeout(() => { statusDisplay.style.display = 'none'; }, 3000);
+                if (syncButton) { syncButton.disabled = false; syncButton.style.opacity = '1'; }
+
+                if (listenbrainzPlaylistStates[playlistMbid]) {
+                    listenbrainzPlaylistStates[playlistMbid].phase = 'sync_complete';
+                }
+
+                showToast(`Sync complete: ${matched}/${total} tracks matched`, 'success');
+            } else if (data.status === 'error' || data.status === 'cancelled') {
+                if (activeYouTubePollers[playlistMbid]) { clearInterval(activeYouTubePollers[playlistMbid]); delete activeYouTubePollers[playlistMbid]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                showToast(`Sync failed: ${data.error || 'Unknown error'}`, 'error');
+            }
+        };
+    }
+
     const pollInterval = setInterval(async () => {
+        if (socketConnected) return; // Phase 6: WS handles updates
         try {
             const response = await fetch(`/api/listenbrainz/sync/status/${playlistMbid}`);
             const status = await response.json();
@@ -21790,18 +22518,10 @@ function startListenBrainzListingSyncPolling(playlistMbid, listingPlaylistId) {
                 return;
             }
 
-            // Update UI elements in listing
             const totalEl = document.getElementById(`${listingPlaylistId}-sync-total`);
             const matchedEl = document.getElementById(`${listingPlaylistId}-sync-matched`);
             const failedEl = document.getElementById(`${listingPlaylistId}-sync-failed`);
             const percentageEl = document.getElementById(`${listingPlaylistId}-sync-percentage`);
-
-            console.log(`📊 ListenBrainz listing sync progress:`, {
-                total: status.progress?.total_tracks,
-                matched: status.progress?.matched_tracks,
-                failed: status.progress?.failed_tracks,
-                complete: status.complete
-            });
 
             if (totalEl) totalEl.textContent = status.progress?.total_tracks || 0;
             if (matchedEl) matchedEl.textContent = status.progress?.matched_tracks || 0;
@@ -21812,34 +22532,21 @@ function startListenBrainzListingSyncPolling(playlistMbid, listingPlaylistId) {
                 : 0;
             if (percentageEl) percentageEl.textContent = percentage;
 
-            // Check if complete
             if (status.complete) {
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[playlistMbid];
 
                 const statusDisplay = document.getElementById(`${listingPlaylistId}-sync-status`);
                 const syncButton = document.getElementById(`${listingPlaylistId}-sync-btn`);
+                if (statusDisplay) setTimeout(() => { statusDisplay.style.display = 'none'; }, 3000);
+                if (syncButton) { syncButton.disabled = false; syncButton.style.opacity = '1'; }
 
-                if (statusDisplay) {
-                    setTimeout(() => {
-                        statusDisplay.style.display = 'none';
-                    }, 3000);
-                }
-
-                if (syncButton) {
-                    syncButton.disabled = false;
-                    syncButton.style.opacity = '1';
-                }
-
-                // Update state
                 if (listenbrainzPlaylistStates[playlistMbid]) {
                     listenbrainzPlaylistStates[playlistMbid].phase = 'sync_complete';
                 }
 
                 showToast(`Sync complete: ${status.progress?.matched_tracks || 0}/${status.progress?.total_tracks || 0} tracks matched`, 'success');
-                console.log('✅ ListenBrainz listing sync complete:', playlistMbid);
             }
-
         } catch (error) {
             console.error('❌ Error polling ListenBrainz listing sync:', error);
             clearInterval(pollInterval);
@@ -25590,6 +26297,7 @@ function escapeHtml(text) {
 
 async function fetchAndUpdateServiceStatus() {
     if (document.hidden) return; // Skip polling when tab is not visible
+    if (socketConnected) return; // WebSocket is pushing updates — skip HTTP poll
     try {
         const response = await fetch('/status');
         if (!response.ok) return;
@@ -25696,6 +26404,7 @@ function updateSidebarServiceStatus(service, statusData) {
 }
 
 async function fetchAndUpdateSystemStats() {
+    if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/system/stats');
@@ -25732,6 +26441,7 @@ function updateStatCard(cardId, value, subtitle) {
 }
 
 async function fetchAndUpdateActivityFeed() {
+    if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/activity/feed');
@@ -25802,6 +26512,7 @@ function updateActivityFeed(activities) {
 }
 
 async function checkForActivityToasts() {
+    if (socketConnected) return; // WebSocket handles this (instant push)
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/activity/toasts');
@@ -25918,6 +26629,7 @@ async function toggleWatchlist(event, artistId, artistName) {
  */
 async function updateWatchlistButtonCount() {
     if (document.hidden) return; // Skip polling when tab is not visible
+    if (socketConnected) return; // WebSocket is pushing updates — skip HTTP poll
     try {
         const response = await fetch('/api/watchlist/count');
         const data = await response.json();
@@ -26721,132 +27433,138 @@ async function startWatchlistScan() {
 /**
  * Poll watchlist scan status
  */
+function handleWatchlistScanData(data) {
+    const button = document.getElementById('scan-watchlist-btn');
+    const liveActivity = document.getElementById('watchlist-live-activity');
+
+    // Update live visual activity display
+    if (liveActivity && data.status === 'scanning') {
+        liveActivity.style.display = 'flex';
+
+        // Update artist image and name
+        const artistImg = document.getElementById('watchlist-artist-img');
+        const artistName = document.getElementById('watchlist-artist-name');
+        if (artistImg && data.current_artist_image_url) {
+            artistImg.src = data.current_artist_image_url;
+            artistImg.style.display = 'block';
+        }
+        if (artistName) {
+            artistName.textContent = data.current_artist_name || 'Processing...';
+        }
+
+        // Update album image and name
+        const albumImg = document.getElementById('watchlist-album-img');
+        const albumName = document.getElementById('watchlist-album-name');
+        if (albumImg && data.current_album_image_url) {
+            albumImg.src = data.current_album_image_url;
+            albumImg.style.display = 'block';
+        } else if (albumImg) {
+            albumImg.style.display = 'none';
+        }
+        if (albumName) {
+            albumName.textContent = data.current_album || (data.current_phase === 'fetching_discography' ? 'Fetching releases...' : 'Processing...');
+        }
+
+        // Update current track
+        const trackName = document.getElementById('watchlist-track-name');
+        if (trackName) {
+            trackName.textContent = data.current_track_name || (data.current_phase === 'fetching_discography' ? 'Fetching releases...' : 'Processing...');
+        }
+
+        // Update wishlist additions feed
+        const additionsFeed = document.getElementById('watchlist-additions-feed');
+        if (additionsFeed) {
+            if (data.recent_wishlist_additions && data.recent_wishlist_additions.length > 0) {
+                additionsFeed.innerHTML = data.recent_wishlist_additions.map(item => `
+                    <div style="display: flex; gap: 6px; align-items: center; padding: 3px; background: #1a1a1a; border-radius: 4px;">
+                        <img src="${item.album_image_url || ''}" alt="" style="width: 24px; height: 24px; border-radius: 3px; object-fit: cover;" onerror="this.style.display='none';" />
+                        <div style="flex: 1; overflow: hidden;">
+                            <div style="font-weight: bold; color: rgb(var(--accent-light-rgb)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.track_name}</div>
+                            <div style="font-size: 9px; color: #b3b3b3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.artist_name}</div>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                additionsFeed.innerHTML = '<div style="color: #666; font-size: 10px;">No tracks added yet...</div>';
+            }
+        }
+    } else if (liveActivity && data.status !== 'scanning') {
+        liveActivity.style.display = 'none';
+    }
+
+    if (data.status === 'completed') {
+        if (button) {
+            button.disabled = false;
+            button.textContent = 'Scan for New Releases';
+        }
+
+        // Hide live activity
+        if (liveActivity) {
+            liveActivity.style.display = 'none';
+        }
+
+        // Show completion message in status div
+        const statusDiv = document.getElementById('watchlist-scan-status');
+        if (statusDiv && data.summary) {
+            const newTracks = data.summary.new_tracks_found || 0;
+            const addedTracks = data.summary.tracks_added_to_wishlist || 0;
+            const totalArtists = data.summary.total_artists || 0;
+            const successfulScans = data.summary.successful_scans || 0;
+
+            let completionMessage = `Scan completed: ${successfulScans}/${totalArtists} artists scanned`;
+            if (newTracks > 0) {
+                completionMessage += `, found ${newTracks} new track${newTracks !== 1 ? 's' : ''}`;
+                if (addedTracks > 0) {
+                    completionMessage += `, added ${addedTracks} to wishlist`;
+                }
+            } else {
+                completionMessage += ', no new tracks found';
+            }
+
+            // Update the scan status display with completion message and summary
+            statusDiv.innerHTML = `
+                <div style="text-align: center; padding: 15px; background: #2a2a2a; border-radius: 8px; border: 1px solid #444;">
+                    <div style="font-size: 14px; color: rgb(var(--accent-light-rgb)); margin-bottom: 10px;">${completionMessage}</div>
+                    <div style="font-size: 13px; opacity: 0.8;">
+                        <span class="sync-stat">Artists: ${totalArtists}</span>
+                        <span class="sync-separator"> • </span>
+                        <span class="sync-stat">New tracks: ${newTracks}</span>
+                        <span class="sync-separator"> • </span>
+                        <span class="sync-stat">Added to wishlist: ${addedTracks}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Update watchlist count
+        updateWatchlistButtonCount();
+
+        console.log('Watchlist scan completed:', data.summary);
+
+    } else if (data.status === 'error') {
+        if (button) {
+            button.disabled = false;
+            button.textContent = 'Scan for New Releases';
+        }
+
+        // Hide live activity
+        if (liveActivity) {
+            liveActivity.style.display = 'none';
+        }
+
+        console.error('Watchlist scan error:', data.error);
+    }
+}
+
 async function pollWatchlistScanStatus() {
+    if (socketConnected) return; // Phase 5: WS handles scan updates
     try {
         const response = await fetch('/api/watchlist/scan/status');
         const data = await response.json();
 
         if (data.success) {
-            const button = document.getElementById('scan-watchlist-btn');
-            const liveActivity = document.getElementById('watchlist-live-activity');
-
-            // Update live visual activity display
-            if (liveActivity && data.status === 'scanning') {
-                liveActivity.style.display = 'flex';
-
-                // Update artist image and name
-                const artistImg = document.getElementById('watchlist-artist-img');
-                const artistName = document.getElementById('watchlist-artist-name');
-                if (artistImg && data.current_artist_image_url) {
-                    artistImg.src = data.current_artist_image_url;
-                    artistImg.style.display = 'block';
-                }
-                if (artistName) {
-                    artistName.textContent = data.current_artist_name || 'Processing...';
-                }
-
-                // Update album image and name
-                const albumImg = document.getElementById('watchlist-album-img');
-                const albumName = document.getElementById('watchlist-album-name');
-                if (albumImg && data.current_album_image_url) {
-                    albumImg.src = data.current_album_image_url;
-                    albumImg.style.display = 'block';
-                } else if (albumImg) {
-                    albumImg.style.display = 'none';
-                }
-                if (albumName) {
-                    albumName.textContent = data.current_album || (data.current_phase === 'fetching_discography' ? 'Fetching releases...' : 'Processing...');
-                }
-
-                // Update current track
-                const trackName = document.getElementById('watchlist-track-name');
-                if (trackName) {
-                    trackName.textContent = data.current_track_name || (data.current_phase === 'fetching_discography' ? 'Fetching releases...' : 'Processing...');
-                }
-
-                // Update wishlist additions feed
-                const additionsFeed = document.getElementById('watchlist-additions-feed');
-                if (additionsFeed) {
-                    if (data.recent_wishlist_additions && data.recent_wishlist_additions.length > 0) {
-                        additionsFeed.innerHTML = data.recent_wishlist_additions.map(item => `
-                            <div style="display: flex; gap: 6px; align-items: center; padding: 3px; background: #1a1a1a; border-radius: 4px;">
-                                <img src="${item.album_image_url || ''}" alt="" style="width: 24px; height: 24px; border-radius: 3px; object-fit: cover;" onerror="this.style.display='none';" />
-                                <div style="flex: 1; overflow: hidden;">
-                                    <div style="font-weight: bold; color: rgb(var(--accent-light-rgb)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.track_name}</div>
-                                    <div style="font-size: 9px; color: #b3b3b3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.artist_name}</div>
-                                </div>
-                            </div>
-                        `).join('');
-                    } else {
-                        additionsFeed.innerHTML = '<div style="color: #666; font-size: 10px;">No tracks added yet...</div>';
-                    }
-                }
-            } else if (liveActivity && data.status !== 'scanning') {
-                liveActivity.style.display = 'none';
-            }
-
-            if (data.status === 'completed') {
-                if (button) {
-                    button.disabled = false;
-                    button.textContent = 'Scan for New Releases';
-                }
-
-                // Hide live activity
-                if (liveActivity) {
-                    liveActivity.style.display = 'none';
-                }
-
-                // Show completion message in status div
-                const statusDiv = document.getElementById('watchlist-scan-status');
-                if (statusDiv && data.summary) {
-                    const newTracks = data.summary.new_tracks_found || 0;
-                    const addedTracks = data.summary.tracks_added_to_wishlist || 0;
-                    const totalArtists = data.summary.total_artists || 0;
-                    const successfulScans = data.summary.successful_scans || 0;
-
-                    let completionMessage = `Scan completed: ${successfulScans}/${totalArtists} artists scanned`;
-                    if (newTracks > 0) {
-                        completionMessage += `, found ${newTracks} new track${newTracks !== 1 ? 's' : ''}`;
-                        if (addedTracks > 0) {
-                            completionMessage += `, added ${addedTracks} to wishlist`;
-                        }
-                    } else {
-                        completionMessage += ', no new tracks found';
-                    }
-
-                    // Update the scan status display with completion message and summary
-                    statusDiv.innerHTML = `
-                        <div style="text-align: center; padding: 15px; background: #2a2a2a; border-radius: 8px; border: 1px solid #444;">
-                            <div style="font-size: 14px; color: rgb(var(--accent-light-rgb)); margin-bottom: 10px;">${completionMessage}</div>
-                            <div style="font-size: 13px; opacity: 0.8;">
-                                <span class="sync-stat">Artists: ${totalArtists}</span>
-                                <span class="sync-separator"> • </span>
-                                <span class="sync-stat">New tracks: ${newTracks}</span>
-                                <span class="sync-separator"> • </span>
-                                <span class="sync-stat">Added to wishlist: ${addedTracks}</span>
-                            </div>
-                        </div>
-                    `;
-                }
-
-                // Update watchlist count
-                updateWatchlistButtonCount();
-
-                console.log('Watchlist scan completed:', data.summary);
-                return; // Stop polling
-
-            } else if (data.status === 'error') {
-                if (button) {
-                    button.disabled = false;
-                    button.textContent = 'Scan for New Releases';
-                }
-
-                // Hide live activity
-                if (liveActivity) {
-                    liveActivity.style.display = 'none';
-                }
-
-                console.error('Watchlist scan error:', data.error);
+            handleWatchlistScanData(data);
+            if (data.status === 'completed' || data.status === 'error') {
                 return; // Stop polling
             }
         }
@@ -27154,6 +27872,7 @@ function stopMetadataUpdatePolling() {
  * Check current metadata update status and update UI
  */
 async function checkMetadataUpdateStatus() {
+    if (socketConnected) return; // WebSocket handles this
     try {
         const response = await fetch('/api/metadata/status');
         const data = await response.json();
@@ -27169,6 +27888,17 @@ async function checkMetadataUpdateStatus() {
 
     } catch (error) {
         console.warn('Could not fetch metadata update status:', error);
+    }
+}
+
+function updateMetadataStatusFromData(data) {
+    if (!data.success || !data.status) return;
+    const prev = _lastToolStatus['metadata'];
+    _lastToolStatus['metadata'] = data.status.status;
+    if (prev !== undefined && data.status.status === prev && data.status.status !== 'running' && data.status.status !== 'stopping') return;
+    updateMetadataProgressUI(data.status);
+    if (data.status.status === 'completed' || data.status.status === 'error') {
+        stopMetadataUpdatePolling();
     }
 }
 
@@ -27399,6 +28129,7 @@ async function handleMediaScanButtonClick() {
                     const maxPolls = 150; // 5 minutes
 
                     pollInterval = setInterval(async () => {
+                        if (socketConnected) return; // Phase 5: WS handles scan status
                         pollCount++;
 
                         if (pollCount > maxPolls) {
@@ -27544,37 +28275,38 @@ function stopLogPolling() {
  * Load and display activity feed as logs
  */
 async function loadLogs() {
+    if (socketConnected) return; // WebSocket handles this
     try {
         const response = await fetch('/api/logs');
         const data = await response.json();
-
-        if (data.logs && Array.isArray(data.logs)) {
-            const logArea = document.getElementById('sync-log-area');
-            if (!logArea) return;
-
-            // Join logs with newlines and update textarea
-            const logText = data.logs.join('\n');
-
-            // Store current scroll state
-            const wasAtTop = logArea.scrollTop <= 10;
-            const wasUserScrolled = logArea.scrollTop < logArea.scrollHeight - logArea.clientHeight - 10;
-
-            // Update content only if it has changed
-            if (logArea.value !== logText) {
-                logArea.value = logText;
-
-                // Smart scrolling: stay at top for new entries, preserve user position if scrolled
-                if (wasAtTop || !wasUserScrolled) {
-                    logArea.scrollTop = 0; // Stay at top since newest entries are now at top
-                }
-                // If user had scrolled, keep their position (browser handles this automatically)
-            }
-        }
+        updateLogsFromData(data);
     } catch (error) {
         console.warn('Could not load activity logs for sync page:', error);
         const logArea = document.getElementById('sync-log-area');
         if (logArea && (logArea.value === 'Loading logs...' || logArea.value === '')) {
             logArea.value = 'Error loading activity feed. Check console for details.';
+        }
+    }
+}
+
+function updateLogsFromData(data) {
+    if (!data.logs || !Array.isArray(data.logs)) return;
+    const logArea = document.getElementById('sync-log-area');
+    if (!logArea) return;
+
+    const logText = data.logs.join('\n');
+
+    // Store current scroll state
+    const wasAtTop = logArea.scrollTop <= 10;
+    const wasUserScrolled = logArea.scrollTop < logArea.scrollHeight - logArea.clientHeight - 10;
+
+    // Update content only if it has changed
+    if (logArea.value !== logText) {
+        logArea.value = logText;
+
+        // Smart scrolling: stay at top for new entries, preserve user position if scrolled
+        if (wasAtTop || !wasUserScrolled) {
+            logArea.scrollTop = 0; // Stay at top since newest entries are now at top
         }
     }
 }
@@ -35015,7 +35747,36 @@ function startDecadeSyncPolling(decade, virtualPlaylistId) {
         clearInterval(discoverSyncPollers[pollerId]);
     }
 
+    // Phase 5: Subscribe via WebSocket
+    if (socketConnected) {
+        socket.emit('sync:subscribe', { playlist_ids: [virtualPlaylistId] });
+        _syncProgressCallbacks[virtualPlaylistId] = (data) => {
+            const progress = data.progress || {};
+            const total = progress.total_tracks || 0;
+            const matched = progress.matched_tracks || 0;
+            const failed = progress.failed_tracks || 0;
+            const processed = matched + failed;
+            const pending = total - processed;
+            const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+            const el = (id) => document.getElementById(id);
+            if (el(`decade-${decade}-sync-completed`)) el(`decade-${decade}-sync-completed`).textContent = matched;
+            if (el(`decade-${decade}-sync-pending`)) el(`decade-${decade}-sync-pending`).textContent = pending;
+            if (el(`decade-${decade}-sync-failed`)) el(`decade-${decade}-sync-failed`).textContent = failed;
+            if (el(`decade-${decade}-sync-percentage`)) el(`decade-${decade}-sync-percentage`).textContent = pct;
+            if (data.status === 'finished') {
+                if (discoverSyncPollers[pollerId]) { clearInterval(discoverSyncPollers[pollerId]); delete discoverSyncPollers[pollerId]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [virtualPlaylistId] });
+                delete _syncProgressCallbacks[virtualPlaylistId];
+                const syncButton = el(`decade-${decade}-sync-btn`);
+                if (syncButton) { syncButton.disabled = false; syncButton.style.opacity = '1'; syncButton.style.cursor = 'pointer'; }
+                showToast(`${decade}s Classics sync complete!`, 'success');
+                setTimeout(() => { const sd = el(`decade-${decade}-sync-status`); if (sd) sd.style.display = 'none'; }, 3000);
+            }
+        };
+    }
+
     discoverSyncPollers[pollerId] = setInterval(async () => {
+        if (socketConnected) return; // Phase 5: WS handles updates
         try {
             const response = await fetch(`/api/sync/status/${virtualPlaylistId}`);
             if (!response.ok) return;
@@ -35387,7 +36148,36 @@ function startGenreSyncPolling(genreName, genreId, virtualPlaylistId) {
         clearInterval(discoverSyncPollers[pollerId]);
     }
 
+    // Phase 5: Subscribe via WebSocket
+    if (socketConnected) {
+        socket.emit('sync:subscribe', { playlist_ids: [virtualPlaylistId] });
+        _syncProgressCallbacks[virtualPlaylistId] = (data) => {
+            const progress = data.progress || {};
+            const total = progress.total_tracks || 0;
+            const matched = progress.matched_tracks || 0;
+            const failed = progress.failed_tracks || 0;
+            const processed = matched + failed;
+            const pending = total - processed;
+            const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+            const el = (id) => document.getElementById(id);
+            if (el(`genre-${genreId}-sync-completed`)) el(`genre-${genreId}-sync-completed`).textContent = matched;
+            if (el(`genre-${genreId}-sync-pending`)) el(`genre-${genreId}-sync-pending`).textContent = pending;
+            if (el(`genre-${genreId}-sync-failed`)) el(`genre-${genreId}-sync-failed`).textContent = failed;
+            if (el(`genre-${genreId}-sync-percentage`)) el(`genre-${genreId}-sync-percentage`).textContent = pct;
+            if (data.status === 'finished') {
+                if (discoverSyncPollers[pollerId]) { clearInterval(discoverSyncPollers[pollerId]); delete discoverSyncPollers[pollerId]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [virtualPlaylistId] });
+                delete _syncProgressCallbacks[virtualPlaylistId];
+                const syncButton = el(`genre-${genreId}-sync-btn`);
+                if (syncButton) { syncButton.disabled = false; syncButton.style.opacity = '1'; syncButton.style.cursor = 'pointer'; }
+                showToast(`${capitalizeGenre(genreName)} Mix sync complete!`, 'success');
+                setTimeout(() => { const sd = el(`genre-${genreId}-sync-status`); if (sd) sd.style.display = 'none'; }, 3000);
+            }
+        };
+    }
+
     discoverSyncPollers[pollerId] = setInterval(async () => {
+        if (socketConnected) return; // Phase 5: WS handles updates
         try {
             const response = await fetch(`/api/sync/status/${virtualPlaylistId}`);
             if (!response.ok) return;
@@ -37285,8 +38075,45 @@ function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
 
     console.log(`🔄 Starting sync polling for ${playlistType} (${virtualPlaylistId})`);
 
+    // Phase 5: Subscribe via WebSocket
+    if (socketConnected) {
+        socket.emit('sync:subscribe', { playlist_ids: [virtualPlaylistId] });
+        _syncProgressCallbacks[virtualPlaylistId] = (data) => {
+            const prefix = playlistType.replace(/_/g, '-');
+            const progress = data.progress || {};
+            const total = progress.total_tracks || 0;
+            const matched = progress.matched_tracks || 0;
+            const failed = progress.failed_tracks || 0;
+            const processed = matched + failed;
+            const pending = total - processed;
+            const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+            const el = (id) => document.getElementById(id);
+            if (el(`${prefix}-sync-completed`)) el(`${prefix}-sync-completed`).textContent = matched;
+            if (el(`${prefix}-sync-pending`)) el(`${prefix}-sync-pending`).textContent = pending;
+            if (el(`${prefix}-sync-failed`)) el(`${prefix}-sync-failed`).textContent = failed;
+            if (el(`${prefix}-sync-percentage`)) el(`${prefix}-sync-percentage`).textContent = pct;
+            if (data.status === 'finished') {
+                if (discoverSyncPollers[playlistType]) { clearInterval(discoverSyncPollers[playlistType]); delete discoverSyncPollers[playlistType]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [virtualPlaylistId] });
+                delete _syncProgressCallbacks[virtualPlaylistId];
+                const buttonId = playlistType.replace(/_/g, '-') + '-sync-btn';
+                const syncButton = el(buttonId);
+                if (syncButton) { syncButton.disabled = false; syncButton.style.opacity = '1'; syncButton.style.cursor = 'pointer'; }
+                const playlistNames = {
+                    'release_radar': 'Fresh Tape', 'discovery_weekly': 'The Archives',
+                    'seasonal_playlist': 'Seasonal Mix', 'popular_picks': 'Popular Picks',
+                    'hidden_gems': 'Hidden Gems', 'discovery_shuffle': 'Discovery Shuffle',
+                    'familiar_favorites': 'Familiar Favorites', 'build_playlist': 'Custom Playlist'
+                };
+                showToast(`${playlistNames[playlistType] || playlistType} sync complete!`, 'success');
+                setTimeout(() => { const sd = el(`${prefix}-sync-status`); if (sd) sd.style.display = 'none'; }, 3000);
+            }
+        };
+    }
+
     // Poll every 500ms for progress updates
     discoverSyncPollers[playlistType] = setInterval(async () => {
+        if (socketConnected) return; // Phase 5: WS handles updates
         try {
             const response = await fetch(`/api/sync/status/${virtualPlaylistId}`);
             if (!response.ok) {
@@ -37495,11 +38322,35 @@ function monitorDiscoverDownload(playlistId) {
     let notFoundCount = 0;
     const maxNotFoundAttempts = 5; // Give sync 10 seconds to start (5 checks * 2 seconds)
 
+    // Phase 5: Subscribe via WebSocket for sync status updates
+    if (socketConnected) {
+        socket.emit('sync:subscribe', { playlist_ids: [playlistId] });
+        _syncProgressCallbacks[playlistId] = (data) => {
+            if (!discoverDownloads[playlistId]) return;
+            if (data.status === 'complete' || data.status === 'finished') {
+                discoverDownloads[playlistId].status = 'completed';
+                updateDiscoverDownloadBar();
+                updateDashboardDownloads();
+                socket.emit('sync:unsubscribe', { playlist_ids: [playlistId] });
+                delete _syncProgressCallbacks[playlistId];
+                setTimeout(() => {
+                    if (discoverDownloads[playlistId] && discoverDownloads[playlistId].status === 'completed') {
+                        removeDiscoverDownload(playlistId);
+                    }
+                }, 30000);
+            }
+        };
+    }
+
     const checkInterval = setInterval(async () => {
         try {
             // Check if download still exists
             if (!discoverDownloads[playlistId]) {
                 clearInterval(checkInterval);
+                if (_syncProgressCallbacks[playlistId]) {
+                    if (socketConnected) socket.emit('sync:unsubscribe', { playlist_ids: [playlistId] });
+                    delete _syncProgressCallbacks[playlistId];
+                }
                 return;
             }
 
@@ -37526,6 +38377,7 @@ function monitorDiscoverDownload(playlistId) {
             }
 
             // Check sync status API (for sync-based downloads)
+            if (socketConnected) return; // Phase 5: WS handles sync status
             const response = await fetch(`/api/sync/status/${playlistId}`);
             if (response.ok) {
                 const data = await response.json();
@@ -37809,6 +38661,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
                 if (process) {
                     process.status = 'running';
                     process.batchId = batchId;
+                    subscribeToDownloadBatch(batchId);
                     const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
                     const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
                     if (beginBtn) beginBtn.style.display = 'none';
@@ -37873,6 +38726,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
             if (process) {
                 process.status = 'running';
                 process.batchId = batchId;
+                subscribeToDownloadBatch(batchId);
                 const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
                 const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
                 if (beginBtn) beginBtn.style.display = 'none';
@@ -37948,6 +38802,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
                 if (process) {
                     process.status = 'running';
                     process.batchId = batchId;
+                    subscribeToDownloadBatch(batchId);
                     const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
                     const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
                     if (beginBtn) beginBtn.style.display = 'none';
@@ -38017,6 +38872,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
         if (process) {
             process.status = 'running';
             process.batchId = batchId;
+            subscribeToDownloadBatch(batchId);
 
             // Update button states
             const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
@@ -38181,91 +39037,83 @@ if (document.readyState === 'loading') {
  * Poll MusicBrainz status every 2 seconds and update UI
  */
 async function updateMusicBrainzStatus() {
+    if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/musicbrainz/status');
-        if (!response.ok) {
-            console.warn('MusicBrainz status endpoint unavailable');
-            return;
-        }
-
+        if (!response.ok) { console.warn('MusicBrainz status endpoint unavailable'); return; }
         const data = await response.json();
-        const button = document.getElementById('musicbrainz-button');
-        if (!button) return;
-
-        // Update button state classes
-        button.classList.remove('active', 'paused', 'complete');
-        if (data.idle) {
-            button.classList.add('complete');
-        } else if (data.running && !data.paused) {
-            button.classList.add('active');
-        } else if (data.paused) {
-            button.classList.add('paused');
-        }
-
-        // Update tooltip content
-        const tooltipStatus = document.getElementById('mb-tooltip-status');
-        const tooltipCurrent = document.getElementById('mb-tooltip-current');
-        const tooltipProgress = document.getElementById('mb-tooltip-progress');
-
-        if (tooltipStatus) {
-            if (data.idle) {
-                tooltipStatus.textContent = 'Complete';
-            } else if (data.running && !data.paused) {
-                tooltipStatus.textContent = 'Running';
-            } else if (data.paused) {
-                tooltipStatus.textContent = 'Paused';
-            } else {
-                tooltipStatus.textContent = 'Idle';
-            }
-        }
-
-        if (tooltipCurrent) {
-            if (data.idle) {
-                tooltipCurrent.textContent = 'All items processed';
-            } else if (data.current_item && data.current_item.name) {
-                const type = data.current_item.type || 'item';
-                const name = data.current_item.name;
-                tooltipCurrent.textContent = `${type.charAt(0).toUpperCase() + type.slice(1)}: "${name}"`;
-            } else {
-                tooltipCurrent.textContent = 'No active matches';
-            }
-        }
-
-        if (tooltipProgress && data.progress) {
-            const artists = data.progress.artists || {};
-            const albums = data.progress.albums || {};
-            const tracks = data.progress.tracks || {};
-
-            // Determine which phase we're in by checking:
-            // 1. Current item type (if available)
-            // 2. Which entity type still has pending work
-            const currentType = data.current_item?.type;
-            let progressText = '';
-
-            // Check if each phase is complete (all items have been attempted)
-            const artistsComplete = artists.matched >= artists.total;
-            const albumsComplete = albums.matched >= albums.total;
-
-            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
-                // Show artists if not complete OR if explicitly processing an artist
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total} (${artists.percent || 0}%)`;
-            } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
-                // Show albums if artists done and albums not done
-                progressText = `Albums: ${albums.matched || 0} / ${albums.total} (${albums.percent || 0}%)`;
-            } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
-                // Show tracks if both artists and albums done
-                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total} (${tracks.percent || 0}%)`;
-            } else {
-                // Fallback to artists
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total} (${artists.percent || 0}%)`;
-            }
-
-            tooltipProgress.textContent = progressText;
-        }
-
+        updateMusicBrainzStatusFromData(data);
     } catch (error) {
         console.error('Error updating MusicBrainz status:', error);
+    }
+}
+
+function updateMusicBrainzStatusFromData(data) {
+    const button = document.getElementById('musicbrainz-button');
+    if (!button) return;
+
+    // Update button state classes
+    button.classList.remove('active', 'paused', 'complete');
+    if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    } else if (data.paused) {
+        button.classList.add('paused');
+    }
+
+    // Update tooltip content
+    const tooltipStatus = document.getElementById('mb-tooltip-status');
+    const tooltipCurrent = document.getElementById('mb-tooltip-current');
+    const tooltipProgress = document.getElementById('mb-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (data.idle) {
+            tooltipStatus.textContent = 'Complete';
+        } else if (data.running && !data.paused) {
+            tooltipStatus.textContent = 'Running';
+        } else if (data.paused) {
+            tooltipStatus.textContent = 'Paused';
+        } else {
+            tooltipStatus.textContent = 'Idle';
+        }
+    }
+
+    if (tooltipCurrent) {
+        if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            const type = data.current_item.type || 'item';
+            const name = data.current_item.name;
+            tooltipCurrent.textContent = `${type.charAt(0).toUpperCase() + type.slice(1)}: "${name}"`;
+        } else {
+            tooltipCurrent.textContent = 'No active matches';
+        }
+    }
+
+    if (tooltipProgress && data.progress) {
+        const artists = data.progress.artists || {};
+        const albums = data.progress.albums || {};
+        const tracks = data.progress.tracks || {};
+
+        const currentType = data.current_item?.type;
+        let progressText = '';
+
+        const artistsComplete = artists.matched >= artists.total;
+        const albumsComplete = albums.matched >= albums.total;
+
+        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total} (${artists.percent || 0}%)`;
+        } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
+            progressText = `Albums: ${albums.matched || 0} / ${albums.total} (${albums.percent || 0}%)`;
+        } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
+            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total} (${tracks.percent || 0}%)`;
+        } else {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total} (${artists.percent || 0}%)`;
+        }
+
+        tooltipProgress.textContent = progressText;
     }
 }
 
@@ -38327,83 +39175,76 @@ if (document.readyState === 'loading') {
  * Poll AudioDB status every 2 seconds and update UI
  */
 async function updateAudioDBStatus() {
+    if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/audiodb/status');
-        if (!response.ok) {
-            console.warn('AudioDB status endpoint unavailable');
-            return;
-        }
-
+        if (!response.ok) { console.warn('AudioDB status endpoint unavailable'); return; }
         const data = await response.json();
-        const button = document.getElementById('audiodb-button');
-        if (!button) return;
-
-        // Update button state classes
-        button.classList.remove('active', 'paused', 'complete');
-        if (data.idle) {
-            button.classList.add('complete');
-        } else if (data.running && !data.paused) {
-            button.classList.add('active');
-        } else if (data.paused) {
-            button.classList.add('paused');
-        }
-
-        // Update tooltip content
-        const tooltipStatus = document.getElementById('audiodb-tooltip-status');
-        const tooltipCurrent = document.getElementById('audiodb-tooltip-current');
-        const tooltipProgress = document.getElementById('audiodb-tooltip-progress');
-
-        if (tooltipStatus) {
-            if (data.idle) {
-                tooltipStatus.textContent = 'Complete';
-            } else if (data.running && !data.paused) {
-                tooltipStatus.textContent = 'Running';
-            } else if (data.paused) {
-                tooltipStatus.textContent = 'Paused';
-            } else {
-                tooltipStatus.textContent = 'Idle';
-            }
-        }
-
-        if (tooltipCurrent) {
-            if (data.idle) {
-                tooltipCurrent.textContent = 'All items processed';
-            } else if (data.current_item && data.current_item.name) {
-                const type = data.current_item.type || 'item';
-                const name = data.current_item.name;
-                tooltipCurrent.textContent = `${type.charAt(0).toUpperCase() + type.slice(1)}: "${name}"`;
-            } else {
-                tooltipCurrent.textContent = 'No active matches';
-            }
-        }
-
-        if (tooltipProgress && data.progress) {
-            const artists = data.progress.artists || {};
-            const albums = data.progress.albums || {};
-            const tracks = data.progress.tracks || {};
-
-            const currentType = data.current_item?.type;
-            let progressText = '';
-
-            const artistsComplete = artists.matched >= artists.total;
-            const albumsComplete = albums.matched >= albums.total;
-
-            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-            } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
-                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-            } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
-                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-            } else {
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-            }
-
-            tooltipProgress.textContent = progressText;
-        }
-
+        updateAudioDBStatusFromData(data);
     } catch (error) {
         console.error('Error updating AudioDB status:', error);
+    }
+}
+
+function updateAudioDBStatusFromData(data) {
+    const button = document.getElementById('audiodb-button');
+    if (!button) return;
+
+    button.classList.remove('active', 'paused', 'complete');
+    if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    } else if (data.paused) {
+        button.classList.add('paused');
+    }
+
+    const tooltipStatus = document.getElementById('audiodb-tooltip-status');
+    const tooltipCurrent = document.getElementById('audiodb-tooltip-current');
+    const tooltipProgress = document.getElementById('audiodb-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
+        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else { tooltipStatus.textContent = 'Idle'; }
+    }
+
+    if (tooltipCurrent) {
+        if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            const type = data.current_item.type || 'item';
+            const name = data.current_item.name;
+            tooltipCurrent.textContent = `${type.charAt(0).toUpperCase() + type.slice(1)}: "${name}"`;
+        } else {
+            tooltipCurrent.textContent = 'No active matches';
+        }
+    }
+
+    if (tooltipProgress && data.progress) {
+        const artists = data.progress.artists || {};
+        const albums = data.progress.albums || {};
+        const tracks = data.progress.tracks || {};
+
+        const currentType = data.current_item?.type;
+        let progressText = '';
+
+        const artistsComplete = artists.matched >= artists.total;
+        const albumsComplete = albums.matched >= albums.total;
+
+        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
+            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+        } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
+            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+        } else {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        }
+
+        tooltipProgress.textContent = progressText;
     }
 }
 
@@ -38460,79 +39301,72 @@ if (document.readyState === 'loading') {
 // ===================================================================
 
 async function updateDeezerStatus() {
+    if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/deezer/status');
-        if (!response.ok) {
-            console.warn('Deezer status endpoint unavailable');
-            return;
-        }
-
+        if (!response.ok) { console.warn('Deezer status endpoint unavailable'); return; }
         const data = await response.json();
-        const button = document.getElementById('deezer-button');
-        if (!button) return;
-
-        // Update button state classes
-        button.classList.remove('active', 'paused', 'complete');
-        if (data.idle) {
-            button.classList.add('complete');
-        } else if (data.running && !data.paused) {
-            button.classList.add('active');
-        } else if (data.paused) {
-            button.classList.add('paused');
-        }
-
-        // Update tooltip content
-        const tooltipStatus = document.getElementById('deezer-tooltip-status');
-        const tooltipCurrent = document.getElementById('deezer-tooltip-current');
-        const tooltipProgress = document.getElementById('deezer-tooltip-progress');
-
-        if (tooltipStatus) {
-            if (data.idle) {
-                tooltipStatus.textContent = 'Complete';
-            } else if (data.running && !data.paused) {
-                tooltipStatus.textContent = 'Running';
-            } else if (data.paused) {
-                tooltipStatus.textContent = 'Paused';
-            } else {
-                tooltipStatus.textContent = 'Idle';
-            }
-        }
-
-        if (tooltipCurrent) {
-            if (data.idle) {
-                tooltipCurrent.textContent = 'All items processed';
-            } else if (data.current_item && data.current_item.name) {
-                tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
-            }
-        }
-
-        if (data.progress && tooltipProgress) {
-            const artists = data.progress.artists || {};
-            const albums = data.progress.albums || {};
-            const tracks = data.progress.tracks || {};
-
-            const currentType = data.current_item?.type;
-            let progressText = '';
-
-            const artistsComplete = artists.matched >= artists.total;
-            const albumsComplete = albums.matched >= albums.total;
-
-            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-            } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
-                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-            } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
-                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-            } else {
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-            }
-
-            tooltipProgress.textContent = progressText;
-        }
-
+        updateDeezerStatusFromData(data);
     } catch (error) {
         console.error('Error updating Deezer status:', error);
+    }
+}
+
+function updateDeezerStatusFromData(data) {
+    const button = document.getElementById('deezer-button');
+    if (!button) return;
+
+    button.classList.remove('active', 'paused', 'complete');
+    if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    } else if (data.paused) {
+        button.classList.add('paused');
+    }
+
+    const tooltipStatus = document.getElementById('deezer-tooltip-status');
+    const tooltipCurrent = document.getElementById('deezer-tooltip-current');
+    const tooltipProgress = document.getElementById('deezer-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
+        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else { tooltipStatus.textContent = 'Idle'; }
+    }
+
+    if (tooltipCurrent) {
+        if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        }
+    }
+
+    if (data.progress && tooltipProgress) {
+        const artists = data.progress.artists || {};
+        const albums = data.progress.albums || {};
+        const tracks = data.progress.tracks || {};
+
+        const currentType = data.current_item?.type;
+        let progressText = '';
+
+        const artistsComplete = artists.matched >= artists.total;
+        const albumsComplete = albums.matched >= albums.total;
+
+        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
+            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+        } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
+            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+        } else {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        }
+
+        tooltipProgress.textContent = progressText;
     }
 }
 
@@ -38586,96 +39420,87 @@ if (document.readyState === 'loading') {
 // ===================================================================
 
 async function updateSpotifyEnrichmentStatus() {
+    if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/spotify-enrichment/status');
-        if (!response.ok) {
-            console.warn('Spotify enrichment status endpoint unavailable');
-            return;
-        }
-
+        if (!response.ok) { console.warn('Spotify enrichment status endpoint unavailable'); return; }
         const data = await response.json();
-        const button = document.getElementById('spotify-enrich-button');
-        if (!button) return;
-
-        const notAuthenticated = data.authenticated === false;
-
-        // Update button state classes
-        button.classList.remove('active', 'paused', 'complete', 'no-auth');
-        if (notAuthenticated) {
-            button.classList.add('no-auth');
-        } else if (data.idle) {
-            button.classList.add('complete');
-        } else if (data.running && !data.paused) {
-            button.classList.add('active');
-        } else if (data.paused) {
-            button.classList.add('paused');
-        }
-
-        // Update tooltip content
-        const tooltipStatus = document.getElementById('spotify-enrich-tooltip-status');
-        const tooltipCurrent = document.getElementById('spotify-enrich-tooltip-current');
-        const tooltipProgress = document.getElementById('spotify-enrich-tooltip-progress');
-
-        if (tooltipStatus) {
-            if (notAuthenticated) {
-                tooltipStatus.textContent = 'Not Authenticated';
-            } else if (data.idle) {
-                tooltipStatus.textContent = 'Complete';
-            } else if (data.running && !data.paused) {
-                tooltipStatus.textContent = 'Running';
-            } else if (data.paused) {
-                tooltipStatus.textContent = 'Paused';
-            } else {
-                tooltipStatus.textContent = 'Idle';
-            }
-        }
-
-        if (tooltipCurrent) {
-            if (notAuthenticated) {
-                tooltipCurrent.textContent = 'Connect Spotify in Settings to enrich';
-            } else if (data.idle) {
-                tooltipCurrent.textContent = 'All items processed';
-            } else if (data.current_item && data.current_item.name) {
-                tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
-            }
-        }
-
-        if (data.progress && tooltipProgress) {
-            if (notAuthenticated) {
-                tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
-            } else {
-                const artists = data.progress.artists || {};
-                const albums = data.progress.albums || {};
-                const tracks = data.progress.tracks || {};
-
-                const currentType = data.current_item?.type || '';
-                let progressText = '';
-
-                const artistsComplete = artists.matched >= artists.total;
-                const albumsComplete = albums.matched >= albums.total;
-
-                // Prioritize currentType over completion-based inference
-                if (currentType === 'artist') {
-                    progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-                } else if (currentType.includes('album')) {
-                    progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-                } else if (currentType.includes('track')) {
-                    progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-                } else if (!artistsComplete) {
-                    progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-                } else if (!albumsComplete) {
-                    progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-                } else {
-                    progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-                }
-
-                tooltipProgress.textContent = progressText;
-            }
-        }
-
+        updateSpotifyEnrichmentStatusFromData(data);
     } catch (error) {
         console.error('Error updating Spotify enrichment status:', error);
+    }
+}
+
+function updateSpotifyEnrichmentStatusFromData(data) {
+    const button = document.getElementById('spotify-enrich-button');
+    if (!button) return;
+
+    const notAuthenticated = data.authenticated === false;
+
+    button.classList.remove('active', 'paused', 'complete', 'no-auth');
+    if (notAuthenticated) {
+        button.classList.add('no-auth');
+    } else if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    } else if (data.paused) {
+        button.classList.add('paused');
+    }
+
+    const tooltipStatus = document.getElementById('spotify-enrich-tooltip-status');
+    const tooltipCurrent = document.getElementById('spotify-enrich-tooltip-current');
+    const tooltipProgress = document.getElementById('spotify-enrich-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
+        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
+        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else { tooltipStatus.textContent = 'Idle'; }
+    }
+
+    if (tooltipCurrent) {
+        if (notAuthenticated) {
+            tooltipCurrent.textContent = 'Connect Spotify in Settings to enrich';
+        } else if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        }
+    }
+
+    if (data.progress && tooltipProgress) {
+        if (notAuthenticated) {
+            tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
+        } else {
+            const artists = data.progress.artists || {};
+            const albums = data.progress.albums || {};
+            const tracks = data.progress.tracks || {};
+
+            const currentType = data.current_item?.type || '';
+            let progressText = '';
+
+            const artistsComplete = artists.matched >= artists.total;
+            const albumsComplete = albums.matched >= albums.total;
+
+            if (currentType === 'artist') {
+                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+            } else if (currentType.includes('album')) {
+                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+            } else if (currentType.includes('track')) {
+                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+            } else if (!artistsComplete) {
+                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+            } else if (!albumsComplete) {
+                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+            } else {
+                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+            }
+
+            tooltipProgress.textContent = progressText;
+        }
     }
 }
 
@@ -38725,84 +39550,76 @@ if (document.readyState === 'loading') {
 // ===================================================================
 
 async function updateiTunesEnrichmentStatus() {
+    if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/itunes-enrichment/status');
-        if (!response.ok) {
-            console.warn('iTunes enrichment status endpoint unavailable');
-            return;
-        }
-
+        if (!response.ok) { console.warn('iTunes enrichment status endpoint unavailable'); return; }
         const data = await response.json();
-        const button = document.getElementById('itunes-enrich-button');
-        if (!button) return;
-
-        // Update button state classes
-        button.classList.remove('active', 'paused', 'complete');
-        if (data.idle) {
-            button.classList.add('complete');
-        } else if (data.running && !data.paused) {
-            button.classList.add('active');
-        } else if (data.paused) {
-            button.classList.add('paused');
-        }
-
-        // Update tooltip content
-        const tooltipStatus = document.getElementById('itunes-enrich-tooltip-status');
-        const tooltipCurrent = document.getElementById('itunes-enrich-tooltip-current');
-        const tooltipProgress = document.getElementById('itunes-enrich-tooltip-progress');
-
-        if (tooltipStatus) {
-            if (data.idle) {
-                tooltipStatus.textContent = 'Complete';
-            } else if (data.running && !data.paused) {
-                tooltipStatus.textContent = 'Running';
-            } else if (data.paused) {
-                tooltipStatus.textContent = 'Paused';
-            } else {
-                tooltipStatus.textContent = 'Idle';
-            }
-        }
-
-        if (tooltipCurrent) {
-            if (data.idle) {
-                tooltipCurrent.textContent = 'All items processed';
-            } else if (data.current_item && data.current_item.name) {
-                tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
-            }
-        }
-
-        if (data.progress && tooltipProgress) {
-            const artists = data.progress.artists || {};
-            const albums = data.progress.albums || {};
-            const tracks = data.progress.tracks || {};
-
-            const currentType = data.current_item?.type || '';
-            let progressText = '';
-
-            const artistsComplete = artists.matched >= artists.total;
-            const albumsComplete = albums.matched >= albums.total;
-
-            // Prioritize currentType over completion-based inference
-            if (currentType === 'artist') {
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-            } else if (currentType.includes('album')) {
-                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-            } else if (currentType.includes('track')) {
-                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-            } else if (!artistsComplete) {
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-            } else if (!albumsComplete) {
-                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-            } else {
-                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-            }
-
-            tooltipProgress.textContent = progressText;
-        }
-
+        updateiTunesEnrichmentStatusFromData(data);
     } catch (error) {
         console.error('Error updating iTunes enrichment status:', error);
+    }
+}
+
+function updateiTunesEnrichmentStatusFromData(data) {
+    const button = document.getElementById('itunes-enrich-button');
+    if (!button) return;
+
+    button.classList.remove('active', 'paused', 'complete');
+    if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    } else if (data.paused) {
+        button.classList.add('paused');
+    }
+
+    const tooltipStatus = document.getElementById('itunes-enrich-tooltip-status');
+    const tooltipCurrent = document.getElementById('itunes-enrich-tooltip-current');
+    const tooltipProgress = document.getElementById('itunes-enrich-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
+        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else { tooltipStatus.textContent = 'Idle'; }
+    }
+
+    if (tooltipCurrent) {
+        if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        }
+    }
+
+    if (data.progress && tooltipProgress) {
+        const artists = data.progress.artists || {};
+        const albums = data.progress.albums || {};
+        const tracks = data.progress.tracks || {};
+
+        const currentType = data.current_item?.type || '';
+        let progressText = '';
+
+        const artistsComplete = artists.matched >= artists.total;
+        const albumsComplete = albums.matched >= albums.total;
+
+        if (currentType === 'artist') {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        } else if (currentType.includes('album')) {
+            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+        } else if (currentType.includes('track')) {
+            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+        } else if (!artistsComplete) {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        } else if (!albumsComplete) {
+            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+        } else {
+            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+        }
+
+        tooltipProgress.textContent = progressText;
     }
 }
 
@@ -38852,37 +39669,41 @@ if (document.readyState === 'loading') {
 // ===================================================================
 
 async function updateHydrabaseStatus() {
+    if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/hydrabase-worker/status');
         if (!response.ok) return;
         const data = await response.json();
-        const button = document.getElementById('hydrabase-button');
-        if (!button) return;
-
-        button.classList.remove('active', 'paused');
-        if (data.running && !data.paused) {
-            button.classList.add('active');
-        } else if (data.paused) {
-            button.classList.add('paused');
-        }
-
-        // Update tooltip
-        const statusEl = document.getElementById('hydrabase-tooltip-status');
-        if (statusEl) {
-            if (data.paused) {
-                statusEl.textContent = 'Paused';
-                statusEl.style.color = '#ffc107';
-            } else if (data.running) {
-                statusEl.textContent = 'Active';
-                statusEl.style.color = '#ffffff';
-            } else {
-                statusEl.textContent = 'Stopped';
-                statusEl.style.color = '#ff5252';
-            }
-        }
+        updateHydrabaseStatusFromData(data);
     } catch (error) {
         // Silently ignore — worker may not be available
+    }
+}
+
+function updateHydrabaseStatusFromData(data) {
+    const button = document.getElementById('hydrabase-button');
+    if (!button) return;
+
+    button.classList.remove('active', 'paused');
+    if (data.running && !data.paused) {
+        button.classList.add('active');
+    } else if (data.paused) {
+        button.classList.add('paused');
+    }
+
+    const statusEl = document.getElementById('hydrabase-tooltip-status');
+    if (statusEl) {
+        if (data.paused) {
+            statusEl.textContent = 'Paused';
+            statusEl.style.color = '#ffc107';
+        } else if (data.running) {
+            statusEl.textContent = 'Active';
+            statusEl.style.color = '#ffffff';
+        } else {
+            statusEl.textContent = 'Stopped';
+            statusEl.style.color = '#ff5252';
+        }
     }
 }
 
@@ -38923,64 +39744,57 @@ if (document.readyState === 'loading') {
 // ===================================================================
 
 async function updateRepairStatus() {
+    if (socketConnected) return; // WebSocket handles this
     if (document.hidden) return; // Skip polling when tab is not visible
     try {
         const response = await fetch('/api/repair/status');
-        if (!response.ok) {
-            console.warn('Repair status endpoint unavailable');
-            return;
-        }
-
+        if (!response.ok) { console.warn('Repair status endpoint unavailable'); return; }
         const data = await response.json();
-        const button = document.getElementById('repair-button');
-        if (!button) return;
-
-        // Update button state classes
-        button.classList.remove('active', 'paused', 'complete');
-        if (data.idle) {
-            button.classList.add('complete');
-        } else if (data.running && !data.paused) {
-            button.classList.add('active');
-        } else if (data.paused) {
-            button.classList.add('paused');
-        }
-
-        // Update tooltip content
-        const tooltipStatus = document.getElementById('repair-tooltip-status');
-        const tooltipCurrent = document.getElementById('repair-tooltip-current');
-        const tooltipProgress = document.getElementById('repair-tooltip-progress');
-
-        if (tooltipStatus) {
-            if (data.idle) {
-                tooltipStatus.textContent = 'Complete';
-            } else if (data.running && !data.paused) {
-                tooltipStatus.textContent = 'Running';
-            } else if (data.paused) {
-                tooltipStatus.textContent = 'Paused';
-            } else {
-                tooltipStatus.textContent = 'Idle';
-            }
-        }
-
-        if (tooltipCurrent) {
-            if (data.idle) {
-                tooltipCurrent.textContent = 'All items processed';
-            } else if (data.current_item && data.current_item.name) {
-                const type = data.current_item.type || 'item';
-                const name = data.current_item.name;
-                tooltipCurrent.textContent = `${type.charAt(0).toUpperCase() + type.slice(1)}: "${name}"`;
-            } else {
-                tooltipCurrent.textContent = 'No active repairs';
-            }
-        }
-
-        if (tooltipProgress && data.progress) {
-            const tracks = data.progress.tracks || {};
-            tooltipProgress.textContent = `Checked: ${tracks.checked || 0} / ${tracks.total || 0} (${tracks.percent || 0}%) | Repaired: ${tracks.repaired || 0}`;
-        }
-
+        updateRepairStatusFromData(data);
     } catch (error) {
         console.error('Error updating repair status:', error);
+    }
+}
+
+function updateRepairStatusFromData(data) {
+    const button = document.getElementById('repair-button');
+    if (!button) return;
+
+    button.classList.remove('active', 'paused', 'complete');
+    if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    } else if (data.paused) {
+        button.classList.add('paused');
+    }
+
+    const tooltipStatus = document.getElementById('repair-tooltip-status');
+    const tooltipCurrent = document.getElementById('repair-tooltip-current');
+    const tooltipProgress = document.getElementById('repair-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
+        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else { tooltipStatus.textContent = 'Idle'; }
+    }
+
+    if (tooltipCurrent) {
+        if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            const type = data.current_item.type || 'item';
+            const name = data.current_item.name;
+            tooltipCurrent.textContent = `${type.charAt(0).toUpperCase() + type.slice(1)}: "${name}"`;
+        } else {
+            tooltipCurrent.textContent = 'No active repairs';
+        }
+    }
+
+    if (tooltipProgress && data.progress) {
+        const tracks = data.progress.tracks || {};
+        tooltipProgress.textContent = `Checked: ${tracks.checked || 0} / ${tracks.total || 0} (${tracks.percent || 0}%) | Repaired: ${tracks.repaired || 0}`;
     }
 }
 
