@@ -47,3 +47,6 @@ websocket-client>=1.7.0
 
 # Tidal download support
 tidalapi>=0.7.6
+
+# WebSocket server for real-time UI updates
+flask-socketio>=5.3.0
