@@ -1155,6 +1155,78 @@ Get discovery pool metadata (when it was last populated, track count).
 }
 ```
 
+#### `GET /api/v1/discover/bubbles`
+
+List all bubble snapshots for the current profile. Returns snapshots for three types: `artist_bubbles`, `search_bubbles`, `discover_downloads`. Each snapshot is `null` if it hasn't been created yet.
+
+```json
+{
+  "data": {
+    "snapshots": {
+      "artist_bubbles": {
+        "data": {
+          "bubbles": [
+            { "name": "Radiohead", "value": 45, "genre": "alternative rock" },
+            { "name": "Daft Punk", "value": 32, "genre": "electronic" },
+            { "name": "Portishead", "value": 18, "genre": "trip hop" }
+          ],
+          "total_artists": 3,
+          "generated_at": "2026-03-04T06:00:00"
+        },
+        "timestamp": "2026-03-04T06:00:00"
+      },
+      "search_bubbles": {
+        "data": {
+          "bubbles": [
+            { "query": "ambient electronic", "count": 12 },
+            { "query": "shoegaze", "count": 8 }
+          ],
+          "generated_at": "2026-03-03T14:00:00"
+        },
+        "timestamp": "2026-03-03T14:00:00"
+      },
+      "discover_downloads": null
+    }
+  }
+}
+```
+
+#### `GET /api/v1/discover/bubbles/<snapshot_type>`
+
+Get a specific bubble snapshot by type.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `snapshot_type` | path | `artist_bubbles`, `search_bubbles`, or `discover_downloads` |
+
+```json
+{
+  "data": {
+    "snapshot": {
+      "data": {
+        "bubbles": [
+          { "name": "Radiohead", "value": 45, "genre": "alternative rock" },
+          { "name": "Daft Punk", "value": 32, "genre": "electronic" },
+          { "name": "Portishead", "value": 18, "genre": "trip hop" }
+        ],
+        "total_artists": 3,
+        "generated_at": "2026-03-04T06:00:00"
+      },
+      "timestamp": "2026-03-04T06:00:00"
+    }
+  }
+}
+```
+
+**Bubble snapshot fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data` | object | Parsed snapshot data (structure varies by type — contains bubble arrays and metadata) |
+| `timestamp` | string | ISO 8601 timestamp when the snapshot was created/updated |
+
+> **Snapshot types:** `artist_bubbles` — artist listening weight visualization data. `search_bubbles` — search frequency visualization data. `discover_downloads` — discovery download activity visualization data. Returns `404` if the requested snapshot type doesn't exist for this profile.
+
 ---
 
 ### Playlists
@@ -1232,6 +1304,745 @@ Trigger playlist sync/download.
   ]
 }
 ```
+
+---
+
+### Profiles
+
+Manage user profiles. Profiles scope watchlist, wishlist, and discovery data.
+
+#### `GET /api/v1/profiles`
+
+List all profiles.
+
+```json
+{
+  "data": {
+    "profiles": [
+      {
+        "id": 1,
+        "name": "Admin",
+        "avatar_color": "#6366f1",
+        "avatar_url": null,
+        "is_admin": true,
+        "has_pin": false,
+        "created_at": "2026-01-15T10:00:00",
+        "updated_at": "2026-02-20T14:30:00"
+      },
+      {
+        "id": 2,
+        "name": "Family",
+        "avatar_color": "#10b981",
+        "avatar_url": "https://example.com/avatar.jpg",
+        "is_admin": false,
+        "has_pin": true,
+        "created_at": "2026-02-01T15:00:00",
+        "updated_at": "2026-03-01T09:45:00"
+      }
+    ]
+  }
+}
+```
+
+#### `GET /api/v1/profiles/<profile_id>`
+
+Get a single profile by ID.
+
+```json
+{
+  "data": {
+    "profile": {
+      "id": 2,
+      "name": "Family",
+      "avatar_color": "#10b981",
+      "avatar_url": "https://example.com/avatar.jpg",
+      "is_admin": false,
+      "has_pin": true,
+      "created_at": "2026-02-01T15:00:00",
+      "updated_at": "2026-03-01T09:45:00"
+    }
+  }
+}
+```
+
+**Profile fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | int | Profile ID (auto-increment) |
+| `name` | string | Display name (unique) |
+| `avatar_color` | string | Hex color for the default avatar circle (default `#6366f1`) |
+| `avatar_url` | string? | Custom avatar image URL |
+| `is_admin` | bool | Whether this profile has admin privileges |
+| `has_pin` | bool | Whether a PIN is set (the PIN hash itself is never exposed) |
+| `created_at` | string | ISO 8601 timestamp when profile was created |
+| `updated_at` | string | ISO 8601 timestamp of last profile update |
+
+> **Note:** The `pin_hash` column exists in the database but is never returned by the API. Only the computed `has_pin` boolean is exposed.
+
+#### `POST /api/v1/profiles`
+
+Create a new profile.
+
+**Request body:**
+
+```json
+{
+  "name": "Family",
+  "avatar_color": "#10b981",
+  "avatar_url": "https://example.com/avatar.jpg",
+  "is_admin": false,
+  "pin": "1234"
+}
+```
+
+All fields except `name` are optional. The `pin` field accepts a raw PIN string — it is hashed with PBKDF2-SHA256 before storage.
+
+**Response (201 Created):**
+
+```json
+{
+  "data": {
+    "profile": {
+      "id": 3,
+      "name": "Family",
+      "avatar_color": "#10b981",
+      "avatar_url": "https://example.com/avatar.jpg",
+      "is_admin": false,
+      "has_pin": true,
+      "created_at": "2026-03-04T12:00:00",
+      "updated_at": "2026-03-04T12:00:00"
+    }
+  }
+}
+```
+
+Returns `409 CONFLICT` if the profile name already exists.
+
+#### `PUT /api/v1/profiles/<profile_id>`
+
+Update a profile. Only include the fields you want to change.
+
+**Request body:**
+
+```json
+{
+  "name": "New Name",
+  "avatar_color": "#ef4444",
+  "pin": "5678"
+}
+```
+
+Set `"pin": ""` or `"pin": null` to remove a PIN.
+
+**Response:**
+
+```json
+{
+  "data": {
+    "profile": {
+      "id": 2,
+      "name": "New Name",
+      "avatar_color": "#ef4444",
+      "avatar_url": "https://example.com/avatar.jpg",
+      "is_admin": false,
+      "has_pin": true,
+      "created_at": "2026-02-01T15:00:00",
+      "updated_at": "2026-03-04T12:05:00"
+    }
+  }
+}
+```
+
+#### `DELETE /api/v1/profiles/<profile_id>`
+
+Delete a profile and all its per-profile data (watchlist, wishlist, discovery pool, bubble snapshots). Cannot delete profile 1 (admin) — returns `403 FORBIDDEN`.
+
+**Response:**
+
+```json
+{
+  "data": {
+    "message": "Profile 3 deleted."
+  }
+}
+```
+
+---
+
+### Retag Queue
+
+Browse and manage the retag queue — albums/tracks pending metadata corrections.
+
+#### `GET /api/v1/retag/groups`
+
+List all retag groups with track counts. Groups are ordered by artist name (ascending) then creation date (descending).
+
+```json
+{
+  "data": {
+    "groups": [
+      {
+        "id": 1,
+        "group_type": "album",
+        "artist_name": "Radiohead",
+        "album_name": "OK Computer",
+        "image_url": "https://i.scdn.co/image/ab67616d0000b273c8b444df094c596ea9da41f6",
+        "spotify_album_id": "6dVIqQ8qmQ5GBnJ9shOYGE",
+        "itunes_album_id": "1097862703",
+        "total_tracks": 12,
+        "release_date": "1997-06-16",
+        "created_at": "2026-03-04T10:00:00",
+        "track_count": 12
+      },
+      {
+        "id": 2,
+        "group_type": "album",
+        "artist_name": "Radiohead",
+        "album_name": "In Rainbows",
+        "image_url": "https://i.scdn.co/image/ab67616d0000b2737de1fcc2ebeab8b6e22a1b8a",
+        "spotify_album_id": "7eyQXxuf2nGj9d2367Gi5f",
+        "itunes_album_id": "1109731429",
+        "total_tracks": 10,
+        "release_date": "2007-10-10",
+        "created_at": "2026-03-04T10:05:00",
+        "track_count": 10
+      }
+    ]
+  }
+}
+```
+
+**Retag group fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | int | Group ID (auto-increment) |
+| `group_type` | string | Type of retag group (currently always `album`) |
+| `artist_name` | string | Artist name for this retag group |
+| `album_name` | string | Album name for this retag group |
+| `image_url` | string? | Album cover image URL |
+| `spotify_album_id` | string? | Spotify album ID for metadata lookup |
+| `itunes_album_id` | string? | iTunes/Apple Music album ID for metadata lookup |
+| `total_tracks` | int | Expected total tracks for the album |
+| `release_date` | string? | Album release date (YYYY-MM-DD) |
+| `created_at` | string | ISO 8601 timestamp when group was created |
+| `track_count` | int | Computed: number of tracks currently in this group |
+
+#### `GET /api/v1/retag/groups/<group_id>`
+
+Get a retag group with its full track list. Tracks are ordered by disc number then track number.
+
+```json
+{
+  "data": {
+    "group": {
+      "id": 1,
+      "group_type": "album",
+      "artist_name": "Radiohead",
+      "album_name": "OK Computer",
+      "image_url": "https://i.scdn.co/image/ab67616d0000b273c8b444df094c596ea9da41f6",
+      "spotify_album_id": "6dVIqQ8qmQ5GBnJ9shOYGE",
+      "itunes_album_id": "1097862703",
+      "total_tracks": 12,
+      "release_date": "1997-06-16",
+      "created_at": "2026-03-04T10:00:00",
+      "track_count": 12
+    },
+    "tracks": [
+      {
+        "id": 1,
+        "group_id": 1,
+        "track_number": 1,
+        "disc_number": 1,
+        "title": "Airbag",
+        "file_path": "/downloads/Radiohead/OK Computer/01 - Airbag.flac",
+        "file_format": "flac",
+        "spotify_track_id": "6LgJvl0Xdtc73RJ1mN1a7Z",
+        "itunes_track_id": null,
+        "created_at": "2026-03-04T10:00:00"
+      },
+      {
+        "id": 2,
+        "group_id": 1,
+        "track_number": 2,
+        "disc_number": 1,
+        "title": "Paranoid Android",
+        "file_path": "/downloads/Radiohead/OK Computer/02 - Paranoid Android.flac",
+        "file_format": "flac",
+        "spotify_track_id": "6LgJvl0Xdtc73RJ1mN1a7Z",
+        "itunes_track_id": "1097863062",
+        "created_at": "2026-03-04T10:00:00"
+      },
+      {
+        "id": 3,
+        "group_id": 1,
+        "track_number": 3,
+        "disc_number": 1,
+        "title": "Subterranean Homesick Alien",
+        "file_path": "/downloads/Radiohead/OK Computer/03 - Subterranean Homesick Alien.flac",
+        "file_format": "flac",
+        "spotify_track_id": "3sFhbVuZGMAsmFSIFGVPgS",
+        "itunes_track_id": null,
+        "created_at": "2026-03-04T10:00:00"
+      }
+    ]
+  }
+}
+```
+
+**Retag track fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | int | Track ID (auto-increment) |
+| `group_id` | int | Parent retag group ID (foreign key) |
+| `track_number` | int? | Track number on disc |
+| `disc_number` | int | Disc number (default 1) |
+| `title` | string | Track title |
+| `file_path` | string | Full file path to the downloaded audio file |
+| `file_format` | string? | Audio format (`flac`, `mp3`, `opus`, etc.) |
+| `spotify_track_id` | string? | Spotify track ID for metadata lookup |
+| `itunes_track_id` | string? | iTunes/Apple Music track ID for metadata lookup |
+| `created_at` | string | ISO 8601 timestamp when track was added to queue |
+
+#### `DELETE /api/v1/retag/groups/<group_id>`
+
+Delete a specific retag group and all its tracks (cascade delete).
+
+```json
+{
+  "data": {
+    "message": "Retag group 1 deleted."
+  }
+}
+```
+
+#### `DELETE /api/v1/retag/groups`
+
+Clear all retag groups and tracks from the queue.
+
+```json
+{
+  "data": {
+    "message": "Cleared 5 retag groups."
+  }
+}
+```
+
+#### `GET /api/v1/retag/stats`
+
+Get retag queue statistics.
+
+```json
+{
+  "data": {
+    "groups": 5,
+    "tracks": 47,
+    "artists": 3
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `groups` | int | Total number of retag groups in queue |
+| `tracks` | int | Total number of tracks across all groups |
+| `artists` | int | Number of distinct artists in the queue |
+
+---
+
+### ListenBrainz
+
+Browse cached ListenBrainz playlists and their tracks. Playlists are cached locally when SoulSync pulls recommendations from ListenBrainz.
+
+#### `GET /api/v1/listenbrainz/playlists`
+
+List cached ListenBrainz playlists with optional type filtering and pagination.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `type` | string | | Filter by playlist_type (e.g. `weekly-jams`, `weekly-exploration`) |
+| `page` | int | 1 | Page number |
+| `limit` | int | 50 | Items per page (max 200) |
+
+```json
+{
+  "data": {
+    "playlists": [
+      {
+        "id": 1,
+        "playlist_mbid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "title": "Weekly Jams for user123",
+        "creator": "listenbrainz",
+        "playlist_type": "weekly-jams",
+        "track_count": 50,
+        "annotation_data": {
+          "algorithm": "collaborative-filtering",
+          "source_patch": "weekly-jams"
+        },
+        "last_updated": "2026-03-03T06:00:00",
+        "cached_date": "2026-03-03T06:05:00"
+      },
+      {
+        "id": 2,
+        "playlist_mbid": "f9e8d7c6-b5a4-3210-fedc-ba9876543210",
+        "title": "Weekly Exploration for user123",
+        "creator": "listenbrainz",
+        "playlist_type": "weekly-exploration",
+        "track_count": 50,
+        "annotation_data": {
+          "algorithm": "collaborative-filtering",
+          "source_patch": "weekly-exploration"
+        },
+        "last_updated": "2026-03-03T06:00:00",
+        "cached_date": "2026-03-03T06:08:00"
+      }
+    ]
+  },
+  "pagination": { "page": 1, "limit": 50, "total": 8, "total_pages": 1, "has_next": false, "has_prev": false }
+}
+```
+
+**ListenBrainz playlist fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | int | Internal database ID |
+| `playlist_mbid` | string | MusicBrainz playlist MBID (unique) |
+| `title` | string | Playlist title as given by ListenBrainz |
+| `creator` | string? | Playlist creator (usually `listenbrainz`) |
+| `playlist_type` | string | Type: `weekly-jams`, `weekly-exploration`, etc. |
+| `track_count` | int | Number of tracks in the playlist |
+| `annotation_data` | object? | Parsed JSON annotation metadata from ListenBrainz |
+| `last_updated` | string | ISO 8601 timestamp of last update from ListenBrainz |
+| `cached_date` | string | ISO 8601 timestamp when SoulSync cached this playlist |
+
+#### `GET /api/v1/listenbrainz/playlists/<playlist_id>`
+
+Get a ListenBrainz playlist with its full track list. `playlist_id` can be the internal database ID (integer) or the MusicBrainz playlist MBID (UUID string). Tracks are returned in playlist order (by position).
+
+```json
+{
+  "data": {
+    "playlist": {
+      "id": 1,
+      "playlist_mbid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "title": "Weekly Jams for user123",
+      "creator": "listenbrainz",
+      "playlist_type": "weekly-jams",
+      "track_count": 50,
+      "annotation_data": {
+        "algorithm": "collaborative-filtering",
+        "source_patch": "weekly-jams"
+      },
+      "last_updated": "2026-03-03T06:00:00",
+      "cached_date": "2026-03-03T06:05:00"
+    },
+    "tracks": [
+      {
+        "id": 1,
+        "playlist_id": 1,
+        "position": 1,
+        "track_name": "Paranoid Android",
+        "artist_name": "Radiohead",
+        "album_name": "OK Computer",
+        "duration_ms": 383000,
+        "recording_mbid": "b3e2b7e0-a147-4b3c-8eab-fd90bfff7e74",
+        "release_mbid": "a1c35a51-d102-4ce7-b7b0-8a4f68385bb2",
+        "album_cover_url": "https://coverartarchive.org/release/a1c35a51-d102-4ce7-b7b0-8a4f68385bb2/front-250.jpg",
+        "additional_metadata": {
+          "artist_mbids": ["a74b1b7f-71a5-4011-9441-d0b5e4122711"],
+          "caa_id": 12345678901,
+          "caa_release_mbid": "a1c35a51-d102-4ce7-b7b0-8a4f68385bb2"
+        }
+      },
+      {
+        "id": 2,
+        "playlist_id": 1,
+        "position": 2,
+        "track_name": "All I Need",
+        "artist_name": "Radiohead",
+        "album_name": "In Rainbows",
+        "duration_ms": 226000,
+        "recording_mbid": "c7d9e0f1-2345-6789-abcd-ef0123456789",
+        "release_mbid": "d4e5f6a7-8901-2345-bcde-f67890123456",
+        "album_cover_url": "https://coverartarchive.org/release/d4e5f6a7-8901-2345-bcde-f67890123456/front-250.jpg",
+        "additional_metadata": {
+          "artist_mbids": ["a74b1b7f-71a5-4011-9441-d0b5e4122711"],
+          "caa_id": 23456789012,
+          "caa_release_mbid": "d4e5f6a7-8901-2345-bcde-f67890123456"
+        }
+      },
+      {
+        "id": 3,
+        "playlist_id": 1,
+        "position": 3,
+        "track_name": "Something About Us",
+        "artist_name": "Daft Punk",
+        "album_name": "Discovery",
+        "duration_ms": 232000,
+        "recording_mbid": "e8f9a0b1-c2d3-e4f5-6789-012345678901",
+        "release_mbid": "f0a1b2c3-d4e5-f6a7-8901-234567890123",
+        "album_cover_url": "https://coverartarchive.org/release/f0a1b2c3-d4e5-f6a7-8901-234567890123/front-250.jpg",
+        "additional_metadata": {
+          "artist_mbids": ["056e4f3e-d505-4dad-8ec1-d04f521cbb56"],
+          "caa_id": 34567890123,
+          "caa_release_mbid": "f0a1b2c3-d4e5-f6a7-8901-234567890123"
+        }
+      }
+    ]
+  }
+}
+```
+
+**ListenBrainz track fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | int | Internal track ID |
+| `playlist_id` | int | Parent playlist ID (foreign key) |
+| `position` | int | Position in the playlist (1-based) |
+| `track_name` | string | Track title |
+| `artist_name` | string | Artist name |
+| `album_name` | string | Album name |
+| `duration_ms` | int | Track duration in milliseconds |
+| `recording_mbid` | string? | MusicBrainz recording MBID |
+| `release_mbid` | string? | MusicBrainz release MBID |
+| `album_cover_url` | string? | Album cover art URL (usually from Cover Art Archive) |
+| `additional_metadata` | object? | Parsed JSON with extra MusicBrainz data (artist MBIDs, CAA info, etc.) |
+
+---
+
+### Cache
+
+Browse internal enrichment caches. Useful for debugging enrichment issues, understanding match quality, or auditing what metadata has been resolved.
+
+#### `GET /api/v1/cache/musicbrainz`
+
+List cached MusicBrainz lookups with optional filtering and pagination. Results ordered by `last_updated` descending.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `entity_type` | string | | Filter by type: `artist`, `album`, `track` |
+| `search` | string | | Filter by entity name (case-insensitive partial match) |
+| `page` | int | 1 | Page number |
+| `limit` | int | 50 | Items per page (max 200) |
+
+```json
+{
+  "data": {
+    "entries": [
+      {
+        "id": 42,
+        "entity_type": "artist",
+        "entity_name": "Radiohead",
+        "artist_name": null,
+        "musicbrainz_id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+        "spotify_id": "4Z8W4fKeB5YxbusRsdQVPb",
+        "itunes_id": "657515",
+        "metadata_json": {
+          "name": "Radiohead",
+          "type": "Group",
+          "country": "GB",
+          "disambiguation": "English rock band",
+          "begin_date": "1985",
+          "end_date": null,
+          "tags": ["alternative rock", "art rock", "experimental"]
+        },
+        "match_confidence": 95,
+        "last_updated": "2026-03-01T12:00:00"
+      },
+      {
+        "id": 88,
+        "entity_type": "album",
+        "entity_name": "OK Computer",
+        "artist_name": "Radiohead",
+        "musicbrainz_id": "b1f5a82e-5cfa-36f8-b084-4a93d7e7e608",
+        "spotify_id": "6dVIqQ8qmQ5GBnJ9shOYGE",
+        "itunes_id": "1097862703",
+        "metadata_json": {
+          "title": "OK Computer",
+          "date": "1997-06-16",
+          "country": "XE",
+          "status": "Official",
+          "packaging": "Jewel Case",
+          "barcode": "724385522925"
+        },
+        "match_confidence": 100,
+        "last_updated": "2026-02-28T08:30:00"
+      },
+      {
+        "id": 215,
+        "entity_type": "track",
+        "entity_name": "Paranoid Android",
+        "artist_name": "Radiohead",
+        "musicbrainz_id": "b3e2b7e0-a147-4b3c-8eab-fd90bfff7e74",
+        "spotify_id": "6LgJvl0Xdtc73RJ1mN1a7Z",
+        "itunes_id": "1097863062",
+        "metadata_json": {
+          "title": "Paranoid Android",
+          "length": 383000,
+          "isrcs": ["GBAYE9700074"]
+        },
+        "match_confidence": 98,
+        "last_updated": "2026-02-28T08:35:00"
+      }
+    ]
+  },
+  "pagination": { "page": 1, "limit": 50, "total": 1250, "total_pages": 25, "has_next": true, "has_prev": false }
+}
+```
+
+**MusicBrainz cache fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | int | Cache entry ID |
+| `entity_type` | string | Entity type: `artist`, `album`, or `track` |
+| `entity_name` | string | Name that was looked up |
+| `artist_name` | string? | Associated artist name (for album/track lookups) |
+| `musicbrainz_id` | string? | Resolved MusicBrainz MBID (`null` if no match) |
+| `spotify_id` | string? | Cross-referenced Spotify ID |
+| `itunes_id` | string? | Cross-referenced iTunes/Apple Music ID |
+| `metadata_json` | object? | Parsed JSON with full MusicBrainz metadata (tags, dates, ISRCs, etc.) |
+| `match_confidence` | int? | Match confidence score (0-100) |
+| `last_updated` | string | ISO 8601 timestamp of last cache update |
+
+> **Unique constraint:** `(entity_type, entity_name, artist_name)` — each entity is cached once per type+name combination.
+
+#### `GET /api/v1/cache/musicbrainz/stats`
+
+Get MusicBrainz cache statistics — total entries, matched vs unmatched, and breakdown by entity type.
+
+```json
+{
+  "data": {
+    "total": 1250,
+    "matched": 1100,
+    "unmatched": 150,
+    "by_type": {
+      "artist": 500,
+      "album": 450,
+      "track": 300
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total` | int | Total cache entries |
+| `matched` | int | Entries with a resolved `musicbrainz_id` |
+| `unmatched` | int | Entries where no MusicBrainz match was found |
+| `by_type` | object | Entry counts keyed by `entity_type` |
+
+#### `GET /api/v1/cache/discovery-matches`
+
+List cached discovery provider matches. These are stored when the discovery system resolves tracks from external providers. Results ordered by `last_used_at` descending.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `provider` | string | | Filter by provider (e.g. `spotify`, `itunes`) |
+| `search` | string | | Filter by title or artist (case-insensitive partial match on both) |
+| `page` | int | 1 | Page number |
+| `limit` | int | 50 | Items per page (max 200) |
+
+```json
+{
+  "data": {
+    "entries": [
+      {
+        "id": 100,
+        "normalized_title": "paranoid android",
+        "normalized_artist": "radiohead",
+        "provider": "spotify",
+        "match_confidence": 0.95,
+        "matched_data_json": {
+          "track_id": "6LgJvl0Xdtc73RJ1mN1a7Z",
+          "track_name": "Paranoid Android",
+          "artist_name": "Radiohead",
+          "album_name": "OK Computer",
+          "album_id": "6dVIqQ8qmQ5GBnJ9shOYGE",
+          "duration_ms": 383000,
+          "popularity": 72,
+          "preview_url": "https://p.scdn.co/mp3-preview/..."
+        },
+        "original_title": "Paranoid Android",
+        "original_artist": "Radiohead",
+        "created_at": "2026-02-15T10:00:00",
+        "last_used_at": "2026-03-04T09:00:00",
+        "use_count": 12
+      },
+      {
+        "id": 101,
+        "normalized_title": "something about us",
+        "normalized_artist": "daft punk",
+        "provider": "itunes",
+        "match_confidence": 0.92,
+        "matched_data_json": {
+          "track_id": "724633277",
+          "track_name": "Something About Us",
+          "artist_name": "Daft Punk",
+          "album_name": "Discovery",
+          "collection_id": "724633180",
+          "duration_ms": 232000,
+          "artwork_url": "https://is1-ssl.mzstatic.com/image/..."
+        },
+        "original_title": "Something About Us",
+        "original_artist": "Daft Punk",
+        "created_at": "2026-02-20T14:30:00",
+        "last_used_at": "2026-03-03T18:00:00",
+        "use_count": 5
+      }
+    ]
+  },
+  "pagination": { "page": 1, "limit": 50, "total": 3200, "total_pages": 64, "has_next": true, "has_prev": false }
+}
+```
+
+**Discovery match cache fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | int | Cache entry ID |
+| `normalized_title` | string | Lowercase normalized track title used for matching |
+| `normalized_artist` | string | Lowercase normalized artist name used for matching |
+| `provider` | string | Provider that was matched against (`spotify`, `itunes`) |
+| `match_confidence` | float | Match confidence score (0.0-1.0) |
+| `matched_data_json` | object? | Parsed JSON with full matched track data from the provider |
+| `original_title` | string? | Original (un-normalized) track title |
+| `original_artist` | string? | Original (un-normalized) artist name |
+| `created_at` | string | ISO 8601 timestamp when match was first cached |
+| `last_used_at` | string | ISO 8601 timestamp when match was last reused |
+| `use_count` | int | Number of times this cached match has been reused |
+
+> **Unique constraint:** `(normalized_title, normalized_artist, provider)` — each title+artist+provider combination is cached once.
+
+#### `GET /api/v1/cache/discovery-matches/stats`
+
+Get discovery match cache statistics — total entries, total reuses, average confidence, and breakdown by provider.
+
+```json
+{
+  "data": {
+    "total": 3200,
+    "total_uses": 15000,
+    "avg_confidence": 0.872,
+    "by_provider": {
+      "spotify": 2800,
+      "itunes": 400
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total` | int | Total cached match entries |
+| `total_uses` | int | Sum of all `use_count` values across entries |
+| `avg_confidence` | float? | Average match confidence (rounded to 3 decimals, `null` if empty) |
+| `by_provider` | object | Entry counts keyed by provider name |
 
 ---
 
@@ -1553,6 +2364,28 @@ curl -H "Authorization: Bearer sk_..." \
 | GET | `/discover/similar-artists` | Similar artists |
 | GET | `/discover/recent-releases` | Recent releases |
 | GET | `/discover/pool/metadata` | Pool metadata |
+| GET | `/discover/bubbles` | All bubble snapshots |
+| GET | `/discover/bubbles/<type>` | Specific bubble snapshot |
+| **Profiles** | | |
+| GET | `/profiles` | List all profiles |
+| GET | `/profiles/<id>` | Profile detail |
+| POST | `/profiles` | Create profile |
+| PUT | `/profiles/<id>` | Update profile |
+| DELETE | `/profiles/<id>` | Delete profile |
+| **Retag Queue** | | |
+| GET | `/retag/groups` | List retag groups |
+| GET | `/retag/groups/<id>` | Retag group detail + tracks |
+| DELETE | `/retag/groups/<id>` | Delete retag group |
+| DELETE | `/retag/groups` | Clear all retag groups |
+| GET | `/retag/stats` | Retag queue statistics |
+| **ListenBrainz** | | |
+| GET | `/listenbrainz/playlists` | List cached playlists |
+| GET | `/listenbrainz/playlists/<id>` | Playlist detail + tracks |
+| **Cache** | | |
+| GET | `/cache/musicbrainz` | Browse MusicBrainz cache |
+| GET | `/cache/musicbrainz/stats` | MusicBrainz cache statistics |
+| GET | `/cache/discovery-matches` | Browse discovery match cache |
+| GET | `/cache/discovery-matches/stats` | Discovery match cache statistics |
 | **Playlists** | | |
 | GET | `/playlists` | List playlists |
 | GET | `/playlists/<id>` | Playlist detail + tracks |
