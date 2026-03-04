@@ -25,8 +25,8 @@ class WishlistService:
             self._database = get_database(self.database_path)
         return self._database
     
-    def add_failed_track_from_modal(self, track_info: Dict[str, Any], source_type: str = "unknown", 
-                                  source_context: Dict[str, Any] = None) -> bool:
+    def add_failed_track_from_modal(self, track_info: Dict[str, Any], source_type: str = "unknown",
+                                  source_context: Dict[str, Any] = None, profile_id: int = 1) -> bool:
         """
         Add a failed track from a download modal to the wishlist.
         
@@ -74,7 +74,8 @@ class WishlistService:
                 spotify_track_data=spotify_track,
                 failure_reason=failure_reason,
                 source_type=source_type,
-                source_info=source_info
+                source_info=source_info,
+                profile_id=profile_id
             )
             
         except Exception as e:
@@ -82,30 +83,33 @@ class WishlistService:
             return False
     
     def add_spotify_track_to_wishlist(self, spotify_track_data: Dict[str, Any], failure_reason: str,
-                                    source_type: str = "manual", source_context: Dict[str, Any] = None) -> bool:
+                                    source_type: str = "manual", source_context: Dict[str, Any] = None,
+                                    profile_id: int = 1) -> bool:
         """
         Directly add a Spotify track to the wishlist.
-        
+
         Args:
             spotify_track_data: Full Spotify track data dictionary
             failure_reason: Reason for the failure
             source_type: Source type ('playlist', 'album', 'manual')
             source_context: Additional context information
+            profile_id: Profile to add to
         """
         return self.database.add_to_wishlist(
             spotify_track_data=spotify_track_data,
             failure_reason=failure_reason,
             source_type=source_type,
-            source_info=source_context or {}
+            source_info=source_context or {},
+            profile_id=profile_id
         )
     
-    def get_wishlist_tracks_for_download(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_wishlist_tracks_for_download(self, limit: Optional[int] = None, profile_id: int = 1) -> List[Dict[str, Any]]:
         """
         Get wishlist tracks formatted for the download modal.
         Returns tracks in a format similar to playlist tracks for compatibility.
         """
         try:
-            wishlist_tracks = self.database.get_wishlist_tracks(limit=limit)
+            wishlist_tracks = self.database.get_wishlist_tracks(limit=limit, profile_id=profile_id)
             formatted_tracks = []
 
             for wishlist_track in wishlist_tracks:
@@ -144,28 +148,29 @@ class WishlistService:
             logger.error(f"Error getting wishlist tracks for download: {e}")
             return []
     
-    def mark_track_download_result(self, spotify_track_id: str, success: bool, error_message: str = None) -> bool:
+    def mark_track_download_result(self, spotify_track_id: str, success: bool, error_message: str = None, profile_id: int = 1) -> bool:
         """
         Mark the result of a download attempt for a wishlist track.
-        
+
         Args:
             spotify_track_id: Spotify track ID
             success: Whether the download was successful
             error_message: Error message if failed
+            profile_id: Profile to scope the operation to
         """
-        return self.database.update_wishlist_retry(spotify_track_id, success, error_message)
+        return self.database.update_wishlist_retry(spotify_track_id, success, error_message, profile_id=profile_id)
     
-    def remove_track_from_wishlist(self, spotify_track_id: str) -> bool:
+    def remove_track_from_wishlist(self, spotify_track_id: str, profile_id: int = 1) -> bool:
         """Remove a track from the wishlist (typically after successful download)"""
-        return self.database.remove_from_wishlist(spotify_track_id)
-    
-    def get_wishlist_count(self) -> int:
+        return self.database.remove_from_wishlist(spotify_track_id, profile_id=profile_id)
+
+    def get_wishlist_count(self, profile_id: int = 1) -> int:
         """Get the total number of tracks in the wishlist"""
-        return self.database.get_wishlist_count()
-    
-    def clear_wishlist(self) -> bool:
+        return self.database.get_wishlist_count(profile_id=profile_id)
+
+    def clear_wishlist(self, profile_id: int = 1) -> bool:
         """Clear all tracks from the wishlist"""
-        return self.database.clear_wishlist()
+        return self.database.clear_wishlist(profile_id=profile_id)
     
     def check_track_in_wishlist(self, spotify_track_id: str) -> bool:
         """Check if a track exists in the wishlist by Spotify track ID"""
@@ -213,20 +218,20 @@ class WishlistService:
             logger.error(f"Error finding matching wishlist track: {e}")
             return None
     
-    def get_wishlist_summary(self) -> Dict[str, Any]:
+    def get_wishlist_summary(self, profile_id: int = 1) -> Dict[str, Any]:
         """Get a summary of the wishlist for dashboard display"""
         try:
-            total_tracks = self.get_wishlist_count()
-            
+            total_tracks = self.get_wishlist_count(profile_id=profile_id)
+
             if total_tracks == 0:
                 return {
                     'total_tracks': 0,
                     'by_source_type': {},
                     'recent_failures': []
                 }
-            
+
             # Get detailed breakdown
-            wishlist_tracks = self.database.get_wishlist_tracks()
+            wishlist_tracks = self.database.get_wishlist_tracks(profile_id=profile_id)
             
             # Group by source type
             by_source_type = {}

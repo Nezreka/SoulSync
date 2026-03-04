@@ -11,6 +11,63 @@
 </head>
 
 <body>
+    <!-- Profile Picker Overlay -->
+    <div id="profile-picker-overlay" class="profile-picker-overlay" style="display: none;">
+        <div class="profile-picker-container">
+            <h2 class="profile-picker-title">Who's listening?</h2>
+            <div id="profile-picker-grid" class="profile-picker-grid"></div>
+            <div id="profile-picker-actions" class="profile-picker-actions" style="display: none;">
+                <button id="manage-profiles-btn" class="profile-manage-btn">Manage Profiles</button>
+            </div>
+        </div>
+        <!-- PIN Dialog -->
+        <div id="profile-pin-dialog" class="profile-pin-dialog" style="display: none;">
+            <div class="profile-pin-content">
+                <div id="profile-pin-avatar" class="profile-pin-avatar"></div>
+                <p id="profile-pin-name" class="profile-pin-name"></p>
+                <input type="password" id="profile-pin-input" class="profile-pin-input" maxlength="6" placeholder="Enter PIN" autocomplete="off">
+                <div class="profile-pin-buttons">
+                    <button id="profile-pin-cancel" class="profile-pin-cancel">Cancel</button>
+                    <button id="profile-pin-submit" class="profile-pin-submit">Submit</button>
+                </div>
+                <p id="profile-pin-error" class="profile-pin-error" style="display: none;"></p>
+            </div>
+        </div>
+        <!-- Profile Management Panel -->
+        <div id="profile-manage-panel" class="profile-manage-panel" style="display: none;">
+            <div class="profile-manage-content">
+                <div class="profile-manage-header">
+                    <h3>Manage Profiles</h3>
+                    <button id="profile-manage-close" class="profile-manage-close-btn">&times;</button>
+                </div>
+                <div id="profile-manage-list" class="profile-manage-list"></div>
+                <div class="profile-manage-add">
+                    <h4>Add Profile</h4>
+                    <input type="text" id="new-profile-name" class="profile-input" placeholder="Profile name" maxlength="20">
+                    <input type="url" id="new-profile-avatar-url" class="profile-input" placeholder="Avatar image URL (optional)">
+                    <div class="profile-color-picker">
+                        <span class="profile-color-swatch" data-color="#6366f1" style="background:#6366f1" title="Indigo"></span>
+                        <span class="profile-color-swatch" data-color="#ec4899" style="background:#ec4899" title="Pink"></span>
+                        <span class="profile-color-swatch" data-color="#10b981" style="background:#10b981" title="Green"></span>
+                        <span class="profile-color-swatch" data-color="#f59e0b" style="background:#f59e0b" title="Amber"></span>
+                        <span class="profile-color-swatch" data-color="#3b82f6" style="background:#3b82f6" title="Blue"></span>
+                        <span class="profile-color-swatch" data-color="#ef4444" style="background:#ef4444" title="Red"></span>
+                        <span class="profile-color-swatch" data-color="#8b5cf6" style="background:#8b5cf6" title="Purple"></span>
+                        <span class="profile-color-swatch" data-color="#14b8a6" style="background:#14b8a6" title="Teal"></span>
+                    </div>
+                    <input type="password" id="new-profile-pin" class="profile-input" placeholder="PIN (optional)" maxlength="6">
+                    <button id="create-profile-btn" class="profile-create-btn">Create Profile</button>
+                </div>
+                <div id="admin-pin-section" class="admin-pin-section" style="display: none;">
+                    <h4>Admin PIN</h4>
+                    <p class="admin-pin-note">Required when multiple profiles exist</p>
+                    <input type="password" id="admin-pin-input" class="profile-input" placeholder="Set admin PIN" maxlength="6">
+                    <button id="set-admin-pin-btn" class="profile-create-btn">Set Admin PIN</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="main-container">
         <!-- Mobile Navigation -->
         <button class="hamburger-btn" id="hamburger-btn" aria-label="Toggle navigation">
@@ -26,6 +83,10 @@
             <div class="sidebar-header">
                 <h1 class="app-name">SoulSync</h1>
                 <p class="app-subtitle">Music Sync & Manager</p>
+                <div id="profile-indicator" class="profile-indicator" style="display: none;" title="Switch profile">
+                    <div id="profile-indicator-avatar" class="profile-indicator-avatar"></div>
+                    <span id="profile-indicator-name" class="profile-indicator-name"></span>
+                </div>
             </div>
 
             <!-- Navigation Section -->

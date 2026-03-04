@@ -2151,4 +2151,25 @@
         gap: 4px;
         align-items: flex-start;
     }
+
+    /* Profile Picker - Mobile */
+    .profile-picker-grid {
+        gap: 20px;
+    }
+
+    .profile-avatar {
+        width: 64px;
+        height: 64px;
+        font-size: 26px;
+    }
+
+    .profile-manage-content {
+        width: calc(100vw - 32px);
+        max-width: 400px;
+    }
+
+    .profile-pin-content {
+        width: calc(100vw - 32px);
+        max-width: 340px;
+    }
 }

@@ -686,13 +686,14 @@ class WatchlistScanner:
                 # Check if we have fresh similar artists cached (< 30 days old)
                 # If Spotify is authenticated, also require Spotify IDs to be present
                 spotify_authenticated = self.spotify_client and self.spotify_client.is_spotify_authenticated()
-                if self.database.has_fresh_similar_artists(source_artist_id, days_threshold=30, require_spotify=spotify_authenticated):
+                artist_profile_id = getattr(watchlist_artist, 'profile_id', 1)
+                if self.database.has_fresh_similar_artists(source_artist_id, days_threshold=30, require_spotify=spotify_authenticated, profile_id=artist_profile_id):
                     logger.info(f"Similar artists for {watchlist_artist.artist_name} are cached and fresh, skipping MusicMap fetch")
                     # Even if cached, backfill missing iTunes IDs (seamless dual-source support)
-                    self._backfill_similar_artists_itunes_ids(source_artist_id)
+                    self._backfill_similar_artists_itunes_ids(source_artist_id, profile_id=artist_profile_id)
                 else:
                     logger.info(f"Fetching similar artists for {watchlist_artist.artist_name}...")
-                    self.update_similar_artists(watchlist_artist)
+                    self.update_similar_artists(watchlist_artist, profile_id=artist_profile_id)
                     logger.info(f"Similar artists updated for {watchlist_artist.artist_name}")
             except Exception as similar_error:
                 logger.warning(f"Failed to update similar artists for {watchlist_artist.artist_name}: {similar_error}")
@@ -1183,7 +1184,7 @@ class WatchlistScanner:
                 'is_local': False
             }
             
-            # Add to wishlist with watchlist context
+            # Add to wishlist with watchlist context (scoped to artist's profile)
             success = self.database.add_to_wishlist(
                 spotify_track_data=spotify_track_data,
                 failure_reason="Missing from library (found by watchlist scan)",
@@ -1193,7 +1194,8 @@ class WatchlistScanner:
                     'watchlist_artist_id': watchlist_artist.spotify_artist_id,
                     'album_name': album_name,
                     'scan_timestamp': datetime.now().isoformat()
-                }
+                },
+                profile_id=getattr(watchlist_artist, 'profile_id', 1)
             )
             
             if success:
@@ -1407,20 +1409,21 @@ class WatchlistScanner:
             logger.error(f"Error fetching similar artists from MusicMap: {e}")
             return []
 
-    def _backfill_similar_artists_itunes_ids(self, source_artist_id: str) -> int:
+    def _backfill_similar_artists_itunes_ids(self, source_artist_id: str, profile_id: int = 1) -> int:
         """
         Backfill missing iTunes IDs for cached similar artists.
         This ensures seamless dual-source support without clearing cached data.
 
         Args:
             source_artist_id: The source artist ID to backfill similar artists for
+            profile_id: Profile to scope the backfill to
 
         Returns:
             Number of similar artists updated with iTunes IDs
         """
         try:
             # Get similar artists that are missing iTunes IDs
-            similar_artists = self.database.get_similar_artists_missing_itunes_ids(source_artist_id)
+            similar_artists = self.database.get_similar_artists_missing_itunes_ids(source_artist_id, profile_id=profile_id)
 
             if not similar_artists:
                 return 0
@@ -1455,7 +1458,7 @@ class WatchlistScanner:
             logger.error(f"Error backfilling similar artists iTunes IDs: {e}")
             return 0
 
-    def update_similar_artists(self, watchlist_artist: WatchlistArtist, limit: int = 10) -> bool:
+    def update_similar_artists(self, watchlist_artist: WatchlistArtist, limit: int = 10, profile_id: int = 1) -> bool:
         """
         Fetch and store similar artists for a watchlist artist.
         Called after each artist scan to build discovery pool.
@@ -1486,7 +1489,8 @@ class WatchlistScanner:
                         similar_artist_name=similar_artist['name'],
                         similar_artist_spotify_id=similar_artist.get('spotify_id'),
                         similar_artist_itunes_id=similar_artist.get('itunes_id'),
-                        similarity_rank=rank
+                        similarity_rank=rank,
+                        profile_id=profile_id
                     )
 
                     if success:
@@ -1504,7 +1508,7 @@ class WatchlistScanner:
             logger.error(f"Error fetching similar artists for {watchlist_artist.artist_name}: {e}")
             return False
 
-    def populate_discovery_pool(self, top_artists_limit: int = 50, albums_per_artist: int = 10):
+    def populate_discovery_pool(self, top_artists_limit: int = 50, albums_per_artist: int = 10, profile_id: int = 1):
         """
         Populate discovery pool with tracks from top similar artists.
         Called after watchlist scan completes.
@@ -1520,14 +1524,14 @@ class WatchlistScanner:
             import random
 
             # Check if we should run discovery pool population (prevents over-polling)
-            skip_pool_population = not self.database.should_populate_discovery_pool(hours_threshold=24)
+            skip_pool_population = not self.database.should_populate_discovery_pool(hours_threshold=24, profile_id=profile_id)
 
             if skip_pool_population:
                 logger.info("Discovery pool was populated recently (< 24 hours ago). Skipping pool population.")
                 logger.info("But still refreshing recent albums cache and curated playlists...")
                 # Still run these even when skipping main pool population
-                self.cache_discovery_recent_albums()
-                self.curate_discovery_playlists()
+                self.cache_discovery_recent_albums(profile_id=profile_id)
+                self.curate_discovery_playlists(profile_id=profile_id)
                 return
 
             logger.info("Populating discovery pool from similar artists...")
@@ -1546,15 +1550,15 @@ class WatchlistScanner:
 
             logger.info(f"Sources available - Spotify: {spotify_available}, iTunes: {itunes_available}")
 
-            # Get top similar artists across all watchlist (ordered by occurrence_count)
-            similar_artists = self.database.get_top_similar_artists(limit=top_artists_limit)
+            # Get top similar artists for this profile's watchlist (ordered by occurrence_count)
+            similar_artists = self.database.get_top_similar_artists(limit=top_artists_limit, profile_id=profile_id)
 
             if not similar_artists:
                 logger.info("No similar artists found to populate discovery pool from similar artists")
                 logger.info("But still caching recent albums from watchlist artists and curating playlists...")
                 # Still run these even without similar artists - they use watchlist artists
-                self.cache_discovery_recent_albums()
-                self.curate_discovery_playlists()
+                self.cache_discovery_recent_albums(profile_id=profile_id)
+                self.curate_discovery_playlists(profile_id=profile_id)
                 return
 
             logger.info(f"Processing {len(similar_artists)} top similar artists for discovery pool")
@@ -1734,8 +1738,8 @@ class WatchlistScanner:
                                                 track_data['itunes_album_id'] = album_data.get('id')
                                                 track_data['itunes_artist_id'] = similar_artist.similar_artist_itunes_id
 
-                                            # Add to discovery pool with source
-                                            if self.database.add_to_discovery_pool(track_data, source=source):
+                                            # Add to discovery pool with source (scoped to profile)
+                                            if self.database.add_to_discovery_pool(track_data, source=source, profile_id=profile_id):
                                                 total_tracks_added += 1
 
                                         except Exception as track_error:
@@ -1887,7 +1891,7 @@ class WatchlistScanner:
                                         track_data['itunes_album_id'] = album_data.get('id')
                                         track_data['itunes_artist_id'] = artist_id_for_genres or ''
 
-                                    if self.database.add_to_discovery_pool(track_data, source=db_source):
+                                    if self.database.add_to_discovery_pool(track_data, source=db_source, profile_id=profile_id):
                                         total_tracks_added += 1
                                 except Exception as track_error:
                                     continue
@@ -1918,23 +1922,23 @@ class WatchlistScanner:
                 final_count = cursor.fetchone()['count']
 
             # Update timestamp to mark when pool was last populated
-            self.database.update_discovery_pool_timestamp(track_count=final_count)
+            self.database.update_discovery_pool_timestamp(track_count=final_count, profile_id=profile_id)
             logger.info(f"Discovery pool now contains {final_count} total tracks (built over time)")
 
             # Cache recent albums for discovery page
             logger.info("Caching recent albums for discovery page...")
-            self.cache_discovery_recent_albums()
+            self.cache_discovery_recent_albums(profile_id=profile_id)
 
             # Curate playlists for consistent daily experience
             logger.info("Curating discovery playlists...")
-            self.curate_discovery_playlists()
+            self.curate_discovery_playlists(profile_id=profile_id)
 
         except Exception as e:
             logger.error(f"Error populating discovery pool: {e}")
             import traceback
             traceback.print_exc()
 
-    def update_discovery_pool_incremental(self):
+    def update_discovery_pool_incremental(self, profile_id: int = 1):
         """
         Lightweight incremental update for discovery pool - runs every 6 hours.
 
@@ -1948,13 +1952,13 @@ class WatchlistScanner:
             from datetime import datetime, timedelta
 
             # Check if we should run (prevents over-polling Spotify)
-            if not self.database.should_populate_discovery_pool(hours_threshold=6):
+            if not self.database.should_populate_discovery_pool(hours_threshold=6, profile_id=profile_id):
                 logger.info("Discovery pool was updated recently (< 6 hours ago). Skipping incremental update.")
                 return
 
             logger.info("Starting incremental discovery pool update (watchlist artists only)...")
 
-            watchlist_artists = self.database.get_watchlist_artists()
+            watchlist_artists = self.database.get_watchlist_artists(profile_id=profile_id)
             if not watchlist_artists:
                 logger.info("No watchlist artists to check for incremental update")
                 return
@@ -2042,7 +2046,7 @@ class WatchlistScanner:
                                         'artist_genres': artist_genres
                                     }
 
-                                    if self.database.add_to_discovery_pool(track_data):
+                                    if self.database.add_to_discovery_pool(track_data, profile_id=profile_id):
                                         total_tracks_added += 1
 
                                 except Exception as track_error:
@@ -2071,7 +2075,7 @@ class WatchlistScanner:
                     cursor.execute("SELECT COUNT(*) as count FROM discovery_pool")
                     current_count = cursor.fetchone()['count']
 
-                self.database.update_discovery_pool_timestamp(track_count=current_count)
+                self.database.update_discovery_pool_timestamp(track_count=current_count, profile_id=profile_id)
                 logger.info(f"Discovery pool now contains {current_count} total tracks")
 
         except Exception as e:
@@ -2079,7 +2083,7 @@ class WatchlistScanner:
             import traceback
             traceback.print_exc()
 
-    def cache_discovery_recent_albums(self):
+    def cache_discovery_recent_albums(self, profile_id: int = 1):
         """
         Cache recent albums from watchlist and similar artists for discover page.
 
@@ -2091,8 +2095,8 @@ class WatchlistScanner:
 
             logger.info("Caching recent albums for discover page...")
 
-            # Clear existing cache
-            self.database.clear_discovery_recent_albums()
+            # Clear existing cache for this profile
+            self.database.clear_discovery_recent_albums(profile_id=profile_id)
 
             # 30-day window for recent releases
             cutoff_date = datetime.now() - timedelta(days=30)
@@ -2106,9 +2110,9 @@ class WatchlistScanner:
             from core.itunes_client import iTunesClient
             itunes_client = iTunesClient()
 
-            # Get artists to check
-            watchlist_artists = self.database.get_watchlist_artists()
-            similar_artists = self.database.get_top_similar_artists(limit=50)
+            # Get artists to check (scoped to profile)
+            watchlist_artists = self.database.get_watchlist_artists(profile_id=profile_id)
+            similar_artists = self.database.get_top_similar_artists(limit=50, profile_id=profile_id)
 
             logger.info(f"Checking albums from {len(watchlist_artists)} watchlist + {len(similar_artists)} similar artists")
             logger.info(f"Sources: Spotify={spotify_available}, iTunes=True")
@@ -2141,7 +2145,7 @@ class WatchlistScanner:
                                 'release_date': release_str[:10],
                                 'album_type': album.album_type if hasattr(album, 'album_type') else 'album'
                             }
-                            if self.database.cache_discovery_recent_album(album_data, source=source):
+                            if self.database.cache_discovery_recent_album(album_data, source=source, profile_id=profile_id):
                                 cached_count[source] += 1
                                 logger.debug(f"Cached [{source}] recent album: {album.name} by {artist_name} ({release_str})")
                                 return True
@@ -2256,7 +2260,7 @@ class WatchlistScanner:
             import traceback
             traceback.print_exc()
 
-    def curate_discovery_playlists(self):
+    def curate_discovery_playlists(self, profile_id: int = 1):
         """
         Curate consistent playlist selections that stay the same until next discovery pool update.
 
@@ -2286,7 +2290,7 @@ class WatchlistScanner:
                 logger.info(f"Curating Release Radar for {source}...")
 
                 # 1. Curate Release Radar - 50 tracks from recent albums
-                recent_albums = self.database.get_discovery_recent_albums(limit=50, source=source)
+                recent_albums = self.database.get_discovery_recent_albums(limit=50, source=source, profile_id=profile_id)
                 release_radar_tracks = []
 
                 if not recent_albums:
@@ -2405,18 +2409,18 @@ class WatchlistScanner:
                                 formatted_track['itunes_track_id'] = track_data['id']
                                 formatted_track['itunes_album_id'] = track_data['album'].get('id', '')
 
-                            self.database.add_to_discovery_pool(formatted_track, source=source)
+                            self.database.add_to_discovery_pool(formatted_track, source=source, profile_id=profile_id)
                         except Exception as e:
                             continue
 
                 # Save with source suffix for multi-source support
                 playlist_key = f'release_radar_{source}'
-                self.database.save_curated_playlist(playlist_key, release_radar_tracks)
+                self.database.save_curated_playlist(playlist_key, release_radar_tracks, profile_id=profile_id)
                 logger.info(f"Release Radar ({source}) curated: {len(release_radar_tracks)} tracks")
 
                 # 2. Curate Discovery Weekly - 50 tracks from discovery pool
                 logger.info(f"Curating Discovery Weekly for {source}...")
-                discovery_tracks = self.database.get_discovery_pool_tracks(limit=2000, new_releases_only=False, source=source)
+                discovery_tracks = self.database.get_discovery_pool_tracks(limit=2000, new_releases_only=False, source=source, profile_id=profile_id)
 
                 if not discovery_tracks:
                     logger.warning(f"[{source.upper()}] No discovery pool tracks found for Discovery Weekly - check populate_discovery_pool()")
@@ -2458,7 +2462,7 @@ class WatchlistScanner:
                             discovery_weekly_tracks.append(track.itunes_track_id)
 
                 playlist_key = f'discovery_weekly_{source}'
-                self.database.save_curated_playlist(playlist_key, discovery_weekly_tracks)
+                self.database.save_curated_playlist(playlist_key, discovery_weekly_tracks, profile_id=profile_id)
                 logger.info(f"Discovery Weekly ({source}) curated: {len(discovery_weekly_tracks)} tracks")
 
             # Also save without suffix for backward compatibility (use active source)
@@ -2467,10 +2471,10 @@ class WatchlistScanner:
             discovery_weekly_key = f'discovery_weekly_{active_source}'
 
             # Copy active source playlists to non-suffixed keys
-            release_radar_ids = self.database.get_curated_playlist(release_radar_key) or []
-            discovery_weekly_ids = self.database.get_curated_playlist(discovery_weekly_key) or []
-            self.database.save_curated_playlist('release_radar', release_radar_ids)
-            self.database.save_curated_playlist('discovery_weekly', discovery_weekly_ids)
+            release_radar_ids = self.database.get_curated_playlist(release_radar_key, profile_id=profile_id) or []
+            discovery_weekly_ids = self.database.get_curated_playlist(discovery_weekly_key, profile_id=profile_id) or []
+            self.database.save_curated_playlist('release_radar', release_radar_ids, profile_id=profile_id)
+            self.database.save_curated_playlist('discovery_weekly', discovery_weekly_ids, profile_id=profile_id)
 
             logger.info("Playlist curation complete")
 
