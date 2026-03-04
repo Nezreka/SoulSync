@@ -11925,6 +11925,64 @@ def _automatic_wishlist_cleanup_after_db_update():
         import traceback
         traceback.print_exc()
 
+# ── Update detection ─────────────────────────────────────────────
+_GITHUB_REPO = "Nezreka/SoulSync"
+_update_cache = {'latest_sha': None, 'last_check': 0, 'error': None}
+_UPDATE_CHECK_INTERVAL = 3600  # 1 hour
+
+def _get_current_commit_sha():
+    """Get the commit SHA of the running instance (env var for Docker, git for local)."""
+    # Docker: baked in at build time via COMMIT_SHA build arg
+    sha = os.environ.get('SOULSYNC_COMMIT_SHA', '').strip()
+    if sha:
+        return sha
+    # Local dev: read from git
+    try:
+        import subprocess
+        result = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(__file__) or '.')
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+_current_commit_sha = _get_current_commit_sha()
+
+def _check_for_updates():
+    """Check GitHub for the latest commit SHA on main branch."""
+    import time as _time
+    now = _time.time()
+    if now - _update_cache['last_check'] < _UPDATE_CHECK_INTERVAL:
+        return  # Still fresh
+    _update_cache['last_check'] = now
+    try:
+        import urllib.request
+        import json as _json
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{_GITHUB_REPO}/commits/main",
+            headers={'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'SoulSync-UpdateCheck'}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read().decode())
+            _update_cache['latest_sha'] = data.get('sha')
+            _update_cache['error'] = None
+    except Exception as e:
+        _update_cache['error'] = str(e)
+        logger.debug(f"Update check failed: {e}")
+
+@app.route('/api/update-check', methods=['GET'])
+def check_for_update():
+    """Check if a newer version is available on GitHub."""
+    _check_for_updates()
+    current = _current_commit_sha
+    latest = _update_cache.get('latest_sha')
+    update_available = bool(current and latest and current != latest)
+    return jsonify({
+        'update_available': update_available,
+        'current_sha': current[:8] if current else None,
+        'latest_sha': latest[:8] if latest else None,
+    })
+
 @app.route('/api/version-info', methods=['GET'])
 def get_version_info():
     """

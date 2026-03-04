@@ -868,6 +868,23 @@ body {
     transform: scale(0.97);
 }
 
+.version-button.update-available {
+    color: rgb(var(--accent-light-rgb));
+    border-color: rgba(var(--accent-rgb), 0.4);
+    animation: version-glow 2s ease-in-out infinite;
+}
+
+@keyframes version-glow {
+    0%, 100% {
+        box-shadow: 0 0 4px rgba(var(--accent-rgb), 0.2), 0 0 8px rgba(var(--accent-rgb), 0.1);
+        border-color: rgba(var(--accent-rgb), 0.3);
+    }
+    50% {
+        box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.5), 0 0 20px rgba(var(--accent-rgb), 0.3), 0 0 30px rgba(var(--accent-rgb), 0.1);
+        border-color: rgba(var(--accent-rgb), 0.6);
+    }
+}
+
 /* Status Section - Premium Glassmorphic Design */
 .status-section {
     height: fit-content;
