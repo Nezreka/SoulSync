@@ -1939,14 +1939,16 @@ Get MusicBrainz cache statistics — total entries, matched vs unmatched, and br
 
 #### `GET /api/v1/cache/discovery-matches`
 
-List cached discovery provider matches. These are stored when the discovery system resolves tracks from external providers. Results ordered by `last_used_at` descending.
+List cached discovery provider matches. When SoulSync discovers tracks from external sources (Tidal playlists, YouTube Music, ListenBrainz recommendations, Beatport), it resolves them against Spotify or iTunes to get downloadable metadata. These resolved matches are cached here to avoid redundant API calls. Results ordered by `last_used_at` descending.
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
-| `provider` | string | | Filter by provider (e.g. `spotify`, `itunes`) |
+| `provider` | string | | Filter by target provider: `spotify` or `itunes` |
 | `search` | string | | Filter by title or artist (case-insensitive partial match on both) |
 | `page` | int | 1 | Page number |
 | `limit` | int | 50 | Items per page (max 200) |
+
+**Example — Spotify-resolved match** (e.g. a Tidal track matched to Spotify):
 
 ```json
 {
@@ -1959,14 +1961,26 @@ List cached discovery provider matches. These are stored when the discovery syst
         "provider": "spotify",
         "match_confidence": 0.95,
         "matched_data_json": {
-          "track_id": "6LgJvl0Xdtc73RJ1mN1a7Z",
-          "track_name": "Paranoid Android",
-          "artist_name": "Radiohead",
-          "album_name": "OK Computer",
-          "album_id": "6dVIqQ8qmQ5GBnJ9shOYGE",
+          "id": "6LgJvl0Xdtc73RJ1mN1a7Z",
+          "name": "Paranoid Android",
+          "artists": ["Radiohead"],
+          "album": {
+            "id": "6dVIqQ8qmQ5GBnJ9shOYGE",
+            "name": "OK Computer",
+            "album_type": "album",
+            "release_date": "1997-06-16",
+            "total_tracks": 12,
+            "images": [
+              { "url": "https://i.scdn.co/image/ab67616d0000b273c8b444df094c596ea9da41f6", "height": 640, "width": 640 },
+              { "url": "https://i.scdn.co/image/ab67616d00001e02c8b444df094c596ea9da41f6", "height": 300, "width": 300 },
+              { "url": "https://i.scdn.co/image/ab67616d00004851c8b444df094c596ea9da41f6", "height": 64, "width": 64 }
+            ]
+          },
           "duration_ms": 383000,
-          "popularity": 72,
-          "preview_url": "https://p.scdn.co/mp3-preview/..."
+          "external_urls": {
+            "spotify": "https://open.spotify.com/track/6LgJvl0Xdtc73RJ1mN1a7Z"
+          },
+          "source": "spotify"
         },
         "original_title": "Paranoid Android",
         "original_artist": "Radiohead",
@@ -1975,19 +1989,23 @@ List cached discovery provider matches. These are stored when the discovery syst
         "use_count": 12
       },
       {
-        "id": 101,
+        "id": 205,
         "normalized_title": "something about us",
         "normalized_artist": "daft punk",
         "provider": "itunes",
         "match_confidence": 0.92,
         "matched_data_json": {
-          "track_id": "724633277",
-          "track_name": "Something About Us",
-          "artist_name": "Daft Punk",
-          "album_name": "Discovery",
-          "collection_id": "724633180",
-          "duration_ms": 232000,
-          "artwork_url": "https://is1-ssl.mzstatic.com/image/..."
+          "id": "724633277",
+          "name": "Something About Us",
+          "artists": ["Daft Punk"],
+          "album": {
+            "name": "Discovery",
+            "album_type": "album",
+            "images": [
+              { "url": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/a1/b2/c3/disc-cover.jpg/300x300bb.jpg", "height": 300, "width": 300 }
+            ]
+          },
+          "source": "itunes"
         },
         "original_title": "Something About Us",
         "original_artist": "Daft Punk",
@@ -2008,16 +2026,34 @@ List cached discovery provider matches. These are stored when the discovery syst
 | `id` | int | Cache entry ID |
 | `normalized_title` | string | Lowercase normalized track title used for matching |
 | `normalized_artist` | string | Lowercase normalized artist name used for matching |
-| `provider` | string | Provider that was matched against (`spotify`, `itunes`) |
-| `match_confidence` | float | Match confidence score (0.0-1.0) |
-| `matched_data_json` | object? | Parsed JSON with full matched track data from the provider |
-| `original_title` | string? | Original (un-normalized) track title |
-| `original_artist` | string? | Original (un-normalized) artist name |
+| `provider` | string | Target provider the track was matched against (`spotify` or `itunes`) |
+| `match_confidence` | float | Match confidence score (0.0-1.0). Only matches ≥ 0.70 are cached. |
+| `matched_data_json` | object | Parsed JSON with full resolved track data (structure varies by provider — see below) |
+| `original_title` | string? | Original (un-normalized) track title from the discovery source |
+| `original_artist` | string? | Original (un-normalized) artist name from the discovery source |
 | `created_at` | string | ISO 8601 timestamp when match was first cached |
 | `last_used_at` | string | ISO 8601 timestamp when match was last reused |
 | `use_count` | int | Number of times this cached match has been reused |
 
-> **Unique constraint:** `(normalized_title, normalized_artist, provider)` — each title+artist+provider combination is cached once.
+**`matched_data_json` structure by provider:**
+
+| Field | Spotify | iTunes | Description |
+|-------|---------|--------|-------------|
+| `id` | string | string | Spotify track ID or iTunes track ID |
+| `name` | string | string | Resolved track name |
+| `artists` | string[] | string[] | Artist names (normalized to string array before caching) |
+| `album` | object | object | Album data (see below) |
+| `album.id` | string | — | Spotify album ID (not present for iTunes) |
+| `album.name` | string | string | Album name |
+| `album.album_type` | string | string | Album type (`album`, `single`, `compilation`) |
+| `album.release_date` | string | — | Release date (Spotify only) |
+| `album.total_tracks` | int | — | Track count (Spotify only) |
+| `album.images` | array | array | Cover art: `[{url, height, width}]` (Spotify provides 3 sizes; iTunes provides 1) |
+| `duration_ms` | int | — | Track duration in milliseconds (Spotify only) |
+| `external_urls` | object | — | External URLs e.g. `{"spotify": "https://..."}` (Spotify only) |
+| `source` | `"spotify"` | `"itunes"` | Which provider this match came from |
+
+> **Unique constraint:** `(normalized_title, normalized_artist, provider)` — each title+artist+provider combination is cached once. Discovery sources (Tidal, YouTube, ListenBrainz, Beatport) are the input — the `provider` field records which catalog they were matched against.
 
 #### `GET /api/v1/cache/discovery-matches/stats`
 
