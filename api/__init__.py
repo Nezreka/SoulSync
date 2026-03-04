@@ -38,6 +38,10 @@ def create_api_blueprint():
     from .playlists import register_routes as reg_playlists
     from .settings import register_routes as reg_settings
     from .discover import register_routes as reg_discover
+    from .profiles import register_routes as reg_profiles
+    from .retag import register_routes as reg_retag
+    from .listenbrainz import register_routes as reg_listenbrainz
+    from .cache import register_routes as reg_cache
 
     reg_library(bp)
     reg_system(bp)
@@ -48,6 +52,10 @@ def create_api_blueprint():
     reg_playlists(bp)
     reg_settings(bp)
     reg_discover(bp)
+    reg_profiles(bp)
+    reg_retag(bp)
+    reg_listenbrainz(bp)
+    reg_cache(bp)
 
     # ---- error handlers (scoped to this Blueprint) ----
     @bp.errorhandler(400)

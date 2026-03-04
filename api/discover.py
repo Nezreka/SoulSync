@@ -151,3 +151,48 @@ def register_routes(bp):
             })
         except Exception as e:
             return api_error("DISCOVER_ERROR", str(e), 500)
+
+    # ── Bubble Snapshots ───────────────────────────────────────
+
+    @bp.route("/discover/bubbles", methods=["GET"])
+    @require_api_key
+    def list_bubble_snapshots():
+        """List all bubble snapshots for the current profile.
+
+        Returns snapshots for all types: artist_bubbles, search_bubbles, discover_downloads.
+        """
+        profile_id = parse_profile_id(request)
+
+        try:
+            db = get_database()
+            result = {}
+            for snap_type in ("artist_bubbles", "search_bubbles", "discover_downloads"):
+                snapshot = db.get_bubble_snapshot(snap_type, profile_id=profile_id)
+                result[snap_type] = snapshot  # None if not found
+
+            return api_success({"snapshots": result})
+        except Exception as e:
+            return api_error("DISCOVER_ERROR", str(e), 500)
+
+    @bp.route("/discover/bubbles/<snapshot_type>", methods=["GET"])
+    @require_api_key
+    def get_bubble_snapshot(snapshot_type):
+        """Get a specific bubble snapshot by type.
+
+        Types: artist_bubbles, search_bubbles, discover_downloads
+        """
+        valid_types = ("artist_bubbles", "search_bubbles", "discover_downloads")
+        if snapshot_type not in valid_types:
+            return api_error("BAD_REQUEST", f"type must be one of: {', '.join(valid_types)}", 400)
+
+        profile_id = parse_profile_id(request)
+
+        try:
+            db = get_database()
+            snapshot = db.get_bubble_snapshot(snapshot_type, profile_id=profile_id)
+            if not snapshot:
+                return api_error("NOT_FOUND", f"No '{snapshot_type}' snapshot found.", 404)
+
+            return api_success({"snapshot": snapshot})
+        except Exception as e:
+            return api_error("DISCOVER_ERROR", str(e), 500)
