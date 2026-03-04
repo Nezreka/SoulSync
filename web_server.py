@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, request, jsonify, redirect, send_file, Response
+from flask import Flask, render_template, request, jsonify, redirect, send_file, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from utils.logging_config import get_logger
 from utils.async_helpers import run_async
@@ -120,8 +120,60 @@ app = Flask(
     static_folder=os.path.join(base_dir, 'webui', 'static')
 )
 
+# --- Flask Session Setup (for multi-profile support) ---
+import secrets as _secrets
+def _init_flask_secret_key():
+    """Load or generate a persistent secret key for Flask sessions"""
+    try:
+        db = get_database()
+        key = db.get_metadata('flask_secret_key')
+        if not key:
+            key = _secrets.token_hex(32)
+            db.set_metadata('flask_secret_key', key)
+        return key
+    except Exception:
+        return _secrets.token_hex(32)
+
+app.secret_key = _init_flask_secret_key()
+
 # --- WebSocket (Socket.IO) Setup ---
 socketio = SocketIO(app, async_mode='threading', cors_allowed_origins='*')
+
+# --- Profile Context (before_request hook) ---
+@app.before_request
+def _set_profile_context():
+    """Set g.profile_id from session for every request"""
+    # Skip for profile management, static, and root routes
+    path = request.path
+    if (path.startswith('/api/profiles') or
+        path.startswith('/static/') or
+        path == '/' or
+        path.startswith('/api/v1/')):
+        g.profile_id = session.get('profile_id', 1)
+        return
+
+    pid = session.get('profile_id', 1)
+
+    # Validate session profile still exists (handles deleted profiles)
+    if pid != 1 and 'profile_id' in session:
+        try:
+            database = get_database()
+            profile = database.get_profile(pid)
+            if not profile:
+                session.pop('profile_id', None)
+                from flask import jsonify as _jsonify
+                return _jsonify({"error": "profile_required", "message": "Profile no longer exists"}), 401
+        except Exception:
+            pass  # DB error — don't block requests, use the session value
+
+    g.profile_id = pid
+
+def get_current_profile_id() -> int:
+    """Get the current profile ID from Flask g context or default to 1"""
+    try:
+        return g.profile_id
+    except AttributeError:
+        return 1
 
 # --- Docker Helper Functions ---
 def docker_resolve_path(path_str):
@@ -5775,7 +5827,8 @@ def get_library_artists():
             letter=letter,
             page=page,
             limit=limit,
-            watchlist_filter=watchlist_filter
+            watchlist_filter=watchlist_filter,
+            profile_id=get_current_profile_id()
         )
 
         # Fix image URLs for all artists
@@ -11654,24 +11707,33 @@ def _check_and_remove_from_wishlist(context):
             wishlist_id = track_info['wishlist_id']
             print(f"📋 [Wishlist] Found wishlist_id in context: {wishlist_id}")
             
-            # Get the Spotify track ID from the wishlist entry
-            wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+            # Get the Spotify track ID from the wishlist entry (search all profiles)
+            database = get_database()
+            all_profiles = database.get_all_profiles()
+            wishlist_tracks = []
+            for p in all_profiles:
+                wishlist_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id']))
             for wl_track in wishlist_tracks:
                 if wl_track.get('wishlist_id') == wishlist_id:
                     spotify_track_id = wl_track.get('spotify_track_id') or wl_track.get('id')
                     print(f"📋 [Wishlist] Found Spotify ID from wishlist entry: {spotify_track_id}")
                     break
-        
+
         # Method 4: Try to construct ID from track metadata for fuzzy matching
         if not spotify_track_id:
             track_name = track_info.get('name') or context.get('original_search_result', {}).get('title', '')
             artist_name = _get_track_artist_name(track_info) or _get_track_artist_name(context.get('original_search_result', {}))
-            
+
             if track_name and artist_name:
                 print(f"📋 [Wishlist] No Spotify ID found, checking for fuzzy match: '{track_name}' by '{artist_name}'")
-                
-                # Get all wishlist tracks and find potential matches
-                wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+
+                # Get all wishlist tracks and find potential matches (search all profiles)
+                if not wishlist_tracks:
+                    database = get_database()
+                    all_profiles = database.get_all_profiles()
+                    wishlist_tracks = []
+                    for p in all_profiles:
+                        wishlist_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id']))
                 for wl_track in wishlist_tracks:
                     wl_name = wl_track.get('name', '').lower()
                     wl_artists = wl_track.get('artists', [])
@@ -11741,9 +11803,13 @@ def _check_and_remove_track_from_wishlist_by_metadata(track_data):
                 primary_artist = str(artists[0])
             
             print(f"📋 [Analysis] No direct ID match, trying fuzzy match: '{track_name}' by '{primary_artist}'")
-            
-            # Get all wishlist tracks and find matches
-            wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+
+            # Get all wishlist tracks and find matches (search all profiles)
+            database = get_database()
+            all_profiles = database.get_all_profiles()
+            wishlist_tracks = []
+            for p in all_profiles:
+                wishlist_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id']))
             for wl_track in wishlist_tracks:
                 wl_name = wl_track.get('name', '').lower()
                 wl_artists = wl_track.get('artists', [])
@@ -11788,9 +11854,13 @@ def _automatic_wishlist_cleanup_after_db_update():
         active_server = config_manager.get_active_media_server()
         
         print("📋 [Auto Cleanup] Starting automatic wishlist cleanup after database update...")
-        
-        # Get all wishlist tracks
-        wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+
+        # Get all wishlist tracks (across all profiles - cleanup is global)
+        database = get_database()
+        all_profiles = database.get_all_profiles()
+        wishlist_tracks = []
+        for p in all_profiles:
+            wishlist_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id']))
         if not wishlist_tracks:
             print("📋 [Auto Cleanup] No tracks in wishlist to clean up")
             return
@@ -12391,10 +12461,12 @@ def _process_wishlist_automatically():
         with app.app_context():
             from core.wishlist_service import get_wishlist_service
             wishlist_service = get_wishlist_service()
-            
-            # Check if wishlist has tracks
-            count = wishlist_service.get_wishlist_count()
-            print(f"🔍 [Auto-Wishlist] Wishlist count check: {count} tracks found")
+
+            # Check if wishlist has tracks across all profiles
+            database = get_database()
+            all_profiles = database.get_all_profiles()
+            count = sum(wishlist_service.get_wishlist_count(profile_id=p['id']) for p in all_profiles)
+            print(f"🔍 [Auto-Wishlist] Wishlist count check: {count} tracks found across {len(all_profiles)} profiles")
             if count == 0:
                 print("ℹ️ [Auto-Wishlist] No tracks in wishlist for auto-processing.")
                 with wishlist_timer_lock:
@@ -12426,14 +12498,17 @@ def _process_wishlist_automatically():
             db = MusicDatabase()
 
             print("🧹 [Auto-Wishlist] Cleaning duplicate tracks before processing...")
-            duplicates_removed = db.remove_wishlist_duplicates()
-            if duplicates_removed > 0:
-                print(f"🧹 [Auto-Wishlist] Removed {duplicates_removed} duplicate tracks")
+            for p in all_profiles:
+                duplicates_removed = db.remove_wishlist_duplicates(profile_id=p['id'])
+                if duplicates_removed > 0:
+                    print(f"🧹 [Auto-Wishlist] Removed {duplicates_removed} duplicate tracks from profile {p['id']}")
 
             # CLEANUP: Remove tracks from wishlist that already exist in library
             # This prevents wasting bandwidth on tracks we already have
             print("🧼 [Auto-Wishlist] Checking wishlist against library for already-owned tracks...")
-            cleanup_tracks = wishlist_service.get_wishlist_tracks_for_download()
+            cleanup_tracks = []
+            for p in all_profiles:
+                cleanup_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id']))
             cleanup_removed = 0
 
             for track in cleanup_tracks:
@@ -12480,8 +12555,10 @@ def _process_wishlist_automatically():
             if cleanup_removed > 0:
                 print(f"✅ [Auto-Wishlist] Cleaned up {cleanup_removed} already-owned tracks from wishlist")
 
-            # Get wishlist tracks for processing (after cleanup)
-            raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+            # Get wishlist tracks for processing (after cleanup) - combine all profiles
+            raw_wishlist_tracks = []
+            for p in all_profiles:
+                raw_wishlist_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id']))
             if not raw_wishlist_tracks:
                 print("⚠️ No tracks returned from wishlist service.")
                 with wishlist_timer_lock:
@@ -12600,7 +12677,9 @@ def _process_wishlist_automatically():
                     'auto_initiated': True,
                     'auto_processing_timestamp': time.time(),
                     # Store current cycle for toggling after completion
-                    'current_cycle': current_cycle
+                    'current_cycle': current_cycle,
+                    # Profile context for failed track wishlist re-adds (auto = profile 1 default)
+                    'profile_id': 1
                 }
             
             print(f"🚀 Starting automatic wishlist batch {batch_id} with {len(wishlist_tracks)} tracks")
@@ -12744,7 +12823,7 @@ def get_wishlist_count():
     try:
         from core.wishlist_service import get_wishlist_service
         wishlist_service = get_wishlist_service()
-        count = wishlist_service.get_wishlist_count()
+        count = wishlist_service.get_wishlist_count(profile_id=get_current_profile_id())
         return jsonify({"count": count})
     except Exception as e:
         print(f"Error getting wishlist count: {e}")
@@ -12766,7 +12845,7 @@ def get_wishlist_stats():
         from core.wishlist_service import get_wishlist_service
 
         wishlist_service = get_wishlist_service()
-        raw_tracks = wishlist_service.get_wishlist_tracks_for_download()
+        raw_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=get_current_profile_id())
 
         singles_count = 0
         albums_count = 0
@@ -12997,14 +13076,14 @@ def get_wishlist_tracks():
 
         if not wishlist_batch_active:
             db = MusicDatabase()
-            duplicates_removed = db.remove_wishlist_duplicates()
+            duplicates_removed = db.remove_wishlist_duplicates(profile_id=get_current_profile_id())
             if duplicates_removed > 0:
                 print(f"🧹 Cleaned {duplicates_removed} duplicate tracks from wishlist")
         else:
             print(f"⏸️ Skipping wishlist duplicate cleanup - download in progress")
 
         wishlist_service = get_wishlist_service()
-        raw_tracks = wishlist_service.get_wishlist_tracks_for_download()
+        raw_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=get_current_profile_id())
 
         # SANITIZE: Ensure consistent data format for frontend
         sanitized_tracks = []
@@ -13088,14 +13167,15 @@ def start_wishlist_missing_downloads():
         # This prevents the "11 tracks shown but 12 counted" bug
         print("🧹 [Manual-Wishlist] Cleaning duplicate tracks before download...")
         db = MusicDatabase()
-        duplicates_removed = db.remove_wishlist_duplicates()
+        manual_profile_id = get_current_profile_id()
+        duplicates_removed = db.remove_wishlist_duplicates(profile_id=manual_profile_id)
         if duplicates_removed > 0:
             print(f"🧹 [Manual-Wishlist] Removed {duplicates_removed} duplicate tracks")
 
         # CLEANUP: Remove tracks from wishlist that already exist in library
         # This prevents wasting bandwidth on tracks we already have
         print("🧼 [Manual-Wishlist] Checking wishlist against library for already-owned tracks...")
-        cleanup_tracks = wishlist_service.get_wishlist_tracks_for_download()
+        cleanup_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=manual_profile_id)
         cleanup_removed = 0
 
         for track in cleanup_tracks:
@@ -13143,7 +13223,7 @@ def start_wishlist_missing_downloads():
             print(f"✅ [Manual-Wishlist] Cleaned up {cleanup_removed} already-owned tracks from wishlist")
 
         # Get wishlist tracks formatted for download modal (after cleanup)
-        raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+        raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=manual_profile_id)
         if not raw_wishlist_tracks:
             return jsonify({"success": False, "error": "No tracks in wishlist"}), 400
 
@@ -13265,7 +13345,9 @@ def start_wishlist_missing_downloads():
                 'permanently_failed_tracks': [],
                 'cancelled_tracks': set(),
                 # Wishlist tracks are already known-missing — always skip the library check
-                'force_download_all': True
+                'force_download_all': True,
+                # Profile context for failed track wishlist re-adds
+                'profile_id': manual_profile_id
             }
 
         # Submit the wishlist processing job using the same processing function
@@ -13286,8 +13368,8 @@ def clear_wishlist():
     try:
         from core.wishlist_service import get_wishlist_service
         wishlist_service = get_wishlist_service()
-        success = wishlist_service.clear_wishlist()
-        
+        success = wishlist_service.clear_wishlist(profile_id=get_current_profile_id())
+
         if success:
             return jsonify({"success": True, "message": "Wishlist cleared successfully"})
         else:
@@ -13309,12 +13391,13 @@ def cleanup_wishlist():
         active_server = config_manager.get_active_media_server()
         
         print("📋 [Wishlist Cleanup] Starting wishlist cleanup process...")
-        
-        # Get all wishlist tracks
-        wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download()
+
+        # Get wishlist tracks for current profile
+        cleanup_profile_id = get_current_profile_id()
+        wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=cleanup_profile_id)
         if not wishlist_tracks:
             return jsonify({"success": True, "message": "No tracks in wishlist to clean up", "removed_count": 0})
-        
+
         print(f"📋 [Wishlist Cleanup] Found {len(wishlist_tracks)} tracks in wishlist")
         
         removed_count = 0
@@ -13399,7 +13482,7 @@ def remove_track_from_wishlist():
             return jsonify({"success": False, "error": "No spotify_track_id provided"}), 400
 
         wishlist_service = get_wishlist_service()
-        success = wishlist_service.remove_track_from_wishlist(spotify_track_id)
+        success = wishlist_service.remove_track_from_wishlist(spotify_track_id, profile_id=get_current_profile_id())
 
         if success:
             logger.info(f"Successfully removed track from wishlist: {spotify_track_id}")
@@ -13426,7 +13509,7 @@ def remove_album_from_wishlist():
             return jsonify({"success": False, "error": "No album_id provided"}), 400
 
         wishlist_service = get_wishlist_service()
-        all_tracks = wishlist_service.get_wishlist_tracks_for_download()
+        all_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=get_current_profile_id())
 
         # Find all tracks that belong to this album
         tracks_to_remove = []
@@ -13470,8 +13553,9 @@ def remove_album_from_wishlist():
 
         # Remove all matching tracks
         removed_count = 0
+        album_remove_pid = get_current_profile_id()
         for spotify_track_id in tracks_to_remove:
-            if wishlist_service.remove_track_from_wishlist(spotify_track_id):
+            if wishlist_service.remove_track_from_wishlist(spotify_track_id, profile_id=album_remove_pid):
                 removed_count += 1
 
         if removed_count > 0:
@@ -13503,8 +13587,9 @@ def remove_batch_from_wishlist():
 
         wishlist_service = get_wishlist_service()
         removed = 0
+        pid = get_current_profile_id()
         for track_id in spotify_track_ids:
-            if wishlist_service.remove_track_from_wishlist(track_id):
+            if wishlist_service.remove_track_from_wishlist(track_id, profile_id=pid):
                 removed += 1
 
         logger.info(f"Batch removed {removed} track(s) from wishlist")
@@ -13586,7 +13671,8 @@ def add_album_track_to_wishlist():
             spotify_track_data=spotify_track_data,
             failure_reason="Added from library (incomplete album)",
             source_type=source_type,
-            source_context=enhanced_source_context
+            source_context=enhanced_source_context,
+            profile_id=get_current_profile_id()
         )
 
         if success:
@@ -13695,7 +13781,7 @@ def _get_quality_tier_from_extension(file_path):
 
     return ('unknown', 999)
 
-def _run_quality_scanner(scope='watchlist'):
+def _run_quality_scanner(scope='watchlist', profile_id=1):
     """Main quality scanner worker function"""
     from core.wishlist_service import get_wishlist_service
     from database.music_database import MusicDatabase
@@ -13746,7 +13832,7 @@ def _run_quality_scanner(scope='watchlist'):
 
         if scope == 'watchlist':
             # Get watchlist artists
-            watchlist_artists = db.get_watchlist_artists()
+            watchlist_artists = db.get_watchlist_artists(profile_id=profile_id)
             if not watchlist_artists:
                 with quality_scanner_lock:
                     quality_scanner_state["status"] = "finished"
@@ -13937,7 +14023,8 @@ def _run_quality_scanner(scope='watchlist'):
                             spotify_track_data=matched_track_data,
                             failure_reason=f"Low quality - {tier_name.replace('_', ' ').title()} format",
                             source_type='quality_scanner',
-                            source_context=source_context
+                            source_context=source_context,
+                            profile_id=profile_id
                         )
 
                         if success:
@@ -14206,8 +14293,9 @@ def start_quality_scan():
         quality_scanner_state["results"] = []
         quality_scanner_state["error_message"] = ""
 
-        # Submit worker
-        quality_scanner_executor.submit(_run_quality_scanner, scope)
+        # Submit worker (capture profile_id before thread)
+        scan_profile_id = get_current_profile_id()
+        quality_scanner_executor.submit(_run_quality_scanner, scope, scan_profile_id)
 
         add_activity_item("🔍", "Quality Scan Started", f"Scanning {scope} tracks", "Now")
 
@@ -14832,7 +14920,8 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                         success = wishlist_service.add_failed_track_from_modal(
                             track_info=failed_track_info,
                             source_type='playlist',
-                            source_context=source_context
+                            source_context=source_context,
+                            profile_id=batch.get('profile_id', 1)
                         )
                         if success:
                             wishlist_added_count += 1
@@ -16618,9 +16707,11 @@ def start_playlist_missing_downloads(playlist_id):
                 'queue_index': 0,
                 # Track state management (replicating sync.py)
                 'permanently_failed_tracks': [],
-                'cancelled_tracks': set()
+                'cancelled_tracks': set(),
+                # Profile context for failed track wishlist re-adds
+                'profile_id': get_current_profile_id()
             }
-            
+
             for i, track_entry in enumerate(missing_tracks):
                 task_id = str(uuid.uuid4())
                 # Extract track data and original track index from frontend
@@ -17126,10 +17217,11 @@ def cancel_download_task():
             success = wishlist_service.add_spotify_track_to_wishlist(
                 spotify_track_data=spotify_track_data,
                 failure_reason="Download cancelled by user",
-                source_type="playlist", 
-                source_context=source_context
+                source_type="playlist",
+                source_context=source_context,
+                profile_id=get_current_profile_id()
             )
-            
+
             if success:
                 print(f"✅ Added cancelled track '{track_info.get('name')}' to wishlist.")
             else:
@@ -17587,8 +17679,9 @@ def _add_cancelled_task_to_wishlist(task):
         success = wishlist_service.add_spotify_track_to_wishlist(
             spotify_track_data=spotify_track_data,
             failure_reason="Download cancelled by user (v2)",
-            source_type="playlist", 
-            source_context=source_context
+            source_type="playlist",
+            source_context=source_context,
+            profile_id=get_current_profile_id()
         )
         
         if success:
@@ -17772,6 +17865,8 @@ def start_missing_tracks_process(playlist_id):
             'cancelled_tracks': set(),
             'queue_index': 0,
             'analysis_total': len(tracks),
+            # Profile context for failed track wishlist re-adds
+            'profile_id': get_current_profile_id(),
             'analysis_processed': 0,
             'analysis_results': [],
             'force_download_all': force_download_all,  # Pass the force flag to the batch
@@ -17834,9 +17929,11 @@ def start_missing_downloads():
                 'queue_index': 0,
                 # Track state management (replicating sync.py)
                 'permanently_failed_tracks': [],
-                'cancelled_tracks': set()
+                'cancelled_tracks': set(),
+                # Profile context for failed track wishlist re-adds
+                'profile_id': get_current_profile_id()
             }
-            
+
             for track_index, track_data in enumerate(missing_tracks):
                 task_id = str(uuid.uuid4())
                 download_tasks[task_id] = {
@@ -21013,7 +21110,7 @@ def save_discover_download_snapshot():
         downloads = data['downloads']
 
         db = get_database()
-        db.save_bubble_snapshot('discover_downloads', downloads)
+        db.save_bubble_snapshot('discover_downloads', downloads, profile_id=get_current_profile_id())
 
         download_count = len(downloads)
         print(f"📸 Saved discover download snapshot: {download_count} downloads")
@@ -21042,7 +21139,7 @@ def hydrate_discover_downloads():
         from datetime import datetime, timedelta
 
         db = get_database()
-        snapshot = db.get_bubble_snapshot('discover_downloads')
+        snapshot = db.get_bubble_snapshot('discover_downloads', profile_id=get_current_profile_id())
 
         # Load snapshot if it exists
         if not snapshot:
@@ -21062,7 +21159,7 @@ def hydrate_discover_downloads():
                 cutoff = datetime.now() - timedelta(hours=48)
                 if snapshot_dt < cutoff:
                     print(f"🧹 Cleaning up old discover download snapshot from {snapshot_time}")
-                    db.delete_bubble_snapshot('discover_downloads')
+                    db.delete_bubble_snapshot('discover_downloads', profile_id=get_current_profile_id())
                     return jsonify({
                         'success': True,
                         'downloads': {},
@@ -21090,7 +21187,7 @@ def hydrate_discover_downloads():
         # If no active processes exist, the app likely restarted - clean up snapshots
         if not current_processes:
             print(f"🧹 No active processes found - app likely restarted, cleaning up discover download snapshot")
-            db.delete_bubble_snapshot('discover_downloads')
+            db.delete_bubble_snapshot('discover_downloads', profile_id=get_current_profile_id())
             return jsonify({
                 'success': True,
                 'downloads': {},
@@ -21162,7 +21259,7 @@ def save_artist_bubble_snapshot():
         bubbles = data['bubbles']
 
         db = get_database()
-        db.save_bubble_snapshot('artist_bubbles', bubbles)
+        db.save_bubble_snapshot('artist_bubbles', bubbles, profile_id=get_current_profile_id())
 
         bubble_count = len(bubbles)
         print(f"📸 Saved artist bubble snapshot: {bubble_count} artists")
@@ -21191,7 +21288,7 @@ def hydrate_artist_bubbles():
         from datetime import datetime, timedelta
 
         db = get_database()
-        snapshot = db.get_bubble_snapshot('artist_bubbles')
+        snapshot = db.get_bubble_snapshot('artist_bubbles', profile_id=get_current_profile_id())
 
         # Load snapshot if it exists
         if not snapshot:
@@ -21211,7 +21308,7 @@ def hydrate_artist_bubbles():
                 cutoff = datetime.now() - timedelta(hours=48)
                 if snapshot_dt < cutoff:
                     print(f"🧹 Cleaning up old snapshot from {snapshot_time}")
-                    db.delete_bubble_snapshot('artist_bubbles')
+                    db.delete_bubble_snapshot('artist_bubbles', profile_id=get_current_profile_id())
                     return jsonify({
                         'success': True,
                         'bubbles': {},
@@ -21239,7 +21336,7 @@ def hydrate_artist_bubbles():
         # If no active processes exist, the app likely restarted - clean up snapshots
         if not current_processes:
             print(f"🧹 No active processes found - app likely restarted, cleaning up snapshot")
-            db.delete_bubble_snapshot('artist_bubbles')
+            db.delete_bubble_snapshot('artist_bubbles', profile_id=get_current_profile_id())
             return jsonify({
                 'success': True,
                 'bubbles': {},
@@ -21334,7 +21431,7 @@ def save_search_bubble_snapshot():
         bubbles = data['bubbles']
 
         db = get_database()
-        db.save_bubble_snapshot('search_bubbles', bubbles)
+        db.save_bubble_snapshot('search_bubbles', bubbles, profile_id=get_current_profile_id())
 
         bubble_count = len(bubbles)
         print(f"📸 Saved search bubble snapshot: {bubble_count} albums/tracks")
@@ -21363,7 +21460,7 @@ def hydrate_search_bubbles():
         from datetime import datetime, timedelta
 
         db = get_database()
-        snapshot = db.get_bubble_snapshot('search_bubbles')
+        snapshot = db.get_bubble_snapshot('search_bubbles', profile_id=get_current_profile_id())
 
         # Load snapshot if it exists
         if not snapshot:
@@ -21383,7 +21480,7 @@ def hydrate_search_bubbles():
                 cutoff = datetime.now() - timedelta(hours=48)
                 if snapshot_dt < cutoff:
                     print(f"🧹 Cleaning up old search snapshot from {snapshot_time}")
-                    db.delete_bubble_snapshot('search_bubbles')
+                    db.delete_bubble_snapshot('search_bubbles', profile_id=get_current_profile_id())
                     return jsonify({
                         'success': True,
                         'bubbles': {},
@@ -21411,7 +21508,7 @@ def hydrate_search_bubbles():
         # If no active processes exist, the app likely restarted - clean up snapshots
         if not current_processes:
             print(f"🧹 No active processes found - app likely restarted, cleaning up search snapshot")
-            db.delete_bubble_snapshot('search_bubbles')
+            db.delete_bubble_snapshot('search_bubbles', profile_id=get_current_profile_id())
             return jsonify({
                 'success': True,
                 'bubbles': {},
@@ -21484,6 +21581,192 @@ def hydrate_search_bubbles():
             'error': str(e)
         }), 500
 
+# --- Profile API Endpoints ---
+
+@app.route('/api/profiles', methods=['GET'])
+def list_profiles():
+    """List all profiles"""
+    try:
+        database = get_database()
+        profiles = database.get_all_profiles()
+        return jsonify({'success': True, 'profiles': profiles})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles', methods=['POST'])
+def create_profile():
+    """Create a new profile (admin only)"""
+    try:
+        # Check that requester is admin
+        database = get_database()
+        current = database.get_profile(get_current_profile_id())
+        if current and not current['is_admin']:
+            return jsonify({'success': False, 'error': 'Admin only'}), 403
+
+        data = request.json or {}
+        name = data.get('name', '').strip()
+        if not name:
+            return jsonify({'success': False, 'error': 'Name is required'}), 400
+
+        avatar_color = data.get('avatar_color', '#6366f1')
+        avatar_url = data.get('avatar_url') or None
+        pin = data.get('pin')
+        pin_hash = None
+        if pin:
+            from werkzeug.security import generate_password_hash
+            pin_hash = generate_password_hash(pin, method='pbkdf2:sha256')
+
+        profile_id = database.create_profile(name, avatar_color, pin_hash, is_admin=False, avatar_url=avatar_url)
+        if profile_id is None:
+            return jsonify({'success': False, 'error': 'Profile name already exists'}), 409
+
+        return jsonify({'success': True, 'profile_id': profile_id})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles/<int:profile_id>', methods=['PUT'])
+def update_profile(profile_id):
+    """Update a profile (admin or self)"""
+    try:
+        database = get_database()
+        current_pid = get_current_profile_id()
+        current = database.get_profile(current_pid)
+        if not current:
+            return jsonify({'success': False, 'error': 'Current profile not found'}), 404
+
+        # Only admin or self can update
+        if not current['is_admin'] and current_pid != profile_id:
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+        data = request.json or {}
+        kwargs = {}
+        if 'name' in data:
+            name = data['name'].strip()
+            if not name:
+                return jsonify({'success': False, 'error': 'Name cannot be empty'}), 400
+            kwargs['name'] = name
+        if 'avatar_color' in data:
+            kwargs['avatar_color'] = data['avatar_color']
+        if 'avatar_url' in data:
+            kwargs['avatar_url'] = data['avatar_url'] or None
+        if 'is_admin' in data and current['is_admin']:
+            # Prevent demoting the last admin
+            if not data['is_admin']:
+                all_profiles = database.get_all_profiles()
+                admin_count = sum(1 for p in all_profiles if p['is_admin'])
+                target = database.get_profile(profile_id)
+                if target and target['is_admin'] and admin_count <= 1:
+                    return jsonify({'success': False, 'error': 'Cannot remove the last admin'}), 400
+            kwargs['is_admin'] = int(data['is_admin'])
+
+        success = database.update_profile(profile_id, **kwargs)
+        return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles/<int:profile_id>', methods=['DELETE'])
+def delete_profile(profile_id):
+    """Delete a profile (admin only, can't delete self)"""
+    try:
+        database = get_database()
+        current_pid = get_current_profile_id()
+        current = database.get_profile(current_pid)
+
+        if not current or not current['is_admin']:
+            return jsonify({'success': False, 'error': 'Admin only'}), 403
+        if current_pid == profile_id:
+            return jsonify({'success': False, 'error': 'Cannot delete your own profile'}), 400
+
+        target = database.get_profile(profile_id)
+        if not target:
+            return jsonify({'success': False, 'error': 'Profile not found'}), 404
+
+        success = database.delete_profile(profile_id)
+        return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles/select', methods=['POST'])
+def select_profile():
+    """Select a profile (validates PIN if set)"""
+    try:
+        data = request.json or {}
+        try:
+            profile_id = int(data.get('profile_id', 0))
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'Invalid profile_id'}), 400
+        pin = data.get('pin', '')
+
+        if not profile_id:
+            return jsonify({'success': False, 'error': 'profile_id required'}), 400
+
+        database = get_database()
+        profile = database.get_profile(profile_id)
+        if not profile:
+            return jsonify({'success': False, 'error': 'Profile not found'}), 404
+
+        # Only enforce PIN when multiple profiles exist (PIN protects against profile switching)
+        all_profiles = database.get_all_profiles()
+        if len(all_profiles) > 1 and profile['has_pin']:
+            if not pin:
+                return jsonify({'success': False, 'error': 'PIN required', 'pin_required': True}), 401
+            if not database.verify_profile_pin(profile_id, pin):
+                return jsonify({'success': False, 'error': 'Invalid PIN'}), 401
+
+        session['profile_id'] = profile_id
+        return jsonify({'success': True, 'profile': profile})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles/current', methods=['GET'])
+def get_current_profile():
+    """Get the currently selected profile from session"""
+    try:
+        pid = session.get('profile_id')
+        if not pid:
+            return jsonify({'success': False, 'error': 'No profile selected'}), 200
+
+        database = get_database()
+        profile = database.get_profile(pid)
+        if not profile:
+            session.pop('profile_id', None)
+            return jsonify({'success': False, 'error': 'Profile not found'}), 200
+
+        return jsonify({'success': True, 'profile': profile})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles/logout', methods=['POST'])
+def logout_profile():
+    """Clear session — back to profile picker"""
+    session.pop('profile_id', None)
+    return jsonify({'success': True})
+
+@app.route('/api/profiles/<int:profile_id>/set-pin', methods=['POST'])
+def set_profile_pin(profile_id):
+    """Set or change PIN for a profile (admin or self)"""
+    try:
+        database = get_database()
+        current_pid = get_current_profile_id()
+        current = database.get_profile(current_pid)
+
+        if not current or (not current['is_admin'] and current_pid != profile_id):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+        data = request.json or {}
+        pin = data.get('pin', '')
+
+        if pin:
+            from werkzeug.security import generate_password_hash
+            pin_hash = generate_password_hash(pin, method='pbkdf2:sha256')
+        else:
+            pin_hash = None  # Remove PIN
+
+        success = database.update_profile(profile_id, pin_hash=pin_hash)
+        return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 # --- Watchlist API Endpoints ---
 
 @app.route('/api/watchlist/count', methods=['GET'])
@@ -21491,7 +21774,7 @@ def get_watchlist_count():
     """Get the number of artists in the watchlist"""
     try:
         database = get_database()
-        count = database.get_watchlist_count()
+        count = database.get_watchlist_count(profile_id=get_current_profile_id())
 
         # Calculate time until next auto-scanning
         next_run_in_seconds = 0
@@ -21513,7 +21796,7 @@ def get_watchlist_artists():
     """Get all artists in the watchlist with cached images"""
     try:
         database = get_database()
-        watchlist_artists = database.get_watchlist_artists()
+        watchlist_artists = database.get_watchlist_artists(profile_id=get_current_profile_id())
 
         # Convert to JSON serializable format (images are cached from watchlist scans)
         artists_data = []
@@ -21554,7 +21837,7 @@ def add_to_watchlist():
             return jsonify({"success": False, "error": "Missing artist_id or artist_name"}), 400
 
         database = get_database()
-        success = database.add_artist_to_watchlist(artist_id, artist_name)
+        success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id())
 
         if success:
             # Detect ID type: iTunes IDs are purely numeric, Spotify IDs are alphanumeric
@@ -21616,9 +21899,10 @@ def add_to_watchlist():
                 # Don't fail the add operation if image fetch fails
                 print(f"⚠️ Could not fetch artist image for {artist_name}: {img_error}")
 
-            # Push updated count to all WebSocket clients immediately
+            # Push updated count to this profile's WebSocket room immediately
             try:
-                socketio.emit('watchlist:count', _build_watchlist_count_payload())
+                pid = get_current_profile_id()
+                socketio.emit('watchlist:count', _build_watchlist_count_payload(profile_id=pid), room=f'profile:{pid}')
             except Exception:
                 pass
             return jsonify({"success": True, "message": f"Added {artist_name} to watchlist"})
@@ -21640,12 +21924,13 @@ def remove_from_watchlist():
             return jsonify({"success": False, "error": "Missing artist_id"}), 400
 
         database = get_database()
-        success = database.remove_artist_from_watchlist(artist_id)
+        success = database.remove_artist_from_watchlist(artist_id, profile_id=get_current_profile_id())
 
         if success:
-            # Push updated count to all WebSocket clients immediately
+            # Push updated count to this profile's WebSocket room immediately
             try:
-                socketio.emit('watchlist:count', _build_watchlist_count_payload())
+                pid = get_current_profile_id()
+                socketio.emit('watchlist:count', _build_watchlist_count_payload(profile_id=pid), room=f'profile:{pid}')
             except Exception:
                 pass
             return jsonify({"success": True, "message": "Removed artist from watchlist"})
@@ -21677,11 +21962,11 @@ def add_batch_to_watchlist():
                 continue
 
             # Check if already watched
-            if database.is_artist_in_watchlist(artist_id):
+            if database.is_artist_in_watchlist(artist_id, profile_id=get_current_profile_id()):
                 skipped += 1
                 continue
 
-            success = database.add_artist_to_watchlist(artist_id, artist_name)
+            success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id())
             if success:
                 added += 1
                 # Cache artist image
@@ -21730,7 +22015,8 @@ def watchlist_all_unwatched_library_artists():
             letter='all',
             page=1,
             limit=99999,
-            watchlist_filter='unwatched'
+            watchlist_filter='unwatched',
+            profile_id=get_current_profile_id()
         )
 
         unwatched_artists = result.get('artists', [])
@@ -21758,11 +22044,11 @@ def watchlist_all_unwatched_library_artists():
                 continue
 
             # Check if already watched (shouldn't be since we filtered, but safety check)
-            if database.is_artist_in_watchlist(artist_id):
+            if database.is_artist_in_watchlist(artist_id, profile_id=get_current_profile_id()):
                 skipped_already += 1
                 continue
 
-            success = database.add_artist_to_watchlist(artist_id, artist_name)
+            success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id())
             if success:
                 added += 1
                 # Use library thumb_url if available (no HTTP calls needed)
@@ -21805,7 +22091,7 @@ def remove_batch_from_watchlist():
         database = get_database()
         removed = 0
         for artist_id in artist_ids:
-            if database.remove_artist_from_watchlist(artist_id):
+            if database.remove_artist_from_watchlist(artist_id, profile_id=get_current_profile_id()):
                 removed += 1
 
         return jsonify({
@@ -21829,8 +22115,8 @@ def check_watchlist_status():
             return jsonify({"success": False, "error": "Missing artist_id"}), 400
         
         database = get_database()
-        is_watching = database.is_artist_in_watchlist(artist_id)
-        
+        is_watching = database.is_artist_in_watchlist(artist_id, profile_id=get_current_profile_id())
+
         return jsonify({"success": True, "is_watching": is_watching})
         
     except Exception as e:
@@ -21867,6 +22153,7 @@ def start_watchlist_scan():
             return jsonify({"success": False, "error": "Watchlist scan is already in progress."}), 409
         
         # Start the scan in a background thread
+        scan_profile_id = get_current_profile_id()
         def run_scan():
             _enrichment_was_running = False
             _itunes_enrichment_was_running = False
@@ -21882,9 +22169,9 @@ def start_watchlist_scan():
                     watchlist_auto_scanning_timestamp = time.time()
                     print(f"🔒 [Manual Watchlist Scan] Flag set at timestamp {watchlist_auto_scanning_timestamp}")
 
-                # Get list of artists to scan
+                # Get list of artists to scan (for the current profile)
                 database = get_database()
-                watchlist_artists = database.get_watchlist_artists()
+                watchlist_artists = database.get_watchlist_artists(profile_id=scan_profile_id)
 
                 # Apply global overrides if enabled
                 _apply_watchlist_global_overrides(watchlist_artists)
@@ -22113,13 +22400,13 @@ def start_watchlist_scan():
 
                             # If Spotify is authenticated, also require Spotify IDs to be present
                             spotify_authenticated = spotify_client and spotify_client.is_spotify_authenticated()
-                            if database.has_fresh_similar_artists(source_artist_id, days_threshold=30, require_spotify=spotify_authenticated):
+                            if database.has_fresh_similar_artists(source_artist_id, days_threshold=30, require_spotify=spotify_authenticated, profile_id=scan_profile_id):
                                 print(f"  Similar artists for {artist.artist_name} are cached and fresh")
                                 # Still backfill missing iTunes IDs
-                                scanner._backfill_similar_artists_itunes_ids(source_artist_id)
+                                scanner._backfill_similar_artists_itunes_ids(source_artist_id, profile_id=scan_profile_id)
                             else:
                                 print(f"  Fetching similar artists for {artist.artist_name}...")
-                                scanner.update_similar_artists(artist)
+                                scanner.update_similar_artists(artist, profile_id=scan_profile_id)
                                 print(f"  Similar artists updated for {artist.artist_name}")
                         except Exception as similar_error:
                             print(f"  ⚠️ Failed to update similar artists for {artist.artist_name}: {similar_error}")
@@ -22184,7 +22471,7 @@ def start_watchlist_scan():
                 print("🎵 Starting discovery pool population...")
                 watchlist_scan_state['current_phase'] = 'populating_discovery_pool'
                 try:
-                    scanner.populate_discovery_pool()
+                    scanner.populate_discovery_pool(profile_id=scan_profile_id)
                     print("✅ Discovery pool population complete")
                 except Exception as discovery_error:
                     print(f"⚠️ Error populating discovery pool: {discovery_error}")
@@ -22644,30 +22931,41 @@ def _update_similar_artists_worker():
         print("🎵 [Similar Artists] Starting similar artists update...")
 
         database = get_database()
-        watchlist_artists = database.get_watchlist_artists()
+        all_profiles = database.get_all_profiles()
 
-        if not watchlist_artists:
+        # Build per-profile artist lists and deduplicate for API calls
+        # artist_key -> (artist_obj, [profile_ids])
+        artist_profiles = {}
+        for p in all_profiles:
+            for artist in database.get_watchlist_artists(profile_id=p['id']):
+                key = (artist.spotify_artist_id or '', artist.itunes_artist_id or '', artist.artist_name.lower())
+                if key not in artist_profiles:
+                    artist_profiles[key] = (artist, [])
+                artist_profiles[key][1].append(p['id'])
+
+        if not artist_profiles:
             similar_artists_update_state['status'] = 'completed'
             print("📭 [Similar Artists] No watchlist artists to process")
             return
 
-        similar_artists_update_state['total_artists'] = len(watchlist_artists)
-        print(f"📊 [Similar Artists] Processing {len(watchlist_artists)} watchlist artists")
+        similar_artists_update_state['total_artists'] = len(artist_profiles)
+        print(f"📊 [Similar Artists] Processing {len(artist_profiles)} unique watchlist artists across {len(all_profiles)} profiles")
 
         scanner = get_watchlist_scanner(spotify_client)
 
-        for idx, artist in enumerate(watchlist_artists, 1):
+        for idx, (key, (artist, profile_ids)) in enumerate(artist_profiles.items(), 1):
             try:
                 similar_artists_update_state['artists_processed'] = idx
                 similar_artists_update_state['current_artist'] = artist.artist_name
 
-                print(f"[{idx}/{len(watchlist_artists)}] Updating similar artists for {artist.artist_name}")
+                print(f"[{idx}/{len(artist_profiles)}] Updating similar artists for {artist.artist_name} (profiles: {profile_ids})")
 
-                # Update similar artists for this artist
-                scanner.update_similar_artists(artist, limit=10)
+                # Update similar artists for each profile that watches this artist
+                for pid in profile_ids:
+                    scanner.update_similar_artists(artist, limit=10, profile_id=pid)
 
                 # Rate limiting
-                if idx < len(watchlist_artists):
+                if idx < len(artist_profiles):
                     time.sleep(2.0)  # 2 seconds between artists
 
             except Exception as artist_error:
@@ -22678,7 +22976,7 @@ def _update_similar_artists_worker():
         similar_artists_update_state['status'] = 'completed'
         similar_artists_update_state['current_artist'] = None
 
-        print(f"✅ [Similar Artists] Update complete! Processed {len(watchlist_artists)} artists")
+        print(f"✅ [Similar Artists] Update complete! Processed {len(artist_profiles)} artists")
 
     except Exception as e:
         print(f"❌ [Similar Artists] Critical error: {e}")
@@ -22824,10 +23122,12 @@ def _process_watchlist_scan_automatically():
             from core.watchlist_scanner import get_watchlist_scanner
             from database.music_database import get_database
 
-            # Check if we have artists to scan and Spotify client is available
+            # Check if we have artists to scan across all profiles
             database = get_database()
-            watchlist_count = database.get_watchlist_count()
-            print(f"🔍 [Auto-Watchlist] Watchlist count check: {watchlist_count} artists found")
+            # Auto-scan covers all profiles
+            all_profiles = database.get_all_profiles()
+            watchlist_count = sum(database.get_watchlist_count(profile_id=p['id']) for p in all_profiles)
+            print(f"🔍 [Auto-Watchlist] Watchlist count check: {watchlist_count} artists found across {len(all_profiles)} profiles")
 
             if watchlist_count == 0:
                 print("ℹ️ [Auto-Watchlist] No artists in watchlist for auto-scanning.")
@@ -22849,8 +23149,10 @@ def _process_watchlist_scan_automatically():
 
             print(f"👁️ [Auto-Watchlist] Found {watchlist_count} artists in watchlist, starting automatic scan...")
 
-            # Get list of artists to scan
-            watchlist_artists = database.get_watchlist_artists()
+            # Get list of artists to scan (all profiles combined for auto-scan)
+            watchlist_artists = []
+            for p in all_profiles:
+                watchlist_artists.extend(database.get_watchlist_artists(profile_id=p['id']))
             scanner = get_watchlist_scanner(spotify_client)
 
             # Apply global overrides if enabled
@@ -23102,11 +23404,12 @@ def _process_watchlist_scan_automatically():
             print(f"Automatic watchlist scan completed: {len(successful_scans)}/{len(scan_results)} artists scanned successfully")
             print(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
 
-            # Populate discovery pool from similar artists
+            # Populate discovery pool from similar artists (per-profile)
             print("🎵 Starting discovery pool population...")
             watchlist_scan_state['current_phase'] = 'populating_discovery_pool'
             try:
-                scanner.populate_discovery_pool()
+                for p in all_profiles:
+                    scanner.populate_discovery_pool(profile_id=p['id'])
                 print("✅ Discovery pool population complete")
             except Exception as discovery_error:
                 print(f"⚠️ Error populating discovery pool: {discovery_error}")
@@ -23235,12 +23538,13 @@ def get_discover_hero():
         itunes_client = iTunesClient()
 
         # Get top similar artists (excluding watchlist, cycled by last_featured)
-        similar_artists = database.get_top_similar_artists(limit=50)
+        pid = get_current_profile_id()
+        similar_artists = database.get_top_similar_artists(limit=50, profile_id=pid)
 
         # FALLBACK: If no similar artists exist, use watchlist artists for Hero section
         if not similar_artists:
             print("[Discover Hero] No similar artists found, falling back to watchlist artists")
-            watchlist_artists = database.get_watchlist_artists()
+            watchlist_artists = database.get_watchlist_artists(profile_id=pid)
 
             if not watchlist_artists:
                 return jsonify({"success": True, "artists": [], "source": active_source})
@@ -23396,7 +23700,7 @@ def get_discover_similar_artists():
         database = get_database()
         active_source = _get_active_discovery_source()
 
-        similar_artists = database.get_top_similar_artists(limit=200)
+        similar_artists = database.get_top_similar_artists(limit=200, profile_id=get_current_profile_id())
 
         if not similar_artists:
             return jsonify({"success": True, "artists": [], "source": active_source, "count": 0})
@@ -23501,7 +23805,7 @@ def get_discover_recent_releases():
         active_source = _get_active_discovery_source()
 
         # Get cached recent albums filtered by source (max 20)
-        albums = database.get_discovery_recent_albums(limit=20, source=active_source)
+        albums = database.get_discovery_recent_albums(limit=20, source=active_source, profile_id=get_current_profile_id())
 
         return jsonify({"success": True, "albums": albums, "source": active_source})
 
@@ -23520,13 +23824,14 @@ def get_discover_release_radar():
         active_source = _get_active_discovery_source()
 
         # Try source-specific playlist first, then fall back to generic
-        curated_track_ids = database.get_curated_playlist(f'release_radar_{active_source}')
+        pid = get_current_profile_id()
+        curated_track_ids = database.get_curated_playlist(f'release_radar_{active_source}', profile_id=pid)
         if not curated_track_ids:
-            curated_track_ids = database.get_curated_playlist('release_radar')
+            curated_track_ids = database.get_curated_playlist('release_radar', profile_id=pid)
 
         if curated_track_ids:
             # Use curated selection - fetch track data from discovery pool filtered by source
-            discovery_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False, source=active_source)
+            discovery_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False, source=active_source, profile_id=pid)
 
             # Build lookup dict with source-appropriate IDs
             tracks_by_id = {}
@@ -23583,13 +23888,14 @@ def get_discover_weekly():
         active_source = _get_active_discovery_source()
 
         # Try source-specific playlist first, then fall back to generic
-        curated_track_ids = database.get_curated_playlist(f'discovery_weekly_{active_source}')
+        pid = get_current_profile_id()
+        curated_track_ids = database.get_curated_playlist(f'discovery_weekly_{active_source}', profile_id=pid)
         if not curated_track_ids:
-            curated_track_ids = database.get_curated_playlist('discovery_weekly')
+            curated_track_ids = database.get_curated_playlist('discovery_weekly', profile_id=pid)
 
         if curated_track_ids:
             # Use curated selection - fetch track data from discovery pool filtered by source
-            discovery_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False, source=active_source)
+            discovery_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False, source=active_source, profile_id=pid)
 
             # Build lookup dict with source-appropriate IDs
             tracks_by_id = {}
@@ -23649,19 +23955,22 @@ def refresh_discover_data():
 
         print("[Discover Refresh] Starting forced refresh of discover data...")
 
+        refresh_pid = get_current_profile_id()
+
         # Cache recent albums from watchlist and similar artists
         print("[Discover Refresh] Caching recent albums...")
-        scanner.cache_discovery_recent_albums()
+        scanner.cache_discovery_recent_albums(profile_id=refresh_pid)
 
         # Curate playlists
         print("[Discover Refresh] Curating discovery playlists...")
-        scanner.curate_discovery_playlists()
+        scanner.curate_discovery_playlists(profile_id=refresh_pid)
 
         # Get counts for response
         active_source = _get_active_discovery_source()
-        recent_albums = database.get_discovery_recent_albums(limit=100, source=active_source)
-        release_radar = database.get_curated_playlist(f'release_radar_{active_source}') or []
-        discovery_weekly = database.get_curated_playlist(f'discovery_weekly_{active_source}') or []
+        pid = get_current_profile_id()
+        recent_albums = database.get_discovery_recent_albums(limit=100, source=active_source, profile_id=pid)
+        release_radar = database.get_curated_playlist(f'release_radar_{active_source}', profile_id=pid) or []
+        discovery_weekly = database.get_curated_playlist(f'discovery_weekly_{active_source}', profile_id=pid) or []
 
         print(f"[Discover Refresh] Complete! Recent albums: {len(recent_albums)}, Release Radar: {len(release_radar)} tracks, Discovery Weekly: {len(discovery_weekly)} tracks")
 
@@ -23690,30 +23999,31 @@ def diagnose_discover_data():
     try:
         database = get_database()
         active_source = _get_active_discovery_source()
+        pid = get_current_profile_id()
 
         with database._get_connection() as conn:
             cursor = conn.cursor()
 
             # Similar artists stats
-            cursor.execute("SELECT COUNT(*) as total FROM similar_artists")
+            cursor.execute("SELECT COUNT(*) as total FROM similar_artists WHERE profile_id = ?", (pid,))
             total_similar = cursor.fetchone()['total']
 
-            cursor.execute("SELECT COUNT(*) as count FROM similar_artists WHERE similar_artist_itunes_id IS NOT NULL")
+            cursor.execute("SELECT COUNT(*) as count FROM similar_artists WHERE similar_artist_itunes_id IS NOT NULL AND profile_id = ?", (pid,))
             similar_with_itunes = cursor.fetchone()['count']
 
-            cursor.execute("SELECT COUNT(*) as count FROM similar_artists WHERE similar_artist_spotify_id IS NOT NULL")
+            cursor.execute("SELECT COUNT(*) as count FROM similar_artists WHERE similar_artist_spotify_id IS NOT NULL AND profile_id = ?", (pid,))
             similar_with_spotify = cursor.fetchone()['count']
 
             # Discovery pool stats
-            cursor.execute("SELECT source, COUNT(*) as count FROM discovery_pool GROUP BY source")
+            cursor.execute("SELECT source, COUNT(*) as count FROM discovery_pool WHERE profile_id = ? GROUP BY source", (pid,))
             pool_by_source = {row['source']: row['count'] for row in cursor.fetchall()}
 
             # Recent albums stats
-            cursor.execute("SELECT source, COUNT(*) as count FROM discovery_recent_albums GROUP BY source")
+            cursor.execute("SELECT source, COUNT(*) as count FROM discovery_recent_albums WHERE profile_id = ? GROUP BY source", (pid,))
             albums_by_source = {row['source']: row['count'] for row in cursor.fetchall()}
 
             # Curated playlists
-            cursor.execute("SELECT playlist_type, track_ids_json FROM discovery_curated_playlists")
+            cursor.execute("SELECT playlist_type, track_ids_json FROM discovery_curated_playlists WHERE profile_id = ?", (pid,))
             playlists = {}
             for row in cursor.fetchall():
                 import json
@@ -23721,10 +24031,10 @@ def diagnose_discover_data():
                 playlists[row['playlist_type']] = len(track_ids)
 
             # Watchlist artists
-            cursor.execute("SELECT COUNT(*) as total FROM watchlist_artists")
+            cursor.execute("SELECT COUNT(*) as total FROM watchlist_artists WHERE profile_id = ?", (pid,))
             total_watchlist = cursor.fetchone()['total']
 
-            cursor.execute("SELECT COUNT(*) as count FROM watchlist_artists WHERE itunes_artist_id IS NOT NULL")
+            cursor.execute("SELECT COUNT(*) as count FROM watchlist_artists WHERE itunes_artist_id IS NOT NULL AND profile_id = ?", (pid,))
             watchlist_with_itunes = cursor.fetchone()['count']
 
         return jsonify({
@@ -29741,11 +30051,11 @@ def _build_status_payload():
         'active_media_server': config_manager.get_active_media_server()
     }
 
-def _build_watchlist_count_payload():
+def _build_watchlist_count_payload(profile_id=1):
     """Build the same payload used by GET /api/watchlist/count."""
     try:
         database = get_database()
-        count = database.get_watchlist_count()
+        count = database.get_watchlist_count(profile_id=profile_id)
     except Exception:
         count = 0
     next_run_in_seconds = 0
@@ -29768,11 +30078,15 @@ def _emit_service_status_loop():
             logger.debug(f"Error emitting service status: {e}")
 
 def _emit_watchlist_count_loop():
-    """Background thread that pushes watchlist count every 30 seconds."""
+    """Background thread that pushes watchlist count every 30 seconds to each profile room."""
     while True:
         socketio.sleep(30)
         try:
-            socketio.emit('watchlist:count', _build_watchlist_count_payload())
+            database = get_database()
+            profiles = database.get_all_profiles()
+            for profile in profiles:
+                pid = profile['id']
+                socketio.emit('watchlist:count', _build_watchlist_count_payload(profile_id=pid), room=f'profile:{pid}')
         except Exception as e:
             logger.debug(f"Error emitting watchlist count: {e}")
 
@@ -29823,6 +30137,18 @@ def handle_download_unsubscribe(data):
         leave_room(f'batch:{bid}')
     logger.debug(f"Client unsubscribed from batches: {batch_ids}")
 
+@socketio.on('profile:join')
+def handle_profile_join(data):
+    """Client joins a profile room for scoped WebSocket emits (watchlist/wishlist counts)."""
+    profile_id = data.get('profile_id')
+    if profile_id:
+        # Leave any previous profile rooms
+        old_id = data.get('old_profile_id')
+        if old_id:
+            leave_room(f'profile:{old_id}')
+        join_room(f'profile:{profile_id}')
+        logger.debug(f"Client joined profile room: profile:{profile_id}")
+
 # --- Phase 2: Dashboard emitters ---
 
 def _emit_system_stats_loop():
@@ -29857,13 +30183,18 @@ def _emit_db_stats_loop():
             logger.debug(f"Error emitting db stats: {e}")
 
 def _emit_wishlist_count_loop():
-    """Background thread that pushes wishlist count every 30 seconds."""
+    """Background thread that pushes wishlist count every 30 seconds to each profile room."""
     while True:
         socketio.sleep(30)
         try:
             from core.wishlist_service import get_wishlist_service
-            count = get_wishlist_service().get_wishlist_count()
-            socketio.emit('dashboard:wishlist_count', {'count': count})
+            ws = get_wishlist_service()
+            database = get_database()
+            profiles = database.get_all_profiles()
+            for profile in profiles:
+                pid = profile['id']
+                count = ws.get_wishlist_count(profile_id=pid)
+                socketio.emit('dashboard:wishlist_count', {'count': count}, room=f'profile:{pid}')
         except Exception as e:
             logger.debug(f"Error emitting wishlist count: {e}")
 

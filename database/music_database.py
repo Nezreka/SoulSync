@@ -94,6 +94,7 @@ class WatchlistArtist:
     include_remixes: bool = False
     include_acoustic: bool = False
     include_compilations: bool = False
+    profile_id: int = 1
 
 @dataclass
 class SimilarArtist:
@@ -330,6 +331,12 @@ class MusicDatabase:
 
             # Retag tool tables for tracking processed downloads (migration)
             self._add_retag_tables(cursor)
+
+            # Multi-profile support (migration)
+            self._add_profile_support(cursor)
+            self._add_profile_support_v2(cursor)
+            self._add_profile_support_v3(cursor)
+            self._add_profile_support_v4(cursor)
 
             conn.commit()
             logger.info("Database initialized successfully")
@@ -1332,6 +1339,618 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding retag tables: {e}")
+
+    def _add_profile_support(self, cursor):
+        """Add multi-profile support: profiles table + profile_id on per-profile tables"""
+        try:
+            # Check if migration already applied
+            cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_migration_v1' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+
+            logger.info("Adding multi-profile support...")
+
+            # 1. Create profiles table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS profiles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    avatar_color TEXT DEFAULT '#6366f1',
+                    pin_hash TEXT,
+                    is_admin INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # 2. Insert default admin profile
+            cursor.execute("""
+                INSERT OR IGNORE INTO profiles (id, name, is_admin)
+                VALUES (1, 'Admin', 1)
+            """)
+
+            # 3. Add profile_id column to per-profile tables
+            tables_needing_profile_id = [
+                'watchlist_artists', 'wishlist_tracks', 'similar_artists',
+                'discovery_pool', 'discovery_recent_albums', 'discovery_curated_playlists',
+                'bubble_snapshots', 'recent_releases'
+            ]
+
+            for table in tables_needing_profile_id:
+                try:
+                    cursor.execute(f"PRAGMA table_info({table})")
+                    columns = [col[1] for col in cursor.fetchall()]
+                    if 'profile_id' not in columns:
+                        cursor.execute(f"ALTER TABLE {table} ADD COLUMN profile_id INTEGER DEFAULT 1")
+                        logger.info(f"Added profile_id column to {table}")
+                except Exception as e:
+                    logger.warning(f"Could not add profile_id to {table}: {e}")
+
+            # 4. Rebuild watchlist_artists to change UNIQUE constraint
+            #    Old: UNIQUE(spotify_artist_id)
+            #    New: UNIQUE(profile_id, spotify_artist_id)
+            try:
+                cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='watchlist_artists'")
+                create_sql = cursor.fetchone()
+                if create_sql and 'UNIQUE(profile_id' not in create_sql[0]:
+                    # Get current columns for the table
+                    cursor.execute("PRAGMA table_info(watchlist_artists)")
+                    cols_info = cursor.fetchall()
+                    col_names = [c[1] for c in cols_info]
+
+                    cursor.execute("""
+                        CREATE TABLE watchlist_artists_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            spotify_artist_id TEXT,
+                            artist_name TEXT NOT NULL,
+                            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            last_scan_timestamp TIMESTAMP,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            image_url TEXT,
+                            include_albums INTEGER DEFAULT 1,
+                            include_eps INTEGER DEFAULT 1,
+                            include_singles INTEGER DEFAULT 1,
+                            include_live INTEGER DEFAULT 0,
+                            include_remixes INTEGER DEFAULT 0,
+                            include_acoustic INTEGER DEFAULT 0,
+                            include_compilations INTEGER DEFAULT 0,
+                            itunes_artist_id TEXT,
+                            profile_id INTEGER DEFAULT 1,
+                            UNIQUE(profile_id, spotify_artist_id),
+                            UNIQUE(profile_id, itunes_artist_id)
+                        )
+                    """)
+
+                    # Build column list for INSERT (only columns that exist in both)
+                    new_cols = ['id', 'spotify_artist_id', 'artist_name', 'date_added',
+                                'last_scan_timestamp', 'created_at', 'updated_at', 'image_url',
+                                'include_albums', 'include_eps', 'include_singles', 'include_live',
+                                'include_remixes', 'include_acoustic', 'include_compilations',
+                                'itunes_artist_id', 'profile_id']
+                    shared_cols = [c for c in new_cols if c in col_names]
+                    cols_str = ', '.join(shared_cols)
+
+                    cursor.execute(f"INSERT INTO watchlist_artists_new ({cols_str}) SELECT {cols_str} FROM watchlist_artists")
+                    cursor.execute("DROP TABLE watchlist_artists")
+                    cursor.execute("ALTER TABLE watchlist_artists_new RENAME TO watchlist_artists")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_spotify_id ON watchlist_artists (spotify_artist_id)")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_profile ON watchlist_artists (profile_id)")
+                    logger.info("Rebuilt watchlist_artists with profile-scoped UNIQUE constraints")
+            except Exception as e:
+                logger.error(f"Error rebuilding watchlist_artists for profiles: {e}")
+
+            # 5. Rebuild wishlist_tracks for profile-scoped uniqueness
+            try:
+                cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='wishlist_tracks'")
+                create_sql = cursor.fetchone()
+                if create_sql and 'UNIQUE(profile_id' not in create_sql[0]:
+                    cursor.execute("""
+                        CREATE TABLE wishlist_tracks_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            spotify_track_id TEXT NOT NULL,
+                            spotify_data TEXT NOT NULL,
+                            failure_reason TEXT,
+                            retry_count INTEGER DEFAULT 0,
+                            last_attempted TIMESTAMP,
+                            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            source_type TEXT DEFAULT 'unknown',
+                            source_info TEXT,
+                            profile_id INTEGER DEFAULT 1,
+                            UNIQUE(profile_id, spotify_track_id)
+                        )
+                    """)
+
+                    cursor.execute("PRAGMA table_info(wishlist_tracks)")
+                    old_cols = [c[1] for c in cursor.fetchall()]
+                    new_cols = ['id', 'spotify_track_id', 'spotify_data', 'failure_reason',
+                                'retry_count', 'last_attempted', 'date_added', 'source_type',
+                                'source_info', 'profile_id']
+                    shared_cols = [c for c in new_cols if c in old_cols]
+                    cols_str = ', '.join(shared_cols)
+
+                    cursor.execute(f"INSERT INTO wishlist_tracks_new ({cols_str}) SELECT {cols_str} FROM wishlist_tracks")
+                    cursor.execute("DROP TABLE wishlist_tracks")
+                    cursor.execute("ALTER TABLE wishlist_tracks_new RENAME TO wishlist_tracks")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_spotify_id ON wishlist_tracks (spotify_track_id)")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_profile ON wishlist_tracks (profile_id)")
+                    logger.info("Rebuilt wishlist_tracks with profile-scoped UNIQUE constraints")
+            except Exception as e:
+                logger.error(f"Error rebuilding wishlist_tracks for profiles: {e}")
+
+            # 6. Rebuild bubble_snapshots for profile-scoped PRIMARY KEY
+            try:
+                cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='bubble_snapshots'")
+                create_sql = cursor.fetchone()
+                if create_sql and 'profile_id' in [c[1] for c in (cursor.execute("PRAGMA table_info(bubble_snapshots)").fetchall())]:
+                    cursor.execute("""
+                        CREATE TABLE bubble_snapshots_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            type TEXT NOT NULL,
+                            data TEXT NOT NULL,
+                            timestamp TEXT NOT NULL,
+                            snapshot_id TEXT NOT NULL,
+                            profile_id INTEGER DEFAULT 1,
+                            UNIQUE(profile_id, type)
+                        )
+                    """)
+
+                    cursor.execute("""
+                        INSERT INTO bubble_snapshots_new (type, data, timestamp, snapshot_id, profile_id)
+                        SELECT type, data, timestamp, snapshot_id, profile_id FROM bubble_snapshots
+                    """)
+                    cursor.execute("DROP TABLE bubble_snapshots")
+                    cursor.execute("ALTER TABLE bubble_snapshots_new RENAME TO bubble_snapshots")
+                    logger.info("Rebuilt bubble_snapshots with profile-scoped UNIQUE constraints")
+            except Exception as e:
+                logger.error(f"Error rebuilding bubble_snapshots for profiles: {e}")
+
+            # 7. Rebuild discovery_curated_playlists for profile-scoped uniqueness
+            try:
+                cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='discovery_curated_playlists'")
+                create_sql = cursor.fetchone()
+                if create_sql and 'UNIQUE(profile_id' not in create_sql[0]:
+                    cursor.execute("""
+                        CREATE TABLE discovery_curated_playlists_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            playlist_type TEXT NOT NULL,
+                            track_ids_json TEXT NOT NULL,
+                            curated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            profile_id INTEGER DEFAULT 1,
+                            UNIQUE(profile_id, playlist_type)
+                        )
+                    """)
+
+                    cursor.execute("PRAGMA table_info(discovery_curated_playlists)")
+                    old_cols = [c[1] for c in cursor.fetchall()]
+                    new_cols = ['id', 'playlist_type', 'track_ids_json', 'curated_date', 'profile_id']
+                    shared_cols = [c for c in new_cols if c in old_cols]
+                    cols_str = ', '.join(shared_cols)
+
+                    cursor.execute(f"INSERT INTO discovery_curated_playlists_new ({cols_str}) SELECT {cols_str} FROM discovery_curated_playlists")
+                    cursor.execute("DROP TABLE discovery_curated_playlists")
+                    cursor.execute("ALTER TABLE discovery_curated_playlists_new RENAME TO discovery_curated_playlists")
+                    logger.info("Rebuilt discovery_curated_playlists with profile-scoped UNIQUE constraints")
+            except Exception as e:
+                logger.error(f"Error rebuilding discovery_curated_playlists for profiles: {e}")
+
+            # 8. Add indexes for profile_id on remaining tables
+            index_pairs = [
+                ('idx_similar_artists_profile', 'similar_artists'),
+                ('idx_discovery_pool_profile', 'discovery_pool'),
+                ('idx_discovery_recent_albums_profile', 'discovery_recent_albums'),
+                ('idx_recent_releases_profile', 'recent_releases'),
+            ]
+            for idx_name, table in index_pairs:
+                try:
+                    cursor.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table} (profile_id)")
+                except Exception:
+                    pass
+
+            # Set migration marker
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value, updated_at)
+                VALUES ('profiles_migration_v1', 'true', CURRENT_TIMESTAMP)
+            """)
+
+            logger.info("Multi-profile support migration completed successfully")
+
+        except Exception as e:
+            logger.error(f"Error adding profile support: {e}")
+            # Don't raise - this is a migration, database can still function
+
+    def _add_profile_support_v2(self, cursor):
+        """Fix missing profile-scoped UNIQUE constraints on 3 tables (v2 migration)"""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_migration_v2' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+
+            logger.info("Applying profile support v2 migration...")
+
+            # Rebuild discovery_pool: UNIQUE(profile_id, spotify_track_id, itunes_track_id, source)
+            try:
+                cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='discovery_pool'")
+                create_sql = cursor.fetchone()
+                if create_sql and 'UNIQUE(profile_id' not in create_sql[0]:
+                    cursor.execute("PRAGMA table_info(discovery_pool)")
+                    old_cols = [c[1] for c in cursor.fetchall()]
+
+                    cursor.execute("""
+                        CREATE TABLE discovery_pool_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            spotify_track_id TEXT,
+                            spotify_album_id TEXT,
+                            spotify_artist_id TEXT,
+                            itunes_track_id TEXT,
+                            itunes_album_id TEXT,
+                            itunes_artist_id TEXT,
+                            source TEXT NOT NULL DEFAULT 'spotify',
+                            track_name TEXT NOT NULL,
+                            artist_name TEXT NOT NULL,
+                            album_name TEXT NOT NULL,
+                            album_cover_url TEXT,
+                            duration_ms INTEGER,
+                            popularity INTEGER DEFAULT 0,
+                            release_date TEXT,
+                            is_new_release BOOLEAN DEFAULT 0,
+                            track_data_json TEXT NOT NULL,
+                            artist_genres TEXT,
+                            added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            profile_id INTEGER DEFAULT 1,
+                            UNIQUE(profile_id, spotify_track_id, itunes_track_id, source)
+                        )
+                    """)
+
+                    new_cols = ['id', 'spotify_track_id', 'spotify_album_id', 'spotify_artist_id',
+                                'itunes_track_id', 'itunes_album_id', 'itunes_artist_id',
+                                'source', 'track_name', 'artist_name', 'album_name', 'album_cover_url',
+                                'duration_ms', 'popularity', 'release_date', 'is_new_release',
+                                'track_data_json', 'artist_genres', 'added_date', 'profile_id']
+                    shared_cols = [c for c in new_cols if c in old_cols]
+                    cols_str = ', '.join(shared_cols)
+
+                    cursor.execute(f"INSERT INTO discovery_pool_new ({cols_str}) SELECT {cols_str} FROM discovery_pool")
+                    cursor.execute("DROP TABLE discovery_pool")
+                    cursor.execute("ALTER TABLE discovery_pool_new RENAME TO discovery_pool")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_profile ON discovery_pool (profile_id)")
+                    logger.info("Rebuilt discovery_pool with profile-scoped UNIQUE constraint")
+            except Exception as e:
+                logger.error(f"Error rebuilding discovery_pool for profiles v2: {e}")
+
+            # Rebuild discovery_recent_albums: UNIQUE(profile_id, album_spotify_id, album_itunes_id, source)
+            try:
+                cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='discovery_recent_albums'")
+                create_sql = cursor.fetchone()
+                if create_sql and 'UNIQUE(profile_id' not in create_sql[0]:
+                    cursor.execute("PRAGMA table_info(discovery_recent_albums)")
+                    old_cols = [c[1] for c in cursor.fetchall()]
+
+                    cursor.execute("""
+                        CREATE TABLE discovery_recent_albums_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            album_spotify_id TEXT,
+                            album_itunes_id TEXT,
+                            artist_spotify_id TEXT,
+                            artist_itunes_id TEXT,
+                            source TEXT NOT NULL DEFAULT 'spotify',
+                            album_name TEXT NOT NULL,
+                            artist_name TEXT NOT NULL,
+                            album_cover_url TEXT,
+                            release_date TEXT NOT NULL,
+                            album_type TEXT DEFAULT 'album',
+                            cached_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            profile_id INTEGER DEFAULT 1,
+                            UNIQUE(profile_id, album_spotify_id, album_itunes_id, source)
+                        )
+                    """)
+
+                    new_cols = ['id', 'album_spotify_id', 'album_itunes_id', 'artist_spotify_id',
+                                'artist_itunes_id', 'source', 'album_name', 'artist_name',
+                                'album_cover_url', 'release_date', 'album_type', 'cached_date', 'profile_id']
+                    shared_cols = [c for c in new_cols if c in old_cols]
+                    cols_str = ', '.join(shared_cols)
+
+                    cursor.execute(f"INSERT INTO discovery_recent_albums_new ({cols_str}) SELECT {cols_str} FROM discovery_recent_albums")
+                    cursor.execute("DROP TABLE discovery_recent_albums")
+                    cursor.execute("ALTER TABLE discovery_recent_albums_new RENAME TO discovery_recent_albums")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_recent_albums_profile ON discovery_recent_albums (profile_id)")
+                    logger.info("Rebuilt discovery_recent_albums with profile-scoped UNIQUE constraint")
+            except Exception as e:
+                logger.error(f"Error rebuilding discovery_recent_albums for profiles v2: {e}")
+
+            # Rebuild recent_releases: UNIQUE(profile_id, watchlist_artist_id, album_spotify_id, album_itunes_id)
+            try:
+                cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='recent_releases'")
+                create_sql = cursor.fetchone()
+                if create_sql and 'UNIQUE(profile_id' not in create_sql[0]:
+                    cursor.execute("PRAGMA table_info(recent_releases)")
+                    old_cols = [c[1] for c in cursor.fetchall()]
+
+                    cursor.execute("""
+                        CREATE TABLE recent_releases_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            watchlist_artist_id INTEGER NOT NULL,
+                            album_spotify_id TEXT,
+                            album_itunes_id TEXT,
+                            source TEXT NOT NULL DEFAULT 'spotify',
+                            album_name TEXT NOT NULL,
+                            release_date TEXT NOT NULL,
+                            album_cover_url TEXT,
+                            track_count INTEGER DEFAULT 0,
+                            added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            profile_id INTEGER DEFAULT 1,
+                            UNIQUE(profile_id, watchlist_artist_id, album_spotify_id, album_itunes_id)
+                        )
+                    """)
+
+                    new_cols = ['id', 'watchlist_artist_id', 'album_spotify_id', 'album_itunes_id',
+                                'source', 'album_name', 'release_date', 'album_cover_url',
+                                'track_count', 'added_date', 'profile_id']
+                    shared_cols = [c for c in new_cols if c in old_cols]
+                    cols_str = ', '.join(shared_cols)
+
+                    cursor.execute(f"INSERT INTO recent_releases_new ({cols_str}) SELECT {cols_str} FROM recent_releases")
+                    cursor.execute("DROP TABLE recent_releases")
+                    cursor.execute("ALTER TABLE recent_releases_new RENAME TO recent_releases")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_recent_releases_profile ON recent_releases (profile_id)")
+                    logger.info("Rebuilt recent_releases with profile-scoped UNIQUE constraint")
+            except Exception as e:
+                logger.error(f"Error rebuilding recent_releases for profiles v2: {e}")
+
+            # Set migration marker
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value, updated_at)
+                VALUES ('profiles_migration_v2', 'true', CURRENT_TIMESTAMP)
+            """)
+
+            logger.info("Profile support v2 migration completed successfully")
+
+        except Exception as e:
+            logger.error(f"Error in profile support v2 migration: {e}")
+
+    def _add_profile_support_v3(self, cursor):
+        """Fix similar_artists UNIQUE constraint and make discovery_pool_metadata per-profile (v3 migration)"""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_migration_v3' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+
+            logger.info("Applying profile support v3 migration...")
+
+            # Rebuild similar_artists: UNIQUE(profile_id, source_artist_id, similar_artist_name)
+            try:
+                cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='similar_artists'")
+                create_sql = cursor.fetchone()
+                if create_sql and 'UNIQUE(profile_id' not in create_sql[0]:
+                    cursor.execute("PRAGMA table_info(similar_artists)")
+                    old_cols = [c[1] for c in cursor.fetchall()]
+
+                    cursor.execute("""
+                        CREATE TABLE similar_artists_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            source_artist_id TEXT NOT NULL,
+                            similar_artist_spotify_id TEXT,
+                            similar_artist_itunes_id TEXT,
+                            similar_artist_name TEXT NOT NULL,
+                            similarity_rank INTEGER DEFAULT 1,
+                            occurrence_count INTEGER DEFAULT 1,
+                            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            last_featured TIMESTAMP,
+                            profile_id INTEGER DEFAULT 1,
+                            UNIQUE(profile_id, source_artist_id, similar_artist_name)
+                        )
+                    """)
+
+                    new_cols = ['id', 'source_artist_id', 'similar_artist_spotify_id',
+                                'similar_artist_itunes_id', 'similar_artist_name',
+                                'similarity_rank', 'occurrence_count', 'last_updated',
+                                'last_featured', 'profile_id']
+                    shared_cols = [c for c in new_cols if c in old_cols]
+                    cols_str = ', '.join(shared_cols)
+
+                    cursor.execute(f"INSERT INTO similar_artists_new ({cols_str}) SELECT {cols_str} FROM similar_artists")
+                    cursor.execute("DROP TABLE similar_artists")
+                    cursor.execute("ALTER TABLE similar_artists_new RENAME TO similar_artists")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_profile ON similar_artists (profile_id)")
+                    logger.info("Rebuilt similar_artists with profile-scoped UNIQUE constraint")
+            except Exception as e:
+                logger.error(f"Error rebuilding similar_artists for profiles v3: {e}")
+
+            # Make discovery_pool_metadata per-profile: change CHECK(id=1) to use profile_id as key
+            try:
+                cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='discovery_pool_metadata'")
+                create_sql = cursor.fetchone()
+                if create_sql and 'profile_id' not in create_sql[0]:
+                    cursor.execute("""
+                        CREATE TABLE discovery_pool_metadata_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            profile_id INTEGER NOT NULL DEFAULT 1 UNIQUE,
+                            last_populated_timestamp TIMESTAMP NOT NULL,
+                            track_count INTEGER DEFAULT 0,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    # Migrate existing row (profile 1)
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO discovery_pool_metadata_new
+                        (profile_id, last_populated_timestamp, track_count, updated_at)
+                        SELECT 1, last_populated_timestamp, track_count, updated_at
+                        FROM discovery_pool_metadata WHERE id = 1
+                    """)
+                    cursor.execute("DROP TABLE discovery_pool_metadata")
+                    cursor.execute("ALTER TABLE discovery_pool_metadata_new RENAME TO discovery_pool_metadata")
+                    logger.info("Rebuilt discovery_pool_metadata with per-profile support")
+            except Exception as e:
+                logger.error(f"Error rebuilding discovery_pool_metadata for profiles v3: {e}")
+
+            # Set migration marker
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value, updated_at)
+                VALUES ('profiles_migration_v3', 'true', CURRENT_TIMESTAMP)
+            """)
+
+            logger.info("Profile support v3 migration completed successfully")
+
+        except Exception as e:
+            logger.error(f"Error in profile support v3 migration: {e}")
+
+    def _add_profile_support_v4(self, cursor):
+        """Add avatar_url column to profiles table (v4 migration)"""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_migration_v4' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+
+            logger.info("Applying profile support v4 migration...")
+
+            # Add avatar_url column
+            try:
+                cursor.execute("ALTER TABLE profiles ADD COLUMN avatar_url TEXT DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value) VALUES ('profiles_migration_v4', '1')
+            """)
+
+            logger.info("Profile support v4 migration completed successfully")
+
+        except Exception as e:
+            logger.error(f"Error in profile support v4 migration: {e}")
+
+    # ── Profile CRUD ──────────────────────────────────────────────────
+
+    def get_all_profiles(self) -> List[Dict[str, Any]]:
+        """Get all profiles"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='profiles'")
+                if not cursor.fetchone():
+                    return [{'id': 1, 'name': 'Admin', 'avatar_color': '#6366f1', 'avatar_url': None, 'is_admin': True, 'has_pin': False}]
+                cursor.execute("SELECT * FROM profiles ORDER BY id")
+                rows = cursor.fetchall()
+                columns = [desc[0] for desc in cursor.description]
+                return [{
+                    'id': row['id'],
+                    'name': row['name'],
+                    'avatar_color': row['avatar_color'],
+                    'avatar_url': row['avatar_url'] if 'avatar_url' in columns else None,
+                    'is_admin': bool(row['is_admin']),
+                    'has_pin': row['pin_hash'] is not None,
+                    'created_at': row['created_at'],
+                    'updated_at': row['updated_at'],
+                } for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting profiles: {e}")
+            return [{'id': 1, 'name': 'Admin', 'avatar_color': '#6366f1', 'avatar_url': None, 'is_admin': True, 'has_pin': False}]
+
+    def get_profile(self, profile_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single profile by ID"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+                if row:
+                    columns = [desc[0] for desc in cursor.description]
+                    return {
+                        'id': row['id'],
+                        'name': row['name'],
+                        'avatar_color': row['avatar_color'],
+                        'avatar_url': row['avatar_url'] if 'avatar_url' in columns else None,
+                        'is_admin': bool(row['is_admin']),
+                        'has_pin': row['pin_hash'] is not None,
+                        'created_at': row['created_at'],
+                        'updated_at': row['updated_at'],
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"Error getting profile {profile_id}: {e}")
+            return None
+
+    def create_profile(self, name: str, avatar_color: str = '#6366f1',
+                       pin_hash: Optional[str] = None, is_admin: bool = False,
+                       avatar_url: Optional[str] = None) -> Optional[int]:
+        """Create a new profile. Returns new profile ID or None on error."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO profiles (name, avatar_color, pin_hash, is_admin, avatar_url)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (name, avatar_color, pin_hash, int(is_admin), avatar_url))
+                conn.commit()
+                return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            logger.warning(f"Profile name '{name}' already exists")
+            return None
+        except Exception as e:
+            logger.error(f"Error creating profile: {e}")
+            return None
+
+    def update_profile(self, profile_id: int, **kwargs) -> bool:
+        """Update profile fields. Accepts: name, avatar_color, avatar_url, pin_hash, is_admin."""
+        allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin'}
+        updates = {k: v for k, v in kwargs.items() if k in allowed}
+        if not updates:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                set_clause = ', '.join(f"{k} = ?" for k in updates)
+                values = list(updates.values())
+                values.append(profile_id)
+                cursor.execute(
+                    f"UPDATE profiles SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    values
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except sqlite3.IntegrityError:
+            logger.warning(f"Profile update failed (duplicate name?)")
+            return False
+        except Exception as e:
+            logger.error(f"Error updating profile {profile_id}: {e}")
+            return False
+
+    def delete_profile(self, profile_id: int) -> bool:
+        """Delete a profile and all its per-profile data."""
+        if profile_id == 1:
+            return False  # Cannot delete the default admin profile
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # Delete per-profile data from all tables
+                for table in ['watchlist_artists', 'wishlist_tracks', 'similar_artists',
+                              'discovery_pool', 'discovery_recent_albums', 'discovery_curated_playlists',
+                              'bubble_snapshots', 'recent_releases']:
+                    try:
+                        cursor.execute(f"DELETE FROM {table} WHERE profile_id = ?", (profile_id,))
+                    except Exception:
+                        pass
+                cursor.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting profile {profile_id}: {e}")
+            return False
+
+    def verify_profile_pin(self, profile_id: int, pin: str) -> bool:
+        """Verify a profile's PIN"""
+        try:
+            from werkzeug.security import check_password_hash
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT pin_hash FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+                if not row or not row['pin_hash']:
+                    return True  # No PIN set = always valid
+                return check_password_hash(row['pin_hash'], pin)
+        except Exception as e:
+            logger.error(f"Error verifying PIN for profile {profile_id}: {e}")
+            return False
 
     def close(self):
         """Close database connection (no-op since we create connections per operation)"""
@@ -3335,29 +3954,42 @@ class MusicDatabase:
 
     # --- Bubble Snapshot Methods ---
 
-    def save_bubble_snapshot(self, snapshot_type: str, data_dict: dict):
-        """Save a bubble snapshot (upserts by type).
+    def save_bubble_snapshot(self, snapshot_type: str, data_dict: dict, profile_id: int = 1):
+        """Save a bubble snapshot (upserts by type + profile).
 
         Args:
             snapshot_type: One of 'artist_bubbles', 'search_bubbles', 'discover_downloads'
             data_dict: The bubbles/downloads dict to persist
+            profile_id: Profile to save for
         """
         from datetime import datetime
         now = datetime.now()
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT OR REPLACE INTO bubble_snapshots (type, data, timestamp, snapshot_id) VALUES (?, ?, ?, ?)",
-                    (snapshot_type, json.dumps(data_dict), now.isoformat(), now.strftime('%Y%m%d_%H%M%S'))
-                )
+                # Check if profile_id column exists
+                cursor.execute("PRAGMA table_info(bubble_snapshots)")
+                cols = {c[1] for c in cursor.fetchall()}
+                if 'profile_id' in cols:
+                    # Delete existing entry for this profile+type, then insert
+                    cursor.execute("DELETE FROM bubble_snapshots WHERE type = ? AND profile_id = ?",
+                                   (snapshot_type, profile_id))
+                    cursor.execute(
+                        "INSERT INTO bubble_snapshots (type, data, timestamp, snapshot_id, profile_id) VALUES (?, ?, ?, ?, ?)",
+                        (snapshot_type, json.dumps(data_dict), now.isoformat(), now.strftime('%Y%m%d_%H%M%S'), profile_id)
+                    )
+                else:
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO bubble_snapshots (type, data, timestamp, snapshot_id) VALUES (?, ?, ?, ?)",
+                        (snapshot_type, json.dumps(data_dict), now.isoformat(), now.strftime('%Y%m%d_%H%M%S'))
+                    )
                 conn.commit()
         except Exception as e:
             logger.error(f"Error saving bubble snapshot '{snapshot_type}': {e}")
             raise
 
-    def get_bubble_snapshot(self, snapshot_type: str) -> Optional[Dict[str, Any]]:
-        """Load a bubble snapshot.
+    def get_bubble_snapshot(self, snapshot_type: str, profile_id: int = 1) -> Optional[Dict[str, Any]]:
+        """Load a bubble snapshot for the given profile.
 
         Returns:
             {'data': dict, 'timestamp': str} or None if not found
@@ -3365,7 +3997,13 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT data, timestamp FROM bubble_snapshots WHERE type = ?", (snapshot_type,))
+                cursor.execute("PRAGMA table_info(bubble_snapshots)")
+                cols = {c[1] for c in cursor.fetchall()}
+                if 'profile_id' in cols:
+                    cursor.execute("SELECT data, timestamp FROM bubble_snapshots WHERE type = ? AND profile_id = ?",
+                                   (snapshot_type, profile_id))
+                else:
+                    cursor.execute("SELECT data, timestamp FROM bubble_snapshots WHERE type = ?", (snapshot_type,))
                 row = cursor.fetchone()
                 if row:
                     return {'data': json.loads(row['data']), 'timestamp': row['timestamp']}
@@ -3374,12 +4012,18 @@ class MusicDatabase:
             logger.error(f"Error getting bubble snapshot '{snapshot_type}': {e}")
             return None
 
-    def delete_bubble_snapshot(self, snapshot_type: str):
-        """Delete a bubble snapshot."""
+    def delete_bubble_snapshot(self, snapshot_type: str, profile_id: int = 1):
+        """Delete a bubble snapshot for the given profile."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("DELETE FROM bubble_snapshots WHERE type = ?", (snapshot_type,))
+                cursor.execute("PRAGMA table_info(bubble_snapshots)")
+                cols = {c[1] for c in cursor.fetchall()}
+                if 'profile_id' in cols:
+                    cursor.execute("DELETE FROM bubble_snapshots WHERE type = ? AND profile_id = ?",
+                                   (snapshot_type, profile_id))
+                else:
+                    cursor.execute("DELETE FROM bubble_snapshots WHERE type = ?", (snapshot_type,))
                 conn.commit()
         except Exception as e:
             logger.error(f"Error deleting bubble snapshot '{snapshot_type}': {e}")
@@ -3559,7 +4203,8 @@ class MusicDatabase:
     # Wishlist management methods
     
     def add_to_wishlist(self, spotify_track_data: Dict[str, Any], failure_reason: str = "Download failed",
-                       source_type: str = "unknown", source_info: Dict[str, Any] = None) -> bool:
+                       source_type: str = "unknown", source_info: Dict[str, Any] = None,
+                       profile_id: int = 1) -> bool:
         """Add a failed track to the wishlist for retry"""
         try:
             with self._get_connection() as conn:
@@ -3588,7 +4233,8 @@ class MusicDatabase:
                 # This prevents adding the same track multiple times with different IDs or edge cases
                 cursor.execute("""
                     SELECT id, spotify_track_id, spotify_data FROM wishlist_tracks
-                """)
+                    WHERE profile_id = ?
+                """, (profile_id,))
 
                 existing_tracks = cursor.fetchall()
 
@@ -3625,9 +4271,9 @@ class MusicDatabase:
                 # No duplicate found, insert the track
                 cursor.execute("""
                     INSERT OR REPLACE INTO wishlist_tracks
-                    (spotify_track_id, spotify_data, failure_reason, source_type, source_info, date_added)
-                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                """, (track_id, spotify_json, failure_reason, source_type, source_json))
+                    (spotify_track_id, spotify_data, failure_reason, source_type, source_info, date_added, profile_id)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+                """, (track_id, spotify_json, failure_reason, source_type, source_json, profile_id))
 
                 conn.commit()
 
@@ -3638,42 +4284,45 @@ class MusicDatabase:
             logger.error(f"Error adding track to wishlist: {e}")
             return False
     
-    def remove_from_wishlist(self, spotify_track_id: str) -> bool:
+    def remove_from_wishlist(self, spotify_track_id: str, profile_id: int = 1) -> bool:
         """Remove a track from the wishlist (typically after successful download)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("DELETE FROM wishlist_tracks WHERE spotify_track_id = ?", (spotify_track_id,))
+                cursor.execute("DELETE FROM wishlist_tracks WHERE spotify_track_id = ? AND profile_id = ?",
+                               (spotify_track_id, profile_id))
                 conn.commit()
-                
+
                 if cursor.rowcount > 0:
                     logger.info(f"Removed track from wishlist: {spotify_track_id}")
                     return True
                 else:
                     logger.debug(f"Track not found in wishlist: {spotify_track_id}")
                     return False
-                    
+
         except Exception as e:
             logger.error(f"Error removing track from wishlist: {e}")
             return False
     
-    def get_wishlist_tracks(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get all tracks in the wishlist, ordered by date added (oldest first for retry priority)"""
+    def get_wishlist_tracks(self, limit: Optional[int] = None, profile_id: int = 1) -> List[Dict[str, Any]]:
+        """Get all tracks in the wishlist for the given profile, ordered by date added (oldest first for retry priority)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
+
                 query = """
-                    SELECT id, spotify_track_id, spotify_data, failure_reason, retry_count, 
+                    SELECT id, spotify_track_id, spotify_data, failure_reason, retry_count,
                            last_attempted, date_added, source_type, source_info
-                    FROM wishlist_tracks 
+                    FROM wishlist_tracks
+                    WHERE profile_id = ?
                     ORDER BY date_added
                 """
-                
+
+                params = [profile_id]
                 if limit:
                     query += f" LIMIT {limit}"
-                
-                cursor.execute(query)
+
+                cursor.execute(query, params)
                 rows = cursor.fetchall()
                 
                 wishlist_tracks = []
@@ -3703,24 +4352,24 @@ class MusicDatabase:
             logger.error(f"Error getting wishlist tracks: {e}")
             return []
     
-    def update_wishlist_retry(self, spotify_track_id: str, success: bool, error_message: str = None) -> bool:
+    def update_wishlist_retry(self, spotify_track_id: str, success: bool, error_message: str = None, profile_id: int = 1) -> bool:
         """Update retry count and status for a wishlist track"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
+
                 if success:
-                    # Remove from wishlist on success
+                    # Remove from ALL profiles' wishlists — track is now in shared library
                     cursor.execute("DELETE FROM wishlist_tracks WHERE spotify_track_id = ?", (spotify_track_id,))
                 else:
                     # Increment retry count and update failure reason
                     cursor.execute("""
-                        UPDATE wishlist_tracks 
-                        SET retry_count = retry_count + 1, 
+                        UPDATE wishlist_tracks
+                        SET retry_count = retry_count + 1,
                             last_attempted = CURRENT_TIMESTAMP,
                             failure_reason = COALESCE(?, failure_reason)
-                        WHERE spotify_track_id = ?
-                    """, (error_message, spotify_track_id))
+                        WHERE spotify_track_id = ? AND profile_id = ?
+                    """, (error_message, spotify_track_id, profile_id))
                 
                 conn.commit()
                 return cursor.rowcount > 0
@@ -3729,38 +4378,38 @@ class MusicDatabase:
             logger.error(f"Error updating wishlist retry status: {e}")
             return False
     
-    def get_wishlist_count(self) -> int:
-        """Get the total number of tracks in the wishlist"""
+    def get_wishlist_count(self, profile_id: int = 1) -> int:
+        """Get the total number of tracks in the wishlist for the given profile"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM wishlist_tracks")
+                cursor.execute("SELECT COUNT(*) FROM wishlist_tracks WHERE profile_id = ?", (profile_id,))
                 result = cursor.fetchone()
                 return result[0] if result else 0
         except Exception as e:
             logger.error(f"Error getting wishlist count: {e}")
             return 0
     
-    def clear_wishlist(self) -> bool:
-        """Clear all tracks from the wishlist and reset scan timestamps so next scan re-discovers everything"""
+    def clear_wishlist(self, profile_id: int = 1) -> bool:
+        """Clear all tracks from the wishlist for the given profile and reset scan timestamps"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("DELETE FROM wishlist_tracks")
+                cursor.execute("DELETE FROM wishlist_tracks WHERE profile_id = ?", (profile_id,))
                 cleared_count = cursor.rowcount
-                # Reset last_scan_timestamp on all watchlist artists so the next scan
+                # Reset last_scan_timestamp on this profile's watchlist artists so the next scan
                 # uses the lookback period setting (e.g. "entire discography") instead
                 # of only finding albums released after the old scan date
-                cursor.execute("UPDATE watchlist_artists SET last_scan_timestamp = NULL")
+                cursor.execute("UPDATE watchlist_artists SET last_scan_timestamp = NULL WHERE profile_id = ?", (profile_id,))
                 reset_count = cursor.rowcount
                 conn.commit()
-                logger.info(f"Cleared {cleared_count} tracks from wishlist, reset scan timestamps on {reset_count} artists")
+                logger.info(f"Cleared {cleared_count} tracks from wishlist, reset scan timestamps on {reset_count} artists (profile: {profile_id})")
                 return True
         except Exception as e:
             logger.error(f"Error clearing wishlist: {e}")
             return False
 
-    def remove_wishlist_duplicates(self) -> int:
+    def remove_wishlist_duplicates(self, profile_id: int = 1) -> int:
         """Remove duplicate tracks from wishlist based on track name + artist.
         Keeps the oldest entry (by date_added) for each duplicate set.
         Returns the number of duplicates removed."""
@@ -3768,12 +4417,13 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Get all wishlist tracks
+                # Get all wishlist tracks for this profile
                 cursor.execute("""
                     SELECT id, spotify_track_id, spotify_data, date_added
                     FROM wishlist_tracks
+                    WHERE profile_id = ?
                     ORDER BY date_added ASC
-                """)
+                """, (profile_id,))
                 all_tracks = cursor.fetchall()
 
                 # Track seen tracks and duplicates to remove
@@ -3821,7 +4471,7 @@ class MusicDatabase:
             return 0
 
     # Watchlist operations
-    def add_artist_to_watchlist(self, artist_id: str, artist_name: str) -> bool:
+    def add_artist_to_watchlist(self, artist_id: str, artist_name: str, profile_id: int = 1) -> bool:
         """Add an artist to the watchlist for monitoring new releases.
 
         Automatically detects if artist_id is a Spotify ID (alphanumeric) or iTunes ID (numeric).
@@ -3836,17 +4486,17 @@ class MusicDatabase:
                 if is_itunes_id:
                     cursor.execute("""
                         INSERT OR REPLACE INTO watchlist_artists
-                        (itunes_artist_id, artist_name, date_added, updated_at)
-                        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """, (artist_id, artist_name))
-                    logger.info(f"Added artist '{artist_name}' to watchlist (iTunes ID: {artist_id})")
+                        (itunes_artist_id, artist_name, date_added, updated_at, profile_id)
+                        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+                    """, (artist_id, artist_name, profile_id))
+                    logger.info(f"Added artist '{artist_name}' to watchlist (iTunes ID: {artist_id}, profile: {profile_id})")
                 else:
                     cursor.execute("""
                         INSERT OR REPLACE INTO watchlist_artists
-                        (spotify_artist_id, artist_name, date_added, updated_at)
-                        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """, (artist_id, artist_name))
-                    logger.info(f"Added artist '{artist_name}' to watchlist (Spotify ID: {artist_id})")
+                        (spotify_artist_id, artist_name, date_added, updated_at, profile_id)
+                        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+                    """, (artist_id, artist_name, profile_id))
+                    logger.info(f"Added artist '{artist_name}' to watchlist (Spotify ID: {artist_id}, profile: {profile_id})")
 
                 conn.commit()
                 return True
@@ -3855,7 +4505,7 @@ class MusicDatabase:
             logger.error(f"Error adding artist '{artist_name}' to watchlist: {e}")
             return False
 
-    def remove_artist_from_watchlist(self, artist_id: str) -> bool:
+    def remove_artist_from_watchlist(self, artist_id: str, profile_id: int = 1) -> bool:
         """Remove an artist from the watchlist (checks both Spotify and iTunes IDs)"""
         try:
             with self._get_connection() as conn:
@@ -3864,29 +4514,29 @@ class MusicDatabase:
                 # Get artist name for logging (check both ID columns)
                 cursor.execute("""
                     SELECT artist_name FROM watchlist_artists
-                    WHERE spotify_artist_id = ? OR itunes_artist_id = ?
-                """, (artist_id, artist_id))
+                    WHERE (spotify_artist_id = ? OR itunes_artist_id = ?) AND profile_id = ?
+                """, (artist_id, artist_id, profile_id))
                 result = cursor.fetchone()
                 artist_name = result['artist_name'] if result else "Unknown"
 
                 cursor.execute("""
                     DELETE FROM watchlist_artists
-                    WHERE spotify_artist_id = ? OR itunes_artist_id = ?
-                """, (artist_id, artist_id))
+                    WHERE (spotify_artist_id = ? OR itunes_artist_id = ?) AND profile_id = ?
+                """, (artist_id, artist_id, profile_id))
 
                 if cursor.rowcount > 0:
                     conn.commit()
-                    logger.info(f"Removed artist '{artist_name}' from watchlist (ID: {artist_id})")
+                    logger.info(f"Removed artist '{artist_name}' from watchlist (ID: {artist_id}, profile: {profile_id})")
                     return True
                 else:
-                    logger.warning(f"Artist with ID {artist_id} not found in watchlist")
+                    logger.warning(f"Artist with ID {artist_id} not found in watchlist for profile {profile_id}")
                     return False
 
         except Exception as e:
             logger.error(f"Error removing artist from watchlist (ID: {artist_id}): {e}")
             return False
 
-    def is_artist_in_watchlist(self, artist_id: str) -> bool:
+    def is_artist_in_watchlist(self, artist_id: str, profile_id: int = 1) -> bool:
         """Check if an artist is currently in the watchlist (checks both Spotify and iTunes IDs)"""
         try:
             with self._get_connection() as conn:
@@ -3895,9 +4545,9 @@ class MusicDatabase:
                 # Check both spotify_artist_id and itunes_artist_id columns
                 cursor.execute("""
                     SELECT 1 FROM watchlist_artists
-                    WHERE spotify_artist_id = ? OR itunes_artist_id = ?
+                    WHERE (spotify_artist_id = ? OR itunes_artist_id = ?) AND profile_id = ?
                     LIMIT 1
-                """, (artist_id, artist_id))
+                """, (artist_id, artist_id, profile_id))
                 result = cursor.fetchone()
 
                 return result is not None
@@ -3906,8 +4556,8 @@ class MusicDatabase:
             logger.error(f"Error checking if artist is in watchlist (ID: {artist_id}): {e}")
             return False
 
-    def get_watchlist_artists(self) -> List[WatchlistArtist]:
-        """Get all artists in the watchlist"""
+    def get_watchlist_artists(self, profile_id: int = 1) -> List[WatchlistArtist]:
+        """Get all artists in the watchlist for the given profile"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -3924,11 +4574,19 @@ class MusicDatabase:
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
-                cursor.execute(f"""
-                    SELECT {', '.join(columns_to_select)}
-                    FROM watchlist_artists
-                    ORDER BY date_added DESC
-                """)
+                if 'profile_id' in existing_columns:
+                    cursor.execute(f"""
+                        SELECT {', '.join(columns_to_select)}
+                        FROM watchlist_artists
+                        WHERE profile_id = ?
+                        ORDER BY date_added DESC
+                    """, (profile_id,))
+                else:
+                    cursor.execute(f"""
+                        SELECT {', '.join(columns_to_select)}
+                        FROM watchlist_artists
+                        ORDER BY date_added DESC
+                    """)
 
                 rows = cursor.fetchall()
 
@@ -3961,7 +4619,8 @@ class MusicDatabase:
                         include_live=include_live,
                         include_remixes=include_remixes,
                         include_acoustic=include_acoustic,
-                        include_compilations=include_compilations
+                        include_compilations=include_compilations,
+                        profile_id=profile_id
                     ))
 
                 return watchlist_artists
@@ -3970,17 +4629,17 @@ class MusicDatabase:
             logger.error(f"Error getting watchlist artists: {e}")
             return []
 
-    def get_watchlist_count(self) -> int:
-        """Get the number of artists in the watchlist"""
+    def get_watchlist_count(self, profile_id: int = 1) -> int:
+        """Get the number of artists in the watchlist for the given profile"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
-                cursor.execute("SELECT COUNT(*) as count FROM watchlist_artists")
+
+                cursor.execute("SELECT COUNT(*) as count FROM watchlist_artists WHERE profile_id = ?", (profile_id,))
                 result = cursor.fetchone()
-                
+
                 return result['count'] if result else 0
-                
+
         except Exception as e:
             logger.error(f"Error getting watchlist count: {e}")
             return 0
@@ -4078,7 +4737,8 @@ class MusicDatabase:
     def add_or_update_similar_artist(self, source_artist_id: str, similar_artist_name: str,
                                       similar_artist_spotify_id: Optional[str] = None,
                                       similar_artist_itunes_id: Optional[str] = None,
-                                      similarity_rank: int = 1) -> bool:
+                                      similarity_rank: int = 1,
+                                      profile_id: int = 1) -> bool:
         """Add or update a similar artist recommendation (supports both Spotify and iTunes IDs)"""
         try:
             with self._get_connection() as conn:
@@ -4087,16 +4747,16 @@ class MusicDatabase:
                 # Use artist name as the unique key (allows storing both IDs for same artist)
                 cursor.execute("""
                     INSERT INTO similar_artists
-                    (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_name, similarity_rank, occurrence_count, last_updated)
-                    VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
-                    ON CONFLICT(source_artist_id, similar_artist_name)
+                    (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_name, similarity_rank, occurrence_count, last_updated, profile_id)
+                    VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?)
+                    ON CONFLICT(profile_id, source_artist_id, similar_artist_name)
                     DO UPDATE SET
                         similar_artist_spotify_id = COALESCE(excluded.similar_artist_spotify_id, similar_artist_spotify_id),
                         similar_artist_itunes_id = COALESCE(excluded.similar_artist_itunes_id, similar_artist_itunes_id),
                         similarity_rank = excluded.similarity_rank,
                         occurrence_count = occurrence_count + 1,
                         last_updated = CURRENT_TIMESTAMP
-                """, (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_name, similarity_rank))
+                """, (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_name, similarity_rank, profile_id))
 
                 conn.commit()
                 return True
@@ -4105,7 +4765,7 @@ class MusicDatabase:
             logger.error(f"Error adding similar artist: {e}")
             return False
 
-    def get_similar_artists_for_source(self, source_artist_id: str) -> List[SimilarArtist]:
+    def get_similar_artists_for_source(self, source_artist_id: str, profile_id: int = 1) -> List[SimilarArtist]:
         """Get all similar artists for a given source artist"""
         try:
             with self._get_connection() as conn:
@@ -4113,9 +4773,9 @@ class MusicDatabase:
 
                 cursor.execute("""
                     SELECT * FROM similar_artists
-                    WHERE source_artist_id = ?
+                    WHERE source_artist_id = ? AND profile_id = ?
                     ORDER BY similarity_rank ASC
-                """, (source_artist_id,))
+                """, (source_artist_id, profile_id))
 
                 rows = cursor.fetchall()
                 return [SimilarArtist(
@@ -4133,7 +4793,7 @@ class MusicDatabase:
             logger.error(f"Error getting similar artists: {e}")
             return []
 
-    def get_similar_artists_missing_itunes_ids(self, source_artist_id: str) -> List[SimilarArtist]:
+    def get_similar_artists_missing_itunes_ids(self, source_artist_id: str, profile_id: int = 1) -> List[SimilarArtist]:
         """Get similar artists for a source that are missing iTunes IDs (for backfill)"""
         try:
             with self._get_connection() as conn:
@@ -4141,11 +4801,11 @@ class MusicDatabase:
 
                 cursor.execute("""
                     SELECT * FROM similar_artists
-                    WHERE source_artist_id = ?
+                    WHERE source_artist_id = ? AND profile_id = ?
                     AND (similar_artist_itunes_id IS NULL OR similar_artist_itunes_id = '')
                     ORDER BY occurrence_count DESC
                     LIMIT 50
-                """, (source_artist_id,))
+                """, (source_artist_id, profile_id))
 
                 rows = cursor.fetchall()
                 return [SimilarArtist(
@@ -4182,7 +4842,7 @@ class MusicDatabase:
             logger.error(f"Error updating similar artist iTunes ID: {e}")
             return False
 
-    def has_fresh_similar_artists(self, source_artist_id: str, days_threshold: int = 30, require_itunes: bool = True, require_spotify: bool = False) -> bool:
+    def has_fresh_similar_artists(self, source_artist_id: str, days_threshold: int = 30, require_itunes: bool = True, require_spotify: bool = False, profile_id: int = 1) -> bool:
         """
         Check if we have cached similar artists that are still fresh (<days_threshold old).
         Also checks that similar artists have the required provider IDs.
@@ -4192,6 +4852,7 @@ class MusicDatabase:
             days_threshold: Maximum age in days to consider fresh
             require_itunes: If True, also requires iTunes IDs to be present (for seamless provider switching)
             require_spotify: If True, also requires Spotify IDs to be present (for Spotify discovery)
+            profile_id: Profile to check freshness for
 
         Returns True if we have recent data with required IDs, False if data is stale, missing, or incomplete.
         """
@@ -4202,8 +4863,8 @@ class MusicDatabase:
                 cursor.execute("""
                     SELECT COUNT(*) as count, MAX(last_updated) as last_updated
                     FROM similar_artists
-                    WHERE source_artist_id = ?
-                """, (source_artist_id,))
+                    WHERE source_artist_id = ? AND profile_id = ?
+                """, (source_artist_id, profile_id))
 
                 row = cursor.fetchone()
 
@@ -4224,8 +4885,8 @@ class MusicDatabase:
                         SELECT COUNT(*) as total,
                                SUM(CASE WHEN similar_artist_itunes_id IS NOT NULL AND similar_artist_itunes_id != '' THEN 1 ELSE 0 END) as has_itunes
                         FROM similar_artists
-                        WHERE source_artist_id = ?
-                    """, (source_artist_id,))
+                        WHERE source_artist_id = ? AND profile_id = ?
+                    """, (source_artist_id, profile_id))
                     id_row = cursor.fetchone()
 
                     if id_row and id_row['total'] > 0:
@@ -4241,8 +4902,8 @@ class MusicDatabase:
                         SELECT COUNT(*) as total,
                                SUM(CASE WHEN similar_artist_spotify_id IS NOT NULL AND similar_artist_spotify_id != '' THEN 1 ELSE 0 END) as has_spotify
                         FROM similar_artists
-                        WHERE source_artist_id = ?
-                    """, (source_artist_id,))
+                        WHERE source_artist_id = ? AND profile_id = ?
+                    """, (source_artist_id, profile_id))
                     id_row = cursor.fetchone()
 
                     if id_row and id_row['total'] > 0:
@@ -4258,7 +4919,7 @@ class MusicDatabase:
             logger.error(f"Error checking similar artists freshness: {e}")
             return False  # Default to re-fetching on error
 
-    def get_top_similar_artists(self, limit: int = 50) -> List[SimilarArtist]:
+    def get_top_similar_artists(self, limit: int = 50, profile_id: int = 1) -> List[SimilarArtist]:
         """Get top similar artists excluding watchlist artists, with cycling support"""
         try:
             with self._get_connection() as conn:
@@ -4279,8 +4940,8 @@ class MusicDatabase:
                         (sa.similar_artist_spotify_id IS NOT NULL AND sa.similar_artist_spotify_id = wa.spotify_artist_id)
                         OR (sa.similar_artist_itunes_id IS NOT NULL AND sa.similar_artist_itunes_id = wa.itunes_artist_id)
                         OR LOWER(sa.similar_artist_name) = LOWER(wa.artist_name)
-                    )
-                    WHERE wa.id IS NULL
+                    ) AND wa.profile_id = ?
+                    WHERE wa.id IS NULL AND sa.profile_id = ?
                     GROUP BY sa.similar_artist_name
                     ORDER BY
                         CASE WHEN MAX(sa.last_featured) IS NULL THEN 0 ELSE 1 END,
@@ -4288,7 +4949,7 @@ class MusicDatabase:
                         occurrence_count DESC,
                         similarity_rank ASC
                     LIMIT ?
-                """, (limit,))
+                """, (profile_id, profile_id, limit))
 
                 rows = cursor.fetchall()
                 return [SimilarArtist(
@@ -4323,23 +4984,23 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error marking artists as featured: {e}")
 
-    def add_to_discovery_pool(self, track_data: Dict[str, Any], source: str = 'spotify') -> bool:
+    def add_to_discovery_pool(self, track_data: Dict[str, Any], source: str = 'spotify', profile_id: int = 1) -> bool:
         """Add a track to the discovery pool (supports both Spotify and iTunes sources)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Check if track already exists based on source
+                # Check if track already exists based on source (scoped to profile)
                 if source == 'spotify' and track_data.get('spotify_track_id'):
-                    cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE spotify_track_id = ? AND source = 'spotify'",
-                                  (track_data['spotify_track_id'],))
+                    cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE spotify_track_id = ? AND source = 'spotify' AND profile_id = ?",
+                                  (track_data['spotify_track_id'], profile_id))
                 elif source == 'itunes' and track_data.get('itunes_track_id'):
-                    cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE itunes_track_id = ? AND source = 'itunes'",
-                                  (track_data['itunes_track_id'],))
+                    cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE itunes_track_id = ? AND source = 'itunes' AND profile_id = ?",
+                                  (track_data['itunes_track_id'], profile_id))
                 else:
                     # Fallback check by track name and artist
-                    cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE track_name = ? AND artist_name = ? AND source = ?",
-                                  (track_data['track_name'], track_data['artist_name'], source))
+                    cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE track_name = ? AND artist_name = ? AND source = ? AND profile_id = ?",
+                                  (track_data['track_name'], track_data['artist_name'], source, profile_id))
 
                 if cursor.fetchone()['count'] > 0:
                     return True  # Already in pool
@@ -4353,8 +5014,8 @@ class MusicDatabase:
                     (spotify_track_id, spotify_album_id, spotify_artist_id,
                      itunes_track_id, itunes_album_id, itunes_artist_id,
                      source, track_name, artist_name, album_name, album_cover_url,
-                     duration_ms, popularity, release_date, is_new_release, track_data_json, artist_genres, added_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                     duration_ms, popularity, release_date, is_new_release, track_data_json, artist_genres, added_date, profile_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
                 """, (
                     track_data.get('spotify_track_id'),
                     track_data.get('spotify_album_id'),
@@ -4372,7 +5033,8 @@ class MusicDatabase:
                     track_data['release_date'],
                     track_data.get('is_new_release', False),
                     json.dumps(track_data['track_data_json']),
-                    artist_genres_json
+                    artist_genres_json,
+                    profile_id
                 ))
 
                 conn.commit()
@@ -4382,26 +5044,27 @@ class MusicDatabase:
             logger.error(f"Error adding to discovery pool: {e}")
             return False
 
-    def rotate_discovery_pool(self, max_tracks: int = 2000, remove_count: int = 500):
+    def rotate_discovery_pool(self, max_tracks: int = 2000, remove_count: int = 500, profile_id: int = 1):
         """Remove oldest tracks from discovery pool if it exceeds max_tracks"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Check current count
-                cursor.execute("SELECT COUNT(*) as count FROM discovery_pool")
+                # Check current count for this profile
+                cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE profile_id = ?", (profile_id,))
                 current_count = cursor.fetchone()['count']
 
                 if current_count > max_tracks:
-                    # Remove oldest tracks
+                    # Remove oldest tracks for this profile
                     cursor.execute("""
                         DELETE FROM discovery_pool
                         WHERE id IN (
                             SELECT id FROM discovery_pool
+                            WHERE profile_id = ?
                             ORDER BY added_date ASC
                             LIMIT ?
                         )
-                    """, (remove_count,))
+                    """, (profile_id, remove_count))
 
                     conn.commit()
                     logger.info(f"Removed {remove_count} oldest tracks from discovery pool")
@@ -4409,15 +5072,15 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error rotating discovery pool: {e}")
 
-    def get_discovery_pool_tracks(self, limit: int = 100, new_releases_only: bool = False, source: Optional[str] = None) -> List[DiscoveryTrack]:
+    def get_discovery_pool_tracks(self, limit: int = 100, new_releases_only: bool = False, source: Optional[str] = None, profile_id: int = 1) -> List[DiscoveryTrack]:
         """Get tracks from discovery pool, optionally filtered by source ('spotify' or 'itunes')"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
                 # Build query with optional source filter
-                where_clauses = []
-                params = []
+                where_clauses = ["profile_id = ?"]
+                params = [profile_id]
 
                 if new_releases_only:
                     where_clauses.append("is_new_release = 1")
@@ -4464,7 +5127,7 @@ class MusicDatabase:
             logger.error(f"Error getting discovery pool tracks: {e}")
             return []
 
-    def cache_discovery_recent_album(self, album_data: Dict[str, Any], source: str = 'spotify') -> bool:
+    def cache_discovery_recent_album(self, album_data: Dict[str, Any], source: str = 'spotify', profile_id: int = 1) -> bool:
         """Cache a recent album for the discover page (supports both Spotify and iTunes sources)"""
         try:
             with self._get_connection() as conn:
@@ -4473,8 +5136,8 @@ class MusicDatabase:
                 cursor.execute("""
                     INSERT OR REPLACE INTO discovery_recent_albums
                     (album_spotify_id, album_itunes_id, artist_spotify_id, artist_itunes_id, source,
-                     album_name, artist_name, album_cover_url, release_date, album_type, cached_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                     album_name, artist_name, album_cover_url, release_date, album_type, cached_date, profile_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
                 """, (
                     album_data.get('album_spotify_id'),
                     album_data.get('album_itunes_id'),
@@ -4485,7 +5148,8 @@ class MusicDatabase:
                     album_data['artist_name'],
                     album_data.get('album_cover_url'),
                     album_data['release_date'],
-                    album_data.get('album_type', 'album')
+                    album_data.get('album_type', 'album'),
+                    profile_id
                 ))
 
                 conn.commit()
@@ -4495,7 +5159,7 @@ class MusicDatabase:
             logger.error(f"Error caching discovery recent album: {e}")
             return False
 
-    def get_discovery_recent_albums(self, limit: int = 10, source: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_discovery_recent_albums(self, limit: int = 10, source: Optional[str] = None, profile_id: int = 1) -> List[Dict[str, Any]]:
         """Get cached recent albums for discover page, optionally filtered by source"""
         try:
             with self._get_connection() as conn:
@@ -4504,16 +5168,17 @@ class MusicDatabase:
                 if source:
                     cursor.execute("""
                         SELECT * FROM discovery_recent_albums
-                        WHERE source = ?
+                        WHERE source = ? AND profile_id = ?
                         ORDER BY release_date DESC
                         LIMIT ?
-                    """, (source, limit))
+                    """, (source, profile_id, limit))
                 else:
                     cursor.execute("""
                         SELECT * FROM discovery_recent_albums
+                        WHERE profile_id = ?
                         ORDER BY release_date DESC
                         LIMIT ?
-                    """, (limit,))
+                    """, (profile_id, limit))
 
                 rows = cursor.fetchall()
                 row_keys = rows[0].keys() if rows else []
@@ -4535,45 +5200,48 @@ class MusicDatabase:
             logger.error(f"Error getting discovery recent albums: {e}")
             return []
 
-    def clear_discovery_recent_albums(self) -> bool:
-        """Clear all cached recent albums"""
+    def clear_discovery_recent_albums(self, profile_id: int = 1) -> bool:
+        """Clear cached recent albums for a profile"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("DELETE FROM discovery_recent_albums")
+                cursor.execute("DELETE FROM discovery_recent_albums WHERE profile_id = ?", (profile_id,))
                 conn.commit()
                 return True
         except Exception as e:
             logger.error(f"Error clearing discovery recent albums: {e}")
             return False
 
-    def save_curated_playlist(self, playlist_type: str, track_ids: List[str]) -> bool:
+    def save_curated_playlist(self, playlist_type: str, track_ids: List[str], profile_id: int = 1) -> bool:
         """Save a curated playlist selection (stays same until next discovery pool update)"""
         try:
             import json
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                # Delete existing for this profile+type, then insert
+                cursor.execute("DELETE FROM discovery_curated_playlists WHERE playlist_type = ? AND profile_id = ?",
+                               (playlist_type, profile_id))
                 cursor.execute("""
-                    INSERT OR REPLACE INTO discovery_curated_playlists
-                    (playlist_type, track_ids_json, curated_date)
-                    VALUES (?, ?, CURRENT_TIMESTAMP)
-                """, (playlist_type, json.dumps(track_ids)))
+                    INSERT INTO discovery_curated_playlists
+                    (playlist_type, track_ids_json, curated_date, profile_id)
+                    VALUES (?, ?, CURRENT_TIMESTAMP, ?)
+                """, (playlist_type, json.dumps(track_ids), profile_id))
                 conn.commit()
                 return True
         except Exception as e:
             logger.error(f"Error saving curated playlist {playlist_type}: {e}")
             return False
 
-    def get_curated_playlist(self, playlist_type: str) -> Optional[List[str]]:
-        """Get saved curated playlist track IDs"""
+    def get_curated_playlist(self, playlist_type: str, profile_id: int = 1) -> Optional[List[str]]:
+        """Get saved curated playlist track IDs for the given profile"""
         try:
             import json
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT track_ids_json FROM discovery_curated_playlists
-                    WHERE playlist_type = ?
-                """, (playlist_type,))
+                    WHERE playlist_type = ? AND profile_id = ?
+                """, (playlist_type, profile_id))
                 row = cursor.fetchone()
                 if row:
                     return json.loads(row['track_ids_json'])
@@ -4582,7 +5250,7 @@ class MusicDatabase:
             logger.error(f"Error getting curated playlist {playlist_type}: {e}")
             return None
 
-    def should_populate_discovery_pool(self, hours_threshold: int = 24) -> bool:
+    def should_populate_discovery_pool(self, hours_threshold: int = 24, profile_id: int = 1) -> bool:
         """Check if discovery pool should be populated (hasn't been updated in X hours)"""
         try:
             with self._get_connection() as conn:
@@ -4590,8 +5258,8 @@ class MusicDatabase:
                 cursor.execute("""
                     SELECT last_populated_timestamp
                     FROM discovery_pool_metadata
-                    WHERE id = 1
-                """)
+                    WHERE profile_id = ?
+                """, (profile_id,))
                 row = cursor.fetchone()
 
                 if not row:
@@ -4607,16 +5275,20 @@ class MusicDatabase:
             logger.error(f"Error checking discovery pool timestamp: {e}")
             return True  # Default to allowing population on error
 
-    def update_discovery_pool_timestamp(self, track_count: int) -> bool:
+    def update_discovery_pool_timestamp(self, track_count: int, profile_id: int = 1) -> bool:
         """Update the last populated timestamp and track count"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT OR REPLACE INTO discovery_pool_metadata
-                    (id, last_populated_timestamp, track_count, updated_at)
-                    VALUES (1, ?, ?, CURRENT_TIMESTAMP)
-                """, (datetime.now().isoformat(), track_count))
+                    INSERT INTO discovery_pool_metadata
+                    (profile_id, last_populated_timestamp, track_count, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(profile_id) DO UPDATE SET
+                        last_populated_timestamp = excluded.last_populated_timestamp,
+                        track_count = excluded.track_count,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (profile_id, datetime.now().isoformat(), track_count))
                 conn.commit()
                 return True
         except Exception as e:
@@ -4647,7 +5319,7 @@ class MusicDatabase:
             logger.error(f"Error cleaning up old discovery tracks: {e}")
             return 0
 
-    def add_recent_release(self, watchlist_artist_id: int, album_data: Dict[str, Any]) -> bool:
+    def add_recent_release(self, watchlist_artist_id: int, album_data: Dict[str, Any], profile_id: int = 1) -> bool:
         """Add a recent release to the recent_releases table"""
         try:
             with self._get_connection() as conn:
@@ -4655,15 +5327,16 @@ class MusicDatabase:
 
                 cursor.execute("""
                     INSERT OR IGNORE INTO recent_releases
-                    (watchlist_artist_id, album_spotify_id, album_name, release_date, album_cover_url, track_count, added_date)
-                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    (watchlist_artist_id, album_spotify_id, album_name, release_date, album_cover_url, track_count, added_date, profile_id)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
                 """, (
                     watchlist_artist_id,
                     album_data['album_spotify_id'],
                     album_data['album_name'],
                     album_data['release_date'],
                     album_data.get('album_cover_url'),
-                    album_data.get('track_count', 0)
+                    album_data.get('track_count', 0),
+                    profile_id
                 ))
 
                 conn.commit()
@@ -4673,17 +5346,18 @@ class MusicDatabase:
             logger.error(f"Error adding recent release: {e}")
             return False
 
-    def get_recent_releases(self, limit: int = 50) -> List[RecentRelease]:
-        """Get recent releases from watchlist artists"""
+    def get_recent_releases(self, limit: int = 50, profile_id: int = 1) -> List[RecentRelease]:
+        """Get recent releases from watchlist artists for the given profile"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
                 cursor.execute("""
                     SELECT * FROM recent_releases
+                    WHERE profile_id = ?
                     ORDER BY release_date DESC, added_date DESC
                     LIMIT ?
-                """, (limit,))
+                """, (profile_id, limit))
 
                 rows = cursor.fetchall()
                 return [RecentRelease(
@@ -4810,7 +5484,7 @@ class MusicDatabase:
                 'server_source': server_source
             }
 
-    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all") -> Dict[str, Any]:
+    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1) -> Dict[str, Any]:
         """
         Get artists for the library page with search, filtering, and pagination
 
@@ -4855,8 +5529,8 @@ class MusicDatabase:
 
                 where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
 
-                # Pre-fetch watchlist data (small table, single fast query)
-                cursor.execute("SELECT spotify_artist_id, itunes_artist_id, LOWER(artist_name) as name_lower FROM watchlist_artists")
+                # Pre-fetch watchlist data for this profile (small table, single fast query)
+                cursor.execute("SELECT spotify_artist_id, itunes_artist_id, LOWER(artist_name) as name_lower FROM watchlist_artists WHERE profile_id = ?", (profile_id,))
                 watchlist_rows = cursor.fetchall()
                 wl_spotify = {r['spotify_artist_id'] for r in watchlist_rows if r['spotify_artist_id']}
                 wl_itunes = {r['itunes_artist_id'] for r in watchlist_rows if r['itunes_artist_id']}

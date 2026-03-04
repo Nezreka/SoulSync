@@ -147,6 +147,10 @@ function initializeWebSocket() {
         console.log('WebSocket connected');
         socketConnected = true;
         resubscribeDownloadBatches();
+        // Join profile room for scoped watchlist/wishlist count updates
+        if (currentProfile) {
+            socket.emit('profile:join', { profile_id: currentProfile.id });
+        }
     });
 
     socket.on('disconnect', (reason) => {
@@ -156,6 +160,10 @@ function initializeWebSocket() {
 
     socket.on('reconnect', (attemptNumber) => {
         console.log(`WebSocket reconnected after ${attemptNumber} attempts`);
+        // Rejoin profile room for scoped WebSocket emits
+        if (currentProfile) {
+            socket.emit('profile:join', { profile_id: currentProfile.id });
+        }
         // Phase 1: Full state refresh on reconnect
         fetchAndUpdateServiceStatus();
         updateWatchlistButtonCount();
@@ -637,9 +645,571 @@ function initAccentColorListeners() {
     if (saved) applyAccentColor(saved);
 })();
 
-document.addEventListener('DOMContentLoaded', function () {
+// ── Profile System ─────────────────────────────────────────────
+let currentProfile = null;
+
+function renderProfileAvatar(el, profile) {
+    // Renders avatar as image (if avatar_url set) or colored initial fallback
+    // Preserves existing classes, ensures 'profile-avatar' is present
+    if (!el.classList.contains('profile-avatar') && !el.classList.contains('profile-indicator-avatar') && !el.classList.contains('profile-pin-avatar')) {
+        el.className = 'profile-avatar';
+    }
+    el.style.background = profile.avatar_color || '#6366f1';
+    el.textContent = '';
+    if (profile.avatar_url) {
+        const img = document.createElement('img');
+        img.src = profile.avatar_url;
+        img.alt = profile.name;
+        img.className = 'profile-avatar-img';
+        img.onerror = () => {
+            img.remove();
+            el.textContent = profile.name.charAt(0).toUpperCase();
+        };
+        el.appendChild(img);
+    } else {
+        el.textContent = profile.name.charAt(0).toUpperCase();
+    }
+}
+
+async function initProfileSystem() {
+    try {
+        // Check if a session already has a profile selected
+        const currentRes = await fetch('/api/profiles/current');
+        const currentData = await currentRes.json();
+        if (currentData.success && currentData.profile) {
+            currentProfile = currentData.profile;
+            updateProfileIndicator();
+            return true; // Profile already selected, skip picker
+        }
+
+        // Fetch all profiles
+        const res = await fetch('/api/profiles');
+        const data = await res.json();
+        const profiles = data.profiles || [];
+
+        if (profiles.length === 0) {
+            // No profiles yet — auto-select admin profile 1
+            await selectProfile(1);
+            return true;
+        }
+
+        if (profiles.length === 1) {
+            // Only one profile — always auto-select (PIN only matters with multiple profiles)
+            await selectProfile(profiles[0].id);
+            return true;
+        }
+
+        // Multiple profiles or PIN required — show picker
+        showProfilePicker(profiles);
+        return false; // App init deferred until profile selected
+    } catch (e) {
+        console.error('Profile init error:', e);
+        return true; // Fall through to normal init
+    }
+}
+
+function showProfilePicker(profiles, canCancel = false) {
+    const overlay = document.getElementById('profile-picker-overlay');
+    const grid = document.getElementById('profile-picker-grid');
+    const actions = document.getElementById('profile-picker-actions');
+
+    grid.innerHTML = '';
+    profiles.forEach(p => {
+        const card = document.createElement('div');
+        card.className = 'profile-picker-card';
+        const avatarEl = document.createElement('div');
+        renderProfileAvatar(avatarEl, p);
+        card.appendChild(avatarEl);
+        const nameEl = document.createElement('span');
+        nameEl.className = 'profile-name';
+        nameEl.textContent = p.name;
+        card.appendChild(nameEl);
+        if (p.is_admin) {
+            const badge = document.createElement('span');
+            badge.className = 'profile-badge';
+            badge.textContent = 'Admin';
+            card.appendChild(badge);
+        }
+        card.onclick = () => handleProfileClick(p);
+        grid.appendChild(card);
+    });
+
+    // Show manage button only if current profile is admin (not on first load before selection)
+    const isAdmin = currentProfile ? currentProfile.is_admin : false;
+    if (isAdmin) {
+        actions.style.display = '';
+    } else {
+        actions.style.display = 'none';
+    }
+
+    // Show/remove cancel button when opened from sidebar indicator
+    let cancelBtn = overlay.querySelector('.profile-picker-cancel');
+    if (cancelBtn) cancelBtn.remove();
+    if (canCancel) {
+        cancelBtn = document.createElement('button');
+        cancelBtn.className = 'profile-picker-cancel';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.onclick = () => hideProfilePicker();
+        actions.parentElement.appendChild(cancelBtn);
+    }
+
+    overlay.style.display = 'flex';
+    document.querySelector('.main-container').style.display = 'none';
+}
+
+async function handleProfileClick(profile) {
+    // Fetch profile count — PIN only matters with multiple profiles
+    let profileCount = 1;
+    try {
+        const r = await fetch('/api/profiles');
+        const d = await r.json();
+        profileCount = (d.profiles || []).length;
+    } catch (e) {}
+
+    if (profile.has_pin && profileCount > 1) {
+        showPinDialog(profile);
+    } else {
+        const wasSwitching = !!currentProfile;
+        await selectProfile(profile.id);
+        if (wasSwitching) {
+            window.location.reload();
+            return;
+        }
+        hideProfilePicker();
+        initApp();
+    }
+}
+
+function showPinDialog(profile) {
+    const dialog = document.getElementById('profile-pin-dialog');
+    const avatar = document.getElementById('profile-pin-avatar');
+    const nameEl = document.getElementById('profile-pin-name');
+    const input = document.getElementById('profile-pin-input');
+    const errorEl = document.getElementById('profile-pin-error');
+
+    renderProfileAvatar(avatar, profile);
+    nameEl.textContent = profile.name;
+    input.value = '';
+    errorEl.style.display = 'none';
+    dialog.style.display = 'flex';
+    setTimeout(() => input.focus(), 100);
+
+    const submit = document.getElementById('profile-pin-submit');
+    const cancel = document.getElementById('profile-pin-cancel');
+
+    const wasSwitching = !!currentProfile;
+    const handleSubmit = async () => {
+        const pin = input.value;
+        if (!pin) return;
+        try {
+            const res = await fetch('/api/profiles/select', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profile_id: profile.id, pin })
+            });
+            const data = await res.json();
+            if (data.success) {
+                cleanup();
+                if (wasSwitching) {
+                    window.location.reload();
+                    return;
+                }
+                currentProfile = data.profile;
+                dialog.style.display = 'none';
+                hideProfilePicker();
+                updateProfileIndicator();
+                initApp();
+                return;
+            } else {
+                errorEl.textContent = data.error || 'Invalid PIN';
+                errorEl.style.display = '';
+                input.value = '';
+                input.focus();
+            }
+        } catch (e) {
+            errorEl.textContent = 'Connection error';
+            errorEl.style.display = '';
+        }
+        cleanup();
+    };
+
+    const handleCancel = () => {
+        dialog.style.display = 'none';
+        cleanup();
+    };
+
+    const handleKeydown = (e) => {
+        if (e.key === 'Enter') handleSubmit();
+        if (e.key === 'Escape') handleCancel();
+    };
+
+    const cleanup = () => {
+        submit.removeEventListener('click', handleSubmit);
+        cancel.removeEventListener('click', handleCancel);
+        input.removeEventListener('keydown', handleKeydown);
+    };
+
+    submit.addEventListener('click', handleSubmit);
+    cancel.addEventListener('click', handleCancel);
+    input.addEventListener('keydown', handleKeydown);
+}
+
+async function selectProfile(profileId) {
+    try {
+        const oldProfileId = currentProfile ? currentProfile.id : null;
+        const res = await fetch('/api/profiles/select', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profile_id: profileId })
+        });
+        const data = await res.json();
+        if (data.success) {
+            currentProfile = data.profile;
+            updateProfileIndicator();
+            // Join profile-scoped WebSocket room for watchlist/wishlist count updates
+            if (socket && socket.connected) {
+                socket.emit('profile:join', { profile_id: profileId, old_profile_id: oldProfileId });
+            }
+        }
+        return data.success;
+    } catch (e) {
+        console.error('Error selecting profile:', e);
+        return false;
+    }
+}
+
+function hideProfilePicker() {
+    document.getElementById('profile-picker-overlay').style.display = 'none';
+    document.querySelector('.main-container').style.display = 'flex';
+}
+
+function updateProfileIndicator() {
+    const indicator = document.getElementById('profile-indicator');
+    if (!currentProfile || !indicator) return;
+
+    const avatar = document.getElementById('profile-indicator-avatar');
+    const name = document.getElementById('profile-indicator-name');
+
+    renderProfileAvatar(avatar, currentProfile);
+    name.textContent = currentProfile.name;
+    indicator.style.display = 'flex';
+
+    indicator.onclick = async () => {
+        const res = await fetch('/api/profiles');
+        const data = await res.json();
+        if (data.profiles && data.profiles.length > 0) {
+            showProfilePicker(data.profiles, true);
+        }
+    };
+
+    // Hide settings nav for non-admin
+    const settingsBtn = document.querySelector('.nav-button[data-page="settings"]');
+    if (settingsBtn && !currentProfile.is_admin) {
+        settingsBtn.style.display = 'none';
+    } else if (settingsBtn) {
+        settingsBtn.style.display = '';
+    }
+}
+
+function initProfileManagement() {
+    const manageBtn = document.getElementById('manage-profiles-btn');
+    const closeBtn = document.getElementById('profile-manage-close');
+    const createBtn = document.getElementById('create-profile-btn');
+    const adminPinBtn = document.getElementById('set-admin-pin-btn');
+
+    if (manageBtn) {
+        manageBtn.onclick = () => {
+            document.getElementById('profile-manage-panel').style.display = 'flex';
+            loadProfileManageList();
+        };
+    }
+
+    if (closeBtn) {
+        closeBtn.onclick = () => {
+            document.getElementById('profile-manage-panel').style.display = 'none';
+            // Refresh picker — keep cancel button if user already has a profile selected
+            const hasCancel = !!currentProfile;
+            fetch('/api/profiles').then(r => r.json()).then(d => {
+                showProfilePicker(d.profiles || [], hasCancel);
+            });
+        };
+    }
+
+    // Color picker
+    let selectedColor = '#6366f1';
+    document.querySelectorAll('.profile-color-swatch').forEach(swatch => {
+        swatch.onclick = () => {
+            document.querySelectorAll('.profile-color-swatch').forEach(s => s.classList.remove('selected'));
+            swatch.classList.add('selected');
+            selectedColor = swatch.dataset.color;
+        };
+    });
+    // Select first by default
+    const firstSwatch = document.querySelector('.profile-color-swatch');
+    if (firstSwatch) firstSwatch.classList.add('selected');
+
+    if (createBtn) {
+        createBtn.onclick = async () => {
+            const name = document.getElementById('new-profile-name').value.trim();
+            const avatarUrl = document.getElementById('new-profile-avatar-url').value.trim();
+            const pin = document.getElementById('new-profile-pin').value;
+            if (!name) return;
+
+            const res = await fetch('/api/profiles', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, avatar_color: selectedColor, avatar_url: avatarUrl || undefined, pin: pin || undefined })
+            });
+            const data = await res.json();
+            if (data.success) {
+                document.getElementById('new-profile-name').value = '';
+                document.getElementById('new-profile-avatar-url').value = '';
+                document.getElementById('new-profile-pin').value = '';
+                loadProfileManageList();
+                // Show admin PIN section if >1 profiles and admin has no PIN
+                checkAdminPinRequired();
+            } else {
+                alert(data.error || 'Failed to create profile');
+            }
+        };
+    }
+
+    if (adminPinBtn) {
+        adminPinBtn.onclick = async () => {
+            const pin = document.getElementById('admin-pin-input').value;
+            if (!pin || pin.length < 1) return;
+            // Find admin profile
+            const res = await fetch('/api/profiles');
+            const data = await res.json();
+            const admin = (data.profiles || []).find(p => p.is_admin);
+            if (!admin) return;
+
+            try {
+                const pinRes = await fetch(`/api/profiles/${admin.id}/set-pin`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pin })
+                });
+                const pinData = await pinRes.json();
+                if (!pinData.success) {
+                    alert(pinData.error || 'Failed to set PIN');
+                    return;
+                }
+            } catch (e) {
+                alert('Connection error');
+                return;
+            }
+            document.getElementById('admin-pin-input').value = '';
+            document.getElementById('admin-pin-section').style.display = 'none';
+            loadProfileManageList();
+        };
+    }
+}
+
+async function loadProfileManageList() {
+    const list = document.getElementById('profile-manage-list');
+    const res = await fetch('/api/profiles');
+    const data = await res.json();
+    const profiles = data.profiles || [];
+
+    list.innerHTML = '';
+    profiles.forEach(p => {
+        const item = document.createElement('div');
+        item.className = 'profile-manage-item';
+
+        const av = document.createElement('div');
+        renderProfileAvatar(av, p);
+        item.appendChild(av);
+
+        const info = document.createElement('div');
+        info.className = 'profile-info';
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'name';
+        nameDiv.textContent = p.name + (p.has_pin ? ' 🔒' : '');
+        info.appendChild(nameDiv);
+        if (p.is_admin) {
+            const roleDiv = document.createElement('div');
+            roleDiv.className = 'role';
+            roleDiv.textContent = 'Admin';
+            info.appendChild(roleDiv);
+        }
+        item.appendChild(info);
+
+        const actions = document.createElement('div');
+        actions.className = 'profile-manage-actions';
+
+        const editBtn = document.createElement('button');
+        editBtn.className = 'profile-edit-btn';
+        editBtn.dataset.id = p.id;
+        editBtn.dataset.name = p.name;
+        editBtn.dataset.color = p.avatar_color || '#6366f1';
+        editBtn.dataset.avatarUrl = p.avatar_url || '';
+        editBtn.title = 'Edit profile';
+        editBtn.textContent = '✏️';
+        actions.appendChild(editBtn);
+
+        if (!p.is_admin) {
+            const delBtn = document.createElement('button');
+            delBtn.className = 'profile-delete-btn';
+            delBtn.dataset.id = p.id;
+            delBtn.title = 'Delete profile';
+            delBtn.textContent = '🗑️';
+            actions.appendChild(delBtn);
+        }
+
+        item.appendChild(actions);
+        list.appendChild(item);
+    });
+
+    // Bind edit buttons
+    list.querySelectorAll('.profile-edit-btn').forEach(btn => {
+        btn.onclick = () => {
+            showProfileEditForm(btn.dataset.id, btn.dataset.name, btn.dataset.color, btn.dataset.avatarUrl);
+        };
+    });
+
+    // Bind delete buttons
+    list.querySelectorAll('.profile-delete-btn').forEach(btn => {
+        btn.onclick = async () => {
+            if (!confirm('Delete this profile and all its data?')) return;
+            try {
+                const res = await fetch(`/api/profiles/${btn.dataset.id}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!data.success) {
+                    alert(data.error || 'Failed to delete profile');
+                }
+            } catch (e) {
+                alert('Connection error');
+            }
+            loadProfileManageList();
+        };
+    });
+
+    checkAdminPinRequired();
+}
+
+function showProfileEditForm(profileId, currentName, currentColor, currentAvatarUrl) {
+    const list = document.getElementById('profile-manage-list');
+    // Remove any existing edit form
+    const existing = document.getElementById('profile-edit-form');
+    if (existing) existing.remove();
+
+    const editColors = ['#6366f1','#ec4899','#10b981','#f59e0b','#3b82f6','#ef4444','#8b5cf6','#14b8a6'];
+
+    const form = document.createElement('div');
+    form.id = 'profile-edit-form';
+    form.className = 'profile-edit-form';
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'profile-input';
+    nameInput.value = currentName;
+    nameInput.maxLength = 20;
+    nameInput.placeholder = 'Profile name';
+    form.appendChild(nameInput);
+
+    const urlInput = document.createElement('input');
+    urlInput.type = 'url';
+    urlInput.className = 'profile-input';
+    urlInput.value = currentAvatarUrl || '';
+    urlInput.placeholder = 'Avatar image URL (optional)';
+    form.appendChild(urlInput);
+
+    const colorRow = document.createElement('div');
+    colorRow.className = 'profile-color-picker';
+    let editColor = currentColor;
+    editColors.forEach(c => {
+        const swatch = document.createElement('span');
+        swatch.className = 'profile-color-swatch' + (c === currentColor ? ' selected' : '');
+        swatch.style.background = c;
+        swatch.dataset.color = c;
+        swatch.onclick = () => {
+            colorRow.querySelectorAll('.profile-color-swatch').forEach(s => s.classList.remove('selected'));
+            swatch.classList.add('selected');
+            editColor = c;
+        };
+        colorRow.appendChild(swatch);
+    });
+    form.appendChild(colorRow);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'profile-edit-buttons';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'profile-create-btn';
+    saveBtn.textContent = 'Save';
+    saveBtn.onclick = async () => {
+        const newName = nameInput.value.trim();
+        if (!newName) { alert('Name cannot be empty'); return; }
+        const newAvatarUrl = urlInput.value.trim() || null;
+        try {
+            const res = await fetch(`/api/profiles/${profileId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: newName, avatar_color: editColor, avatar_url: newAvatarUrl })
+            });
+            const data = await res.json();
+            if (data.success) {
+                // Update sidebar indicator if editing current profile
+                if (currentProfile && currentProfile.id == profileId) {
+                    currentProfile.name = newName;
+                    currentProfile.avatar_color = editColor;
+                    currentProfile.avatar_url = newAvatarUrl;
+                    updateProfileIndicator();
+                }
+                loadProfileManageList();
+            } else {
+                alert(data.error || 'Failed to update profile');
+            }
+        } catch (e) {
+            alert('Connection error');
+        }
+    };
+    btnRow.appendChild(saveBtn);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'profile-picker-cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = () => form.remove();
+    btnRow.appendChild(cancelBtn);
+
+    form.appendChild(btnRow);
+    list.appendChild(form);
+    nameInput.focus();
+    nameInput.select();
+}
+
+async function checkAdminPinRequired() {
+    const res = await fetch('/api/profiles');
+    const data = await res.json();
+    const profiles = data.profiles || [];
+    const admin = profiles.find(p => p.is_admin);
+    const section = document.getElementById('admin-pin-section');
+
+    if (profiles.length > 1 && admin && !admin.has_pin && section) {
+        section.style.display = '';
+    } else if (section) {
+        section.style.display = 'none';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', async function () {
     console.log('SoulSync WebUI initializing...');
 
+    // Initialize profile management UI handlers
+    initProfileManagement();
+
+    // Check profiles first — may show picker instead of app
+    const profileReady = await initProfileSystem();
+    if (!profileReady) {
+        console.log('Waiting for profile selection...');
+        return; // App init deferred until profile is selected via picker
+    }
+
+    initApp();
+});
+
+function initApp() {
     // Initialize components
     initializeNavigation();
     initializeMobileNavigation();
@@ -702,7 +1272,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     console.log('SoulSync WebUI initialized successfully!');
-});
+}
 
 // ===============================
 // NAVIGATION SYSTEM
