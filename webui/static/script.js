@@ -12090,10 +12090,26 @@ async function checkForUpdates() {
         if (data.update_available) {
             const dismissed = localStorage.getItem('soulsync-update-dismissed');
             if (dismissed !== data.latest_sha) {
+                // Add glow class
                 btn.classList.add('update-available');
+                // Add UPDATE badge if not already present
+                if (!btn.querySelector('.update-badge')) {
+                    const badge = document.createElement('span');
+                    badge.className = 'update-badge';
+                    badge.textContent = 'UPDATE';
+                    btn.appendChild(badge);
+                }
+                // Show toast on first detection (not if already notified this session)
+                const notified = sessionStorage.getItem('soulsync-update-notified');
+                if (notified !== data.latest_sha) {
+                    sessionStorage.setItem('soulsync-update-notified', data.latest_sha);
+                    showToast('A new SoulSync update is available!', 'info');
+                }
             }
         } else {
             btn.classList.remove('update-available');
+            const badge = btn.querySelector('.update-badge');
+            if (badge) badge.remove();
         }
     } catch (e) {
         console.debug('Update check failed:', e);
@@ -12101,13 +12117,25 @@ async function checkForUpdates() {
 }
 
 async function showVersionInfo() {
-    // Dismiss update glow when user opens the modal (fire-and-forget, don't block modal)
+    // Check update status before dismissing so we can pass it to the modal
+    let updateInfo = null;
     const btn = document.querySelector('.version-button');
-    if (btn && btn.classList.contains('update-available')) {
+    const hadUpdate = btn && btn.classList.contains('update-available');
+
+    // Dismiss update glow when user opens the modal
+    if (hadUpdate) {
         btn.classList.remove('update-available');
-        fetch('/api/update-check').then(r => r.json()).then(data => {
-            if (data.latest_sha) localStorage.setItem('soulsync-update-dismissed', data.latest_sha);
-        }).catch(() => {});
+        const badge = btn.querySelector('.update-badge');
+        if (badge) badge.remove();
+        try {
+            const updateRes = await fetch('/api/update-check');
+            if (updateRes.ok) {
+                updateInfo = await updateRes.json();
+                if (updateInfo.latest_sha) {
+                    localStorage.setItem('soulsync-update-dismissed', updateInfo.latest_sha);
+                }
+            }
+        } catch (e) { /* ignore */ }
     }
 
     try {
@@ -12123,7 +12151,7 @@ async function showVersionInfo() {
         console.log('Version data received:', versionData);
 
         // Populate modal content
-        populateVersionModal(versionData);
+        populateVersionModal(versionData, hadUpdate ? updateInfo : null);
 
         // Show modal
         const modalOverlay = document.getElementById('version-modal-overlay');
@@ -12143,7 +12171,7 @@ function closeVersionModal() {
     console.log('Version modal closed');
 }
 
-function populateVersionModal(versionData) {
+function populateVersionModal(versionData, updateInfo) {
     const container = document.getElementById('version-content-container');
     if (!container) {
         console.error('Version content container not found');
@@ -12159,6 +12187,20 @@ function populateVersionModal(versionData) {
 
     // Clear existing content
     container.innerHTML = '';
+
+    // Show update banner if an update was available when modal was opened
+    if (updateInfo && updateInfo.update_available) {
+        const banner = document.createElement('div');
+        banner.className = 'version-update-banner';
+        banner.innerHTML = `
+            <div class="version-update-banner-icon">&#x2B06;</div>
+            <div class="version-update-banner-text">
+                <strong>New update available</strong>
+                <span>Your version: ${updateInfo.current_sha || 'unknown'} &rarr; Latest: ${updateInfo.latest_sha || 'unknown'}</span>
+            </div>
+        `;
+        container.appendChild(banner);
+    }
 
     // Create sections
     versionData.sections.forEach(section => {
