@@ -124,9 +124,12 @@ class SpotifyWorker:
 
                 # Auth guard — don't process anything without Spotify auth
                 if not self.client.is_spotify_authenticated():
-                    logger.debug("Spotify not authenticated, sleeping 30s...")
-                    time.sleep(30)
-                    continue
+                    # Try reloading config in case user re-authenticated via settings
+                    self.client.reload_config()
+                    if not self.client.is_spotify_authenticated():
+                        logger.debug("Spotify not authenticated, sleeping 30s...")
+                        time.sleep(30)
+                        continue
 
                 self.current_item = None
                 item = self._get_next_item()

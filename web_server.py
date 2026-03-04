@@ -3685,6 +3685,9 @@ def spotify_callback():
             if spotify_client.is_authenticated():
                 # Invalidate status cache so next poll picks up the new connection
                 _status_cache_timestamps['spotify'] = 0
+                # Refresh enrichment worker's client so it picks up new auth
+                if spotify_enrichment_worker and hasattr(spotify_enrichment_worker, 'client'):
+                    spotify_enrichment_worker.client.reload_config()
                 add_activity_item("✅", "Spotify Auth Complete", "Successfully authenticated with Spotify", "Now")
                 return "<h1>Spotify Authentication Successful!</h1><p>You can close this window.</p>"
             else:
@@ -28322,6 +28325,9 @@ def start_oauth_callback_servers():
                         if spotify_client.is_authenticated():
                             # Invalidate status cache so next poll picks up the new connection
                             _status_cache_timestamps['spotify'] = 0
+                            # Refresh enrichment worker's client so it picks up new auth
+                            if spotify_enrichment_worker and hasattr(spotify_enrichment_worker, 'client'):
+                                spotify_enrichment_worker.client.reload_config()
                             add_activity_item("✅", "Spotify Auth Complete", "Successfully authenticated with Spotify", "Now")
                             self.send_response(200)
                             self.send_header('Content-type', 'text/html')
