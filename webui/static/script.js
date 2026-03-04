@@ -1241,6 +1241,10 @@ function initApp() {
     fetchAndUpdateServiceStatus();
     setInterval(fetchAndUpdateServiceStatus, 10000); // Every 10 seconds (no-op when WebSocket active)
 
+    // Check for updates on load and every hour
+    checkForUpdates();
+    setInterval(checkForUpdates, 3600000);
+
     // Refresh key data immediately when user returns to this tab
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
@@ -12076,7 +12080,36 @@ function formatArtists(artists) {
     return artistNames.join(', ') || 'Unknown Artist';
 }
 
+async function checkForUpdates() {
+    try {
+        const res = await fetch('/api/update-check');
+        if (!res.ok) return;
+        const data = await res.json();
+        const btn = document.querySelector('.version-button');
+        if (!btn) return;
+        if (data.update_available) {
+            const dismissed = localStorage.getItem('soulsync-update-dismissed');
+            if (dismissed !== data.latest_sha) {
+                btn.classList.add('update-available');
+            }
+        } else {
+            btn.classList.remove('update-available');
+        }
+    } catch (e) {
+        console.debug('Update check failed:', e);
+    }
+}
+
 async function showVersionInfo() {
+    // Dismiss update glow when user opens the modal (fire-and-forget, don't block modal)
+    const btn = document.querySelector('.version-button');
+    if (btn && btn.classList.contains('update-available')) {
+        btn.classList.remove('update-available');
+        fetch('/api/update-check').then(r => r.json()).then(data => {
+            if (data.latest_sha) localStorage.setItem('soulsync-update-dismissed', data.latest_sha);
+        }).catch(() => {});
+    }
+
     try {
         console.log('Fetching version info...');
 

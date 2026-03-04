@@ -36,6 +36,8 @@ jobs:
           push: true
           no-cache: true
           pull: true
+          build-args: |
+            COMMIT_SHA=${{ github.sha }}
           tags: |
             boulderbadgedad/soulsync:latest
             boulderbadgedad/soulsync:${{ inputs.version_tag }}

@@ -3,6 +3,10 @@
 
 FROM python:3.11-slim
 
+# Build-time commit SHA for update detection
+ARG COMMIT_SHA=""
+ENV SOULSYNC_COMMIT_SHA=${COMMIT_SHA}
+
 # Set working directory
 WORKDIR /app
 
