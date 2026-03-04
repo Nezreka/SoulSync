@@ -13638,6 +13638,7 @@ body {
     gap: 20px;
     padding: 20px 0;
     flex: 1;
+    contain: layout style;
 }
 
 /* Library Artist Card — full-bleed photo style */
@@ -13647,13 +13648,17 @@ body {
     border: 1px solid rgba(255, 255, 255, 0.06);
     padding: 0;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     flex-direction: column;
     position: relative;
     overflow: hidden;
     aspect-ratio: 0.8;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    will-change: transform;
+    contain: layout style paint;
 }
 
 .library-artist-card:hover {
@@ -13723,7 +13728,6 @@ body {
             transparent 60%);
     pointer-events: none;
     z-index: 1;
-    transition: background 0.3s ease;
 }
 
 .library-artist-card:hover::after {
@@ -25374,8 +25378,7 @@ body {
     right: 8px;
     width: 28px;
     height: 28px;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.75);
     /* MusicBrainz Purple - Force visible color */
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 4px;
@@ -25399,8 +25402,7 @@ body {
     right: 8px;
     width: 28px;
     height: 28px;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.75);
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 4px;
     display: flex;
@@ -25440,8 +25442,7 @@ body {
     right: 8px;
     width: 28px;
     height: 28px;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.75);
     border: 1px solid rgba(var(--accent-rgb), 0.4);
     border-radius: 4px;
     display: flex;
@@ -25461,8 +25462,7 @@ body {
     align-items: center;
     gap: 4px;
     padding: 4px 10px;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.75);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 12px;
     color: #e0e0e0;
@@ -25471,7 +25471,7 @@ body {
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
     cursor: pointer;
     z-index: 100;
-    transition: all 0.2s ease;
+    transition: opacity 0.2s ease, transform 0.2s ease;
     opacity: 0;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
