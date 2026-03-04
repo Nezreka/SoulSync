@@ -1486,10 +1486,32 @@
         font-size: 10px;
     }
 
-    /* Show checkbox and remove always on mobile (no hover) */
+    /* Show checkbox, remove, and gear always on mobile (no hover) */
     .watchlist-card-checkbox,
-    .watchlist-artist-card .watchlist-card-remove {
+    .watchlist-artist-card .watchlist-card-remove,
+    .watchlist-artist-card .watchlist-card-gear {
         opacity: 1;
+    }
+
+    .watchlist-detail-hero {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .watchlist-detail-hero-stats {
+        justify-content: center;
+    }
+
+    .watchlist-detail-hero-genres {
+        justify-content: center;
+    }
+
+    .watchlist-detail-actions {
+        flex-direction: column;
+    }
+
+    .watchlist-detail-actions button {
+        width: 100%;
     }
 
     .watchlist-search-container {
@@ -1902,6 +1924,32 @@
 
     .watchlist-card-info {
         padding: 8px 10px;
+    }
+
+    .watchlist-pill {
+        font-size: 8px;
+        padding: 1px 4px;
+    }
+
+    .watchlist-card-pills {
+        padding: 0 10px 6px;
+    }
+
+    .watchlist-detail-content {
+        padding: 20px 16px;
+    }
+
+    .watchlist-detail-hero img {
+        width: 80px;
+        height: 80px;
+    }
+
+    .watchlist-detail-hero-name {
+        font-size: 22px;
+    }
+
+    .watchlist-detail-releases {
+        grid-template-columns: 1fr;
     }
 
     /* Download modal - even more compact */

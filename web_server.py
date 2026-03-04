@@ -21527,7 +21527,14 @@ def get_watchlist_artists():
                 "created_at": artist.created_at.isoformat() if artist.created_at else None,
                 "updated_at": artist.updated_at.isoformat() if artist.updated_at else None,
                 "image_url": artist.image_url,  # Cached during watchlist scans
-                "itunes_artist_id": artist.itunes_artist_id  # For iTunes-only artists
+                "itunes_artist_id": artist.itunes_artist_id,  # For iTunes-only artists
+                "include_albums": artist.include_albums,
+                "include_eps": artist.include_eps,
+                "include_singles": artist.include_singles,
+                "include_live": artist.include_live,
+                "include_remixes": artist.include_remixes,
+                "include_acoustic": artist.include_acoustic,
+                "include_compilations": artist.include_compilations,
             })
 
         return jsonify({"success": True, "artists": artists_data})
@@ -22362,7 +22369,8 @@ def watchlist_artist_config(artist_id):
             cursor.execute("""
                 SELECT include_albums, include_eps, include_singles,
                        include_live, include_remixes, include_acoustic, include_compilations,
-                       artist_name, image_url, spotify_artist_id, itunes_artist_id
+                       artist_name, image_url, spotify_artist_id, itunes_artist_id,
+                       last_scan_timestamp, date_added
                 FROM watchlist_artists
                 WHERE spotify_artist_id = ? OR itunes_artist_id = ?
             """, (artist_id, artist_id))
@@ -22405,6 +22413,53 @@ def watchlist_artist_config(artist_id):
                     'genres': []
                 }
 
+            # Enrich with library artist data (banner, bio, style, mood, label)
+            try:
+                conn2 = sqlite3.connect(str(database.database_path))
+                cur2 = conn2.cursor()
+                cur2.execute("""
+                    SELECT banner_url, summary, style, mood, label, genres
+                    FROM artists
+                    WHERE spotify_artist_id = ? OR itunes_artist_id = ?
+                    LIMIT 1
+                """, (artist_id, artist_id))
+                lib_row = cur2.fetchone()
+                if lib_row:
+                    artist_info['banner_url'] = lib_row[0]
+                    artist_info['summary'] = lib_row[1]
+                    artist_info['style'] = lib_row[2]
+                    artist_info['mood'] = lib_row[3]
+                    artist_info['label'] = lib_row[4]
+                    # Backfill genres from library if Spotify didn't provide any
+                    if not artist_info.get('genres') and lib_row[5]:
+                        try:
+                            artist_info['genres'] = json.loads(lib_row[5])
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
+                # Get recent releases for this watchlist artist
+                cur2.execute("""
+                    SELECT rr.album_name, rr.release_date, rr.album_cover_url, rr.track_count
+                    FROM recent_releases rr
+                    JOIN watchlist_artists wa ON rr.watchlist_artist_id = wa.id
+                    WHERE wa.spotify_artist_id = ? OR wa.itunes_artist_id = ?
+                    ORDER BY rr.release_date DESC
+                    LIMIT 6
+                """, (artist_id, artist_id))
+                releases = [
+                    {
+                        'album_name': r[0],
+                        'release_date': r[1],
+                        'album_cover_url': r[2],
+                        'track_count': r[3],
+                    }
+                    for r in cur2.fetchall()
+                ]
+                conn2.close()
+            except Exception as e:
+                print(f"Warning: Could not enrich artist from library: {e}")
+                releases = []
+
             config = {
                 'include_albums': bool(result[0]),  # Convert INTEGER to boolean
                 'include_eps': bool(result[1]),
@@ -22412,13 +22467,16 @@ def watchlist_artist_config(artist_id):
                 'include_live': bool(result[3]),
                 'include_remixes': bool(result[4]),
                 'include_acoustic': bool(result[5]),
-                'include_compilations': bool(result[6])
+                'include_compilations': bool(result[6]),
+                'last_scan_timestamp': result[11],
+                'date_added': result[12],
             }
 
             return jsonify({
                 "success": True,
                 "config": config,
-                "artist": artist_info
+                "artist": artist_info,
+                "recent_releases": releases
             })
 
         else:  # POST

@@ -26757,25 +26757,25 @@ async function showWatchlistModal() {
                         </div>
                         <div class="playlist-modal-sync-status" id="watchlist-scan-status" style="display: ${scanStatus !== 'idle' ? 'flex' : 'none'}; flex-direction: column; align-items: center;">
                             <!-- Live Visual Activity Display -->
-                            <div id="watchlist-live-activity" style="display: ${scanStatus === 'scanning' ? 'flex' : 'none'}; gap: 15px; margin-top: 15px; padding: 15px; background: #2a2a2a; border-radius: 8px; border: 1px solid #444; justify-content: center; align-items: flex-start;">
+                            <div id="watchlist-live-activity" class="watchlist-live-activity" style="display: ${scanStatus === 'scanning' ? 'flex' : 'none'};">
                                 <!-- Artist Photo -->
-                                <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
-                                    <img id="watchlist-artist-img" src="" alt="Artist" style="width: 80px; height: 80px; border-radius: 50%; border: 2px solid rgb(var(--accent-rgb)); object-fit: cover; background: #1a1a1a;" onerror="this.style.display='none';" />
-                                    <div id="watchlist-artist-name" style="font-size: 11px; font-weight: bold; color: #fff; text-align: center; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Waiting...</div>
+                                <div class="watchlist-live-activity-col">
+                                    <img id="watchlist-artist-img" class="watchlist-live-activity-artist-img" src="" alt="Artist" onerror="this.style.display='none';" />
+                                    <div id="watchlist-artist-name" class="watchlist-live-activity-label">Waiting...</div>
                                 </div>
 
                                 <!-- Album Cover -->
-                                <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
-                                    <img id="watchlist-album-img" src="" alt="Album" style="width: 80px; height: 80px; border-radius: 6px; border: 2px solid #ffc107; object-fit: cover; background: #1a1a1a;" onerror="this.style.display='none';" />
-                                    <div id="watchlist-album-name" style="font-size: 11px; font-weight: bold; color: #fff; text-align: center; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Waiting...</div>
+                                <div class="watchlist-live-activity-col">
+                                    <img id="watchlist-album-img" class="watchlist-live-activity-album-img" src="" alt="Album" onerror="this.style.display='none';" />
+                                    <div id="watchlist-album-name" class="watchlist-live-activity-label">Waiting...</div>
                                 </div>
 
                                 <!-- Track and Wishlist Feed -->
-                                <div style="display: flex; flex-direction: column; gap: 6px; min-width: 250px; max-width: 300px;">
-                                    <div style="font-size: 10px; color: #b3b3b3; text-transform: uppercase;">Current Track:</div>
-                                    <div id="watchlist-track-name" style="font-size: 11px; font-weight: bold; color: rgb(var(--accent-light-rgb)); margin-bottom: 8px;">Waiting...</div>
+                                <div class="watchlist-live-activity-feed">
+                                    <div class="watchlist-live-activity-feed-label">Current Track:</div>
+                                    <div id="watchlist-track-name" class="watchlist-live-activity-track">Waiting...</div>
 
-                                    <div style="font-size: 10px; color: #ff9800; text-transform: uppercase;">✨ Recently Added:</div>
+                                    <div class="watchlist-live-activity-feed-label-orange">✨ Recently Added:</div>
                                     <div id="watchlist-additions-feed" style="max-height: 80px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-size: 10px;">
                                         <!-- Populated by JavaScript -->
                                     </div>
@@ -26845,7 +26845,16 @@ async function showWatchlistModal() {
                     </div>
 
                     <div class="watchlist-artists-grid" id="watchlist-artists-list">
-                        ${artistsData.artists.map(artist => `
+                        ${artistsData.artists.map(artist => {
+                            const pills = [];
+                            if (artist.include_albums) pills.push('<span class="watchlist-pill watchlist-pill-active">Albums</span>');
+                            if (artist.include_eps) pills.push('<span class="watchlist-pill watchlist-pill-active">EPs</span>');
+                            if (artist.include_singles) pills.push('<span class="watchlist-pill watchlist-pill-active">Singles</span>');
+                            if (artist.include_live) pills.push('<span class="watchlist-pill watchlist-pill-filter">Live</span>');
+                            if (artist.include_remixes) pills.push('<span class="watchlist-pill watchlist-pill-filter">Remixes</span>');
+                            if (artist.include_acoustic) pills.push('<span class="watchlist-pill watchlist-pill-filter">Acoustic</span>');
+                            if (artist.include_compilations) pills.push('<span class="watchlist-pill watchlist-pill-filter">Compilations</span>');
+                            return `
                             <div class="watchlist-artist-card"
                                  data-artist-name="${artist.artist_name.toLowerCase().replace(/"/g, '&quot;')}"
                                  data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}">
@@ -26858,11 +26867,13 @@ async function showWatchlistModal() {
                                     <span class="watchlist-checkbox-custom"></span>
                                 </label>
 
-                                <button class="watchlist-card-remove"
+                                <button class="watchlist-card-gear"
                                         data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}"
                                         data-artist-name="${escapeHtml(artist.artist_name)}"
                                         onclick="event.stopPropagation();"
-                                        title="Remove from watchlist">&times;</button>
+                                        title="Artist settings">
+                                    <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 00-.48-.41h-3.84a.48.48 0 00-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87a.48.48 0 00.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.26.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.6 3.6 0 0112 15.6z"/></svg>
+                                </button>
 
                                 <div class="watchlist-card-image">
                                     ${artist.image_url ? `
@@ -26877,29 +26888,29 @@ async function showWatchlistModal() {
 
                                 <div class="watchlist-card-info">
                                     <span class="watchlist-card-name">${escapeHtml(artist.artist_name)}</span>
-                                    <span class="watchlist-card-meta">Added ${new Date(artist.date_added).toLocaleDateString()}</span>
+                                    <span class="watchlist-card-meta">${formatRelativeScanTime(artist.last_scan_timestamp)}</span>
                                 </div>
+                                ${pills.length > 0 ? `<div class="watchlist-card-pills">${pills.join('')}</div>` : ''}
                             </div>
-                        `).join('')}
+                        `}).join('')}
                     </div>
                 </div>
             </div>
         `;
 
-        // Add event listeners for remove buttons
-        modal.querySelectorAll('.watchlist-card-remove').forEach(button => {
+        // Add event listeners for gear buttons
+        modal.querySelectorAll('.watchlist-card-gear').forEach(button => {
             button.addEventListener('click', () => {
                 const artistId = button.getAttribute('data-artist-id');
                 const artistName = button.getAttribute('data-artist-name');
-                removeFromWatchlistModal(artistId, artistName);
+                openWatchlistArtistConfigModal(artistId, artistName);
             });
         });
 
-        // Add click handlers to artist cards (except for remove button or checkbox)
+        // Add click handlers to artist cards (except for gear button or checkbox)
         modal.querySelectorAll('.watchlist-artist-card').forEach(item => {
             item.addEventListener('click', (e) => {
-                // Don't trigger if clicking the remove button or checkbox
-                if (e.target.closest('.watchlist-card-remove') || e.target.closest('.watchlist-card-checkbox')) {
+                if (e.target.closest('.watchlist-card-gear') || e.target.closest('.watchlist-card-checkbox')) {
                     return;
                 }
 
@@ -26907,7 +26918,7 @@ async function showWatchlistModal() {
                 const artistName = item.querySelector('.watchlist-card-name').textContent;
 
                 console.log(`🎵 Artist card clicked: ${artistName} (${artistId})`);
-                openWatchlistArtistConfigModal(artistId, artistName);
+                openWatchlistArtistDetailView(artistId, artistName);
             });
         });
 
@@ -27110,6 +27121,177 @@ function closeWatchlistArtistConfigModal() {
     const heroContainer = document.getElementById('watchlist-artist-config-hero');
     if (heroContainer) {
         heroContainer.innerHTML = '';
+    }
+}
+
+/**
+ * Open watchlist artist detail view (slides in from right)
+ */
+async function openWatchlistArtistDetailView(artistId, artistName) {
+    try {
+        const response = await fetch(`/api/watchlist/artist/${artistId}/config`);
+        const data = await response.json();
+
+        if (!data.success) {
+            showToast(`Error loading artist info: ${data.error}`, 'error');
+            return;
+        }
+
+        const { config, artist, recent_releases } = data;
+
+        // Remove existing overlay if any
+        const existing = document.querySelector('.watchlist-artist-detail-overlay');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.className = 'watchlist-artist-detail-overlay';
+
+        // Build pills
+        const pills = [];
+        if (config.include_albums) pills.push('<span class="watchlist-pill watchlist-pill-active">Albums</span>');
+        if (config.include_eps) pills.push('<span class="watchlist-pill watchlist-pill-active">EPs</span>');
+        if (config.include_singles) pills.push('<span class="watchlist-pill watchlist-pill-active">Singles</span>');
+        if (config.include_live) pills.push('<span class="watchlist-pill watchlist-pill-filter">Live</span>');
+        if (config.include_remixes) pills.push('<span class="watchlist-pill watchlist-pill-filter">Remixes</span>');
+        if (config.include_acoustic) pills.push('<span class="watchlist-pill watchlist-pill-filter">Acoustic</span>');
+        if (config.include_compilations) pills.push('<span class="watchlist-pill watchlist-pill-filter">Compilations</span>');
+
+        // Build scan info
+        const scanTimeText = config.last_scan_timestamp ? formatRelativeScanTime(config.last_scan_timestamp) : 'Never scanned';
+        const dateAddedText = config.date_added ? `Added ${new Date(config.date_added).toLocaleDateString()}` : '';
+
+        // Build metadata tags (style, mood, label)
+        const metaTags = [];
+        if (artist.style) metaTags.push(`<span class="watchlist-detail-genre-tag">${escapeHtml(artist.style)}</span>`);
+        if (artist.mood) metaTags.push(`<span class="watchlist-detail-genre-tag">${escapeHtml(artist.mood)}</span>`);
+        if (artist.label) metaTags.push(`<span class="watchlist-detail-genre-tag">${escapeHtml(artist.label)}</span>`);
+
+        overlay.innerHTML = `
+            ${artist.banner_url ? `
+                <div class="watchlist-detail-banner">
+                    <img src="${artist.banner_url}" alt="" onerror="this.parentElement.remove();">
+                    <div class="watchlist-detail-banner-fade"></div>
+                </div>
+            ` : ''}
+
+            <div class="watchlist-detail-content ${artist.banner_url ? 'has-banner' : ''}">
+                <button class="watchlist-detail-back watchlist-detail-back-btn">
+                    ← Back to Watchlist
+                </button>
+
+                <div class="watchlist-detail-hero">
+                    ${artist.image_url ? `<img src="${artist.image_url}" alt="${escapeHtml(artist.name)}" onerror="this.style.display='none';">` : ''}
+                    <div class="watchlist-detail-hero-info">
+                        <h2 class="watchlist-detail-hero-name">${escapeHtml(artist.name)}</h2>
+                        ${artist.followers || artist.popularity ? `
+                        <div class="watchlist-detail-hero-stats">
+                            ${artist.followers ? `
+                            <div class="watchlist-detail-stat">
+                                <span class="watchlist-detail-stat-value">${formatNumber(artist.followers)}</span>
+                                <span class="watchlist-detail-stat-label">Followers</span>
+                            </div>` : ''}
+                            ${artist.popularity ? `
+                            <div class="watchlist-detail-stat">
+                                <span class="watchlist-detail-stat-value">${artist.popularity}/100</span>
+                                <span class="watchlist-detail-stat-label">Popularity</span>
+                            </div>` : ''}
+                        </div>
+                        ` : ''}
+                        ${artist.genres && artist.genres.length > 0 ? `
+                            <div class="watchlist-detail-hero-genres">
+                                ${artist.genres.map(g => `<span class="watchlist-detail-genre-tag">${escapeHtml(g)}</span>`).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+
+                ${artist.summary ? `
+                <div class="watchlist-detail-section">
+                    <div class="watchlist-detail-section-title">About</div>
+                    <p class="watchlist-detail-bio">${escapeHtml(artist.summary)}</p>
+                </div>
+                ` : ''}
+
+                ${metaTags.length > 0 ? `
+                <div class="watchlist-detail-section">
+                    <div class="watchlist-detail-section-title">Info</div>
+                    <div class="watchlist-detail-hero-genres">${metaTags.join('')}</div>
+                </div>
+                ` : ''}
+
+                ${recent_releases && recent_releases.length > 0 ? `
+                <div class="watchlist-detail-section">
+                    <div class="watchlist-detail-section-title">Recent Releases</div>
+                    <div class="watchlist-detail-releases">
+                        ${recent_releases.map(r => `
+                            <div class="watchlist-detail-release">
+                                ${r.album_cover_url ? `<img src="${r.album_cover_url}" alt="" onerror="this.style.display='none';">` : ''}
+                                <div class="watchlist-detail-release-info">
+                                    <span class="watchlist-detail-release-name">${escapeHtml(r.album_name)}</span>
+                                    <span class="watchlist-detail-release-meta">${r.release_date}${r.track_count ? ` · ${r.track_count} tracks` : ''}</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+
+                <div class="watchlist-detail-section">
+                    <div class="watchlist-detail-section-title">Watchlist</div>
+                    <div class="watchlist-detail-watchlist-info">
+                        <span class="watchlist-card-meta">${scanTimeText}</span>
+                        ${dateAddedText ? `<span class="watchlist-detail-info-sep">·</span><span class="watchlist-card-meta">${dateAddedText}</span>` : ''}
+                    </div>
+                    <div class="watchlist-card-pills" style="padding: 0; margin-top: 8px;">
+                        ${pills.length > 0 ? pills.join('') : '<span class="watchlist-card-meta">No release types enabled</span>'}
+                    </div>
+                </div>
+
+                <div class="watchlist-detail-actions">
+                    <button class="watchlist-detail-settings-btn watchlist-detail-settings-action">Settings</button>
+                    <button class="watchlist-detail-remove-btn watchlist-detail-remove-action">Remove from Watchlist</button>
+                </div>
+            </div>
+        `;
+
+        // Wire up event listeners (avoids inline onclick escaping issues)
+        overlay.querySelector('.watchlist-detail-back-btn').addEventListener('click', () => {
+            closeWatchlistArtistDetailView();
+        });
+
+        overlay.querySelector('.watchlist-detail-settings-action').addEventListener('click', () => {
+            // Remove overlay immediately so it doesn't block the config modal
+            const detailOverlay = document.querySelector('.watchlist-artist-detail-overlay');
+            if (detailOverlay) detailOverlay.remove();
+            openWatchlistArtistConfigModal(artistId, artistName);
+        });
+
+        overlay.querySelector('.watchlist-detail-remove-action').addEventListener('click', () => {
+            removeFromWatchlistModal(artistId, artistName);
+        });
+
+        // Append to the modal container
+        const container = document.querySelector('.watchlist-fullscreen');
+        if (container) {
+            container.appendChild(overlay);
+            // Trigger slide-in animation
+            requestAnimationFrame(() => overlay.classList.add('visible'));
+        }
+
+    } catch (error) {
+        console.error('Error opening artist detail view:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Close watchlist artist detail view (slides out)
+ */
+function closeWatchlistArtistDetailView() {
+    const overlay = document.querySelector('.watchlist-artist-detail-overlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+        overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
     }
 }
 
@@ -27366,6 +27548,23 @@ function formatNumber(num) {
 }
 
 /**
+ * Format last scan timestamp as relative time
+ */
+function formatRelativeScanTime(isoString) {
+    if (!isoString) return 'Never scanned';
+    const diff = Date.now() - new Date(isoString).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Scanned just now';
+    if (mins < 60) return `Scanned ${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `Scanned ${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 30) return `Scanned ${days}d ago`;
+    const months = Math.floor(days / 30);
+    return `Scanned ${months}mo ago`;
+}
+
+/**
  * Filter watchlist artists based on search input
  */
 function filterWatchlistArtists() {
@@ -27476,16 +27675,16 @@ function handleWatchlistScanData(data) {
         if (additionsFeed) {
             if (data.recent_wishlist_additions && data.recent_wishlist_additions.length > 0) {
                 additionsFeed.innerHTML = data.recent_wishlist_additions.map(item => `
-                    <div style="display: flex; gap: 6px; align-items: center; padding: 3px; background: #1a1a1a; border-radius: 4px;">
-                        <img src="${item.album_image_url || ''}" alt="" style="width: 24px; height: 24px; border-radius: 3px; object-fit: cover;" onerror="this.style.display='none';" />
-                        <div style="flex: 1; overflow: hidden;">
-                            <div style="font-weight: bold; color: rgb(var(--accent-light-rgb)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.track_name}</div>
-                            <div style="font-size: 9px; color: #b3b3b3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.artist_name}</div>
+                    <div class="watchlist-live-addition-item">
+                        <img src="${item.album_image_url || ''}" alt="" onerror="this.style.display='none';" />
+                        <div class="watchlist-live-addition-item-info">
+                            <div class="watchlist-live-addition-item-track">${item.track_name}</div>
+                            <div class="watchlist-live-addition-item-artist">${item.artist_name}</div>
                         </div>
                     </div>
                 `).join('');
             } else {
-                additionsFeed.innerHTML = '<div style="color: #666; font-size: 10px;">No tracks added yet...</div>';
+                additionsFeed.innerHTML = '<div class="watchlist-live-addition-empty">No tracks added yet...</div>';
             }
         }
     } else if (liveActivity && data.status !== 'scanning') {
@@ -27523,8 +27722,8 @@ function handleWatchlistScanData(data) {
 
             // Update the scan status display with completion message and summary
             statusDiv.innerHTML = `
-                <div style="text-align: center; padding: 15px; background: #2a2a2a; border-radius: 8px; border: 1px solid #444;">
-                    <div style="font-size: 14px; color: rgb(var(--accent-light-rgb)); margin-bottom: 10px;">${completionMessage}</div>
+                <div class="watchlist-scan-completion">
+                    <div class="watchlist-scan-completion-message">${completionMessage}</div>
                     <div style="font-size: 13px; opacity: 0.8;">
                         <span class="sync-stat">Artists: ${totalArtists}</span>
                         <span class="sync-separator"> • </span>
@@ -27693,6 +27892,9 @@ async function removeFromWatchlistModal(artistId, artistName) {
         }
 
         console.log(`❌ Removed ${artistName} from watchlist`);
+
+        // Close detail view if open
+        closeWatchlistArtistDetailView();
 
         // Refresh the modal
         showWatchlistModal();
