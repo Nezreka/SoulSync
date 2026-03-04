@@ -370,6 +370,18 @@ class AcoustIDClient:
             logger.warning(f"Cannot lookup: file not found: {audio_file}")
             return None
 
+        # Check channel count — chromaprint crashes (SIGABRT) on >2 channel files (e.g. 5.1 surround)
+        try:
+            from mutagen import File as MutagenFile
+            mf = MutagenFile(audio_file)
+            if mf and mf.info:
+                channels = getattr(mf.info, 'channels', 2)
+                if channels and channels > 2:
+                    logger.warning(f"Skipping AcoustID: file has {channels} channels (surround audio): {audio_file}")
+                    return None
+        except Exception as e:
+            logger.debug(f"Could not check channel count, proceeding anyway: {e}")
+
         try:
             import acoustid
 
