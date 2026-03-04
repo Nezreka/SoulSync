@@ -37,6 +37,7 @@ def create_api_blueprint():
     from .downloads import register_routes as reg_downloads
     from .playlists import register_routes as reg_playlists
     from .settings import register_routes as reg_settings
+    from .discover import register_routes as reg_discover
 
     reg_library(bp)
     reg_system(bp)
@@ -46,6 +47,7 @@ def create_api_blueprint():
     reg_downloads(bp)
     reg_playlists(bp)
     reg_settings(bp)
+    reg_discover(bp)
 
     # ---- error handlers (scoped to this Blueprint) ----
     @bp.errorhandler(400)

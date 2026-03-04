@@ -2,6 +2,7 @@
 Shared response helpers for the SoulSync public API.
 """
 
+from typing import Optional, Set
 from flask import jsonify
 
 
@@ -49,3 +50,25 @@ def parse_pagination(request, default_limit=50, max_limit=200):
     except (ValueError, TypeError):
         limit = default_limit
     return page, limit
+
+
+def parse_fields(request) -> Optional[Set[str]]:
+    """Parse ?fields=id,name,thumb_url into a set. Returns None if not specified."""
+    raw = request.args.get("fields", "").strip()
+    if not raw:
+        return None
+    return {f.strip() for f in raw.split(",") if f.strip()}
+
+
+def parse_profile_id(request, default: int = 1) -> int:
+    """Extract profile_id from X-Profile-Id header or ?profile_id query param."""
+    try:
+        header = request.headers.get("X-Profile-Id")
+        if header:
+            return max(1, int(header))
+        param = request.args.get("profile_id")
+        if param:
+            return max(1, int(param))
+    except (ValueError, TypeError):
+        pass
+    return default

@@ -5364,6 +5364,8 @@ class MusicDatabase:
                     id=row['id'],
                     watchlist_artist_id=row['watchlist_artist_id'],
                     album_spotify_id=row['album_spotify_id'],
+                    album_itunes_id=row['album_itunes_id'] if 'album_itunes_id' in row.keys() else None,
+                    source=row['source'] if 'source' in row.keys() else 'spotify',
                     album_name=row['album_name'],
                     release_date=row['release_date'],
                     album_cover_url=row['album_cover_url'],
@@ -6110,6 +6112,232 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error clearing all retag groups: {e}")
             return 0
+
+    # ── Full-row API query methods (return dicts, not dataclasses) ────────
+
+    def api_get_artist(self, artist_id: int) -> Optional[Dict[str, Any]]:
+        """Get artist by ID with ALL columns as a dict."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM artists WHERE id = ?", (artist_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"API: Error getting artist {artist_id}: {e}")
+            return None
+
+    def api_get_album(self, album_id: int) -> Optional[Dict[str, Any]]:
+        """Get album by ID with ALL columns as a dict."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM albums WHERE id = ?", (album_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"API: Error getting album {album_id}: {e}")
+            return None
+
+    def api_get_track(self, track_id: int) -> Optional[Dict[str, Any]]:
+        """Get track by ID with ALL columns as a dict, plus artist_name and album_title."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT t.*, a.name as artist_name, al.title as album_title
+                FROM tracks t
+                LEFT JOIN artists a ON t.artist_id = a.id
+                LEFT JOIN albums al ON t.album_id = al.id
+                WHERE t.id = ?
+            """, (track_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"API: Error getting track {track_id}: {e}")
+            return None
+
+    def api_get_albums_by_artist(self, artist_id: int) -> List[Dict[str, Any]]:
+        """Get all albums for an artist with ALL columns."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM albums WHERE artist_id = ? ORDER BY year, title",
+                (artist_id,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"API: Error getting albums for artist {artist_id}: {e}")
+            return []
+
+    def api_get_tracks_by_album(self, album_id: int) -> List[Dict[str, Any]]:
+        """Get all tracks for an album with ALL columns, plus artist_name."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT t.*, a.name as artist_name
+                FROM tracks t
+                LEFT JOIN artists a ON t.artist_id = a.id
+                WHERE t.album_id = ?
+                ORDER BY t.track_number, t.title
+            """, (album_id,))
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"API: Error getting tracks for album {album_id}: {e}")
+            return []
+
+    def api_get_tracks_by_ids(self, track_ids: List[int]) -> List[Dict[str, Any]]:
+        """Get multiple tracks by ID with ALL columns, plus artist_name and album_title."""
+        if not track_ids:
+            return []
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            placeholders = ",".join("?" * len(track_ids))
+            cursor.execute(f"""
+                SELECT t.*, a.name as artist_name, al.title as album_title
+                FROM tracks t
+                LEFT JOIN artists a ON t.artist_id = a.id
+                LEFT JOIN albums al ON t.album_id = al.id
+                WHERE t.id IN ({placeholders})
+            """, track_ids)
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"API: Error getting tracks by IDs: {e}")
+            return []
+
+    def api_lookup_by_external_id(self, table: str, provider: str, external_id: str) -> Optional[Dict[str, Any]]:
+        """Look up an entity by external provider ID.
+
+        Args:
+            table: 'artists', 'albums', or 'tracks'
+            provider: 'spotify', 'musicbrainz', 'itunes', 'deezer', 'audiodb'
+        """
+        column_map = {
+            "artists": {
+                "spotify": "spotify_artist_id",
+                "musicbrainz": "musicbrainz_id",
+                "itunes": "itunes_artist_id",
+                "deezer": "deezer_id",
+                "audiodb": "audiodb_id",
+            },
+            "albums": {
+                "spotify": "spotify_album_id",
+                "musicbrainz": "musicbrainz_release_id",
+                "itunes": "itunes_album_id",
+                "deezer": "deezer_id",
+                "audiodb": "audiodb_id",
+            },
+            "tracks": {
+                "spotify": "spotify_track_id",
+                "musicbrainz": "musicbrainz_recording_id",
+                "itunes": "itunes_track_id",
+                "deezer": "deezer_id",
+                "audiodb": "audiodb_id",
+            },
+        }
+        if table not in column_map or provider not in column_map[table]:
+            return None
+        column = column_map[table][provider]
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT * FROM {table} WHERE {column} = ?", (external_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"API: External lookup {table}.{column}={external_id}: {e}")
+            return None
+
+    def api_get_genres(self, table: str = "artists") -> List[Dict[str, Any]]:
+        """Get all unique genres with counts from the given table."""
+        if table not in ("artists", "albums"):
+            return []
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT genres FROM {table}")
+            genre_counts: Dict[str, int] = {}
+            for row in cursor.fetchall():
+                raw = row["genres"]
+                if raw:
+                    try:
+                        genres = json.loads(raw) if isinstance(raw, str) else raw
+                        if isinstance(genres, list):
+                            for g in genres:
+                                g = g.strip() if isinstance(g, str) else str(g)
+                                if g:
+                                    genre_counts[g] = genre_counts.get(g, 0) + 1
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            return sorted(
+                [{"name": k, "count": v} for k, v in genre_counts.items()],
+                key=lambda x: x["count"],
+                reverse=True,
+            )
+        except Exception as e:
+            logger.error(f"API: Error getting genres from {table}: {e}")
+            return []
+
+    def api_get_recently_added(self, entity_type: str = "albums", limit: int = 50) -> List[Dict[str, Any]]:
+        """Get recently added entities, ordered by created_at DESC."""
+        table = {"artists": "artists", "albums": "albums", "tracks": "tracks"}.get(entity_type)
+        if not table:
+            return []
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT * FROM {table} ORDER BY created_at DESC LIMIT ?", (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"API: Error getting recently added {entity_type}: {e}")
+            return []
+
+    def api_list_albums(self, search: str = "", artist_id: int = None,
+                        year: int = None, page: int = 1, limit: int = 50) -> Dict[str, Any]:
+        """List/search albums with pagination, returning full rows."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            where_parts = []
+            params: list = []
+
+            if search:
+                where_parts.append("LOWER(al.title) LIKE LOWER(?)")
+                params.append(f"%{search}%")
+            if artist_id is not None:
+                where_parts.append("al.artist_id = ?")
+                params.append(artist_id)
+            if year is not None:
+                where_parts.append("al.year = ?")
+                params.append(year)
+
+            where_clause = " AND ".join(where_parts) if where_parts else "1=1"
+
+            # Count
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM albums al WHERE {where_clause}", params)
+            total = cursor.fetchone()["cnt"]
+
+            # Fetch page
+            offset = (page - 1) * limit
+            cursor.execute(
+                f"""SELECT al.*, a.name as artist_name
+                    FROM albums al
+                    LEFT JOIN artists a ON al.artist_id = a.id
+                    WHERE {where_clause}
+                    ORDER BY al.title COLLATE NOCASE
+                    LIMIT ? OFFSET ?""",
+                params + [limit, offset],
+            )
+            albums = [dict(row) for row in cursor.fetchall()]
+
+            return {"albums": albums, "total": total}
+        except Exception as e:
+            logger.error(f"API: Error listing albums: {e}")
+            return {"albums": [], "total": 0}
 
 # Thread-safe singleton pattern for database access
 _database_instances: Dict[int, MusicDatabase] = {}  # Thread ID -> Database instance

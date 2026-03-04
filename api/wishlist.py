@@ -4,7 +4,8 @@ Wishlist endpoints — view, add, remove, and trigger processing.
 
 from flask import request
 from .auth import require_api_key
-from .helpers import api_success, api_error, parse_pagination, build_pagination
+from .helpers import api_success, api_error, parse_pagination, build_pagination, parse_fields, parse_profile_id
+from .serializers import serialize_wishlist_track
 
 
 def register_routes(bp):
@@ -12,14 +13,16 @@ def register_routes(bp):
     @bp.route("/wishlist", methods=["GET"])
     @require_api_key
     def list_wishlist():
-        """List wishlist tracks with optional category filter."""
+        """List wishlist tracks with optional category filter and standardized format."""
         category = request.args.get("category")  # "singles" or "albums"
         page, limit = parse_pagination(request)
+        fields = parse_fields(request)
+        profile_id = parse_profile_id(request)
 
         try:
-            from core.wishlist_service import get_wishlist_service
-            service = get_wishlist_service()
-            raw_tracks = service.get_wishlist_tracks_for_download()
+            from database.music_database import get_database
+            db = get_database()
+            raw_tracks = db.get_wishlist_tracks(profile_id=profile_id)
 
             # Category filter
             if category in ("singles", "albums"):
@@ -33,7 +36,7 @@ def register_routes(bp):
             tracks = raw_tracks[start:start + limit]
 
             return api_success(
-                {"tracks": tracks},
+                {"tracks": [serialize_wishlist_track(t, fields) for t in tracks]},
                 pagination=build_pagination(page, limit, total),
             )
         except Exception as e:
@@ -50,6 +53,7 @@ def register_routes(bp):
         track_data = body.get("spotify_track_data")
         reason = body.get("failure_reason", "Added via API")
         source_type = body.get("source_type", "api")
+        profile_id = parse_profile_id(request)
 
         if not track_data:
             return api_error("BAD_REQUEST", "Missing 'spotify_track_data' in body.", 400)
@@ -57,7 +61,12 @@ def register_routes(bp):
         try:
             from database.music_database import get_database
             db = get_database()
-            ok = db.add_to_wishlist(track_data, failure_reason=reason, source_type=source_type)
+            ok = db.add_to_wishlist(
+                track_data,
+                failure_reason=reason,
+                source_type=source_type,
+                profile_id=profile_id,
+            )
             if ok:
                 return api_success({"message": "Track added to wishlist."}, status=201)
             return api_error("CONFLICT", "Track may already be in wishlist.", 409)
@@ -68,10 +77,11 @@ def register_routes(bp):
     @require_api_key
     def remove_from_wishlist(track_id):
         """Remove a track from the wishlist by its Spotify track ID."""
+        profile_id = parse_profile_id(request)
         try:
             from database.music_database import get_database
             db = get_database()
-            ok = db.remove_from_wishlist(track_id)
+            ok = db.remove_from_wishlist(track_id, profile_id=profile_id)
             if ok:
                 return api_success({"message": "Track removed from wishlist."})
             return api_error("NOT_FOUND", "Track not found in wishlist.", 404)

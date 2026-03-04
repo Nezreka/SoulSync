@@ -7,6 +7,34 @@ from .auth import require_api_key
 from .helpers import api_success, api_error
 
 
+def _serialize_download(task_id, task):
+    """Serialize a download task with all available fields."""
+    track_info = task.get("track_info") or {}
+
+    # Track names can be top-level or inside track_info
+    track_name = task.get("track_name") or track_info.get("title") or track_info.get("track_name")
+    artist_name = task.get("artist_name") or track_info.get("artist") or track_info.get("artist_name")
+    album_name = task.get("album_name") or track_info.get("album") or track_info.get("album_name")
+
+    return {
+        "id": task_id,
+        "status": task.get("status"),
+        "track_name": track_name,
+        "artist_name": artist_name,
+        "album_name": album_name,
+        "username": task.get("username"),
+        "filename": task.get("filename"),
+        "progress": task.get("progress", 0),
+        "size": task.get("size"),
+        "error": task.get("error") or task.get("error_message"),
+        "batch_id": task.get("batch_id"),
+        "track_index": task.get("track_index"),
+        "retry_count": task.get("retry_count", 0),
+        "metadata_enhanced": task.get("metadata_enhanced", False),
+        "status_change_time": task.get("status_change_time"),
+    }
+
+
 def register_routes(bp):
 
     @bp.route("/downloads", methods=["GET"])
@@ -19,18 +47,7 @@ def register_routes(bp):
             tasks = []
             with tasks_lock:
                 for task_id, task in download_tasks.items():
-                    tasks.append({
-                        "id": task_id,
-                        "status": task.get("status"),
-                        "track_name": task.get("track_name"),
-                        "artist_name": task.get("artist_name"),
-                        "album_name": task.get("album_name"),
-                        "username": task.get("username"),
-                        "filename": task.get("filename"),
-                        "progress": task.get("progress", 0),
-                        "size": task.get("size"),
-                        "error": task.get("error"),
-                    })
+                    tasks.append(_serialize_download(task_id, task))
 
             return api_success({"downloads": tasks})
         except ImportError:
