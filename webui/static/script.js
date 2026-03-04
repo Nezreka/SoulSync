@@ -40211,14 +40211,14 @@ function updateSpotifyEnrichmentStatusFromData(data) {
     const notAuthenticated = data.authenticated === false;
 
     button.classList.remove('active', 'paused', 'complete', 'no-auth');
-    if (notAuthenticated) {
+    if (data.paused) {
+        button.classList.add('paused');
+    } else if (notAuthenticated) {
         button.classList.add('no-auth');
     } else if (data.idle) {
         button.classList.add('complete');
     } else if (data.running && !data.paused) {
         button.classList.add('active');
-    } else if (data.paused) {
-        button.classList.add('paused');
     }
 
     const tooltipStatus = document.getElementById('spotify-enrich-tooltip-status');
@@ -40226,15 +40226,17 @@ function updateSpotifyEnrichmentStatusFromData(data) {
     const tooltipProgress = document.getElementById('spotify-enrich-tooltip-progress');
 
     if (tooltipStatus) {
-        if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
+        if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
         else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
-        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else if (data.running) { tooltipStatus.textContent = 'Running'; }
         else { tooltipStatus.textContent = 'Idle'; }
     }
 
     if (tooltipCurrent) {
-        if (notAuthenticated) {
+        if (data.paused) {
+            tooltipCurrent.textContent = notAuthenticated ? 'Connect Spotify in Settings to enrich' : 'Click to resume';
+        } else if (notAuthenticated) {
             tooltipCurrent.textContent = 'Connect Spotify in Settings to enrich';
         } else if (data.idle) {
             tooltipCurrent.textContent = 'All items processed';
