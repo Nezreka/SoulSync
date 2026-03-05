@@ -338,6 +338,43 @@ class MusicDatabase:
             self._add_profile_support_v3(cursor)
             self._add_profile_support_v4(cursor)
 
+            # Mirrored playlists — persistent backup of parsed playlists from any service
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mirrored_playlists (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source TEXT NOT NULL,
+                    source_playlist_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    owner TEXT,
+                    image_url TEXT,
+                    track_count INTEGER DEFAULT 0,
+                    profile_id INTEGER DEFAULT 1,
+                    mirrored_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(source, source_playlist_id, profile_id)
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mirrored_playlist_tracks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    playlist_id INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    track_name TEXT NOT NULL,
+                    artist_name TEXT NOT NULL,
+                    album_name TEXT DEFAULT '',
+                    duration_ms INTEGER DEFAULT 0,
+                    image_url TEXT,
+                    source_track_id TEXT,
+                    extra_data TEXT,
+                    FOREIGN KEY (playlist_id) REFERENCES mirrored_playlists(id) ON DELETE CASCADE,
+                    UNIQUE(playlist_id, position)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mirrored_playlists_profile ON mirrored_playlists (profile_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mirrored_playlists_source ON mirrored_playlists (source, source_playlist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mirrored_tracks_playlist ON mirrored_playlist_tracks (playlist_id)")
+
             conn.commit()
             logger.info("Database initialized successfully")
             
@@ -6338,6 +6375,113 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"API: Error listing albums: {e}")
             return {"albums": [], "total": 0}
+
+    # ── Mirrored Playlists ───────────────────────────────────────────────
+
+    def mirror_playlist(self, source: str, source_playlist_id: str, name: str,
+                        tracks: List[Dict], profile_id: int = 1, **kwargs) -> Optional[int]:
+        """Upsert a mirrored playlist and replace all its tracks."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # Upsert the playlist row
+                cursor.execute("""
+                    INSERT INTO mirrored_playlists
+                        (source, source_playlist_id, name, description, owner, image_url, track_count, profile_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(source, source_playlist_id, profile_id) DO UPDATE SET
+                        name = excluded.name,
+                        description = excluded.description,
+                        owner = excluded.owner,
+                        image_url = excluded.image_url,
+                        track_count = excluded.track_count,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (
+                    source, source_playlist_id, name,
+                    kwargs.get('description'), kwargs.get('owner'),
+                    kwargs.get('image_url'), len(tracks), profile_id
+                ))
+                playlist_id = cursor.execute(
+                    "SELECT id FROM mirrored_playlists WHERE source=? AND source_playlist_id=? AND profile_id=?",
+                    (source, source_playlist_id, profile_id)
+                ).fetchone()['id']
+
+                # Replace all tracks
+                cursor.execute("DELETE FROM mirrored_playlist_tracks WHERE playlist_id=?", (playlist_id,))
+                for i, t in enumerate(tracks):
+                    extra = t.get('extra_data')
+                    if extra and not isinstance(extra, str):
+                        extra = json.dumps(extra)
+                    cursor.execute("""
+                        INSERT INTO mirrored_playlist_tracks
+                            (playlist_id, position, track_name, artist_name, album_name, duration_ms, image_url, source_track_id, extra_data)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        playlist_id, i + 1,
+                        t.get('track_name', ''), t.get('artist_name', ''),
+                        t.get('album_name', ''), t.get('duration_ms', 0),
+                        t.get('image_url'), t.get('source_track_id'), extra
+                    ))
+                conn.commit()
+                logger.info(f"Mirrored playlist '{name}' ({source}) with {len(tracks)} tracks")
+                return playlist_id
+        except Exception as e:
+            logger.error(f"Error mirroring playlist: {e}")
+            return None
+
+    def get_mirrored_playlists(self, profile_id: int = 1) -> List[Dict]:
+        """Return all mirrored playlists for a profile, newest first."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM mirrored_playlists
+                    WHERE profile_id = ?
+                    ORDER BY updated_at DESC
+                """, (profile_id,))
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting mirrored playlists: {e}")
+            return []
+
+    def get_mirrored_playlist(self, playlist_id: int) -> Optional[Dict]:
+        """Return a single mirrored playlist by id."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM mirrored_playlists WHERE id = ?", (playlist_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting mirrored playlist: {e}")
+            return None
+
+    def get_mirrored_playlist_tracks(self, playlist_id: int) -> List[Dict]:
+        """Return all tracks for a mirrored playlist ordered by position."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM mirrored_playlist_tracks
+                    WHERE playlist_id = ?
+                    ORDER BY position
+                """, (playlist_id,))
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting mirrored playlist tracks: {e}")
+            return []
+
+    def delete_mirrored_playlist(self, playlist_id: int) -> bool:
+        """Delete a mirrored playlist and its tracks (CASCADE)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM mirrored_playlists WHERE id = ?", (playlist_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting mirrored playlist: {e}")
+            return False
 
 # Thread-safe singleton pattern for database access
 _database_instances: Dict[int, MusicDatabase] = {}  # Thread ID -> Database instance

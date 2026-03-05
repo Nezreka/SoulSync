@@ -6967,6 +6967,15 @@ async function openPlaylistDetailsModal(event, playlistId) {
             playlistTrackCache[playlistId] = fullPlaylist.tracks;
             console.log(`Cached ${fullPlaylist.tracks.length} tracks for playlist ${playlistId}.`);
 
+            // Auto-mirror this Spotify playlist
+            mirrorPlaylist('spotify', playlistId, fullPlaylist.name, fullPlaylist.tracks.map(t => ({
+                track_name: t.name, artist_name: (t.artists && t.artists[0]) ? (typeof t.artists[0] === 'object' ? t.artists[0].name : t.artists[0]) : '',
+                album_name: t.album ? (typeof t.album === 'object' ? t.album.name : t.album) : '',
+                duration_ms: t.duration_ms || 0,
+                image_url: t.album && typeof t.album === 'object' && t.album.images && t.album.images[0] ? t.album.images[0].url : null,
+                source_track_id: t.id || t.spotify_track_id || ''
+            })), { description: fullPlaylist.description, owner: fullPlaylist.owner, image_url: fullPlaylist.image_url });
+
             showPlaylistDetailsModal(fullPlaylist);
         }
         // --- CACHING LOGIC END ---
@@ -7867,6 +7876,10 @@ async function closeDownloadMissingModal(playlistId) {
         if (playlistId.startsWith('youtube_')) {
             const urlHash = playlistId.replace('youtube_', '');
             updateYouTubeCardPhase(urlHash, 'discovered');
+            // Also update mirrored playlist card if applicable
+            if (urlHash.startsWith('mirrored_')) {
+                updateMirroredCardPhase(urlHash, 'discovered');
+            }
 
             // Update backend state to prevent rehydration issues on page refresh (similar to Tidal fix)
             try {
@@ -9334,6 +9347,10 @@ async function startMissingTracksProcess(playlistId) {
         if (playlistId.startsWith('youtube_')) {
             const urlHash = playlistId.replace('youtube_', '');
             updateYouTubeCardPhase(urlHash, 'downloading');
+            // Also update mirrored playlist card if applicable
+            if (urlHash.startsWith('mirrored_')) {
+                updateMirroredCardPhase(urlHash, 'downloading');
+            }
         }
 
         // Update Tidal playlist phase to 'downloading' if this is a Tidal playlist
@@ -10224,6 +10241,14 @@ function processModalStatusUpdate(playlistId, data) {
                 }
             }
 
+            // Update mirrored playlist card phase on client-side completion
+            if (playlistId.startsWith('youtube_')) {
+                const urlHash = playlistId.replace('youtube_', '');
+                if (urlHash.startsWith('mirrored_')) {
+                    updateMirroredCardPhase(urlHash, 'download_complete');
+                }
+            }
+
             // Auto-save final M3U file for playlists
             autoSavePlaylistM3U(playlistId);
 
@@ -10266,6 +10291,9 @@ function processModalStatusUpdate(playlistId, data) {
                 if (playlistId.startsWith('youtube_')) {
                     const urlHash = playlistId.replace('youtube_', '');
                     updateYouTubeCardPhase(urlHash, 'discovered');
+                    if (urlHash.startsWith('mirrored_')) {
+                        updateMirroredCardPhase(urlHash, 'discovered');
+                    }
                 }
 
                 showToast(`Process cancelled for ${process.playlist.name}.`, 'info');
@@ -10277,6 +10305,9 @@ function processModalStatusUpdate(playlistId, data) {
                 if (playlistId.startsWith('youtube_')) {
                     const urlHash = playlistId.replace('youtube_', '');
                     updateYouTubeCardPhase(urlHash, 'discovered');
+                    if (urlHash.startsWith('mirrored_')) {
+                        updateMirroredCardPhase(urlHash, 'discovered');
+                    }
                 }
 
                 showToast(`Process for ${process.playlist.name} failed!`, 'error');
@@ -10288,6 +10319,9 @@ function processModalStatusUpdate(playlistId, data) {
                 if (playlistId.startsWith('youtube_')) {
                     const urlHash = playlistId.replace('youtube_', '');
                     updateYouTubeCardPhase(urlHash, 'download_complete');
+                    if (urlHash.startsWith('mirrored_')) {
+                        updateMirroredCardPhase(urlHash, 'download_complete');
+                    }
                 }
 
                 // Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
@@ -16665,6 +16699,17 @@ async function loadTidalPlaylists() {
 
         console.log(`🎵 Loaded ${tidalPlaylists.length} Tidal playlists`);
 
+        // Auto-mirror Tidal playlists that have tracks
+        tidalPlaylists.forEach(p => {
+            if (p.tracks && p.tracks.length > 0) {
+                mirrorPlaylist('tidal', p.id, p.name, p.tracks.map(t => ({
+                    track_name: t.name || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artists || ''),
+                    album_name: typeof t.album === 'string' ? t.album : '', duration_ms: t.duration_ms || 0,
+                    source_track_id: t.id || ''
+                })), { owner: p.owner, image_url: p.image_url, description: p.description });
+            }
+        });
+
         // Load and apply saved discovery states from backend (like YouTube)
         await loadTidalPlaylistStatesFromBackend();
 
@@ -18074,6 +18119,11 @@ function initializeSyncPage() {
                     syncContentArea.style.gridTemplateColumns = '1fr';
                 }
             }
+
+            // Auto-load mirrored playlists on first tab activation
+            if (tabId === 'mirrored' && !mirroredPlaylistsLoaded) {
+                loadMirroredPlaylists();
+            }
         });
     });
 
@@ -18090,6 +18140,12 @@ function initializeSyncPage() {
     if (tidalRefreshBtn) {
         tidalRefreshBtn.removeEventListener('click', loadTidalPlaylists);
         tidalRefreshBtn.addEventListener('click', loadTidalPlaylists);
+    }
+
+    // Logic for the Mirrored refresh button
+    const mirroredRefreshBtn = document.getElementById('mirrored-refresh-btn');
+    if (mirroredRefreshBtn) {
+        mirroredRefreshBtn.addEventListener('click', loadMirroredPlaylists);
     }
 
     // Logic for the Beatport clear button
@@ -19397,6 +19453,15 @@ function addBeatportCardToContainer(chartData) {
     }
 
     console.log(`🃏 Created Beatport card: ${chartData.name}`);
+
+    // Auto-mirror this Beatport chart
+    if (chartData.tracks && chartData.tracks.length > 0) {
+        mirrorPlaylist('beatport', chartData.hash, chartData.name, chartData.tracks.map(t => ({
+            track_name: t.name || t.title || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artist || ''),
+            album_name: t.album || '', duration_ms: t.duration_ms || 0,
+            source_track_id: t.id || '', image_url: t.image_url || null
+        })));
+    }
 
     // Update clear button state after creating card
     updateBeatportClearButtonState();
@@ -21219,6 +21284,12 @@ async function parseYouTubePlaylist() {
         updateYouTubeCardData(result.url_hash, result);
         updateYouTubeCardPhase(result.url_hash, 'fresh');
 
+        // Auto-mirror this YouTube playlist
+        mirrorPlaylist('youtube', result.url_hash, result.name, result.tracks.map(t => ({
+            track_name: t.name || t.title || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artist || ''),
+            album_name: '', duration_ms: t.duration_ms || 0, source_track_id: t.id || ''
+        })));
+
         // Clear input
         urlInput.value = '';
 
@@ -21550,14 +21621,16 @@ function startYouTubeDiscoveryPolling(urlHash) {
             }
             updateYouTubeCardProgress(urlHash, data);
             const st = youtubePlaylistStates[urlHash];
-            if (st) { st.discoveryResults = data.results || []; st.discoveryProgress = data.progress || 0; st.spotifyMatches = data.spotify_matches || 0; }
+            if (st) { st.discoveryResults = data.results || []; st.discovery_results = data.results || []; st.discoveryProgress = data.progress || 0; st.spotifyMatches = data.spotify_matches || 0; st.spotify_matches = data.spotify_matches || 0; }
             updateYouTubeDiscoveryModal(urlHash, data);
             if (data.complete) {
                 if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
                 socket.emit('discovery:unsubscribe', { ids: [urlHash] }); delete _discoveryProgressCallbacks[urlHash];
+                // Update phase in state directly (updateYouTubeCardPhase may skip if no cardElement)
+                if (st) st.phase = 'discovered';
                 updateYouTubeCardPhase(urlHash, 'discovered');
                 updateYouTubeModalButtons(urlHash, 'discovered');
-                showToast('YouTube discovery complete!', 'success');
+                showToast('Discovery complete!', 'success');
             }
         };
     }
@@ -21582,8 +21655,10 @@ function startYouTubeDiscoveryPolling(urlHash) {
             const state = youtubePlaylistStates[urlHash];
             if (state) {
                 state.discoveryResults = status.results || [];
+                state.discovery_results = status.results || [];
                 state.discoveryProgress = status.progress || 0;
                 state.spotifyMatches = status.spotify_matches || 0;
+                state.spotify_matches = status.spotify_matches || 0;
             }
 
             // Update modal if open
@@ -21594,14 +21669,16 @@ function startYouTubeDiscoveryPolling(urlHash) {
                 clearInterval(pollInterval);
                 delete activeYouTubePollers[urlHash];
 
+                // Update phase in state directly (updateYouTubeCardPhase may skip if no cardElement)
+                if (state) state.phase = 'discovered';
                 // Update card phase to discovered
                 updateYouTubeCardPhase(urlHash, 'discovered');
 
                 // Update modal buttons to show sync and download buttons
                 updateYouTubeModalButtons(urlHash, 'discovered');
 
-                console.log('✅ YouTube discovery complete:', urlHash);
-                showToast('YouTube discovery complete!', 'success');
+                console.log('✅ Discovery complete:', urlHash);
+                showToast('Discovery complete!', 'success');
             }
 
         } catch (error) {
@@ -21658,15 +21735,18 @@ function openYouTubeDiscoveryModal(urlHash) {
             }
         }
     } else {
-        // Create new modal (support YouTube, Tidal, Beatport, and ListenBrainz)
+        // Create new modal (support YouTube, Tidal, Beatport, ListenBrainz, and Mirrored)
         const isTidal = state.is_tidal_playlist;
         const isBeatport = state.is_beatport_playlist;
         const isListenBrainz = state.is_listenbrainz_playlist;
-        const modalTitle = isTidal ? '🎵 Tidal Playlist Discovery' :
+        const isMirrored = state.is_mirrored_playlist;
+        const modalTitle = isMirrored ? '🎵 Mirrored Playlist Discovery' :
+            isTidal ? '🎵 Tidal Playlist Discovery' :
             isBeatport ? '🎵 Beatport Chart Discovery' :
                 isListenBrainz ? '🎵 ListenBrainz Playlist Discovery' :
                     '🎵 YouTube Playlist Discovery';
-        const sourceLabel = isTidal ? 'Tidal' :
+        const sourceLabel = isMirrored ? (state.mirrored_source ? state.mirrored_source.charAt(0).toUpperCase() + state.mirrored_source.slice(1) : 'Source') :
+            isTidal ? 'Tidal' :
             isBeatport ? 'Beatport' :
                 isListenBrainz ? 'LB' :
                     'YT';
@@ -21677,7 +21757,7 @@ function openYouTubeDiscoveryModal(urlHash) {
                     <div class="modal-header">
                         <h2>${modalTitle}</h2>
                         <div class="modal-subtitle">${state.playlist.name} (${state.playlist.tracks.length} tracks)</div>
-                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport, isListenBrainz)}</div>
+                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport, isListenBrainz, isMirrored)}</div>
                         <button class="modal-close-btn" onclick="closeYouTubeDiscoveryModal('${urlHash}')">✕</button>
                     </div>
 
@@ -21850,6 +21930,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
             }
 
         case 'discovered':
+        case 'downloading':
+        case 'download_complete':
             // Only show buttons if we actually have discovery data
             if (!hasDiscoveryResults) {
                 return `<div class="modal-info">⚠️ No discovery results available. Try starting discovery again.</div>`;
@@ -21988,14 +22070,16 @@ function getModalActionButtons(urlHash, phase, state = null) {
     }
 }
 
-function getModalDescription(phase, isTidal = false, isBeatport = false, isListenBrainz = false) {
-    const source = isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube'));
+function getModalDescription(phase, isTidal = false, isBeatport = false, isListenBrainz = false, isMirrored = false) {
+    const source = isMirrored ? 'mirrored' : (isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube')));
     switch (phase) {
         case 'fresh':
             return `Ready to discover clean ${currentMusicSourceName} metadata for ${source} tracks...`;
         case 'discovering':
             return `Discovering clean ${currentMusicSourceName} metadata for ${source} tracks...`;
         case 'discovered':
+        case 'downloading':
+        case 'download_complete':
             return 'Discovery complete! View the results below.';
         default:
             return `Discovering clean ${currentMusicSourceName} metadata for ${source} tracks...`;
@@ -22009,6 +22093,8 @@ function getInitialProgressText(phase, isTidal = false, isBeatport = false, isLi
         case 'discovering':
             return 'Starting discovery...';
         case 'discovered':
+        case 'downloading':
+        case 'download_complete':
             return 'Discovery completed!';
         default:
             return 'Starting discovery...';
@@ -22019,7 +22105,8 @@ function generateTableRowsFromState(state, urlHash) {
     const isTidal = state.is_tidal_playlist;
     const isBeatport = state.is_beatport_playlist;
     const isListenBrainz = state.is_listenbrainz_playlist;
-    const platform = isListenBrainz ? 'listenbrainz' : (isTidal ? 'tidal' : (isBeatport ? 'beatport' : 'youtube'));
+    const isMirrored = state.is_mirrored_playlist;
+    const platform = isMirrored ? 'mirrored' : (isListenBrainz ? 'listenbrainz' : (isTidal ? 'tidal' : (isBeatport ? 'beatport' : 'youtube')));
 
     // Support both camelCase and snake_case
     const discoveryResults = state.discoveryResults || state.discovery_results;
@@ -22163,9 +22250,10 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
         // Update actions cell with appropriate button
         if (actionsCell) {
             const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
-            const platform = state?.is_listenbrainz_playlist ? 'listenbrainz' :
+            const platform = state?.is_mirrored_playlist ? 'mirrored' :
+                (state?.is_listenbrainz_playlist ? 'listenbrainz' :
                 (state?.is_tidal_playlist ? 'tidal' :
-                    (state?.is_beatport_playlist ? 'beatport' : 'youtube'));
+                    (state?.is_beatport_playlist ? 'beatport' : 'youtube')));
             actionsCell.innerHTML = generateDiscoveryActionButton(result, urlHash, platform);
         }
     });
@@ -41445,6 +41533,549 @@ function importPageClearFinishedJobs() {
         }
     }
     _importQueueRender();
+}
+
+// ── Mirrored Playlists ────────────────────────────────────────────────
+
+let mirroredPlaylistsLoaded = false;
+
+/**
+ * Fire-and-forget helper: send parsed playlist data to be mirrored on the backend.
+ */
+function mirrorPlaylist(source, sourceId, name, tracks, metadata = {}) {
+    const normalizedTracks = tracks.map(t => ({
+        track_name: t.track_name || t.name || '',
+        artist_name: t.artist_name || (Array.isArray(t.artists) ? (typeof t.artists[0] === 'object' ? t.artists[0].name : t.artists[0]) : t.artists || ''),
+        album_name: t.album_name || (typeof t.album === 'object' ? (t.album && t.album.name) : t.album) || '',
+        duration_ms: t.duration_ms || 0,
+        image_url: t.image_url || (t.album && typeof t.album === 'object' && t.album.images && t.album.images[0] ? t.album.images[0].url : null),
+        source_track_id: t.source_track_id || t.id || t.spotify_track_id || '',
+        extra_data: t.extra_data || null
+    }));
+
+    fetch('/api/mirror-playlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            source,
+            source_playlist_id: String(sourceId),
+            name,
+            tracks: normalizedTracks,
+            description: metadata.description || '',
+            owner: metadata.owner || '',
+            image_url: metadata.image_url || ''
+        })
+    }).then(r => r.json()).then(data => {
+        if (data.success) console.log(`Mirrored ${source} playlist: ${name} (${normalizedTracks.length} tracks)`);
+    }).catch(err => console.warn('Mirror save failed:', err));
+}
+
+/**
+ * Load and render all mirrored playlists into the Mirrored tab.
+ */
+async function loadMirroredPlaylists() {
+    const container = document.getElementById('mirrored-playlist-container');
+    if (!container) return;
+    container.innerHTML = `<div class="playlist-placeholder">Loading mirrored playlists...</div>`;
+
+    try {
+        const res = await fetch('/api/mirrored-playlists');
+        const playlists = await res.json();
+        if (playlists.error) throw new Error(playlists.error);
+
+        if (!playlists.length) {
+            container.innerHTML = `<div class="playlist-placeholder">Playlists you parse from any service will appear here as persistent backups.</div>`;
+            return;
+        }
+
+        container.innerHTML = '';
+        playlists.forEach(p => renderMirroredCard(p, container));
+        mirroredPlaylistsLoaded = true;
+
+        // Hydrate discovery states from backend (survives page refresh)
+        await hydrateMirroredDiscoveryStates();
+    } catch (err) {
+        container.innerHTML = `<div class="playlist-placeholder">Error loading mirrored playlists: ${err.message}</div>`;
+    }
+}
+
+function renderMirroredCard(p, container) {
+    const ago = timeAgo(p.updated_at || p.mirrored_at);
+    const hash = `mirrored_${p.id}`;
+    const state = youtubePlaylistStates[hash];
+    const phase = state ? state.phase : null;
+
+    // Build phase indicator
+    let phaseHtml = '';
+    if (phase === 'discovering') {
+        const pct = state.discoveryProgress || state.discovery_progress || 0;
+        phaseHtml = `<span style="color:#a78bfa;">Discovering ${pct}%</span>`;
+    } else if (phase === 'discovered') {
+        const matches = state.spotifyMatches || state.spotify_matches || 0;
+        const total = state.spotify_total || p.track_count;
+        phaseHtml = `<span style="color:#22c55e;">Discovered ${matches}/${total}</span>`;
+    } else if (phase === 'syncing' || phase === 'sync_complete') {
+        phaseHtml = `<span style="color:#3b82f6;">${phase === 'syncing' ? 'Syncing...' : 'Synced'}</span>`;
+    } else if (phase === 'downloading') {
+        phaseHtml = `<span style="color:#f59e0b;">Downloading...</span>`;
+    } else if (phase === 'download_complete') {
+        phaseHtml = `<span style="color:#22c55e;">Downloaded</span>`;
+    }
+
+    const sourceIcons = { spotify: '🎵', tidal: '🌊', youtube: '▶', beatport: '🎛' };
+    const srcIcon = sourceIcons[p.source] || '📋';
+
+    const card = document.createElement('div');
+    card.className = 'mirrored-playlist-card';
+    card.id = `mirrored-card-${p.id}`;
+    card.innerHTML = `
+        <div class="source-icon ${_escAttr(p.source)}">${srcIcon}</div>
+        <div class="mirrored-card-info">
+            <div class="card-name">${_esc(p.name)}</div>
+            <div class="card-meta">
+                <span class="source-badge ${_escAttr(p.source)}">${_esc(p.source)}</span>
+                <span>${p.track_count} tracks</span>
+                <span>Mirrored ${ago}</span>
+                ${phaseHtml}
+            </div>
+        </div>
+        <button class="mirrored-card-delete" onclick="event.stopPropagation(); deleteMirroredPlaylist(${p.id}, '${_escAttr(p.name)}')" title="Delete mirror">✕</button>
+    `;
+    card.addEventListener('click', () => {
+        const st = youtubePlaylistStates[hash];
+        if (st && st.phase && st.phase !== 'fresh') {
+            if (st.phase === 'downloading' || st.phase === 'download_complete') {
+                // Open download modal directly (follows Tidal/YouTube card click pattern)
+                const spotifyPlaylistId = st.convertedSpotifyPlaylistId;
+                if (spotifyPlaylistId && activeDownloadProcesses[spotifyPlaylistId]) {
+                    // Modal already exists — just show it
+                    const process = activeDownloadProcesses[spotifyPlaylistId];
+                    if (process.modalElement) {
+                        if (process.status === 'complete') {
+                            showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
+                        }
+                        process.modalElement.style.display = 'flex';
+                    }
+                } else if (spotifyPlaylistId) {
+                    // Need to rehydrate the download modal
+                    rehydrateMirroredDownloadModal(hash, st);
+                } else {
+                    // No converted playlist ID yet, fall back to discovery modal
+                    openYouTubeDiscoveryModal(hash);
+                }
+            } else {
+                openYouTubeDiscoveryModal(hash);
+                if (st.phase === 'discovering' && !activeYouTubePollers[hash]) {
+                    startYouTubeDiscoveryPolling(hash);
+                }
+            }
+        } else {
+            openMirroredPlaylistModal(p.id);
+        }
+    });
+    container.appendChild(card);
+}
+
+function updateMirroredCardPhase(urlHash, phase) {
+    // Update the state phase (updateYouTubeCardPhase skips this for mirrored playlists due to no cardElement)
+    const state = youtubePlaylistStates[urlHash];
+    if (state) state.phase = phase;
+
+    // Extract the numeric ID from urlHash (e.g., 'mirrored_3' → '3')
+    const mirroredId = urlHash.replace('mirrored_', '');
+    const card = document.getElementById(`mirrored-card-${mirroredId}`);
+    if (!card) return;
+
+    const metaEl = card.querySelector('.card-meta');
+    if (!metaEl) return;
+
+    // Remove old phase indicator
+    const oldPhase = metaEl.querySelector('span[style]');
+    if (oldPhase) oldPhase.remove();
+
+    // Add new phase indicator
+    let phaseHtml = '';
+    switch (phase) {
+        case 'discovering':
+            phaseHtml = `<span style="color:#a78bfa;">Discovering...</span>`;
+            break;
+        case 'discovered':
+            const matches = state?.spotifyMatches || state?.spotify_matches || 0;
+            const total = state?.spotify_total || 0;
+            phaseHtml = `<span style="color:#22c55e;">Discovered ${matches}/${total}</span>`;
+            break;
+        case 'syncing':
+            phaseHtml = `<span style="color:#3b82f6;">Syncing...</span>`;
+            break;
+        case 'sync_complete':
+            phaseHtml = `<span style="color:#3b82f6;">Synced</span>`;
+            break;
+        case 'downloading':
+            phaseHtml = `<span style="color:#f59e0b;">Downloading...</span>`;
+            break;
+        case 'download_complete':
+            phaseHtml = `<span style="color:#22c55e;">Downloaded</span>`;
+            break;
+    }
+    if (phaseHtml) {
+        metaEl.insertAdjacentHTML('beforeend', phaseHtml);
+    }
+}
+
+async function rehydrateMirroredDownloadModal(urlHash, state) {
+    try {
+        if (!state || !state.playlist) {
+            showToast('Cannot open download modal - invalid playlist data', 'error');
+            return;
+        }
+
+        console.log(`💧 [Rehydration] Rehydrating mirrored download modal for: ${state.playlist.name}`);
+
+        // Get discovery results from backend if not already loaded
+        let discoveryRes = state.discoveryResults || state.discovery_results;
+        if (!discoveryRes || discoveryRes.length === 0) {
+            console.log(`🔍 Fetching discovery results from backend for mirrored playlist: ${urlHash}`);
+            const stateResponse = await fetch(`/api/youtube/state/${urlHash}`);
+            if (stateResponse.ok) {
+                const fullState = await stateResponse.json();
+                state.discovery_results = fullState.discovery_results;
+                state.discoveryResults = fullState.discovery_results;
+                state.convertedSpotifyPlaylistId = fullState.converted_spotify_playlist_id;
+                state.download_process_id = fullState.download_process_id;
+                discoveryRes = fullState.discovery_results;
+                console.log(`✅ Loaded ${discoveryRes?.length || 0} discovery results from backend`);
+            } else {
+                showToast('Error loading playlist data', 'error');
+                return;
+            }
+        }
+
+        // Extract Spotify tracks from discovery results
+        const spotifyTracks = (discoveryRes || [])
+            .filter(r => r.spotify_data || (r.spotify_track && r.status_class === 'found'))
+            .map(r => {
+                if (r.spotify_data) return r.spotify_data;
+                const albumData = r.spotify_album || 'Unknown Album';
+                return {
+                    id: r.spotify_id || 'unknown',
+                    name: r.spotify_track || 'Unknown Track',
+                    artists: r.spotify_artist ? [r.spotify_artist] : ['Unknown Artist'],
+                    album: typeof albumData === 'object' ? albumData : { name: albumData, album_type: 'album', images: [] },
+                    duration_ms: 0
+                };
+            });
+
+        if (spotifyTracks.length === 0) {
+            showToast('No Spotify matches found for download', 'error');
+            return;
+        }
+
+        const virtualPlaylistId = state.convertedSpotifyPlaylistId;
+        const playlistName = state.playlist.name;
+
+        // Create the download modal
+        await openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks);
+
+        // If we have a download process ID, set up the modal for the running/complete state
+        if (state.download_process_id) {
+            const process = activeDownloadProcesses[virtualPlaylistId];
+            if (process) {
+                process.status = state.phase === 'download_complete' ? 'complete' : 'running';
+                process.batchId = state.download_process_id;
+
+                const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
+                const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+
+                if (state.phase === 'downloading') {
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                    // Start polling for live updates
+                    startModalDownloadPolling(virtualPlaylistId);
+                    console.log(`🔄 Started polling for active mirrored download: ${state.download_process_id}`);
+                } else if (state.phase === 'download_complete') {
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'none';
+                    console.log(`✅ Showing completed mirrored download results: ${state.download_process_id}`);
+
+                    // Fetch final results to populate the modal
+                    try {
+                        const response = await fetch(`/api/playlists/${state.download_process_id}/download_status`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.phase === 'complete' && data.tasks) {
+                                updateCompletedModalResults(virtualPlaylistId, data);
+                            }
+                        }
+                    } catch (err) {
+                        console.warn('Could not load completed download results:', err);
+                    }
+                }
+            }
+        }
+
+        console.log(`✅ Successfully rehydrated mirrored download modal for: ${state.playlist.name}`);
+    } catch (error) {
+        console.error('❌ Error rehydrating mirrored download modal:', error);
+        showToast('Error opening download modal', 'error');
+    }
+}
+
+async function hydrateMirroredDiscoveryStates() {
+    try {
+        const res = await fetch('/api/mirrored-playlists/discovery-states');
+        const data = await res.json();
+        if (data.error || !data.states || data.states.length === 0) return;
+
+        console.log(`Hydrating ${data.states.length} mirrored discovery states`);
+
+        for (const s of data.states) {
+            const hash = s.url_hash;
+
+            youtubePlaylistStates[hash] = {
+                playlist: s.playlist,
+                phase: s.phase,
+                discovery_results: s.discovery_results || [],
+                discoveryResults: s.discovery_results || [],
+                discovery_progress: s.discovery_progress || 0,
+                discoveryProgress: s.discovery_progress || 0,
+                spotify_matches: s.spotify_matches || 0,
+                spotifyMatches: s.spotify_matches || 0,
+                spotify_total: s.spotify_total || 0,
+                status: s.status || '',
+                url: s.playlist?.url || '',
+                sync_playlist_id: null,
+                converted_spotify_playlist_id: s.converted_spotify_playlist_id,
+                convertedSpotifyPlaylistId: s.converted_spotify_playlist_id,
+                download_process_id: s.download_process_id,
+                created_at: Date.now() / 1000,
+                last_accessed: Date.now() / 1000,
+                discovery_future: null,
+                sync_progress: {},
+                is_mirrored_playlist: true,
+                mirrored_source: s.playlist?.source || ''
+            };
+
+            // Update the card to reflect the current phase
+            const card = document.getElementById(`mirrored-card-${s.playlist_id}`);
+            if (card) {
+                const metaEl = card.querySelector('.card-meta');
+                if (metaEl) {
+                    // Remove old phase span and add new one
+                    const oldPhase = metaEl.querySelector('span[style]');
+                    if (oldPhase) oldPhase.remove();
+
+                    if (s.phase === 'discovering') {
+                        metaEl.insertAdjacentHTML('beforeend', `<span style="color:#a78bfa;">Discovering ${s.discovery_progress || 0}%</span>`);
+                    } else if (s.phase === 'discovered') {
+                        metaEl.insertAdjacentHTML('beforeend', `<span style="color:#22c55e;">Discovered ${s.spotify_matches || 0}/${s.spotify_total || 0}</span>`);
+                    } else if (s.phase === 'syncing' || s.phase === 'sync_complete') {
+                        metaEl.insertAdjacentHTML('beforeend', `<span style="color:#3b82f6;">${s.phase === 'syncing' ? 'Syncing...' : 'Synced'}</span>`);
+                    } else if (s.phase === 'downloading') {
+                        metaEl.insertAdjacentHTML('beforeend', `<span style="color:#f59e0b;">Downloading...</span>`);
+                    } else if (s.phase === 'download_complete') {
+                        metaEl.insertAdjacentHTML('beforeend', `<span style="color:#22c55e;">Downloaded</span>`);
+                    }
+                }
+            }
+
+            // Resume polling if discovery is in progress
+            if (s.phase === 'discovering' && !activeYouTubePollers[hash]) {
+                startYouTubeDiscoveryPolling(hash);
+            }
+        }
+    } catch (err) {
+        console.warn('Failed to hydrate mirrored discovery states:', err);
+    }
+}
+
+function timeAgo(dateStr) {
+    if (!dateStr) return '';
+    const diff = Date.now() - new Date(dateStr + (dateStr.includes('Z') ? '' : 'Z')).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 30) return `${days}d ago`;
+    return `${Math.floor(days / 30)}mo ago`;
+}
+
+/**
+ * Open modal showing all tracks in a mirrored playlist.
+ */
+async function openMirroredPlaylistModal(playlistId) {
+    showLoadingOverlay('Loading mirrored playlist...');
+    try {
+        const res = await fetch(`/api/mirrored-playlists/${playlistId}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        hideLoadingOverlay();
+
+        // Remove any existing modal
+        const old = document.getElementById('mirrored-track-modal');
+        if (old) old.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'mirrored-track-modal';
+        overlay.className = 'mirrored-modal-overlay';
+
+        const tracks = data.tracks || [];
+        const source = data.source || 'unknown';
+        const sourceIcons = { spotify: '🎵', tidal: '🌊', youtube: '▶', beatport: '🎛' };
+        const sourceIcon = sourceIcons[source] || '📋';
+
+        const trackRows = tracks.map(t => {
+            const dur = t.duration_ms ? `${Math.floor(t.duration_ms / 60000)}:${String(Math.floor((t.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '';
+            return `<div class="mirrored-track-row">
+                <span class="track-pos">${t.position}</span>
+                <span class="track-title">${_esc(t.track_name)}</span>
+                <span class="track-artist">${_esc(t.artist_name)}</span>
+                <span class="track-album">${_esc(t.album_name)}</span>
+                <span class="track-duration">${dur}</span>
+            </div>`;
+        }).join('');
+
+        overlay.innerHTML = `
+            <div class="mirrored-modal">
+                <div class="mirrored-modal-header">
+                    <div class="mirrored-modal-hero">
+                        <div class="mirrored-modal-hero-icon ${_escAttr(source)}">${sourceIcon}</div>
+                        <div class="mirrored-modal-hero-info">
+                            <h2 class="mirrored-modal-hero-title">${_esc(data.name)}</h2>
+                            <div class="mirrored-modal-hero-subtitle">
+                                <span class="mirrored-modal-hero-badge">${_esc(source)}</span>
+                                <span>${tracks.length} tracks</span>
+                                <span>&middot;</span>
+                                <span>Mirrored ${timeAgo(data.updated_at || data.mirrored_at)}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <span class="mirrored-modal-close" onclick="closeMirroredModal()">&times;</span>
+                </div>
+                <div class="mirrored-modal-tracks">
+                    <div class="mirrored-track-header">
+                        <span>#</span><span>Track</span><span>Artist</span><span>Album</span><span style="text-align:right">Time</span>
+                    </div>
+                    ${trackRows}
+                </div>
+                <div class="mirrored-modal-footer">
+                    <div class="mirrored-modal-footer-left">
+                        <button class="mirrored-btn-delete" onclick="closeMirroredModal(); deleteMirroredPlaylist(${playlistId}, '${_escAttr(data.name)}')">Delete Mirror</button>
+                    </div>
+                    <div class="mirrored-modal-footer-right" style="display:flex;gap:10px;">
+                        <button class="mirrored-btn-close" onclick="closeMirroredModal()">Close</button>
+                        <button class="mirrored-btn-discover" onclick="discoverMirroredPlaylist(${playlistId})">Discover</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        overlay.addEventListener('click', e => { if (e.target === overlay) closeMirroredModal(); });
+        document.body.appendChild(overlay);
+    } catch (err) {
+        hideLoadingOverlay();
+        showToast(`Error: ${err.message}`, 'error');
+    }
+}
+
+function closeMirroredModal() {
+    const m = document.getElementById('mirrored-track-modal');
+    if (m) m.remove();
+}
+
+/**
+ * Delete a mirrored playlist after confirmation.
+ */
+async function deleteMirroredPlaylist(playlistId, name) {
+    if (!confirm(`Delete mirrored playlist "${name}"?`)) return;
+    try {
+        const res = await fetch(`/api/mirrored-playlists/${playlistId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Deleted mirror: ${name}`, 'success');
+            loadMirroredPlaylists();
+        } else {
+            showToast(data.error || 'Failed to delete', 'error');
+        }
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+    }
+}
+
+/**
+ * Launch the existing discovery modal for a mirrored playlist by creating
+ * a temporary entry in youtubePlaylistStates and reusing openYouTubeDiscoveryModal.
+ */
+async function discoverMirroredPlaylist(playlistId) {
+    closeMirroredModal();
+    const tempHash = `mirrored_${playlistId}`;
+
+    // If state already exists (discovery in progress or completed), just reopen the modal
+    const existingState = youtubePlaylistStates[tempHash];
+    if (existingState && existingState.phase !== 'fresh') {
+        openYouTubeDiscoveryModal(tempHash);
+        // Resume polling if discovery is in progress
+        if (existingState.phase === 'discovering' && !activeYouTubePollers[tempHash]) {
+            startYouTubeDiscoveryPolling(tempHash);
+        }
+        return;
+    }
+
+    showLoadingOverlay('Preparing discovery...');
+    try {
+        // Register the mirrored playlist on the backend so the YouTube discovery pipeline can find it
+        const prepRes = await fetch(`/api/mirrored-playlists/${playlistId}/prepare-discovery`, { method: 'POST' });
+        const prepData = await prepRes.json();
+        if (prepData.error) throw new Error(prepData.error);
+
+        // Also fetch the full data for the frontend state
+        const res = await fetch(`/api/mirrored-playlists/${playlistId}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        hideLoadingOverlay();
+
+        // Build tracks in the format the discovery modal expects
+        const tracks = (data.tracks || []).map(t => ({
+            id: t.source_track_id || `mirrored_${t.id}`,
+            name: t.track_name,
+            artists: [t.artist_name],
+            album: t.album_name || '',
+            duration_ms: t.duration_ms || 0
+        }));
+
+        // Create state entry reusing the YouTube discovery infrastructure
+        youtubePlaylistStates[tempHash] = {
+            playlist: {
+                name: data.name,
+                tracks: tracks,
+                track_count: tracks.length
+            },
+            phase: 'fresh',
+            discovery_results: [],
+            discovery_progress: 0,
+            spotify_matches: 0,
+            spotify_total: tracks.length,
+            status: 'parsed',
+            url: `mirrored://${data.source}/${data.source_playlist_id}`,
+            sync_playlist_id: null,
+            converted_spotify_playlist_id: null,
+            download_process_id: null,
+            created_at: Date.now() / 1000,
+            last_accessed: Date.now() / 1000,
+            discovery_future: null,
+            sync_progress: {},
+            is_mirrored_playlist: true,
+            mirrored_source: data.source
+        };
+
+        openYouTubeDiscoveryModal(tempHash);
+    } catch (err) {
+        hideLoadingOverlay();
+        showToast(`Error: ${err.message}`, 'error');
+    }
 }
 
 // --- Helpers ---
