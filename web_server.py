@@ -2755,7 +2755,7 @@ def _run_background_comparison(query, hydrabase_counts=None):
                 hydra_data = {'tracks': 0, 'artists': 0, 'albums': 0}
                 if _is_hydrabase_active():
                     raw_t = hydrabase_client.search_raw(query, 'track')
-                    raw_ar = hydrabase_client.search_raw(query, 'artist')
+                    raw_ar = hydrabase_client.search_raw(query, 'artists')
                     raw_al = hydrabase_client.search_raw(query, 'album')
                     hydra_data = {
                         'tracks': len(raw_t) if raw_t else 0,
@@ -4472,7 +4472,7 @@ def enhanced_search():
             if hydrabase_worker and dev_mode_enabled:
                 hydrabase_worker.enqueue(query, 'track')
                 hydrabase_worker.enqueue(query, 'album')
-                hydrabase_worker.enqueue(query, 'artist')
+                hydrabase_worker.enqueue(query, 'artists')
 
             if spotify_client and spotify_client.is_authenticated():
                 artist_objs = spotify_client.search_artists(query, limit=10)
@@ -24504,7 +24504,7 @@ def search_artists_for_playlist():
                 })
         else:
             if hydrabase_worker and dev_mode_enabled:
-                hydrabase_worker.enqueue(query, 'artist')
+                hydrabase_worker.enqueue(query, 'artists')
 
             search_query = f'artist:{query}' if len(query.strip()) <= 4 else query
             results = spotify_client.sp.search(q=search_query, type='artist', limit=10)
