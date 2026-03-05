@@ -11995,6 +11995,19 @@ def get_version_info():
         "subtitle": "Version 1.7 — Latest Changes",
         "sections": [
             {
+                "title": "📋 Mirrored Playlists",
+                "description": "Persistent cross-service playlist archive on the Sync page",
+                "features": [
+                    "• Automatically mirrors every parsed playlist from Spotify, Tidal, YouTube, and Beatport",
+                    "• New 'Mirrored' tab with source-branded cards showing live discovery and download status",
+                    "• Click any mirrored playlist to browse its full track list or run it through discovery",
+                    "• Re-parsing the same playlist updates the existing mirror — no duplicates",
+                    "• Cards reflect live state: Discovering, Discovered, Downloading, Downloaded",
+                    "• Download progress survives page refresh — click a 'Downloading...' card to resume viewing",
+                    "• Profile-scoped — each profile has its own mirrored playlists"
+                ]
+            },
+            {
                 "title": "👥 Multi-Profile Support",
                 "description": "Netflix-style profile picker for shared households",
                 "features": [
