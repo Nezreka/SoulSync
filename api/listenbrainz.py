@@ -13,7 +13,7 @@ def register_routes(bp):
 
     @bp.route("/listenbrainz/playlists", methods=["GET"])
     @require_api_key
-    def list_playlists():
+    def list_listenbrainz_playlists():
         """List cached ListenBrainz playlists.
 
         Query params:
@@ -71,7 +71,7 @@ def register_routes(bp):
 
     @bp.route("/listenbrainz/playlists/<playlist_id>", methods=["GET"])
     @require_api_key
-    def get_playlist(playlist_id):
+    def get_listenbrainz_playlist(playlist_id):
         """Get a ListenBrainz playlist with its tracks.
 
         playlist_id can be the internal ID or the MusicBrainz playlist MBID.

@@ -375,6 +375,31 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mirrored_playlists_source ON mirrored_playlists (source, source_playlist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mirrored_tracks_playlist ON mirrored_playlist_tracks (playlist_id)")
 
+            # Automations table — trigger → action scheduled tasks
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS automations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    enabled INTEGER DEFAULT 1,
+                    trigger_type TEXT NOT NULL,
+                    trigger_config TEXT DEFAULT '{}',
+                    action_type TEXT NOT NULL,
+                    action_config TEXT DEFAULT '{}',
+                    last_run TIMESTAMP,
+                    next_run TIMESTAMP,
+                    run_count INTEGER DEFAULT 0,
+                    last_error TEXT,
+                    profile_id INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_automations_profile ON automations (profile_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_automations_enabled ON automations (enabled)")
+
+            # Add notification columns to automations (migration)
+            self._add_automation_notify_columns(cursor)
+
             conn.commit()
             logger.info("Database initialized successfully")
             
@@ -382,6 +407,18 @@ class MusicDatabase:
             logger.error(f"Error initializing database: {e}")
             raise
     
+    def _add_automation_notify_columns(self, cursor):
+        """Add notification and result columns to automations table."""
+        try:
+            cursor.execute("PRAGMA table_info(automations)")
+            cols = [c[1] for c in cursor.fetchall()]
+            for col, typedef in [('notify_type', 'TEXT DEFAULT NULL'), ('notify_config', "TEXT DEFAULT '{}'"), ('last_result', 'TEXT DEFAULT NULL')]:
+                if col not in cols:
+                    cursor.execute(f"ALTER TABLE automations ADD COLUMN {col} {typedef}")
+                    logger.info(f"Added {col} column to automations table")
+        except Exception as e:
+            logger.error(f"Error adding automation notify columns: {e}")
+
     def _add_server_source_columns(self, cursor):
         """Add server_source columns to existing tables for multi-server support"""
         try:
@@ -6481,6 +6518,122 @@ class MusicDatabase:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error deleting mirrored playlist: {e}")
+            return False
+
+    # ===========================
+    # AUTOMATIONS CRUD
+    # ===========================
+
+    def create_automation(self, name: str, trigger_type: str, trigger_config: str,
+                          action_type: str, action_config: str, profile_id: int = 1,
+                          notify_type: str = None, notify_config: str = '{}'):
+        """Create a new automation. Returns the new automation ID or None."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO automations (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error creating automation: {e}")
+            return None
+
+    def get_automations(self, profile_id: int = 1):
+        """Get all automations for a profile."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM automations WHERE profile_id = ? ORDER BY created_at DESC
+                """, (profile_id,))
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting automations: {e}")
+            return []
+
+    def get_automation(self, automation_id: int):
+        """Get a single automation by ID."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM automations WHERE id = ?", (automation_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting automation {automation_id}: {e}")
+            return None
+
+    def update_automation(self, automation_id: int, **kwargs) -> bool:
+        """Update automation fields."""
+        allowed = {'name', 'enabled', 'trigger_type', 'trigger_config', 'action_type', 'action_config', 'next_run', 'notify_type', 'notify_config', 'last_result'}
+        updates = {k: v for k, v in kwargs.items() if k in allowed}
+        if not updates:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                set_clause = ', '.join(f"{k} = ?" for k in updates)
+                values = list(updates.values()) + [automation_id]
+                cursor.execute(
+                    f"UPDATE automations SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    values
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating automation {automation_id}: {e}")
+            return False
+
+    def delete_automation(self, automation_id: int) -> bool:
+        """Delete an automation."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM automations WHERE id = ?", (automation_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting automation {automation_id}: {e}")
+            return False
+
+    def toggle_automation(self, automation_id: int) -> bool:
+        """Toggle the enabled state of an automation. Returns True on success."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE automations SET enabled = CASE WHEN enabled = 1 THEN 0 ELSE 1 END, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (automation_id,)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error toggling automation {automation_id}: {e}")
+            return False
+
+    def update_automation_run(self, automation_id: int, next_run=None, error=None, last_result=None) -> bool:
+        """Record a run: set last_run=now, increment run_count, optionally set next_run, last_error, last_result."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE automations
+                    SET last_run = CURRENT_TIMESTAMP,
+                        run_count = run_count + 1,
+                        next_run = ?,
+                        last_error = ?,
+                        last_result = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (next_run, error, last_result, automation_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating automation run {automation_id}: {e}")
             return False
 
 # Thread-safe singleton pattern for database access

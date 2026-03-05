@@ -111,6 +111,10 @@
                     <span class="nav-icon">🎵</span>
                     <span class="nav-text">Artists</span>
                 </button>
+                <button class="nav-button" data-page="automations">
+                    <span class="nav-icon">⚡</span>
+                    <span class="nav-text">Automations</span>
+                </button>
                 <button class="nav-button" data-page="library">
                     <span class="nav-icon">📚</span>
                     <span class="nav-text">Library</span>
@@ -498,8 +502,12 @@
                             <div class="tool-card" id="db-updater-card">
                                 <div class="tool-card-header">
                                     <h4 class="tool-card-title">Database Updater</h4>
-                                    <button class="tool-help-button" data-tool="db-updater"
-                                        title="Learn more about this tool">?</button>
+                                    <div style="display:flex;gap:4px;">
+                                        <button class="tool-help-button" id="db-backup-button"
+                                            title="Create a rolling backup of the database"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button>
+                                        <button class="tool-help-button" data-tool="db-updater"
+                                            title="Learn more about this tool">?</button>
+                                    </div>
                                 </div>
                                 <p class="tool-card-info">Last Full Refresh: <span id="db-last-refresh">Never</span></p>
                                 <div class="tool-card-stats">
@@ -1943,6 +1951,49 @@
                                 <!-- Artist bubble cards will be populated here -->
                             </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Automations Page -->
+            <div class="page" id="automations-page">
+                <!-- List View -->
+                <div class="automations-list-view" id="automations-list-view">
+                    <div class="automations-container">
+                        <div class="dashboard-header">
+                            <div class="header-text">
+                                <h2 class="header-title">Automations</h2>
+                                <p class="header-subtitle">Configure scheduled tasks and automated workflows</p>
+                            </div>
+                            <div class="header-spacer"></div>
+                            <div class="header-actions">
+                                <button class="auto-new-btn" onclick="showAutomationBuilder()">+ New Automation</button>
+                            </div>
+                        </div>
+                        <div class="automations-stats" id="automations-stats"></div>
+                        <div class="automations-list" id="automations-list"></div>
+                        <div class="automations-empty" id="automations-empty" style="display:none;">
+                            <div class="automations-empty-icon">&#9889;</div>
+                            <div class="automations-empty-title">No automations yet</div>
+                            <div class="automations-empty-text">Create your first automation to schedule tasks and trigger actions automatically.</div>
+                            <button class="auto-new-btn" onclick="showAutomationBuilder()">+ New Automation</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Builder View -->
+                <div class="automations-builder-view" id="automations-builder-view" style="display:none;">
+                    <div class="builder-header">
+                        <button class="builder-back-btn" onclick="hideAutomationBuilder()" title="Back to list">&#8592;</button>
+                        <input type="text" id="builder-name" class="builder-name-input" placeholder="Automation Name">
+                        <div class="builder-header-actions">
+                            <button class="btn-cancel" onclick="hideAutomationBuilder()">Cancel</button>
+                            <button class="btn-save" onclick="saveAutomation()">Save</button>
+                        </div>
+                    </div>
+                    <div class="builder-content">
+                        <div class="builder-sidebar" id="builder-sidebar"></div>
+                        <div class="builder-canvas" id="builder-canvas"></div>
                     </div>
                 </div>
             </div>
