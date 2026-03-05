@@ -76,6 +76,7 @@ from core.spotify_worker import SpotifyWorker
 from core.itunes_worker import iTunesWorker
 from core.hydrabase_worker import HydrabaseWorker
 from core.hydrabase_client import HydrabaseClient
+from core.automation_engine import AutomationEngine
 
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -253,6 +254,267 @@ try:
 except Exception as e:
     print(f"🔴 FATAL: Error initializing service clients: {e}")
     spotify_client = plex_client = jellyfin_client = navidrome_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
+
+# --- Automation Engine ---
+try:
+    automation_engine = AutomationEngine(get_database())
+    print("✅ Automation engine initialized.")
+except Exception as e:
+    print(f"⚠️ Automation engine failed to initialize: {e}")
+    automation_engine = None
+
+def _register_automation_handlers():
+    """Register real SoulSync action handlers with the automation engine."""
+    if not automation_engine:
+        return
+
+    def _auto_process_wishlist(config):
+        if is_wishlist_actually_processing():
+            return {'status': 'skipped', 'reason': 'Wishlist already processing'}
+        threading.Thread(target=_process_wishlist_automatically, daemon=True, name='auto-wishlist').start()
+        return {'status': 'started', 'category': config.get('category', 'all')}
+
+    def _auto_scan_watchlist(config):
+        if is_watchlist_actually_scanning():
+            return {'status': 'skipped', 'reason': 'Watchlist already scanning'}
+        threading.Thread(target=_process_watchlist_scan_automatically, daemon=True, name='auto-watchlist').start()
+        return {'status': 'started'}
+
+    def _auto_scan_library(config):
+        if web_scan_manager:
+            result = web_scan_manager.request_scan('Automation trigger')
+            return {'status': result.get('status', 'unknown')}
+        return {'status': 'error', 'reason': 'Scan manager not available'}
+
+    automation_engine.register_action_handler('process_wishlist', _auto_process_wishlist, is_wishlist_actually_processing)
+    automation_engine.register_action_handler('scan_watchlist', _auto_scan_watchlist, is_watchlist_actually_scanning)
+    automation_engine.register_action_handler('scan_library', _auto_scan_library)
+
+    def _auto_refresh_mirrored(config):
+        """Refresh mirrored playlist(s) from source."""
+        db = get_database()
+        playlist_id = config.get('playlist_id')
+        refresh_all = config.get('all', False)
+
+        if refresh_all:
+            playlists = db.get_mirrored_playlists()
+        elif playlist_id:
+            p = db.get_mirrored_playlist(int(playlist_id))
+            playlists = [p] if p else []
+        else:
+            return {'status': 'error', 'reason': 'No playlist specified'}
+
+        refreshed = 0
+        errors = []
+        for pl in playlists:
+            try:
+                source = pl.get('source', '')
+                source_id = pl.get('source_playlist_id', '')
+                if source == 'spotify' and spotify_client and spotify_client.is_spotify_authenticated():
+                    playlist_obj = spotify_client.get_playlist_by_id(source_id)
+                    if playlist_obj and playlist_obj.tracks:
+                        tracks = []
+                        for t in playlist_obj.tracks:
+                            # Track.artists is List[str], not List[dict]
+                            artist_name = t.artists[0] if t.artists else ''
+                            tracks.append({
+                                'track_name': t.name or '',
+                                'artist_name': str(artist_name),
+                                'album_name': t.album or '',
+                                'duration_ms': t.duration_ms or 0,
+                                'source_track_id': t.id or '',
+                            })
+                        # Compare old vs new track IDs to detect changes
+                        old_tracks = db.get_mirrored_playlist_tracks(pl['id']) if pl.get('id') else []
+                        old_ids = {t.get('source_track_id') for t in old_tracks if t.get('source_track_id')}
+                        new_ids = {t.get('source_track_id') for t in tracks if t.get('source_track_id')}
+
+                        db.mirror_playlist(
+                            source=source,
+                            source_playlist_id=source_id,
+                            name=pl['name'],
+                            tracks=tracks,
+                            profile_id=pl.get('profile_id', 1),
+                            # Preserve existing image/owner — Playlist dataclass lacks image_url
+                            owner=getattr(playlist_obj, 'owner', pl.get('owner')),
+                            image_url=pl.get('image_url'),
+                        )
+                        refreshed += 1
+
+                        # Emit playlist_changed if tracks actually changed
+                        if old_ids != new_ids:
+                            try:
+                                if automation_engine:
+                                    automation_engine.emit('playlist_changed', {
+                                        'playlist_name': pl.get('name', ''),
+                                        'old_count': str(len(old_ids)),
+                                        'new_count': str(len(new_ids)),
+                                        'added': str(len(new_ids - old_ids)),
+                                        'removed': str(len(old_ids - new_ids)),
+                                    })
+                            except Exception:
+                                pass
+            except Exception as e:
+                errors.append(f"{pl.get('name', '?')}: {str(e)}")
+        return {'status': 'completed', 'refreshed': str(refreshed), 'errors': str(len(errors))}
+
+    def _auto_sync_playlist(config):
+        """Sync a mirrored playlist to media server."""
+        playlist_id = config.get('playlist_id')
+        if not playlist_id:
+            return {'status': 'error', 'reason': 'No playlist specified'}
+
+        db = get_database()
+        pl = db.get_mirrored_playlist(int(playlist_id))
+        if not pl:
+            return {'status': 'error', 'reason': 'Playlist not found'}
+
+        tracks = db.get_mirrored_playlist_tracks(int(playlist_id))
+        if not tracks:
+            return {'status': 'error', 'reason': 'No tracks in playlist'}
+
+        # Convert mirrored tracks to format expected by _run_sync_task
+        tracks_json = []
+        for t in tracks:
+            tracks_json.append({
+                'name': t.get('track_name', ''),
+                'artists': [{'name': t.get('artist_name', '')}],
+                'album': t.get('album_name', ''),
+                'duration_ms': t.get('duration_ms', 0),
+                'id': t.get('source_track_id', ''),
+            })
+
+        sync_id = f"auto_mirror_{playlist_id}"
+        threading.Thread(
+            target=_run_sync_task,
+            args=(sync_id, pl['name'], json.dumps(tracks_json)),
+            daemon=True,
+            name=f'auto-sync-{playlist_id}'
+        ).start()
+        return {'status': 'started', 'playlist_name': pl['name']}
+
+    automation_engine.register_action_handler('refresh_mirrored', _auto_refresh_mirrored)
+    automation_engine.register_action_handler('sync_playlist', _auto_sync_playlist)
+
+    # --- Phase 3 action handlers ---
+
+    def _auto_start_database_update(config):
+        if db_update_state.get('status') == 'running':
+            return {'status': 'skipped', 'reason': 'Database update already running'}
+        full = config.get('full_refresh', False)
+        active_server = config_manager.get_active_media_server()
+        with db_update_lock:
+            db_update_state.update({
+                "status": "running", "phase": "Initializing...",
+                "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": ""
+            })
+        db_update_executor.submit(_run_db_update_task, full, active_server)
+        return {'status': 'started', 'full_refresh': str(full)}
+
+    def _auto_run_duplicate_cleaner(config):
+        if duplicate_cleaner_state.get('status') == 'running':
+            return {'status': 'skipped', 'reason': 'Duplicate cleaner already running'}
+        duplicate_cleaner_executor.submit(_run_duplicate_cleaner)
+        return {'status': 'started'}
+
+    def _auto_clear_quarantine(config):
+        import shutil as _shutil
+        quarantine_path = os.path.join(docker_resolve_path(config_manager.get('soulseek.download_path', './downloads')), 'ss_quarantine')
+        if not os.path.exists(quarantine_path):
+            return {'status': 'completed', 'removed': '0'}
+        removed = 0
+        for f in os.listdir(quarantine_path):
+            fp = os.path.join(quarantine_path, f)
+            try:
+                if os.path.isfile(fp):
+                    os.remove(fp)
+                    removed += 1
+                elif os.path.isdir(fp):
+                    _shutil.rmtree(fp)
+                    removed += 1
+            except Exception:
+                pass
+        return {'status': 'completed', 'removed': str(removed)}
+
+    def _auto_cleanup_wishlist(config):
+        db = get_database()
+        removed = db.remove_wishlist_duplicates(get_current_profile_id())
+        return {'status': 'completed', 'removed': str(removed or 0)}
+
+    def _auto_update_discovery_pool(config):
+        try:
+            from core.watchlist_scanner import get_watchlist_scanner
+            scanner = get_watchlist_scanner(spotify_client)
+            threading.Thread(target=scanner.update_discovery_pool_incremental,
+                             args=(get_current_profile_id(),), daemon=True).start()
+            return {'status': 'started'}
+        except Exception as e:
+            return {'status': 'error', 'reason': str(e)}
+
+    def _auto_start_quality_scan(config):
+        if quality_scanner_state.get('status') == 'running':
+            return {'status': 'skipped', 'reason': 'Quality scan already running'}
+        scope = config.get('scope', 'watchlist')
+        quality_scanner_executor.submit(_run_quality_scanner, scope, get_current_profile_id())
+        return {'status': 'started', 'scope': scope}
+
+    def _auto_backup_database(config):
+        import sqlite3, glob as _glob
+        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+        if not os.path.exists(db_path):
+            return {'status': 'error', 'reason': 'Database file not found'}
+        max_backups = 3
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_path = f"{db_path}.backup_{timestamp}"
+        # Use SQLite backup API for safe hot-copy of active database
+        src = sqlite3.connect(db_path)
+        dst = sqlite3.connect(backup_path)
+        src.backup(dst)
+        dst.close()
+        src.close()
+        size_mb = round(os.path.getsize(backup_path) / (1024 * 1024), 1)
+        # Rolling cleanup — keep only the newest N backups
+        existing = sorted(_glob.glob(f"{db_path}.backup_*"), key=os.path.getmtime)
+        while len(existing) > max_backups:
+            try:
+                os.remove(existing.pop(0))
+            except Exception:
+                pass
+        return {'status': 'completed', 'backup_path': backup_path, 'size_mb': str(size_mb)}
+
+    automation_engine.register_action_handler('start_database_update', _auto_start_database_update,
+                                              lambda: db_update_state.get('status') == 'running')
+    automation_engine.register_action_handler('run_duplicate_cleaner', _auto_run_duplicate_cleaner,
+                                              lambda: duplicate_cleaner_state.get('status') == 'running')
+    automation_engine.register_action_handler('clear_quarantine', _auto_clear_quarantine)
+    automation_engine.register_action_handler('cleanup_wishlist', _auto_cleanup_wishlist)
+    automation_engine.register_action_handler('update_discovery_pool', _auto_update_discovery_pool)
+    automation_engine.register_action_handler('start_quality_scan', _auto_start_quality_scan,
+                                              lambda: quality_scanner_state.get('status') == 'running')
+    automation_engine.register_action_handler('backup_database', _auto_backup_database)
+
+    print("✅ Automation action handlers registered")
+
+
+def _emit_track_downloaded(context):
+    """Emit track_downloaded event for automation engine. Safe to call anywhere."""
+    try:
+        if not automation_engine:
+            return
+        ti = context.get('track_info') or context.get('search_result') or {}
+        artist_name = ''
+        artists = ti.get('artists', [])
+        if artists:
+            a = artists[0]
+            artist_name = a.get('name', str(a)) if isinstance(a, dict) else str(a)
+        automation_engine.emit('track_downloaded', {
+            'artist': artist_name,
+            'title': ti.get('name', ti.get('title', '')),
+            'album': ti.get('album', ''),
+            'quality': context.get('_audio_quality', 'Unknown'),
+        })
+    except Exception:
+        pass
 
 # --- Register Public REST API Blueprint (v1) ---
 try:
@@ -1449,6 +1711,14 @@ def signal_handler(signum, frame):
     IS_SHUTTING_DOWN = True
     cleanup_monitor()
     
+    # Stop automation engine
+    try:
+        if automation_engine:
+            print("🛑 Stopping automation engine...")
+            automation_engine.stop()
+    except Exception as e:
+        print(f"⚠️ Error stopping automation engine: {e}")
+
     # Shutdown executor to prevent new tasks
     try:
         print("🛑 Shutting down missing_download_executor...")
@@ -3094,6 +3364,323 @@ def handle_log_level():
         except Exception as e:
             logger.error(f"Error getting log level: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
+
+# ===========================
+# AUTOMATIONS API
+# ===========================
+
+@app.route('/api/automations', methods=['GET'])
+def list_automations():
+    """List all automations for the current profile."""
+    try:
+        profile_id = session.get('profile_id', 1)
+        db = get_database()
+        automations = db.get_automations(profile_id)
+        # Parse JSON config fields for frontend
+        for auto in automations:
+            for field in ('trigger_config', 'action_config', 'notify_config', 'last_result'):
+                try:
+                    auto[field] = json.loads(auto[field]) if isinstance(auto[field], str) else auto[field]
+                except (json.JSONDecodeError, TypeError):
+                    if field in ('trigger_config', 'action_config', 'notify_config'):
+                        auto[field] = {}
+                    else:
+                        auto[field] = None
+        return jsonify(automations)
+    except Exception as e:
+        logger.error(f"Error listing automations: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/automations', methods=['POST'])
+def create_automation():
+    """Create a new automation."""
+    try:
+        data = request.get_json()
+        name = data.get('name', '').strip()
+        if not name:
+            return jsonify({"error": "Name is required"}), 400
+
+        trigger_type = data.get('trigger_type', 'schedule')
+        trigger_config = json.dumps(data.get('trigger_config', {}))
+        action_type = data.get('action_type', 'process_wishlist')
+        action_config = json.dumps(data.get('action_config', {}))
+        notify_type = data.get('notify_type') or None
+        notify_config = json.dumps(data.get('notify_config', {})) if notify_type else '{}'
+        profile_id = session.get('profile_id', 1)
+
+        db = get_database()
+        auto_id = db.create_automation(name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config)
+        if auto_id is None:
+            return jsonify({"error": "Failed to create automation"}), 500
+
+        # Schedule it
+        if automation_engine:
+            automation_engine.schedule_automation(auto_id)
+
+        return jsonify({"success": True, "id": auto_id})
+    except Exception as e:
+        logger.error(f"Error creating automation: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/automations/<int:automation_id>', methods=['GET'])
+def get_automation(automation_id):
+    """Get a single automation."""
+    try:
+        db = get_database()
+        auto = db.get_automation(automation_id)
+        if not auto:
+            return jsonify({"error": "Automation not found"}), 404
+        for field in ('trigger_config', 'action_config', 'notify_config', 'last_result'):
+            try:
+                auto[field] = json.loads(auto[field]) if isinstance(auto[field], str) else auto[field]
+            except (json.JSONDecodeError, TypeError):
+                if field in ('trigger_config', 'action_config', 'notify_config'):
+                    auto[field] = {}
+                else:
+                    auto[field] = None
+        return jsonify(auto)
+    except Exception as e:
+        logger.error(f"Error getting automation: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/automations/<int:automation_id>', methods=['PUT'])
+def update_automation_endpoint(automation_id):
+    """Update an automation."""
+    try:
+        data = request.get_json()
+        db = get_database()
+
+        update_fields = {}
+        if 'name' in data:
+            update_fields['name'] = data['name'].strip()
+        if 'trigger_type' in data:
+            update_fields['trigger_type'] = data['trigger_type']
+        if 'trigger_config' in data:
+            update_fields['trigger_config'] = json.dumps(data['trigger_config'])
+        if 'action_type' in data:
+            update_fields['action_type'] = data['action_type']
+        if 'action_config' in data:
+            update_fields['action_config'] = json.dumps(data['action_config'])
+        if 'notify_type' in data:
+            update_fields['notify_type'] = data['notify_type'] or None
+        if 'notify_config' in data:
+            update_fields['notify_config'] = json.dumps(data['notify_config'])
+
+        if not update_fields:
+            return jsonify({"error": "No fields to update"}), 400
+
+        success = db.update_automation(automation_id, **update_fields)
+        if not success:
+            return jsonify({"error": "Automation not found"}), 404
+
+        # Reschedule
+        if automation_engine:
+            auto = db.get_automation(automation_id)
+            if auto and auto.get('enabled'):
+                automation_engine.schedule_automation(automation_id)
+            else:
+                automation_engine.cancel_automation(automation_id)
+
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"Error updating automation: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/automations/<int:automation_id>', methods=['DELETE'])
+def delete_automation_endpoint(automation_id):
+    """Delete an automation."""
+    try:
+        if automation_engine:
+            automation_engine.cancel_automation(automation_id)
+        db = get_database()
+        success = db.delete_automation(automation_id)
+        if not success:
+            return jsonify({"error": "Automation not found"}), 404
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"Error deleting automation: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/automations/<int:automation_id>/toggle', methods=['POST'])
+def toggle_automation_endpoint(automation_id):
+    """Toggle an automation's enabled state."""
+    try:
+        db = get_database()
+        success = db.toggle_automation(automation_id)
+        if not success:
+            return jsonify({"error": "Automation not found"}), 404
+
+        # Reschedule or cancel based on new state
+        if automation_engine:
+            auto = db.get_automation(automation_id)
+            if auto and auto.get('enabled'):
+                automation_engine.schedule_automation(automation_id)
+            else:
+                automation_engine.cancel_automation(automation_id)
+
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"Error toggling automation: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/automations/<int:automation_id>/run', methods=['POST'])
+def run_automation_endpoint(automation_id):
+    """Manually trigger an automation."""
+    try:
+        if not automation_engine:
+            return jsonify({"error": "Automation engine not available"}), 500
+        success = automation_engine.run_now(automation_id)
+        if not success:
+            return jsonify({"error": "Automation not found"}), 404
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"Error running automation: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/automations/blocks', methods=['GET'])
+def get_automation_blocks():
+    """Return available block types for the automation builder sidebar."""
+    return jsonify({
+        "triggers": [
+            {"type": "schedule", "label": "Schedule", "icon": "clock", "description": "Run on a timer interval", "available": True,
+             "config_fields": [
+                 {"key": "interval", "type": "number", "label": "Every", "default": 6, "min": 1},
+                 {"key": "unit", "type": "select", "label": "Unit",
+                  "options": [{"value": "minutes", "label": "Minutes"}, {"value": "hours", "label": "Hours"}, {"value": "days", "label": "Days"}],
+                  "default": "hours"}
+             ]},
+            {"type": "daily_time", "label": "Daily Time", "icon": "clock", "description": "Run every day at a specific time", "available": True,
+             "config_fields": [
+                 {"key": "time", "type": "time", "label": "At", "default": "03:00"}
+             ]},
+            {"type": "weekly_time", "label": "Weekly Schedule", "icon": "calendar", "description": "Run on specific days of the week at a set time", "available": True,
+             "config_fields": [
+                 {"key": "time", "type": "time", "label": "At", "default": "03:00"},
+                 {"key": "days", "type": "multi_select", "label": "Days",
+                  "options": [{"value": "mon", "label": "Mon"}, {"value": "tue", "label": "Tue"}, {"value": "wed", "label": "Wed"},
+                              {"value": "thu", "label": "Thu"}, {"value": "fri", "label": "Fri"}, {"value": "sat", "label": "Sat"}, {"value": "sun", "label": "Sun"}]}
+             ]},
+            {"type": "app_started", "label": "App Started", "icon": "power", "description": "When SoulSync starts up", "available": True},
+            {"type": "track_downloaded", "label": "Track Downloaded", "icon": "download", "description": "When a track finishes downloading", "available": True,
+             "has_conditions": True,
+             "condition_fields": ["artist", "title", "album", "quality"],
+             "variables": ["artist", "title", "album", "quality"]},
+            {"type": "batch_complete", "label": "Batch Complete", "icon": "check-circle", "description": "When an album/playlist download finishes", "available": True,
+             "has_conditions": True,
+             "condition_fields": ["playlist_name"],
+             "variables": ["playlist_name", "total_tracks", "completed_tracks", "failed_tracks"]},
+            {"type": "watchlist_new_release", "label": "New Release Found", "icon": "bell", "description": "When watchlist detects new music", "available": True,
+             "has_conditions": True,
+             "condition_fields": ["artist"],
+             "variables": ["artist", "new_tracks", "added_to_wishlist"]},
+            {"type": "playlist_synced", "label": "Playlist Synced", "icon": "refresh", "description": "When a playlist sync completes", "available": True,
+             "has_conditions": True,
+             "condition_fields": ["playlist_name"],
+             "variables": ["playlist_name", "total_tracks", "matched_tracks", "synced_tracks", "failed_tracks"]},
+            {"type": "playlist_changed", "label": "Playlist Changed", "icon": "edit", "description": "When a mirrored playlist detects track changes from source", "available": True,
+             "has_conditions": True,
+             "condition_fields": ["playlist_name"],
+             "variables": ["playlist_name", "old_count", "new_count", "added", "removed"]},
+            # Phase 3 triggers
+            {"type": "wishlist_processing_completed", "label": "Wishlist Processed", "icon": "check-circle",
+             "description": "When auto-wishlist processing finishes", "available": True,
+             "variables": ["tracks_processed", "tracks_found", "tracks_failed"]},
+            {"type": "watchlist_scan_completed", "label": "Watchlist Scan Done", "icon": "check-circle",
+             "description": "When watchlist scan finishes", "available": True,
+             "variables": ["artists_scanned", "new_tracks_found", "tracks_added"]},
+            {"type": "database_update_completed", "label": "Database Updated", "icon": "database",
+             "description": "When library database refresh finishes", "available": True,
+             "variables": ["total_artists", "total_albums", "total_tracks"]},
+            {"type": "download_failed", "label": "Download Failed", "icon": "x-circle",
+             "description": "When a track permanently fails to download", "available": True,
+             "has_conditions": True, "condition_fields": ["artist", "title", "reason"],
+             "variables": ["artist", "title", "reason"]},
+            {"type": "download_quarantined", "label": "File Quarantined", "icon": "alert-triangle",
+             "description": "When AcoustID verification fails", "available": True,
+             "has_conditions": True, "condition_fields": ["artist", "title"],
+             "variables": ["artist", "title", "reason"]},
+            {"type": "wishlist_item_added", "label": "Wishlist Item Added", "icon": "plus-circle",
+             "description": "When a track is added to wishlist", "available": True,
+             "has_conditions": True, "condition_fields": ["artist", "title"],
+             "variables": ["artist", "title", "reason"]},
+            {"type": "watchlist_artist_added", "label": "Artist Watched", "icon": "user-plus",
+             "description": "When an artist is added to watchlist", "available": True,
+             "has_conditions": True, "condition_fields": ["artist"],
+             "variables": ["artist", "artist_id"]},
+            {"type": "watchlist_artist_removed", "label": "Artist Unwatched", "icon": "user-minus",
+             "description": "When an artist is removed from watchlist", "available": True,
+             "has_conditions": True, "condition_fields": ["artist"],
+             "variables": ["artist", "artist_id"]},
+            {"type": "import_completed", "label": "Import Complete", "icon": "upload",
+             "description": "When album/track import finishes", "available": True,
+             "has_conditions": True, "condition_fields": ["artist", "album_name"],
+             "variables": ["track_count", "album_name", "artist"]},
+            {"type": "mirrored_playlist_created", "label": "Playlist Mirrored", "icon": "copy",
+             "description": "When a new playlist is mirrored", "available": True,
+             "has_conditions": True, "condition_fields": ["playlist_name", "source"],
+             "variables": ["playlist_name", "source", "track_count"]},
+            {"type": "quality_scan_completed", "label": "Quality Scan Done", "icon": "bar-chart",
+             "description": "When quality scan finishes", "available": True,
+             "variables": ["quality_met", "low_quality", "total_scanned"]},
+            {"type": "duplicate_scan_completed", "label": "Duplicate Scan Done", "icon": "layers",
+             "description": "When duplicate cleaner finishes", "available": True,
+             "variables": ["files_scanned", "duplicates_found", "space_freed"]},
+        ],
+        "actions": [
+            {"type": "process_wishlist", "label": "Process Wishlist", "icon": "list", "description": "Retry failed downloads from wishlist", "available": True,
+             "config_fields": [{"key": "category", "type": "select", "label": "Category", "options": [{"value": "all", "label": "All"}, {"value": "albums", "label": "Albums"}, {"value": "singles", "label": "Singles"}], "default": "all"}]},
+            {"type": "scan_watchlist", "label": "Scan Watchlist", "icon": "eye", "description": "Check watched artists for new releases", "available": True},
+            {"type": "scan_library", "label": "Scan Library", "icon": "refresh", "description": "Trigger media server library scan", "available": True},
+            {"type": "refresh_mirrored", "label": "Refresh Mirrored Playlist", "icon": "copy", "description": "Re-fetch playlist from source and update mirror", "available": True,
+             "config_fields": [
+                 {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"},
+                 {"key": "all", "type": "checkbox", "label": "Refresh all mirrored playlists", "default": False}
+             ]},
+            {"type": "sync_playlist", "label": "Sync Playlist", "icon": "sync", "description": "Sync mirrored playlist to media server", "available": True,
+             "config_fields": [
+                 {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"}
+             ]},
+            {"type": "notify_only", "label": "Notify Only", "icon": "bell", "description": "No action — just send notification", "available": True},
+            # Phase 3 actions
+            {"type": "start_database_update", "label": "Update Database", "icon": "database",
+             "description": "Trigger library database refresh", "available": True,
+             "config_fields": [
+                 {"key": "full_refresh", "type": "checkbox", "label": "Full refresh (slower)", "default": False}
+             ]},
+            {"type": "run_duplicate_cleaner", "label": "Run Duplicate Cleaner", "icon": "layers",
+             "description": "Scan for and remove duplicate files", "available": True},
+            {"type": "clear_quarantine", "label": "Clear Quarantine", "icon": "trash",
+             "description": "Delete all quarantined files", "available": True},
+            {"type": "cleanup_wishlist", "label": "Clean Up Wishlist", "icon": "filter",
+             "description": "Remove duplicate/owned tracks from wishlist", "available": True},
+            {"type": "update_discovery_pool", "label": "Update Discovery", "icon": "compass",
+             "description": "Refresh discovery pool with new tracks", "available": True},
+            {"type": "start_quality_scan", "label": "Run Quality Scan", "icon": "bar-chart",
+             "description": "Scan for low-quality audio files", "available": True,
+             "config_fields": [
+                 {"key": "scope", "type": "select", "label": "Scope",
+                  "options": [{"value": "watchlist", "label": "Watchlist Artists"}, {"value": "library", "label": "Full Library"}],
+                  "default": "watchlist"}
+             ]},
+            {"type": "backup_database", "label": "Backup Database", "icon": "save",
+             "description": "Create timestamped database backup", "available": True},
+        ],
+        "notifications": [
+            {"type": "discord_webhook", "label": "Discord Webhook", "icon": "message", "description": "Send a Discord notification", "available": True,
+             "variables": ["time", "name", "run_count", "status"]},
+        ]
+    })
+
+@app.route('/api/mirrored-playlists/list', methods=['GET'])
+def get_mirrored_playlists_list():
+    """Return simple list of mirrored playlists for automation config dropdowns."""
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+        playlists = database.get_mirrored_playlists(profile_id=profile_id)
+        return jsonify([{"id": p['id'], "name": p['name']} for p in playlists])
+    except Exception as e:
+        return jsonify([]), 200
 
 @app.route('/api/test-connection', methods=['POST'])
 def test_connection_endpoint():
@@ -10712,6 +11299,23 @@ def _move_to_quarantine(file_path: str, context: dict, reason: str) -> str:
         logger.warning(f"Failed to write quarantine metadata: {e}")
 
     logger.warning(f"🚫 File quarantined: {quarantine_path} - Reason: {reason}")
+
+    try:
+        if automation_engine:
+            ti = context.get('track_info', {})
+            artists = ti.get('artists', [])
+            artist_name = ''
+            if artists:
+                a = artists[0]
+                artist_name = a.get('name', str(a)) if isinstance(a, dict) else str(a)
+            automation_engine.emit('download_quarantined', {
+                'artist': artist_name,
+                'title': ti.get('name', ''),
+                'reason': reason or 'Unknown',
+            })
+    except Exception:
+        pass
+
     return str(quarantine_path)
 
 
@@ -11014,6 +11618,7 @@ def _post_process_matched_download(context_key, context, file_path):
             # Set flag in context so verification function knows this was fully handled
             context['_simple_download_completed'] = True
             context['_final_path'] = str(destination)
+            _emit_track_downloaded(context)
             return
         # --- END SIMPLE DOWNLOAD HANDLING ---
 
@@ -11082,6 +11687,8 @@ def _post_process_matched_download(context_key, context, file_path):
                 _check_and_remove_from_wishlist(context)
             except Exception as wishlist_error:
                 print(f"⚠️ [Playlist Folder] Error checking wishlist removal: {wishlist_error}")
+
+            _emit_track_downloaded(context)
 
             # NOTE: Don't call callbacks here - let verification function handle completion
             # The verification function will check file exists and then call callbacks
@@ -11379,6 +11986,8 @@ def _post_process_matched_download(context_key, context, file_path):
         _cleanup_empty_directories(downloads_path, file_path)
 
         print(f"✅ Post-processing complete for: {context.get('_final_processed_path', final_path)}")
+
+        _emit_track_downloaded(context)
 
         # RETAG DATA CAPTURE: Record completed album/single downloads for retag tool
         try:
@@ -12904,7 +13513,17 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
     if removed_artists > 0 or removed_albums > 0:
         summary += f" | {removed_artists} artists, {removed_albums} albums removed"
     add_activity_item("✅", "Database Update Complete", summary, "Now")
-    
+
+    try:
+        if automation_engine:
+            automation_engine.emit('database_update_completed', {
+                'total_artists': str(total_artists),
+                'total_albums': str(total_albums),
+                'total_tracks': str(total_tracks),
+            })
+    except Exception:
+        pass
+
     # WISHLIST CLEANUP: Automatically clean up wishlist after database update
     try:
         print("📋 [DB Update] Database update completed, starting automatic wishlist cleanup...")
@@ -13901,6 +14520,34 @@ def stop_database_update():
         else:
             return jsonify({"success": False, "error": "No update is currently running."}), 404
 
+@app.route('/api/database/backup', methods=['POST'])
+def backup_database_endpoint():
+    """Create a rolling backup of the database (max 3)."""
+    try:
+        import sqlite3, glob as _glob
+        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+        if not os.path.exists(db_path):
+            return jsonify({"success": False, "error": "Database file not found"}), 404
+        max_backups = 3
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_path = f"{db_path}.backup_{timestamp}"
+        src = sqlite3.connect(db_path)
+        dst = sqlite3.connect(backup_path)
+        src.backup(dst)
+        dst.close()
+        src.close()
+        size_mb = round(os.path.getsize(backup_path) / (1024 * 1024), 1)
+        # Rolling cleanup
+        existing = sorted(_glob.glob(f"{db_path}.backup_*"), key=os.path.getmtime)
+        while len(existing) > max_backups:
+            try:
+                os.remove(existing.pop(0))
+            except Exception:
+                pass
+        return jsonify({"success": True, "backup_path": backup_path, "size_mb": size_mb})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 # ===============================
 # == QUALITY SCANNER           ==
 # ===============================
@@ -14232,6 +14879,16 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
         add_activity_item("🔍", "Quality Scan Complete",
                          f"{quality_scanner_state['matched']} tracks added to wishlist", "Now")
 
+        try:
+            if automation_engine:
+                automation_engine.emit('quality_scan_completed', {
+                    'quality_met': str(quality_scanner_state.get('quality_met', 0)),
+                    'low_quality': str(quality_scanner_state.get('low_quality', 0)),
+                    'total_scanned': str(quality_scanner_state.get('processed', 0)),
+                })
+        except Exception:
+            pass
+
     except Exception as e:
         print(f"❌ [Quality Scanner] Critical error: {e}")
         import traceback
@@ -14415,6 +15072,16 @@ def _run_duplicate_cleaner():
         # Add activity
         add_activity_item("🧹", "Duplicate Cleaner Complete",
                          f"{deleted_count} files removed, {space_mb:.1f} MB freed", "Now")
+
+        try:
+            if automation_engine:
+                automation_engine.emit('duplicate_scan_completed', {
+                    'files_scanned': str(files_scanned),
+                    'duplicates_found': str(duplicates_found),
+                    'space_freed': f"{space_mb:.1f} MB",
+                })
+        except Exception:
+            pass
 
     except Exception as e:
         print(f"❌ [Duplicate Cleaner] Critical error: {e}")
@@ -15083,6 +15750,15 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                         if success:
                             wishlist_added_count += 1
                             print(f"✅ [Wishlist Processing] Added {track_name} to wishlist")
+                            try:
+                                if automation_engine:
+                                    automation_engine.emit('wishlist_item_added', {
+                                        'artist': artist_name,
+                                        'title': track_name,
+                                        'reason': track.get('failure_reason', ''),
+                                    })
+                            except Exception:
+                                pass
                         else:
                             print(f"⚠️ [Wishlist Processing] Failed to add {track_name} to wishlist")
                             
@@ -15206,6 +15882,16 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
             wishlist_auto_processing_timestamp = 0
             # Don't clear wishlist_next_run_time here - let schedule function handle it atomically
 
+        try:
+            if automation_engine:
+                automation_engine.emit('wishlist_processing_completed', {
+                    'tracks_processed': str(total_failed),
+                    'tracks_found': str(tracks_added),
+                    'tracks_failed': str(total_failed - tracks_added),
+                })
+        except Exception:
+            pass
+
         # Schedule next automatic processing cycle (handles timer atomically with retry logic)
         print("⏰ [Auto-Wishlist] Scheduling next automatic cycle in 30 minutes")
         schedule_next_wishlist_processing()  # Has built-in error handling and retry
@@ -15282,7 +15968,17 @@ def _on_download_completed(batch_id, task_id, success=True):
                 else:
                     print(f"❌ [Batch Manager] Added failed track to batch tracking: {track_info['track_name']}")
                     add_activity_item("❌", "Download Failed", f"'{track_info['track_name']}'", "Now")
-            
+
+                try:
+                    if automation_engine:
+                        automation_engine.emit('download_failed', {
+                            'artist': track_info.get('artist_name', ''),
+                            'title': track_info.get('track_name', ''),
+                            'reason': track_info.get('failure_reason', 'Unknown'),
+                        })
+                except Exception:
+                    pass
+
         # WISHLIST REMOVAL: Handle successful downloads for wishlist removal
         if success and task_id in download_tasks:
             try:
@@ -15393,8 +16089,21 @@ def _on_download_completed(batch_id, task_id, success=True):
             
             # Add activity for batch completion
             playlist_name = batch.get('playlist_name', 'Unknown Playlist')
-            successful_downloads = finished_count - len(batch.get('permanently_failed_tracks', []))
+            failed_count = len(batch.get('permanently_failed_tracks', []))
+            successful_downloads = finished_count - failed_count
             add_activity_item("✅", "Download Batch Complete", f"'{playlist_name}' - {successful_downloads} tracks downloaded", "Now")
+
+            # Emit batch_complete event for automation engine
+            try:
+                if automation_engine:
+                    automation_engine.emit('batch_complete', {
+                        'playlist_name': playlist_name,
+                        'total_tracks': str(len(queue)),
+                        'completed_tracks': str(successful_downloads),
+                        'failed_tracks': str(failed_count),
+                    })
+            except Exception:
+                pass
             
             # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
             playlist_id = batch.get('playlist_id')
@@ -21087,7 +21796,20 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
                 "result": result.__dict__  # Keep result for backward compatibility
             }
         print(f"🏁 Sync finished for {playlist_id} - state updated")
-        
+
+        # Emit playlist_synced event for automation engine
+        try:
+            if automation_engine:
+                automation_engine.emit('playlist_synced', {
+                    'playlist_name': playlist_name,
+                    'total_tracks': str(getattr(result, 'total_tracks', 0)),
+                    'matched_tracks': str(getattr(result, 'matched_tracks', 0)),
+                    'synced_tracks': str(getattr(result, 'synced_tracks', 0)),
+                    'failed_tracks': str(getattr(result, 'failed_tracks', 0)),
+                })
+        except Exception:
+            pass
+
         # Save sync status to storage/sync_status.json (same as GUI)
         # Handle snapshot_id safely - may not exist in all playlist objects
         snapshot_id = getattr(playlist, 'snapshot_id', None)
@@ -22065,6 +22787,14 @@ def add_to_watchlist():
                 socketio.emit('watchlist:count', _build_watchlist_count_payload(profile_id=pid), room=f'profile:{pid}')
             except Exception:
                 pass
+            try:
+                if automation_engine:
+                    automation_engine.emit('watchlist_artist_added', {
+                        'artist': artist_name,
+                        'artist_id': str(artist_id),
+                    })
+            except Exception:
+                pass
             return jsonify({"success": True, "message": f"Added {artist_name} to watchlist"})
         else:
             return jsonify({"success": False, "error": "Failed to add artist to watchlist"}), 500
@@ -22093,10 +22823,18 @@ def remove_from_watchlist():
                 socketio.emit('watchlist:count', _build_watchlist_count_payload(profile_id=pid), room=f'profile:{pid}')
             except Exception:
                 pass
+            try:
+                if automation_engine:
+                    automation_engine.emit('watchlist_artist_removed', {
+                        'artist': data.get('artist_name', str(artist_id)),
+                        'artist_id': str(artist_id),
+                    })
+            except Exception:
+                pass
             return jsonify({"success": True, "message": "Removed artist from watchlist"})
         else:
             return jsonify({"success": False, "error": "Failed to remove artist from watchlist"}), 500
-            
+
     except Exception as e:
         print(f"Error removing from watchlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -23510,6 +24248,18 @@ def _process_watchlist_scan_automatically():
 
                     print(f"✅ Scanned {artist.artist_name}: {artist_new_tracks} new tracks found, {artist_added_tracks} added to wishlist")
 
+                    # Emit watchlist_new_release event if new tracks were found
+                    if artist_new_tracks > 0:
+                        try:
+                            if automation_engine:
+                                automation_engine.emit('watchlist_new_release', {
+                                    'artist': artist.artist_name,
+                                    'new_tracks': str(artist_new_tracks),
+                                    'added_to_wishlist': str(artist_added_tracks),
+                                })
+                        except Exception:
+                            pass
+
                     # Delay between artists
                     if i < len(watchlist_artists) - 1:
                         watchlist_scan_state['current_phase'] = 'rate_limiting'
@@ -23620,6 +24370,16 @@ def _process_watchlist_scan_automatically():
             # Add activity for watchlist scan completion
             if total_added_to_wishlist > 0:
                 add_activity_item("👁️", "Watchlist Scan Complete", f"{total_added_to_wishlist} new tracks added to wishlist", "Now")
+
+            try:
+                if automation_engine:
+                    automation_engine.emit('watchlist_scan_completed', {
+                        'artists_scanned': str(len(scan_results)),
+                        'new_tracks_found': str(total_new_tracks),
+                        'tracks_added': str(total_added_to_wishlist),
+                    })
+            except Exception:
+                pass
 
     except Exception as e:
         print(f"❌ Error in automatic watchlist scan: {e}")
@@ -27894,6 +28654,16 @@ def mirror_playlist_endpoint():
         if playlist_id is None:
             return jsonify({"error": "Failed to mirror playlist"}), 500
 
+        try:
+            if automation_engine:
+                automation_engine.emit('mirrored_playlist_created', {
+                    'playlist_name': name,
+                    'source': source,
+                    'track_count': str(len(tracks)),
+                })
+        except Exception:
+            pass
+
         return jsonify({"success": True, "playlist_id": playlist_id})
     except Exception as e:
         logger.error(f"Error mirroring playlist: {e}")
@@ -30080,6 +30850,16 @@ def import_album_process():
 
         add_activity_item("📥", "Album Imported", f"{album_name} by {artist_name} ({processed}/{len(matches)} tracks)", "Now")
 
+        try:
+            if automation_engine:
+                automation_engine.emit('import_completed', {
+                    'track_count': str(processed),
+                    'album_name': album_name or '',
+                    'artist': artist_name or '',
+                })
+        except Exception:
+            pass
+
         # Rebuild suggestions cache since staging contents changed
         if processed > 0:
             refresh_import_suggestions_cache()
@@ -30324,6 +31104,16 @@ def import_singles_process():
             ).start()
 
         add_activity_item("📥", "Singles Imported", f"{processed}/{len(files)} tracks processed", "Now")
+
+        try:
+            if automation_engine:
+                automation_engine.emit('import_completed', {
+                    'track_count': str(processed),
+                    'album_name': '',
+                    'artist': 'Various',
+                })
+        except Exception:
+            pass
 
         # Rebuild suggestions cache since staging contents changed
         if processed > 0:
@@ -30890,6 +31680,17 @@ if __name__ == '__main__':
     # Initialize app start time for uptime tracking
     import time
     app.start_time = time.time()
+
+    # Register action handlers and start automation engine
+    _register_automation_handlers()
+    if automation_engine:
+        print("🔧 Starting automation engine...")
+        automation_engine.start()
+        print("✅ Automation engine started")
+        try:
+            automation_engine.emit('app_started', {})
+        except Exception:
+            pass
 
     # Add startup activity
     add_activity_item("🚀", "System Started", "SoulSync Web UI Server initialized", "Now")

@@ -1522,6 +1522,9 @@ async function loadPageData(pageId) {
                 // Load comparisons
                 loadHydrabaseComparisons();
                 break;
+            case 'automations':
+                await loadAutomations();
+                break;
         }
     } catch (error) {
         console.error(`Error loading ${pageId} data:`, error);
@@ -16264,6 +16267,11 @@ async function loadDashboardData() {
         updateButton.addEventListener('click', handleDbUpdateButtonClick);
     }
 
+    const backupButton = document.getElementById('db-backup-button');
+    if (backupButton) {
+        backupButton.addEventListener('click', handleDbBackupButtonClick);
+    }
+
     // Attach event listeners for the metadata updater tool
     const metadataButton = document.getElementById('metadata-update-button');
     if (metadataButton) {
@@ -18370,6 +18378,26 @@ async function handleDbUpdateButtonClick() {
             showToast('Error sending stop request.', 'error');
         }
     }
+}
+
+async function handleDbBackupButtonClick() {
+    const button = document.getElementById('db-backup-button');
+    const origText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Backing up...';
+    try {
+        const res = await fetch('/api/database/backup', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Database backed up (${data.size_mb} MB)`, 'success');
+        } else {
+            showToast(`Backup failed: ${data.error}`, 'error');
+        }
+    } catch (e) {
+        showToast('Backup request failed', 'error');
+    }
+    button.disabled = false;
+    button.textContent = origText;
 }
 
 async function handleWishlistButtonClick() {
@@ -42092,6 +42120,719 @@ async function discoverMirroredPlaylist(playlistId) {
         hideLoadingOverlay();
         showToast(`Error: ${err.message}`, 'error');
     }
+}
+
+// ===============================
+// AUTOMATIONS — Visual Builder
+// ===============================
+
+let _autoBlocks = null; // cached block definitions from /api/automations/blocks
+let _autoBuilder = { editId: null, when: null, do: null, notify: null };
+
+let _autoMirroredPlaylists = null; // cached mirrored playlist list
+
+const _autoIcons = {
+    schedule: '\u23F1\uFE0F', daily_time: '\u{1F570}\uFE0F', weekly_time: '\uD83D\uDCC5', app_started: '\uD83D\uDE80', track_downloaded: '\u2B07\uFE0F', batch_complete: '\u2705',
+    watchlist_new_release: '\uD83D\uDD14', playlist_synced: '\uD83D\uDD04',
+    playlist_changed: '\u270F\uFE0F',
+    process_wishlist: '\uD83D\uDCCB', scan_watchlist: '\uD83D\uDC41\uFE0F',
+    scan_library: '\uD83D\uDD04', refresh_mirrored: '\uD83D\uDCC2', sync_playlist: '\uD83D\uDD01',
+    notify_only: '\uD83D\uDD14', discord_webhook: '\uD83D\uDCAC',
+    // Phase 3
+    wishlist_processing_completed: '\u2705', watchlist_scan_completed: '\u2705',
+    database_update_completed: '\uD83D\uDDC4\uFE0F', download_failed: '\u274C',
+    download_quarantined: '\u26A0\uFE0F', wishlist_item_added: '\u2795',
+    watchlist_artist_added: '\uD83D\uDC64', watchlist_artist_removed: '\uD83D\uDC64',
+    import_completed: '\uD83D\uDCE5', mirrored_playlist_created: '\uD83D\uDCC2',
+    quality_scan_completed: '\uD83D\uDCCA', duplicate_scan_completed: '\uD83D\uDDC2\uFE0F',
+    start_database_update: '\uD83D\uDDC4\uFE0F', run_duplicate_cleaner: '\uD83D\uDDC2\uFE0F',
+    clear_quarantine: '\uD83D\uDDD1\uFE0F', cleanup_wishlist: '\uD83E\uDDF9',
+    update_discovery_pool: '\uD83E\uDDED', start_quality_scan: '\uD83D\uDCCA',
+    backup_database: '\uD83D\uDCBE',
+};
+
+// --- Load & Render List ---
+
+async function loadAutomations() {
+    const list = document.getElementById('automations-list');
+    const empty = document.getElementById('automations-empty');
+    const statsBar = document.getElementById('automations-stats');
+    if (!list || !empty) return;
+    try {
+        const res = await fetch('/api/automations');
+        const automations = await res.json();
+        if (automations.error) throw new Error(automations.error);
+        if (!automations.length) {
+            list.innerHTML = ''; empty.style.display = '';
+            if (statsBar) statsBar.innerHTML = '';
+            return;
+        }
+        empty.style.display = 'none';
+        list.innerHTML = '';
+        automations.forEach(a => list.appendChild(renderAutomationCard(a)));
+        // Stats summary bar
+        if (statsBar) {
+            const total = automations.length;
+            const active = automations.filter(a => a.enabled).length;
+            const scheduled = automations.filter(a => a.enabled && a.trigger_type === 'schedule').length;
+            const eventBased = automations.filter(a => a.enabled && a.trigger_type !== 'schedule').length;
+            statsBar.innerHTML = `
+                <span class="auto-stat"><strong>${total}</strong> Total</span>
+                <span class="auto-stat"><strong>${active}</strong> Active</span>
+                <span class="auto-stat"><strong>${scheduled}</strong> Scheduled</span>
+                <span class="auto-stat"><strong>${eventBased}</strong> Event-Based</span>
+            `;
+        }
+    } catch (err) {
+        list.innerHTML = ''; empty.style.display = '';
+        if (statsBar) statsBar.innerHTML = '';
+    }
+}
+
+function renderAutomationCard(a) {
+    const card = document.createElement('div');
+    card.className = 'automation-card' + (a.enabled ? '' : ' disabled');
+    card.dataset.id = a.id;
+    const tIcon = _autoIcons[a.trigger_type] || '\u2699\uFE0F';
+    const aIcon = _autoIcons[a.action_type] || '\u2699\uFE0F';
+    const tl = tIcon + ' ' + _autoFormatTrigger(a.trigger_type, a.trigger_config);
+    const al = aIcon + ' ' + _autoFormatAction(a.action_type);
+    const nl = a.notify_type ? _autoFormatNotify(a.notify_type) : '';
+    const actionDelay = a.action_config && a.action_config.delay ? a.action_config.delay : 0;
+    const metaParts = [];
+    if (a.last_run) metaParts.push('Last: ' + _autoTimeAgo(a.last_run));
+    const _timerTriggers = ['schedule', 'daily_time', 'weekly_time'];
+    if (a.next_run && a.enabled && _timerTriggers.includes(a.trigger_type)) metaParts.push('Next: ' + _autoTimeUntil(a.next_run));
+    if (!_timerTriggers.includes(a.trigger_type) && a.enabled) metaParts.push('Listening');
+    if (a.run_count) metaParts.push('Runs: ' + a.run_count);
+    if (a.last_error) metaParts.push('Error: ' + _esc(a.last_error));
+
+    card.innerHTML = `
+        <div class="automation-status ${a.enabled ? 'enabled' : 'disabled'}"></div>
+        <div class="automation-info">
+            <div class="automation-name">${_esc(a.name)}</div>
+            <div class="automation-flow">
+                <span class="flow-trigger">${_esc(tl)}</span>
+                <span class="flow-arrow">&rarr;</span>
+                ${actionDelay ? `<span class="flow-delay">\u23F3 ${actionDelay}m</span><span class="flow-arrow">&rarr;</span>` : ''}
+                <span class="flow-action">${_esc(al)}</span>
+                ${nl ? `<span class="flow-arrow">&rarr;</span><span class="flow-notify">${_esc(nl)}</span>` : ''}
+            </div>
+            <div class="automation-meta">${metaParts.join(' &middot; ')}</div>
+        </div>
+        <div class="automation-actions">
+            <button class="automation-run-btn" title="Run now" onclick="event.stopPropagation(); runAutomation(${a.id})">&#9654;</button>
+            <label class="automation-toggle" onclick="event.stopPropagation();">
+                <input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="toggleAutomation(${a.id})">
+                <span class="toggle-slider"></span>
+            </label>
+            <button class="automation-edit-btn" title="Edit" onclick="event.stopPropagation(); showAutomationBuilder(${a.id})">&#9881;</button>
+            <button class="automation-delete-btn" title="Delete" onclick="event.stopPropagation(); deleteAutomation(${a.id}, '${_escAttr(a.name)}')">&#128465;</button>
+        </div>
+    `;
+    return card;
+}
+
+function _autoFormatTrigger(type, config) {
+    if (type === 'schedule' && config) return 'Every ' + (config.interval || 1) + ' ' + (config.unit || 'hours');
+    if (type === 'daily_time' && config) return 'Daily at ' + (config.time || '00:00');
+    if (type === 'weekly_time' && config) {
+        const days = (config.days || []).map(d => d.charAt(0).toUpperCase() + d.slice(1)).join(', ');
+        return (days || 'Every day') + ' at ' + (config.time || '00:00');
+    }
+    const labels = { app_started: 'App Started', track_downloaded: 'Track Downloaded', batch_complete: 'Batch Complete',
+        watchlist_new_release: 'New Release Found', playlist_synced: 'Playlist Synced',
+        playlist_changed: 'Playlist Changed',
+        wishlist_processing_completed: 'Wishlist Processed', watchlist_scan_completed: 'Watchlist Scan Done',
+        database_update_completed: 'Database Updated', download_failed: 'Download Failed',
+        download_quarantined: 'File Quarantined', wishlist_item_added: 'Wishlist Item Added',
+        watchlist_artist_added: 'Artist Watched', watchlist_artist_removed: 'Artist Unwatched',
+        import_completed: 'Import Complete', mirrored_playlist_created: 'Playlist Mirrored',
+        quality_scan_completed: 'Quality Scan Done', duplicate_scan_completed: 'Duplicate Scan Done' };
+    let label = labels[type] || type || 'Unknown';
+    if (config && config.conditions && config.conditions.length) {
+        const first = config.conditions[0];
+        label += ' (' + first.field + ' ' + first.operator + ' "' + first.value + '"' +
+            (config.conditions.length > 1 ? ' +' + (config.conditions.length - 1) + ' more' : '') + ')';
+    }
+    return label;
+}
+function _autoFormatAction(type) {
+    const labels = { process_wishlist: 'Process Wishlist', scan_watchlist: 'Scan Watchlist',
+        scan_library: 'Scan Library', refresh_mirrored: 'Refresh Mirrored',
+        sync_playlist: 'Sync Playlist', notify_only: 'Notify Only',
+        start_database_update: 'Update Database', run_duplicate_cleaner: 'Run Duplicate Cleaner',
+        clear_quarantine: 'Clear Quarantine', cleanup_wishlist: 'Clean Up Wishlist',
+        update_discovery_pool: 'Update Discovery', start_quality_scan: 'Run Quality Scan',
+        backup_database: 'Backup Database' };
+    return labels[type] || type || 'Unknown';
+}
+function _autoFormatNotify(type) {
+    if (type === 'discord_webhook') return 'Discord';
+    return type || '';
+}
+function _autoTimeAgo(ts) {
+    if (!ts) return 'Never';
+    const d = (Date.now() - new Date(ts + 'Z').getTime()) / 1000;
+    if (d < 60) return 'just now'; if (d < 3600) return Math.floor(d/60) + 'm ago';
+    if (d < 86400) return Math.floor(d/3600) + 'h ago'; return Math.floor(d/86400) + 'd ago';
+}
+function _autoTimeUntil(ts) {
+    if (!ts) return '';
+    const d = (new Date(ts + 'Z').getTime() - Date.now()) / 1000;
+    if (d <= 0) return 'soon'; if (d < 60) return 'in ' + Math.ceil(d) + 's';
+    if (d < 3600) return 'in ' + Math.ceil(d/60) + 'm'; if (d < 86400) return 'in ' + Math.round(d/3600) + 'h';
+    return 'in ' + Math.round(d/86400) + 'd';
+}
+
+// --- CRUD ---
+
+async function deleteAutomation(id, name) {
+    if (!confirm('Delete automation "' + name + '"?')) return;
+    try {
+        const res = await fetch('/api/automations/' + id, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        showToast('Automation deleted', 'success');
+        await loadAutomations();
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
+async function toggleAutomation(id) {
+    try {
+        const res = await fetch('/api/automations/' + id + '/toggle', { method: 'POST' });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await loadAutomations();
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
+async function runAutomation(id) {
+    try {
+        const res = await fetch('/api/automations/' + id + '/run', { method: 'POST' });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        showToast('Automation triggered', 'success');
+        setTimeout(() => loadAutomations(), 1500);
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
+async function saveAutomation() {
+    const name = document.getElementById('builder-name').value.trim();
+    if (!name) { showToast('Name is required', 'error'); return; }
+    if (!_autoBuilder.when) { showToast('Add a trigger (WHEN)', 'error'); return; }
+    if (!_autoBuilder.do) { showToast('Add an action (DO)', 'error'); return; }
+
+    // Read configs from DOM
+    const triggerConfig = _readPlacedConfig('when');
+    const actionConfig = _readPlacedConfig('do');
+    const notifyConfig = _autoBuilder.notify ? _readPlacedConfig('notify') : {};
+
+    // Read optional delay from DO slot
+    const delayEl = document.getElementById('cfg-do-delay');
+    const delayVal = delayEl ? parseInt(delayEl.value) : 0;
+    if (delayVal > 0) actionConfig.delay = delayVal;
+
+    const body = {
+        name,
+        trigger_type: _autoBuilder.when.type, trigger_config: triggerConfig,
+        action_type: _autoBuilder.do.type, action_config: actionConfig,
+        notify_type: _autoBuilder.notify ? _autoBuilder.notify.type : null,
+        notify_config: _autoBuilder.notify ? notifyConfig : {},
+    };
+
+    try {
+        let res;
+        if (_autoBuilder.editId) {
+            res = await fetch('/api/automations/' + _autoBuilder.editId, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        } else {
+            res = await fetch('/api/automations', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        }
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        showToast(_autoBuilder.editId ? 'Automation updated' : 'Automation created', 'success');
+        hideAutomationBuilder();
+        await loadAutomations();
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
+// --- Builder View ---
+
+async function showAutomationBuilder(editId) {
+    // Load block definitions (always refresh)
+    try {
+        const res = await fetch('/api/automations/blocks');
+        _autoBlocks = await res.json();
+    } catch (e) {
+        if (!_autoBlocks) { showToast('Failed to load blocks', 'error'); return; }
+    }
+
+    _autoMirroredPlaylists = null; // invalidate so it re-fetches
+    _autoBuilder = { editId: editId || null, when: null, do: null, notify: null };
+
+    // If editing, load automation data
+    if (editId) {
+        try {
+            const res = await fetch('/api/automations/' + editId);
+            const a = await res.json();
+            if (a.error) throw new Error(a.error);
+            document.getElementById('builder-name').value = a.name || '';
+            _autoBuilder.when = { type: a.trigger_type, config: a.trigger_config || {} };
+            _autoBuilder.do = { type: a.action_type, config: a.action_config || {} };
+            if (a.notify_type) _autoBuilder.notify = { type: a.notify_type, config: a.notify_config || {} };
+        } catch (err) { showToast('Failed to load automation', 'error'); return; }
+    } else {
+        document.getElementById('builder-name').value = '';
+    }
+
+    _renderBuilderSidebar();
+    _renderBuilderCanvas();
+
+    document.getElementById('automations-list-view').style.display = 'none';
+    document.getElementById('automations-builder-view').style.display = '';
+}
+
+function hideAutomationBuilder() {
+    document.getElementById('automations-builder-view').style.display = 'none';
+    document.getElementById('automations-list-view').style.display = '';
+    _autoBuilder = { editId: null, when: null, do: null, notify: null };
+}
+
+// --- Sidebar ---
+
+function _renderBuilderSidebar() {
+    const sidebar = document.getElementById('builder-sidebar');
+    if (!sidebar || !_autoBlocks) return;
+
+    let html = '';
+    const sections = [
+        { key: 'triggers', title: 'Triggers', slot: 'when' },
+        { key: 'actions', title: 'Actions', slot: 'do' },
+        { key: 'notifications', title: 'Notifications', slot: 'notify' },
+    ];
+
+    sections.forEach(sec => {
+        html += `<div class="sidebar-section"><div class="sidebar-section-title">${sec.title}</div>`;
+        (_autoBlocks[sec.key] || []).forEach(block => {
+            const icon = _autoIcons[block.type] || '\u2699\uFE0F';
+            const disabled = !block.available;
+            html += `<div class="block-item${disabled ? ' coming-soon' : ''}" ${!disabled ? `draggable="true" ondragstart="_autoDragStart(event,'${block.type}','${sec.slot}')" onclick="_autoClickBlock('${block.type}','${sec.slot}')"` : ''}>
+                <div class="block-item-icon">${icon}</div>
+                <div class="block-item-text">
+                    <div class="block-item-label">${_esc(block.label)}</div>
+                    <div class="block-item-desc">${_esc(block.description)}</div>
+                </div>
+                ${disabled ? '<span class="coming-soon-badge">Soon</span>' : ''}
+            </div>`;
+        });
+        html += '</div>';
+    });
+    sidebar.innerHTML = html;
+}
+
+// --- Canvas ---
+
+function _renderBuilderCanvas() {
+    const canvas = document.getElementById('builder-canvas');
+    if (!canvas) return;
+
+    let html = '';
+    const slots = [
+        { key: 'when', label: 'WHEN', labelClass: 'when', prompt: 'Drag a trigger here — WHEN does this run?' },
+        { key: 'do', label: 'DO', labelClass: 'do', prompt: 'Drag an action here — WHAT should it do?' },
+        { key: 'notify', label: 'NOTIFY', labelClass: 'notify', prompt: 'Drag a notification here (optional)' },
+    ];
+
+    slots.forEach((slot, i) => {
+        if (i > 0) html += '<div class="flow-connector"></div>';
+        const data = _autoBuilder[slot.key];
+        if (data) {
+            html += `<div class="flow-slot filled" id="slot-${slot.key}" ondragover="_autoDragOver(event,'${slot.key}')" ondragleave="_autoDragLeave(event,'${slot.key}')" ondrop="_autoDrop(event,'${slot.key}')">
+                <span class="flow-slot-label ${slot.labelClass}">${slot.label}</span>
+                ${_renderPlacedBlock(slot.key, data)}
+            </div>`;
+        } else {
+            html += `<div class="flow-slot empty" id="slot-${slot.key}" ondragover="_autoDragOver(event,'${slot.key}')" ondragleave="_autoDragLeave(event,'${slot.key}')" ondrop="_autoDrop(event,'${slot.key}')">
+                <span class="flow-slot-label ${slot.labelClass}">${slot.label}</span>
+                <div class="flow-slot-prompt">${slot.prompt}</div>
+            </div>`;
+        }
+    });
+
+    canvas.innerHTML = html;
+    // Load mirrored playlist selects if any are present
+    _autoLoadMirroredSelects();
+    // Set up checkbox state for refresh_mirrored
+    ['when', 'do', 'notify'].forEach(sk => {
+        const allCb = document.getElementById('cfg-' + sk + '-all');
+        if (allCb) _autoTogglePlaylistSelect(sk);
+    });
+}
+
+function _renderPlacedBlock(slotKey, data) {
+    const blockDef = _findBlockDef(data.type);
+    const icon = _autoIcons[data.type] || '\u2699\uFE0F';
+    const label = blockDef ? blockDef.label : data.type;
+    const configHtml = _renderBlockConfigFields(slotKey, data.type, data.config || {});
+
+    // Add optional delay field for action blocks
+    let delayHtml = '';
+    if (slotKey === 'do') {
+        const delayVal = (data.config && data.config.delay) || '';
+        delayHtml = `<div class="placed-block-config"><div class="config-row">
+            <label>Delay (minutes)</label>
+            <input type="number" id="cfg-${slotKey}-delay" value="${delayVal}" min="0" placeholder="0" style="width:80px;" title="Wait before executing action">
+        </div></div>`;
+    }
+
+    return `<div class="placed-block" data-type="${_escAttr(data.type)}">
+        <div class="placed-block-header">
+            <span class="placed-block-icon">${icon}</span>
+            <span class="placed-block-label">${_esc(label)}</span>
+            <button class="placed-block-remove" onclick="_autoRemoveBlock('${slotKey}')">\u2715</button>
+        </div>
+        ${configHtml ? '<div class="placed-block-config">' + configHtml + '</div>' : ''}
+        ${delayHtml}
+    </div>`;
+}
+
+function _renderBlockConfigFields(slotKey, blockType, config) {
+    if (blockType === 'schedule') {
+        const interval = config.interval || 6;
+        const unit = config.unit || 'hours';
+        return `<div class="config-row">
+            <label>Every</label>
+            <input type="number" id="cfg-${slotKey}-interval" value="${interval}" min="1" style="width:70px;">
+            <select id="cfg-${slotKey}-unit">
+                <option value="minutes"${unit==='minutes'?' selected':''}>Minutes</option>
+                <option value="hours"${unit==='hours'?' selected':''}>Hours</option>
+                <option value="days"${unit==='days'?' selected':''}>Days</option>
+            </select>
+        </div>`;
+    }
+    if (blockType === 'daily_time') {
+        const timeVal = config.time || '03:00';
+        return `<div class="config-row">
+            <label>At</label>
+            <input type="time" id="cfg-${slotKey}-time" value="${timeVal}">
+        </div>`;
+    }
+    if (blockType === 'weekly_time') {
+        const timeVal = config.time || '03:00';
+        const selectedDays = config.days || [];
+        const allDays = [['mon','Mon'],['tue','Tue'],['wed','Wed'],['thu','Thu'],['fri','Fri'],['sat','Sat'],['sun','Sun']];
+        let dayHtml = '<div class="config-row"><label>Days</label><div class="day-picker" id="cfg-' + slotKey + '-days">';
+        allDays.forEach(([val, lbl]) => {
+            const active = selectedDays.includes(val) ? ' active' : '';
+            dayHtml += `<button type="button" class="day-btn${active}" data-day="${val}" onclick="this.classList.toggle('active')">${lbl}</button>`;
+        });
+        dayHtml += '</div></div>';
+        return `<div class="config-row">
+            <label>At</label>
+            <input type="time" id="cfg-${slotKey}-time" value="${timeVal}">
+        </div>${dayHtml}`;
+    }
+
+    // Event triggers with conditions
+    const blockDef = _findBlockDef(blockType);
+    if (blockDef && blockDef.has_conditions) {
+        return _renderConditionBuilder(slotKey, blockDef, config);
+    }
+
+    if (blockType === 'process_wishlist') {
+        const cat = config.category || 'all';
+        return `<div class="config-row">
+            <label>Category</label>
+            <select id="cfg-${slotKey}-category">
+                <option value="all"${cat==='all'?' selected':''}>All</option>
+                <option value="albums"${cat==='albums'?' selected':''}>Albums</option>
+                <option value="singles"${cat==='singles'?' selected':''}>Singles</option>
+            </select>
+        </div>`;
+    }
+    if (blockType === 'scan_watchlist' || blockType === 'scan_library' || blockType === 'notify_only') {
+        return '<div class="config-row" style="color:rgba(255,255,255,0.4);font-size:12px;">No configuration needed</div>';
+    }
+    if (blockType === 'refresh_mirrored') {
+        const allChecked = config.all ? ' checked' : '';
+        return `<div class="config-row">
+            <label>Playlist</label>
+            <select id="cfg-${slotKey}-playlist_id" class="mirrored-playlist-select" data-value="${_escAttr(config.playlist_id || '')}">
+                <option value="">Loading...</option>
+            </select>
+        </div>
+        <div class="config-row">
+            <label><input type="checkbox" id="cfg-${slotKey}-all"${allChecked} onchange="_autoTogglePlaylistSelect('${slotKey}')"> Refresh all mirrored playlists</label>
+        </div>`;
+    }
+    if (blockType === 'sync_playlist') {
+        return `<div class="config-row">
+            <label>Playlist</label>
+            <select id="cfg-${slotKey}-playlist_id" class="mirrored-playlist-select" data-value="${_escAttr(config.playlist_id || '')}">
+                <option value="">Loading...</option>
+            </select>
+        </div>`;
+    }
+    if (blockType === 'discord_webhook') {
+        const url = _escAttr(config.webhook_url || '');
+        // Merge base variables with trigger-specific variables
+        let allVars = ['time', 'name', 'run_count', 'status'];
+        const triggerDef = _autoBuilder.when ? _findBlockDef(_autoBuilder.when.type) : null;
+        if (triggerDef && triggerDef.variables) {
+            triggerDef.variables.forEach(v => { if (!allVars.includes(v)) allVars.push(v); });
+        }
+        let varHtml = '<div class="variable-tags">';
+        allVars.forEach(v => { varHtml += `<span class="variable-tag" onclick="_autoInsertVar('cfg-${slotKey}-message','{${v}}')">{${v}}</span>`; });
+        varHtml += '</div>';
+        return `<div class="config-row">
+            <label>URL</label>
+            <input type="text" id="cfg-${slotKey}-webhook_url" value="${url}" placeholder="https://discord.com/api/webhooks/...">
+        </div>
+        <div class="config-row">
+            <label>Message</label>
+            <textarea id="cfg-${slotKey}-message" placeholder="Message with {variables}...">${config.message || '{name} completed with status: {status}'}</textarea>
+        </div>
+        ${varHtml}`;
+    }
+    return '';
+}
+
+// --- Condition Builder ---
+
+function _renderConditionBuilder(slotKey, blockDef, config) {
+    const conditions = config.conditions || [];
+    const match = config.match || 'all';
+    const fields = blockDef.condition_fields || [];
+
+    let html = '<div class="condition-builder" id="conditions-' + slotKey + '">';
+    html += `<div class="config-row condition-header">
+        <label>Match</label>
+        <select id="cfg-${slotKey}-match" class="condition-match-select">
+            <option value="all"${match==='all'?' selected':''}>All conditions</option>
+            <option value="any"${match==='any'?' selected':''}>Any condition</option>
+        </select>
+    </div>`;
+
+    html += '<div id="condition-rows-' + slotKey + '">';
+    if (conditions.length) {
+        conditions.forEach((cond, i) => {
+            html += _renderConditionRow(slotKey, i, fields, cond);
+        });
+    }
+    html += '</div>';
+
+    html += `<button class="add-condition-btn" onclick="_autoAddCondition('${slotKey}')">+ Add Condition</button>`;
+    html += '</div>';
+
+    if (!conditions.length) {
+        html += '<div class="config-row" style="color:rgba(255,255,255,0.35);font-size:12px;margin-top:4px;">No conditions = triggers on every event</div>';
+    }
+
+    return html;
+}
+
+function _renderConditionRow(slotKey, index, fields, cond) {
+    const field = cond ? cond.field : (fields[0] || '');
+    const operator = cond ? cond.operator : 'contains';
+    const value = cond ? _escAttr(cond.value) : '';
+
+    let fieldOpts = '';
+    fields.forEach(f => { fieldOpts += `<option value="${f}"${f===field?' selected':''}>${f}</option>`; });
+
+    return `<div class="condition-row" data-index="${index}">
+        <select class="cond-field" data-slot="${slotKey}" data-idx="${index}">${fieldOpts}</select>
+        <select class="cond-operator" data-slot="${slotKey}" data-idx="${index}">
+            <option value="contains"${operator==='contains'?' selected':''}>contains</option>
+            <option value="equals"${operator==='equals'?' selected':''}>equals</option>
+            <option value="starts_with"${operator==='starts_with'?' selected':''}>starts with</option>
+            <option value="not_contains"${operator==='not_contains'?' selected':''}>not contains</option>
+        </select>
+        <input type="text" class="cond-value" data-slot="${slotKey}" data-idx="${index}" value="${value}" placeholder="value...">
+        <button class="remove-condition-btn" onclick="_autoRemoveCondition('${slotKey}',${index})">\u2715</button>
+    </div>`;
+}
+
+function _autoAddCondition(slotKey) {
+    const data = _autoBuilder[slotKey];
+    if (!data) return;
+    if (!data.config) data.config = {};
+    if (!data.config.conditions) data.config.conditions = [];
+
+    // Save existing conditions from DOM before re-render
+    _autoSaveConditionsFromDOM(slotKey);
+
+    const blockDef = _findBlockDef(data.type);
+    const fields = blockDef ? (blockDef.condition_fields || []) : [];
+    data.config.conditions.push({ field: fields[0] || '', operator: 'contains', value: '' });
+    _renderBuilderCanvas();
+    // Re-populate mirrored playlist selects if needed
+    _autoLoadMirroredSelects();
+}
+
+function _autoRemoveCondition(slotKey, index) {
+    const data = _autoBuilder[slotKey];
+    if (!data || !data.config || !data.config.conditions) return;
+    _autoSaveConditionsFromDOM(slotKey);
+    data.config.conditions.splice(index, 1);
+    _renderBuilderCanvas();
+    _autoLoadMirroredSelects();
+}
+
+function _autoSaveConditionsFromDOM(slotKey) {
+    const data = _autoBuilder[slotKey];
+    if (!data || !data.config) return;
+    const container = document.getElementById('condition-rows-' + slotKey);
+    if (!container) return;
+    const rows = container.querySelectorAll('.condition-row');
+    const conditions = [];
+    rows.forEach(row => {
+        const field = row.querySelector('.cond-field')?.value || '';
+        const operator = row.querySelector('.cond-operator')?.value || 'contains';
+        const value = row.querySelector('.cond-value')?.value || '';
+        conditions.push({ field, operator, value });
+    });
+    data.config.conditions = conditions;
+    // Also save match mode
+    const matchEl = document.getElementById('cfg-' + slotKey + '-match');
+    if (matchEl) data.config.match = matchEl.value;
+}
+
+// --- Mirrored Playlist Select ---
+
+function _autoTogglePlaylistSelect(slotKey) {
+    const allCb = document.getElementById('cfg-' + slotKey + '-all');
+    const sel = document.getElementById('cfg-' + slotKey + '-playlist_id');
+    if (sel) sel.disabled = allCb && allCb.checked;
+}
+
+async function _autoLoadMirroredSelects() {
+    const selects = document.querySelectorAll('.mirrored-playlist-select');
+    if (!selects.length) return;
+
+    if (!_autoMirroredPlaylists) {
+        try {
+            const res = await fetch('/api/mirrored-playlists/list');
+            _autoMirroredPlaylists = await res.json();
+        } catch (e) { _autoMirroredPlaylists = []; }
+    }
+
+    selects.forEach(sel => {
+        const savedValue = sel.dataset.value || '';
+        sel.innerHTML = '<option value="">-- Select playlist --</option>';
+        _autoMirroredPlaylists.forEach(p => {
+            sel.innerHTML += `<option value="${p.id}"${String(p.id) === savedValue ? ' selected' : ''}>${_esc(p.name)}</option>`;
+        });
+    });
+}
+
+function _readPlacedConfig(slotKey) {
+    const data = _autoBuilder[slotKey];
+    if (!data) return {};
+    const type = data.type;
+    if (type === 'schedule') {
+        return {
+            interval: parseInt(document.getElementById('cfg-' + slotKey + '-interval')?.value) || 6,
+            unit: document.getElementById('cfg-' + slotKey + '-unit')?.value || 'hours',
+        };
+    }
+    if (type === 'daily_time') {
+        return { time: document.getElementById('cfg-' + slotKey + '-time')?.value || '03:00' };
+    }
+    if (type === 'weekly_time') {
+        const daysEl = document.getElementById('cfg-' + slotKey + '-days');
+        const days = daysEl ? Array.from(daysEl.querySelectorAll('.day-btn.active')).map(b => b.dataset.day) : [];
+        return {
+            time: document.getElementById('cfg-' + slotKey + '-time')?.value || '03:00',
+            days,
+        };
+    }
+    // Event triggers with conditions
+    const blockDef = _findBlockDef(type);
+    if (blockDef && blockDef.has_conditions) {
+        _autoSaveConditionsFromDOM(slotKey);
+        return {
+            conditions: (data.config && data.config.conditions) || [],
+            match: document.getElementById('cfg-' + slotKey + '-match')?.value || 'all',
+        };
+    }
+    if (type === 'process_wishlist') {
+        return { category: document.getElementById('cfg-' + slotKey + '-category')?.value || 'all' };
+    }
+    if (type === 'refresh_mirrored') {
+        const allCb = document.getElementById('cfg-' + slotKey + '-all');
+        return {
+            playlist_id: document.getElementById('cfg-' + slotKey + '-playlist_id')?.value || '',
+            all: allCb ? allCb.checked : false,
+        };
+    }
+    if (type === 'sync_playlist') {
+        return { playlist_id: document.getElementById('cfg-' + slotKey + '-playlist_id')?.value || '' };
+    }
+    if (type === 'discord_webhook') {
+        return {
+            webhook_url: document.getElementById('cfg-' + slotKey + '-webhook_url')?.value?.trim() || '',
+            message: document.getElementById('cfg-' + slotKey + '-message')?.value || '',
+        };
+    }
+    return {};
+}
+
+function _findBlockDef(type) {
+    if (!_autoBlocks) return null;
+    for (const cat of ['triggers','actions','notifications']) {
+        const found = (_autoBlocks[cat] || []).find(b => b.type === type);
+        if (found) return found;
+    }
+    return null;
+}
+
+// --- Drag & Drop ---
+
+function _autoDragStart(e, blockType, slotCategory) {
+    e.dataTransfer.setData('text/plain', JSON.stringify({ type: blockType, slot: slotCategory }));
+    e.dataTransfer.effectAllowed = 'copy';
+}
+
+function _autoDragOver(e, slotKey) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    document.getElementById('slot-' + slotKey)?.classList.add('drag-over');
+}
+
+function _autoDragLeave(e, slotKey) {
+    document.getElementById('slot-' + slotKey)?.classList.remove('drag-over');
+}
+
+function _autoDrop(e, slotKey) {
+    e.preventDefault();
+    document.getElementById('slot-' + slotKey)?.classList.remove('drag-over');
+    try {
+        const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+        if (data.slot !== slotKey) { showToast('Wrong slot — drop ' + data.slot + ' blocks here', 'error'); return; }
+        _autoBuilder[slotKey] = { type: data.type, config: {} };
+        _renderBuilderCanvas();
+    } catch (err) {}
+}
+
+// Click-to-add (alternative to drag)
+function _autoClickBlock(blockType, slotCategory) {
+    _autoBuilder[slotCategory] = { type: blockType, config: {} };
+    _renderBuilderCanvas();
+}
+
+function _autoRemoveBlock(slotKey) {
+    _autoBuilder[slotKey] = null;
+    _renderBuilderCanvas();
+}
+
+// Variable insertion
+function _autoInsertVar(textareaId, variable) {
+    const el = document.getElementById(textareaId);
+    if (!el) return;
+    const start = el.selectionStart, end = el.selectionEnd;
+    el.value = el.value.substring(0, start) + variable + el.value.substring(end);
+    el.selectionStart = el.selectionEnd = start + variable.length;
+    el.focus();
 }
 
 // --- Helpers ---
