@@ -2845,6 +2845,10 @@ async function loadSettingsData() {
         document.getElementById('youtube-min-confidence').value = settings.download_source?.youtube_min_confidence || 0.65;
         document.getElementById('tidal-download-quality').value = settings.tidal_download?.quality || 'lossless';
 
+        // Populate YouTube settings
+        document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
+        document.getElementById('youtube-download-delay').value = settings.youtube?.download_delay ?? 3;
+
         // Update UI based on download source mode
         updateDownloadSourceUI();
 
@@ -3019,12 +3023,16 @@ function updateDownloadSourceUI() {
     const mode = document.getElementById('download-source-mode').value;
     const hybridContainer = document.getElementById('hybrid-settings-container');
     const tidalContainer = document.getElementById('tidal-download-settings-container');
+    const youtubeContainer = document.getElementById('youtube-settings-container');
 
     // Show hybrid settings only when hybrid mode is selected
     hybridContainer.style.display = mode === 'hybrid' ? 'block' : 'none';
 
     // Show Tidal download settings when tidal mode is selected
     tidalContainer.style.display = mode === 'tidal' ? 'block' : 'none';
+
+    // Show YouTube settings when youtube or hybrid mode is selected
+    youtubeContainer.style.display = (mode === 'youtube' || mode === 'hybrid') ? 'block' : 'none';
 
     // Check Tidal download auth status when switching to tidal mode
     if (mode === 'tidal') {
@@ -3573,6 +3581,10 @@ async function saveSettings(quiet = false) {
         ui_appearance: {
             accent_preset: document.getElementById('accent-preset')?.value || '#1db954',
             accent_color: document.getElementById('accent-custom-color')?.value || '#1db954'
+        },
+        youtube: {
+            cookies_browser: document.getElementById('youtube-cookies-browser').value,
+            download_delay: parseInt(document.getElementById('youtube-download-delay').value) || 3,
         }
     };
 
