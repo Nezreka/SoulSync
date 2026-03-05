@@ -28054,7 +28054,7 @@ def convert_beatport_results_to_spotify_tracks(discovery_results):
 
 class WebMetadataUpdateWorker:
     """Web-based metadata update worker - EXACT port of dashboard.py MetadataUpdateWorker"""
-    
+
     def __init__(self, artists, media_client, spotify_client, server_type, refresh_interval_days=30):
         self.artists = artists
         self.media_client = media_client  # Can be plex_client or jellyfin_client
@@ -28067,6 +28067,12 @@ class WebMetadataUpdateWorker:
         self.successful_count = 0
         self.failed_count = 0
         self.max_workers = 1
+        # DB-first: reuse existing metadata from SoulSync database
+        try:
+            from database.music_database import MusicDatabase
+            self._db = MusicDatabase()
+        except Exception:
+            self._db = None
         self.thread_lock = threading.Lock()
     
     def stop(self):
@@ -28137,45 +28143,37 @@ class WebMetadataUpdateWorker:
                 except Exception as e:
                     return (artist_name, False, f"Error: {str(e)}")
             
-            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                # Submit all tasks
-                future_to_artist = {executor.submit(process_single_artist, artist): artist 
-                                  for artist in self.artists}
-                
-                # Process completed tasks as they finish
-                for future in as_completed(future_to_artist):
-                    if self.should_stop or metadata_update_state['status'] == 'stopping':
-                        break
-                        
-                    result = future.result()
-                    if result is None:  # Task was cancelled
-                        continue
-                        
-                    artist_name, success, details = result
-                    
-                    with self.thread_lock:
-                        self.processed_count += 1
-                        if success:
-                            self.successful_count += 1
-                        else:
-                            self.failed_count += 1
-                    
-                    # Update global state - equivalent to progress_updated.emit
-                    progress_percent = (self.processed_count / total_artists) * 100
-                    metadata_update_state.update({
-                        'current_artist': artist_name,
-                        'processed': self.processed_count,
-                        'percentage': progress_percent,
-                        'successful': self.successful_count,
-                        'failed': self.failed_count
-                    })
-                    
-                    # Individual artist updates are tracked in progress but not shown as separate activity items
-                    # This prevents spam in the activity feed (unlike dashboard which shows these in a separate widget)
+            # Process artists sequentially with rate limiting
+            # (no ThreadPoolExecutor — API rate limits make parallelism counterproductive)
+            import time
+            for artist in self.artists:
+                if self.should_stop or metadata_update_state['status'] == 'stopping':
+                    break
 
-                    # Add delay between artist processing to respect Spotify API rate limits
-                    import time
-                    time.sleep(1.0)
+                result = process_single_artist(artist)
+                if result is None:
+                    continue
+
+                artist_name, success, details = result
+
+                with self.thread_lock:
+                    self.processed_count += 1
+                    if success:
+                        self.successful_count += 1
+                    else:
+                        self.failed_count += 1
+
+                progress_percent = (self.processed_count / total_artists) * 100
+                metadata_update_state.update({
+                    'current_artist': artist_name,
+                    'processed': self.processed_count,
+                    'percentage': progress_percent,
+                    'successful': self.successful_count,
+                    'failed': self.failed_count
+                })
+
+                # Rate limit: 1.5s between artists (this actually runs between artists now)
+                time.sleep(1.5)
             
             # Mark as completed - equivalent to finished.emit
             metadata_update_state['status'] = 'completed'
@@ -28205,8 +28203,53 @@ class WebMetadataUpdateWorker:
             print(f"Error checking artist {getattr(artist, 'title', 'Unknown')}: {e}")
             return True  # Process if we can't determine status
     
+    def _check_db_artist(self, artist_name):
+        """Check SoulSync DB for existing artist metadata (genres, spotify_artist_id).
+
+        NOTE: DB thumb_url is a Plex/Jellyfin internal path, NOT a downloadable URL.
+        Photos must be checked via the media server object, not the DB.
+
+        Returns (db_artist_dict, has_genres, spotify_artist_id) or (None, False, None) if not found."""
+        if not self._db:
+            return None, False, None
+        try:
+            db_artists = self._db.search_artists(artist_name, limit=5)
+            if not db_artists:
+                return None, False, None
+            # Find best name match
+            best = None
+            best_score = 0.0
+            norm_name = self.matching_engine.normalize_string(artist_name)
+            for dba in db_artists:
+                score = self.matching_engine.similarity_score(
+                    norm_name, self.matching_engine.normalize_string(dba.name))
+                if score > best_score:
+                    best_score = score
+                    best = dba
+            if not best or best_score < 0.85:
+                return None, False, None
+            has_genres = bool(best.genres and len(best.genres) > 0)
+            # Get spotify_artist_id from raw DB row (not in dataclass)
+            spotify_artist_id = None
+            try:
+                raw = self._db.api_get_artist(best.id)
+                if raw:
+                    spotify_artist_id = raw.get('spotify_artist_id')
+            except Exception:
+                pass
+            return best, has_genres, spotify_artist_id
+        except Exception:
+            return None, False, None
+
     def update_artist_metadata(self, artist):
-        """Update a single artist's metadata - EXACT copy from dashboard.py"""
+        """Update a single artist's metadata. Checks SoulSync DB first to avoid unnecessary API calls.
+
+        DB-first strategy:
+        - Genres: DB stores real genre strings → can apply directly, skip Spotify
+        - spotify_artist_id: DB may have it from enrichment → skip search_artists() call
+        - Photos/album art: DB thumb_url is a media-server internal path (not downloadable)
+          so these MUST come from Spotify API
+        """
         try:
             artist_name = getattr(artist, 'title', 'Unknown Artist')
 
@@ -28214,66 +28257,139 @@ class WebMetadataUpdateWorker:
             if artist_name == 'Unknown Artist' or not artist_name or not artist_name.strip():
                 return False, "Skipped: No valid artist name"
 
-            # 1. Search for top 5 potential artists on Spotify
-            spotify_artists = self.spotify_client.search_artists(artist_name, limit=5)
-            if not spotify_artists:
-                return False, "Not found on Spotify"
-            
-            # 2. Find the best match using the matching engine
-            best_match = None
+            # DB-first: check what we already have cached
+            db_artist, db_has_genres, db_spotify_id = self._check_db_artist(artist_name)
+
+            # Check what the media server artist is currently missing
+            needs_photo = not self.artist_has_valid_photo(artist) if self.server_type != "jellyfin" else True
+            needs_genres = not getattr(artist, 'genres', None)
+            needs_album_art = self.server_type == "plex"
+
+            # If media server already has valid photo + genres + album art, skip entirely
+            if not needs_photo and not needs_genres and not needs_album_art:
+                self.media_client.update_artist_biography(artist)
+                return True, "Already up to date"
+
+            # Determine if we actually need Spotify
+            # Photos and album art MUST come from Spotify (DB only has internal media server paths)
+            # Genres CAN come from DB if available
+            need_spotify = needs_photo or needs_album_art or (needs_genres and not db_has_genres)
+
+            spotify_artist = None
             highest_score = 0.0
-            
-            plex_artist_normalized = self.matching_engine.normalize_string(artist_name)
 
-            for spotify_artist in spotify_artists:
-                spotify_artist_normalized = self.matching_engine.normalize_string(spotify_artist.name)
-                score = self.matching_engine.similarity_score(plex_artist_normalized, spotify_artist_normalized)
-                
-                if score > highest_score:
-                    highest_score = score
-                    best_match = spotify_artist
+            if need_spotify:
+                # Try direct lookup by cached spotify_artist_id first (1 API call vs search)
+                if db_spotify_id:
+                    try:
+                        from core.spotify_client import Artist as SpotifyArtistDC
+                        raw = self.spotify_client.get_artist(db_spotify_id)
+                        if raw and 'name' in raw:
+                            spotify_artist = SpotifyArtistDC.from_spotify_artist(raw)
+                            highest_score = 1.0
+                            print(f"✅ Metadata updater: direct Spotify lookup for '{artist_name}' via cached ID {db_spotify_id}")
+                    except Exception as e:
+                        print(f"Direct Spotify lookup failed for {db_spotify_id}: {e}")
+                        spotify_artist = None
 
-            # 3. If no suitable match is found, exit
-            if not best_match or highest_score < 0.7: # Confidence threshold
-                 return False, f"No confident match found (best: '{getattr(best_match, 'name', 'N/A')}', score: {highest_score:.2f})"
+                # Fall back to search if direct lookup didn't work
+                if not spotify_artist:
+                    spotify_artists = self.spotify_client.search_artists(artist_name, limit=5)
+                    if not spotify_artists:
+                        # Spotify failed — apply DB genres if available, skip photos/art
+                        changes_made = []
+                        if needs_genres and db_has_genres and db_artist:
+                            if self._apply_db_genres(artist, db_artist.genres):
+                                changes_made.append("genres (DB)")
+                        if changes_made:
+                            self.media_client.update_artist_biography(artist)
+                            return True, f"Updated {', '.join(changes_made)} (Spotify unavailable)"
+                        return False, "Not found on Spotify"
 
-            spotify_artist = best_match
+                    # Find the best match
+                    best_match = None
+                    plex_artist_normalized = self.matching_engine.normalize_string(artist_name)
+
+                    for sa in spotify_artists:
+                        spotify_artist_normalized = self.matching_engine.normalize_string(sa.name)
+                        score = self.matching_engine.similarity_score(plex_artist_normalized, spotify_artist_normalized)
+                        if score > highest_score:
+                            highest_score = score
+                            best_match = sa
+
+                    if not best_match or highest_score < 0.7:
+                        # No good Spotify match — still try DB genres
+                        changes_made = []
+                        if needs_genres and db_has_genres and db_artist:
+                            if self._apply_db_genres(artist, db_artist.genres):
+                                changes_made.append("genres (DB)")
+                        if changes_made:
+                            self.media_client.update_artist_biography(artist)
+                            return True, f"Updated {', '.join(changes_made)} (no Spotify match)"
+                        return False, f"No confident match found (best: '{getattr(best_match, 'name', 'N/A')}', score: {highest_score:.2f})"
+
+                    spotify_artist = best_match
+
             changes_made = []
-            
-            # Update photo if needed
-            photo_updated = self.update_artist_photo(artist, spotify_artist)
-            if photo_updated:
-                changes_made.append("photo")
-            
-            # Update genres
-            genres_updated = self.update_artist_genres(artist, spotify_artist)
-            if genres_updated:
-                changes_made.append("genres")
-            
-            # Update album artwork (only for Plex, skip for Jellyfin due to API issues)
-            if self.server_type == "plex":
+
+            # Update photo (always from Spotify — DB only has media server paths)
+            if needs_photo and spotify_artist:
+                photo_updated = self.update_artist_photo(artist, spotify_artist)
+                if photo_updated:
+                    changes_made.append("photo")
+
+            # Update genres — use DB if available, otherwise Spotify
+            if needs_genres:
+                if db_has_genres and db_artist:
+                    genres_updated = self._apply_db_genres(artist, db_artist.genres)
+                    if genres_updated:
+                        changes_made.append("genres (DB)")
+                    elif spotify_artist:
+                        # DB genres didn't result in changes, try Spotify for newer/different genres
+                        genres_updated = self.update_artist_genres(artist, spotify_artist)
+                        if genres_updated:
+                            changes_made.append("genres")
+                elif spotify_artist:
+                    genres_updated = self.update_artist_genres(artist, spotify_artist)
+                    if genres_updated:
+                        changes_made.append("genres")
+
+            # Update album artwork (only for Plex, always from Spotify)
+            if self.server_type == "plex" and spotify_artist:
                 albums_updated = self.update_album_artwork(artist, spotify_artist)
                 if albums_updated > 0:
                     changes_made.append(f"{albums_updated} album art")
-            else:
-                # Skip album artwork for Jellyfin until API issues are resolved
+            elif self.server_type != "plex":
                 print(f"Skipping album artwork updates for Jellyfin artist: {artist.title}")
-            
+
             if changes_made:
-                # Update artist biography with timestamp to track last update
                 biography_updated = self.media_client.update_artist_biography(artist)
                 if biography_updated:
                     changes_made.append("timestamp")
-                
-                details = f"Updated {', '.join(changes_made)} (match: '{spotify_artist.name}', score: {highest_score:.2f})"
+
+                source = f"match: '{spotify_artist.name}', score: {highest_score:.2f}" if spotify_artist else "DB cache"
+                details = f"Updated {', '.join(changes_made)} ({source})"
                 return True, details
             else:
-                # Even if no metadata changes, update biography to record we checked this artist
                 self.media_client.update_artist_biography(artist)
                 return True, "Already up to date"
-                
+
         except Exception as e:
             return False, str(e)
+
+    def _apply_db_genres(self, artist, genres):
+        """Apply genres from DB cache to media server."""
+        try:
+            if not genres:
+                return False
+            existing_genres = set(genre.tag if hasattr(genre, 'tag') else str(genre)
+                                for genre in (getattr(artist, 'genres', None) or []))
+            db_genres = set(g for g in genres if g and g.strip() and len(g.strip()) > 1)
+            if db_genres and db_genres != existing_genres:
+                return self.media_client.update_artist_genres(artist, list(db_genres)[:10])
+            return False
+        except Exception:
+            return False
     
     def update_artist_photo(self, artist, spotify_artist):
         """Update artist photo from Spotify - EXACT copy from dashboard.py"""
@@ -28359,64 +28475,68 @@ class WebMetadataUpdateWorker:
             return False
     
     def update_album_artwork(self, artist, spotify_artist):
-        """Update album artwork for all albums by this artist - EXACT copy from dashboard.py"""
+        """Update album artwork for all albums by this artist from Spotify.
+        DB thumb_url is a media-server internal path, so album art must come from Spotify."""
         try:
             updated_count = 0
             skipped_count = 0
-            
+
             # Get all albums for this artist
             try:
                 albums = list(artist.albums())
             except Exception:
                 print(f"Could not access albums for artist '{artist.title}'")
                 return 0
-            
+
             if not albums:
                 print(f"No albums found for artist '{artist.title}'")
                 return 0
-            
+
+            import time
             for album in albums:
                 try:
                     album_title = getattr(album, 'title', 'Unknown Album')
-                    
-                    # Check if album already has good artwork
+
+                    # Check if album already has good artwork on the media server
                     if self.album_has_valid_artwork(album):
                         skipped_count += 1
                         continue
-                    
+
+                    # Rate limit between album API calls
+                    time.sleep(0.5)
+
                     # Search for this specific album on Spotify
                     album_query = f"album:{album_title} artist:{spotify_artist.name}"
                     spotify_albums = self.spotify_client.search_albums(album_query, limit=3)
-                    
+
                     if not spotify_albums:
                         continue
-                    
+
                     # Find the best matching album
                     best_album = None
                     highest_score = 0.0
-                    
+
                     plex_album_normalized = self.matching_engine.normalize_string(album_title)
-                    
+
                     for spotify_album in spotify_albums:
                         spotify_album_normalized = self.matching_engine.normalize_string(spotify_album.name)
                         score = self.matching_engine.similarity_score(plex_album_normalized, spotify_album_normalized)
-                        
+
                         if score > highest_score:
                             highest_score = score
                             best_album = spotify_album
-                    
+
                     # If we found a good match with artwork, download it
                     if best_album and highest_score > 0.7 and best_album.image_url:
-                        # Download and upload the artwork
                         if self.download_and_upload_album_artwork(album, best_album.image_url):
                             updated_count += 1
-                
+
                 except Exception as e:
                     print(f"Error processing album '{getattr(album, 'title', 'Unknown')}': {e}")
                     continue
-            
+
             return updated_count
-            
+
         except Exception as e:
             print(f"Error updating album artwork for artist '{getattr(artist, 'title', 'Unknown')}': {e}")
             return 0
