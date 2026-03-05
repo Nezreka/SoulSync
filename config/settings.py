@@ -240,6 +240,10 @@ class ConfigManager:
             "m3u_export": {
                 "enabled": False
             },
+            "youtube": {
+                "cookies_browser": "",      # "", "chrome", "firefox", "edge", "brave", "opera", "safari"
+                "download_delay": 3,        # seconds between sequential downloads
+            },
             "hydrabase": {
                 "url": "",
                 "api_key": "",

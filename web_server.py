@@ -2796,7 +2796,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'listenbrainz', 'acoustid', 'import', 'lossy_copy', 'ui_appearance']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'listenbrainz', 'acoustid', 'import', 'lossy_copy', 'ui_appearance', 'youtube']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -2816,6 +2816,9 @@ def handle_settings():
             navidrome_client.reload_config()
             # Reload orchestrator settings (download source mode, hybrid_primary, etc.)
             soulseek_client.reload_settings()
+            # Reload YouTube client settings (rate limiting, cookies)
+            if hasattr(soulseek_client, 'youtube'):
+                soulseek_client.youtube.reload_settings()
             # FIX: Re-instantiate the global tidal_client to pick up new settings
             tidal_client = TidalClient()
             print("✅ Service clients re-initialized with new settings.")

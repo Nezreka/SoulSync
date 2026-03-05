@@ -13,6 +13,7 @@ This client provides:
 import sys
 import os
 import re
+import time
 import platform
 import asyncio
 import uuid
@@ -111,6 +112,11 @@ class YouTubeClient:
         # Callback for shutdown check (avoids circular imports)
         self.shutdown_check = None
 
+        # Rate limiting — serialize YouTube downloads with delay
+        self._download_semaphore = threading.Semaphore(1)
+        self._download_delay = config_manager.get('youtube.download_delay', 3)
+        self._last_download_time = 0
+
     def set_shutdown_check(self, check_callable):
         """Set a callback function to check for system shutdown"""
         self.shutdown_check = check_callable
@@ -153,6 +159,12 @@ class YouTubeClient:
             'age_limit': None,  # Don't skip age-restricted
         }
 
+        # Cookie support — use browser cookies for YouTube auth
+        from config.settings import config_manager
+        cookies_browser = config_manager.get('youtube.cookies_browser', '')
+        if cookies_browser:
+            self.download_opts['cookiesfrombrowser'] = (cookies_browser,)
+
         # Track current download progress (mirrors Soulseek transfer tracking)
         self.current_download_id: Optional[str] = None
         self.current_download_progress = {
@@ -186,6 +198,17 @@ class YouTubeClient:
         except ImportError:
             logger.error("yt-dlp is not installed")
             return False
+
+    def reload_settings(self):
+        """Reload YouTube settings from config (called when settings are saved)."""
+        from config.settings import config_manager
+        self._download_delay = config_manager.get('youtube.download_delay', 3)
+        cookies_browser = config_manager.get('youtube.cookies_browser', '')
+        if cookies_browser:
+            self.download_opts['cookiesfrombrowser'] = (cookies_browser,)
+        elif 'cookiesfrombrowser' in self.download_opts:
+            del self.download_opts['cookiesfrombrowser']
+        logger.info(f"🔄 YouTube settings reloaded (delay={self._download_delay}s, cookies={'enabled' if cookies_browser else 'disabled'})")
 
     async def check_connection(self) -> bool:
         """
@@ -568,6 +591,7 @@ class YouTubeClient:
             loop = asyncio.get_event_loop()
 
             def _search():
+                from config.settings import config_manager
                 ydl_opts = {
                     'quiet': True,
                     'no_warnings': True,
@@ -582,6 +606,11 @@ class YouTubeClient:
                     },
                     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 }
+
+                # Add cookie support for search (avoids bot detection)
+                cookies_browser = config_manager.get('youtube.cookies_browser', '')
+                if cookies_browser:
+                    ydl_opts['cookiesfrombrowser'] = (cookies_browser,)
 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     # Search YouTube (max 50 results)
@@ -837,42 +866,54 @@ class YouTubeClient:
         """
         Background thread worker for downloading YouTube videos.
         Updates active_downloads dict with progress.
+        Serialized via semaphore with configurable delay between downloads.
         """
         try:
-            # Update state to downloading
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['state'] = 'InProgress, Downloading'  # Match Soulseek state
+            with self._download_semaphore:
+                # Enforce delay since last download completed
+                elapsed = time.time() - self._last_download_time
+                if self._last_download_time > 0 and elapsed < self._download_delay:
+                    wait_time = self._download_delay - elapsed
+                    logger.info(f"⏳ Rate limiting: waiting {wait_time:.1f}s before next YouTube download")
+                    time.sleep(wait_time)
 
-            # Set current download ID for progress hook
-            self.current_download_id = download_id
-
-            # Perform actual download
-            file_path = self._download_sync(youtube_url, title)
-
-            # Clear current download ID
-            self.current_download_id = None
-
-            if file_path:
-                # Mark as completed/succeeded (match Soulseek state)
+                # Update state to downloading
                 with self._download_lock:
                     if download_id in self.active_downloads:
-                        # IMPORTANT: Keep original filename for context lookup!
-                        # The filename must match what was used to create the context entry
-                        # We store the actual file path separately
-                        self.active_downloads[download_id]['state'] = 'Completed, Succeeded'  # Match Soulseek
-                        self.active_downloads[download_id]['progress'] = 100.0
-                        self.active_downloads[download_id]['file_path'] = file_path
-                        # DO NOT update filename - keep original_filename for context matching
+                        self.active_downloads[download_id]['state'] = 'InProgress, Downloading'  # Match Soulseek state
 
-                logger.info(f"✅ YouTube download {download_id} completed: {file_path}")
-            else:
-                # Mark as errored
-                with self._download_lock:
-                    if download_id in self.active_downloads:
-                        self.active_downloads[download_id]['state'] = 'Errored'
+                # Set current download ID for progress hook
+                self.current_download_id = download_id
 
-                logger.error(f"❌ YouTube download {download_id} failed")
+                # Perform actual download
+                file_path = self._download_sync(youtube_url, title)
+
+                # Clear current download ID
+                self.current_download_id = None
+
+                # Record completion time for rate limiting
+                self._last_download_time = time.time()
+
+                if file_path:
+                    # Mark as completed/succeeded (match Soulseek state)
+                    with self._download_lock:
+                        if download_id in self.active_downloads:
+                            # IMPORTANT: Keep original filename for context lookup!
+                            # The filename must match what was used to create the context entry
+                            # We store the actual file path separately
+                            self.active_downloads[download_id]['state'] = 'Completed, Succeeded'  # Match Soulseek
+                            self.active_downloads[download_id]['progress'] = 100.0
+                            self.active_downloads[download_id]['file_path'] = file_path
+                            # DO NOT update filename - keep original_filename for context matching
+
+                    logger.info(f"✅ YouTube download {download_id} completed: {file_path}")
+                else:
+                    # Mark as errored
+                    with self._download_lock:
+                        if download_id in self.active_downloads:
+                            self.active_downloads[download_id]['state'] = 'Errored'
+
+                    logger.error(f"❌ YouTube download {download_id} failed")
 
         except Exception as e:
             logger.error(f"❌ YouTube download thread failed for {download_id}: {e}")
