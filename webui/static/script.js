@@ -3446,6 +3446,10 @@ async function hydrabaseSendRaw(textareaId) {
         showToast('Invalid JSON payload', 'error');
         return;
     }
+    // Auto-inject a fresh nonce if not set or zero
+    if (!payload.nonce) {
+        payload.nonce = Date.now();
+    }
     const responseArea = document.getElementById('hydra-response');
     responseArea.textContent = 'Sending...';
     try {

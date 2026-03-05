@@ -177,7 +177,7 @@ class HydrabaseClient:
     # ==================== Artist Methods ====================
 
     def search_artists(self, query: str, limit: int = 20) -> List[Artist]:
-        results = self._send_and_recv('artist', query)
+        results = self._send_and_recv('artists', query)
         if not results:
             return []
 
