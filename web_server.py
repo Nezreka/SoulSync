@@ -844,7 +844,61 @@ class WebUIDownloadMonitor:
         if not live_info:
             # Task not in live transfers but status is downloading/queued - likely stuck
             if current_time - task.get('status_change_time', current_time) > 90:
-                return True
+                retry_count = task.get('stuck_retry_count', 0)
+                last_retry = task.get('last_retry_time', 0)
+
+                if retry_count < 3 and (current_time - last_retry) > 30:
+                    print(f"⚠️ Task not in live transfers for >90s - retry {retry_count + 1}/3")
+                    task['stuck_retry_count'] = retry_count + 1
+                    task['last_retry_time'] = current_time
+
+                    download_id = task.get('download_id')
+
+                    # Defer slskd cancel to outside the lock
+                    if task_username and download_id:
+                        deferred_ops.append(('cancel_download', download_id, task_username))
+
+                    # Mark current source as used (full filename to match worker format)
+                    if task_username and task_filename:
+                        used_sources = task.get('used_sources', set())
+                        source_key = f"{task_username}_{task_filename}"
+                        used_sources.add(source_key)
+                        task['used_sources'] = used_sources
+                        print(f"🚫 Marked missing-transfer source as used: {source_key}")
+
+                    # Defer orphan cleanup
+                    if task_username and task_filename:
+                        _orphaned_download_keys.add(lookup_key)
+                        deferred_ops.append(('cleanup_orphan', lookup_key))
+
+                    # Clear download info and reset for retry
+                    task.pop('download_id', None)
+                    task.pop('username', None)
+                    task.pop('filename', None)
+                    task['status'] = 'searching'
+                    task.pop('queued_start_time', None)
+                    task.pop('downloading_start_time', None)
+                    task['status_change_time'] = current_time
+                    print(f"🔄 Task {task.get('track_info', {}).get('name', 'Unknown')} reset for missing-transfer retry")
+
+                    batch_id = task.get('batch_id')
+                    if task_id and batch_id:
+                        deferred_ops.append(('restart_worker', task_id, batch_id))
+                    return False
+                elif retry_count < 3:
+                    return False
+                else:
+                    track_label = task.get('track_info', {}).get('name', 'Unknown')
+                    tried_sources = task.get('used_sources', set())
+                    sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
+                    print(f"❌ Task failed after 3 retry attempts (not in live transfers)")
+                    task['status'] = 'failed'
+                    task['error_message'] = f'Download disappeared from transfer list 3 times for "{track_label}"{sources_str} — source may be unavailable'
+
+                    batch_id = task.get('batch_id')
+                    if batch_id:
+                        return True
+                    return False
             return False
 
         state_str = live_info.get('state', '')
@@ -871,9 +925,10 @@ class WebUIDownloadMonitor:
                     deferred_ops.append(('cancel_download', download_id, username))
 
                 # Mark current source as used to prevent retry loops
+                # CRITICAL: Use full filename (not basename) to match worker's source_key format
                 if username and filename:
                     used_sources = task.get('used_sources', set())
-                    source_key = f"{username}_{os.path.basename(filename)}"
+                    source_key = f"{username}_{filename}"
                     used_sources.add(source_key)
                     task['used_sources'] = used_sources
                     print(f"🚫 Marked errored source as used: {source_key}")
@@ -956,9 +1011,10 @@ class WebUIDownloadMonitor:
 
                         # UNIFIED RETRY LOGIC: Handle timeout retry exactly like error retry
                         # Mark current source as used to prevent retry loops
+                        # CRITICAL: Use full filename (not basename) to match worker's source_key format
                         if username and filename:
                             used_sources = task.get('used_sources', set())
-                            source_key = f"{username}_{os.path.basename(filename)}"
+                            source_key = f"{username}_{filename}"
                             used_sources.add(source_key)
                             task['used_sources'] = used_sources
                             print(f"🚫 Marked timeout source as used: {source_key}")
@@ -1043,9 +1099,10 @@ class WebUIDownloadMonitor:
 
                         # UNIFIED RETRY LOGIC: Handle 0% timeout retry exactly like error retry
                         # Mark current source as used to prevent retry loops
+                        # CRITICAL: Use full filename (not basename) to match worker's source_key format
                         if username and filename:
                             used_sources = task.get('used_sources', set())
-                            source_key = f"{username}_{os.path.basename(filename)}"
+                            source_key = f"{username}_{filename}"
                             used_sources.add(source_key)
                             task['used_sources'] = used_sources
                             print(f"🚫 Marked 0% progress source as used: {source_key}")
@@ -1094,11 +1151,80 @@ class WebUIDownloadMonitor:
                             return True  # Signal that we need to call completion outside the lock
                         return False
         else:
-            # Progress being made, reset timers and retry counts
-            task.pop('queued_start_time', None)
-            task.pop('downloading_start_time', None)
-            task.pop('stuck_retry_count', None)
-            
+            # Only reset timers if actual byte progress is being made
+            bytes_transferred = live_info.get('bytesTransferred', 0)
+            if progress >= 1 or bytes_transferred > 0:
+                # Real progress happening, reset timers and retry counts
+                task.pop('queued_start_time', None)
+                task.pop('downloading_start_time', None)
+                task.pop('stuck_retry_count', None)
+            else:
+                # Unknown state with no progress (e.g., "Requested", "Initializing")
+                # Treat like 0% stuck — start/keep the downloading timer running
+                if 'downloading_start_time' not in task:
+                    task['downloading_start_time'] = current_time
+                download_time = current_time - task['downloading_start_time']
+
+                # Use context-aware timeouts
+                is_streaming_context = task.get('track_info', {}).get('is_album_download', False)
+                timeout_threshold = 15.0 if is_streaming_context else 90.0
+
+                if download_time > timeout_threshold:
+                    retry_count = task.get('stuck_retry_count', 0)
+                    last_retry = task.get('last_retry_time', 0)
+
+                    if retry_count < 3 and (current_time - last_retry) > 30:
+                        print(f"⚠️ Task stuck in unknown state '{state_str}' with 0 progress for {download_time:.1f}s - retry {retry_count + 1}/3")
+                        task['stuck_retry_count'] = retry_count + 1
+                        task['last_retry_time'] = current_time
+
+                        _ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
+                        username = task.get('username') or _ti.get('username')
+                        filename = task.get('filename') or _ti.get('filename')
+                        download_id = task.get('download_id')
+
+                        if username and download_id:
+                            deferred_ops.append(('cancel_download', download_id, username))
+
+                        if username and filename:
+                            used_sources = task.get('used_sources', set())
+                            source_key = f"{username}_{filename}"
+                            used_sources.add(source_key)
+                            task['used_sources'] = used_sources
+                            print(f"🚫 Marked unknown-state source as used: {source_key}")
+
+                        if username and filename:
+                            old_context_key = _make_context_key(username, filename)
+                            _orphaned_download_keys.add(old_context_key)
+                            deferred_ops.append(('cleanup_orphan', old_context_key))
+
+                        task.pop('download_id', None)
+                        task.pop('username', None)
+                        task.pop('filename', None)
+                        task['status'] = 'searching'
+                        task.pop('queued_start_time', None)
+                        task.pop('downloading_start_time', None)
+                        task['status_change_time'] = current_time
+
+                        batch_id = task.get('batch_id')
+                        if task_id and batch_id:
+                            deferred_ops.append(('restart_worker', task_id, batch_id))
+                        return False
+                    elif retry_count >= 3:
+                        track_label = task.get('track_info', {}).get('name', 'Unknown')
+                        tried_sources = task.get('used_sources', set())
+                        sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
+                        print(f"❌ Task failed after 3 retry attempts (unknown state '{state_str}')")
+                        task['status'] = 'failed'
+                        task['error_message'] = f'Download stuck in "{state_str}" state 3 times for "{track_label}"{sources_str}'
+                        task.pop('queued_start_time', None)
+                        task.pop('downloading_start_time', None)
+
+                        batch_id = task.get('batch_id')
+                        if batch_id:
+                            return True
+                        return False
+
         return False
     
     
@@ -5315,7 +5441,7 @@ def download_selected_candidate(task_id):
             task.pop('filename', None)
             # Clear the selected candidate from used_sources so it won't be skipped
             used_sources = task.get('used_sources', set())
-            source_key = f"{username}_{os.path.basename(filename)}"
+            source_key = f"{username}_{filename}"
             used_sources.discard(source_key)
 
             # Reset batch tracking for this task
