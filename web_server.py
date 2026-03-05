@@ -20550,9 +20550,12 @@ def get_all_youtube_playlists():
         current_time = time.time()
         
         for url_hash, state in youtube_playlist_states.items():
+            # Skip mirrored playlist entries — they have their own hydration
+            if url_hash.startswith('mirrored_'):
+                continue
             # Update access time when requested
             state['last_accessed'] = current_time
-            
+
             # Return essential data for card recreation
             playlist_info = {
                 'url_hash': url_hash,
@@ -27712,6 +27715,164 @@ def delete_beatport_chart(chart_hash):
 
     except Exception as e:
         logger.error(f"❌ Error deleting Beatport chart: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ── Mirrored Playlists ────────────────────────────────────────────────
+
+@app.route('/api/mirror-playlist', methods=['POST'])
+def mirror_playlist_endpoint():
+    """Save or update a mirrored playlist."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data received"}), 400
+
+        source = data.get('source')
+        source_playlist_id = data.get('source_playlist_id')
+        name = data.get('name')
+        tracks = data.get('tracks', [])
+
+        if not all([source, source_playlist_id, name]):
+            return jsonify({"error": "source, source_playlist_id, and name are required"}), 400
+
+        database = get_database()
+        profile_id = get_current_profile_id()
+
+        playlist_id = database.mirror_playlist(
+            source=source,
+            source_playlist_id=str(source_playlist_id),
+            name=name,
+            tracks=tracks,
+            profile_id=profile_id,
+            description=data.get('description'),
+            owner=data.get('owner'),
+            image_url=data.get('image_url')
+        )
+
+        if playlist_id is None:
+            return jsonify({"error": "Failed to mirror playlist"}), 500
+
+        return jsonify({"success": True, "playlist_id": playlist_id})
+    except Exception as e:
+        logger.error(f"Error mirroring playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mirrored-playlists', methods=['GET'])
+def get_mirrored_playlists_endpoint():
+    """List all mirrored playlists for the active profile."""
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+        playlists = database.get_mirrored_playlists(profile_id=profile_id)
+        return jsonify(playlists)
+    except Exception as e:
+        logger.error(f"Error getting mirrored playlists: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>', methods=['GET'])
+def get_mirrored_playlist_endpoint(playlist_id):
+    """Get a mirrored playlist with its tracks."""
+    try:
+        database = get_database()
+        playlist = database.get_mirrored_playlist(playlist_id)
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+        playlist['tracks'] = database.get_mirrored_playlist_tracks(playlist_id)
+        return jsonify(playlist)
+    except Exception as e:
+        logger.error(f"Error getting mirrored playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>', methods=['DELETE'])
+def delete_mirrored_playlist_endpoint(playlist_id):
+    """Delete a mirrored playlist."""
+    try:
+        database = get_database()
+        if database.delete_mirrored_playlist(playlist_id):
+            return jsonify({"success": True})
+        return jsonify({"error": "Playlist not found"}), 404
+    except Exception as e:
+        logger.error(f"Error deleting mirrored playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/prepare-discovery', methods=['POST'])
+def prepare_mirrored_discovery(playlist_id):
+    """Register a mirrored playlist into youtube_playlist_states so the YouTube discovery pipeline can run."""
+    try:
+        database = get_database()
+        playlist = database.get_mirrored_playlist(playlist_id)
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+
+        tracks_data = database.get_mirrored_playlist_tracks(playlist_id)
+        url_hash = f"mirrored_{playlist_id}"
+
+        # Build track list in the format the YouTube discovery worker expects
+        tracks = [{
+            'id': t.get('source_track_id') or f"mirrored_{t['id']}",
+            'name': t['track_name'],
+            'artists': [t['artist_name']],
+            'album': t.get('album_name', ''),
+            'duration_ms': t.get('duration_ms', 0)
+        } for t in tracks_data]
+
+        playlist_data = {
+            'id': url_hash,
+            'name': playlist['name'],
+            'tracks': tracks,
+            'track_count': len(tracks),
+            'url': f"mirrored://{playlist['source']}/{playlist['source_playlist_id']}",
+            'source': playlist['source']
+        }
+
+        youtube_playlist_states[url_hash] = {
+            'playlist': playlist_data,
+            'phase': 'fresh',
+            'discovery_results': [],
+            'discovery_progress': 0,
+            'spotify_matches': 0,
+            'spotify_total': len(tracks),
+            'status': 'parsed',
+            'url': playlist_data['url'],
+            'sync_playlist_id': None,
+            'converted_spotify_playlist_id': None,
+            'download_process_id': None,
+            'created_at': time.time(),
+            'last_accessed': time.time(),
+            'discovery_future': None,
+            'sync_progress': {}
+        }
+
+        logger.info(f"Prepared mirrored playlist for discovery: {playlist['name']} ({len(tracks)} tracks)")
+        return jsonify({"success": True, "url_hash": url_hash})
+    except Exception as e:
+        logger.error(f"Error preparing mirrored discovery: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mirrored-playlists/discovery-states', methods=['GET'])
+def get_mirrored_discovery_states():
+    """Return discovery states for any mirrored playlists that have active/completed discoveries."""
+    try:
+        states = []
+        for url_hash, state in youtube_playlist_states.items():
+            if not url_hash.startswith('mirrored_'):
+                continue
+            states.append({
+                'url_hash': url_hash,
+                'playlist_id': int(url_hash.replace('mirrored_', '')),
+                'playlist': state['playlist'],
+                'phase': state['phase'],
+                'status': state.get('status', ''),
+                'discovery_progress': state.get('discovery_progress', 0),
+                'spotify_matches': state.get('spotify_matches', 0),
+                'spotify_total': state.get('spotify_total', 0),
+                'discovery_results': state.get('discovery_results', []),
+                'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+                'download_process_id': state.get('download_process_id'),
+            })
+        return jsonify({"states": states})
+    except Exception as e:
+        logger.error(f"Error getting mirrored discovery states: {e}")
         return jsonify({"error": str(e)}), 500
 
 def convert_beatport_results_to_spotify_tracks(discovery_results):

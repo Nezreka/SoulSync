@@ -765,6 +765,9 @@
                             <button class="sync-tab-button" data-tab="beatport">
                                 <span class="tab-icon beatport-icon"></span> Beatport
                             </button>
+                            <button class="sync-tab-button" data-tab="mirrored">
+                                <span class="tab-icon mirrored-icon"></span> Mirrored
+                            </button>
                         </div>
 
                         <!-- Spotify Tab Content -->
@@ -1487,6 +1490,17 @@
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- Mirrored Playlists Tab Content -->
+                        <div class="sync-tab-content" id="mirrored-tab-content">
+                            <div class="playlist-header">
+                                <h3>Mirrored Playlists</h3>
+                                <button class="refresh-button mirrored" id="mirrored-refresh-btn">Refresh</button>
+                            </div>
+                            <div class="playlist-scroll-container" id="mirrored-playlist-container">
+                                <div class="playlist-placeholder">Playlists you parse from any service will appear here as persistent backups.</div>
                             </div>
                         </div>
                     </div>
