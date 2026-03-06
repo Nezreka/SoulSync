@@ -5972,6 +5972,44 @@ body {
     transform: scale(1.1);
 }
 
+.mirrored-card-clear {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #555;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    opacity: 0;
+}
+
+.mirrored-playlist-card:hover .mirrored-card-clear {
+    opacity: 1;
+}
+
+.mirrored-card-clear:hover {
+    color: #a78bfa;
+    background: rgba(167, 139, 250, 0.15);
+    border-color: rgba(167, 139, 250, 0.3);
+    transform: scale(1.1);
+}
+
+.discovery-ratio {
+    font-size: 0.8em;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.discovery-ratio.complete {
+    color: #22c55e;
+}
+
 /* Mirrored playlist track modal */
 .mirrored-modal-overlay {
     position: fixed;

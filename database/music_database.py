@@ -896,6 +896,25 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_cache_lookup ON discovery_match_cache (normalized_title, normalized_artist, provider)")
 
+            # Sync match cache — caches server track ID for discovered Spotify tracks
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sync_match_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    spotify_track_id TEXT NOT NULL,
+                    normalized_title TEXT NOT NULL,
+                    normalized_artist TEXT NOT NULL,
+                    server_source TEXT NOT NULL,
+                    server_track_id INTEGER NOT NULL,
+                    server_track_title TEXT,
+                    confidence REAL NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    use_count INTEGER DEFAULT 1,
+                    UNIQUE(spotify_track_id, server_source)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_cache_lookup ON sync_match_cache (spotify_track_id, server_source)")
+
             logger.info("Discovery tables created successfully")
 
         except Exception as e:
@@ -5994,6 +6013,73 @@ class MusicDatabase:
             logger.error(f"Error saving discovery cache: {e}")
             return False
 
+    # ==================== Sync Match Cache ====================
+
+    def read_sync_match_cache(self, spotify_track_id: str, server_source: str) -> Optional[Dict]:
+        """Read a cached sync match. Returns {server_track_id, server_track_title, confidence} or None.
+        Also bumps last_used_at and use_count on hit."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT server_track_id, server_track_title, confidence FROM sync_match_cache
+                WHERE spotify_track_id = ? AND server_source = ?
+            """, (spotify_track_id, server_source))
+            row = cursor.fetchone()
+            if row:
+                cursor.execute("""
+                    UPDATE sync_match_cache
+                    SET last_used_at = CURRENT_TIMESTAMP, use_count = use_count + 1
+                    WHERE spotify_track_id = ? AND server_source = ?
+                """, (spotify_track_id, server_source))
+                conn.commit()
+                return {
+                    'server_track_id': row['server_track_id'],
+                    'server_track_title': row['server_track_title'],
+                    'confidence': row['confidence'],
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Error reading sync match cache: {e}")
+            return None
+
+    def save_sync_match_cache(self, spotify_track_id: str, normalized_title: str,
+                               normalized_artist: str, server_source: str,
+                               server_track_id, server_track_title: str,
+                               confidence: float) -> bool:
+        """Save a sync match to cache. Uses INSERT OR REPLACE for upsert."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO sync_match_cache
+                (spotify_track_id, normalized_title, normalized_artist, server_source,
+                 server_track_id, server_track_title, confidence,
+                 created_at, last_used_at, use_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)
+            """, (spotify_track_id, normalized_title, normalized_artist, server_source,
+                  server_track_id, server_track_title, confidence))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving sync match cache: {e}")
+            return False
+
+    def invalidate_sync_match_cache(self, server_source: str = None) -> int:
+        """Clear sync match cache entries. If server_source given, only clear that server's entries."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            if server_source:
+                cursor.execute("DELETE FROM sync_match_cache WHERE server_source = ?", (server_source,))
+            else:
+                cursor.execute("DELETE FROM sync_match_cache")
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error invalidating sync match cache: {e}")
+            return 0
+
     # ==================== Retag Tool Methods ====================
 
     def add_retag_group(self, group_type: str, artist_name: str, album_name: str,
@@ -6563,6 +6649,41 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting extra_data map: {e}")
             return {}
+
+    def clear_mirrored_playlist_discovery(self, playlist_id: int) -> int:
+        """Clear extra_data for all tracks in a mirrored playlist (resets discovery)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE mirrored_playlist_tracks SET extra_data = NULL WHERE playlist_id = ?",
+                    (playlist_id,)
+                )
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error clearing mirrored playlist discovery: {e}")
+            return 0
+
+    def get_mirrored_playlist_discovery_counts(self, playlist_id: int) -> tuple:
+        """Return (discovered_count, total_count) for a mirrored playlist."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT COUNT(*) as total FROM mirrored_playlist_tracks WHERE playlist_id = ?",
+                    (playlist_id,)
+                )
+                total = cursor.fetchone()['total']
+                cursor.execute(
+                    "SELECT COUNT(*) as discovered FROM mirrored_playlist_tracks WHERE playlist_id = ? AND extra_data LIKE '%\"discovered\": true%'",
+                    (playlist_id,)
+                )
+                discovered = cursor.fetchone()['discovered']
+                return (discovered, total)
+        except Exception as e:
+            logger.error(f"Error getting mirrored playlist discovery counts: {e}")
+            return (0, 0)
 
     def delete_mirrored_playlist(self, playlist_id: int) -> bool:
         """Delete a mirrored playlist and its tracks (CASCADE)."""
