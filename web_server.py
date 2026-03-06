@@ -307,12 +307,42 @@ def _register_automation_handlers():
             try:
                 source = pl.get('source', '')
                 source_id = pl.get('source_playlist_id', '')
+                tracks = None
+
                 if source == 'spotify' and spotify_client and spotify_client.is_spotify_authenticated():
                     playlist_obj = spotify_client.get_playlist_by_id(source_id)
                     if playlist_obj and playlist_obj.tracks:
                         tracks = []
                         for t in playlist_obj.tracks:
-                            # Track.artists is List[str], not List[dict]
+                            artist_name = t.artists[0] if t.artists else ''
+                            track_dict = {
+                                'track_name': t.name or '',
+                                'artist_name': str(artist_name),
+                                'album_name': t.album or '',
+                                'duration_ms': t.duration_ms or 0,
+                                'source_track_id': t.id or '',
+                            }
+                            # Spotify data IS official — auto-mark as discovered
+                            if t.id:
+                                track_dict['extra_data'] = json.dumps({
+                                    'discovered': True,
+                                    'provider': 'spotify',
+                                    'confidence': 1.0,
+                                    'matched_data': {
+                                        'id': t.id,
+                                        'name': t.name or '',
+                                        'artists': [{'name': str(a)} for a in (t.artists or [])],
+                                        'album': t.album or '',
+                                        'duration_ms': t.duration_ms or 0,
+                                    }
+                                })
+                            tracks.append(track_dict)
+
+                elif source == 'tidal' and tidal_client and tidal_client.is_authenticated():
+                    full_playlist = tidal_client.get_playlist(source_id)
+                    if full_playlist and full_playlist.tracks:
+                        tracks = []
+                        for t in full_playlist.tracks:
                             artist_name = t.artists[0] if t.artists else ''
                             tracks.append({
                                 'track_name': t.name or '',
@@ -321,42 +351,66 @@ def _register_automation_handlers():
                                 'duration_ms': t.duration_ms or 0,
                                 'source_track_id': t.id or '',
                             })
-                        # Compare old vs new track IDs to detect changes
-                        old_tracks = db.get_mirrored_playlist_tracks(pl['id']) if pl.get('id') else []
-                        old_ids = {t.get('source_track_id') for t in old_tracks if t.get('source_track_id')}
-                        new_ids = {t.get('source_track_id') for t in tracks if t.get('source_track_id')}
 
-                        db.mirror_playlist(
-                            source=source,
-                            source_playlist_id=source_id,
-                            name=pl['name'],
-                            tracks=tracks,
-                            profile_id=pl.get('profile_id', 1),
-                            # Preserve existing image/owner — Playlist dataclass lacks image_url
-                            owner=getattr(playlist_obj, 'owner', pl.get('owner')),
-                            image_url=pl.get('image_url'),
-                        )
-                        refreshed += 1
+                elif source == 'youtube':
+                    yt_url = f"https://www.youtube.com/playlist?list={source_id}"
+                    playlist_data = parse_youtube_playlist(yt_url)
+                    if playlist_data and playlist_data.get('tracks'):
+                        tracks = []
+                        for t in playlist_data['tracks']:
+                            artist_name = t['artists'][0] if t.get('artists') else ''
+                            tracks.append({
+                                'track_name': t.get('name', ''),
+                                'artist_name': str(artist_name),
+                                'album_name': '',
+                                'duration_ms': t.get('duration_ms', 0),
+                                'source_track_id': t.get('id', ''),
+                            })
 
-                        # Emit playlist_changed if tracks actually changed
-                        if old_ids != new_ids:
-                            try:
-                                if automation_engine:
-                                    automation_engine.emit('playlist_changed', {
-                                        'playlist_name': pl.get('name', ''),
-                                        'old_count': str(len(old_ids)),
-                                        'new_count': str(len(new_ids)),
-                                        'added': str(len(new_ids - old_ids)),
-                                        'removed': str(len(old_ids - new_ids)),
-                                    })
-                            except Exception:
-                                pass
+                if tracks is not None:
+                    # Compare old vs new track IDs to detect changes
+                    old_tracks = db.get_mirrored_playlist_tracks(pl['id']) if pl.get('id') else []
+                    old_ids = {t.get('source_track_id') for t in old_tracks if t.get('source_track_id')}
+                    new_ids = {t.get('source_track_id') for t in tracks if t.get('source_track_id')}
+
+                    # Preserve existing discovery extra_data for tracks that still exist
+                    old_extra_map = db.get_mirrored_tracks_extra_data_map(pl['id']) if pl.get('id') else {}
+                    for t in tracks:
+                        sid = t.get('source_track_id', '')
+                        if sid and sid in old_extra_map and 'extra_data' not in t:
+                            t['extra_data'] = old_extra_map[sid]
+
+                    db.mirror_playlist(
+                        source=source,
+                        source_playlist_id=source_id,
+                        name=pl['name'],
+                        tracks=tracks,
+                        profile_id=pl.get('profile_id', 1),
+                        owner=pl.get('owner'),
+                        image_url=pl.get('image_url'),
+                    )
+                    refreshed += 1
+
+                    # Emit playlist_changed if tracks actually changed
+                    if old_ids != new_ids:
+                        try:
+                            if automation_engine:
+                                automation_engine.emit('playlist_changed', {
+                                    'playlist_name': pl.get('name', ''),
+                                    'old_count': str(len(old_ids)),
+                                    'new_count': str(len(new_ids)),
+                                    'added': str(len(new_ids - old_ids)),
+                                    'removed': str(len(old_ids - new_ids)),
+                                })
+                        except Exception:
+                            pass
             except Exception as e:
                 errors.append(f"{pl.get('name', '?')}: {str(e)}")
         return {'status': 'completed', 'refreshed': str(refreshed), 'errors': str(len(errors))}
 
     def _auto_sync_playlist(config):
-        """Sync a mirrored playlist to media server."""
+        """Sync a mirrored playlist to media server.
+        Uses discovered metadata when available, skips undiscovered tracks."""
         playlist_id = config.get('playlist_id')
         if not playlist_id:
             return {'status': 'error', 'reason': 'No playlist specified'}
@@ -371,15 +425,39 @@ def _register_automation_handlers():
             return {'status': 'error', 'reason': 'No tracks in playlist'}
 
         # Convert mirrored tracks to format expected by _run_sync_task
+        # Use discovered metadata when available, skip undiscovered tracks
         tracks_json = []
+        skipped_count = 0
+
         for t in tracks:
-            tracks_json.append({
-                'name': t.get('track_name', ''),
-                'artists': [{'name': t.get('artist_name', '')}],
-                'album': t.get('album_name', ''),
-                'duration_ms': t.get('duration_ms', 0),
-                'id': t.get('source_track_id', ''),
-            })
+            # Parse extra_data for discovery info
+            extra = {}
+            if t.get('extra_data'):
+                try:
+                    extra = json.loads(t['extra_data']) if isinstance(t['extra_data'], str) else t['extra_data']
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            if extra.get('discovered') and extra.get('matched_data'):
+                # Use official discovered metadata
+                md = extra['matched_data']
+                tracks_json.append({
+                    'name': md.get('name', ''),
+                    'artists': md.get('artists', [{'name': t.get('artist_name', '')}]),
+                    'album': md.get('album', ''),
+                    'duration_ms': md.get('duration_ms', 0),
+                    'id': md.get('id', ''),
+                })
+            else:
+                # NOT discovered — skip to prevent garbage in wishlist
+                skipped_count += 1
+
+        if not tracks_json:
+            return {
+                'status': 'skipped',
+                'reason': f'No discovered tracks to sync ({skipped_count} tracks need discovery first)',
+                'skipped_tracks': str(skipped_count),
+            }
 
         sync_id = f"auto_mirror_{playlist_id}"
         threading.Thread(
@@ -388,10 +466,42 @@ def _register_automation_handlers():
             daemon=True,
             name=f'auto-sync-{playlist_id}'
         ).start()
-        return {'status': 'started', 'playlist_name': pl['name']}
+        return {
+            'status': 'started',
+            'playlist_name': pl['name'],
+            'discovered_tracks': str(len(tracks_json)),
+            'skipped_tracks': str(skipped_count),
+        }
+
+    def _auto_discover_playlist(config):
+        """Discover official Spotify/iTunes metadata for mirrored playlist tracks."""
+        db = get_database()
+        playlist_id = config.get('playlist_id')
+        discover_all = config.get('all', False)
+
+        if discover_all:
+            playlists = db.get_mirrored_playlists()
+        elif playlist_id:
+            p = db.get_mirrored_playlist(int(playlist_id))
+            playlists = [p] if p else []
+        else:
+            return {'status': 'error', 'reason': 'No playlist specified'}
+
+        if not playlists:
+            return {'status': 'error', 'reason': 'No playlists found'}
+
+        threading.Thread(
+            target=_run_playlist_discovery_worker,
+            args=(playlists,),
+            daemon=True,
+            name='auto-discover-playlist'
+        ).start()
+        names = ', '.join(p['name'] for p in playlists[:3])
+        return {'status': 'started', 'playlist_count': str(len(playlists)), 'playlists': names}
 
     automation_engine.register_action_handler('refresh_mirrored', _auto_refresh_mirrored)
     automation_engine.register_action_handler('sync_playlist', _auto_sync_playlist)
+    automation_engine.register_action_handler('discover_playlist', _auto_discover_playlist)
 
     # --- Phase 3 action handlers ---
 
@@ -3576,6 +3686,10 @@ def get_automation_blocks():
              "has_conditions": True,
              "condition_fields": ["playlist_name"],
              "variables": ["playlist_name", "old_count", "new_count", "added", "removed"]},
+            {"type": "discovery_completed", "label": "Discovery Complete", "icon": "search", "description": "When playlist track discovery finishes", "available": True,
+             "has_conditions": True,
+             "condition_fields": ["playlist_name"],
+             "variables": ["playlist_name", "total_tracks", "discovered_count", "failed_count", "skipped_count"]},
             # Phase 3 triggers
             {"type": "wishlist_processing_completed", "label": "Wishlist Processed", "icon": "check-circle",
              "description": "When auto-wishlist processing finishes", "available": True,
@@ -3634,6 +3748,11 @@ def get_automation_blocks():
             {"type": "sync_playlist", "label": "Sync Playlist", "icon": "sync", "description": "Sync mirrored playlist to media server", "available": True,
              "config_fields": [
                  {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"}
+             ]},
+            {"type": "discover_playlist", "label": "Discover Playlist", "icon": "search", "description": "Find official Spotify/iTunes metadata for mirrored playlist tracks", "available": True,
+             "config_fields": [
+                 {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"},
+                 {"key": "all", "type": "checkbox", "label": "Discover all mirrored playlists", "default": False}
              ]},
             {"type": "notify_only", "label": "Notify Only", "icon": "bell", "description": "No action — just send notification", "available": True},
             # Phase 3 actions
@@ -19770,6 +19889,203 @@ def update_tidal_playlist_phase(playlist_id):
     except Exception as e:
         print(f"❌ Error updating Tidal playlist phase: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+def _run_playlist_discovery_worker(playlists):
+    """Background worker that discovers Spotify/iTunes metadata for undiscovered
+    mirrored playlist tracks. Stores results in extra_data for use by sync."""
+    try:
+        use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
+        discovery_source = 'spotify' if use_spotify else 'itunes'
+
+        itunes_client_instance = None
+        if not use_spotify:
+            try:
+                from core.itunes_client import iTunesClient
+                itunes_client_instance = iTunesClient()
+            except Exception:
+                print("❌ Neither Spotify nor iTunes available for discovery")
+                return
+
+        total_discovered = 0
+        total_failed = 0
+        total_skipped = 0
+        total_tracks = 0
+        last_playlist_name = ''
+
+        for pl in playlists:
+            pl_id = pl['id']
+            pl_name = pl.get('name', '')
+            last_playlist_name = pl_name
+            source = pl.get('source', '')
+
+            # Spotify playlists are auto-discovered during refresh
+            if source == 'spotify':
+                continue
+
+            db = get_database()
+            tracks = db.get_mirrored_playlist_tracks(pl_id)
+            if not tracks:
+                continue
+
+            print(f"🔍 Starting discovery for playlist '{pl_name}' ({len(tracks)} tracks, using {discovery_source.upper()})")
+
+            for i, track in enumerate(tracks):
+                total_tracks += 1
+                track_id = track['id']
+                track_name = track.get('track_name', '')
+                artist_name = track.get('artist_name', '')
+                duration_ms = track.get('duration_ms', 0)
+
+                # Check if already discovered
+                existing_extra = {}
+                if track.get('extra_data'):
+                    try:
+                        existing_extra = json.loads(track['extra_data']) if isinstance(track['extra_data'], str) else track['extra_data']
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                if existing_extra.get('discovered'):
+                    total_skipped += 1
+                    continue
+
+                # Step 1: Check discovery cache
+                cache_key = _get_discovery_cache_key(track_name, artist_name)
+                try:
+                    cached_match = db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
+                    if cached_match and _validate_discovery_cache_artist(artist_name, cached_match):
+                        extra_data = {
+                            'discovered': True,
+                            'provider': discovery_source,
+                            'confidence': cached_match.get('confidence', 0.85),
+                            'matched_data': cached_match,
+                        }
+                        db.update_mirrored_track_extra_data(track_id, extra_data)
+                        total_discovered += 1
+                        print(f"⚡ CACHE [{i+1}/{len(tracks)}]: {track_name} → {cached_match.get('name', '?')}")
+                        continue
+                except Exception:
+                    pass
+
+                # Step 2: Generate search queries
+                try:
+                    temp_track = type('TempTrack', (), {
+                        'name': track_name,
+                        'artists': [artist_name],
+                        'album': None
+                    })()
+                    search_queries = matching_engine.generate_download_queries(temp_track)
+                except Exception:
+                    search_queries = [f"{artist_name} {track_name}", track_name]
+
+                # Step 3: Search and score
+                best_match = None
+                best_confidence = 0.0
+                min_confidence = 0.7
+
+                for search_query in search_queries:
+                    try:
+                        if use_spotify:
+                            results = spotify_client.search_tracks(search_query, limit=10)
+                        else:
+                            results = itunes_client_instance.search_tracks(search_query, limit=10)
+                        if not results:
+                            continue
+
+                        match, confidence, _ = _discovery_score_candidates(
+                            track_name, artist_name, duration_ms, results
+                        )
+
+                        if match and confidence > best_confidence:
+                            best_confidence = confidence
+                            best_match = match
+
+                        if best_confidence >= 0.9:
+                            break
+                    except Exception:
+                        continue
+
+                # Extended search fallback
+                if not best_match or best_confidence < min_confidence:
+                    try:
+                        query = f"{artist_name} {track_name}"
+                        if use_spotify:
+                            extended = spotify_client.search_tracks(query, limit=50)
+                        else:
+                            extended = itunes_client_instance.search_tracks(query, limit=50)
+                        if extended:
+                            match, confidence, _ = _discovery_score_candidates(
+                                track_name, artist_name, duration_ms, extended
+                            )
+                            if match and confidence > best_confidence:
+                                best_confidence = confidence
+                                best_match = match
+                    except Exception:
+                        pass
+
+                # Step 4: Store results
+                if best_match and best_confidence >= min_confidence:
+                    match_artists = best_match.artists if hasattr(best_match, 'artists') else []
+                    matched_data = {
+                        'id': best_match.id if hasattr(best_match, 'id') else '',
+                        'name': best_match.name if hasattr(best_match, 'name') else '',
+                        'artists': [{'name': a} if isinstance(a, str) else a for a in match_artists],
+                        'album': best_match.album if hasattr(best_match, 'album') else '',
+                        'duration_ms': best_match.duration_ms if hasattr(best_match, 'duration_ms') else 0,
+                        'source': discovery_source,
+                    }
+
+                    extra_data = {
+                        'discovered': True,
+                        'provider': discovery_source,
+                        'confidence': best_confidence,
+                        'matched_data': matched_data,
+                    }
+                    db.update_mirrored_track_extra_data(track_id, extra_data)
+                    total_discovered += 1
+
+                    # Save to discovery cache
+                    try:
+                        db.save_discovery_cache_match(
+                            cache_key[0], cache_key[1], discovery_source,
+                            best_confidence, matched_data,
+                            track_name, artist_name
+                        )
+                    except Exception:
+                        pass
+
+                    print(f"✅ [{i+1}/{len(tracks)}] {track_name} → {matched_data['name']} ({best_confidence:.2f})")
+                else:
+                    extra_data = {
+                        'discovered': False,
+                        'discovery_attempted': True,
+                        'provider': discovery_source,
+                    }
+                    db.update_mirrored_track_extra_data(track_id, extra_data)
+                    total_failed += 1
+                    print(f"❌ [{i+1}/{len(tracks)}] No match: {track_name} by {artist_name}")
+
+                time.sleep(0.15)
+
+        # Emit completion event
+        try:
+            if automation_engine:
+                automation_engine.emit('discovery_completed', {
+                    'playlist_name': last_playlist_name if len(playlists) == 1 else f'{len(playlists)} playlists',
+                    'total_tracks': str(total_tracks),
+                    'discovered_count': str(total_discovered),
+                    'failed_count': str(total_failed),
+                    'skipped_count': str(total_skipped),
+                })
+        except Exception:
+            pass
+
+        print(f"✅ Playlist discovery complete: {total_discovered} discovered, {total_failed} failed, {total_skipped} skipped")
+
+    except Exception as e:
+        print(f"❌ Error in playlist discovery worker: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def _get_discovery_cache_key(title, artist):

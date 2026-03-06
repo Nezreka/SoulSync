@@ -6520,6 +6520,50 @@ class MusicDatabase:
             logger.error(f"Error getting mirrored playlist tracks: {e}")
             return []
 
+    def update_mirrored_track_extra_data(self, track_id: int, extra_data_dict: dict) -> bool:
+        """Merge new data into a mirrored track's extra_data JSON field."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT extra_data FROM mirrored_playlist_tracks WHERE id = ?",
+                    (track_id,)
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return False
+                existing = {}
+                if row['extra_data']:
+                    try:
+                        existing = json.loads(row['extra_data'])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                existing.update(extra_data_dict)
+                cursor.execute(
+                    "UPDATE mirrored_playlist_tracks SET extra_data = ? WHERE id = ?",
+                    (json.dumps(existing), track_id)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating mirrored track extra_data: {e}")
+            return False
+
+    def get_mirrored_tracks_extra_data_map(self, playlist_id: int) -> dict:
+        """Return {source_track_id: extra_data_json_string} for a playlist.
+        Used to preserve discovery data across refreshes."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT source_track_id, extra_data FROM mirrored_playlist_tracks
+                    WHERE playlist_id = ? AND source_track_id IS NOT NULL AND extra_data IS NOT NULL
+                """, (playlist_id,))
+                return {row['source_track_id']: row['extra_data'] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Error getting extra_data map: {e}")
+            return {}
+
     def delete_mirrored_playlist(self, playlist_id: int) -> bool:
         """Delete a mirrored playlist and its tracks (CASCADE)."""
         try:
