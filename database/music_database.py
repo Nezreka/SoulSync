@@ -6080,6 +6080,106 @@ class MusicDatabase:
             logger.error(f"Error invalidating sync match cache: {e}")
             return 0
 
+    # ==================== Discovery Pool Methods ====================
+
+    def get_discovery_pool_matched(self, limit: int = 500) -> list:
+        """Get all cached discovery matches, ordered by most recently used."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, original_title, original_artist, normalized_title, normalized_artist,
+                       provider, match_confidence, matched_data_json, use_count, last_used_at, created_at
+                FROM discovery_match_cache
+                ORDER BY last_used_at DESC
+                LIMIT ?
+            """, (limit,))
+            results = []
+            for row in cursor.fetchall():
+                try:
+                    matched_data = json.loads(row['matched_data_json'])
+                except (json.JSONDecodeError, TypeError):
+                    matched_data = {}
+                results.append({
+                    'id': row['id'],
+                    'original_title': row['original_title'] or row['normalized_title'],
+                    'original_artist': row['original_artist'] or row['normalized_artist'],
+                    'provider': row['provider'],
+                    'confidence': row['match_confidence'],
+                    'matched_data': matched_data,
+                    'use_count': row['use_count'],
+                    'last_used_at': row['last_used_at'],
+                    'created_at': row['created_at'],
+                })
+            return results
+        except Exception as e:
+            logger.error(f"Error getting discovery pool matched: {e}")
+            return []
+
+    def get_discovery_pool_failed(self, profile_id: int = None, playlist_id: int = None) -> list:
+        """Get all tracks where discovery was attempted but failed."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            query = """
+                SELECT mpt.id, mpt.track_name, mpt.artist_name, mpt.album_name,
+                       mpt.playlist_id, mp.name as playlist_name
+                FROM mirrored_playlist_tracks mpt
+                JOIN mirrored_playlists mp ON mpt.playlist_id = mp.id
+                WHERE mpt.extra_data LIKE '%"discovery_attempted": true%'
+                  AND mpt.extra_data NOT LIKE '%"discovered": true%'
+            """
+            params = []
+            if playlist_id:
+                query += " AND mpt.playlist_id = ?"
+                params.append(playlist_id)
+            elif profile_id:
+                query += " AND mp.profile_id = ?"
+                params.append(profile_id)
+            query += " ORDER BY mp.name, mpt.track_name"
+            cursor.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting discovery pool failed: {e}")
+            return []
+
+    def delete_discovery_cache_entry(self, entry_id: int) -> bool:
+        """Delete a single entry from the discovery match cache."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM discovery_match_cache WHERE id = ?", (entry_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting discovery cache entry: {e}")
+            return False
+
+    def get_discovery_pool_stats(self, profile_id: int = None) -> dict:
+        """Get counts for matched and failed discovery tracks."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) as cnt FROM discovery_match_cache")
+            matched = cursor.fetchone()['cnt']
+
+            query = """
+                SELECT COUNT(*) as cnt FROM mirrored_playlist_tracks mpt
+                JOIN mirrored_playlists mp ON mpt.playlist_id = mp.id
+                WHERE mpt.extra_data LIKE '%"discovery_attempted": true%'
+                  AND mpt.extra_data NOT LIKE '%"discovered": true%'
+            """
+            params = []
+            if profile_id:
+                query += " AND mp.profile_id = ?"
+                params.append(profile_id)
+            cursor.execute(query, params)
+            failed = cursor.fetchone()['cnt']
+            return {'matched': matched, 'failed': failed}
+        except Exception as e:
+            logger.error(f"Error getting discovery pool stats: {e}")
+            return {'matched': 0, 'failed': 0}
+
     # ==================== Retag Tool Methods ====================
 
     def add_retag_group(self, group_type: str, artist_name: str, album_name: str,

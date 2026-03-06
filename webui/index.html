@@ -657,6 +657,26 @@
                                 </div>
                             </div>
 
+                            <div class="tool-card" id="discovery-pool-card">
+                                <div class="tool-card-header">
+                                    <h4 class="tool-card-title">Discovery Pool</h4>
+                                </div>
+                                <p class="tool-card-info">View and fix matched/failed discovery results across all mirrored playlists</p>
+                                <div class="tool-card-stats" id="discovery-pool-stats">
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Matched:</span>
+                                        <span class="stat-item-value" id="discovery-pool-matched-count">&mdash;</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Failed:</span>
+                                        <span class="stat-item-value" id="discovery-pool-failed-count" style="background-color: rgba(239, 68, 68, 0.15); color: #ef4444;">&mdash;</span>
+                                    </div>
+                                </div>
+                                <div class="tool-card-controls">
+                                    <button onclick="openDiscoveryPoolModal()">Open Discovery Pool</button>
+                                </div>
+                            </div>
+
                             <div class="tool-card" id="retag-tool-card">
                                 <div class="tool-card-header">
                                     <h4 class="tool-card-title">Retag Tool</h4>
@@ -1505,6 +1525,7 @@
                         <div class="sync-tab-content" id="mirrored-tab-content">
                             <div class="playlist-header">
                                 <h3>Mirrored Playlists</h3>
+                                <button class="pool-trigger-btn" onclick="openDiscoveryPoolModal()" title="View matched and failed discovery tracks">Discovery Pool</button>
                                 <button class="refresh-button mirrored" id="mirrored-refresh-btn">Refresh</button>
                             </div>
                             <div class="playlist-scroll-container" id="mirrored-playlist-container">
