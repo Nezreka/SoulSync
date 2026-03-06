@@ -6,7 +6,7 @@ on:
       version_tag:
         description: 'Version tag (e.g. 1.6, 1.7)'
         required: true
-        default: '1.7'
+        default: '1.8'
 
 jobs:
   build-and-push:
