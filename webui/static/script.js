@@ -42137,6 +42137,7 @@ const _autoIcons = {
     playlist_changed: '\u270F\uFE0F',
     process_wishlist: '\uD83D\uDCCB', scan_watchlist: '\uD83D\uDC41\uFE0F',
     scan_library: '\uD83D\uDD04', refresh_mirrored: '\uD83D\uDCC2', sync_playlist: '\uD83D\uDD01',
+    discover_playlist: '\uD83D\uDD0D', discovery_completed: '\uD83D\uDD0D',
     notify_only: '\uD83D\uDD14', discord_webhook: '\uD83D\uDCAC', pushbullet: '\uD83D\uDD14', telegram: '\u2709\uFE0F',
     // Phase 3
     wishlist_processing_completed: '\u2705', watchlist_scan_completed: '\u2705',
@@ -42246,7 +42247,7 @@ function _autoFormatTrigger(type, config) {
     }
     const labels = { app_started: 'App Started', track_downloaded: 'Track Downloaded', batch_complete: 'Batch Complete',
         watchlist_new_release: 'New Release Found', playlist_synced: 'Playlist Synced',
-        playlist_changed: 'Playlist Changed',
+        playlist_changed: 'Playlist Changed', discovery_completed: 'Discovery Complete',
         wishlist_processing_completed: 'Wishlist Processed', watchlist_scan_completed: 'Watchlist Scan Done',
         database_update_completed: 'Database Updated', download_failed: 'Download Failed',
         download_quarantined: 'File Quarantined', wishlist_item_added: 'Wishlist Item Added',
@@ -42264,7 +42265,8 @@ function _autoFormatTrigger(type, config) {
 function _autoFormatAction(type) {
     const labels = { process_wishlist: 'Process Wishlist', scan_watchlist: 'Scan Watchlist',
         scan_library: 'Scan Library', refresh_mirrored: 'Refresh Mirrored',
-        sync_playlist: 'Sync Playlist', notify_only: 'Notify Only',
+        sync_playlist: 'Sync Playlist', discover_playlist: 'Discover Playlist',
+        notify_only: 'Notify Only',
         start_database_update: 'Update Database', run_duplicate_cleaner: 'Run Duplicate Cleaner',
         clear_quarantine: 'Clear Quarantine', cleanup_wishlist: 'Clean Up Wishlist',
         update_discovery_pool: 'Update Discovery', start_quality_scan: 'Run Quality Scan',
@@ -42587,6 +42589,18 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
             </select>
         </div>`;
     }
+    if (blockType === 'discover_playlist') {
+        const allChecked = config.all ? ' checked' : '';
+        return `<div class="config-row">
+            <label>Playlist</label>
+            <select id="cfg-${slotKey}-playlist_id" class="mirrored-playlist-select" data-value="${_escAttr(config.playlist_id || '')}">
+                <option value="">Loading...</option>
+            </select>
+        </div>
+        <div class="config-row">
+            <label><input type="checkbox" id="cfg-${slotKey}-all"${allChecked} onchange="_autoTogglePlaylistSelect('${slotKey}')"> Discover all mirrored playlists</label>
+        </div>`;
+    }
     // Shared variable tags builder for notification types
     function _notifyVarHtml(slotKey) {
         let allVars = ['time', 'name', 'run_count', 'status'];
@@ -42683,21 +42697,28 @@ function _renderConditionBuilder(slotKey, blockDef, config) {
 
 function _renderConditionRow(slotKey, index, fields, cond) {
     const field = cond ? cond.field : (fields[0] || '');
-    const operator = cond ? cond.operator : 'contains';
+    const operator = cond ? cond.operator : 'equals';
     const value = cond ? _escAttr(cond.value) : '';
 
     let fieldOpts = '';
     fields.forEach(f => { fieldOpts += `<option value="${f}"${f===field?' selected':''}>${f}</option>`; });
 
+    // For playlist-related triggers, use a mirrored playlist dropdown instead of free text
+    const triggerType = _autoBuilder.when ? _autoBuilder.when.type : '';
+    const usePlaylistSelect = ((triggerType === 'playlist_changed' || triggerType === 'discovery_completed') && field === 'playlist_name');
+    const valueHtml = usePlaylistSelect
+        ? `<select class="cond-value mirrored-playlist-name-select" data-slot="${slotKey}" data-idx="${index}" data-value="${value}"></select>`
+        : `<input type="text" class="cond-value" data-slot="${slotKey}" data-idx="${index}" value="${value}" placeholder="value...">`;
+
     return `<div class="condition-row" data-index="${index}">
         <select class="cond-field" data-slot="${slotKey}" data-idx="${index}">${fieldOpts}</select>
         <select class="cond-operator" data-slot="${slotKey}" data-idx="${index}">
-            <option value="contains"${operator==='contains'?' selected':''}>contains</option>
             <option value="equals"${operator==='equals'?' selected':''}>equals</option>
+            <option value="contains"${operator==='contains'?' selected':''}>contains</option>
             <option value="starts_with"${operator==='starts_with'?' selected':''}>starts with</option>
             <option value="not_contains"${operator==='not_contains'?' selected':''}>not contains</option>
         </select>
-        <input type="text" class="cond-value" data-slot="${slotKey}" data-idx="${index}" value="${value}" placeholder="value...">
+        ${valueHtml}
         <button class="remove-condition-btn" onclick="_autoRemoveCondition('${slotKey}',${index})">\u2715</button>
     </div>`;
 }
@@ -42757,7 +42778,8 @@ function _autoTogglePlaylistSelect(slotKey) {
 
 async function _autoLoadMirroredSelects() {
     const selects = document.querySelectorAll('.mirrored-playlist-select');
-    if (!selects.length) return;
+    const nameSelects = document.querySelectorAll('.mirrored-playlist-name-select');
+    if (!selects.length && !nameSelects.length) return;
 
     if (!_autoMirroredPlaylists) {
         try {
@@ -42771,6 +42793,14 @@ async function _autoLoadMirroredSelects() {
         sel.innerHTML = '<option value="">-- Select playlist --</option>';
         _autoMirroredPlaylists.forEach(p => {
             sel.innerHTML += `<option value="${p.id}"${String(p.id) === savedValue ? ' selected' : ''}>${_esc(p.name)}</option>`;
+        });
+    });
+
+    nameSelects.forEach(sel => {
+        const savedValue = sel.dataset.value || '';
+        sel.innerHTML = '<option value="">-- Select playlist --</option>';
+        _autoMirroredPlaylists.forEach(p => {
+            sel.innerHTML += `<option value="${_escAttr(p.name)}"${p.name === savedValue ? ' selected' : ''}>${_esc(p.name)}</option>`;
         });
     });
 }
@@ -42817,6 +42847,13 @@ function _readPlacedConfig(slotKey) {
     }
     if (type === 'sync_playlist') {
         return { playlist_id: document.getElementById('cfg-' + slotKey + '-playlist_id')?.value || '' };
+    }
+    if (type === 'discover_playlist') {
+        const allCb = document.getElementById('cfg-' + slotKey + '-all');
+        return {
+            playlist_id: document.getElementById('cfg-' + slotKey + '-playlist_id')?.value || '',
+            all: allCb ? allCb.checked : false,
+        };
     }
     if (type === 'discord_webhook') {
         return {
