@@ -42385,11 +42385,12 @@ function updateAutomationProgressFromData(data) {
             }
         }
 
-        // Diff-append log lines
+        // Update log lines
         const logEl = panel.querySelector('.auto-progress-log');
         const rendered = _autoProgressLogCounts[aid] || 0;
         const logLines = state.log || [];
         if (logLines.length > rendered) {
+            // Normal append — log is still growing
             for (let i = rendered; i < logLines.length; i++) {
                 const line = logLines[i];
                 const div = document.createElement('div');
@@ -42399,6 +42400,25 @@ function updateAutomationProgressFromData(data) {
             }
             _autoProgressLogCounts[aid] = logLines.length;
             logEl.scrollTop = logEl.scrollHeight;
+        } else if (logLines.length === rendered && logLines.length >= 50) {
+            // Log buffer is full and rotating — replace last few lines
+            const children = logEl.children;
+            if (children.length > 0) {
+                const lastServerLine = logLines[logLines.length - 1];
+                const lastDomLine = children[children.length - 1];
+                if (lastServerLine && lastDomLine.textContent !== lastServerLine.text) {
+                    // Content changed — full re-render
+                    logEl.innerHTML = '';
+                    for (const line of logLines) {
+                        const div = document.createElement('div');
+                        div.className = 'auto-log-line ' + (line.type || 'info');
+                        div.textContent = line.text;
+                        logEl.appendChild(div);
+                    }
+                    _autoProgressLogCounts[aid] = logLines.length;
+                    logEl.scrollTop = logEl.scrollHeight;
+                }
+            }
         }
     }
 }
