@@ -20226,12 +20226,18 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                 # Step 4: Store results
                 if best_match and best_confidence >= min_confidence:
                     match_artists = best_match.artists if hasattr(best_match, 'artists') else []
+                    match_image = getattr(best_match, 'image_url', None)
+                    album_name = best_match.album if hasattr(best_match, 'album') else ''
+                    album_obj = {'name': album_name}
+                    if match_image:
+                        album_obj['images'] = [{'url': match_image, 'height': 600, 'width': 600}]
                     matched_data = {
                         'id': best_match.id if hasattr(best_match, 'id') else '',
                         'name': best_match.name if hasattr(best_match, 'name') else '',
                         'artists': [{'name': a} if isinstance(a, str) else a for a in match_artists],
-                        'album': best_match.album if hasattr(best_match, 'album') else '',
+                        'album': album_obj,
                         'duration_ms': best_match.duration_ms if hasattr(best_match, 'duration_ms') else 0,
+                        'image_url': match_image,
                         'source': discovery_source,
                     }
 
