@@ -492,7 +492,7 @@ def _register_automation_handlers():
             log_line=f'Starting sync: {len(tracks_json)} tracks', log_type='success')
         threading.Thread(
             target=_run_sync_task,
-            args=(sync_id, pl['name'], tracks_json),
+            args=(sync_id, pl['name'], tracks_json, auto_id),
             daemon=True,
             name=f'auto-sync-{playlist_id}'
         ).start()
@@ -501,6 +501,7 @@ def _register_automation_handlers():
             'playlist_name': pl['name'],
             'discovered_tracks': str(len(tracks_json)),
             'skipped_tracks': str(skipped_count),
+            '_manages_own_progress': True,
         }
 
     def _auto_discover_playlist(config):
@@ -21981,10 +21982,10 @@ def convert_youtube_results_to_spotify_tracks(discovery_results):
 
 # Add these new endpoints to the end of web_server.py
 
-def _run_sync_task(playlist_id, playlist_name, tracks_json):
+def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
     """The actual sync function that runs in the background thread."""
     global sync_states, sync_service
-    
+
     task_start_time = time.time()
     print(f"🚀 [TIMING] _run_sync_task STARTED for playlist '{playlist_name}' at {time.strftime('%H:%M:%S')}")
     print(f"📊 Received {len(tracks_json)} tracks from frontend")
@@ -22049,16 +22050,33 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
                 first_callback_time[0] = time.time()
                 first_callback_duration = (first_callback_time[0] - task_start_time) * 1000
                 print(f"⏱️ [TIMING] FIRST progress callback at {time.strftime('%H:%M:%S')} (took {first_callback_duration:.1f}ms from start)")
-            
+
             print(f"⚡ PROGRESS CALLBACK: {progress.current_step} - {progress.current_track}")
             print(f"   📊 Progress: {progress.progress}% ({progress.matched_tracks}/{progress.total_tracks} matched, {progress.failed_tracks} failed)")
-            
+
             with sync_lock:
                 sync_states[playlist_id] = {
                     "status": "syncing",
                     "progress": progress.__dict__ # Convert dataclass to dict
                 }
                 print(f"   ✅ Updated sync_states for {playlist_id}")
+
+            # Update automation progress card
+            if automation_id:
+                step = getattr(progress, 'current_step', '')
+                track = getattr(progress, 'current_track', '')
+                pct = getattr(progress, 'progress', 0)
+                matched = getattr(progress, 'matched_tracks', 0)
+                failed = getattr(progress, 'failed_tracks', 0)
+                total = getattr(progress, 'total_tracks', 0)
+                log_type = 'success' if 'matched' in step.lower() or 'found' in step.lower() else 'info'
+                if 'not found' in step.lower() or 'failed' in step.lower():
+                    log_type = 'error'
+                _update_automation_progress(automation_id, progress=pct,
+                    phase=f'Syncing: {step}',
+                    processed=matched + failed, total=total,
+                    current_item=track,
+                    log_line=f'{track} — {step}' if track else step, log_type=log_type)
                 
     except Exception as setup_error:
         print(f"❌ SETUP ERROR in _run_sync_task: {setup_error}")
@@ -22069,6 +22087,9 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
                 "status": "error",
                 "error": f"Setup error: {str(setup_error)}"
             }
+        if automation_id:
+            _update_automation_progress(automation_id, status='error', progress=100,
+                phase='Error', log_line=f'Setup error: {str(setup_error)}', log_type='error')
         return
 
     try:
@@ -22193,6 +22214,14 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
             }
         print(f"🏁 Sync finished for {playlist_id} - state updated")
 
+        if automation_id:
+            matched = getattr(result, 'matched_tracks', 0)
+            total = getattr(result, 'total_tracks', 0)
+            failed = getattr(result, 'failed_tracks', 0)
+            _update_automation_progress(automation_id, status='finished', progress=100,
+                phase='Sync complete',
+                log_line=f'Done: {matched}/{total} matched, {failed} failed', log_type='success')
+
         # Emit playlist_synced event for automation engine
         try:
             if automation_engine:
@@ -22220,6 +22249,9 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json):
                 "status": "error",
                 "error": str(e)
             }
+        if automation_id:
+            _update_automation_progress(automation_id, status='error', progress=100,
+                phase='Error', log_line=f'Sync failed: {str(e)}', log_type='error')
     finally:
         print(f"🧹 Cleaning up progress callback for {playlist.name}")
         # Clean up the callback
