@@ -20106,25 +20106,41 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
             _update_automation_progress(automation_id, phase=f'Discovering: "{pl_name}"',
                                          log_line=f'Playlist "{pl_name}" — {len(tracks)} tracks ({discovery_source.upper()})', log_type='info')
 
-            for i, track in enumerate(tracks):
-                total_tracks += 1
-                track_id = track['id']
-                track_name = track.get('track_name', '')
-                artist_name = track.get('artist_name', '')
-                duration_ms = track.get('duration_ms', 0)
-
-                # Check if already discovered
+            # Fast pre-scan: separate already-discovered from undiscovered
+            undiscovered_tracks = []
+            pl_skipped = 0
+            for track in tracks:
                 existing_extra = {}
                 if track.get('extra_data'):
                     try:
                         existing_extra = json.loads(track['extra_data']) if isinstance(track['extra_data'], str) else track['extra_data']
                     except (json.JSONDecodeError, TypeError):
                         pass
-
                 if existing_extra.get('discovered'):
+                    pl_skipped += 1
                     total_skipped += 1
-                    _update_automation_progress(automation_id, log_line=f'Already discovered: {track_name}', log_type='skip')
-                    continue
+                else:
+                    undiscovered_tracks.append(track)
+
+            if pl_skipped > 0:
+                _update_automation_progress(automation_id,
+                    log_line=f'{pl_skipped} tracks already discovered — skipped', log_type='skip')
+
+            if not undiscovered_tracks:
+                _update_automation_progress(automation_id,
+                    progress=((total_skipped + total_discovered + total_failed) / max(1, grand_total)) * 100,
+                    log_line=f'All {len(tracks)} tracks already discovered', log_type='skip')
+                continue
+
+            _update_automation_progress(automation_id,
+                log_line=f'{len(undiscovered_tracks)} tracks to discover', log_type='info')
+
+            for i, track in enumerate(undiscovered_tracks):
+                total_tracks += 1
+                track_id = track['id']
+                track_name = track.get('track_name', '')
+                artist_name = track.get('artist_name', '')
+                duration_ms = track.get('duration_ms', 0)
 
                 # Step 1: Check discovery cache
                 cache_key = _get_discovery_cache_key(track_name, artist_name)
@@ -20139,9 +20155,9 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                         }
                         db.update_mirrored_track_extra_data(track_id, extra_data)
                         total_discovered += 1
-                        print(f"⚡ CACHE [{i+1}/{len(tracks)}]: {track_name} → {cached_match.get('name', '?')}")
+                        print(f"⚡ CACHE [{i+1}/{len(undiscovered_tracks)}]: {track_name} → {cached_match.get('name', '?')}")
                         _update_automation_progress(automation_id,
-                            progress=(total_tracks / max(1, grand_total)) * 100,
+                            progress=((total_skipped + total_discovered + total_failed) / max(1, grand_total)) * 100,
                             current_item=track_name,
                             log_line=f'{track_name} → {cached_match.get("name", "?")} (cache)', log_type='success')
                         continue
@@ -20235,9 +20251,9 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                     except Exception:
                         pass
 
-                    print(f"✅ [{i+1}/{len(tracks)}] {track_name} → {matched_data['name']} ({best_confidence:.2f})")
+                    print(f"✅ [{i+1}/{len(undiscovered_tracks)}] {track_name} → {matched_data['name']} ({best_confidence:.2f})")
                     _update_automation_progress(automation_id,
-                        progress=(total_tracks / max(1, grand_total)) * 100,
+                        progress=((total_skipped + total_discovered + total_failed) / max(1, grand_total)) * 100,
                         processed=total_discovered + total_failed,
                         current_item=f'{track_name} - {artist_name}',
                         log_line=f'{track_name} → {matched_data["name"]} ({best_confidence:.2f})', log_type='success')
@@ -20249,9 +20265,9 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                     }
                     db.update_mirrored_track_extra_data(track_id, extra_data)
                     total_failed += 1
-                    print(f"❌ [{i+1}/{len(tracks)}] No match: {track_name} by {artist_name}")
+                    print(f"❌ [{i+1}/{len(undiscovered_tracks)}] No match: {track_name} by {artist_name}")
                     _update_automation_progress(automation_id,
-                        progress=(total_tracks / max(1, grand_total)) * 100,
+                        progress=((total_skipped + total_discovered + total_failed) / max(1, grand_total)) * 100,
                         processed=total_discovered + total_failed,
                         current_item=f'{track_name} - {artist_name}',
                         log_line=f'{track_name} by {artist_name} → no match', log_type='error')
