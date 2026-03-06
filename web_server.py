@@ -4679,6 +4679,12 @@ def tidal_callback():
     try:
         # Create a temporary client for the token exchange
         temp_tidal_client = TidalClient()
+
+        # Restore PKCE values from the auth request (matches HTTPServer handler logic)
+        with tidal_oauth_lock:
+            temp_tidal_client.code_verifier = tidal_oauth_state["code_verifier"]
+            temp_tidal_client.code_challenge = tidal_oauth_state["code_challenge"]
+
         success = temp_tidal_client.fetch_token_from_code(auth_code)
         
         if success:
