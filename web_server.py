@@ -269,12 +269,18 @@ def _register_automation_handlers():
         return
 
     def _auto_process_wishlist(config):
-        _process_wishlist_automatically()
-        return {'status': 'completed'}
+        try:
+            _process_wishlist_automatically(automation_id=config.get('_automation_id'))
+            return {'status': 'completed'}
+        except Exception as e:
+            return {'status': 'error', 'error': str(e)}
 
     def _auto_scan_watchlist(config):
-        _process_watchlist_scan_automatically()
-        return {'status': 'completed'}
+        try:
+            _process_watchlist_scan_automatically(automation_id=config.get('_automation_id'))
+            return {'status': 'completed'}
+        except Exception as e:
+            return {'status': 'error', 'error': str(e)}
 
     def _auto_scan_library(config):
         if web_scan_manager:
@@ -292,6 +298,7 @@ def _register_automation_handlers():
         db = get_database()
         playlist_id = config.get('playlist_id')
         refresh_all = config.get('all', False)
+        auto_id = config.get('_automation_id')
 
         if refresh_all:
             playlists = db.get_mirrored_playlists()
@@ -303,10 +310,14 @@ def _register_automation_handlers():
 
         refreshed = 0
         errors = []
-        for pl in playlists:
+        for idx, pl in enumerate(playlists):
             try:
                 source = pl.get('source', '')
                 source_id = pl.get('source_playlist_id', '')
+                _update_automation_progress(auto_id,
+                    progress=(idx / max(1, len(playlists))) * 100,
+                    phase=f'Refreshing: "{pl.get("name", "")}"',
+                    current_item=pl.get('name', ''))
                 tracks = None
 
                 if source == 'spotify' and spotify_client and spotify_client.is_spotify_authenticated():
@@ -393,24 +404,34 @@ def _register_automation_handlers():
 
                     # Emit playlist_changed if tracks actually changed
                     if old_ids != new_ids:
+                        added_count = len(new_ids - old_ids)
+                        removed_count = len(old_ids - new_ids)
+                        _update_automation_progress(auto_id,
+                            log_line=f'"{pl.get("name", "")}" — {added_count} added, {removed_count} removed', log_type='success')
                         try:
                             if automation_engine:
                                 automation_engine.emit('playlist_changed', {
                                     'playlist_name': pl.get('name', ''),
                                     'old_count': str(len(old_ids)),
                                     'new_count': str(len(new_ids)),
-                                    'added': str(len(new_ids - old_ids)),
-                                    'removed': str(len(old_ids - new_ids)),
+                                    'added': str(added_count),
+                                    'removed': str(removed_count),
                                 })
                         except Exception:
                             pass
+                    else:
+                        _update_automation_progress(auto_id,
+                            log_line=f'No changes: "{pl.get("name", "")}"', log_type='skip')
             except Exception as e:
                 errors.append(f"{pl.get('name', '?')}: {str(e)}")
+                _update_automation_progress(auto_id,
+                    log_line=f'Error: {pl.get("name", "?")} — {str(e)}', log_type='error')
         return {'status': 'completed', 'refreshed': str(refreshed), 'errors': str(len(errors))}
 
     def _auto_sync_playlist(config):
         """Sync a mirrored playlist to media server.
         Uses discovered metadata when available, skips undiscovered tracks."""
+        auto_id = config.get('_automation_id')
         playlist_id = config.get('playlist_id')
         if not playlist_id:
             return {'status': 'error', 'reason': 'No playlist specified'}
@@ -452,7 +473,14 @@ def _register_automation_handlers():
                 # NOT discovered — skip to prevent garbage in wishlist
                 skipped_count += 1
 
+        _update_automation_progress(auto_id, progress=50,
+            phase=f'Syncing "{pl["name"]}"',
+            log_line=f'{len(tracks_json)} discovered, {skipped_count} skipped',
+            log_type='info' if tracks_json else 'skip')
+
         if not tracks_json:
+            _update_automation_progress(auto_id,
+                log_line=f'No discovered tracks — {skipped_count} need discovery first', log_type='skip')
             return {
                 'status': 'skipped',
                 'reason': f'No discovered tracks to sync ({skipped_count} tracks need discovery first)',
@@ -460,6 +488,8 @@ def _register_automation_handlers():
             }
 
         sync_id = f"auto_mirror_{playlist_id}"
+        _update_automation_progress(auto_id, progress=90,
+            log_line=f'Starting sync: {len(tracks_json)} tracks', log_type='success')
         threading.Thread(
             target=_run_sync_task,
             args=(sync_id, pl['name'], json.dumps(tracks_json)),
@@ -492,12 +522,13 @@ def _register_automation_handlers():
 
         threading.Thread(
             target=_run_playlist_discovery_worker,
-            args=(playlists,),
+            args=(playlists, config.get('_automation_id')),
             daemon=True,
             name='auto-discover-playlist'
         ).start()
         names = ', '.join(p['name'] for p in playlists[:3])
-        return {'status': 'started', 'playlist_count': str(len(playlists)), 'playlists': names}
+        return {'status': 'started', 'playlist_count': str(len(playlists)), 'playlists': names,
+                '_manages_own_progress': True}
 
     automation_engine.register_action_handler('refresh_mirrored', _auto_refresh_mirrored)
     automation_engine.register_action_handler('sync_playlist', _auto_sync_playlist)
@@ -599,6 +630,24 @@ def _register_automation_handlers():
     automation_engine.register_action_handler('start_quality_scan', _auto_start_quality_scan,
                                               lambda: quality_scanner_state.get('status') == 'running')
     automation_engine.register_action_handler('backup_database', _auto_backup_database)
+
+    # Register progress tracking callbacks
+    def _progress_init(aid, name, action_type):
+        _init_automation_progress(aid, name, action_type)
+
+    def _progress_finish(aid, result):
+        result_status = result.get('status', '')
+        # Skip for handlers that manage their own progress lifecycle
+        # (they call _update_automation_progress(status='finished') themselves)
+        if result.get('_manages_own_progress'):
+            return
+        status = 'error' if result_status == 'error' else 'finished'
+        msg = result.get('error', result.get('reason', result_status or 'done'))
+        _update_automation_progress(aid, status=status, progress=100,
+                                     phase='Error' if status == 'error' else 'Complete',
+                                     log_line=msg, log_type='error' if status == 'error' else 'success')
+
+    automation_engine.register_progress_callbacks(_progress_init, _progress_finish)
 
     print("✅ Automation action handlers registered")
 
@@ -728,6 +777,46 @@ active_sync_workers = {}  # Key: playlist_id, Value: Future object
 sync_states = {}          # Key: playlist_id, Value: dict with progress info
 sync_lock = threading.Lock()
 db_update_lock = threading.Lock()
+
+# --- Automation Progress Tracking ---
+automation_progress_states = {}   # automation_id (int) -> state dict
+automation_progress_lock = threading.Lock()
+
+def _init_automation_progress(automation_id, automation_name, action_type):
+    """Initialize progress state when an automation starts running."""
+    with automation_progress_lock:
+        automation_progress_states[automation_id] = {
+            'status': 'running',
+            'action_type': action_type,
+            'progress': 0, 'phase': 'Starting...', 'current_item': '',
+            'processed': 0, 'total': 0,
+            'log': [{'type': 'info', 'text': f'Starting {automation_name}'}],
+            'started_at': datetime.now().isoformat(),
+            'finished_at': None,
+        }
+
+def _update_automation_progress(automation_id, **kwargs):
+    """Update progress state from handler threads. Thread-safe."""
+    if automation_id is None:
+        return
+    with automation_progress_lock:
+        state = automation_progress_states.get(automation_id)
+        if not state:
+            return
+        for k, v in kwargs.items():
+            if k == 'log_line':
+                state['log'].append({'type': kwargs.get('log_type', 'info'), 'text': v})
+                if len(state['log']) > 50:
+                    state['log'] = state['log'][-50:]
+            elif k != 'log_type':
+                state[k] = v
+        # Immediate emit on finish so frontend gets final state without waiting for loop
+        if kwargs.get('status') in ('finished', 'error'):
+            state['finished_at'] = datetime.now().isoformat()
+            try:
+                socketio.emit('automation:progress', {str(automation_id): dict(state)})
+            except Exception:
+                pass
 
 # --- Global Matched Downloads Context Management ---
 # Thread-safe storage for matched download contexts
@@ -3640,6 +3729,21 @@ def run_automation_endpoint(automation_id):
         return jsonify({"success": True})
     except Exception as e:
         logger.error(f"Error running automation: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/automations/progress', methods=['GET'])
+def get_automation_progress():
+    """Get current progress state for all running/recently finished automations."""
+    try:
+        with automation_progress_lock:
+            result = {}
+            for aid, state in automation_progress_states.items():
+                if state['status'] in ('running', 'finished', 'error'):
+                    cp = dict(state)
+                    cp['log'] = list(state['log'])
+                    result[str(aid)] = cp
+        return jsonify(result)
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/automations/blocks', methods=['GET'])
@@ -12846,10 +12950,59 @@ def get_version_info():
     This provides the same data that the GUI version modal displays.
     """
     version_data = {
-        "version": "1.7",
+        "version": "1.8",
         "title": "What's New in SoulSync",
-        "subtitle": "Version 1.7 — Latest Changes",
+        "subtitle": "Version 1.8 — Latest Changes",
         "sections": [
+            {
+                "title": "🤖 Automation Engine",
+                "description": "Visual drag-and-drop automation builder with 20+ triggers and 14 actions",
+                "features": [
+                    "• Drag-and-drop builder: connect WHEN triggers → DO actions → NOTIFY alerts",
+                    "• Timer triggers: Schedule (interval), Daily Time, Weekly Schedule",
+                    "• Event triggers: Track Downloaded, Batch Complete, New Release Found, Playlist Changed, Discovery Complete, and 15 more",
+                    "• Actions: Process Wishlist, Scan Watchlist, Refresh/Discover/Sync Playlists, Update Database, Quality Scan, Backup, and more",
+                    "• Conditions with match modes (All/Any) and operators (contains, equals, starts_with, not_contains)",
+                    "• Configurable delay on actions — wait N minutes after trigger fires before executing",
+                    "• System automations for wishlist (every 30 min) and watchlist (every 24 hr) with cross-guards",
+                    "• Run Now button on every card for instant testing"
+                ]
+            },
+            {
+                "title": "🔍 Playlist Discovery Pipeline",
+                "description": "Official Spotify/iTunes metadata enforcement for mirrored playlist sync",
+                "features": [
+                    "• New 'Discover Playlist' automation action matches raw YouTube/Tidal tracks to official Spotify or iTunes metadata",
+                    "• Fuzzy title/artist matching with confidence scoring — minimum 0.7 threshold",
+                    "• Discovery results cached globally across playlists for instant repeat lookups",
+                    "• Sync Playlist now only includes discovered tracks — undiscovered tracks are skipped entirely",
+                    "• Prevents garbage data (wrong artist, no album, no cover art) from reaching the wishlist",
+                    "• Spotify-sourced playlists auto-discovered during refresh at confidence 1.0",
+                    "• Chain automations: Refresh → Playlist Changed → Discover → Discovery Complete → Sync"
+                ]
+            },
+            {
+                "title": "🔔 Notification Integrations",
+                "description": "Get alerted when automations run via Discord, Pushbullet, or Telegram",
+                "features": [
+                    "• Discord Webhook — post automation results to any Discord channel",
+                    "• Pushbullet — push notifications to phone and desktop",
+                    "• Telegram Bot — send alerts via Telegram Bot API",
+                    "• Variable substitution in messages: {artist}, {title}, {album}, {quality}, {time}, and more",
+                    "• Attach notifications to any automation — event-based or scheduled"
+                ]
+            },
+            {
+                "title": "🔄 YouTube & Tidal Playlist Refresh",
+                "description": "Automated re-fetching of mirrored playlists from any source",
+                "features": [
+                    "• Refresh Mirrored Playlist action now supports YouTube and Tidal alongside Spotify",
+                    "• YouTube URLs reconstructed from stored playlist ID for seamless re-parsing",
+                    "• Tidal playlists refreshed via Tidal API using stored source ID",
+                    "• Discovery data preserved across refreshes — previously matched tracks keep their official metadata",
+                    "• Change detection emits Playlist Changed event for automation chaining"
+                ]
+            },
             {
                 "title": "📋 Mirrored Playlists",
                 "description": "Persistent cross-service playlist archive on the Sync page",
@@ -13205,7 +13358,7 @@ def _classify_wishlist_track(track):
     return 'albums'
 
 
-def _process_wishlist_automatically():
+def _process_wishlist_automatically(automation_id=None):
     """Main automatic processing logic that runs in background thread."""
     global wishlist_auto_processing, wishlist_auto_processing_timestamp
 
@@ -13253,6 +13406,8 @@ def _process_wishlist_automatically():
             all_profiles = database.get_all_profiles()
             count = sum(wishlist_service.get_wishlist_count(profile_id=p['id']) for p in all_profiles)
             print(f"🔍 [Auto-Wishlist] Wishlist count check: {count} tracks found across {len(all_profiles)} profiles")
+            _update_automation_progress(automation_id, progress=10, phase='Checking wishlist',
+                                         log_line=f'{count} tracks across {len(all_profiles)} profiles', log_type='info')
             if count == 0:
                 print("ℹ️ [Auto-Wishlist] No tracks in wishlist for auto-processing.")
                 with wishlist_timer_lock:
@@ -13337,6 +13492,11 @@ def _process_wishlist_automatically():
 
             if cleanup_removed > 0:
                 print(f"✅ [Auto-Wishlist] Cleaned up {cleanup_removed} already-owned tracks from wishlist")
+                _update_automation_progress(automation_id, progress=25, phase='Cleaned up duplicates',
+                                             log_line=f'Removed {cleanup_removed} already-owned tracks', log_type='success')
+            else:
+                _update_automation_progress(automation_id, progress=25, phase='Cleanup done',
+                                             log_line='No duplicates or already-owned tracks found', log_type='skip')
 
             # Get wishlist tracks for processing (after cleanup) - combine all profiles
             raw_wishlist_tracks = []
@@ -13408,6 +13568,8 @@ def _process_wishlist_automatically():
 
             print(f"🔄 [Auto-Wishlist] Current cycle: {current_cycle}")
             print(f"📊 [Auto-Wishlist] Filtered {len(filtered_tracks)}/{len(wishlist_tracks)} tracks for '{current_cycle}' category")
+            _update_automation_progress(automation_id, progress=40, phase=f'Processing {current_cycle}',
+                                         log_line=f'Cycle: {current_cycle} — {len(filtered_tracks)} tracks to process', log_type='info')
 
             # If no tracks in this category, skip to next cycle immediately
             if len(filtered_tracks) == 0:
@@ -13464,6 +13626,8 @@ def _process_wishlist_automatically():
                 }
             
             print(f"🚀 Starting automatic wishlist batch {batch_id} with {len(wishlist_tracks)} tracks")
+            _update_automation_progress(automation_id, progress=50, phase=f'Downloading {len(wishlist_tracks)} tracks',
+                                         log_line=f'Started batch: {len(wishlist_tracks)} {current_cycle}', log_type='success')
             
             # Submit the wishlist processing job using existing infrastructure
             missing_download_executor.submit(_run_full_missing_tracks_process, batch_id, playlist_id, wishlist_tracks)
@@ -13474,10 +13638,12 @@ def _process_wishlist_automatically():
         print(f"❌ Error in automatic wishlist processing: {e}")
         import traceback
         traceback.print_exc()
+        _update_automation_progress(automation_id, log_line=f'Error: {str(e)}', log_type='error')
 
         with wishlist_timer_lock:
             wishlist_auto_processing = False
             wishlist_auto_processing_timestamp = 0
+        raise  # re-raise so automation wrapper returns error status
 
 # ===============================
 # == DATABASE UPDATER API      ==
@@ -19891,7 +20057,7 @@ def update_tidal_playlist_phase(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 
-def _run_playlist_discovery_worker(playlists):
+def _run_playlist_discovery_worker(playlists, automation_id=None):
     """Background worker that discovers Spotify/iTunes metadata for undiscovered
     mirrored playlist tracks. Stores results in extra_data for use by sync."""
     try:
@@ -19905,6 +20071,9 @@ def _run_playlist_discovery_worker(playlists):
                 itunes_client_instance = iTunesClient()
             except Exception:
                 print("❌ Neither Spotify nor iTunes available for discovery")
+                _update_automation_progress(automation_id, status='error', progress=100,
+                                            phase='Error', log_line='Neither Spotify nor iTunes available',
+                                            log_type='error')
                 return
 
         total_discovered = 0
@@ -19912,6 +20081,16 @@ def _run_playlist_discovery_worker(playlists):
         total_skipped = 0
         total_tracks = 0
         last_playlist_name = ''
+
+        # Pre-compute grand total for progress tracking (skip spotify playlists)
+        grand_total = 0
+        db_init = get_database()
+        for pl in playlists:
+            if pl.get('source', '') != 'spotify':
+                t = db_init.get_mirrored_playlist_tracks(pl['id'])
+                if t:
+                    grand_total += len(t)
+        _update_automation_progress(automation_id, total=grand_total)
 
         for pl in playlists:
             pl_id = pl['id']
@@ -19929,6 +20108,8 @@ def _run_playlist_discovery_worker(playlists):
                 continue
 
             print(f"🔍 Starting discovery for playlist '{pl_name}' ({len(tracks)} tracks, using {discovery_source.upper()})")
+            _update_automation_progress(automation_id, phase=f'Discovering: "{pl_name}"',
+                                         log_line=f'Playlist "{pl_name}" — {len(tracks)} tracks ({discovery_source.upper()})', log_type='info')
 
             for i, track in enumerate(tracks):
                 total_tracks += 1
@@ -19947,6 +20128,7 @@ def _run_playlist_discovery_worker(playlists):
 
                 if existing_extra.get('discovered'):
                     total_skipped += 1
+                    _update_automation_progress(automation_id, log_line=f'Already discovered: {track_name}', log_type='skip')
                     continue
 
                 # Step 1: Check discovery cache
@@ -19963,6 +20145,10 @@ def _run_playlist_discovery_worker(playlists):
                         db.update_mirrored_track_extra_data(track_id, extra_data)
                         total_discovered += 1
                         print(f"⚡ CACHE [{i+1}/{len(tracks)}]: {track_name} → {cached_match.get('name', '?')}")
+                        _update_automation_progress(automation_id,
+                            progress=(total_tracks / max(1, grand_total)) * 100,
+                            current_item=track_name,
+                            log_line=f'{track_name} → {cached_match.get("name", "?")} (cache)', log_type='success')
                         continue
                 except Exception:
                     pass
@@ -20055,6 +20241,11 @@ def _run_playlist_discovery_worker(playlists):
                         pass
 
                     print(f"✅ [{i+1}/{len(tracks)}] {track_name} → {matched_data['name']} ({best_confidence:.2f})")
+                    _update_automation_progress(automation_id,
+                        progress=(total_tracks / max(1, grand_total)) * 100,
+                        processed=total_discovered + total_failed,
+                        current_item=f'{track_name} - {artist_name}',
+                        log_line=f'{track_name} → {matched_data["name"]} ({best_confidence:.2f})', log_type='success')
                 else:
                     extra_data = {
                         'discovered': False,
@@ -20064,6 +20255,11 @@ def _run_playlist_discovery_worker(playlists):
                     db.update_mirrored_track_extra_data(track_id, extra_data)
                     total_failed += 1
                     print(f"❌ [{i+1}/{len(tracks)}] No match: {track_name} by {artist_name}")
+                    _update_automation_progress(automation_id,
+                        progress=(total_tracks / max(1, grand_total)) * 100,
+                        processed=total_discovered + total_failed,
+                        current_item=f'{track_name} - {artist_name}',
+                        log_line=f'{track_name} by {artist_name} → no match', log_type='error')
 
                 time.sleep(0.15)
 
@@ -20081,11 +20277,18 @@ def _run_playlist_discovery_worker(playlists):
             pass
 
         print(f"✅ Playlist discovery complete: {total_discovered} discovered, {total_failed} failed, {total_skipped} skipped")
+        _update_automation_progress(automation_id, status='finished', progress=100,
+                                     phase='Discovery complete',
+                                     log_line=f'Done: {total_discovered} discovered, {total_failed} failed, {total_skipped} skipped',
+                                     log_type='success')
 
     except Exception as e:
         print(f"❌ Error in playlist discovery worker: {e}")
         import traceback
         traceback.print_exc()
+        _update_automation_progress(automation_id, status='error', progress=100,
+                                     phase='Error',
+                                     log_line=f'Error: {str(e)}', log_type='error')
 
 
 def _get_discovery_cache_key(title, artist):
@@ -24070,7 +24273,7 @@ watchlist_scan_state = {
     'error': None
 }
 
-def _process_watchlist_scan_automatically():
+def _process_watchlist_scan_automatically(automation_id=None):
     """Main automatic scanning logic that runs in background thread."""
     global watchlist_auto_scanning, watchlist_auto_scanning_timestamp, watchlist_scan_state
 
@@ -24125,6 +24328,8 @@ def _process_watchlist_scan_automatically():
                 return
 
             print(f"👁️ [Auto-Watchlist] Found {watchlist_count} artists in watchlist, starting automatic scan...")
+            _update_automation_progress(automation_id, progress=5, phase='Loading watchlist',
+                                         log_line=f'{watchlist_count} artists across {len(all_profiles)} profiles', log_type='info')
 
             # Get list of artists to scan (all profiles combined for auto-scan)
             watchlist_artists = []
@@ -24204,6 +24409,12 @@ def _process_watchlist_scan_automatically():
                 try:
                     # Fetch artist image using provider-aware method
                     artist_image_url = scanner.get_artist_image_url(artist) or ''
+
+                    pct = 5 + (i / max(1, len(watchlist_artists))) * 90
+                    _update_automation_progress(automation_id, progress=pct,
+                        phase=f'Scanning: {artist.artist_name} ({i+1}/{len(watchlist_artists)})',
+                        current_item=artist.artist_name,
+                        processed=i, total=len(watchlist_artists))
 
                     # Update progress
                     watchlist_scan_state.update({
@@ -24326,6 +24537,12 @@ def _process_watchlist_scan_automatically():
                     })())
 
                     print(f"✅ Scanned {artist.artist_name}: {artist_new_tracks} new tracks found, {artist_added_tracks} added to wishlist")
+                    if artist_new_tracks > 0:
+                        _update_automation_progress(automation_id,
+                            log_line=f'{artist.artist_name} — {artist_new_tracks} new, {artist_added_tracks} added', log_type='success')
+                    else:
+                        _update_automation_progress(automation_id,
+                            log_line=f'{artist.artist_name} — no new tracks', log_type='skip')
 
                     # Emit watchlist_new_release event if new tracks were found
                     if artist_new_tracks > 0:
@@ -24350,6 +24567,8 @@ def _process_watchlist_scan_automatically():
 
                 except Exception as e:
                     print(f"Error scanning artist {artist.artist_name}: {e}")
+                    _update_automation_progress(automation_id,
+                        log_line=f'{artist.artist_name} — error: {str(e)[:60]}', log_type='error')
 
                     # Circuit breaker: detect consecutive rate-limit failures
                     error_str = str(e).lower()
@@ -24392,6 +24611,9 @@ def _process_watchlist_scan_automatically():
 
             print(f"Automatic watchlist scan completed: {len(successful_scans)}/{len(scan_results)} artists scanned successfully")
             print(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
+            _update_automation_progress(automation_id, progress=95, phase='Scan complete',
+                                         log_line=f'Scanned {len(successful_scans)} artists — {total_new_tracks} new tracks, {total_added_to_wishlist} added to wishlist',
+                                         log_type='success' if total_new_tracks > 0 else 'info')
 
             # Populate discovery pool from similar artists (per-profile)
             print("🎵 Starting discovery pool population...")
@@ -24464,9 +24686,11 @@ def _process_watchlist_scan_automatically():
         print(f"❌ Error in automatic watchlist scan: {e}")
         import traceback
         traceback.print_exc()
+        _update_automation_progress(automation_id, log_line=f'Error: {str(e)}', log_type='error')
 
         watchlist_scan_state['status'] = 'error'
         watchlist_scan_state['error'] = str(e)
+        raise  # re-raise so automation wrapper returns error status
 
     finally:
         # Resume enrichment workers if we paused them
@@ -31702,6 +31926,50 @@ def _emit_scan_status_loop():
         except Exception as e:
             logger.debug(f"Error emitting wishlist stats: {e}")
 
+def _emit_automation_progress_loop():
+    """Push automation:progress events every 1 second for running automations."""
+    while True:
+        socketio.sleep(1)
+        try:
+            with automation_progress_lock:
+                active = {}
+                stale = []
+                now = datetime.now()
+                for aid, state in automation_progress_states.items():
+                    if state['status'] == 'running':
+                        # Timeout zombie running states after 2 hours
+                        try:
+                            started = datetime.fromisoformat(state.get('started_at', ''))
+                            if (now - started).total_seconds() > 7200:
+                                state['status'] = 'error'
+                                state['phase'] = 'Timed out'
+                                state['finished_at'] = now.isoformat()
+                                state['log'].append({'type': 'error', 'text': 'Timed out after 2 hours'})
+                                # Emit error state before cleanup so frontend sees it
+                                cp = dict(state)
+                                cp['log'] = list(state['log'])
+                                active[str(aid)] = cp
+                                continue
+                        except (ValueError, TypeError):
+                            pass
+                        cp = dict(state)
+                        cp['log'] = list(state['log'])
+                        active[str(aid)] = cp
+                    elif state['status'] in ('finished', 'error') and state.get('finished_at'):
+                        # Clean up finished states after 60 seconds (frontend already got final emit)
+                        try:
+                            finished_time = datetime.fromisoformat(state['finished_at'])
+                            if (now - finished_time).total_seconds() > 60:
+                                stale.append(aid)
+                        except (ValueError, TypeError):
+                            stale.append(aid)
+                for aid in stale:
+                    del automation_progress_states[aid]
+            if active:
+                socketio.emit('automation:progress', active)
+        except Exception as e:
+            logger.debug(f"Error emitting automation progress: {e}")
+
 # ================================================================================================
 # END WEBSOCKET HANDLERS
 # ================================================================================================
@@ -31780,6 +32048,8 @@ if __name__ == '__main__':
     socketio.start_background_task(_emit_sync_progress_loop)
     socketio.start_background_task(_emit_discovery_progress_loop)
     socketio.start_background_task(_emit_scan_status_loop)
-    print("✅ WebSocket emitters started (Phase 1-5: global/dashboard/enrichment/tools/sync)")
+    # Phase 6: Automation progress
+    socketio.start_background_task(_emit_automation_progress_loop)
+    print("✅ WebSocket emitters started (Phase 1-6: global/dashboard/enrichment/tools/sync/automations)")
 
     socketio.run(app, host='0.0.0.0', port=8008, debug=False, allow_unsafe_werkzeug=True)

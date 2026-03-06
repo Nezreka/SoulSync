@@ -213,6 +213,8 @@ function initializeWebSocket() {
     socket.on('scan:watchlist', (data) => updateWatchlistScanFromData(data));
     socket.on('scan:media', (data) => updateMediaScanFromData(data));
     socket.on('wishlist:stats', (data) => updateWishlistStatsFromData(data));
+    // Phase 6: Automation progress
+    socket.on('automation:progress', (data) => updateAutomationProgressFromData(data));
 }
 
 function handleServiceStatusUpdate(data) {
@@ -42184,6 +42186,12 @@ async function loadAutomations() {
                 <span class="auto-stat"><strong>${eventBased}</strong> Event-Based</span>
             `;
         }
+        // Catch up on current automation progress
+        try {
+            const progRes = await fetch('/api/automations/progress');
+            const progData = await progRes.json();
+            if (!progData.error) updateAutomationProgressFromData(progData);
+        } catch (e) {}
     } catch (err) {
         list.innerHTML = ''; empty.style.display = '';
         if (statsBar) statsBar.innerHTML = '';
@@ -42313,6 +42321,86 @@ async function toggleAutomation(id) {
         if (data.error) throw new Error(data.error);
         await loadAutomations();
     } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
+// --- Automation Progress Tracking ---
+const _autoProgressLogCounts = {};
+const _autoProgressHideTimers = {};
+
+function updateAutomationProgressFromData(data) {
+    for (const [aidStr, state] of Object.entries(data)) {
+        const aid = parseInt(aidStr);
+        const card = document.querySelector(`.automation-card[data-id="${aid}"]`);
+        if (!card) continue;
+
+        let panel = card.querySelector('.automation-output');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.className = 'automation-output';
+            panel.innerHTML = `
+                <div class="auto-progress-bar-wrap"><div class="auto-progress-bar" style="width:0%"></div></div>
+                <div class="auto-progress-phase"></div>
+                <div class="auto-progress-log"></div>
+            `;
+            card.appendChild(panel);
+            _autoProgressLogCounts[aid] = 0;
+        }
+
+        // Update progress bar
+        const bar = panel.querySelector('.auto-progress-bar');
+        bar.style.width = (state.progress || 0) + '%';
+
+        // Update phase text
+        const phaseEl = panel.querySelector('.auto-progress-phase');
+        phaseEl.textContent = state.phase || '';
+
+        // Status indicator on card
+        const statusDot = card.querySelector('.automation-status');
+
+        if (state.status === 'running') {
+            if (statusDot) statusDot.className = 'automation-status running';
+            panel.classList.add('visible');
+            panel.classList.remove('finished', 'error');
+            if (_autoProgressHideTimers[aid]) {
+                clearTimeout(_autoProgressHideTimers[aid]);
+                delete _autoProgressHideTimers[aid];
+            }
+            // Reset log for new run (handles re-run within hide window)
+            if (_autoProgressLogCounts[aid] > 0 && state.log && state.log.length < _autoProgressLogCounts[aid]) {
+                const existingLog = panel.querySelector('.auto-progress-log');
+                if (existingLog) existingLog.innerHTML = '';
+                _autoProgressLogCounts[aid] = 0;
+            }
+        } else if (state.status === 'finished' || state.status === 'error') {
+            if (statusDot) statusDot.className = 'automation-status ' + (card.querySelector('input[type=checkbox]')?.checked ? 'enabled' : 'disabled');
+            bar.style.width = '100%';
+            panel.classList.add('finished');
+            if (state.status === 'error') panel.classList.add('error');
+            if (!_autoProgressHideTimers[aid]) {
+                _autoProgressHideTimers[aid] = setTimeout(() => {
+                    panel.classList.remove('visible');
+                    delete _autoProgressHideTimers[aid];
+                    _autoProgressLogCounts[aid] = 0;
+                }, 30000);
+            }
+        }
+
+        // Diff-append log lines
+        const logEl = panel.querySelector('.auto-progress-log');
+        const rendered = _autoProgressLogCounts[aid] || 0;
+        const logLines = state.log || [];
+        if (logLines.length > rendered) {
+            for (let i = rendered; i < logLines.length; i++) {
+                const line = logLines[i];
+                const div = document.createElement('div');
+                div.className = 'auto-log-line ' + (line.type || 'info');
+                div.textContent = line.text;
+                logEl.appendChild(div);
+            }
+            _autoProgressLogCounts[aid] = logLines.length;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+    }
 }
 
 async function runAutomation(id) {

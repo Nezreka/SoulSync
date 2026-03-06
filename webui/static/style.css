@@ -28399,6 +28399,57 @@ body {
 .automation-toggle input:checked + .toggle-slider { background: rgba(var(--accent-rgb),0.5); border-color: rgba(var(--accent-rgb),0.5); }
 .automation-toggle input:checked + .toggle-slider::before { transform: translateX(14px); background: rgb(var(--accent-light-rgb)); }
 
+/* Only wrap card layout when output panel is present */
+.automation-card:has(.automation-output) { flex-wrap: wrap; }
+
+/* Automation progress output panel */
+.automation-output {
+    width: 100%; max-height: 0; overflow: hidden;
+    transition: max-height 0.3s ease, padding 0.3s ease, margin 0.3s ease;
+    border-top: none; padding: 0; margin: 0;
+}
+.automation-output.visible {
+    max-height: 300px; padding: 8px 0 4px; margin-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+}
+.auto-progress-bar-wrap {
+    width: 100%; height: 3px; background: rgba(255,255,255,0.06);
+    border-radius: 3px; overflow: hidden; margin-bottom: 6px;
+}
+.auto-progress-bar {
+    height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
+    transition: width 0.5s ease;
+}
+.automation-output.finished .auto-progress-bar { background: #4ade80; }
+.automation-output.error .auto-progress-bar { background: #ef4444; }
+.auto-progress-phase {
+    font-size: 10px; color: rgba(255,255,255,0.5);
+    margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.auto-progress-log {
+    max-height: 200px; overflow-y: auto;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 10px; line-height: 1.5;
+    scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent;
+}
+.auto-log-line { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.auto-log-line.success { color: #4ade80; }
+.auto-log-line.error   { color: #f87171; }
+.auto-log-line.skip    { color: rgba(255,255,255,0.35); }
+.auto-log-line.info    { color: rgba(255,255,255,0.55); }
+
+/* Pulsing status indicator for running automation */
+.automation-status.running {
+    background: rgb(var(--accent-rgb));
+    box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.5);
+    animation: auto-pulse 1.5s ease-in-out infinite;
+}
+@keyframes auto-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
 /* --- Empty State --- */
 .automations-empty {
     text-align: center; padding: 80px 24px;
