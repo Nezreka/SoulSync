@@ -29138,6 +29138,108 @@ def clear_mirrored_discovery_endpoint(playlist_id):
         logger.error(f"Error clearing mirrored discovery: {e}")
         return jsonify({"error": str(e)}), 500
 
+# ==================== Discovery Pool ====================
+
+@app.route('/api/discovery-pool', methods=['GET'])
+def get_discovery_pool():
+    """List matched and failed discovery tracks, optionally filtered by playlist."""
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+        playlist_id = request.args.get('playlist_id', type=int)
+
+        matched = database.get_discovery_pool_matched()
+        failed = database.get_discovery_pool_failed(profile_id=profile_id, playlist_id=playlist_id)
+        stats = database.get_discovery_pool_stats(profile_id=profile_id)
+
+        # Playlist list for the filter dropdown
+        playlists = database.get_mirrored_playlists(profile_id=profile_id)
+        playlist_options = [{'id': p['id'], 'name': p['name']} for p in playlists]
+
+        return jsonify({
+            'matched': matched,
+            'failed': failed,
+            'stats': stats,
+            'playlists': playlist_options,
+        })
+    except Exception as e:
+        logger.error(f"Error getting discovery pool: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/discovery-pool/fix', methods=['POST'])
+def fix_discovery_pool_track():
+    """Manually fix a failed discovery by linking a mirrored track to a Spotify/iTunes result."""
+    try:
+        data = request.get_json()
+        track_id = data.get('track_id')
+        spotify_track = data.get('spotify_track')
+        if not track_id or not spotify_track:
+            return jsonify({"error": "track_id and spotify_track required"}), 400
+
+        database = get_database()
+
+        # Build matched_data in the same format as the discovery flow
+        artists = spotify_track.get('artists', [])
+        album_raw = spotify_track.get('album', '')
+        album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
+        image_url = spotify_track.get('image_url', '')
+        if not image_url and isinstance(album_raw, dict):
+            images = album_raw.get('images', [])
+            image_url = images[0].get('url', '') if images else ''
+
+        matched_data = {
+            'id': spotify_track.get('id', ''),
+            'name': spotify_track.get('name', ''),
+            'artists': [{'name': a} if isinstance(a, str) else a for a in artists],
+            'album': album_obj,
+            'duration_ms': spotify_track.get('duration_ms', 0),
+            'image_url': image_url,
+            'source': 'spotify',
+        }
+
+        # Update the mirrored track's extra_data
+        extra_data = {
+            'discovered': True,
+            'provider': 'spotify',
+            'confidence': 1.0,
+            'matched_data': matched_data,
+            'manual_match': True,
+        }
+        database.update_mirrored_track_extra_data(track_id, extra_data)
+
+        # Also save to discovery cache so future discoveries hit the cache
+        # Need to get the track's original name/artist for the cache key
+        try:
+            conn = database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT track_name, artist_name FROM mirrored_playlist_tracks WHERE id = ?", (track_id,))
+            row = cursor.fetchone()
+            if row:
+                cache_key = _get_discovery_cache_key(row['track_name'], row['artist_name'])
+                database.save_discovery_cache_match(
+                    cache_key[0], cache_key[1], 'spotify', 1.0, matched_data,
+                    row['track_name'], row['artist_name']
+                )
+        except Exception:
+            pass
+
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"Error fixing discovery pool track: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/discovery-pool/cache/<int:entry_id>', methods=['DELETE'])
+def delete_discovery_pool_cache_entry(entry_id):
+    """Remove a single entry from the discovery match cache."""
+    try:
+        database = get_database()
+        if database.delete_discovery_cache_entry(entry_id):
+            return jsonify({"success": True})
+        return jsonify({"error": "Entry not found"}), 404
+    except Exception as e:
+        logger.error(f"Error deleting discovery cache entry: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/mirrored-playlists/<int:playlist_id>/prepare-discovery', methods=['POST'])
 def prepare_mirrored_discovery(playlist_id):
     """Register a mirrored playlist into youtube_playlist_states so the YouTube discovery pipeline can run."""

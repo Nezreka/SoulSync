@@ -6010,6 +6010,488 @@ body {
     color: #22c55e;
 }
 
+/* Discovery Pool trigger button (secondary - dashboard card is primary entry) */
+.pool-trigger-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.5);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.pool-trigger-btn:hover {
+    background: rgba(var(--accent-rgb), 0.1);
+    border-color: rgba(var(--accent-rgb), 0.2);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* ===== Discovery Pool — Premium Modal ===== */
+
+/* Playlist filter in header */
+.pool-playlist-filter {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+    padding: 5px 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+}
+
+.pool-playlist-filter:focus {
+    border-color: rgba(var(--accent-rgb), 0.4);
+}
+
+.pool-playlist-filter option {
+    background: #1a1a1a;
+    color: #fff;
+}
+
+/* Header failed highlight */
+.pool-header-failed-highlight {
+    color: #ef4444 !important;
+    background: rgba(239, 68, 68, 0.12) !important;
+    border-radius: 12px;
+    padding: 4px 10px !important;
+}
+
+/* ===== Category Grid ===== */
+.pool-category-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+    padding: 28px;
+}
+
+.pool-category-card {
+    background: linear-gradient(135deg,
+            rgba(26, 26, 26, 0.95) 0%,
+            rgba(18, 18, 18, 0.98) 100%);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 32px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+    min-height: 250px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pool-category-card .pool-category-top-bar {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.pool-category-card .pool-category-top-bar.failed {
+    background: linear-gradient(90deg, #ef4444, #f97316);
+}
+
+.pool-category-card .pool-category-top-bar.matched {
+    background: linear-gradient(90deg, #22c55e, rgb(var(--accent-light-rgb)));
+}
+
+.pool-category-card:hover .pool-category-top-bar {
+    opacity: 1;
+}
+
+/* Failed card accent */
+.pool-category-card.failed {
+    border-color: rgba(239, 68, 68, 0.12);
+}
+
+.pool-category-card.failed:hover {
+    border-color: rgba(239, 68, 68, 0.35);
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(239, 68, 68, 0.2);
+}
+
+/* Matched card accent */
+.pool-category-card.matched {
+    border-color: rgba(34, 197, 94, 0.12);
+}
+
+.pool-category-card.matched:hover {
+    border-color: rgba(34, 197, 94, 0.35);
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(34, 197, 94, 0.2);
+}
+
+/* Fallback gradient backgrounds */
+.pool-category-fallback {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    opacity: 0;
+    animation: fadeInRow 1s ease-out forwards, gradientShift 8s ease infinite;
+}
+
+.pool-category-fallback.failed {
+    background: linear-gradient(135deg,
+            rgba(239, 68, 68, 0.25) 0%,
+            rgba(249, 115, 22, 0.2) 50%,
+            rgba(239, 68, 68, 0.15) 100%);
+    background-size: 200% 200%;
+}
+
+.pool-category-fallback.matched {
+    background: linear-gradient(135deg,
+            rgba(34, 197, 94, 0.25) 0%,
+            rgba(var(--accent-rgb), 0.2) 50%,
+            rgba(34, 197, 94, 0.15) 100%);
+    background-size: 200% 200%;
+}
+
+/* Content overlay for text readability */
+.pool-category-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg,
+            rgba(0, 0, 0, 0.82) 0%,
+            rgba(0, 0, 0, 0.72) 100%);
+    z-index: 1;
+    pointer-events: none;
+}
+
+.pool-category-content {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+}
+
+.pool-category-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.pool-category-card.failed .pool-category-icon {
+    filter: drop-shadow(0 4px 12px rgba(239, 68, 68, 0.4));
+    color: #ef4444;
+}
+
+.pool-category-card.matched .pool-category-icon {
+    filter: drop-shadow(0 4px 12px rgba(34, 197, 94, 0.4));
+    color: #22c55e;
+}
+
+.pool-category-count {
+    font-size: 36px;
+    font-weight: 700;
+    margin: 8px 0;
+}
+
+.pool-category-count.failed {
+    color: #ef4444;
+}
+
+.pool-category-count.matched {
+    color: #22c55e;
+}
+
+.pool-category-label {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.55);
+    font-weight: 500;
+}
+
+/* Matched card mosaic hover */
+.pool-category-card.matched:hover .wishlist-mosaic-image {
+    transform: scale(1.1);
+}
+
+.pool-category-card.matched:hover .pool-category-overlay {
+    background: linear-gradient(135deg,
+            rgba(34, 197, 94, 0.12) 0%,
+            rgba(0, 0, 0, 0.78) 100%);
+}
+
+.pool-category-card.failed:hover .pool-category-overlay {
+    background: linear-gradient(135deg,
+            rgba(239, 68, 68, 0.12) 0%,
+            rgba(0, 0, 0, 0.78) 100%);
+}
+
+/* ===== List View ===== */
+.pool-list-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 0 28px;
+}
+
+.pool-list-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 3;
+}
+
+.pool-back-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #e0e0e0;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.pool-back-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    transform: translateX(-2px);
+}
+
+.pool-list-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #ffffff;
+    flex: 1;
+}
+
+.pool-list-content {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 8px;
+    max-height: 55vh;
+}
+
+.pool-list-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.pool-list-content::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+.pool-list-content::-webkit-scrollbar-thumb {
+    background: rgba(var(--accent-rgb), 0.4);
+    border-radius: 4px;
+}
+
+/* ===== Track Rows (Premium) ===== */
+.pool-empty {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.3);
+    padding: 40px 20px;
+    font-size: 14px;
+}
+
+.pool-track-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    transition: background 0.15s ease;
+}
+
+.pool-track-row:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.pool-track-row:last-child {
+    border-bottom: none;
+}
+
+.pool-track-info {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.pool-track-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pool-track-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+}
+
+.pool-track-artist {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.pool-track-playlist-badge {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(var(--accent-rgb), 0.8);
+    background: rgba(var(--accent-rgb), 0.1);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+.pool-track-arrow {
+    color: rgba(var(--accent-rgb), 0.5);
+    font-size: 12px;
+}
+
+.pool-match-name {
+    font-size: 12px;
+    color: rgb(var(--accent-light-rgb));
+    font-weight: 500;
+}
+
+.pool-match-provider {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.06);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+/* Album art thumbnail */
+.pool-match-image {
+    width: 40px;
+    height: 40px;
+    border-radius: 6px;
+    flex-shrink: 0;
+    object-fit: cover;
+}
+
+.pool-match-image-placeholder {
+    width: 40px;
+    height: 40px;
+    border-radius: 6px;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Confidence badge */
+.pool-confidence-badge {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 8px;
+    flex-shrink: 0;
+}
+
+.pool-confidence-badge.high {
+    color: #22c55e;
+    background: rgba(34, 197, 94, 0.12);
+}
+
+.pool-confidence-badge.mid {
+    color: #eab308;
+    background: rgba(234, 179, 8, 0.12);
+}
+
+.pool-confidence-badge.low {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.12);
+}
+
+/* Use count */
+.pool-use-count {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.3);
+    flex-shrink: 0;
+    min-width: 30px;
+    text-align: right;
+}
+
+/* Fix button in list */
+.pool-fix-btn {
+    flex-shrink: 0;
+    font-size: 12px !important;
+    padding: 6px 14px !important;
+}
+
+/* Remove button */
+.pool-remove-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.3);
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.pool-remove-btn:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* ===== Fix Sub-Modal (kept) ===== */
+.pool-fix-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 10001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.2s ease;
+}
+
+.pool-fix-modal {
+    background: linear-gradient(135deg, rgba(26, 26, 26, 0.98) 0%, rgba(18, 18, 18, 0.99) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    width: 90%;
+    max-width: 700px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    animation: slideUp 0.25s ease;
+}
+
 /* Mirrored playlist track modal */
 .mirrored-modal-overlay {
     position: fixed;

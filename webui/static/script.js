@@ -16335,6 +16335,9 @@ async function loadDashboardData() {
     stopDbStatsPolling(); // Ensure no duplicates
     dbStatsInterval = setInterval(fetchAndUpdateDbStats, 30000);
 
+    // Initial load of discovery pool stats for the tool card
+    loadDiscoveryPoolStats();
+
     // Initial load of wishlist count
     await updateWishlistCount();
 
@@ -42059,6 +42062,433 @@ async function clearMirroredDiscovery(playlistId, name) {
             loadMirroredPlaylists();
         } else {
             showToast(data.error || 'Failed to clear discovery', 'error');
+        }
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+    }
+}
+
+// ==================== Discovery Pool Modal ====================
+
+let _discoveryPoolOverlay = null;
+let _discoveryPoolData = null;
+let _discoveryPoolView = 'categories'; // 'categories' | 'failed' | 'matched'
+let _discoveryPoolPlaylistFilter = null;
+
+async function loadDiscoveryPoolStats() {
+    try {
+        const res = await fetch('/api/discovery-pool');
+        const data = await res.json();
+        const matchedEl = document.getElementById('discovery-pool-matched-count');
+        const failedEl = document.getElementById('discovery-pool-failed-count');
+        if (matchedEl) matchedEl.textContent = data.stats.matched || 0;
+        if (failedEl) failedEl.textContent = data.stats.failed || 0;
+    } catch (e) {}
+}
+
+async function openDiscoveryPoolModal(playlistId = null) {
+    _discoveryPoolPlaylistFilter = playlistId;
+    _discoveryPoolView = 'categories';
+
+    // Fetch pool data
+    let url = '/api/discovery-pool';
+    if (playlistId) url += `?playlist_id=${playlistId}`;
+    try {
+        const res = await fetch(url);
+        _discoveryPoolData = await res.json();
+    } catch (err) {
+        showToast('Failed to load discovery pool', 'error');
+        return;
+    }
+
+    // Remove existing overlay if present
+    if (_discoveryPoolOverlay) _discoveryPoolOverlay.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'discovery-pool-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) closeDiscoveryPoolModal(); };
+
+    const playlistOptions = (_discoveryPoolData.playlists || [])
+        .map(p => `<option value="${p.id}" ${playlistId == p.id ? 'selected' : ''}>${_esc(p.name)}</option>`)
+        .join('');
+
+    const failedCount = _discoveryPoolData.stats.failed || 0;
+    const matchedCount = _discoveryPoolData.stats.matched || 0;
+
+    overlay.innerHTML = `
+        <div class="modal-container playlist-modal">
+            <div class="playlist-modal-header">
+                <div class="playlist-header-content">
+                    <h2>Discovery Pool</h2>
+                    <div class="playlist-quick-info">
+                        <span class="playlist-track-count" id="pool-header-matched">${matchedCount} Matched</span>
+                        <span class="playlist-owner ${failedCount > 0 ? 'pool-header-failed-highlight' : ''}" id="pool-header-failed">${failedCount} Failed</span>
+                        <select class="pool-playlist-filter" onchange="filterDiscoveryPool(this.value)">
+                            <option value="">All Playlists</option>
+                            ${playlistOptions}
+                        </select>
+                    </div>
+                </div>
+                <span class="playlist-modal-close" onclick="closeDiscoveryPoolModal()">&times;</span>
+            </div>
+
+            <div class="playlist-modal-body">
+                <div class="pool-category-grid" id="pool-category-grid">
+                    <div class="pool-category-card failed" onclick="showPoolList('failed')">
+                        <div class="pool-category-fallback failed"></div>
+                        <div class="pool-category-overlay"></div>
+                        <div class="pool-category-content">
+                            <div class="pool-category-icon">&#9888;</div>
+                            <div class="pool-category-count failed" id="pool-cat-failed-count">${failedCount}</div>
+                            <div class="pool-category-label">tracks need attention</div>
+                        </div>
+                        <div class="pool-category-top-bar failed"></div>
+                    </div>
+                    <div class="pool-category-card matched" onclick="showPoolList('matched')">
+                        <div class="pool-category-fallback matched" id="pool-matched-bg"></div>
+                        <div class="pool-category-overlay"></div>
+                        <div class="pool-category-content">
+                            <div class="pool-category-icon">&#10003;</div>
+                            <div class="pool-category-count matched" id="pool-cat-matched-count">${matchedCount}</div>
+                            <div class="pool-category-label">cached matches</div>
+                        </div>
+                        <div class="pool-category-top-bar matched"></div>
+                    </div>
+                </div>
+
+                <div class="pool-list-view" id="pool-list-view" style="display: none;">
+                    <div class="pool-list-header">
+                        <button class="pool-back-btn" onclick="showPoolCategories()">&larr; Back</button>
+                        <span class="pool-list-title" id="pool-list-title"></span>
+                    </div>
+                    <div class="pool-list-content" id="pool-list-content"></div>
+                </div>
+            </div>
+
+            <div class="playlist-modal-footer">
+                <div class="playlist-modal-footer-left"></div>
+                <div class="playlist-modal-footer-right">
+                    <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeDiscoveryPoolModal()">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    overlay.style.display = 'flex';
+    _discoveryPoolOverlay = overlay;
+
+    // Build matched mosaic if images available
+    _buildPoolMatchedMosaic();
+}
+
+function _buildPoolMatchedMosaic() {
+    const entries = _discoveryPoolData.matched || [];
+    const images = [];
+    for (const e of entries) {
+        const md = e.matched_data || {};
+        if (md.image_url && images.indexOf(md.image_url) === -1) {
+            images.push(md.image_url);
+            if (images.length >= 20) break;
+        }
+    }
+    const bgEl = document.getElementById('pool-matched-bg');
+    if (!bgEl || images.length < 4) return; // keep fallback gradient
+
+    // Build mosaic rows similar to wishlist
+    bgEl.innerHTML = '';
+    bgEl.className = 'wishlist-mosaic-background';
+    const rows = 4;
+    const imgPerRow = Math.ceil(images.length / rows) * 2; // duplicate for seamless loop
+    for (let r = 0; r < rows; r++) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'wishlist-mosaic-row-wrapper';
+        const row = document.createElement('div');
+        row.className = 'wishlist-mosaic-row' + (r % 2 === 1 ? ' scroll-right' : '');
+        row.style.setProperty('--speed', (25 + r * 5) + 's');
+        row.style.animationDelay = (r * 0.15) + 's';
+        for (let i = 0; i < imgPerRow; i++) {
+            const img = images[(i + r * 3) % images.length];
+            const tile = document.createElement('div');
+            tile.className = 'wishlist-mosaic-tile';
+            tile.innerHTML = `<div class="wishlist-mosaic-image" style="background-image: url('${img}')"></div>`;
+            row.appendChild(tile);
+        }
+        wrapper.appendChild(row);
+        bgEl.appendChild(wrapper);
+    }
+}
+
+function closeDiscoveryPoolModal() {
+    if (_discoveryPoolOverlay) {
+        _discoveryPoolOverlay.remove();
+        _discoveryPoolOverlay = null;
+    }
+    _discoveryPoolData = null;
+    // Refresh dashboard stats
+    loadDiscoveryPoolStats();
+}
+
+function showPoolCategories() {
+    _discoveryPoolView = 'categories';
+    const grid = document.getElementById('pool-category-grid');
+    const list = document.getElementById('pool-list-view');
+    if (grid) grid.style.display = '';
+    if (list) list.style.display = 'none';
+}
+
+function showPoolList(category) {
+    _discoveryPoolView = category;
+    const grid = document.getElementById('pool-category-grid');
+    const list = document.getElementById('pool-list-view');
+    if (grid) grid.style.display = 'none';
+    if (list) list.style.display = '';
+
+    const titleEl = document.getElementById('pool-list-title');
+    if (titleEl) titleEl.textContent = category === 'failed' ? 'Failed Tracks' : 'Matched Tracks';
+
+    renderPoolList();
+}
+
+async function filterDiscoveryPool(playlistId) {
+    _discoveryPoolPlaylistFilter = playlistId || null;
+    let url = '/api/discovery-pool';
+    if (playlistId) url += `?playlist_id=${playlistId}`;
+    try {
+        const res = await fetch(url);
+        _discoveryPoolData = await res.json();
+        // Update header counts
+        _updatePoolHeaderCounts();
+        // Update category card counts
+        const failedCountEl = document.getElementById('pool-cat-failed-count');
+        const matchedCountEl = document.getElementById('pool-cat-matched-count');
+        if (failedCountEl) failedCountEl.textContent = _discoveryPoolData.stats.failed || 0;
+        if (matchedCountEl) matchedCountEl.textContent = _discoveryPoolData.stats.matched || 0;
+        // If viewing a list, refresh it
+        if (_discoveryPoolView === 'failed' || _discoveryPoolView === 'matched') {
+            renderPoolList();
+        }
+    } catch (err) {
+        showToast('Failed to filter discovery pool', 'error');
+    }
+}
+
+function _updatePoolHeaderCounts() {
+    if (!_discoveryPoolData) return;
+    const failedCount = _discoveryPoolData.stats.failed || 0;
+    const matchedCount = _discoveryPoolData.stats.matched || 0;
+    const matchedEl = document.getElementById('pool-header-matched');
+    const failedEl = document.getElementById('pool-header-failed');
+    if (matchedEl) matchedEl.textContent = `${matchedCount} Matched`;
+    if (failedEl) {
+        failedEl.textContent = `${failedCount} Failed`;
+        failedEl.classList.toggle('pool-header-failed-highlight', failedCount > 0);
+    }
+}
+
+function renderPoolList() {
+    const container = document.getElementById('pool-list-content');
+    if (!container || !_discoveryPoolData) return;
+
+    if (_discoveryPoolView === 'failed') {
+        const tracks = _discoveryPoolData.failed || [];
+        if (tracks.length === 0) {
+            container.innerHTML = '<div class="pool-empty">No failed discoveries. All tracks matched successfully.</div>';
+            return;
+        }
+        container.innerHTML = tracks.map(t => `
+            <div class="pool-track-row pool-failed">
+                <div class="pool-track-info">
+                    <div class="pool-track-name">${_esc(t.track_name)}</div>
+                    <div class="pool-track-meta">
+                        <span class="pool-track-artist">${_esc(t.artist_name)}</span>
+                        <span class="pool-track-playlist-badge">${_esc(t.playlist_name)}</span>
+                    </div>
+                </div>
+                <button class="playlist-modal-btn playlist-modal-btn-primary pool-fix-btn" onclick="openPoolFixModal(${t.id}, '${_escAttr(t.track_name)}', '${_escAttr(t.artist_name)}')">Fix Match</button>
+            </div>
+        `).join('');
+    } else {
+        const entries = _discoveryPoolData.matched || [];
+        if (entries.length === 0) {
+            container.innerHTML = '<div class="pool-empty">No cached discovery matches yet.</div>';
+            return;
+        }
+        container.innerHTML = entries.map(e => {
+            const md = e.matched_data || {};
+            const matchedArtists = (md.artists || []).map(a => typeof a === 'string' ? a : (a.name || '')).join(', ');
+            const conf = Math.round((e.confidence || 0) * 100);
+            const confClass = conf >= 80 ? 'high' : (conf >= 70 ? 'mid' : 'low');
+            const imgUrl = md.image_url || '';
+            return `
+                <div class="pool-track-row pool-matched">
+                    ${imgUrl ? `<img class="pool-match-image" src="${_esc(imgUrl)}" alt="" onerror="this.style.display='none'" />` : '<div class="pool-match-image-placeholder"></div>'}
+                    <div class="pool-track-info">
+                        <div class="pool-track-name">${_esc(e.original_title)}</div>
+                        <div class="pool-track-meta">
+                            <span class="pool-track-artist">${_esc(e.original_artist)}</span>
+                            <span class="pool-track-arrow">&rarr;</span>
+                            <span class="pool-match-name">${_esc(md.name || '?')}</span>
+                            <span class="pool-match-provider">${_esc(e.provider)}</span>
+                        </div>
+                    </div>
+                    <span class="pool-confidence-badge ${confClass}">${conf}%</span>
+                    <span class="pool-use-count">${e.use_count}&times;</span>
+                    <button class="pool-remove-btn" onclick="removePoolCacheEntry(${e.id})" title="Remove cached match">&times;</button>
+                </div>
+            `;
+        }).join('');
+    }
+}
+
+async function removePoolCacheEntry(entryId) {
+    if (!confirm('Remove this cached match? The track will be re-discovered fresh next time.')) return;
+    try {
+        const res = await fetch(`/api/discovery-pool/cache/${entryId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Cache entry removed', 'success');
+            filterDiscoveryPool(_discoveryPoolPlaylistFilter || '');
+        } else {
+            showToast(data.error || 'Failed to remove', 'error');
+        }
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+    }
+}
+
+// --- Pool Fix Sub-Modal ---
+
+function openPoolFixModal(trackId, trackName, artistName) {
+    // Create sub-modal overlay inside the pool modal
+    let fixOverlay = document.getElementById('pool-fix-overlay');
+    if (fixOverlay) fixOverlay.remove();
+
+    fixOverlay = document.createElement('div');
+    fixOverlay.className = 'pool-fix-overlay';
+    fixOverlay.id = 'pool-fix-overlay';
+    fixOverlay.onclick = (e) => { if (e.target === fixOverlay) closePoolFixModal(); };
+
+    fixOverlay.innerHTML = `
+        <div class="pool-fix-modal">
+            <div class="discovery-fix-modal-header">
+                <h2>Fix Track Match</h2>
+                <button class="modal-close-btn" onclick="closePoolFixModal()">✕</button>
+            </div>
+            <div class="discovery-fix-modal-content">
+                <div class="source-track-info">
+                    <h3>Source Track</h3>
+                    <div class="source-track-display">
+                        <div class="source-field"><label>Track:</label><span>${_esc(trackName)}</span></div>
+                        <div class="source-field"><label>Artist:</label><span>${_esc(artistName)}</span></div>
+                    </div>
+                </div>
+                <div class="search-inputs-section">
+                    <h3>Search for Match</h3>
+                    <div class="search-input-group">
+                        <input type="text" id="pool-fix-track-input" placeholder="Track name" class="fix-modal-input" value="${_escAttr(trackName)}">
+                        <input type="text" id="pool-fix-artist-input" placeholder="Artist name" class="fix-modal-input" value="${_escAttr(artistName)}">
+                        <button class="search-btn" onclick="searchPoolFix()">Search</button>
+                    </div>
+                </div>
+                <div class="search-results-section">
+                    <h3>Results</h3>
+                    <div id="pool-fix-results" class="fix-modal-results">
+                        <div class="pool-empty">Searching...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="discovery-fix-modal-footer">
+                <button class="modal-btn secondary" onclick="closePoolFixModal()">Cancel</button>
+            </div>
+        </div>
+    `;
+
+    fixOverlay.dataset.trackId = trackId;
+    document.body.appendChild(fixOverlay);
+
+    // Add enter key support
+    const trackInput = fixOverlay.querySelector('#pool-fix-track-input');
+    const artistInput = fixOverlay.querySelector('#pool-fix-artist-input');
+    const enterHandler = (e) => { if (e.key === 'Enter') searchPoolFix(); };
+    trackInput.addEventListener('keypress', enterHandler);
+    artistInput.addEventListener('keypress', enterHandler);
+
+    // Auto-search
+    setTimeout(() => searchPoolFix(), 100);
+}
+
+function closePoolFixModal() {
+    const fixOverlay = document.getElementById('pool-fix-overlay');
+    if (fixOverlay) fixOverlay.remove();
+}
+
+async function searchPoolFix() {
+    const trackInput = document.getElementById('pool-fix-track-input');
+    const artistInput = document.getElementById('pool-fix-artist-input');
+    const resultsContainer = document.getElementById('pool-fix-results');
+    if (!trackInput || !resultsContainer) return;
+
+    const query = `${artistInput.value.trim()} ${trackInput.value.trim()}`.trim();
+    if (!query) {
+        resultsContainer.innerHTML = '<div class="pool-empty">Enter a search term</div>';
+        return;
+    }
+
+    resultsContainer.innerHTML = '<div class="pool-empty">Searching...</div>';
+
+    try {
+        const res = await fetch(`/api/spotify/search_tracks?query=${encodeURIComponent(query)}&limit=20`);
+        const data = await res.json();
+        const tracks = data.tracks || [];
+
+        if (tracks.length === 0) {
+            resultsContainer.innerHTML = '<div class="pool-empty">No results found</div>';
+            return;
+        }
+
+        resultsContainer.innerHTML = tracks.map((track, i) => {
+            const artists = (track.artists || []).join(', ');
+            const duration = track.duration_ms ? formatDuration(track.duration_ms) : '';
+            return `
+                <div class="fix-result-card" onclick='selectPoolFixTrack(${JSON.stringify(track).replace(/'/g, "&#39;")})'>
+                    <div class="fix-result-card-content">
+                        <div class="fix-result-title">${_esc(track.name || 'Unknown')}</div>
+                        <div class="fix-result-artist">${_esc(artists)}</div>
+                        <div class="fix-result-album">${_esc(track.album || '')}</div>
+                        ${duration ? `<div class="fix-result-duration">${duration}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (err) {
+        resultsContainer.innerHTML = `<div class="pool-empty">Search failed: ${_esc(err.message)}</div>`;
+    }
+}
+
+async function selectPoolFixTrack(track) {
+    const fixOverlay = document.getElementById('pool-fix-overlay');
+    if (!fixOverlay) return;
+    const trackId = parseInt(fixOverlay.dataset.trackId);
+
+    try {
+        const res = await fetch('/api/discovery-pool/fix', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track_id: trackId,
+                spotify_track: track,
+            }),
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Matched: ${track.name}`, 'success');
+            closePoolFixModal();
+            // Refresh pool data
+            filterDiscoveryPool(_discoveryPoolPlaylistFilter || '');
+        } else {
+            showToast(data.error || 'Failed to fix track', 'error');
         }
     } catch (err) {
         showToast(`Error: ${err.message}`, 'error');
