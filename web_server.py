@@ -462,10 +462,12 @@ def _register_automation_handlers():
             if extra.get('discovered') and extra.get('matched_data'):
                 # Use official discovered metadata
                 md = extra['matched_data']
+                album_raw = md.get('album', '')
+                album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
                 tracks_json.append({
                     'name': md.get('name', ''),
                     'artists': md.get('artists', [{'name': t.get('artist_name', '')}]),
-                    'album': md.get('album', ''),
+                    'album': album_obj,
                     'duration_ms': md.get('duration_ms', 0),
                     'id': md.get('id', ''),
                 })
