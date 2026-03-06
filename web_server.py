@@ -492,7 +492,7 @@ def _register_automation_handlers():
             log_line=f'Starting sync: {len(tracks_json)} tracks', log_type='success')
         threading.Thread(
             target=_run_sync_task,
-            args=(sync_id, pl['name'], json.dumps(tracks_json)),
+            args=(sync_id, pl['name'], tracks_json),
             daemon=True,
             name=f'auto-sync-{playlist_id}'
         ).start()
