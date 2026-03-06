@@ -20082,14 +20082,13 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
         total_tracks = 0
         last_playlist_name = ''
 
-        # Pre-compute grand total for progress tracking (skip spotify playlists)
+        # Pre-compute grand total for progress tracking
         grand_total = 0
         db_init = get_database()
         for pl in playlists:
-            if pl.get('source', '') != 'spotify':
-                t = db_init.get_mirrored_playlist_tracks(pl['id'])
-                if t:
-                    grand_total += len(t)
+            t = db_init.get_mirrored_playlist_tracks(pl['id'])
+            if t:
+                grand_total += len(t)
         _update_automation_progress(automation_id, total=grand_total)
 
         for pl in playlists:
@@ -20097,10 +20096,6 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
             pl_name = pl.get('name', '')
             last_playlist_name = pl_name
             source = pl.get('source', '')
-
-            # Spotify playlists are auto-discovered during refresh
-            if source == 'spotify':
-                continue
 
             db = get_database()
             tracks = db.get_mirrored_playlist_tracks(pl_id)
