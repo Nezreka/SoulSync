@@ -105,6 +105,14 @@ SoulSync bridges streaming services to your media server with automated discover
 
 ### Automation
 
+**Automation Engine** - Visual drag-and-drop builder for custom workflows
+- **Triggers**: Schedule (interval/daily/weekly), Track Downloaded, Batch Complete, Playlist Changed, Discovery Complete, and 10+ more event types
+- **Actions**: Process Wishlist, Scan Watchlist, Refresh Mirrored Playlist, Discover Playlist, Sync Playlist, Scan Library, Update Database, Run Duplicate Cleaner, Quality Scan, and more
+- **Notifications**: Discord webhooks, Pushbullet, Telegram — with variable substitution for dynamic messages
+- **Conditions**: Filter triggers by artist, title, playlist name, quality, and other fields with contains/equals/starts_with operators
+- **System Automations**: Built-in wishlist processing (every 30 min) and watchlist scanning (every 24 hr) — configurable but non-deletable
+- **Playlist Discovery Pipeline**: Automatically discovers official Spotify/iTunes metadata for YouTube/Tidal mirrored playlists, ensuring nothing syncs or downloads without verified context
+
 **Watchlist** - Monitor unlimited artists with per-artist configuration
 - Choose which release types to track: Albums, EPs, Singles
 - Content filters: Live, Remixes, Acoustic, Compilations
@@ -115,6 +123,16 @@ SoulSync bridges streaming services to your media server with automated discover
 - Auto-processing on a configurable timer
 - Organized by category (albums vs singles)
 - Cleanup tool removes tracks you've since acquired
+
+**Mirrored Playlists** - Mirror playlists from Spotify, Tidal, or YouTube and keep them synced
+- Automatic refresh detects track additions and removals from source
+- Discovery pipeline matches raw YouTube/Tidal tracks to official Spotify/iTunes metadata
+- Sync to media server using verified metadata — undiscovered tracks are held back, not synced with garbage data
+
+**Local Profiles** - Multiple configuration profiles for different setups or users
+- Each profile maintains its own watchlist, wishlist, playlists, and automation settings
+- Switch between profiles from the UI — all settings and data are isolated
+- System automations (wishlist/watchlist) appear across all profiles
 
 **Background Tasks** - Database sync, discovery pool updates, seasonal content, watchlist scanning
 
@@ -334,6 +352,8 @@ If you're using the Unraid template from Community Applications:
 | Quality Scanner + Duplicate Cleaner | ✓ | ✗ | ✗ | ✓ |
 | Template-Based Organization | ✓ | ✗ | ✗ | ✓ |
 | Built-in Streaming Player | ✓ | ✗ | ✗ | ✗ |
+| Visual Automation Builder | ✓ | ✗ | ✗ | ✗ |
+| Multi-Profile Support | ✓ | ✗ | ✗ | ✗ |
 | Import Existing Files | ✓ | ✓ | ✗ | ✓ |
 | Web UI | ✓ | ✓ | ✓ | ✗ |
 
@@ -353,6 +373,7 @@ If you're using the Unraid template from Community Applications:
 - **Discovery System** — custom algorithms for personalized playlists, seasonal content, and similar artist exploration
 - **Metadata Pipeline** — dual-source (Spotify/iTunes) with MusicBrainz enrichment, AcoustID verification, LRC lyrics, album art embedding via mutagen
 - **Database Update Worker** — incremental sync from media servers with smart early-stopping (Jellyfin fast-path: ~2 API calls vs thousands)
+- **Automation Engine** — event-driven workflow builder with triggers, actions, conditions, notifications, and cross-action guards
 - **Web Scan Manager** — debounced media server scanning with completion callbacks
 - **Template-based File Organization** — configurable folder structures with automatic fallback
 
@@ -402,7 +423,6 @@ Transfer/Artist/Artist - Album/01 - Track.flac
 - Batch wishlist operations
 - Download history browser UI
 - Source reliability tracking
-- Notification center
 - Mobile-responsive improvements
 
 ### Under Consideration
