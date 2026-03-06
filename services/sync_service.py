@@ -351,9 +351,52 @@ class PlaylistSyncService:
             
             # Use the SAME improved database matching as PlaylistTrackAnalysisWorker
             from database.music_database import MusicDatabase
-            
+            from config.settings import config_manager
+
             original_title = spotify_track.name
-            
+            spotify_id = getattr(spotify_track, 'id', '') or ''
+            active_server = config_manager.get_active_media_server()
+
+            # --- Sync match cache fast-path ---
+            if spotify_id:
+                try:
+                    cache_db = MusicDatabase()
+                    cached = cache_db.read_sync_match_cache(spotify_id, active_server)
+                    if cached:
+                        server_track_id = cached['server_track_id']
+                        db_track_check = cache_db.get_track_by_id(server_track_id)
+                        if db_track_check:
+                            if server_type == "jellyfin":
+                                class JellyfinTrackFromCache:
+                                    def __init__(self, db_t):
+                                        self.ratingKey = db_t.id
+                                        self.title = db_t.title
+                                        self.id = db_t.id
+                                actual_track = JellyfinTrackFromCache(db_track_check)
+                            elif server_type == "navidrome":
+                                class NavidromeTrackFromCache:
+                                    def __init__(self, db_t):
+                                        self.ratingKey = db_t.id
+                                        self.title = db_t.title
+                                        self.id = db_t.id
+                                actual_track = NavidromeTrackFromCache(db_track_check)
+                            else:
+                                try:
+                                    actual_track = media_client.server.fetchItem(int(server_track_id))
+                                    if not (actual_track and hasattr(actual_track, 'ratingKey')):
+                                        actual_track = None
+                                except Exception:
+                                    actual_track = None
+
+                            if actual_track:
+                                logger.debug(f"⚡ Sync cache hit: '{original_title}' → server track {server_track_id}")
+                                return actual_track, cached['confidence']
+
+                        logger.debug(f"🔄 Sync cache stale for '{original_title}' — track {server_track_id} gone")
+                except Exception as cache_err:
+                    logger.debug(f"Sync cache lookup error: {cache_err}")
+            # --- End cache fast-path ---
+
             # Try each artist (same as modal logic)
             for artist in spotify_track.artists:
                 if self._cancelled:
@@ -369,13 +412,23 @@ class PlaylistSyncService:
                 
                 # Use the improved database check_track_exists method with server awareness
                 try:
-                    from config.settings import config_manager
-                    active_server = config_manager.get_active_media_server()
                     db = MusicDatabase()
                     db_track, confidence = db.check_track_exists(original_title, artist_name, confidence_threshold=0.7, server_source=active_server)
-                    
+
                     if db_track and confidence >= 0.7:
                         logger.debug(f"✔️ Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
+
+                        # Save to sync match cache for next time
+                        if spotify_id:
+                            try:
+                                from core.matching_engine import MusicMatchingEngine
+                                me = MusicMatchingEngine()
+                                db.save_sync_match_cache(
+                                    spotify_id, me.clean_title(original_title), me.clean_artist(artist_name),
+                                    active_server, db_track.id, db_track.title, confidence
+                                )
+                            except Exception:
+                                pass
                         
                         # Fetch the actual track object from active media server using the database track ID
                         try:

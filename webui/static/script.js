@@ -41671,6 +41671,15 @@ function renderMirroredCard(p, container) {
     const sourceIcons = { spotify: '🎵', tidal: '🌊', youtube: '▶', beatport: '🎛' };
     const srcIcon = sourceIcons[p.source] || '📋';
 
+    // Discovery ratio
+    const disc = p.discovered_count || 0;
+    const tot = p.total_count || p.track_count || 0;
+    let ratioHtml = '';
+    if (disc > 0) {
+        const complete = disc >= tot;
+        ratioHtml = `<span class="discovery-ratio${complete ? ' complete' : ''}">${disc}/${tot} discovered</span>`;
+    }
+
     const card = document.createElement('div');
     card.className = 'mirrored-playlist-card';
     card.id = `mirrored-card-${p.id}`;
@@ -41682,9 +41691,11 @@ function renderMirroredCard(p, container) {
                 <span class="source-badge ${_escAttr(p.source)}">${_esc(p.source)}</span>
                 <span>${p.track_count} tracks</span>
                 <span>Mirrored ${ago}</span>
+                ${ratioHtml}
                 ${phaseHtml}
             </div>
         </div>
+        ${disc > 0 ? `<button class="mirrored-card-clear" onclick="event.stopPropagation(); clearMirroredDiscovery(${p.id}, '${_escAttr(p.name)}')" title="Clear discovery data">↺</button>` : ''}
         <button class="mirrored-card-delete" onclick="event.stopPropagation(); deleteMirroredPlaylist(${p.id}, '${_escAttr(p.name)}')" title="Delete mirror">✕</button>
     `;
     card.addEventListener('click', () => {
@@ -42035,6 +42046,25 @@ function closeMirroredModal() {
 /**
  * Delete a mirrored playlist after confirmation.
  */
+async function clearMirroredDiscovery(playlistId, name) {
+    if (!confirm(`Clear discovery data for "${name}"? You can re-discover afterwards to get updated cover art.`)) return;
+    try {
+        const res = await fetch(`/api/mirrored-playlists/${playlistId}/clear-discovery`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Cleared discovery for ${name} (${data.cleared} tracks)`, 'success');
+            // Also clear the discovery state so the card goes back to fresh
+            const hash = `mirrored_${playlistId}`;
+            delete youtubePlaylistStates[hash];
+            loadMirroredPlaylists();
+        } else {
+            showToast(data.error || 'Failed to clear discovery', 'error');
+        }
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+    }
+}
+
 async function deleteMirroredPlaylist(playlistId, name) {
     if (!confirm(`Delete mirrored playlist "${name}"?`)) return;
     try {

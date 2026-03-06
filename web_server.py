@@ -13704,6 +13704,15 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
     except Exception:
         pass
 
+    # Invalidate sync match cache (track IDs may have changed)
+    try:
+        inv_db = get_database()
+        cleared = inv_db.invalidate_sync_match_cache()
+        if cleared:
+            logger.info(f"🗑️ Cleared {cleared} sync match cache entries after database update")
+    except Exception:
+        pass
+
     # WISHLIST CLEANUP: Automatically clean up wishlist after database update
     try:
         print("📋 [DB Update] Database update completed, starting automatic wishlist cleanup...")
@@ -22151,11 +22160,31 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
                 try:
                     from database.music_database import MusicDatabase
                     from config.settings import config_manager
-                    
+
                     db = MusicDatabase()
                     active_server = config_manager.get_active_media_server()
                     original_title = spotify_track.name
-                    
+                    spotify_id = getattr(spotify_track, 'id', '') or ''
+
+                    # --- Sync match cache fast-path ---
+                    if spotify_id:
+                        try:
+                            cached = db.read_sync_match_cache(spotify_id, active_server)
+                            if cached:
+                                db_track_check = db.get_track_by_id(cached['server_track_id'])
+                                if db_track_check:
+                                    class DatabaseTrackCached:
+                                        def __init__(self, db_t):
+                                            self.ratingKey = db_t.id
+                                            self.title = db_t.title
+                                            self.id = db_t.id
+                                    print(f"⚡ Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
+                                    return DatabaseTrackCached(db_track_check), cached['confidence']
+                                print(f"🔄 Sync cache stale for '{original_title}' — track gone")
+                        except Exception:
+                            pass
+                    # --- End cache fast-path ---
+
                     # Try each artist (same logic as original)
                     for artist in spotify_track.artists:
                         # Extract artist name from both string and dict formats
@@ -22165,7 +22194,7 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
                             artist_name = artist['name']
                         else:
                             artist_name = str(artist)
-                        
+
                         db_track, confidence = db.check_track_exists(
                             original_title, artist_name,
                             confidence_threshold=0.80,
@@ -22174,20 +22203,31 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
 
                         if db_track and confidence >= 0.80:
                             print(f"✅ Database match: '{db_track.title}' (confidence: {confidence:.2f})")
-                            
+
+                            # Save to sync match cache
+                            if spotify_id:
+                                try:
+                                    from core.matching_engine import MusicMatchingEngine
+                                    me = MusicMatchingEngine()
+                                    db.save_sync_match_cache(
+                                        spotify_id, me.clean_title(original_title), me.clean_artist(artist_name),
+                                        active_server, db_track.id, db_track.title, confidence
+                                    )
+                                except Exception:
+                                    pass
+
                             # Create mock track object for playlist creation
                             class DatabaseTrackMock:
                                 def __init__(self, db_track):
                                     self.ratingKey = db_track.id
                                     self.title = db_track.title
                                     self.id = db_track.id
-                                    # Add any other attributes needed for playlist creation
-                            
+
                             return DatabaseTrackMock(db_track), confidence
-                    
+
                     print(f"❌ No database match found for: '{original_title}'")
                     return None, 0.0
-                    
+
                 except Exception as e:
                     print(f"❌ Database search error: {e}")
                     return None, 0.0
@@ -29028,6 +29068,10 @@ def get_mirrored_playlists_endpoint():
         database = get_database()
         profile_id = get_current_profile_id()
         playlists = database.get_mirrored_playlists(profile_id=profile_id)
+        for pl in playlists:
+            discovered, total = database.get_mirrored_playlist_discovery_counts(pl['id'])
+            pl['discovered_count'] = discovered
+            pl['total_count'] = total
         return jsonify(playlists)
     except Exception as e:
         logger.error(f"Error getting mirrored playlists: {e}")
@@ -29057,6 +29101,35 @@ def delete_mirrored_playlist_endpoint(playlist_id):
         return jsonify({"error": "Playlist not found"}), 404
     except Exception as e:
         logger.error(f"Error deleting mirrored playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/clear-discovery', methods=['POST'])
+def clear_mirrored_discovery_endpoint(playlist_id):
+    """Clear discovery data for all tracks in a mirrored playlist, including discovery cache."""
+    try:
+        database = get_database()
+
+        # Clear discovery cache entries for these tracks so re-discovery does fresh lookups
+        try:
+            tracks = database.get_mirrored_playlist_tracks(playlist_id)
+            if tracks:
+                conn = database._get_connection()
+                cursor = conn.cursor()
+                for t in tracks:
+                    cache_key = _get_discovery_cache_key(t.get('track_name', ''), t.get('artist_name', ''))
+                    cursor.execute(
+                        "DELETE FROM discovery_match_cache WHERE normalized_title = ? AND normalized_artist = ?",
+                        (cache_key[0], cache_key[1])
+                    )
+                conn.commit()
+                logger.info(f"Cleared discovery cache for {len(tracks)} tracks in playlist {playlist_id}")
+        except Exception as cache_err:
+            logger.warning(f"Error clearing discovery cache: {cache_err}")
+
+        cleared = database.clear_mirrored_playlist_discovery(playlist_id)
+        return jsonify({"success": True, "cleared": cleared})
+    except Exception as e:
+        logger.error(f"Error clearing mirrored discovery: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/mirrored-playlists/<int:playlist_id>/prepare-discovery', methods=['POST'])
