@@ -399,6 +399,7 @@ class MusicDatabase:
 
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
+            self._add_automation_system_column(cursor)
 
             conn.commit()
             logger.info("Database initialized successfully")
@@ -418,6 +419,17 @@ class MusicDatabase:
                     logger.info(f"Added {col} column to automations table")
         except Exception as e:
             logger.error(f"Error adding automation notify columns: {e}")
+
+    def _add_automation_system_column(self, cursor):
+        """Add is_system column to automations table for non-deletable system automations."""
+        try:
+            cursor.execute("PRAGMA table_info(automations)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'is_system' not in cols:
+                cursor.execute("ALTER TABLE automations ADD COLUMN is_system INTEGER DEFAULT 0")
+                logger.info("Added is_system column to automations table")
+        except Exception as e:
+            logger.error(f"Error adding automation system column: {e}")
 
     def _add_server_source_columns(self, cursor):
         """Add server_source columns to existing tables for multi-server support"""
@@ -6542,18 +6554,30 @@ class MusicDatabase:
             return None
 
     def get_automations(self, profile_id: int = 1):
-        """Get all automations for a profile."""
+        """Get all automations for a profile (includes system automations regardless of profile)."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT * FROM automations WHERE profile_id = ? ORDER BY created_at DESC
+                    SELECT * FROM automations WHERE profile_id = ? OR is_system = 1 ORDER BY is_system DESC, created_at DESC
                 """, (profile_id,))
                 rows = cursor.fetchall()
                 return [dict(row) for row in rows]
         except Exception as e:
             logger.error(f"Error getting automations: {e}")
             return []
+
+    def get_system_automation_by_action(self, action_type: str):
+        """Get a system automation by its action_type. Returns dict or None."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM automations WHERE is_system = 1 AND action_type = ?", (action_type,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting system automation for {action_type}: {e}")
+            return None
 
     def get_automation(self, automation_id: int):
         """Get a single automation by ID."""
@@ -6569,7 +6593,7 @@ class MusicDatabase:
 
     def update_automation(self, automation_id: int, **kwargs) -> bool:
         """Update automation fields."""
-        allowed = {'name', 'enabled', 'trigger_type', 'trigger_config', 'action_type', 'action_config', 'next_run', 'notify_type', 'notify_config', 'last_result'}
+        allowed = {'name', 'enabled', 'trigger_type', 'trigger_config', 'action_type', 'action_config', 'next_run', 'notify_type', 'notify_config', 'last_result', 'is_system'}
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         if not updates:
             return False
@@ -6589,10 +6613,15 @@ class MusicDatabase:
             return False
 
     def delete_automation(self, automation_id: int) -> bool:
-        """Delete an automation."""
+        """Delete an automation. System automations cannot be deleted."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                cursor.execute("SELECT is_system FROM automations WHERE id = ?", (automation_id,))
+                row = cursor.fetchone()
+                if row and row['is_system']:
+                    logger.warning(f"Attempted to delete system automation {automation_id}")
+                    return False
                 cursor.execute("DELETE FROM automations WHERE id = ?", (automation_id,))
                 conn.commit()
                 return cursor.rowcount > 0

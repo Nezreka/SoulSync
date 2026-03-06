@@ -269,16 +269,12 @@ def _register_automation_handlers():
         return
 
     def _auto_process_wishlist(config):
-        if is_wishlist_actually_processing():
-            return {'status': 'skipped', 'reason': 'Wishlist already processing'}
-        threading.Thread(target=_process_wishlist_automatically, daemon=True, name='auto-wishlist').start()
-        return {'status': 'started', 'category': config.get('category', 'all')}
+        _process_wishlist_automatically()
+        return {'status': 'completed'}
 
     def _auto_scan_watchlist(config):
-        if is_watchlist_actually_scanning():
-            return {'status': 'skipped', 'reason': 'Watchlist already scanning'}
-        threading.Thread(target=_process_watchlist_scan_automatically, daemon=True, name='auto-watchlist').start()
-        return {'status': 'started'}
+        _process_watchlist_scan_automatically()
+        return {'status': 'completed'}
 
     def _auto_scan_library(config):
         if web_scan_manager:
@@ -286,8 +282,9 @@ def _register_automation_handlers():
             return {'status': result.get('status', 'unknown')}
         return {'status': 'error', 'reason': 'Scan manager not available'}
 
-    automation_engine.register_action_handler('process_wishlist', _auto_process_wishlist, is_wishlist_actually_processing)
-    automation_engine.register_action_handler('scan_watchlist', _auto_scan_watchlist, is_watchlist_actually_scanning)
+    cross_guard = lambda: is_wishlist_actually_processing() or is_watchlist_actually_scanning()
+    automation_engine.register_action_handler('process_wishlist', _auto_process_wishlist, cross_guard)
+    automation_engine.register_action_handler('scan_watchlist', _auto_scan_watchlist, cross_guard)
     automation_engine.register_action_handler('scan_library', _auto_scan_library)
 
     def _auto_refresh_mirrored(config):
@@ -670,20 +667,15 @@ def _mark_task_completed(task_id, track_info=None):
 
 # --- Automatic Wishlist Processing Infrastructure ---
 # Server-side timer system for automatic wishlist processing (replaces client-side JavaScript timers)
-wishlist_auto_processor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="WishlistAutoProcessor")
-wishlist_auto_timer = None  # threading.Timer for scheduling next auto-processing
+# --- Automatic Wishlist/Watchlist Processing Flags ---
+# Processing state flags (guards/recovery — timers are now managed by AutomationEngine)
 wishlist_auto_processing = False  # Flag to prevent concurrent auto-processing
 wishlist_auto_processing_timestamp = 0  # Timestamp when processing started (for stuck detection)
-wishlist_next_run_time = 0  # Timestamp when next auto-processing is scheduled (for countdown display)
-wishlist_timer_lock = threading.Lock()  # Thread safety for timer operations
+wishlist_timer_lock = threading.Lock()  # Thread safety for flag operations
 
-# --- Automatic Watchlist Scanning Infrastructure ---
-# Server-side timer system for automatic watchlist scanning (mirrors wishlist pattern for consistency)
-watchlist_auto_timer = None  # threading.Timer for scheduling next auto-scanning
 watchlist_auto_scanning = False  # Flag to prevent concurrent auto-scanning
 watchlist_auto_scanning_timestamp = 0  # Timestamp when scanning started (for stuck detection)
-watchlist_next_run_time = 0  # Timestamp when next auto-scanning is scheduled (for countdown display)
-watchlist_timer_lock = threading.Lock()  # Thread safety for timer operations
+watchlist_timer_lock = threading.Lock()  # Thread safety for flag operations
 
 # --- Shared Transfer Data Cache ---
 # Cache transfer data to avoid hammering the Soulseek API with multiple concurrent modals
@@ -3488,11 +3480,14 @@ def update_automation_endpoint(automation_id):
 
 @app.route('/api/automations/<int:automation_id>', methods=['DELETE'])
 def delete_automation_endpoint(automation_id):
-    """Delete an automation."""
+    """Delete an automation. System automations cannot be deleted."""
     try:
+        db = get_database()
+        auto = db.get_automation(automation_id)
+        if auto and auto.get('is_system'):
+            return jsonify({"error": "System automations cannot be deleted"}), 403
         if automation_engine:
             automation_engine.cancel_automation(automation_id)
-        db = get_database()
         success = db.delete_automation(automation_id)
         if not success:
             return jsonify({"error": "Automation not found"}), 404
@@ -3667,6 +3662,10 @@ def get_automation_blocks():
         ],
         "notifications": [
             {"type": "discord_webhook", "label": "Discord Webhook", "icon": "message", "description": "Send a Discord notification", "available": True,
+             "variables": ["time", "name", "run_count", "status"]},
+            {"type": "pushbullet", "label": "Pushbullet", "icon": "push", "description": "Push notification to phone/desktop", "available": True,
+             "variables": ["time", "name", "run_count", "status"]},
+            {"type": "telegram", "label": "Telegram", "icon": "message", "description": "Send a Telegram message", "available": True,
              "variables": ["time", "name", "run_count", "status"]},
         ]
     })
@@ -12989,12 +12988,6 @@ def check_and_recover_stuck_flags():
                 wishlist_auto_processing = False
                 wishlist_auto_processing_timestamp = 0
 
-            # CRITICAL FIX: Reschedule timer after recovery to maintain continuity
-            print("🔄 [Stuck Recovery] Rescheduling wishlist processing in 30 minutes")
-            try:
-                schedule_next_wishlist_processing()
-            except Exception as e:
-                print(f"❌ [Stuck Recovery] Failed to reschedule wishlist processing: {e}")
             return True
 
     # Check watchlist flag
@@ -13006,13 +12999,6 @@ def check_and_recover_stuck_flags():
             with watchlist_timer_lock:
                 watchlist_auto_scanning = False
                 watchlist_auto_scanning_timestamp = 0
-
-            # CRITICAL FIX: Reschedule timer after recovery to maintain continuity
-            print("🔄 [Stuck Recovery] Rescheduling watchlist scan in 24 hours")
-            try:
-                schedule_next_watchlist_scan()
-            except Exception as e:
-                print(f"❌ [Stuck Recovery] Failed to reschedule watchlist scan: {e}")
             return True
 
     return False
@@ -13063,88 +13049,6 @@ def is_watchlist_actually_scanning():
 
     return True
 
-def start_wishlist_auto_processing():
-    """Start automatic wishlist processing with 1-minute initial delay."""
-    global wishlist_auto_timer, wishlist_next_run_time
-
-    print("🚀 [Auto-Wishlist] Initializing automatic wishlist processing...")
-
-    with wishlist_timer_lock:
-        # Stop any existing timer to prevent duplicates
-        if wishlist_auto_timer is not None:
-            wishlist_auto_timer.cancel()
-
-        print("🔄 Starting automatic wishlist processing system (1 minute initial delay)")
-        wishlist_next_run_time = time.time() + 60.0  # Set timestamp for countdown display
-        wishlist_auto_timer = threading.Timer(60.0, _process_wishlist_automatically)  # 1 minute
-        wishlist_auto_timer.daemon = True
-        wishlist_auto_timer.start()
-        print(f"✅ [Debug] Timer started successfully - will trigger in 60 seconds")
-
-def stop_wishlist_auto_processing():
-    """Stop automatic wishlist processing and cleanup timer."""
-    global wishlist_auto_timer, wishlist_auto_processing, wishlist_auto_processing_timestamp, wishlist_next_run_time
-
-    with wishlist_timer_lock:
-        if wishlist_auto_timer is not None:
-            wishlist_auto_timer.cancel()
-            wishlist_auto_timer = None
-            print("⏹️ Stopped automatic wishlist processing")
-
-        wishlist_auto_processing = False
-        wishlist_auto_processing_timestamp = 0
-        wishlist_next_run_time = 0  # Clear countdown timer
-
-def schedule_next_wishlist_processing(retry_count=0, max_retries=3):
-    """
-    Schedule next automatic wishlist processing in 30 minutes.
-    Includes retry logic and atomic timer updates to prevent "0s" stuck state.
-
-    Args:
-        retry_count: Current retry attempt (internal use)
-        max_retries: Maximum number of retry attempts
-    """
-    global wishlist_auto_timer, wishlist_next_run_time
-
-    try:
-        with wishlist_timer_lock:
-            # Cancel existing timer if present (prevent orphaned timers)
-            if wishlist_auto_timer is not None:
-                try:
-                    wishlist_auto_timer.cancel()
-                except Exception as cancel_error:
-                    print(f"⚠️ Failed to cancel old wishlist timer: {cancel_error}")
-
-            # Calculate next run time BEFORE creating timer
-            next_time = time.time() + 1800.0  # 30 minutes
-
-            # Create and start new timer
-            new_timer = threading.Timer(1800.0, _process_wishlist_automatically)
-            new_timer.daemon = True
-            new_timer.start()
-
-            # Only update globals AFTER successful timer creation and start
-            wishlist_next_run_time = next_time
-            wishlist_auto_timer = new_timer
-
-            print(f"⏰ Scheduled next wishlist processing in 30 minutes")
-
-    except Exception as e:
-        print(f"❌ [CRITICAL] Failed to schedule wishlist processing (attempt {retry_count + 1}/{max_retries}): {e}")
-        import traceback
-        traceback.print_exc()
-
-        # Retry with exponential backoff
-        if retry_count < max_retries:
-            retry_delay = 5 * (2 ** retry_count)  # 5s, 10s, 20s
-            print(f"🔄 Retrying wishlist scheduling in {retry_delay} seconds...")
-            retry_timer = threading.Timer(retry_delay, lambda: schedule_next_wishlist_processing(retry_count + 1, max_retries))
-            retry_timer.daemon = True
-            retry_timer.start()
-        else:
-            print(f"❌ [FATAL] Failed to schedule wishlist processing after {max_retries} attempts!")
-            print("⚠️ MANUAL INTERVENTION REQUIRED - Wishlist auto-processing will not run!")
-
 def _classify_wishlist_track(track):
     """Classify a wishlist track as 'singles' or 'albums'.
 
@@ -13193,7 +13097,6 @@ def _process_wishlist_automatically():
         # This prevents deadlock and handles stuck flags (2-hour timeout)
         if is_wishlist_actually_processing():
             print("⚠️ [Auto-Wishlist] Already processing (verified with stuck detection), skipping.")
-            schedule_next_wishlist_processing()
             return
 
         # Check conditions and set flag
@@ -13218,9 +13121,7 @@ def _process_wishlist_automatically():
                 wishlist_auto_processing_timestamp = time.time()
                 print(f"🔒 [Auto-Wishlist] Flag set at timestamp {wishlist_auto_processing_timestamp}")
 
-        # Schedule next run OUTSIDE the lock to avoid deadlock
         if should_skip_already_running or should_skip_watchlist_conflict:
-            schedule_next_wishlist_processing()
             return
         
         # Use app context for database operations
@@ -13238,8 +13139,6 @@ def _process_wishlist_automatically():
                 with wishlist_timer_lock:
                     wishlist_auto_processing = False
                     wishlist_auto_processing_timestamp = 0
-                    # Don't clear wishlist_next_run_time - let schedule function handle atomically
-                schedule_next_wishlist_processing()  # Has built-in error handling and retry
                 return
 
             print(f"🎵 [Auto-Wishlist] Found {count} tracks in wishlist, starting automatic processing...")
@@ -13255,7 +13154,6 @@ def _process_wishlist_automatically():
                         print(f"⚠️ Wishlist processing already active in another batch ({batch_playlist_id}), skipping automatic start")
                         with wishlist_timer_lock:
                             wishlist_auto_processing = False
-                        schedule_next_wishlist_processing()
                         return
 
             # CRITICAL: Clean duplicates BEFORE fetching tracks to prevent count mismatches
@@ -13330,9 +13228,8 @@ def _process_wishlist_automatically():
                 with wishlist_timer_lock:
                     wishlist_auto_processing = False
                     wishlist_auto_processing_timestamp = 0
-                schedule_next_wishlist_processing()
                 return
-            
+
             # SANITIZE: Ensure consistent data format from wishlist service
             wishlist_tracks = []
             seen_track_ids_sanitation = set()  # Deduplicate during sanitization
@@ -13411,7 +13308,6 @@ def _process_wishlist_automatically():
                 with wishlist_timer_lock:
                     wishlist_auto_processing = False
                     wishlist_auto_processing_timestamp = 0
-                schedule_next_wishlist_processing()
                 return
 
             # Use filtered tracks for processing
@@ -13463,10 +13359,6 @@ def _process_wishlist_automatically():
         with wishlist_timer_lock:
             wishlist_auto_processing = False
             wishlist_auto_processing_timestamp = 0
-            # Don't clear wishlist_next_run_time - let schedule function handle atomically
-
-        # Reschedule next cycle (has built-in error handling and retry logic)
-        schedule_next_wishlist_processing()
 
 # ===============================
 # == DATABASE UPDATER API      ==
@@ -13644,10 +13536,7 @@ def get_wishlist_stats():
         total_count = singles_count + albums_count
 
         # Calculate time until next auto-processing and get processing state
-        next_run_in_seconds = 0
-        with wishlist_timer_lock:
-            if wishlist_next_run_time > 0:
-                next_run_in_seconds = max(0, int(wishlist_next_run_time - time.time()))
+        next_run_in_seconds = automation_engine.get_system_automation_next_run_seconds('process_wishlist') if automation_engine else 0
 
         # Use smart function with stuck detection (not raw flag)
         is_processing = is_wishlist_actually_processing()
@@ -15880,7 +15769,6 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
         with wishlist_timer_lock:
             wishlist_auto_processing = False
             wishlist_auto_processing_timestamp = 0
-            # Don't clear wishlist_next_run_time here - let schedule function handle it atomically
 
         try:
             if automation_engine:
@@ -15892,26 +15780,17 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
         except Exception:
             pass
 
-        # Schedule next automatic processing cycle (handles timer atomically with retry logic)
-        print("⏰ [Auto-Wishlist] Scheduling next automatic cycle in 30 minutes")
-        schedule_next_wishlist_processing()  # Has built-in error handling and retry
-
         return completion_summary
-        
+
     except Exception as e:
         print(f"❌ [Auto-Wishlist] Error in auto-completion processing: {e}")
         import traceback
         traceback.print_exc()
-        
+
         # Ensure auto-processing flag is reset even on error and reset timestamp
         with wishlist_timer_lock:
             wishlist_auto_processing = False
             wishlist_auto_processing_timestamp = 0
-            # Don't clear wishlist_next_run_time here - let schedule function handle it atomically
-
-        # Schedule next cycle even after error to maintain continuity (has built-in retry logic)
-        print("⏰ [Auto-Wishlist] Scheduling next cycle after error (30 minutes)")
-        schedule_next_wishlist_processing()  # Has built-in error handling and retry
 
         return {'tracks_added': 0, 'errors': 1, 'total_failed': 0}
 
@@ -16429,19 +16308,13 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         youtube_playlist_states[url_hash]['phase'] = 'discovered'
                         print(f"📋 Reset YouTube playlist {url_hash} to discovered phase (error)")
 
-        # Handle auto-initiated wishlist errors - reset flag and reschedule timer
+        # Handle auto-initiated wishlist errors - reset flag
         if is_auto_batch and playlist_id == 'wishlist':
-            print("❌ [Auto-Wishlist] Master worker error - resetting auto-processing flag and rescheduling timer")
+            print("❌ [Auto-Wishlist] Master worker error - resetting auto-processing flag")
             global wishlist_auto_processing, wishlist_auto_processing_timestamp
             with wishlist_timer_lock:
                 wishlist_auto_processing = False
                 wishlist_auto_processing_timestamp = 0
-            try:
-                schedule_next_wishlist_processing()
-            except Exception as schedule_error:
-                print(f"❌ [CRITICAL] Failed to schedule next wishlist processing: {schedule_error}")
-                import traceback
-                traceback.print_exc()
 
 def _run_post_processing_worker(task_id, batch_id):
     """
@@ -18585,13 +18458,6 @@ def cancel_batch(batch_id):
                         wishlist_auto_processing = False
                         wishlist_auto_processing_timestamp = 0
                     print(f"🔓 [Wishlist Cancel] Reset wishlist auto-processing flag for cancelled auto-batch")
-                    # Schedule next cycle since this one was cancelled
-                    try:
-                        schedule_next_wishlist_processing()
-                    except Exception as schedule_error:
-                        print(f"❌ [CRITICAL] Failed to schedule next wishlist processing: {schedule_error}")
-                        import traceback
-                        traceback.print_exc()
                 else:
                     print(f"ℹ️ [Wishlist Cancel] Manual wishlist batch cancelled (no flag reset needed)")
 
@@ -22659,10 +22525,7 @@ def get_watchlist_count():
         count = database.get_watchlist_count(profile_id=get_current_profile_id())
 
         # Calculate time until next auto-scanning
-        next_run_in_seconds = 0
-        with watchlist_timer_lock:
-            if watchlist_next_run_time > 0:
-                next_run_in_seconds = max(0, int(watchlist_next_run_time - time.time()))
+        next_run_in_seconds = automation_engine.get_system_automation_next_run_seconds('scan_watchlist') if automation_engine else 0
 
         return jsonify({
             "success": True,
@@ -23086,7 +22949,6 @@ def start_watchlist_scan():
                     with watchlist_timer_lock:
                         watchlist_auto_scanning = False
                         watchlist_auto_scanning_timestamp = 0
-                        watchlist_next_run_time = 0  # Clear timer for consistency
                     return
 
                 # Initialize scanner with MetadataService for cross-provider support
@@ -23435,7 +23297,6 @@ def start_watchlist_scan():
                 with watchlist_timer_lock:
                     watchlist_auto_scanning = False
                     watchlist_auto_scanning_timestamp = 0
-                    watchlist_next_run_time = 0  # Clear timer for consistency
                     print("🔓 [Manual Watchlist Scan] Flag reset - scan complete")
         
         # Initialize scan state
@@ -23893,87 +23754,6 @@ watchlist_scan_state = {
     'error': None
 }
 
-def start_watchlist_auto_scanning():
-    """Start automatic watchlist scanning with 5-minute initial delay (Timer-based like wishlist)"""
-    global watchlist_auto_timer, watchlist_next_run_time
-
-    print("🚀 [Auto-Watchlist] Initializing automatic watchlist scanning...")
-
-    with watchlist_timer_lock:
-        # Stop any existing timer to prevent duplicates
-        if watchlist_auto_timer is not None:
-            watchlist_auto_timer.cancel()
-
-        print("🔄 Starting automatic watchlist scanning system (5 minute initial delay)")
-        watchlist_next_run_time = time.time() + 300.0  # Set timestamp for countdown display
-        watchlist_auto_timer = threading.Timer(300.0, _process_watchlist_scan_automatically)  # 5 minutes
-        watchlist_auto_timer.daemon = True
-        watchlist_auto_timer.start()
-        print(f"✅ [Auto-Watchlist] Timer started successfully - will trigger in 5 minutes")
-
-def stop_watchlist_auto_scanning():
-    """Stop automatic watchlist scanning and cleanup timer."""
-    global watchlist_auto_timer, watchlist_auto_scanning
-
-    with watchlist_timer_lock:
-        if watchlist_auto_timer is not None:
-            watchlist_auto_timer.cancel()
-            watchlist_auto_timer = None
-            print("⏹️ Stopped automatic watchlist scanning")
-
-        watchlist_auto_scanning = False
-        watchlist_auto_scanning_timestamp = 0
-
-def schedule_next_watchlist_scan(retry_count=0, max_retries=3):
-    """
-    Schedule next automatic watchlist scan in 24 hours.
-    Includes retry logic and atomic timer updates to prevent "0s" stuck state.
-
-    Args:
-        retry_count: Current retry attempt (internal use)
-        max_retries: Maximum number of retry attempts
-    """
-    global watchlist_auto_timer, watchlist_next_run_time
-
-    try:
-        with watchlist_timer_lock:
-            # Cancel existing timer if present (prevent orphaned timers)
-            if watchlist_auto_timer is not None:
-                try:
-                    watchlist_auto_timer.cancel()
-                except Exception as cancel_error:
-                    print(f"⚠️ Failed to cancel old watchlist timer: {cancel_error}")
-
-            # Calculate next run time BEFORE creating timer
-            next_time = time.time() + 86400.0  # 24 hours
-
-            # Create and start new timer
-            new_timer = threading.Timer(86400.0, _process_watchlist_scan_automatically)
-            new_timer.daemon = True
-            new_timer.start()
-
-            # Only update globals AFTER successful timer creation and start
-            watchlist_next_run_time = next_time
-            watchlist_auto_timer = new_timer
-
-            print(f"⏰ Scheduled next watchlist scan in 24 hours")
-
-    except Exception as e:
-        print(f"❌ [CRITICAL] Failed to schedule watchlist scan (attempt {retry_count + 1}/{max_retries}): {e}")
-        import traceback
-        traceback.print_exc()
-
-        # Retry with exponential backoff
-        if retry_count < max_retries:
-            retry_delay = 5 * (2 ** retry_count)  # 5s, 10s, 20s
-            print(f"🔄 Retrying watchlist scheduling in {retry_delay} seconds...")
-            retry_timer = threading.Timer(retry_delay, lambda: schedule_next_watchlist_scan(retry_count + 1, max_retries))
-            retry_timer.daemon = True
-            retry_timer.start()
-        else:
-            print(f"❌ [FATAL] Failed to schedule watchlist scan after {max_retries} attempts!")
-            print("⚠️ MANUAL INTERVENTION REQUIRED - Watchlist auto-scanning will not run!")
-
 def _process_watchlist_scan_automatically():
     """Main automatic scanning logic that runs in background thread."""
     global watchlist_auto_scanning, watchlist_auto_scanning_timestamp, watchlist_scan_state
@@ -23988,25 +23768,12 @@ def _process_watchlist_scan_automatically():
         # This prevents deadlock and handles stuck flags (2-hour timeout)
         if is_watchlist_actually_scanning():
             print("⚠️ [Auto-Watchlist] Already scanning (verified with stuck detection), skipping.")
-            schedule_next_watchlist_scan()
             return
 
         with watchlist_timer_lock:
             # Re-check inside lock to handle race conditions
             if watchlist_auto_scanning:
                 print("⚠️ [Auto-Watchlist] Already scanning (race condition check), skipping.")
-                schedule_next_watchlist_scan()
-                return
-
-            # Check if wishlist processing is currently running (using smart detection)
-            if is_wishlist_actually_processing():
-                print("🎵 Wishlist processing in progress, rescheduling watchlist scan for 10 minutes from now")
-                # Smart retry: don't wait 24 hours, just wait 10 minutes and try again
-                global watchlist_auto_timer, watchlist_next_run_time
-                watchlist_next_run_time = time.time() + 600.0  # Set timestamp for countdown display
-                watchlist_auto_timer = threading.Timer(600.0, _process_watchlist_scan_automatically)  # 10 minutes
-                watchlist_auto_timer.daemon = True
-                watchlist_auto_timer.start()
                 return
 
             # Set flag and timestamp
@@ -24032,8 +23799,6 @@ def _process_watchlist_scan_automatically():
                 with watchlist_timer_lock:
                     watchlist_auto_scanning = False
                     watchlist_auto_scanning_timestamp = 0
-                    watchlist_next_run_time = 0  # Clear old timer before rescheduling
-                schedule_next_watchlist_scan()
                 return
 
             if not spotify_client or not spotify_client.is_authenticated():
@@ -24041,8 +23806,6 @@ def _process_watchlist_scan_automatically():
                 with watchlist_timer_lock:
                     watchlist_auto_scanning = False
                     watchlist_auto_scanning_timestamp = 0
-                    watchlist_next_run_time = 0  # Clear old timer before rescheduling
-                schedule_next_watchlist_scan()
                 return
 
             print(f"👁️ [Auto-Watchlist] Found {watchlist_count} artists in watchlist, starting automatic scan...")
@@ -24398,14 +24161,12 @@ def _process_watchlist_scan_automatically():
             itunes_enrichment_worker.resume()
             print("▶️ [Auto-Watchlist] Resumed iTunes enrichment worker after scan")
 
-        # Always reset flag and schedule next scan
+        # Always reset flag
         with watchlist_timer_lock:
             watchlist_auto_scanning = False
             watchlist_auto_scanning_timestamp = 0
-            watchlist_next_run_time = 0  # Clear old timer before rescheduling
-        schedule_next_watchlist_scan()
 
-    print("✅ Automatic watchlist scanning initialized")
+    print("✅ Automatic watchlist scanning complete")
 
 # --- Metadata Updater System ---
 
@@ -31289,10 +31050,7 @@ def _build_watchlist_count_payload(profile_id=1):
         count = database.get_watchlist_count(profile_id=profile_id)
     except Exception:
         count = 0
-    next_run_in_seconds = 0
-    with watchlist_timer_lock:
-        if watchlist_next_run_time > 0:
-            next_run_in_seconds = max(0, int(watchlist_next_run_time - time.time()))
+    next_run_in_seconds = automation_engine.get_system_automation_next_run_seconds('scan_watchlist') if automation_engine else 0
     return {
         'success': True,
         'count': count,
@@ -31620,10 +31378,7 @@ def _emit_scan_status_loop():
             logger.debug(f"Error emitting media scan: {e}")
         # Wishlist stats (auto-processing detection + countdown refresh)
         try:
-            next_run = 0
-            with wishlist_timer_lock:
-                if wishlist_next_run_time > 0:
-                    next_run = max(0, int(wishlist_next_run_time - time.time()))
+            next_run = automation_engine.get_system_automation_next_run_seconds('process_wishlist') if automation_engine else 0
             socketio.emit('wishlist:stats', {
                 "is_auto_processing": is_wishlist_actually_processing(),
                 "next_run_in_seconds": next_run,
@@ -31663,16 +31418,8 @@ if __name__ == '__main__':
     start_simple_background_monitor()
     print("✅ Simple background monitor started (includes automatic search cleanup)")
 
-    # Start automatic wishlist processing when server starts
-    print("🔧 Starting automatic wishlist processing...")
-    start_wishlist_auto_processing()
-    print("✅ Automatic wishlist processing started (1 minute initial delay, 30 minute cycles)")
+    # Wishlist/watchlist timers are now managed by AutomationEngine system automations
 
-    # Start automatic watchlist scanning when server starts
-    print("🔧 Starting automatic watchlist scanning...")
-    start_watchlist_auto_scanning()
-    print("✅ Automatic watchlist scanning started (5 minute initial delay, 24 hour cycles)")
-    
     # Pre-build import suggestions cache in background
     print("🔧 Pre-building import suggestions cache...")
     start_import_suggestions_cache()

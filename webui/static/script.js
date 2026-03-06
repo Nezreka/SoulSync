@@ -42137,7 +42137,7 @@ const _autoIcons = {
     playlist_changed: '\u270F\uFE0F',
     process_wishlist: '\uD83D\uDCCB', scan_watchlist: '\uD83D\uDC41\uFE0F',
     scan_library: '\uD83D\uDD04', refresh_mirrored: '\uD83D\uDCC2', sync_playlist: '\uD83D\uDD01',
-    notify_only: '\uD83D\uDD14', discord_webhook: '\uD83D\uDCAC',
+    notify_only: '\uD83D\uDD14', discord_webhook: '\uD83D\uDCAC', pushbullet: '\uD83D\uDD14', telegram: '\u2709\uFE0F',
     // Phase 3
     wishlist_processing_completed: '\u2705', watchlist_scan_completed: '\u2705',
     database_update_completed: '\uD83D\uDDC4\uFE0F', download_failed: '\u274C',
@@ -42191,7 +42191,7 @@ async function loadAutomations() {
 
 function renderAutomationCard(a) {
     const card = document.createElement('div');
-    card.className = 'automation-card' + (a.enabled ? '' : ' disabled');
+    card.className = 'automation-card' + (a.enabled ? '' : ' disabled') + (a.is_system ? ' system' : '');
     card.dataset.id = a.id;
     const tIcon = _autoIcons[a.trigger_type] || '\u2699\uFE0F';
     const aIcon = _autoIcons[a.action_type] || '\u2699\uFE0F';
@@ -42200,12 +42200,16 @@ function renderAutomationCard(a) {
     const nl = a.notify_type ? _autoFormatNotify(a.notify_type) : '';
     const actionDelay = a.action_config && a.action_config.delay ? a.action_config.delay : 0;
     const metaParts = [];
+    if (a.is_system) metaParts.push('<span class="system-badge">System</span>');
     if (a.last_run) metaParts.push('Last: ' + _autoTimeAgo(a.last_run));
     const _timerTriggers = ['schedule', 'daily_time', 'weekly_time'];
     if (a.next_run && a.enabled && _timerTriggers.includes(a.trigger_type)) metaParts.push('Next: ' + _autoTimeUntil(a.next_run));
     if (!_timerTriggers.includes(a.trigger_type) && a.enabled) metaParts.push('Listening');
     if (a.run_count) metaParts.push('Runs: ' + a.run_count);
     if (a.last_error) metaParts.push('Error: ' + _esc(a.last_error));
+
+    const deleteBtn = a.is_system ? '' :
+        `<button class="automation-delete-btn" title="Delete" onclick="event.stopPropagation(); deleteAutomation(${a.id}, '${_escAttr(a.name)}')">&#128465;</button>`;
 
     card.innerHTML = `
         <div class="automation-status ${a.enabled ? 'enabled' : 'disabled'}"></div>
@@ -42227,7 +42231,7 @@ function renderAutomationCard(a) {
                 <span class="toggle-slider"></span>
             </label>
             <button class="automation-edit-btn" title="Edit" onclick="event.stopPropagation(); showAutomationBuilder(${a.id})">&#9881;</button>
-            <button class="automation-delete-btn" title="Delete" onclick="event.stopPropagation(); deleteAutomation(${a.id}, '${_escAttr(a.name)}')">&#128465;</button>
+            ${deleteBtn}
         </div>
     `;
     return card;
@@ -42269,6 +42273,8 @@ function _autoFormatAction(type) {
 }
 function _autoFormatNotify(type) {
     if (type === 'discord_webhook') return 'Discord';
+    if (type === 'pushbullet') return 'Pushbullet';
+    if (type === 'telegram') return 'Telegram';
     return type || '';
 }
 function _autoTimeAgo(ts) {
@@ -42368,7 +42374,7 @@ async function showAutomationBuilder(editId) {
     }
 
     _autoMirroredPlaylists = null; // invalidate so it re-fetches
-    _autoBuilder = { editId: editId || null, when: null, do: null, notify: null };
+    _autoBuilder = { editId: editId || null, when: null, do: null, notify: null, isSystem: false };
 
     // If editing, load automation data
     if (editId) {
@@ -42380,10 +42386,14 @@ async function showAutomationBuilder(editId) {
             _autoBuilder.when = { type: a.trigger_type, config: a.trigger_config || {} };
             _autoBuilder.do = { type: a.action_type, config: a.action_config || {} };
             if (a.notify_type) _autoBuilder.notify = { type: a.notify_type, config: a.notify_config || {} };
+            _autoBuilder.isSystem = !!a.is_system;
         } catch (err) { showToast('Failed to load automation', 'error'); return; }
     } else {
         document.getElementById('builder-name').value = '';
     }
+
+    // System automations: lock the name field
+    document.getElementById('builder-name').readOnly = _autoBuilder.isSystem;
 
     _renderBuilderSidebar();
     _renderBuilderCanvas();
@@ -42395,7 +42405,8 @@ async function showAutomationBuilder(editId) {
 function hideAutomationBuilder() {
     document.getElementById('automations-builder-view').style.display = 'none';
     document.getElementById('automations-list-view').style.display = '';
-    _autoBuilder = { editId: null, when: null, do: null, notify: null };
+    document.getElementById('builder-name').readOnly = false;
+    _autoBuilder = { editId: null, when: null, do: null, notify: null, isSystem: false };
 }
 
 // --- Sidebar ---
@@ -42446,14 +42457,13 @@ function _renderBuilderCanvas() {
     slots.forEach((slot, i) => {
         if (i > 0) html += '<div class="flow-connector"></div>';
         const data = _autoBuilder[slot.key];
+        html += `<span class="flow-slot-label ${slot.labelClass}">${slot.label}</span>`;
         if (data) {
             html += `<div class="flow-slot filled" id="slot-${slot.key}" ondragover="_autoDragOver(event,'${slot.key}')" ondragleave="_autoDragLeave(event,'${slot.key}')" ondrop="_autoDrop(event,'${slot.key}')">
-                <span class="flow-slot-label ${slot.labelClass}">${slot.label}</span>
                 ${_renderPlacedBlock(slot.key, data)}
             </div>`;
         } else {
             html += `<div class="flow-slot empty" id="slot-${slot.key}" ondragover="_autoDragOver(event,'${slot.key}')" ondragleave="_autoDragLeave(event,'${slot.key}')" ondrop="_autoDrop(event,'${slot.key}')">
-                <span class="flow-slot-label ${slot.labelClass}">${slot.label}</span>
                 <div class="flow-slot-prompt">${slot.prompt}</div>
             </div>`;
         }
@@ -42485,11 +42495,15 @@ function _renderPlacedBlock(slotKey, data) {
         </div></div>`;
     }
 
-    return `<div class="placed-block" data-type="${_escAttr(data.type)}">
+    // System automations: lock trigger and action slots (no remove, no replace)
+    const locked = _autoBuilder.isSystem && (slotKey === 'when' || slotKey === 'do');
+    const removeBtn = locked ? '' : `<button class="placed-block-remove" onclick="_autoRemoveBlock('${slotKey}')">\u2715</button>`;
+
+    return `<div class="placed-block${locked ? ' locked' : ''}" data-type="${_escAttr(data.type)}">
         <div class="placed-block-header">
             <span class="placed-block-icon">${icon}</span>
             <span class="placed-block-label">${_esc(label)}</span>
-            <button class="placed-block-remove" onclick="_autoRemoveBlock('${slotKey}')">\u2715</button>
+            ${removeBtn}
         </div>
         ${configHtml ? '<div class="placed-block-config">' + configHtml + '</div>' : ''}
         ${delayHtml}
@@ -42573,26 +42587,62 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
             </select>
         </div>`;
     }
-    if (blockType === 'discord_webhook') {
-        const url = _escAttr(config.webhook_url || '');
-        // Merge base variables with trigger-specific variables
+    // Shared variable tags builder for notification types
+    function _notifyVarHtml(slotKey) {
         let allVars = ['time', 'name', 'run_count', 'status'];
         const triggerDef = _autoBuilder.when ? _findBlockDef(_autoBuilder.when.type) : null;
         if (triggerDef && triggerDef.variables) {
             triggerDef.variables.forEach(v => { if (!allVars.includes(v)) allVars.push(v); });
         }
-        let varHtml = '<div class="variable-tags">';
-        allVars.forEach(v => { varHtml += `<span class="variable-tag" onclick="_autoInsertVar('cfg-${slotKey}-message','{${v}}')">{${v}}</span>`; });
-        varHtml += '</div>';
+        let html = '<div class="variable-tags">';
+        allVars.forEach(v => { html += `<span class="variable-tag" onclick="_autoInsertVar('cfg-${slotKey}-message','{${v}}')">{${v}}</span>`; });
+        return html + '</div>';
+    }
+
+    if (blockType === 'discord_webhook') {
+        const url = _escAttr(config.webhook_url || '');
         return `<div class="config-row">
-            <label>URL</label>
+            <label>Webhook URL</label>
             <input type="text" id="cfg-${slotKey}-webhook_url" value="${url}" placeholder="https://discord.com/api/webhooks/...">
         </div>
         <div class="config-row">
             <label>Message</label>
             <textarea id="cfg-${slotKey}-message" placeholder="Message with {variables}...">${config.message || '{name} completed with status: {status}'}</textarea>
         </div>
-        ${varHtml}`;
+        ${_notifyVarHtml(slotKey)}`;
+    }
+    if (blockType === 'pushbullet') {
+        const token = _escAttr(config.access_token || '');
+        return `<div class="config-row">
+            <label>Access Token</label>
+            <input type="text" id="cfg-${slotKey}-access_token" value="${token}" placeholder="o.xxxxxxxxxxxxxxxxxxxx">
+        </div>
+        <div class="config-row">
+            <label>Title</label>
+            <input type="text" id="cfg-${slotKey}-title" value="${_escAttr(config.title || '{name}')}" placeholder="Notification title">
+        </div>
+        <div class="config-row">
+            <label>Message</label>
+            <textarea id="cfg-${slotKey}-message" placeholder="Message with {variables}...">${config.message || 'Completed with status: {status}'}</textarea>
+        </div>
+        ${_notifyVarHtml(slotKey)}`;
+    }
+    if (blockType === 'telegram') {
+        const botToken = _escAttr(config.bot_token || '');
+        const chatId = _escAttr(config.chat_id || '');
+        return `<div class="config-row">
+            <label>Bot Token</label>
+            <input type="text" id="cfg-${slotKey}-bot_token" value="${botToken}" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11">
+        </div>
+        <div class="config-row">
+            <label>Chat ID</label>
+            <input type="text" id="cfg-${slotKey}-chat_id" value="${chatId}" placeholder="-1001234567890 or @channelname">
+        </div>
+        <div class="config-row">
+            <label>Message</label>
+            <textarea id="cfg-${slotKey}-message" placeholder="Message with {variables}...">${config.message || '{name} completed with status: {status}'}</textarea>
+        </div>
+        ${_notifyVarHtml(slotKey)}`;
     }
     return '';
 }
@@ -42774,6 +42824,20 @@ function _readPlacedConfig(slotKey) {
             message: document.getElementById('cfg-' + slotKey + '-message')?.value || '',
         };
     }
+    if (type === 'pushbullet') {
+        return {
+            access_token: document.getElementById('cfg-' + slotKey + '-access_token')?.value?.trim() || '',
+            title: document.getElementById('cfg-' + slotKey + '-title')?.value || '',
+            message: document.getElementById('cfg-' + slotKey + '-message')?.value || '',
+        };
+    }
+    if (type === 'telegram') {
+        return {
+            bot_token: document.getElementById('cfg-' + slotKey + '-bot_token')?.value?.trim() || '',
+            chat_id: document.getElementById('cfg-' + slotKey + '-chat_id')?.value?.trim() || '',
+            message: document.getElementById('cfg-' + slotKey + '-message')?.value || '',
+        };
+    }
     return {};
 }
 
@@ -42806,6 +42870,7 @@ function _autoDragLeave(e, slotKey) {
 function _autoDrop(e, slotKey) {
     e.preventDefault();
     document.getElementById('slot-' + slotKey)?.classList.remove('drag-over');
+    if (_autoBuilder.isSystem && (slotKey === 'when' || slotKey === 'do')) return;
     try {
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
         if (data.slot !== slotKey) { showToast('Wrong slot — drop ' + data.slot + ' blocks here', 'error'); return; }
@@ -42816,11 +42881,13 @@ function _autoDrop(e, slotKey) {
 
 // Click-to-add (alternative to drag)
 function _autoClickBlock(blockType, slotCategory) {
+    if (_autoBuilder.isSystem && (slotCategory === 'when' || slotCategory === 'do')) return;
     _autoBuilder[slotCategory] = { type: blockType, config: {} };
     _renderBuilderCanvas();
 }
 
 function _autoRemoveBlock(slotKey) {
+    if (_autoBuilder.isSystem && (slotKey === 'when' || slotKey === 'do')) return;
     _autoBuilder[slotKey] = null;
     _renderBuilderCanvas();
 }

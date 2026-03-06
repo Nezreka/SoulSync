@@ -20,6 +20,23 @@ from utils.logging_config import get_logger
 
 logger = get_logger("automation_engine")
 
+SYSTEM_AUTOMATIONS = [
+    {
+        'name': 'Auto-Process Wishlist',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 30, 'unit': 'minutes'},
+        'action_type': 'process_wishlist',
+        'initial_delay': 60,  # 1 minute after startup
+    },
+    {
+        'name': 'Auto-Scan Watchlist',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 24, 'unit': 'hours'},
+        'action_type': 'scan_watchlist',
+        'initial_delay': 300,  # 5 minutes after startup
+    },
+]
+
 
 class AutomationEngine:
     def __init__(self, db):
@@ -56,12 +73,51 @@ class AutomationEngine:
         }
         logger.debug(f"Registered action handler: {action_type}")
 
+    # --- System Automations ---
+
+    def ensure_system_automations(self):
+        """Create system automations if they don't exist, and reset next_run to initial delays on every startup."""
+        for spec in SYSTEM_AUTOMATIONS:
+            existing = self.db.get_system_automation_by_action(spec['action_type'])
+            if not existing:
+                aid = self.db.create_automation(
+                    name=spec['name'],
+                    trigger_type=spec['trigger_type'],
+                    trigger_config=json.dumps(spec['trigger_config']),
+                    action_type=spec['action_type'],
+                    action_config='{}',
+                    profile_id=1,
+                )
+                if aid:
+                    self.db.update_automation(aid, is_system=1)
+                    logger.info(f"Created system automation: {spec['name']} (id={aid})")
+                existing = self.db.get_system_automation_by_action(spec['action_type'])
+
+            if existing:
+                # Reset next_run to initial delay on every startup
+                next_run = (datetime.now() + timedelta(seconds=spec['initial_delay'])).strftime('%Y-%m-%d %H:%M:%S')
+                self.db.update_automation(existing['id'], next_run=next_run)
+                logger.info(f"System automation '{spec['name']}' next_run reset to {spec['initial_delay']}s from now")
+
+    def get_system_automation_next_run_seconds(self, action_type):
+        """Get seconds until next run for a system automation. Returns 0 if not found or disabled."""
+        auto = self.db.get_system_automation_by_action(action_type)
+        if not auto or not auto.get('enabled') or not auto.get('next_run'):
+            return 0
+        try:
+            next_run = datetime.strptime(auto['next_run'], '%Y-%m-%d %H:%M:%S')
+            remaining = (next_run - datetime.now()).total_seconds()
+            return max(0, int(remaining))
+        except (ValueError, TypeError):
+            return 0
+
     # --- Lifecycle ---
 
     def start(self):
         """Load all enabled automations from DB and schedule them."""
         self._running = True
         self._event_cache_dirty = True
+        self.ensure_system_automations()
         automations = self.db.get_automations()
         scheduled = 0
         event_count = 0
@@ -510,6 +566,10 @@ class AutomationEngine:
 
         if notify_type == 'discord_webhook':
             self._send_discord_notification(config, variables)
+        elif notify_type == 'pushbullet':
+            self._send_pushbullet_notification(config, variables)
+        elif notify_type == 'telegram':
+            self._send_telegram_notification(config, variables)
 
     def _send_discord_notification(self, config, variables):
         """POST to Discord webhook with template variable substitution."""
@@ -526,3 +586,46 @@ class AutomationEngine:
         resp = requests.post(url, json={"content": message}, timeout=10)
         if resp.status_code not in (200, 204):
             raise RuntimeError(f"Discord webhook returned {resp.status_code}: {resp.text[:200]}")
+
+    def _send_pushbullet_notification(self, config, variables):
+        """Send push notification via Pushbullet API."""
+        token = config.get('access_token', '').strip()
+        if not token:
+            raise ValueError("No Pushbullet access token configured")
+
+        title = config.get('title', '{name}')
+        message = config.get('message', 'Completed with status: {status}')
+
+        for key, value in variables.items():
+            title = title.replace('{' + key + '}', value)
+            message = message.replace('{' + key + '}', value)
+
+        resp = requests.post(
+            'https://api.pushbullet.com/v2/pushes',
+            json={"type": "note", "title": title, "body": message},
+            headers={"Access-Token": token},
+            timeout=10,
+        )
+        if resp.status_code not in (200, 201):
+            raise RuntimeError(f"Pushbullet returned {resp.status_code}: {resp.text[:200]}")
+
+    def _send_telegram_notification(self, config, variables):
+        """Send message via Telegram Bot API."""
+        bot_token = config.get('bot_token', '').strip()
+        chat_id = config.get('chat_id', '').strip()
+        if not bot_token or not chat_id:
+            raise ValueError("Bot token and chat ID are required for Telegram")
+
+        message = config.get('message', '{name} completed with status: {status}')
+
+        for key, value in variables.items():
+            message = message.replace('{' + key + '}', value)
+
+        resp = requests.post(
+            f'https://api.telegram.org/bot{bot_token}/sendMessage',
+            json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+            timeout=10,
+        )
+        data = resp.json() if resp.status_code == 200 else {}
+        if not data.get('ok'):
+            raise RuntimeError(f"Telegram returned {resp.status_code}: {resp.text[:200]}")
