@@ -28864,6 +28864,15 @@ body {
     background: rgba(28, 28, 28, 0.98);
     border-color: rgba(var(--accent-rgb), 0.2);
 }
+.automation-card.running {
+    border-color: rgba(var(--accent-rgb), 0.35);
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.15), inset 0 0 12px rgba(var(--accent-rgb), 0.03);
+    animation: card-glow 2s ease-in-out infinite;
+}
+@keyframes card-glow {
+    0%, 100% { box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.15), inset 0 0 12px rgba(var(--accent-rgb), 0.03); }
+    50% { box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.25), inset 0 0 18px rgba(var(--accent-rgb), 0.05); }
+}
 .automation-card.disabled { opacity: 0.55; }
 .automation-card.disabled:hover { opacity: 0.75; }
 .automation-card.disabled .automation-name { color: rgba(255,255,255,0.5); }

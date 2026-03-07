@@ -43430,6 +43430,7 @@ function updateAutomationProgressFromData(data) {
 
         if (state.status === 'running') {
             if (statusDot) statusDot.className = 'automation-status running';
+            card.classList.add('running');
             panel.classList.add('visible');
             panel.classList.remove('finished', 'error');
             if (_autoProgressHideTimers[aid]) {
@@ -43444,6 +43445,7 @@ function updateAutomationProgressFromData(data) {
             }
         } else if (state.status === 'finished' || state.status === 'error') {
             if (statusDot) statusDot.className = 'automation-status ' + (card.querySelector('input[type=checkbox]')?.checked ? 'enabled' : 'disabled');
+            card.classList.remove('running');
             bar.style.width = '100%';
             panel.classList.add('finished');
             if (state.status === 'error') panel.classList.add('error');
