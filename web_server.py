@@ -283,15 +283,89 @@ def _register_automation_handlers():
             return {'status': 'error', 'error': str(e)}
 
     def _auto_scan_library(config):
-        if web_scan_manager:
+        global _scan_library_automation_id
+        automation_id = config.get('_automation_id')
+
+        if not web_scan_manager:
+            return {'status': 'error', 'reason': 'Scan manager not available'}
+
+        # If another automation is already tracking the scan, just forward the request
+        if _scan_library_automation_id is not None:
+            web_scan_manager.request_scan('Automation trigger (additional batch)')
+            return {'status': 'skipped', 'reason': 'Scan already being tracked'}
+
+        _scan_library_automation_id = automation_id
+
+        try:
             result = web_scan_manager.request_scan('Automation trigger')
-            return {'status': result.get('status', 'unknown')}
-        return {'status': 'error', 'reason': 'Scan manager not available'}
+            scan_status_val = result.get('status', 'unknown')
+
+            if scan_status_val == 'queued':
+                _update_automation_progress(automation_id,
+                    log_line='Scan already in progress — waiting for completion', log_type='info')
+            else:
+                delay = result.get('delay_seconds', 60)
+                _update_automation_progress(automation_id,
+                    log_line=f'Scan scheduled (debounce: {delay}s)', log_type='info')
+
+            # Unified polling loop — handles debounce → scanning → idle transitions
+            poll_start = time.time()
+            scan_started = (scan_status_val == 'queued')  # Already scanning if queued
+            while time.time() - poll_start < 1800:  # Max 30 min overall
+                status = web_scan_manager.get_scan_status()
+                st = status.get('status')
+
+                if st == 'idle':
+                    break  # Scan completed (or finished before we started polling)
+
+                elif st == 'scheduled':
+                    elapsed = int(time.time() - poll_start)
+                    _update_automation_progress(automation_id,
+                        phase=f'Waiting for scan to start... ({elapsed}s)',
+                        progress=min(int(elapsed / 60 * 10), 14))
+                    time.sleep(2)
+
+                elif st == 'scanning':
+                    if not scan_started:
+                        scan_started = True
+                        _update_automation_progress(automation_id, progress=15,
+                            log_line='Scan triggered on media server', log_type='success')
+                    elapsed = status.get('elapsed_seconds', 0)
+                    max_time = status.get('max_time_seconds', 300)
+                    pct = min(15 + int(elapsed / max_time * 80), 95)
+                    mins, secs = divmod(elapsed, 60)
+                    _update_automation_progress(automation_id,
+                        phase=f'Library scan in progress... ({mins}m {secs}s)',
+                        progress=pct)
+                    time.sleep(5)
+
+                else:
+                    time.sleep(2)  # Unknown status, avoid tight loop
+            else:
+                # 30-min timeout reached
+                _update_automation_progress(automation_id, status='error',
+                    phase='Timed out', log_line='Library scan timed out after 30 minutes', log_type='error')
+                return {'status': 'error', 'reason': 'Timed out', '_manages_own_progress': True}
+
+            _update_automation_progress(automation_id, status='finished', progress=100,
+                phase='Complete',
+                log_line='Library scan completed', log_type='success')
+
+            return {'status': 'completed', '_manages_own_progress': True}
+
+        except Exception as e:
+            _update_automation_progress(automation_id, status='error',
+                phase='Error', log_line=str(e), log_type='error')
+            return {'status': 'error', 'error': str(e), '_manages_own_progress': True}
+
+        finally:
+            _scan_library_automation_id = None
 
     cross_guard = lambda: is_wishlist_actually_processing() or is_watchlist_actually_scanning()
     automation_engine.register_action_handler('process_wishlist', _auto_process_wishlist, cross_guard)
     automation_engine.register_action_handler('scan_watchlist', _auto_scan_watchlist, cross_guard)
-    automation_engine.register_action_handler('scan_library', _auto_scan_library)
+    automation_engine.register_action_handler('scan_library', _auto_scan_library,
+        lambda: _scan_library_automation_id is not None)
 
     def _auto_refresh_mirrored(config):
         """Refresh mirrored playlist(s) from source."""
@@ -541,9 +615,10 @@ def _register_automation_handlers():
 
     def _auto_start_database_update(config):
         global _db_update_automation_id
+        automation_id = config.get('_automation_id')
         if db_update_state.get('status') == 'running':
             return {'status': 'skipped', 'reason': 'Database update already running'}
-        _db_update_automation_id = config.get('_automation_id')
+        _db_update_automation_id = automation_id
         full = config.get('full_refresh', False)
         active_server = config_manager.get_active_media_server()
         with db_update_lock:
@@ -552,18 +627,95 @@ def _register_automation_handlers():
                 "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": ""
             })
         db_update_executor.submit(_run_db_update_task, full, active_server)
-        return {'status': 'started', 'full_refresh': str(full), '_manages_own_progress': True}
+
+        # Monitor DB update progress (callbacks handle card updates, we just block until done)
+        time.sleep(1)
+        poll_start = time.time()
+        last_progress_time = time.time()
+        last_progress_val = 0
+        while time.time() - poll_start < 7200:  # Max 2 hours
+            time.sleep(3)
+            with db_update_lock:
+                status = db_update_state.get('status', 'idle')
+                current_progress = db_update_state.get('progress', 0)
+            if status != 'running':
+                break
+            # Track stall detection — if no progress change in 10 minutes, warn
+            if current_progress != last_progress_val:
+                last_progress_val = current_progress
+                last_progress_time = time.time()
+            elif time.time() - last_progress_time > 600:
+                _update_automation_progress(automation_id,
+                    log_line='Database update appears stalled — waiting...', log_type='warning')
+                last_progress_time = time.time()  # Reset so warning repeats every 10 min
+        else:
+            # 2-hour timeout reached
+            _update_automation_progress(automation_id, status='error',
+                phase='Timed out', log_line='Database update timed out after 2 hours', log_type='error')
+            return {'status': 'error', 'reason': 'Timed out', '_manages_own_progress': True}
+
+        # Finished/error callback already updated the card — return matching status
+        with db_update_lock:
+            final_status = db_update_state.get('status', 'unknown')
+        if final_status == 'error':
+            return {'status': 'error', 'reason': db_update_state.get('error_message', 'Unknown error'), '_manages_own_progress': True}
+        return {'status': 'completed', 'full_refresh': str(full), '_manages_own_progress': True}
 
     def _auto_run_duplicate_cleaner(config):
+        automation_id = config.get('_automation_id')
         if duplicate_cleaner_state.get('status') == 'running':
             return {'status': 'skipped', 'reason': 'Duplicate cleaner already running'}
+
+        # Pre-set status before submit so polling loop doesn't see stale 'finished' from last run
+        with duplicate_cleaner_lock:
+            duplicate_cleaner_state["status"] = "running"
         duplicate_cleaner_executor.submit(_run_duplicate_cleaner)
-        return {'status': 'started'}
+        _update_automation_progress(automation_id,
+            log_line='Duplicate cleaner started', log_type='info')
+
+        # Monitor duplicate cleaner progress (max 2 hours)
+        time.sleep(1)  # Brief pause for executor to start
+        poll_start = time.time()
+        while time.time() - poll_start < 7200:
+            time.sleep(3)
+            status = duplicate_cleaner_state.get('status', 'idle')
+            if status not in ('running',):
+                break
+            phase = duplicate_cleaner_state.get('phase', 'Scanning...')
+            progress = duplicate_cleaner_state.get('progress', 0)
+            scanned = duplicate_cleaner_state.get('files_scanned', 0)
+            total = duplicate_cleaner_state.get('total_files', 0)
+            _update_automation_progress(automation_id,
+                phase=phase, progress=progress,
+                processed=scanned, total=total)
+        else:
+            # 2-hour timeout reached
+            _update_automation_progress(automation_id, status='error',
+                phase='Timed out', log_line='Duplicate cleaner timed out after 2 hours', log_type='error')
+            return {'status': 'error', 'reason': 'Timed out', '_manages_own_progress': True}
+
+        # Check actual exit status (could be 'finished' or 'error')
+        final_status = duplicate_cleaner_state.get('status', 'idle')
+        if final_status == 'error':
+            err = duplicate_cleaner_state.get('error_message', 'Unknown error')
+            _update_automation_progress(automation_id, status='error', progress=100,
+                phase='Error', log_line=err, log_type='error')
+            return {'status': 'error', 'reason': err, '_manages_own_progress': True}
+
+        dupes = duplicate_cleaner_state.get('duplicates_found', 0)
+        removed = duplicate_cleaner_state.get('deleted', 0)
+        _update_automation_progress(automation_id, status='finished', progress=100,
+            phase='Complete',
+            log_line=f'Found {dupes} duplicates, removed {removed} files', log_type='success')
+        return {'status': 'completed', '_manages_own_progress': True}
 
     def _auto_clear_quarantine(config):
         import shutil as _shutil
+        automation_id = config.get('_automation_id')
         quarantine_path = os.path.join(docker_resolve_path(config_manager.get('soulseek.download_path', './downloads')), 'ss_quarantine')
         if not os.path.exists(quarantine_path):
+            _update_automation_progress(automation_id,
+                log_line='No quarantine folder found', log_type='info')
             return {'status': 'completed', 'removed': '0'}
         removed = 0
         for f in os.listdir(quarantine_path):
@@ -577,32 +729,86 @@ def _register_automation_handlers():
                     removed += 1
             except Exception:
                 pass
+        _update_automation_progress(automation_id,
+            log_line=f'Removed {removed} quarantined items', log_type='success' if removed > 0 else 'info')
         return {'status': 'completed', 'removed': str(removed)}
 
     def _auto_cleanup_wishlist(config):
+        automation_id = config.get('_automation_id')
         db = get_database()
         removed = db.remove_wishlist_duplicates(get_current_profile_id())
+        _update_automation_progress(automation_id,
+            log_line=f'Removed {removed or 0} duplicate wishlist entries', log_type='success' if removed else 'info')
         return {'status': 'completed', 'removed': str(removed or 0)}
 
     def _auto_update_discovery_pool(config):
+        automation_id = config.get('_automation_id')
         try:
             from core.watchlist_scanner import get_watchlist_scanner
             scanner = get_watchlist_scanner(spotify_client)
-            threading.Thread(target=scanner.update_discovery_pool_incremental,
-                             args=(get_current_profile_id(),), daemon=True).start()
-            return {'status': 'started'}
+            _update_automation_progress(automation_id,
+                log_line='Updating discovery pool...', log_type='info')
+            scanner.update_discovery_pool_incremental(get_current_profile_id())
+            _update_automation_progress(automation_id, status='finished', progress=100,
+                phase='Complete',
+                log_line='Discovery pool updated', log_type='success')
+            return {'status': 'completed', '_manages_own_progress': True}
         except Exception as e:
-            return {'status': 'error', 'reason': str(e)}
+            _update_automation_progress(automation_id, status='error',
+                phase='Error', log_line=str(e), log_type='error')
+            return {'status': 'error', 'reason': str(e), '_manages_own_progress': True}
 
     def _auto_start_quality_scan(config):
+        automation_id = config.get('_automation_id')
         if quality_scanner_state.get('status') == 'running':
             return {'status': 'skipped', 'reason': 'Quality scan already running'}
+
         scope = config.get('scope', 'watchlist')
+        # Pre-set status before submit so polling loop doesn't see stale 'finished' from last run
+        with quality_scanner_lock:
+            quality_scanner_state["status"] = "running"
         quality_scanner_executor.submit(_run_quality_scanner, scope, get_current_profile_id())
-        return {'status': 'started', 'scope': scope}
+        _update_automation_progress(automation_id,
+            log_line=f'Quality scan started (scope: {scope})', log_type='info')
+
+        # Monitor quality scanner progress (max 2 hours)
+        time.sleep(1)  # Brief pause for executor to start
+        poll_start = time.time()
+        while time.time() - poll_start < 7200:
+            time.sleep(3)
+            status = quality_scanner_state.get('status', 'idle')
+            if status not in ('running',):
+                break
+            phase = quality_scanner_state.get('phase', 'Scanning...')
+            progress = quality_scanner_state.get('progress', 0)
+            processed = quality_scanner_state.get('processed', 0)
+            total = quality_scanner_state.get('total', 0)
+            _update_automation_progress(automation_id,
+                phase=phase, progress=progress,
+                processed=processed, total=total)
+        else:
+            # 2-hour timeout reached
+            _update_automation_progress(automation_id, status='error',
+                phase='Timed out', log_line='Quality scan timed out after 2 hours', log_type='error')
+            return {'status': 'error', 'reason': 'Timed out', '_manages_own_progress': True}
+
+        # Check actual exit status (could be 'finished' or 'error')
+        final_status = quality_scanner_state.get('status', 'idle')
+        if final_status == 'error':
+            err = quality_scanner_state.get('error_message', 'Unknown error')
+            _update_automation_progress(automation_id, status='error', progress=100,
+                phase='Error', log_line=err, log_type='error')
+            return {'status': 'error', 'reason': err, '_manages_own_progress': True}
+
+        issues = quality_scanner_state.get('low_quality', 0)
+        _update_automation_progress(automation_id, status='finished', progress=100,
+            phase='Complete',
+            log_line=f'Quality scan complete — {issues} issues found', log_type='success')
+        return {'status': 'completed', 'scope': scope, '_manages_own_progress': True}
 
     def _auto_backup_database(config):
         import sqlite3, glob as _glob
+        automation_id = config.get('_automation_id')
         db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
         if not os.path.exists(db_path):
             return {'status': 'error', 'reason': 'Database file not found'}
@@ -623,6 +829,8 @@ def _register_automation_handlers():
                 os.remove(existing.pop(0))
             except Exception:
                 pass
+        _update_automation_progress(automation_id,
+            log_line=f'Backup created: {size_mb}MB ({os.path.basename(backup_path)})', log_type='success')
         return {'status': 'completed', 'backup_path': backup_path, 'size_mb': str(size_mb)}
 
     automation_engine.register_action_handler('start_database_update', _auto_start_database_update,
@@ -652,7 +860,7 @@ def _register_automation_handlers():
                                      phase='Error' if status == 'error' else 'Complete',
                                      log_line=msg, log_type='error' if status == 'error' else 'success')
 
-    automation_engine.register_progress_callbacks(_progress_init, _progress_finish)
+    automation_engine.register_progress_callbacks(_progress_init, _progress_finish, _update_automation_progress)
 
     # Register permanent callback: when any scan completes, emit library_scan_completed event
     # This replaces the hardcoded scan_completion_callback → trigger_automatic_database_update chain
@@ -743,6 +951,7 @@ db_update_state = {
     "removed_tracks": 0
 }
 _db_update_automation_id = None  # Set when automation triggers DB update, used by callbacks
+_scan_library_automation_id = None  # Set when automation triggers library scan, used for tracking
 
 # Quality Scanner state
 quality_scanner_state = {
