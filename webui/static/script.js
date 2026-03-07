@@ -43332,9 +43332,41 @@ const _autoIcons = {
     clear_quarantine: '\uD83D\uDDD1\uFE0F', cleanup_wishlist: '\uD83E\uDDF9',
     update_discovery_pool: '\uD83E\uDDED', start_quality_scan: '\uD83D\uDCCA',
     backup_database: '\uD83D\uDCBE',
+    refresh_beatport_cache: '\uD83C\uDFB5',
+    clean_search_history: '\uD83D\uDDD1\uFE0F',
+    clean_completed_downloads: '\u2705',
 };
 
 // --- Load & Render List ---
+
+function _buildAutomationSection(id, label, automations, useGrid) {
+    const section = document.createElement('div');
+    section.className = 'automations-section';
+    section.id = id;
+    const collapsed = localStorage.getItem('auto_section_' + id) === '1';
+    if (collapsed) section.classList.add('collapsed');
+    const header = document.createElement('div');
+    header.className = 'automations-section-header';
+    header.innerHTML = `
+        <span class="section-chevron">&#9660;</span>
+        <span class="section-label">${label}</span>
+        <span class="section-count">${automations.length}</span>
+        <span class="section-line"></span>
+    `;
+    header.onclick = () => {
+        section.classList.toggle('collapsed');
+        localStorage.setItem('auto_section_' + id, section.classList.contains('collapsed') ? '1' : '0');
+    };
+    const body = document.createElement('div');
+    body.className = 'automations-section-body';
+    const container = document.createElement('div');
+    container.className = useGrid ? 'automations-grid' : 'automations-user-list';
+    automations.forEach(a => container.appendChild(renderAutomationCard(a)));
+    body.appendChild(container);
+    section.appendChild(header);
+    section.appendChild(body);
+    return section;
+}
 
 async function loadAutomations() {
     const list = document.getElementById('automations-list');
@@ -43352,18 +43384,27 @@ async function loadAutomations() {
         }
         empty.style.display = 'none';
         list.innerHTML = '';
-        automations.forEach(a => list.appendChild(renderAutomationCard(a)));
+
+        const systemAutos = automations.filter(a => a.is_system);
+        const userAutos = automations.filter(a => !a.is_system);
+
+        if (systemAutos.length) {
+            list.appendChild(_buildAutomationSection('auto-section-system', 'System', systemAutos, true));
+        }
+        if (userAutos.length) {
+            list.appendChild(_buildAutomationSection('auto-section-custom', 'My Automations', userAutos, false));
+        }
+
         // Stats summary bar
         if (statsBar) {
             const total = automations.length;
             const active = automations.filter(a => a.enabled).length;
-            const scheduled = automations.filter(a => a.enabled && a.trigger_type === 'schedule').length;
-            const eventBased = automations.filter(a => a.enabled && a.trigger_type !== 'schedule').length;
+            const sys = systemAutos.length;
+            const custom = userAutos.length;
             statsBar.innerHTML = `
-                <span class="auto-stat"><strong>${total}</strong> Total</span>
                 <span class="auto-stat"><strong>${active}</strong> Active</span>
-                <span class="auto-stat"><strong>${scheduled}</strong> Scheduled</span>
-                <span class="auto-stat"><strong>${eventBased}</strong> Event-Based</span>
+                <span class="auto-stat"><strong>${sys}</strong> System</span>
+                <span class="auto-stat"><strong>${custom}</strong> Custom</span>
             `;
         }
         // Catch up on current automation progress
@@ -43389,7 +43430,6 @@ function renderAutomationCard(a) {
     const thenItems = a.then_actions || [];
     const actionDelay = a.action_config && a.action_config.delay ? a.action_config.delay : 0;
     const metaParts = [];
-    if (a.is_system) metaParts.push('<span class="system-badge">System</span>');
     if (a.last_run) metaParts.push('Last: ' + _autoTimeAgo(a.last_run));
     const _timerTriggers = ['schedule', 'daily_time', 'weekly_time'];
     if (a.next_run && a.enabled && _timerTriggers.includes(a.trigger_type)) metaParts.push('Next: ' + _autoTimeUntil(a.next_run));
@@ -43463,7 +43503,9 @@ function _autoFormatAction(type) {
         start_database_update: 'Update Database', run_duplicate_cleaner: 'Run Duplicate Cleaner',
         clear_quarantine: 'Clear Quarantine', cleanup_wishlist: 'Clean Up Wishlist',
         update_discovery_pool: 'Update Discovery', start_quality_scan: 'Run Quality Scan',
-        backup_database: 'Backup Database' };
+        backup_database: 'Backup Database',
+        refresh_beatport_cache: 'Refresh Beatport Cache', clean_search_history: 'Clean Search History',
+        clean_completed_downloads: 'Clean Completed Downloads' };
     return labels[type] || type || 'Unknown';
 }
 function _autoFormatNotify(type) {
