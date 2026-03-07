@@ -20371,7 +20371,7 @@ def update_tidal_discovery_match():
         result['status'] = '✅ Found'
         result['status_class'] = 'found'
         result['spotify_track'] = spotify_track['name']
-        result['spotify_artist'] = ', '.join(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else spotify_track['artists']
+        result['spotify_artist'] = _join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else _extract_artist_name(spotify_track['artists'])
         result['spotify_album'] = spotify_track['album']
         result['spotify_id'] = spotify_track['id']
 
@@ -20812,10 +20812,24 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                                      log_line=f'Error: {str(e)}', log_type='error')
 
 
+def _extract_artist_name(artist):
+    """Extract artist name string from either a string or dict ({"name": "..."}) format."""
+    if isinstance(artist, dict):
+        return artist.get('name', '')
+    return artist or ''
+
+def _extract_artist_names(artists):
+    """Extract a list of artist name strings from a list that may contain dicts or strings."""
+    return [_extract_artist_name(a) for a in (artists or [])]
+
+def _join_artist_names(artists):
+    """Join artist names from a list that may contain dicts or strings."""
+    return ', '.join(_extract_artist_names(artists))
+
 def _get_discovery_cache_key(title, artist):
     """Normalize title/artist for discovery cache lookup using matching_engine."""
     norm_title = matching_engine.clean_title(title)
-    norm_artist = matching_engine.clean_artist(artist)
+    norm_artist = matching_engine.clean_artist(_extract_artist_name(artist))
     return (norm_title, norm_artist)
 
 
@@ -20835,6 +20849,11 @@ def _validate_discovery_cache_artist(source_artist, cached_match):
     for cand_artist in cached_artists:
         if not cand_artist:
             continue
+        # Handle both string artists and dict artists ({"name": "..."})
+        if isinstance(cand_artist, dict):
+            cand_artist = cand_artist.get('name', '')
+            if not cand_artist:
+                continue
         cand_normalized = matching_engine.normalize_string(cand_artist)
         if source_artist_cleaned in cand_normalized:
             return True
@@ -21585,7 +21604,7 @@ def update_youtube_discovery_match():
         result['status'] = '✅ Found'
         result['status_class'] = 'found'
         result['spotify_track'] = spotify_track['name']
-        result['spotify_artist'] = ', '.join(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else spotify_track['artists']
+        result['spotify_artist'] = _join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else _extract_artist_name(spotify_track['artists'])
         result['spotify_album'] = spotify_track['album']
         result['spotify_id'] = spotify_track['id']
 
@@ -21669,7 +21688,7 @@ def _run_youtube_discovery_worker(url_hash):
                             'status': '✅ Found',
                             'status_class': 'found',
                             'spotify_track': cached_match.get('name', ''),
-                            'spotify_artist': cached_match.get('artists', [''])[0] if cached_match.get('artists') else '',
+                            'spotify_artist': _extract_artist_name(cached_match.get('artists', [''])[0]) if cached_match.get('artists') else '',
                             'spotify_album': cached_match.get('album', {}).get('name', '') if isinstance(cached_match.get('album'), dict) else cached_match.get('album', ''),
                             'duration': f"{track['duration_ms'] // 60000}:{(track['duration_ms'] % 60000) // 1000:02d}" if track['duration_ms'] else '0:00',
                             'discovery_source': discovery_source,
@@ -21807,7 +21826,7 @@ def _run_youtube_discovery_worker(url_hash):
                     'status': '✅ Found' if matched_track else '❌ Not Found',
                     'status_class': 'found' if matched_track else 'not-found',
                     'spotify_track': matched_track.name if matched_track else '',
-                    'spotify_artist': matched_track.artists[0] if matched_track else '',
+                    'spotify_artist': _extract_artist_name(matched_track.artists[0]) if matched_track else '',
                     'spotify_album': matched_track.album if matched_track else '',
                     'duration': f"{track['duration_ms'] // 60000}:{(track['duration_ms'] % 60000) // 1000:02d}" if track['duration_ms'] else '0:00',
                     'discovery_source': discovery_source,
@@ -21932,7 +21951,7 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
                             'status': '✅ Found',
                             'status_class': 'found',
                             'spotify_track': cached_match.get('name', ''),
-                            'spotify_artist': cached_match.get('artists', [''])[0] if cached_match.get('artists') else '',
+                            'spotify_artist': _extract_artist_name(cached_match.get('artists', [''])[0]) if cached_match.get('artists') else '',
                             'spotify_album': cached_match.get('album', {}).get('name', '') if isinstance(cached_match.get('album'), dict) else cached_match.get('album', ''),
                             'duration': f"{duration_ms // 60000}:{(duration_ms % 60000) // 1000:02d}" if duration_ms else '0:00',
                             'discovery_source': discovery_source,
@@ -22069,7 +22088,7 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
                     'status': '✅ Found' if matched_track else '❌ Not Found',
                     'status_class': 'found' if matched_track else 'not-found',
                     'spotify_track': matched_track.name if matched_track else '',
-                    'spotify_artist': matched_track.artists[0] if matched_track else '',
+                    'spotify_artist': _extract_artist_name(matched_track.artists[0]) if matched_track else '',
                     'spotify_album': matched_track.album if matched_track else '',
                     'duration': f"{duration_ms // 60000}:{(duration_ms % 60000) // 1000:02d}" if duration_ms else '0:00',
                     'discovery_source': discovery_source,
@@ -27033,7 +27052,7 @@ def update_listenbrainz_discovery_match():
             result['spotify_track'] = spotify_track.get('name', '') if spotify_track else ''
             # Join all artists (matching YouTube/Tidal/Beatport format)
             artists = spotify_track.get('artists', []) if spotify_track else []
-            result['spotify_artist'] = ', '.join(artists) if isinstance(artists, list) else artists
+            result['spotify_artist'] = _join_artist_names(artists) if isinstance(artists, list) else _extract_artist_name(artists)
             # Album comes as a string from the frontend fix modal
             album = spotify_track.get('album', '') if spotify_track else ''
             result['spotify_album'] = album if isinstance(album, str) else album.get('name', '') if isinstance(album, dict) else ''
@@ -28944,7 +28963,7 @@ def update_beatport_discovery_match():
         result['status'] = '✅ Found'
         result['status_class'] = 'found'
         result['spotify_track'] = spotify_track['name']
-        result['spotify_artist'] = ', '.join(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else spotify_track['artists']
+        result['spotify_artist'] = _join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else _extract_artist_name(spotify_track['artists'])
         result['spotify_album'] = spotify_track['album']
         result['spotify_id'] = spotify_track['id']
 
