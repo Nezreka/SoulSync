@@ -43432,7 +43432,7 @@ function renderAutomationCard(a) {
     const metaParts = [];
     if (a.last_run) metaParts.push('Last: ' + _autoTimeAgo(a.last_run));
     const _timerTriggers = ['schedule', 'daily_time', 'weekly_time'];
-    if (a.next_run && a.enabled && _timerTriggers.includes(a.trigger_type)) metaParts.push('Next: ' + _autoTimeUntil(a.next_run));
+    if (a.next_run && a.enabled && _timerTriggers.includes(a.trigger_type)) metaParts.push('<span class="auto-next-run" data-next="' + _escAttr(a.next_run) + '">Next: ' + _autoTimeUntil(a.next_run) + '</span>');
     if (!_timerTriggers.includes(a.trigger_type) && a.enabled) metaParts.push('Listening');
     if (a.run_count) metaParts.push('<span class="auto-runs-link" onclick="event.stopPropagation(); showAutomationHistory(' + a.id + ', \'' + _escAttr(a.name) + '\')" title="View run history">Runs: ' + a.run_count + '</span>');
     if (a.last_error) metaParts.push('Error: ' + _esc(a.last_error));
@@ -43533,6 +43533,13 @@ function _autoTimeUntil(ts) {
     if (d < 3600) return 'in ' + Math.ceil(d/60) + 'm'; if (d < 86400) return 'in ' + Math.round(d/3600) + 'h';
     return 'in ' + Math.round(d/86400) + 'd';
 }
+
+// --- Live countdown for "Next: in Xs" ---
+setInterval(() => {
+    document.querySelectorAll('.auto-next-run[data-next]').forEach(el => {
+        el.textContent = 'Next: ' + _autoTimeUntil(el.dataset.next);
+    });
+}, 1000);
 
 // --- CRUD ---
 
