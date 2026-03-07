@@ -14183,7 +14183,6 @@ body {
 
 /* Artist Downloads Section */
 .artist-downloads-section {
-    max-width: 800px;
     padding: 0 20px;
     animation: fadeInUp 0.5s ease-out;
     width: 100%;
@@ -16733,6 +16732,23 @@ body {
     background: rgba(255, 255, 255, 0.2);
     color: #ffffff;
     border-color: rgba(255, 255, 255, 0.3);
+}
+
+.wishlist-modal-btn-download {
+    background: linear-gradient(135deg, #1db954, #1ed760);
+    color: #ffffff;
+    border: 1px solid rgba(29, 185, 84, 0.3);
+}
+
+.wishlist-modal-btn-download:hover {
+    background: linear-gradient(135deg, #1ed760, #1db954);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(29, 185, 84, 0.4);
+}
+
+.wishlist-modal-btn-download:active {
+    transform: translateY(0);
+    box-shadow: 0 4px 12px rgba(29, 185, 84, 0.3);
 }
 
 .wishlist-modal-btn-primary {
