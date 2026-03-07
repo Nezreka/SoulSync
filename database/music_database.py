@@ -825,55 +825,61 @@ class MusicDatabase:
                 logger.info("Successfully migrated discovery_recent_albums table for iTunes support")
 
             # Migration: Add UNIQUE constraint to similar_artists table
-            # Test if ON CONFLICT works by trying a dummy operation
-            needs_similar_migration = False
-            try:
-                cursor.execute("""
-                    INSERT INTO similar_artists
-                    (source_artist_id, similar_artist_name, similarity_rank, occurrence_count, last_updated)
-                    VALUES ('__migration_test__', '__migration_test__', 1, 1, CURRENT_TIMESTAMP)
-                    ON CONFLICT(source_artist_id, similar_artist_name)
-                    DO UPDATE SET occurrence_count = occurrence_count
-                """)
-                # Clean up test row
-                cursor.execute("DELETE FROM similar_artists WHERE source_artist_id = '__migration_test__'")
-                logger.info("similar_artists table has correct UNIQUE constraint")
-            except Exception as constraint_error:
-                logger.info(f"similar_artists needs migration (constraint test failed: {constraint_error})")
-                needs_similar_migration = True
+            # Skip if table already has profile-scoped UNIQUE constraint (from v3 migration)
+            cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='similar_artists'")
+            sa_create_sql = cursor.fetchone()
+            has_profile_unique = sa_create_sql and 'UNIQUE(profile_id' in (sa_create_sql[0] or '')
 
-            if needs_similar_migration:
-                logger.info("Migrating similar_artists to add UNIQUE constraint...")
-                # Get a fresh connection for the migration
-                with self._get_connection() as migration_conn:
-                    migration_cursor = migration_conn.cursor()
-                    # SQLite doesn't support adding constraints, so recreate table
-                    migration_cursor.execute("DROP TABLE IF EXISTS similar_artists_new")
-                    migration_cursor.execute("""
-                        CREATE TABLE similar_artists_new (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            source_artist_id TEXT NOT NULL,
-                            similar_artist_spotify_id TEXT,
-                            similar_artist_itunes_id TEXT,
-                            similar_artist_name TEXT NOT NULL,
-                            similarity_rank INTEGER DEFAULT 1,
-                            occurrence_count INTEGER DEFAULT 1,
-                            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            UNIQUE(source_artist_id, similar_artist_name)
-                        )
+            if not has_profile_unique:
+                # Test if ON CONFLICT works by trying a dummy operation
+                needs_similar_migration = False
+                try:
+                    cursor.execute("""
+                        INSERT INTO similar_artists
+                        (source_artist_id, similar_artist_name, similarity_rank, occurrence_count, last_updated)
+                        VALUES ('__migration_test__', '__migration_test__', 1, 1, CURRENT_TIMESTAMP)
+                        ON CONFLICT(source_artist_id, similar_artist_name)
+                        DO UPDATE SET occurrence_count = occurrence_count
                     """)
-                    migration_cursor.execute("""
-                        INSERT OR IGNORE INTO similar_artists_new
-                        (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
-                         similar_artist_name, similarity_rank, occurrence_count, last_updated)
-                        SELECT source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
-                               similar_artist_name, similarity_rank, occurrence_count, last_updated
-                        FROM similar_artists
-                    """)
-                    migration_cursor.execute("DROP TABLE similar_artists")
-                    migration_cursor.execute("ALTER TABLE similar_artists_new RENAME TO similar_artists")
-                    migration_conn.commit()
-                    logger.info("Successfully migrated similar_artists table with UNIQUE constraint")
+                    # Clean up test row
+                    cursor.execute("DELETE FROM similar_artists WHERE source_artist_id = '__migration_test__'")
+                    logger.info("similar_artists table has correct UNIQUE constraint")
+                except Exception as constraint_error:
+                    logger.info(f"similar_artists needs migration (constraint test failed: {constraint_error})")
+                    needs_similar_migration = True
+
+                if needs_similar_migration:
+                    logger.info("Migrating similar_artists to add UNIQUE constraint...")
+                    # Get a fresh connection for the migration
+                    with self._get_connection() as migration_conn:
+                        migration_cursor = migration_conn.cursor()
+                        # SQLite doesn't support adding constraints, so recreate table
+                        migration_cursor.execute("DROP TABLE IF EXISTS similar_artists_new")
+                        migration_cursor.execute("""
+                            CREATE TABLE similar_artists_new (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                source_artist_id TEXT NOT NULL,
+                                similar_artist_spotify_id TEXT,
+                                similar_artist_itunes_id TEXT,
+                                similar_artist_name TEXT NOT NULL,
+                                similarity_rank INTEGER DEFAULT 1,
+                                occurrence_count INTEGER DEFAULT 1,
+                                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                UNIQUE(source_artist_id, similar_artist_name)
+                            )
+                        """)
+                        migration_cursor.execute("""
+                            INSERT OR IGNORE INTO similar_artists_new
+                            (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
+                             similar_artist_name, similarity_rank, occurrence_count, last_updated)
+                            SELECT source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
+                                   similar_artist_name, similarity_rank, occurrence_count, last_updated
+                            FROM similar_artists
+                        """)
+                        migration_cursor.execute("DROP TABLE similar_artists")
+                        migration_cursor.execute("ALTER TABLE similar_artists_new RENAME TO similar_artists")
+                        migration_conn.commit()
+                        logger.info("Successfully migrated similar_artists table with UNIQUE constraint")
 
             # ============== INDEXES (after migrations to ensure columns exist) ==============
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_source ON similar_artists (source_artist_id)")
