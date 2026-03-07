@@ -22292,6 +22292,12 @@ async function startYouTubeDiscovery(urlHash) {
             return;
         }
 
+        // Update frontend phase to match backend
+        const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
+        if (state) {
+            state.phase = 'discovering';
+        }
+
         // Start polling for progress
         startYouTubeDiscoveryPolling(urlHash);
 
@@ -22570,9 +22576,15 @@ function openYouTubeDiscoveryModal(urlHash) {
 
         // Set initial progress if we have discovery results
         if (state.discoveryResults && state.discoveryResults.length > 0) {
+            // Compute progress from results if discoveryProgress is missing/zero
+            let progress = state.discoveryProgress || 0;
+            const matches = state.spotifyMatches || 0;
+            if (progress === 0 && state.discoveryResults.length > 0 && state.playlist.tracks.length > 0) {
+                progress = Math.min(100, Math.round((state.discoveryResults.length / state.playlist.tracks.length) * 100));
+            }
             const progressData = {
-                progress: state.discoveryProgress || 0,
-                spotify_matches: state.spotifyMatches || 0,
+                progress: progress,
+                spotify_matches: matches || state.discoveryResults.filter(r => r.status_class === 'found').length,
                 spotify_total: state.playlist.tracks.length,
                 results: state.discoveryResults
             };
@@ -42422,7 +42434,9 @@ function renderMirroredCard(p, container) {
     `;
     card.addEventListener('click', () => {
         const st = youtubePlaylistStates[hash];
-        if (st && st.phase && st.phase !== 'fresh') {
+        // Treat as non-fresh if phase is set, or if a poller/discovery modal exists
+        const hasActiveDiscovery = activeYouTubePollers[hash] || document.getElementById(`youtube-discovery-modal-${hash}`);
+        if (st && ((st.phase && st.phase !== 'fresh') || hasActiveDiscovery)) {
             if (st.phase === 'downloading' || st.phase === 'download_complete') {
                 // Open download modal directly (follows Tidal/YouTube card click pattern)
                 const spotifyPlaylistId = st.convertedSpotifyPlaylistId;
@@ -42775,9 +42789,11 @@ async function clearMirroredDiscovery(playlistId, name) {
         const data = await res.json();
         if (data.success) {
             showToast(`Cleared discovery for ${name} (${data.cleared} tracks)`, 'success');
-            // Also clear the discovery state so the card goes back to fresh
+            // Also clear the discovery state and remove stale modal DOM
             const hash = `mirrored_${playlistId}`;
             delete youtubePlaylistStates[hash];
+            const staleModal = document.getElementById(`youtube-discovery-modal-${hash}`);
+            if (staleModal) staleModal.remove();
             loadMirroredPlaylists();
         } else {
             showToast(data.error || 'Failed to clear discovery', 'error');
@@ -43240,9 +43256,10 @@ async function discoverMirroredPlaylist(playlistId) {
 
     // If state already exists (discovery in progress or completed), just reopen the modal
     const existingState = youtubePlaylistStates[tempHash];
-    if (existingState && existingState.phase !== 'fresh') {
+    const hasActiveDiscovery = activeYouTubePollers[tempHash] || document.getElementById(`youtube-discovery-modal-${tempHash}`);
+    if (existingState && (existingState.phase !== 'fresh' || hasActiveDiscovery)) {
         openYouTubeDiscoveryModal(tempHash);
-        // Resume polling if discovery is in progress
+        // Resume polling if discovery is in progress but poller stopped
         if (existingState.phase === 'discovering' && !activeYouTubePollers[tempHash]) {
             startYouTubeDiscoveryPolling(tempHash);
         }

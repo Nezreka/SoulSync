@@ -28886,23 +28886,45 @@ body {
     .automations-grid { grid-template-columns: 1fr; }
 }
 
-/* --- New Automation Button --- */
+/* --- New Automation Button (rainbow glow) --- */
+@keyframes btn-rainbow-glow {
+    0%   { box-shadow: 0 4px 18px rgba(255, 0, 100, 0.3), 0 2px 6px rgba(0,0,0,0.2); border-color: rgba(255, 0, 100, 0.35); }
+    20%  { box-shadow: 0 4px 18px rgba(255, 140, 0, 0.3), 0 2px 6px rgba(0,0,0,0.2); border-color: rgba(255, 140, 0, 0.35); }
+    40%  { box-shadow: 0 4px 18px rgba(0, 210, 120, 0.3), 0 2px 6px rgba(0,0,0,0.2); border-color: rgba(0, 210, 120, 0.35); }
+    60%  { box-shadow: 0 4px 18px rgba(0, 140, 255, 0.3), 0 2px 6px rgba(0,0,0,0.2); border-color: rgba(0, 140, 255, 0.35); }
+    80%  { box-shadow: 0 4px 18px rgba(160, 0, 255, 0.3), 0 2px 6px rgba(0,0,0,0.2); border-color: rgba(160, 0, 255, 0.35); }
+    100% { box-shadow: 0 4px 18px rgba(255, 0, 100, 0.3), 0 2px 6px rgba(0,0,0,0.2); border-color: rgba(255, 0, 100, 0.35); }
+}
+@keyframes btn-rainbow-glow-hover {
+    0%   { box-shadow: 0 6px 28px rgba(255, 0, 100, 0.45), 0 3px 10px rgba(0,0,0,0.25); border-color: rgba(255, 0, 100, 0.5); }
+    20%  { box-shadow: 0 6px 28px rgba(255, 140, 0, 0.45), 0 3px 10px rgba(0,0,0,0.25); border-color: rgba(255, 140, 0, 0.5); }
+    40%  { box-shadow: 0 6px 28px rgba(0, 210, 120, 0.45), 0 3px 10px rgba(0,0,0,0.25); border-color: rgba(0, 210, 120, 0.5); }
+    60%  { box-shadow: 0 6px 28px rgba(0, 140, 255, 0.45), 0 3px 10px rgba(0,0,0,0.25); border-color: rgba(0, 140, 255, 0.5); }
+    80%  { box-shadow: 0 6px 28px rgba(160, 0, 255, 0.45), 0 3px 10px rgba(0,0,0,0.25); border-color: rgba(160, 0, 255, 0.5); }
+    100% { box-shadow: 0 6px 28px rgba(255, 0, 100, 0.45), 0 3px 10px rgba(0,0,0,0.25); border-color: rgba(255, 0, 100, 0.5); }
+}
 .auto-new-btn {
-    background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, rgb(var(--accent-light-rgb)) 100%);
+    position: relative;
+    background: linear-gradient(135deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 100%);
     color: #fff;
-    border: none;
+    border: 1.5px solid rgba(255,255,255,0.15);
     padding: 10px 22px;
     border-radius: 12px;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     letter-spacing: 0.3px;
+    animation: btn-rainbow-glow 6s linear infinite;
+    backdrop-filter: blur(12px);
 }
 .auto-new-btn:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.4);
-    filter: brightness(1.1);
+    background: linear-gradient(135deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.08) 100%);
+    animation: btn-rainbow-glow-hover 4s linear infinite;
+}
+.auto-new-btn:active {
+    transform: translateY(0) scale(0.97);
 }
 
 /* --- Stats Summary Bar --- */

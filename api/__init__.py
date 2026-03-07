@@ -18,7 +18,7 @@ logger = get_logger("api_v1")
 # ---------------------------------------------------------------------------
 limiter = Limiter(
     key_func=get_remote_address,
-    default_limits=["60 per minute"],
+    default_limits=[],           # No global default — limits are applied per-blueprint
     storage_uri="memory://",
 )
 
@@ -42,6 +42,9 @@ def create_api_blueprint():
     from .retag import register_routes as reg_retag
     from .listenbrainz import register_routes as reg_listenbrainz
     from .cache import register_routes as reg_cache
+
+    # ---- rate-limit only /api/v1 routes (not the whole app) ----
+    limiter.limit("60 per minute")(bp)
 
     reg_library(bp)
     reg_system(bp)
