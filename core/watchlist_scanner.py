@@ -1508,7 +1508,7 @@ class WatchlistScanner:
             logger.error(f"Error fetching similar artists for {watchlist_artist.artist_name}: {e}")
             return False
 
-    def populate_discovery_pool(self, top_artists_limit: int = 50, albums_per_artist: int = 10, profile_id: int = 1):
+    def populate_discovery_pool(self, top_artists_limit: int = 50, albums_per_artist: int = 10, profile_id: int = 1, progress_callback=None):
         """
         Populate discovery pool with tracks from top similar artists.
         Called after watchlist scan completes.
@@ -1529,8 +1529,14 @@ class WatchlistScanner:
             if skip_pool_population:
                 logger.info("Discovery pool was populated recently (< 24 hours ago). Skipping pool population.")
                 logger.info("But still refreshing recent albums cache and curated playlists...")
+                if progress_callback:
+                    progress_callback('skip', 'Discovery pool recently updated, skipping')
                 # Still run these even when skipping main pool population
+                if progress_callback:
+                    progress_callback('phase', 'Caching recent albums...')
                 self.cache_discovery_recent_albums(profile_id=profile_id)
+                if progress_callback:
+                    progress_callback('phase', 'Curating playlists...')
                 self.curate_discovery_playlists(profile_id=profile_id)
                 return
 
@@ -1556,8 +1562,14 @@ class WatchlistScanner:
             if not similar_artists:
                 logger.info("No similar artists found to populate discovery pool from similar artists")
                 logger.info("But still caching recent albums from watchlist artists and curating playlists...")
+                if progress_callback:
+                    progress_callback('skip', 'No similar artists found')
                 # Still run these even without similar artists - they use watchlist artists
+                if progress_callback:
+                    progress_callback('phase', 'Caching recent albums...')
                 self.cache_discovery_recent_albums(profile_id=profile_id)
+                if progress_callback:
+                    progress_callback('phase', 'Curating playlists...')
                 self.curate_discovery_playlists(profile_id=profile_id)
                 return
 
@@ -1568,6 +1580,8 @@ class WatchlistScanner:
             for artist_idx, similar_artist in enumerate(similar_artists, 1):
                 try:
                     logger.info(f"[{artist_idx}/{len(similar_artists)}] Processing {similar_artist.similar_artist_name} (occurrence: {similar_artist.occurrence_count})")
+                    if progress_callback:
+                        progress_callback('artist', f'{similar_artist.similar_artist_name} ({artist_idx}/{len(similar_artists)})')
 
                     # Build list of sources to process for this artist
                     # iTunes is ALWAYS processed (baseline), Spotify is added if authenticated
@@ -1766,6 +1780,8 @@ class WatchlistScanner:
                     continue
 
             logger.info(f"Discovery pool from similar artists complete: {total_tracks_added} tracks added")
+            if progress_callback:
+                progress_callback('success', f'Discovery pool: {total_tracks_added} tracks from {len(similar_artists)} artists')
 
             # Note: Watchlist artist albums are already in discovery pool from the watchlist scan itself
             # No need to re-fetch them here to avoid duplicate API calls
@@ -1927,10 +1943,14 @@ class WatchlistScanner:
 
             # Cache recent albums for discovery page
             logger.info("Caching recent albums for discovery page...")
+            if progress_callback:
+                progress_callback('phase', 'Caching recent albums...')
             self.cache_discovery_recent_albums(profile_id=profile_id)
 
             # Curate playlists for consistent daily experience
             logger.info("Curating discovery playlists...")
+            if progress_callback:
+                progress_callback('phase', 'Curating playlists...')
             self.curate_discovery_playlists(profile_id=profile_id)
 
         except Exception as e:
