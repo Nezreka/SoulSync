@@ -29110,6 +29110,18 @@ body {
 .flow-slot-label.when { background: rgba(var(--accent-rgb),0.2); color: rgb(var(--accent-light-rgb)); }
 .flow-slot-label.do { background: rgba(88,101,242,0.2); color: #7289da; }
 .flow-slot-label.notify { background: rgba(250,204,21,0.15); color: #fbbf24; }
+.flow-slot-label.then { background: rgba(250,204,21,0.15); color: #fbbf24; }
+
+.flow-connector.small { height: 16px; }
+
+.then-add {
+    min-height: 48px !important;
+    border-style: dashed;
+    opacity: 0.6;
+    transition: opacity 0.3s ease;
+}
+.then-add:hover, .then-add.drag-over { opacity: 1; }
+.then-add .flow-slot-prompt { font-size: 12px; padding: 12px; }
 
 /* --- Placed Block (in flow) --- */
 .placed-block {

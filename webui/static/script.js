@@ -16187,6 +16187,60 @@ const TOOL_HELP_CONTENT = {
                 <li>Peace of mind for your library data</li>
             </ul>
         `
+    },
+
+    // ==================== Signal System Help ====================
+
+    'auto-signal_received': {
+        title: 'Signal Received',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when another automation sends a named signal using the <strong>Fire Signal</strong> then-action. This lets you chain automations together — one automation finishes and wakes up another.</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>Signal Name:</strong> The name to listen for (e.g. <code>library_ready</code>, <code>scan_done</code>). Must match the name used in the Fire Signal action.</li>
+            </ul>
+
+            <h4>How chaining works</h4>
+            <ol>
+                <li><strong>Automation A:</strong> Trigger = Batch Complete, Action = Scan Library, Then = Fire Signal "scan_done"</li>
+                <li><strong>Automation B:</strong> Trigger = Signal Received "scan_done", Action = Update Database</li>
+                <li>When a download finishes → A scans library → fires signal → B wakes up → updates database</li>
+            </ol>
+
+            <h4>Safety</h4>
+            <ul>
+                <li>Circular signal chains are detected and blocked when you save</li>
+                <li>Maximum chain depth of 5 levels to prevent runaway cascades</li>
+                <li>Same signal can only fire once every 10 seconds (cooldown)</li>
+            </ul>
+
+            <h4>Signal names</h4>
+            <p>Use descriptive lowercase names with underscores: <code>library_ready</code>, <code>scan_complete</code>, <code>downloads_done</code>. Existing signal names from other automations appear as suggestions.</p>
+        `
+    },
+    'auto-fire_signal': {
+        title: 'Fire Signal',
+        content: `
+            <h4>What does this then-action do?</h4>
+            <p>Fires a named signal after the automation's action completes. Any other automation with a <strong>Signal Received</strong> trigger listening for this signal name will wake up and run.</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>Signal Name:</strong> The signal to fire (e.g. <code>library_ready</code>). Use the same name in a Signal Received trigger on another automation to connect them.</li>
+            </ul>
+
+            <h4>Use cases</h4>
+            <ul>
+                <li><strong>Multi-step workflows:</strong> Scan library → fire signal → update database → fire signal → send notification</li>
+                <li><strong>Fan-out:</strong> One signal can trigger multiple automations simultaneously</li>
+                <li><strong>Decoupled logic:</strong> Keep each automation simple with one job, chain them via signals</li>
+            </ul>
+
+            <h4>Combining with notifications</h4>
+            <p>You can add up to 3 then-actions per automation. For example: Fire Signal + Discord notification + Telegram notification — all run after the action completes.</p>
+        `
     }
 };
 
@@ -43160,7 +43214,7 @@ async function discoverMirroredPlaylist(playlistId) {
 // ===============================
 
 let _autoBlocks = null; // cached block definitions from /api/automations/blocks
-let _autoBuilder = { editId: null, when: null, do: null, notify: null };
+let _autoBuilder = { editId: null, when: null, do: null, then: [], isSystem: false };
 
 let _autoMirroredPlaylists = null; // cached mirrored playlist list
 
@@ -43172,6 +43226,7 @@ const _autoIcons = {
     scan_library: '\uD83D\uDD04', refresh_mirrored: '\uD83D\uDCC2', sync_playlist: '\uD83D\uDD01',
     discover_playlist: '\uD83D\uDD0D', discovery_completed: '\uD83D\uDD0D',
     notify_only: '\uD83D\uDD14', discord_webhook: '\uD83D\uDCAC', pushbullet: '\uD83D\uDD14', telegram: '\u2709\uFE0F',
+    signal_received: '\u26A1', fire_signal: '\u26A1',
     // Phase 3
     wishlist_processing_completed: '\u2705', watchlist_scan_completed: '\u2705',
     database_update_completed: '\uD83D\uDDC4\uFE0F', download_failed: '\u274C',
@@ -43237,7 +43292,7 @@ function renderAutomationCard(a) {
     const aIcon = _autoIcons[a.action_type] || '\u2699\uFE0F';
     const tl = tIcon + ' ' + _autoFormatTrigger(a.trigger_type, a.trigger_config);
     const al = aIcon + ' ' + _autoFormatAction(a.action_type);
-    const nl = a.notify_type ? _autoFormatNotify(a.notify_type) : '';
+    const thenItems = a.then_actions || [];
     const actionDelay = a.action_config && a.action_config.delay ? a.action_config.delay : 0;
     const metaParts = [];
     if (a.is_system) metaParts.push('<span class="system-badge">System</span>');
@@ -43260,7 +43315,7 @@ function renderAutomationCard(a) {
                 <span class="flow-arrow">&rarr;</span>
                 ${actionDelay ? `<span class="flow-delay">\u23F3 ${actionDelay}m</span><span class="flow-arrow">&rarr;</span>` : ''}
                 <span class="flow-action">${_esc(al)}</span>
-                ${nl ? `<span class="flow-arrow">&rarr;</span><span class="flow-notify">${_esc(nl)}</span>` : ''}
+                ${thenItems.length ? thenItems.map(t => `<span class="flow-arrow">&rarr;</span><span class="flow-notify">${_esc(_autoFormatNotify(t.type))}</span>`).join('') : ''}
             </div>
             <div class="automation-meta">${metaParts.join(' &middot; ')}</div>
         </div>
@@ -43284,6 +43339,10 @@ function _autoFormatTrigger(type, config) {
         const days = (config.days || []).map(d => d.charAt(0).toUpperCase() + d.slice(1)).join(', ');
         return (days || 'Every day') + ' at ' + (config.time || '00:00');
     }
+    if (type === 'signal_received' && config) {
+        const sig = config.signal_name || 'unknown';
+        return 'Signal: ' + sig;
+    }
     const labels = { app_started: 'App Started', track_downloaded: 'Track Downloaded', batch_complete: 'Batch Complete',
         watchlist_new_release: 'New Release Found', playlist_synced: 'Playlist Synced',
         playlist_changed: 'Playlist Changed', discovery_completed: 'Discovery Complete',
@@ -43292,7 +43351,8 @@ function _autoFormatTrigger(type, config) {
         download_quarantined: 'File Quarantined', wishlist_item_added: 'Wishlist Item Added',
         watchlist_artist_added: 'Artist Watched', watchlist_artist_removed: 'Artist Unwatched',
         import_completed: 'Import Complete', mirrored_playlist_created: 'Playlist Mirrored',
-        quality_scan_completed: 'Quality Scan Done', duplicate_scan_completed: 'Duplicate Scan Done' };
+        quality_scan_completed: 'Quality Scan Done', duplicate_scan_completed: 'Duplicate Scan Done',
+        signal_received: 'Signal Received' };
     let label = labels[type] || type || 'Unknown';
     if (config && config.conditions && config.conditions.length) {
         const first = config.conditions[0];
@@ -43316,6 +43376,7 @@ function _autoFormatNotify(type) {
     if (type === 'discord_webhook') return 'Discord';
     if (type === 'pushbullet') return 'Pushbullet';
     if (type === 'telegram') return 'Telegram';
+    if (type === 'fire_signal') return '\u26A1 Signal';
     return type || '';
 }
 function _autoTimeAgo(ts) {
@@ -43473,7 +43534,12 @@ async function saveAutomation() {
     // Read configs from DOM
     const triggerConfig = _readPlacedConfig('when');
     const actionConfig = _readPlacedConfig('do');
-    const notifyConfig = _autoBuilder.notify ? _readPlacedConfig('notify') : {};
+
+    // Read THEN actions (multi-slot)
+    const thenActions = _autoBuilder.then.map((item, i) => ({
+        type: item.type,
+        config: _readPlacedConfig('then-' + i),
+    }));
 
     // Read optional delay from DO slot
     const delayEl = document.getElementById('cfg-do-delay');
@@ -43484,8 +43550,7 @@ async function saveAutomation() {
         name,
         trigger_type: _autoBuilder.when.type, trigger_config: triggerConfig,
         action_type: _autoBuilder.do.type, action_config: actionConfig,
-        notify_type: _autoBuilder.notify ? _autoBuilder.notify.type : null,
-        notify_config: _autoBuilder.notify ? notifyConfig : {},
+        then_actions: thenActions,
     };
 
     try {
@@ -43515,7 +43580,7 @@ async function showAutomationBuilder(editId) {
     }
 
     _autoMirroredPlaylists = null; // invalidate so it re-fetches
-    _autoBuilder = { editId: editId || null, when: null, do: null, notify: null, isSystem: false };
+    _autoBuilder = { editId: editId || null, when: null, do: null, then: [], isSystem: false };
 
     // If editing, load automation data
     if (editId) {
@@ -43526,7 +43591,14 @@ async function showAutomationBuilder(editId) {
             document.getElementById('builder-name').value = a.name || '';
             _autoBuilder.when = { type: a.trigger_type, config: a.trigger_config || {} };
             _autoBuilder.do = { type: a.action_type, config: a.action_config || {} };
-            if (a.notify_type) _autoBuilder.notify = { type: a.notify_type, config: a.notify_config || {} };
+            // Load then_actions array
+            _autoBuilder.then = (a.then_actions || []).map(item => ({
+                type: item.type, config: item.config || {}
+            }));
+            // Backward compat: if no then_actions but has notify_type
+            if (!_autoBuilder.then.length && a.notify_type) {
+                _autoBuilder.then = [{ type: a.notify_type, config: a.notify_config || {} }];
+            }
             _autoBuilder.isSystem = !!a.is_system;
         } catch (err) { showToast('Failed to load automation', 'error'); return; }
     } else {
@@ -43547,7 +43619,7 @@ function hideAutomationBuilder() {
     document.getElementById('automations-builder-view').style.display = 'none';
     document.getElementById('automations-list-view').style.display = '';
     document.getElementById('builder-name').readOnly = false;
-    _autoBuilder = { editId: null, when: null, do: null, notify: null, isSystem: false };
+    _autoBuilder = { editId: null, when: null, do: null, then: [], isSystem: false };
 }
 
 // --- Sidebar ---
@@ -43560,7 +43632,7 @@ function _renderBuilderSidebar() {
     const sections = [
         { key: 'triggers', title: 'Triggers', slot: 'when' },
         { key: 'actions', title: 'Actions', slot: 'do' },
-        { key: 'notifications', title: 'Notifications', slot: 'notify' },
+        { key: 'notifications', title: 'Then', slot: 'then' },
     ];
 
     sections.forEach(sec => {
@@ -43592,34 +43664,69 @@ function _renderBuilderCanvas() {
     if (!canvas) return;
 
     let html = '';
-    const slots = [
-        { key: 'when', label: 'WHEN', labelClass: 'when', prompt: 'Drag a trigger here — WHEN does this run?' },
-        { key: 'do', label: 'DO', labelClass: 'do', prompt: 'Drag an action here — WHAT should it do?' },
-        { key: 'notify', label: 'NOTIFY', labelClass: 'notify', prompt: 'Drag a notification here (optional)' },
-    ];
 
-    slots.forEach((slot, i) => {
-        if (i > 0) html += '<div class="flow-connector"></div>';
-        const data = _autoBuilder[slot.key];
-        html += `<span class="flow-slot-label ${slot.labelClass}">${slot.label}</span>`;
-        if (data) {
-            html += `<div class="flow-slot filled" id="slot-${slot.key}" ondragover="_autoDragOver(event,'${slot.key}')" ondragleave="_autoDragLeave(event,'${slot.key}')" ondrop="_autoDrop(event,'${slot.key}')">
-                ${_renderPlacedBlock(slot.key, data)}
+    // WHEN slot
+    const whenData = _autoBuilder.when;
+    html += '<span class="flow-slot-label when">WHEN</span>';
+    if (whenData) {
+        html += `<div class="flow-slot filled" id="slot-when" ondragover="_autoDragOver(event,'when')" ondragleave="_autoDragLeave(event,'when')" ondrop="_autoDrop(event,'when')">
+            ${_renderPlacedBlock('when', whenData)}
+        </div>`;
+    } else {
+        html += `<div class="flow-slot empty" id="slot-when" ondragover="_autoDragOver(event,'when')" ondragleave="_autoDragLeave(event,'when')" ondrop="_autoDrop(event,'when')">
+            <div class="flow-slot-prompt">Drag a trigger here — WHEN does this run?</div>
+        </div>`;
+    }
+
+    html += '<div class="flow-connector"></div>';
+
+    // DO slot
+    const doData = _autoBuilder.do;
+    html += '<span class="flow-slot-label do">DO</span>';
+    if (doData) {
+        html += `<div class="flow-slot filled" id="slot-do" ondragover="_autoDragOver(event,'do')" ondragleave="_autoDragLeave(event,'do')" ondrop="_autoDrop(event,'do')">
+            ${_renderPlacedBlock('do', doData)}
+        </div>`;
+    } else {
+        html += `<div class="flow-slot empty" id="slot-do" ondragover="_autoDragOver(event,'do')" ondragleave="_autoDragLeave(event,'do')" ondrop="_autoDrop(event,'do')">
+            <div class="flow-slot-prompt">Drag an action here — WHAT should it do?</div>
+        </div>`;
+    }
+
+    html += '<div class="flow-connector"></div>';
+
+    // THEN section (multi-slot, 1-3 items)
+    html += '<span class="flow-slot-label then">THEN</span>';
+    if (_autoBuilder.then.length > 0) {
+        _autoBuilder.then.forEach((item, i) => {
+            if (i > 0) html += '<div class="flow-connector small"></div>';
+            html += `<div class="flow-slot filled then-slot" id="slot-then-${i}">
+                ${_renderPlacedBlock('then-' + i, item)}
             </div>`;
-        } else {
-            html += `<div class="flow-slot empty" id="slot-${slot.key}" ondragover="_autoDragOver(event,'${slot.key}')" ondragleave="_autoDragLeave(event,'${slot.key}')" ondrop="_autoDrop(event,'${slot.key}')">
-                <div class="flow-slot-prompt">${slot.prompt}</div>
-            </div>`;
-        }
-    });
+        });
+    }
+    if (_autoBuilder.then.length < 3) {
+        if (_autoBuilder.then.length > 0) html += '<div class="flow-connector small"></div>';
+        html += `<div class="flow-slot empty then-add" id="slot-then-add"
+            ondragover="_autoDragOver(event,'then')" ondragleave="_autoDragLeave(event,'then')" ondrop="_autoDrop(event,'then')">
+            <div class="flow-slot-prompt">${_autoBuilder.then.length === 0
+                ? 'Drag a then-action here (optional)'
+                : '+ Add another (max 3)'}</div>
+        </div>`;
+    }
 
     canvas.innerHTML = html;
     // Load mirrored playlist selects if any are present
     _autoLoadMirroredSelects();
     // Set up checkbox state for refresh_mirrored
-    ['when', 'do', 'notify'].forEach(sk => {
+    ['when', 'do'].forEach(sk => {
         const allCb = document.getElementById('cfg-' + sk + '-all');
         if (allCb) _autoTogglePlaylistSelect(sk);
+    });
+    // Also check then slots
+    _autoBuilder.then.forEach((item, i) => {
+        const allCb = document.getElementById('cfg-then-' + i + '-all');
+        if (allCb) _autoTogglePlaylistSelect('then-' + i);
     });
 }
 
@@ -43707,6 +43814,36 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
                 <option value="singles"${cat==='singles'?' selected':''}>Singles</option>
             </select>
         </div>`;
+    }
+    if (blockType === 'signal_received') {
+        const sigName = _escAttr(config.signal_name || '');
+        const knownSignals = (_autoBlocks && _autoBlocks.known_signals) || [];
+        return `<div class="config-row">
+            <label>Signal Name</label>
+            <input type="text" id="cfg-${slotKey}-signal_name" value="${sigName}"
+                list="known-signals-list-${slotKey}" placeholder="e.g. library_ready"
+                oninput="this.value = this.value.toLowerCase().replace(/[^a-z0-9_\\-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')"
+                style="font-family:monospace;">
+            <datalist id="known-signals-list-${slotKey}">
+                ${knownSignals.map(s => `<option value="${s}">`).join('')}
+            </datalist>
+        </div>
+        <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Triggers when another automation fires this signal</div>`;
+    }
+    if (blockType === 'fire_signal') {
+        const sigName = _escAttr(config.signal_name || '');
+        const knownSignals = (_autoBlocks && _autoBlocks.known_signals) || [];
+        return `<div class="config-row">
+            <label>Signal Name</label>
+            <input type="text" id="cfg-${slotKey}-signal_name" value="${sigName}"
+                list="known-signals-fire-${slotKey}" placeholder="e.g. library_ready"
+                oninput="this.value = this.value.toLowerCase().replace(/[^a-z0-9_\\-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')"
+                style="font-family:monospace;">
+            <datalist id="known-signals-fire-${slotKey}">
+                ${knownSignals.map(s => `<option value="${s}">`).join('')}
+            </datalist>
+        </div>
+        <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Other automations with "Signal Received" trigger will wake up</div>`;
     }
     if (blockType === 'scan_watchlist' || blockType === 'scan_library' || blockType === 'notify_only') {
         return '<div class="config-row" style="color:rgba(255,255,255,0.4);font-size:12px;">No configuration needed</div>';
@@ -43948,7 +44085,13 @@ async function _autoLoadMirroredSelects() {
 }
 
 function _readPlacedConfig(slotKey) {
-    const data = _autoBuilder[slotKey];
+    let data;
+    if (slotKey.startsWith('then-')) {
+        const idx = parseInt(slotKey.split('-')[1]);
+        data = _autoBuilder.then[idx];
+    } else {
+        data = _autoBuilder[slotKey];
+    }
     if (!data) return {};
     const type = data.type;
     if (type === 'schedule') {
@@ -43997,6 +44140,9 @@ function _readPlacedConfig(slotKey) {
             all: allCb ? allCb.checked : false,
         };
     }
+    if (type === 'signal_received' || type === 'fire_signal') {
+        return { signal_name: document.getElementById('cfg-' + slotKey + '-signal_name')?.value?.trim() || '' };
+    }
     if (type === 'discord_webhook') {
         return {
             webhook_url: document.getElementById('cfg-' + slotKey + '-webhook_url')?.value?.trim() || '',
@@ -44039,21 +44185,31 @@ function _autoDragStart(e, blockType, slotCategory) {
 function _autoDragOver(e, slotKey) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-    document.getElementById('slot-' + slotKey)?.classList.add('drag-over');
+    const targetId = slotKey === 'then' ? 'slot-then-add' : 'slot-' + slotKey;
+    document.getElementById(targetId)?.classList.add('drag-over');
 }
 
 function _autoDragLeave(e, slotKey) {
-    document.getElementById('slot-' + slotKey)?.classList.remove('drag-over');
+    const targetId = slotKey === 'then' ? 'slot-then-add' : 'slot-' + slotKey;
+    document.getElementById(targetId)?.classList.remove('drag-over');
 }
 
 function _autoDrop(e, slotKey) {
     e.preventDefault();
-    document.getElementById('slot-' + slotKey)?.classList.remove('drag-over');
+    const dropTargetId = slotKey === 'then' ? 'slot-then-add' : 'slot-' + slotKey;
+    document.getElementById(dropTargetId)?.classList.remove('drag-over');
     if (_autoBuilder.isSystem && (slotKey === 'when' || slotKey === 'do')) return;
     try {
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-        if (data.slot !== slotKey) { showToast('Wrong slot — drop ' + data.slot + ' blocks here', 'error'); return; }
-        _autoBuilder[slotKey] = { type: data.type, config: {} };
+        // Handle THEN slot (append to array)
+        if (slotKey === 'then') {
+            if (data.slot !== 'then') { showToast('Wrong slot — drop ' + data.slot + ' blocks here', 'error'); return; }
+            if (_autoBuilder.then.length >= 3) { showToast('Maximum 3 then-actions', 'error'); return; }
+            _autoBuilder.then.push({ type: data.type, config: {} });
+        } else {
+            if (data.slot !== slotKey) { showToast('Wrong slot — drop ' + data.slot + ' blocks here', 'error'); return; }
+            _autoBuilder[slotKey] = { type: data.type, config: {} };
+        }
         _renderBuilderCanvas();
     } catch (err) {}
 }
@@ -44061,13 +44217,26 @@ function _autoDrop(e, slotKey) {
 // Click-to-add (alternative to drag)
 function _autoClickBlock(blockType, slotCategory) {
     if (_autoBuilder.isSystem && (slotCategory === 'when' || slotCategory === 'do')) return;
-    _autoBuilder[slotCategory] = { type: blockType, config: {} };
+    if (slotCategory === 'then') {
+        if (_autoBuilder.then.length >= 3) { showToast('Maximum 3 then-actions', 'error'); return; }
+        _autoBuilder.then.push({ type: blockType, config: {} });
+    } else {
+        _autoBuilder[slotCategory] = { type: blockType, config: {} };
+    }
     _renderBuilderCanvas();
 }
 
 function _autoRemoveBlock(slotKey) {
     if (_autoBuilder.isSystem && (slotKey === 'when' || slotKey === 'do')) return;
-    _autoBuilder[slotKey] = null;
+    // Handle then-N slots
+    if (slotKey.startsWith('then-')) {
+        const idx = parseInt(slotKey.split('-')[1]);
+        if (!isNaN(idx) && idx >= 0 && idx < _autoBuilder.then.length) {
+            _autoBuilder.then.splice(idx, 1);
+        }
+    } else {
+        _autoBuilder[slotKey] = null;
+    }
     _renderBuilderCanvas();
 }
 
