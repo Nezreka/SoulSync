@@ -16180,101 +16180,108 @@ def _on_download_completed(batch_id, task_id, success=True):
         # Guard against double-calling: track which tasks have already been completed
         # This prevents active_count from being decremented multiple times for the same task
         # (e.g. monitor detects completion AND post-processing calls this again)
+        # NOTE: On duplicate calls, we skip decrement/tracking but STILL check batch completion.
+        # This is critical because the first call may see the task in 'post_processing' (not finished),
+        # and the second call (from post-processing worker) arrives after the task is truly 'completed'.
+        # Without the fallthrough, batch_complete would never be emitted.
         completed_tasks = download_batches[batch_id].setdefault('_completed_task_ids', set())
-        if task_id in completed_tasks:
-            print(f"⚠️ [Batch Manager] Task {task_id} already completed — skipping duplicate _on_download_completed call")
+        _is_duplicate_completion = task_id in completed_tasks
+        if _is_duplicate_completion:
+            print(f"⚠️ [Batch Manager] Task {task_id} already completed — skipping decrement, still checking batch completion")
             # Set terminal status so the monitor loop stops re-processing this task
             if task_id in download_tasks and download_tasks[task_id].get('status') in ('downloading', 'queued'):
                 download_tasks[task_id]['status'] = 'completed'
-            return
-        completed_tasks.add(task_id)
+            # Fall through to batch completion check below (don't return)
+        else:
+            completed_tasks.add(task_id)
 
-        # Track failed/cancelled tasks in batch state (replicating sync.py)
-        if not success and task_id in download_tasks:
-            task = download_tasks[task_id]
-            task_status = task.get('status', 'unknown')
-            
-            # Build track_info structure matching sync.py's permanently_failed_tracks format
-            original_track_info = task.get('track_info', {})
-            
-            # Ensure spotify_track has proper structure for wishlist service
-            spotify_track_data = _ensure_spotify_track_format(original_track_info)
-            
-            track_info = {
-                'download_index': task.get('track_index', 0),
-                'table_index': task.get('track_index', 0), 
-                'track_name': original_track_info.get('name', 'Unknown Track'),
-                'artist_name': _get_track_artist_name(original_track_info),
-                'retry_count': task.get('retry_count', 0),
-                'spotify_track': spotify_track_data,  # Properly formatted spotify track for wishlist
-                'failure_reason': 'Download cancelled' if task_status == 'cancelled' else ('Not found on Soulseek' if task_status == 'not_found' else 'Download failed'),
-                'candidates': task.get('cached_candidates', [])  # Include search results if available
-            }
-            
-            if task_status == 'cancelled':
-                download_batches[batch_id]['cancelled_tracks'].add(task.get('track_index', 0))
-                print(f"🚫 [Batch Manager] Added cancelled track to batch tracking: {track_info['track_name']}")
-                add_activity_item("🚫", "Download Cancelled", f"'{track_info['track_name']}'", "Now")
-            elif task_status in ('failed', 'not_found'):
-                download_batches[batch_id]['permanently_failed_tracks'].append(track_info)
-                if task_status == 'not_found':
-                    print(f"🔇 [Batch Manager] Added not-found track to batch tracking: {track_info['track_name']}")
-                    add_activity_item("🔇", "Not Found", f"'{track_info['track_name']}'", "Now")
-                else:
-                    print(f"❌ [Batch Manager] Added failed track to batch tracking: {track_info['track_name']}")
-                    add_activity_item("❌", "Download Failed", f"'{track_info['track_name']}'", "Now")
-
-                try:
-                    if automation_engine:
-                        automation_engine.emit('download_failed', {
-                            'artist': track_info.get('artist_name', ''),
-                            'title': track_info.get('track_name', ''),
-                            'reason': track_info.get('failure_reason', 'Unknown'),
-                        })
-                except Exception:
-                    pass
-
-        # WISHLIST REMOVAL: Handle successful downloads for wishlist removal
-        if success and task_id in download_tasks:
-            try:
+        if not _is_duplicate_completion:
+            # Track failed/cancelled tasks in batch state (replicating sync.py)
+            if not success and task_id in download_tasks:
                 task = download_tasks[task_id]
-                track_info = task.get('track_info', {})
-                print(f"📋 [Batch Manager] Successful download - checking wishlist removal for task {task_id}")
-                
-                # Add activity for successful download
-                track_name = track_info.get('name', 'Unknown Track')
+                task_status = task.get('status', 'unknown')
 
-                # Safely extract artist name (handle both list and string formats)
-                artists = track_info.get('artists', [])
-                if isinstance(artists, list) and len(artists) > 0:
-                    first_artist = artists[0]
-                    artist_name = first_artist.get('name', 'Unknown Artist') if isinstance(first_artist, dict) else str(first_artist)
-                elif isinstance(artists, str):
-                    artist_name = artists
-                else:
-                    artist_name = 'Unknown Artist'
+                # Build track_info structure matching sync.py's permanently_failed_tracks format
+                original_track_info = task.get('track_info', {})
 
-                add_activity_item("📥", "Download Complete", f"'{track_name}' by {artist_name}", "Now")
-                
-                # Try to remove from wishlist using track info
-                if track_info:
-                    # Create a context-like structure for the wishlist removal function
-                    context = {
-                        'track_info': track_info,
-                        'original_search_result': track_info  # fallback
-                    }
-                    _check_and_remove_from_wishlist(context)
-            except Exception as wishlist_error:
-                print(f"⚠️ [Batch Manager] Error checking wishlist removal for successful download: {wishlist_error}")
-        
-        # Decrement active count
-        old_active = download_batches[batch_id]['active_count']
-        download_batches[batch_id]['active_count'] -= 1
-        new_active = download_batches[batch_id]['active_count']
-        
-        print(f"🔄 [Batch Manager] Task {task_id} completed ({'success' if success else 'failed/cancelled'}). Active workers: {old_active} → {new_active}/{download_batches[batch_id]['max_concurrent']}")
-        
-        # ENHANCED: Always check batch completion after any task completes
+                # Ensure spotify_track has proper structure for wishlist service
+                spotify_track_data = _ensure_spotify_track_format(original_track_info)
+
+                track_info = {
+                    'download_index': task.get('track_index', 0),
+                    'table_index': task.get('track_index', 0),
+                    'track_name': original_track_info.get('name', 'Unknown Track'),
+                    'artist_name': _get_track_artist_name(original_track_info),
+                    'retry_count': task.get('retry_count', 0),
+                    'spotify_track': spotify_track_data,  # Properly formatted spotify track for wishlist
+                    'failure_reason': 'Download cancelled' if task_status == 'cancelled' else ('Not found on Soulseek' if task_status == 'not_found' else 'Download failed'),
+                    'candidates': task.get('cached_candidates', [])  # Include search results if available
+                }
+
+                if task_status == 'cancelled':
+                    download_batches[batch_id]['cancelled_tracks'].add(task.get('track_index', 0))
+                    print(f"🚫 [Batch Manager] Added cancelled track to batch tracking: {track_info['track_name']}")
+                    add_activity_item("🚫", "Download Cancelled", f"'{track_info['track_name']}'", "Now")
+                elif task_status in ('failed', 'not_found'):
+                    download_batches[batch_id]['permanently_failed_tracks'].append(track_info)
+                    if task_status == 'not_found':
+                        print(f"🔇 [Batch Manager] Added not-found track to batch tracking: {track_info['track_name']}")
+                        add_activity_item("🔇", "Not Found", f"'{track_info['track_name']}'", "Now")
+                    else:
+                        print(f"❌ [Batch Manager] Added failed track to batch tracking: {track_info['track_name']}")
+                        add_activity_item("❌", "Download Failed", f"'{track_info['track_name']}'", "Now")
+
+                    try:
+                        if automation_engine:
+                            automation_engine.emit('download_failed', {
+                                'artist': track_info.get('artist_name', ''),
+                                'title': track_info.get('track_name', ''),
+                                'reason': track_info.get('failure_reason', 'Unknown'),
+                            })
+                    except Exception:
+                        pass
+
+            # WISHLIST REMOVAL: Handle successful downloads for wishlist removal
+            if success and task_id in download_tasks:
+                try:
+                    task = download_tasks[task_id]
+                    track_info = task.get('track_info', {})
+                    print(f"📋 [Batch Manager] Successful download - checking wishlist removal for task {task_id}")
+
+                    # Add activity for successful download
+                    track_name = track_info.get('name', 'Unknown Track')
+
+                    # Safely extract artist name (handle both list and string formats)
+                    artists = track_info.get('artists', [])
+                    if isinstance(artists, list) and len(artists) > 0:
+                        first_artist = artists[0]
+                        artist_name = first_artist.get('name', 'Unknown Artist') if isinstance(first_artist, dict) else str(first_artist)
+                    elif isinstance(artists, str):
+                        artist_name = artists
+                    else:
+                        artist_name = 'Unknown Artist'
+
+                    add_activity_item("📥", "Download Complete", f"'{track_name}' by {artist_name}", "Now")
+
+                    # Try to remove from wishlist using track info
+                    if track_info:
+                        # Create a context-like structure for the wishlist removal function
+                        context = {
+                            'track_info': track_info,
+                            'original_search_result': track_info  # fallback
+                        }
+                        _check_and_remove_from_wishlist(context)
+                except Exception as wishlist_error:
+                    print(f"⚠️ [Batch Manager] Error checking wishlist removal for successful download: {wishlist_error}")
+
+            # Decrement active count
+            old_active = download_batches[batch_id]['active_count']
+            download_batches[batch_id]['active_count'] -= 1
+            new_active = download_batches[batch_id]['active_count']
+
+            print(f"🔄 [Batch Manager] Task {task_id} completed ({'success' if success else 'failed/cancelled'}). Active workers: {old_active} → {new_active}/{download_batches[batch_id]['max_concurrent']}")
+
+        # ENHANCED: Always check batch completion after any task completes (including duplicate calls)
         # This ensures completion is detected even when mixing normal downloads with cancelled tasks
         print(f"🔍 [Batch Manager] Checking batch completion after task {task_id} completed")
         
@@ -16341,57 +16348,60 @@ def _on_download_completed(batch_id, task_id, success=True):
                 # Mark batch as complete and set completion timestamp for auto-cleanup
                 batch['phase'] = 'complete'
                 batch['completion_time'] = time.time()  # Track when batch completed
-            
-            # Add activity for batch completion
-            playlist_name = batch.get('playlist_name', 'Unknown Playlist')
-            failed_count = len(batch.get('permanently_failed_tracks', []))
-            successful_downloads = finished_count - failed_count
-            add_activity_item("✅", "Download Batch Complete", f"'{playlist_name}' - {successful_downloads} tracks downloaded", "Now")
 
-            # Emit batch_complete event for automation engine
-            try:
-                if automation_engine:
-                    automation_engine.emit('batch_complete', {
-                        'playlist_name': playlist_name,
-                        'total_tracks': str(len(queue)),
-                        'completed_tracks': str(successful_downloads),
-                        'failed_tracks': str(failed_count),
-                    })
-            except Exception:
-                pass
-            
-            # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
-            playlist_id = batch.get('playlist_id')
-            if playlist_id and playlist_id.startswith('youtube_'):
-                url_hash = playlist_id.replace('youtube_', '')
-                if url_hash in youtube_playlist_states:
-                    youtube_playlist_states[url_hash]['phase'] = 'download_complete'
-                    print(f"📋 Updated YouTube playlist {url_hash} to download_complete phase")
-            
-            # Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
-            if playlist_id and playlist_id.startswith('tidal_'):
-                tidal_playlist_id = playlist_id.replace('tidal_', '')
-                if tidal_playlist_id in tidal_discovery_states:
-                    tidal_discovery_states[tidal_playlist_id]['phase'] = 'download_complete'
-                    print(f"📋 Updated Tidal playlist {tidal_playlist_id} to download_complete phase")
-            
-            print(f"🎉 [Batch Manager] Batch {batch_id} complete - stopping monitor")
-            download_monitor.stop_monitoring(batch_id)
+                # Add activity for batch completion
+                playlist_name = batch.get('playlist_name', 'Unknown Playlist')
+                failed_count = len(batch.get('permanently_failed_tracks', []))
+                successful_downloads = finished_count - failed_count
+                add_activity_item("✅", "Download Batch Complete", f"'{playlist_name}' - {successful_downloads} tracks downloaded", "Now")
 
-            # REPAIR: Scan all album folders from this batch for track number issues
-            if repair_worker:
-                repair_worker.process_batch(batch_id)
+                # Emit batch_complete event for automation engine
+                try:
+                    if automation_engine:
+                        automation_engine.emit('batch_complete', {
+                            'playlist_name': playlist_name,
+                            'total_tracks': str(len(queue)),
+                            'completed_tracks': str(successful_downloads),
+                            'failed_tracks': str(failed_count),
+                        })
+                except Exception:
+                    pass
 
-            # Mark that wishlist processing is starting (prevents premature cleanup)
-            batch['wishlist_processing_started'] = True
+                # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
+                playlist_id = batch.get('playlist_id')
+                if playlist_id and playlist_id.startswith('youtube_'):
+                    url_hash = playlist_id.replace('youtube_', '')
+                    if url_hash in youtube_playlist_states:
+                        youtube_playlist_states[url_hash]['phase'] = 'download_complete'
+                        print(f"📋 Updated YouTube playlist {url_hash} to download_complete phase")
 
-            # Process wishlist outside of the lock to prevent threading issues
-            if is_auto_batch:
-                # For auto-initiated batches, handle completion and schedule next cycle
-                missing_download_executor.submit(_process_failed_tracks_to_wishlist_exact_with_auto_completion, batch_id)
+                # Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
+                if playlist_id and playlist_id.startswith('tidal_'):
+                    tidal_playlist_id = playlist_id.replace('tidal_', '')
+                    if tidal_playlist_id in tidal_discovery_states:
+                        tidal_discovery_states[tidal_playlist_id]['phase'] = 'download_complete'
+                        print(f"📋 Updated Tidal playlist {tidal_playlist_id} to download_complete phase")
+
+                print(f"🎉 [Batch Manager] Batch {batch_id} complete - stopping monitor")
+                download_monitor.stop_monitoring(batch_id)
+
+                # REPAIR: Scan all album folders from this batch for track number issues
+                if repair_worker:
+                    repair_worker.process_batch(batch_id)
+
+                # Mark that wishlist processing is starting (prevents premature cleanup)
+                batch['wishlist_processing_started'] = True
+
+                # Process wishlist outside of the lock to prevent threading issues
+                if is_auto_batch:
+                    # For auto-initiated batches, handle completion and schedule next cycle
+                    missing_download_executor.submit(_process_failed_tracks_to_wishlist_exact_with_auto_completion, batch_id)
+                else:
+                    # For manual batches, use standard wishlist processing
+                    missing_download_executor.submit(_process_failed_tracks_to_wishlist_exact, batch_id)
             else:
-                # For manual batches, use standard wishlist processing
-                missing_download_executor.submit(_process_failed_tracks_to_wishlist_exact, batch_id)
+                print(f"✅ [Batch Manager] Batch {batch_id} already marked complete - skipping duplicate processing")
+
             return  # Don't start next batch if we're done
     
     # Start next downloads in queue
@@ -18680,10 +18690,28 @@ def _check_batch_completion_v2(batch_id):
                     # Mark batch as complete and set completion timestamp for auto-cleanup
                     batch['phase'] = 'complete'
                     batch['completion_time'] = time.time()  # Track when batch completed
+
+                    # Add activity for batch completion
+                    playlist_name = batch.get('playlist_name', 'Unknown Playlist')
+                    failed_count = len(batch.get('permanently_failed_tracks', []))
+                    successful_downloads = finished_count - failed_count
+                    add_activity_item("✅", "Download Batch Complete", f"'{playlist_name}' - {successful_downloads} tracks downloaded", "Now")
+
+                    # Emit batch_complete event for automation engine
+                    try:
+                        if automation_engine:
+                            automation_engine.emit('batch_complete', {
+                                'playlist_name': playlist_name,
+                                'total_tracks': str(len(queue)),
+                                'completed_tracks': str(successful_downloads),
+                                'failed_tracks': str(failed_count),
+                            })
+                    except Exception:
+                        pass
                 else:
                     print(f"✅ [Completion Check V2] Batch {batch_id} already marked complete - skipping duplicate processing")
                     return True  # Already complete
-                
+
                 # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
                 playlist_id = batch.get('playlist_id')
                 if playlist_id and playlist_id.startswith('youtube_'):
