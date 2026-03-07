@@ -29058,6 +29058,19 @@ body {
     padding: 2px 6px; border-radius: 6px; white-space: nowrap;
 }
 
+.block-help-btn {
+    width: 20px;
+    height: 20px;
+    font-size: 11px;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.block-item:hover .block-help-btn {
+    opacity: 1;
+}
+
 /* --- Builder Canvas --- */
 .builder-canvas {
     flex: 1; overflow-y: auto; display: flex; flex-direction: column;

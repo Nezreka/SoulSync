@@ -874,7 +874,9 @@ class DatabaseUpdateWorker(QThread):
 
         # Fetch current IDs from media server (lightweight calls)
         logger.info(f"🔍 Removal detection: fetching current IDs from {self.server_type}...")
+        self._emit_signal('phase_changed', f"Fetching artist catalog from {self.server_type}...")
         server_artist_ids = self.media_client.get_all_artist_ids()
+        self._emit_signal('phase_changed', f"Fetching album catalog from {self.server_type}...")
         server_album_ids = self.media_client.get_all_album_ids()
 
         # Safety: if both come back empty, the server is unreachable
@@ -918,6 +920,7 @@ class DatabaseUpdateWorker(QThread):
             return None
 
         # Get stored IDs from database
+        self._emit_signal('phase_changed', f"Comparing local database with {self.server_type}...")
         db_artist_ids = self.database.get_all_artist_ids_for_server(self.server_type) if check_artists else set()
         db_album_ids = self.database.get_all_album_ids_for_server(self.server_type) if check_albums else set()
 
@@ -947,6 +950,7 @@ class DatabaseUpdateWorker(QThread):
 
         if not removed_artist_ids and not removed_album_ids:
             logger.info("🔍 Removal detection: no stale content found")
+            self._emit_signal('phase_changed', "No removed content detected")
             return {'artists_removed': 0, 'albums_removed': 0, 'tracks_removed': 0}
 
         logger.info(f"🗑️ Removal detection: found {len(removed_artist_ids)} removed artists, "
