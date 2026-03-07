@@ -28047,37 +28047,44 @@ async function updateWatchlistButtonCount() {
  */
 async function updateArtistCardWatchlistStatus() {
     const artistCards = document.querySelectorAll('.artist-card');
-
+    const artistIds = [];
     for (const card of artistCards) {
         const artistId = card.dataset.artistId;
-        if (!artistId) continue;
+        if (artistId) artistIds.push(artistId);
+    }
+    if (!artistIds.length) return;
 
-        try {
-            const response = await fetch('/api/watchlist/check', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ artist_id: artistId })
-            });
+    try {
+        const response = await fetch('/api/watchlist/check-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_ids: artistIds })
+        });
 
-            const data = await response.json();
-            if (data.success) {
+        const data = await response.json();
+        if (data.success && data.results) {
+            for (const card of artistCards) {
+                const artistId = card.dataset.artistId;
+                if (!artistId) continue;
+
                 const button = card.querySelector('.watchlist-toggle-btn');
+                if (!button) continue;
                 const icon = button.querySelector('.watchlist-icon');
                 const text = button.querySelector('.watchlist-text');
 
-                if (data.is_watching) {
-                    icon.textContent = '👁️';
-                    text.textContent = 'Watching...';
+                if (data.results[artistId]) {
+                    if (icon) icon.textContent = '👁️';
+                    if (text) text.textContent = 'Watching...';
                     button.classList.add('watching');
                 } else {
-                    icon.textContent = '👁️';
-                    text.textContent = 'Add to Watchlist';
+                    if (icon) icon.textContent = '👁️';
+                    if (text) text.textContent = 'Add to Watchlist';
                     button.classList.remove('watching');
                 }
             }
-        } catch (error) {
-            console.error(`Error checking watchlist status for artist ${artistId}:`, error);
         }
+    } catch (error) {
+        console.error('Error batch checking watchlist status:', error);
     }
 }
 
@@ -36478,24 +36485,29 @@ async function toggleRecommendedWatchlist(btn) {
 }
 
 async function checkRecommendedWatchlistStatuses(artists) {
-    for (const artist of artists) {
-        try {
-            const resp = await fetch('/api/watchlist/check', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ artist_id: artist.artist_id })
-            });
-            const data = await resp.json();
-            if (data.success && data.is_watching) {
-                const btn = document.querySelector(`.recommended-card-watchlist-btn[data-artist-id="${artist.artist_id}"]`);
-                if (btn) {
-                    btn.classList.add('watching');
-                    btn.textContent = 'Watching';
+    try {
+        const artistIds = artists.map(a => a.artist_id).filter(Boolean);
+        if (!artistIds.length) return;
+
+        const resp = await fetch('/api/watchlist/check-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_ids: artistIds })
+        });
+        const data = await resp.json();
+        if (data.success && data.results) {
+            for (const [aid, isWatching] of Object.entries(data.results)) {
+                if (isWatching) {
+                    const btn = document.querySelector(`.recommended-card-watchlist-btn[data-artist-id="${aid}"]`);
+                    if (btn) {
+                        btn.classList.add('watching');
+                        btn.textContent = 'Watching';
+                    }
                 }
             }
-        } catch (e) {
-            // Non-critical
         }
+    } catch (e) {
+        // Non-critical
     }
 }
 
