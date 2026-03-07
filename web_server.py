@@ -652,6 +652,17 @@ def _register_automation_handlers():
 
     automation_engine.register_progress_callbacks(_progress_init, _progress_finish)
 
+    # Register permanent callback: when any scan completes, emit library_scan_completed event
+    # This replaces the hardcoded scan_completion_callback → trigger_automatic_database_update chain
+    if web_scan_manager:
+        def _on_library_scan_completed():
+            if automation_engine:
+                server_type = getattr(web_scan_manager, '_current_server_type', None) or 'unknown'
+                automation_engine.emit('library_scan_completed', {
+                    'server_type': server_type,
+                })
+        web_scan_manager.add_scan_completion_callback(_on_library_scan_completed)
+
     print("✅ Automation action handlers registered")
 
 
@@ -3908,6 +3919,9 @@ def get_automation_blocks():
             {"type": "database_update_completed", "label": "Database Updated", "icon": "database",
              "description": "When library database refresh finishes", "available": True,
              "variables": ["total_artists", "total_albums", "total_tracks"]},
+            {"type": "library_scan_completed", "label": "Library Scan Done", "icon": "hard-drive",
+             "description": "When media library scan finishes", "available": True,
+             "variables": ["server_type"]},
             {"type": "download_failed", "label": "Download Failed", "icon": "x-circle",
              "description": "When a track permanently fails to download", "available": True,
              "has_conditions": True, "condition_fields": ["artist", "title", "reason"],
@@ -6490,7 +6504,8 @@ def clear_quarantine():
 @app.route('/api/scan/request', methods=['POST'])
 def request_media_scan():
     """
-    Request a media library scan with automatic completion callback support.
+    Request a media library scan.
+    Database update is handled automatically by the 'Auto-Update Database After Scan' system automation.
     """
     try:
         if not web_scan_manager:
@@ -6498,33 +6513,13 @@ def request_media_scan():
 
         data = request.get_json() or {}
         reason = data.get('reason', 'Web UI download completed')
-        auto_database_update = data.get('auto_database_update', True)
 
-        def scan_completion_callback():
-            """Callback to trigger automatic database update after scan completes"""
-            if auto_database_update:
-                try:
-                    logger.info("🔄 Starting automatic incremental database update after scan completion")
-                    # Start database update in a separate thread to avoid blocking
-                    threading.Thread(
-                        target=trigger_automatic_database_update,
-                        args=("Post-scan automatic update",),
-                        daemon=True
-                    ).start()
-                except Exception as e:
-                    logger.error(f"Error starting automatic database update: {e}")
-
-        # Request scan with callback
-        result = web_scan_manager.request_scan(
-            reason=reason,
-            callback=scan_completion_callback if auto_database_update else None
-        )
+        result = web_scan_manager.request_scan(reason=reason)
 
         add_activity_item("📡", "Media Scan", f"Scan requested: {reason}", "Now")
         return jsonify({
             "success": True,
             "scan_info": result,
-            "auto_database_update": auto_database_update
         })
 
     except Exception as e:
@@ -6581,7 +6576,16 @@ def request_incremental_database_update():
             }), 400
 
         # Start incremental update
-        result = trigger_automatic_database_update(reason)
+        if db_update_state.get('status') == 'running':
+            return jsonify({"success": False, "error": "Database update already running"}), 409
+
+        active_server = config_manager.get_active_media_server()
+        with db_update_lock:
+            db_update_state.update({
+                "status": "running", "phase": "Initializing...",
+                "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": ""
+            })
+        db_update_executor.submit(_run_db_update_task, False, active_server)
 
         add_activity_item("🔄", "Database Update", f"Incremental update started: {reason}", "Now")
         return jsonify({
@@ -6595,52 +6599,6 @@ def request_incremental_database_update():
     except Exception as e:
         logger.error(f"Error requesting incremental database update: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
-
-def trigger_automatic_database_update(reason="Automatic update"):
-    """
-    Helper function to trigger automatic incremental database update.
-    """
-    try:
-        from config.settings import config_manager
-        active_server = config_manager.get_active_media_server()
-
-        # Get the appropriate media client
-        media_client = None
-        if active_server == "jellyfin" and jellyfin_client:
-            media_client = jellyfin_client
-        elif active_server == "navidrome" and navidrome_client:
-            media_client = navidrome_client
-        else:
-            media_client = plex_client  # Default fallback
-
-        if not media_client or not media_client.is_connected():
-            logger.error(f"No connected {active_server} client for automatic database update")
-            return False
-
-        # Create and start database update worker
-        worker = DatabaseUpdateWorker(
-            media_client=media_client,
-            server_type=active_server,
-            full_refresh=False  # Always incremental for automatic updates
-        )
-
-        def update_completion_callback():
-            logger.info(f"✅ Automatic incremental database update completed for {active_server}")
-            add_activity_item("✅", "Database Update", f"Automatic update completed ({active_server})", "Now")
-
-        # Start update in background thread
-        update_thread = threading.Thread(
-            target=lambda: worker.run_with_callback(update_completion_callback),
-            daemon=True
-        )
-        update_thread.start()
-
-        logger.info(f"🔄 Started automatic incremental database update for {active_server}")
-        return True
-
-    except Exception as e:
-        logger.error(f"Error in automatic database update: {e}")
-        return False
 
 @app.route('/api/test/automation', methods=['POST'])
 def test_automation_workflow():
