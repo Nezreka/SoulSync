@@ -540,8 +540,10 @@ def _register_automation_handlers():
     # --- Phase 3 action handlers ---
 
     def _auto_start_database_update(config):
+        global _db_update_automation_id
         if db_update_state.get('status') == 'running':
             return {'status': 'skipped', 'reason': 'Database update already running'}
+        _db_update_automation_id = config.get('_automation_id')
         full = config.get('full_refresh', False)
         active_server = config_manager.get_active_media_server()
         with db_update_lock:
@@ -550,7 +552,7 @@ def _register_automation_handlers():
                 "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": ""
             })
         db_update_executor.submit(_run_db_update_task, full, active_server)
-        return {'status': 'started', 'full_refresh': str(full)}
+        return {'status': 'started', 'full_refresh': str(full), '_manages_own_progress': True}
 
     def _auto_run_duplicate_cleaner(config):
         if duplicate_cleaner_state.get('status') == 'running':
@@ -740,6 +742,7 @@ db_update_state = {
     "removed_albums": 0,
     "removed_tracks": 0
 }
+_db_update_automation_id = None  # Set when automation triggers DB update, used by callbacks
 
 # Quality Scanner state
 quality_scanner_state = {
@@ -13740,13 +13743,28 @@ def _db_update_progress_callback(current_item, processed, total, percentage):
             "total": total,
             "progress": percentage
         })
+    _update_automation_progress(_db_update_automation_id,
+                                progress=percentage, processed=processed, total=total,
+                                current_item=current_item)
 
 def _db_update_phase_callback(phase):
     print(f"🔄 [DB Phase] {phase}")
     with db_update_lock:
         db_update_state["phase"] = phase
+    _update_automation_progress(_db_update_automation_id, phase=phase)
+
+def _db_update_artist_callback(artist_name, success, details, album_count, track_count):
+    if success:
+        _update_automation_progress(_db_update_automation_id,
+            log_line=f'{artist_name} — {album_count} albums, {track_count} tracks',
+            log_type='success')
+    else:
+        _update_automation_progress(_db_update_automation_id,
+            log_line=f'{artist_name} — {details}',
+            log_type='error')
 
 def _db_update_finished_callback(total_artists, total_albums, total_tracks, successful, failed):
+    global _db_update_automation_id
     # Check for removal results from the worker
     removed_artists = 0
     removed_albums = 0
@@ -13766,6 +13784,15 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
         db_update_state["removed_artists"] = removed_artists
         db_update_state["removed_albums"] = removed_albums
         db_update_state["removed_tracks"] = removed_tracks
+
+    # Finalize automation progress
+    auto_summary = f"{total_tracks} tracks, {total_albums} albums from {total_artists} artists"
+    if removed_artists > 0 or removed_albums > 0:
+        auto_summary += f" | Removed {removed_artists} artists, {removed_albums} albums"
+    _update_automation_progress(_db_update_automation_id,
+        status='finished', progress=100, phase='Complete',
+        log_line=auto_summary, log_type='success')
+    _db_update_automation_id = None
 
     # Add activity for database update completion
     summary = f"{total_tracks} tracks, {total_albums} albums, {total_artists} artists processed"
@@ -13801,10 +13828,15 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
         print(f"⚠️ [DB Update] Error starting automatic wishlist cleanup: {cleanup_error}")
 
 def _db_update_error_callback(error_message):
+    global _db_update_automation_id
     with db_update_lock:
         db_update_state["status"] = "error"
         db_update_state["error_message"] = error_message
-    
+    _update_automation_progress(_db_update_automation_id,
+        status='error', phase='Error',
+        log_line=error_message, log_type='error')
+    _db_update_automation_id = None
+
     # Add activity for database update error
     add_activity_item("❌", "Database Update Failed", error_message, "Now")
 
@@ -13836,12 +13868,14 @@ def _run_db_update_task(full_refresh, server_type):
             # Try Qt signal connection first
             db_update_worker.progress_updated.connect(_db_update_progress_callback)
             db_update_worker.phase_changed.connect(_db_update_phase_callback)
+            db_update_worker.artist_processed.connect(_db_update_artist_callback)
             db_update_worker.finished.connect(_db_update_finished_callback)
             db_update_worker.error.connect(_db_update_error_callback)
         except AttributeError:
             # Headless mode - use callback system
             db_update_worker.connect_callback('progress_updated', _db_update_progress_callback)
             db_update_worker.connect_callback('phase_changed', _db_update_phase_callback)
+            db_update_worker.connect_callback('artist_processed', _db_update_artist_callback)
             db_update_worker.connect_callback('finished', _db_update_finished_callback)
             db_update_worker.connect_callback('error', _db_update_error_callback)
 
