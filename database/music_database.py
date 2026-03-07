@@ -1846,16 +1846,27 @@ class MusicDatabase:
         """Fix similar_artists UNIQUE constraint and make discovery_pool_metadata per-profile (v3 migration)"""
         try:
             cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_migration_v3' LIMIT 1")
-            if cursor.fetchone():
-                return  # Already migrated
+            already_migrated = cursor.fetchone() is not None
 
-            logger.info("Applying profile support v3 migration...")
+            # Always check if similar_artists actually has profile_id column
+            # (an older bug could strip it even after v3 migration ran)
+            cursor.execute("PRAGMA table_info(similar_artists)")
+            sa_cols = [c[1] for c in cursor.fetchall()]
+            needs_repair = 'profile_id' not in sa_cols
+
+            if already_migrated and not needs_repair:
+                return  # Already migrated and table is intact
+
+            if needs_repair:
+                logger.info("Repairing similar_artists table — profile_id column missing, rebuilding...")
+            else:
+                logger.info("Applying profile support v3 migration...")
 
             # Rebuild similar_artists: UNIQUE(profile_id, source_artist_id, similar_artist_name)
             try:
                 cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='similar_artists'")
                 create_sql = cursor.fetchone()
-                if create_sql and 'UNIQUE(profile_id' not in create_sql[0]:
+                if create_sql and ('UNIQUE(profile_id' not in create_sql[0] or needs_repair):
                     cursor.execute("PRAGMA table_info(similar_artists)")
                     old_cols = [c[1] for c in cursor.fetchall()]
 
