@@ -15616,6 +15616,577 @@ const TOOL_HELP_CONTENT = {
                 <li>Add more artists to your watchlist to expand your discovery pool with their MusicMap similar artists</li>
             </ul>
         `
+    },
+
+    // ==================== Automation Trigger Help ====================
+
+    'auto-schedule': {
+        title: 'Schedule Timer',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Runs your automation on a repeating interval — every X minutes, hours, or days.</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>Interval:</strong> How often to repeat (e.g. every 6 hours)</li>
+                <li><strong>Unit:</strong> Minutes, Hours, or Days</li>
+            </ul>
+
+            <h4>When does it first run?</h4>
+            <p>The timer starts when SoulSync boots. If the automation was previously scheduled, it resumes from where it left off.</p>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Regular wishlist processing (every 30 minutes)</li>
+                <li>Periodic database backups (every 12 hours)</li>
+                <li>Any recurring maintenance task</li>
+            </ul>
+        `
+    },
+    'auto-daily_time': {
+        title: 'Daily Time',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Runs your automation once per day at a specific time.</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>Time:</strong> The wall-clock time to run (e.g. 03:00 for 3 AM)</li>
+            </ul>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Nightly watchlist scans</li>
+                <li>Off-peak database updates</li>
+                <li>Daily backups at a consistent time</li>
+            </ul>
+        `
+    },
+    'auto-weekly_time': {
+        title: 'Weekly Schedule',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Runs your automation on specific days of the week at a set time.</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>Days:</strong> Select one or more days (Mon–Sun)</li>
+                <li><strong>Time:</strong> The time to run on those days</li>
+            </ul>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Weekend-only quality scans</li>
+                <li>Weekly playlist refreshes</li>
+                <li>Scheduled maintenance on quiet days</li>
+            </ul>
+        `
+    },
+    'auto-app_started': {
+        title: 'App Started',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires once when SoulSync starts up. Useful for tasks you want to run on every boot.</p>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Refreshing mirrored playlists on startup</li>
+                <li>Running a quick database sync</li>
+                <li>Sending a "SoulSync is online" notification</li>
+            </ul>
+
+            <h4>Note</h4>
+            <p>This trigger fires only once per startup — it will not fire again until SoulSync is restarted.</p>
+        `
+    },
+    'auto-track_downloaded': {
+        title: 'Track Downloaded',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires every time a single track finishes downloading and post-processing (tagging, moving to library).</p>
+
+            <h4>Conditions</h4>
+            <p>You can filter which downloads trigger this automation:</p>
+            <ul>
+                <li><strong>Artist:</strong> Only fire for specific artists</li>
+                <li><strong>Title:</strong> Match on track title</li>
+                <li><strong>Album:</strong> Match on album name</li>
+                <li><strong>Quality:</strong> Match on file format (FLAC, MP3, etc.)</li>
+            </ul>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{artist}</code>, <code>{title}</code>, <code>{album}</code>, <code>{quality}</code></p>
+
+            <h4>Note</h4>
+            <p>This fires per-track, not per-album. For an album with 12 tracks, it fires 12 times. Use <strong>Batch Complete</strong> if you want one event per album.</p>
+        `
+    },
+    'auto-batch_complete': {
+        title: 'Batch Complete',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when an entire album or playlist download batch finishes — all tracks in the batch are done (whether successful or failed).</p>
+
+            <h4>Conditions</h4>
+            <ul>
+                <li><strong>Playlist name:</strong> Filter by the name of the album or playlist</li>
+            </ul>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{playlist_name}</code>, <code>{total_tracks}</code>, <code>{completed_tracks}</code>, <code>{failed_tracks}</code></p>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Triggering a media server scan after downloads finish</li>
+                <li>Sending a notification when an album is fully downloaded</li>
+                <li>Running a database update after new content arrives</li>
+            </ul>
+        `
+    },
+    'auto-watchlist_new_release': {
+        title: 'New Release Found',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when the watchlist scanner detects new music from an artist you're watching. This means a new album, EP, or single has been released that you don't already have.</p>
+
+            <h4>Conditions</h4>
+            <ul>
+                <li><strong>Artist:</strong> Only fire for specific watched artists</li>
+            </ul>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{artist}</code>, <code>{new_tracks}</code>, <code>{added_to_wishlist}</code></p>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Getting notified when your favorite artists drop new music</li>
+                <li>Auto-processing the wishlist immediately after new releases are found</li>
+            </ul>
+        `
+    },
+    'auto-playlist_synced': {
+        title: 'Playlist Synced',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires after a mirrored playlist is synced to your media server (Plex, Jellyfin, or Navidrome). This means the playlist has been matched and created/updated on your server.</p>
+
+            <h4>Conditions</h4>
+            <ul>
+                <li><strong>Playlist name:</strong> Only fire for specific playlists</li>
+            </ul>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{playlist_name}</code>, <code>{total_tracks}</code>, <code>{matched_tracks}</code>, <code>{synced_tracks}</code>, <code>{failed_tracks}</code></p>
+        `
+    },
+    'auto-playlist_changed': {
+        title: 'Playlist Changed',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when a mirrored playlist detects that the source playlist (on Spotify, Tidal, YouTube, etc.) has changed — tracks were added or removed.</p>
+
+            <h4>Conditions</h4>
+            <ul>
+                <li><strong>Playlist name:</strong> Only fire for specific playlists</li>
+            </ul>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{playlist_name}</code>, <code>{old_count}</code>, <code>{new_count}</code>, <code>{added}</code>, <code>{removed}</code></p>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Auto-discovering new tracks after a playlist updates</li>
+                <li>Auto-syncing the playlist to your media server</li>
+                <li>Getting notified when your followed playlists change</li>
+            </ul>
+        `
+    },
+    'auto-discovery_completed': {
+        title: 'Discovery Complete',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when Spotify/iTunes metadata discovery finishes for a mirrored playlist. Discovery is the process of matching playlist tracks to official Spotify or iTunes metadata.</p>
+
+            <h4>Conditions</h4>
+            <ul>
+                <li><strong>Playlist name:</strong> Only fire for specific playlists</li>
+            </ul>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{playlist_name}</code>, <code>{total_tracks}</code>, <code>{discovered_count}</code>, <code>{failed_count}</code>, <code>{skipped_count}</code></p>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Auto-syncing a playlist after discovery completes</li>
+                <li>Getting notified about discovery results (how many matched vs failed)</li>
+            </ul>
+        `
+    },
+    'auto-wishlist_processing_completed': {
+        title: 'Wishlist Processed',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when the auto-wishlist processing batch finishes. This is the automated download cycle that searches Soulseek for wishlist tracks.</p>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{tracks_processed}</code>, <code>{tracks_found}</code>, <code>{tracks_failed}</code></p>
+        `
+    },
+    'auto-watchlist_scan_completed': {
+        title: 'Watchlist Scan Done',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when the watchlist artist scan completes. The scan checks all watched artists for new releases and adds new tracks to your wishlist.</p>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{artists_scanned}</code>, <code>{new_tracks_found}</code>, <code>{tracks_added}</code></p>
+        `
+    },
+    'auto-database_update_completed': {
+        title: 'Database Updated',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when the library database refresh finishes — either incremental or full. This means SoulSync's internal database has been synced with your media server.</p>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{total_artists}</code>, <code>{total_albums}</code>, <code>{total_tracks}</code></p>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Running a quality scan after the database is refreshed</li>
+                <li>Sending a summary notification with library stats</li>
+            </ul>
+        `
+    },
+    'auto-download_failed': {
+        title: 'Download Failed',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when a track permanently fails to download. This means all retry attempts and sources have been exhausted.</p>
+
+            <h4>Conditions</h4>
+            <ul>
+                <li><strong>Artist:</strong> Only fire for specific artists</li>
+                <li><strong>Title:</strong> Match on track title</li>
+                <li><strong>Reason:</strong> Match on failure reason</li>
+            </ul>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{artist}</code>, <code>{title}</code>, <code>{reason}</code></p>
+        `
+    },
+    'auto-download_quarantined': {
+        title: 'File Quarantined',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when a downloaded file fails AcoustID verification and is moved to the quarantine folder. This means the audio fingerprint didn't match what was expected — the file might be the wrong song.</p>
+
+            <h4>Conditions</h4>
+            <ul>
+                <li><strong>Artist:</strong> Only fire for specific artists</li>
+                <li><strong>Title:</strong> Match on track title</li>
+            </ul>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{artist}</code>, <code>{title}</code>, <code>{reason}</code></p>
+
+            <h4>What is quarantine?</h4>
+            <p>Files that fail audio fingerprint verification are moved to a quarantine folder instead of your library. This prevents wrong songs from polluting your collection. You can review quarantined files manually.</p>
+        `
+    },
+    'auto-wishlist_item_added': {
+        title: 'Wishlist Item Added',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when a track is added to your wishlist — whether manually, by the quality scanner, or by the watchlist scan.</p>
+
+            <h4>Conditions</h4>
+            <ul>
+                <li><strong>Artist:</strong> Only fire for specific artists</li>
+                <li><strong>Title:</strong> Match on track title</li>
+            </ul>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{artist}</code>, <code>{title}</code>, <code>{reason}</code></p>
+        `
+    },
+    'auto-watchlist_artist_added': {
+        title: 'Artist Watched',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when an artist is added to your watchlist. Watched artists are periodically scanned for new releases.</p>
+
+            <h4>Conditions</h4>
+            <ul>
+                <li><strong>Artist:</strong> Only fire for specific artists</li>
+            </ul>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{artist}</code>, <code>{artist_id}</code></p>
+        `
+    },
+    'auto-watchlist_artist_removed': {
+        title: 'Artist Unwatched',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when an artist is removed from your watchlist.</p>
+
+            <h4>Conditions</h4>
+            <ul>
+                <li><strong>Artist:</strong> Only fire for specific artists</li>
+            </ul>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{artist}</code>, <code>{artist_id}</code></p>
+        `
+    },
+    'auto-import_completed': {
+        title: 'Import Complete',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when an album or track import operation finishes. Imports bring music from external sources into your library.</p>
+
+            <h4>Conditions</h4>
+            <ul>
+                <li><strong>Artist:</strong> Only fire for specific artists</li>
+                <li><strong>Album name:</strong> Match on album name</li>
+            </ul>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{track_count}</code>, <code>{album_name}</code>, <code>{artist}</code></p>
+        `
+    },
+    'auto-mirrored_playlist_created': {
+        title: 'Playlist Mirrored',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when a new playlist mirror is created — a playlist from Spotify, Tidal, YouTube, ListenBrainz, or Beatport is set up for mirroring.</p>
+
+            <h4>Conditions</h4>
+            <ul>
+                <li><strong>Playlist name:</strong> Match on playlist name</li>
+                <li><strong>Source:</strong> Match on platform (spotify, tidal, youtube, etc.)</li>
+            </ul>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{playlist_name}</code>, <code>{source}</code>, <code>{track_count}</code></p>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Auto-discovering tracks immediately after a new mirror is created</li>
+                <li>Getting notified when new playlists are mirrored</li>
+            </ul>
+        `
+    },
+    'auto-quality_scan_completed': {
+        title: 'Quality Scan Done',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when the quality scanner finishes. The scanner identifies tracks below your quality preferences and adds them to your wishlist for re-downloading.</p>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{quality_met}</code>, <code>{low_quality}</code>, <code>{total_scanned}</code></p>
+        `
+    },
+    'auto-duplicate_scan_completed': {
+        title: 'Duplicate Scan Done',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when the duplicate cleaner finishes scanning your transfer folder for duplicate audio files.</p>
+
+            <h4>Available variables for notifications</h4>
+            <p><code>{files_scanned}</code>, <code>{duplicates_found}</code>, <code>{space_freed}</code></p>
+        `
+    },
+
+    // ==================== Automation Action Help ====================
+
+    'auto-process_wishlist': {
+        title: 'Process Wishlist',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Searches Soulseek for tracks in your wishlist and downloads them. This is the same process that runs automatically on a timer — this action lets you trigger it manually or chain it to events.</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>Category:</strong> Process all wishlist tracks, or only Albums/EPs, or only Singles</li>
+            </ul>
+
+            <h4>How it works</h4>
+            <ol>
+                <li>Picks tracks from the wishlist (alternating Albums and Singles cycles)</li>
+                <li>Searches Soulseek for each track</li>
+                <li>Downloads the best quality match found</li>
+                <li>Tags and moves files to your library</li>
+            </ol>
+        `
+    },
+    'auto-scan_watchlist': {
+        title: 'Scan Watchlist',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Checks all watched artists for new releases you don't already have. New tracks are automatically added to your wishlist for downloading.</p>
+
+            <h4>How it works</h4>
+            <ol>
+                <li>Goes through each artist in your watchlist</li>
+                <li>Fetches their discography from Spotify</li>
+                <li>Compares against your library to find missing releases</li>
+                <li>Adds new tracks to your wishlist</li>
+            </ol>
+        `
+    },
+    'auto-scan_library': {
+        title: 'Scan Library',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Triggers your media server (Plex) to scan its music library folder for new or changed files. This makes newly downloaded music appear in your media server.</p>
+
+            <h4>Note</h4>
+            <p>Jellyfin and Navidrome detect new files automatically in real-time, so this action is primarily useful for Plex.</p>
+        `
+    },
+    'auto-refresh_mirrored': {
+        title: 'Refresh Mirrored Playlist',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Re-fetches a mirrored playlist from its source platform (Spotify, Tidal, YouTube, etc.) and updates the local mirror with any track changes.</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>Playlist:</strong> Select a specific mirrored playlist, or check "Refresh all" to update all mirrors</li>
+            </ul>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Keeping mirrors in sync with playlists that change frequently</li>
+                <li>Detecting added/removed tracks on the source platform</li>
+            </ul>
+        `
+    },
+    'auto-sync_playlist': {
+        title: 'Sync Playlist',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Syncs a mirrored playlist to your media server. It matches discovered tracks against your library and creates or updates the playlist on Plex, Jellyfin, or Navidrome.</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>Playlist:</strong> Select which mirrored playlist to sync</li>
+            </ul>
+
+            <h4>Prerequisites</h4>
+            <p>Tracks should be discovered first (matched to Spotify/iTunes metadata) before syncing. Undiscovered tracks will be skipped.</p>
+        `
+    },
+    'auto-discover_playlist': {
+        title: 'Discover Playlist',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Finds official Spotify or iTunes metadata for tracks in a mirrored playlist. This is required before syncing — it matches each track to a known release so it can be found in your library.</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>Playlist:</strong> Select a specific playlist, or check "Discover all" to process all mirrored playlists</li>
+            </ul>
+
+            <h4>How it works</h4>
+            <ol>
+                <li>Takes each track name and artist from the mirror</li>
+                <li>Searches Spotify (or iTunes as fallback) for a match</li>
+                <li>Stores the best match with confidence score in the discovery cache</li>
+                <li>Already-discovered tracks are skipped for efficiency</li>
+            </ol>
+        `
+    },
+    'auto-notify_only': {
+        title: 'Notify Only',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Nothing — it performs no action. It just passes the event data through to the notification step.</p>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Getting notified about events without taking any automated action</li>
+                <li>Monitoring what's happening in SoulSync (downloads, failures, changes)</li>
+                <li>Pair with any event trigger + Discord/Telegram/Pushbullet notification</li>
+            </ul>
+        `
+    },
+    'auto-start_database_update': {
+        title: 'Update Database',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Refreshes SoulSync's internal library database by syncing with your media server (Plex, Jellyfin, or Navidrome).</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>Full refresh:</strong> When checked, completely rebuilds the database from scratch. When unchecked, only scans for new content (faster).</li>
+            </ul>
+        `
+    },
+    'auto-run_duplicate_cleaner': {
+        title: 'Run Duplicate Cleaner',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Scans your transfer folder for duplicate audio files (same filename, different format) and removes the lower-quality version. For example, if you have both <code>Song.flac</code> and <code>Song.mp3</code>, the MP3 is removed.</p>
+
+            <h4>Safety</h4>
+            <p>Removed files are moved to a <code>deleted/</code> subfolder, not permanently deleted. You can recover them if needed.</p>
+        `
+    },
+    'auto-clear_quarantine': {
+        title: 'Clear Quarantine',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Permanently deletes all files in the quarantine folder. Quarantined files are downloads that failed AcoustID audio fingerprint verification — they might be the wrong song.</p>
+
+            <h4>Warning</h4>
+            <p>This permanently deletes files. Make sure you've reviewed quarantined files before setting up an automation for this.</p>
+        `
+    },
+    'auto-cleanup_wishlist': {
+        title: 'Clean Up Wishlist',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Removes duplicate entries and tracks you already own from your wishlist. Keeps the wishlist lean by removing items that no longer need downloading.</p>
+        `
+    },
+    'auto-update_discovery_pool': {
+        title: 'Update Discovery Pool',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Refreshes the discovery pool with new tracks from your mirrored playlists. The discovery pool tracks which playlist tracks have been successfully matched and which ones failed.</p>
+        `
+    },
+    'auto-start_quality_scan': {
+        title: 'Run Quality Scan',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Scans your library for tracks that don't meet your quality preferences (e.g., MP3 when you prefer FLAC). Low-quality tracks are matched to Spotify and added to your wishlist for re-downloading in better quality.</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>Scope:</strong> Scan only watchlist artists (faster) or your entire library (thorough)</li>
+            </ul>
+        `
+    },
+    'auto-backup_database': {
+        title: 'Backup Database',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Creates a timestamped backup of SoulSync's SQLite database. Uses the SQLite backup API for a safe hot-copy while the app is running.</p>
+
+            <h4>Retention</h4>
+            <p>Keeps the last 3 backups automatically. Older backups are cleaned up to save disk space.</p>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Nightly automated backups</li>
+                <li>Pre-update safety backups</li>
+                <li>Peace of mind for your library data</li>
+            </ul>
+        `
     }
 };
 
@@ -42997,6 +43568,8 @@ function _renderBuilderSidebar() {
         (_autoBlocks[sec.key] || []).forEach(block => {
             const icon = _autoIcons[block.type] || '\u2699\uFE0F';
             const disabled = !block.available;
+            const helpKey = 'auto-' + block.type;
+            const hasHelp = !!TOOL_HELP_CONTENT[helpKey];
             html += `<div class="block-item${disabled ? ' coming-soon' : ''}" ${!disabled ? `draggable="true" ondragstart="_autoDragStart(event,'${block.type}','${sec.slot}')" onclick="_autoClickBlock('${block.type}','${sec.slot}')"` : ''}>
                 <div class="block-item-icon">${icon}</div>
                 <div class="block-item-text">
@@ -43004,6 +43577,7 @@ function _renderBuilderSidebar() {
                     <div class="block-item-desc">${_esc(block.description)}</div>
                 </div>
                 ${disabled ? '<span class="coming-soon-badge">Soon</span>' : ''}
+                ${hasHelp ? `<button class="tool-help-button block-help-btn" onclick="event.stopPropagation(); openToolHelpModal('${helpKey}')" title="Learn more">?</button>` : ''}
             </div>`;
         });
         html += '</div>';
