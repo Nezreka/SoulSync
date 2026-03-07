@@ -17,10 +17,22 @@ import re
 import time
 import threading
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from utils.logging_config import get_logger
 
 logger = get_logger("automation_engine")
+
+def _utcnow():
+    """Return current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
+
+def _utcnow_str():
+    """Return current UTC time as naive string for DB storage (consistent with SQLite CURRENT_TIMESTAMP)."""
+    return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
+def _utc_after(seconds):
+    """Return UTC time N seconds from now as naive string for DB storage."""
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).strftime('%Y-%m-%d %H:%M:%S')
 
 SYSTEM_AUTOMATIONS = [
     {
@@ -161,8 +173,8 @@ class AutomationEngine:
             if existing:
                 # Only reset next_run for timer-based triggers that have an initial delay
                 if spec.get('initial_delay') is not None:
-                    next_run = (datetime.now() + timedelta(seconds=spec['initial_delay'])).strftime('%Y-%m-%d %H:%M:%S')
-                    self.db.update_automation(existing['id'], next_run=next_run)
+                    nr = _utc_after(spec['initial_delay'])
+                    self.db.update_automation(existing['id'], next_run=nr)
                     logger.info(f"System automation '{spec['name']}' next_run reset to {spec['initial_delay']}s from now")
                 else:
                     logger.info(f"System automation '{spec['name']}' ready (event-based)")
@@ -173,8 +185,8 @@ class AutomationEngine:
         if not auto or not auto.get('enabled') or not auto.get('next_run'):
             return 0
         try:
-            next_run = datetime.strptime(auto['next_run'], '%Y-%m-%d %H:%M:%S')
-            remaining = (next_run - datetime.now()).total_seconds()
+            next_run = datetime.strptime(auto['next_run'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+            remaining = (next_run - _utcnow()).total_seconds()
             return max(0, int(remaining))
         except (ValueError, TypeError):
             return 0
@@ -561,20 +573,22 @@ class AutomationEngine:
             try:
                 trigger_config = json.loads(auto.get('trigger_config') or '{}')
                 if trigger_type == 'daily_time':
-                    # Next run is tomorrow at the configured time
+                    # Next run is tomorrow at the configured time (compute delay from local time, store as UTC)
                     time_str = trigger_config.get('time', '00:00')
                     hour, minute = map(int, time_str.split(':'))
-                    target = datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=1)
-                    next_run_str = target.strftime('%Y-%m-%d %H:%M:%S')
+                    now_local = datetime.now()
+                    target = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=1)
+                    next_run_str = _utc_after((target - now_local).total_seconds())
                 elif trigger_type == 'weekly_time':
                     time_str = trigger_config.get('time', '00:00')
                     hour, minute = map(int, time_str.split(':'))
+                    now_local = datetime.now()
                     target = self._next_weekly_occurrence(hour, minute, trigger_config.get('days', []))
-                    next_run_str = target.strftime('%Y-%m-%d %H:%M:%S')
+                    next_run_str = _utc_after((target - now_local).total_seconds())
                 else:
                     delay = self._calc_delay_seconds(trigger_config)
                     if delay:
-                        next_run_str = (datetime.now() + timedelta(seconds=delay)).strftime('%Y-%m-%d %H:%M:%S')
+                        next_run_str = _utc_after(delay)
             except Exception:
                 pass
 
@@ -623,14 +637,14 @@ class AutomationEngine:
         auto = self.db.get_automation(automation_id)
         if auto and auto.get('next_run'):
             try:
-                next_run = datetime.strptime(auto['next_run'], '%Y-%m-%d %H:%M:%S')
-                remaining = (next_run - datetime.now()).total_seconds()
+                next_run = datetime.strptime(auto['next_run'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                remaining = (next_run - _utcnow()).total_seconds()
                 if remaining > 0:
                     delay = remaining
             except (ValueError, TypeError):
                 pass
 
-        next_run_str = (datetime.now() + timedelta(seconds=delay)).strftime('%Y-%m-%d %H:%M:%S')
+        next_run_str = _utc_after(delay)
         self.db.update_automation(automation_id, next_run=next_run_str)
 
         timer = threading.Timer(delay, self.run_automation, args=(automation_id,))
@@ -650,14 +664,14 @@ class AutomationEngine:
         except (ValueError, AttributeError):
             hour, minute = 0, 0
 
-        now = datetime.now()
-        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if target <= now:
+        now_local = datetime.now()
+        target = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target <= now_local:
             target += timedelta(days=1)
 
-        delay = (target - now).total_seconds()
+        delay = (target - now_local).total_seconds()
 
-        next_run_str = target.strftime('%Y-%m-%d %H:%M:%S')
+        next_run_str = _utc_after(delay)
         self.db.update_automation(automation_id, next_run=next_run_str)
 
         timer = threading.Timer(delay, self.run_automation, args=(automation_id,))
@@ -680,7 +694,7 @@ class AutomationEngine:
         target = self._next_weekly_occurrence(hour, minute, config.get('days', []))
         delay = (target - datetime.now()).total_seconds()
 
-        next_run_str = target.strftime('%Y-%m-%d %H:%M:%S')
+        next_run_str = _utc_after(delay)
         self.db.update_automation(automation_id, next_run=next_run_str)
 
         timer = threading.Timer(delay, self.run_automation, args=(automation_id,))

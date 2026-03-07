@@ -43515,15 +43515,20 @@ function _autoFormatNotify(type) {
     if (type === 'fire_signal') return '\u26A1 Signal';
     return type || '';
 }
+function _autoParseUTC(ts) {
+    // If timestamp already has timezone info (+00:00 or Z), parse as-is; otherwise append Z to treat as UTC
+    if (/[Zz]$/.test(ts) || /[+-]\d{2}:\d{2}$/.test(ts)) return new Date(ts).getTime();
+    return new Date(ts + 'Z').getTime();
+}
 function _autoTimeAgo(ts) {
     if (!ts) return 'Never';
-    const d = (Date.now() - new Date(ts + 'Z').getTime()) / 1000;
+    const d = (Date.now() - _autoParseUTC(ts)) / 1000;
     if (d < 60) return 'just now'; if (d < 3600) return Math.floor(d/60) + 'm ago';
     if (d < 86400) return Math.floor(d/3600) + 'h ago'; return Math.floor(d/86400) + 'd ago';
 }
 function _autoTimeUntil(ts) {
     if (!ts) return '';
-    const d = (new Date(ts + 'Z').getTime() - Date.now()) / 1000;
+    const d = (_autoParseUTC(ts) - Date.now()) / 1000;
     if (d <= 0) return 'soon'; if (d < 60) return 'in ' + Math.ceil(d) + 's';
     if (d < 3600) return 'in ' + Math.ceil(d/60) + 'm'; if (d < 86400) return 'in ' + Math.round(d/3600) + 'h';
     return 'in ' + Math.round(d/86400) + 'd';
