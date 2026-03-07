@@ -3580,6 +3580,14 @@ def list_automations():
                         auto[field] = {}
                     else:
                         auto[field] = None
+            # Parse then_actions
+            try:
+                auto['then_actions'] = json.loads(auto.get('then_actions') or '[]') if isinstance(auto.get('then_actions'), str) else (auto.get('then_actions') or [])
+            except (json.JSONDecodeError, TypeError):
+                auto['then_actions'] = []
+            # Backward compat: if then_actions empty but notify_type set, build it
+            if not auto['then_actions'] and auto.get('notify_type'):
+                auto['then_actions'] = [{'type': auto['notify_type'], 'config': auto.get('notify_config', {})}]
         return jsonify(automations)
     except Exception as e:
         logger.error(f"Error listing automations: {e}")
@@ -3598,12 +3606,35 @@ def create_automation():
         trigger_config = json.dumps(data.get('trigger_config', {}))
         action_type = data.get('action_type', 'process_wishlist')
         action_config = json.dumps(data.get('action_config', {}))
-        notify_type = data.get('notify_type') or None
-        notify_config = json.dumps(data.get('notify_config', {})) if notify_type else '{}'
+        # then_actions array (new multi-then system)
+        then_actions = data.get('then_actions', [])
+        then_actions_json = json.dumps(then_actions)
+        # Backward compat: derive notify_type/notify_config from first then_action
+        if then_actions:
+            notify_type = then_actions[0].get('type')
+            notify_config = json.dumps(then_actions[0].get('config', {}))
+        else:
+            notify_type = data.get('notify_type') or None
+            notify_config = json.dumps(data.get('notify_config', {})) if notify_type else '{}'
         profile_id = session.get('profile_id', 1)
 
+        # Signal cycle detection
+        if automation_engine and (trigger_type == 'signal_received' or any(t.get('type') == 'fire_signal' for t in then_actions)):
+            db = get_database()
+            all_autos = db.get_automations(profile_id)
+            test_auto = {
+                'trigger_type': trigger_type,
+                'trigger_config': trigger_config,
+                'then_actions': then_actions_json,
+                'enabled': True,
+            }
+            all_autos.append(test_auto)
+            cycle = automation_engine.detect_signal_cycles(all_autos)
+            if cycle:
+                return jsonify({"error": f"Signal cycle detected: {' → '.join(cycle)}. This would cause an infinite loop."}), 400
+
         db = get_database()
-        auto_id = db.create_automation(name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config)
+        auto_id = db.create_automation(name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions_json)
         if auto_id is None:
             return jsonify({"error": "Failed to create automation"}), 500
 
@@ -3632,6 +3663,13 @@ def get_automation(automation_id):
                     auto[field] = {}
                 else:
                     auto[field] = None
+        # Parse then_actions
+        try:
+            auto['then_actions'] = json.loads(auto.get('then_actions') or '[]') if isinstance(auto.get('then_actions'), str) else (auto.get('then_actions') or [])
+        except (json.JSONDecodeError, TypeError):
+            auto['then_actions'] = []
+        if not auto['then_actions'] and auto.get('notify_type'):
+            auto['then_actions'] = [{'type': auto['notify_type'], 'config': auto.get('notify_config', {})}]
         return jsonify(auto)
     except Exception as e:
         logger.error(f"Error getting automation: {e}")
@@ -3655,13 +3693,47 @@ def update_automation_endpoint(automation_id):
             update_fields['action_type'] = data['action_type']
         if 'action_config' in data:
             update_fields['action_config'] = json.dumps(data['action_config'])
-        if 'notify_type' in data:
+        if 'then_actions' in data:
+            then_actions = data['then_actions']
+            update_fields['then_actions'] = json.dumps(then_actions)
+            # Backward compat: derive notify_type/notify_config from first then_action
+            if then_actions:
+                update_fields['notify_type'] = then_actions[0].get('type')
+                update_fields['notify_config'] = json.dumps(then_actions[0].get('config', {}))
+            else:
+                update_fields['notify_type'] = None
+                update_fields['notify_config'] = '{}'
+        elif 'notify_type' in data:
             update_fields['notify_type'] = data['notify_type'] or None
-        if 'notify_config' in data:
+        if 'notify_config' in data and 'then_actions' not in data:
             update_fields['notify_config'] = json.dumps(data['notify_config'])
 
         if not update_fields:
             return jsonify({"error": "No fields to update"}), 400
+
+        # Signal cycle detection
+        trigger_type = data.get('trigger_type', '')
+        then_actions = data.get('then_actions', [])
+        if automation_engine and (trigger_type == 'signal_received' or any(t.get('type') == 'fire_signal' for t in then_actions)):
+            all_autos = db.get_automations()
+            # Replace the automation being edited with the updated version
+            test_autos = []
+            for a in all_autos:
+                if a['id'] == automation_id:
+                    merged = dict(a)
+                    if 'trigger_type' in data:
+                        merged['trigger_type'] = data['trigger_type']
+                    if 'trigger_config' in data:
+                        merged['trigger_config'] = json.dumps(data['trigger_config'])
+                    if 'then_actions' in data:
+                        merged['then_actions'] = json.dumps(data['then_actions'])
+                    merged['enabled'] = True
+                    test_autos.append(merged)
+                else:
+                    test_autos.append(a)
+            cycle = automation_engine.detect_signal_cycles(test_autos)
+            if cycle:
+                return jsonify({"error": f"Signal cycle detected: {' → '.join(cycle)}. This would cause an infinite loop."}), 400
 
         success = db.update_automation(automation_id, **update_fields)
         if not success:
@@ -3748,6 +3820,35 @@ def get_automation_progress():
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+def _collect_known_signals():
+    """Collect all signal names used across automations (for autocomplete)."""
+    signals = set()
+    try:
+        db = get_database()
+        for auto in db.get_automations():
+            # Check signal_received triggers
+            if auto.get('trigger_type') == 'signal_received':
+                try:
+                    tc = json.loads(auto.get('trigger_config') or '{}')
+                    sig = tc.get('signal_name', '').strip()
+                    if sig:
+                        signals.add(sig)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            # Check fire_signal in then_actions
+            try:
+                ta = json.loads(auto.get('then_actions') or '[]')
+                for item in ta:
+                    if item.get('type') == 'fire_signal':
+                        sig = item.get('config', {}).get('signal_name', '').strip()
+                        if sig:
+                            signals.add(sig)
+            except (json.JSONDecodeError, TypeError):
+                pass
+    except Exception:
+        pass
+    return sorted(signals)
 
 @app.route('/api/automations/blocks', methods=['GET'])
 def get_automation_blocks():
@@ -3841,6 +3942,13 @@ def get_automation_blocks():
             {"type": "duplicate_scan_completed", "label": "Duplicate Scan Done", "icon": "layers",
              "description": "When duplicate cleaner finishes", "available": True,
              "variables": ["files_scanned", "duplicates_found", "space_freed"]},
+            # Signal trigger
+            {"type": "signal_received", "label": "Signal Received", "icon": "zap",
+             "description": "When another automation fires a named signal", "available": True,
+             "config_fields": [
+                 {"key": "signal_name", "type": "signal_input", "label": "Signal Name"}
+             ],
+             "variables": ["signal_name"]},
         ],
         "actions": [
             {"type": "process_wishlist", "label": "Process Wishlist", "icon": "list", "description": "Retry failed downloads from wishlist", "available": True,
@@ -3893,7 +4001,14 @@ def get_automation_blocks():
              "variables": ["time", "name", "run_count", "status"]},
             {"type": "telegram", "label": "Telegram", "icon": "message", "description": "Send a Telegram message", "available": True,
              "variables": ["time", "name", "run_count", "status"]},
-        ]
+            # Signal fire action
+            {"type": "fire_signal", "label": "Fire Signal", "icon": "zap",
+             "description": "Fire a signal that other automations can listen for", "available": True,
+             "config_fields": [
+                 {"key": "signal_name", "type": "signal_input", "label": "Signal Name"}
+             ]},
+        ],
+        "known_signals": _collect_known_signals(),
     })
 
 @app.route('/api/mirrored-playlists/list', methods=['GET'])

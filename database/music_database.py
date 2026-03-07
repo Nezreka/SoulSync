@@ -400,6 +400,7 @@ class MusicDatabase:
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
             self._add_automation_system_column(cursor)
+            self._add_automation_then_actions_column(cursor)
 
             conn.commit()
             logger.info("Database initialized successfully")
@@ -430,6 +431,27 @@ class MusicDatabase:
                 logger.info("Added is_system column to automations table")
         except Exception as e:
             logger.error(f"Error adding automation system column: {e}")
+
+    def _add_automation_then_actions_column(self, cursor):
+        """Add then_actions column to automations table and migrate existing notify data."""
+        try:
+            cursor.execute("PRAGMA table_info(automations)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'then_actions' not in cols:
+                cursor.execute("ALTER TABLE automations ADD COLUMN then_actions TEXT DEFAULT '[]'")
+                logger.info("Added then_actions column to automations table")
+                # Migrate existing notify_type/notify_config into then_actions
+                cursor.execute("SELECT id, notify_type, notify_config FROM automations WHERE notify_type IS NOT NULL AND notify_type != ''")
+                for row in cursor.fetchall():
+                    try:
+                        config = json.loads(row[2]) if row[2] else {}
+                        then_actions = json.dumps([{'type': row[1], 'config': config}])
+                        cursor.execute("UPDATE automations SET then_actions = ? WHERE id = ?", (then_actions, row[0]))
+                    except Exception:
+                        pass
+                logger.info("Migrated existing notify data to then_actions")
+        except Exception as e:
+            logger.error(f"Error adding automation then_actions column: {e}")
 
     def _add_server_source_columns(self, cursor):
         """Add server_source columns to existing tables for multi-server support"""
@@ -6803,15 +6825,16 @@ class MusicDatabase:
 
     def create_automation(self, name: str, trigger_type: str, trigger_config: str,
                           action_type: str, action_config: str, profile_id: int = 1,
-                          notify_type: str = None, notify_config: str = '{}'):
+                          notify_type: str = None, notify_config: str = '{}',
+                          then_actions: str = '[]'):
         """Create a new automation. Returns the new automation ID or None."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT INTO automations (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config))
+                    INSERT INTO automations (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions))
                 conn.commit()
                 return cursor.lastrowid
         except Exception as e:
@@ -6858,7 +6881,7 @@ class MusicDatabase:
 
     def update_automation(self, automation_id: int, **kwargs) -> bool:
         """Update automation fields."""
-        allowed = {'name', 'enabled', 'trigger_type', 'trigger_config', 'action_type', 'action_config', 'next_run', 'notify_type', 'notify_config', 'last_result', 'is_system'}
+        allowed = {'name', 'enabled', 'trigger_type', 'trigger_config', 'action_type', 'action_config', 'next_run', 'notify_type', 'notify_config', 'last_result', 'is_system', 'then_actions'}
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         if not updates:
             return False

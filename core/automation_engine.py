@@ -1,17 +1,19 @@
 """
-Automation Engine — trigger → action → notify scheduler for SoulSync.
+Automation Engine — trigger → action → then scheduler for SoulSync.
 
 Architecture:
-- Triggers (WHEN): schedule timer, event-based (track_downloaded, batch_complete, etc.)
+- Triggers (WHEN): schedule timer, event-based, signal-based (signal_received)
 - Actions (DO): real SoulSync operations registered by web_server.py
-- Notifications (NOTIFY): optional Discord webhook with template variables
+- Then (THEN): 1–3 post-action steps — notifications (Discord/Pushbullet/Telegram) and/or fire_signal
 - Conditions: optional filters on event data (artist contains, title equals, etc.)
+- Signals: user-named events that chain automations together (fire_signal → signal_received)
 
 Uses threading.Timer pattern for schedule triggers.
 Event triggers react to emit() calls from web_server.py hook points.
 """
 
 import json
+import re
 import time
 import threading
 import requests
@@ -57,6 +59,11 @@ class AutomationEngine:
         self._event_automations = {}
         self._event_cache_dirty = True
 
+        # Signal safety: cooldown tracking and chain depth limit
+        self._signal_cooldowns = {}       # signal event key → last fire timestamp
+        self._max_chain_depth = 5
+        self._signal_cooldown_seconds = 10
+
         # Trigger registry: type → setup function (schedule only — events use emit())
         self._trigger_handlers = {
             'schedule': self._setup_schedule_trigger,
@@ -81,6 +88,16 @@ class AutomationEngine:
         """Register callbacks for live progress tracking from web_server.py."""
         self._progress_init_fn = init_fn
         self._progress_finish_fn = finish_fn
+
+    @staticmethod
+    def _sanitize_signal_name(name):
+        """Sanitize signal name: lowercase, alphanumeric + underscore/hyphen, max 50 chars."""
+        if not name:
+            return ''
+        name = name.lower().strip()
+        name = re.sub(r'[^a-z0-9_\-]', '_', name)
+        name = re.sub(r'_+', '_', name).strip('_')
+        return name[:50]
 
     # --- System Automations ---
 
@@ -202,6 +219,20 @@ class AutomationEngine:
     def _process_event(self, event_type, data):
         """Find matching automations and run them."""
         try:
+            # Signal safety: chain depth limit and cooldown
+            if event_type.startswith('signal:'):
+                depth = data.get('_chain_depth', 0)
+                if depth >= self._max_chain_depth:
+                    logger.warning(f"Signal chain depth limit ({self._max_chain_depth}) reached for {event_type}, stopping")
+                    return
+                with self._lock:
+                    now = time.time()
+                    last = self._signal_cooldowns.get(event_type, 0)
+                    if now - last < self._signal_cooldown_seconds:
+                        logger.info(f"Signal {event_type} on cooldown ({self._signal_cooldown_seconds}s), skipping")
+                        return
+                    self._signal_cooldowns[event_type] = now
+
             if self._event_cache_dirty:
                 self._rebuild_event_cache()
 
@@ -234,17 +265,29 @@ class AutomationEngine:
 
     def _rebuild_event_cache(self):
         """Cache which automations listen to which event types."""
-        self._event_automations = {}
+        new_cache = {}
         try:
             all_autos = self.db.get_automations()
             for auto in all_autos:
                 if not auto.get('enabled'):
                     continue
                 tt = auto.get('trigger_type', '')
-                if tt and tt not in self._trigger_handlers:
-                    self._event_automations.setdefault(tt, []).append(auto['id'])
+                if tt == 'signal_received':
+                    # Signal triggers map to 'signal:{name}' event key
+                    try:
+                        tc = json.loads(auto.get('trigger_config') or '{}')
+                    except (json.JSONDecodeError, TypeError):
+                        tc = {}
+                    sig = tc.get('signal_name', '')
+                    if sig:
+                        key = 'signal:' + self._sanitize_signal_name(sig)
+                        new_cache.setdefault(key, []).append(auto['id'])
+                elif tt and tt not in self._trigger_handlers:
+                    new_cache.setdefault(tt, []).append(auto['id'])
         except Exception as e:
             logger.error(f"Failed to rebuild event cache: {e}")
+        # Atomic swap — safe for concurrent readers
+        self._event_automations = new_cache
         self._event_cache_dirty = False
         logger.debug(f"Event cache rebuilt: {dict((k, len(v)) for k, v in self._event_automations.items())}")
 
@@ -328,16 +371,17 @@ class AutomationEngine:
                         try: self._progress_finish_fn(automation_id, result)
                         except Exception: pass
 
-        # Merge event data into result for notification variables
+        # Merge event data into result for then-action variables
         merged = {**event_data, **result}
+        chain_depth = event_data.get('_chain_depth', 0)
 
         try:
-            self._send_notification(auto, merged)
+            self._execute_then_actions(auto, merged, chain_depth)
         except Exception as e:
-            logger.error(f"Notification failed for event automation {automation_id}: {e}")
+            logger.error(f"Then-actions failed for event automation {automation_id}: {e}")
 
         # Update run stats (no reschedule — event triggers don't use timers)
-        last_result = json.dumps(merged)
+        last_result = json.dumps({k: v for k, v in merged.items() if not k.startswith('_')})
         error = result.get('error') if result.get('status') == 'error' else None
         self.db.update_automation_run(automation_id, error=error, last_result=last_result)
 
@@ -358,9 +402,9 @@ class AutomationEngine:
         if action_type == 'notify_only':
             result = {'status': 'triggered'}
             try:
-                self._send_notification(auto, result)
+                self._execute_then_actions(auto, result, chain_depth=0)
             except Exception as e:
-                logger.error(f"Notification failed for automation {automation_id}: {e}")
+                logger.error(f"Then-actions failed for automation {automation_id}: {e}")
             self._finish_run(auto, automation_id, result, error=None)
             return
 
@@ -416,11 +460,11 @@ class AutomationEngine:
             try: self._progress_finish_fn(automation_id, result)
             except Exception: pass
 
-        # Send notification if configured
+        # Execute then-actions (notifications + fire_signal)
         try:
-            self._send_notification(auto, result)
+            self._execute_then_actions(auto, result, chain_depth=0)
         except Exception as e:
-            logger.error(f"Notification failed for automation {automation_id}: {e}")
+            logger.error(f"Then-actions failed for automation {automation_id}: {e}")
 
         self._finish_run(auto, automation_id, result, error)
 
@@ -576,18 +620,28 @@ class AutomationEngine:
         # Fallback: tomorrow (shouldn't happen with 8-day scan)
         return now.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=1)
 
-    # --- Notification ---
+    # --- Then Actions (notifications + signals) ---
 
-    def _send_notification(self, automation, action_result):
-        """Send notification after action completes, if configured."""
-        notify_type = automation.get('notify_type')
-        if not notify_type:
-            return
-
+    def _execute_then_actions(self, automation, action_result, chain_depth=0):
+        """Execute all THEN actions: notifications (Discord/Pushbullet/Telegram) and fire_signal."""
+        # Read then_actions array
         try:
-            config = json.loads(automation.get('notify_config') or '{}')
-        except json.JSONDecodeError:
-            config = {}
+            then_actions = json.loads(automation.get('then_actions') or '[]')
+        except (json.JSONDecodeError, TypeError):
+            then_actions = []
+
+        # Backward compat: fall back to notify_type/notify_config
+        if not then_actions:
+            nt = automation.get('notify_type')
+            if nt:
+                try:
+                    nc = json.loads(automation.get('notify_config') or '{}')
+                except (json.JSONDecodeError, TypeError):
+                    nc = {}
+                then_actions = [{'type': nt, 'config': nc}]
+
+        if not then_actions:
+            return
 
         # Build template variables
         variables = {
@@ -596,16 +650,91 @@ class AutomationEngine:
             'run_count': str(automation.get('run_count', 0) + 1),
             'status': action_result.get('status', 'unknown'),
         }
-        # Add all action result fields as variables
         for k, v in action_result.items():
-            variables[k] = str(v)
+            if not k.startswith('_'):
+                variables[k] = str(v)
 
-        if notify_type == 'discord_webhook':
-            self._send_discord_notification(config, variables)
-        elif notify_type == 'pushbullet':
-            self._send_pushbullet_notification(config, variables)
-        elif notify_type == 'telegram':
-            self._send_telegram_notification(config, variables)
+        for item in then_actions:
+            try:
+                t = item.get('type', '')
+                c = item.get('config', {})
+                if t == 'discord_webhook':
+                    self._send_discord_notification(c, variables)
+                elif t == 'pushbullet':
+                    self._send_pushbullet_notification(c, variables)
+                elif t == 'telegram':
+                    self._send_telegram_notification(c, variables)
+                elif t == 'fire_signal':
+                    sig = self._sanitize_signal_name(c.get('signal_name', ''))
+                    if sig:
+                        emit_data = {k: v for k, v in action_result.items() if not k.startswith('_')}
+                        emit_data['_chain_depth'] = chain_depth + 1
+                        emit_data['signal_name'] = sig
+                        logger.info(f"Automation '{automation.get('name')}' firing signal: {sig} (depth={chain_depth + 1})")
+                        self.emit('signal:' + sig, emit_data)
+            except Exception as e:
+                logger.error(f"Then-action '{item.get('type')}' failed for automation {automation.get('id')}: {e}")
+
+    # --- Signal Cycle Detection ---
+
+    def detect_signal_cycles(self, automations_list):
+        """Build signal dependency graph from automations list, return cycle path or None.
+        Used by web_server.py to validate before saving an automation."""
+        # Build graph: signal listened → set of signals fired
+        graph = {}
+        for auto in automations_list:
+            if not auto.get('enabled', True):
+                continue
+            tt = auto.get('trigger_type', '')
+            if tt != 'signal_received':
+                continue
+            tc = auto.get('trigger_config') or {}
+            if isinstance(tc, str):
+                try:
+                    tc = json.loads(tc)
+                except (json.JSONDecodeError, TypeError):
+                    tc = {}
+            listen_sig = self._sanitize_signal_name(tc.get('signal_name', ''))
+            if not listen_sig:
+                continue
+            # What signals does this automation fire?
+            ta = auto.get('then_actions') or '[]'
+            if isinstance(ta, str):
+                try:
+                    ta = json.loads(ta)
+                except (json.JSONDecodeError, TypeError):
+                    ta = []
+            for item in ta:
+                if item.get('type') == 'fire_signal':
+                    fire_sig = self._sanitize_signal_name(item.get('config', {}).get('signal_name', ''))
+                    if fire_sig:
+                        graph.setdefault(listen_sig, set()).add(fire_sig)
+
+        # DFS cycle detection with ordered path for readable error messages
+        def has_cycle(node, visited, path_list, path_set):
+            if node in path_set:
+                # Extract the cycle portion from path_list
+                cycle_start = path_list.index(node)
+                return path_list[cycle_start:] + [node]
+            if node in visited:
+                return None
+            visited.add(node)
+            path_list.append(node)
+            path_set.add(node)
+            for neighbor in graph.get(node, []):
+                result = has_cycle(neighbor, visited, path_list, path_set)
+                if result:
+                    return result
+            path_list.pop()
+            path_set.discard(node)
+            return None
+
+        visited = set()
+        for start in graph:
+            cycle = has_cycle(start, visited, [], set())
+            if cycle:
+                return cycle
+        return None
 
     def _send_discord_notification(self, config, variables):
         """POST to Discord webhook with template variable substitution."""
