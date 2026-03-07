@@ -833,6 +833,104 @@ def _register_automation_handlers():
             log_line=f'Backup created: {size_mb}MB ({os.path.basename(backup_path)})', log_type='success')
         return {'status': 'completed', 'backup_path': backup_path, 'size_mb': str(size_mb)}
 
+    def _auto_refresh_beatport_cache(config):
+        """Refresh Beatport homepage cache by calling each endpoint internally."""
+        automation_id = config.get('_automation_id')
+        sections = [
+            ('hero_tracks', '/api/beatport/hero-tracks', 'Hero Tracks'),
+            ('new_releases', '/api/beatport/new-releases', 'New Releases'),
+            ('featured_charts', '/api/beatport/featured-charts', 'Featured Charts'),
+            ('dj_charts', '/api/beatport/dj-charts', 'DJ Charts'),
+            ('top_10_lists', '/api/beatport/homepage/top-10-lists', 'Top 10 Lists'),
+            ('top_10_releases', '/api/beatport/homepage/top-10-releases-cards', 'Top 10 Releases'),
+            ('hype_picks', '/api/beatport/hype-picks', 'Hype Picks'),
+        ]
+        # Invalidate all homepage cache timestamps so endpoints re-scrape
+        with beatport_data_cache['cache_lock']:
+            for key in beatport_data_cache['homepage']:
+                beatport_data_cache['homepage'][key]['timestamp'] = 0
+                beatport_data_cache['homepage'][key]['data'] = None
+
+        refreshed = 0
+        errors = []
+        with app.test_client() as client:
+            for idx, (_, endpoint, label) in enumerate(sections):
+                _update_automation_progress(automation_id,
+                    progress=(idx / len(sections)) * 100,
+                    phase=f'Scraping: {label}',
+                    current_item=label)
+                try:
+                    resp = client.get(endpoint)
+                    if resp.status_code == 200:
+                        refreshed += 1
+                        _update_automation_progress(automation_id,
+                            log_line=f'{label}: cached', log_type='success')
+                    else:
+                        errors.append(label)
+                        _update_automation_progress(automation_id,
+                            log_line=f'{label}: HTTP {resp.status_code}', log_type='error')
+                except Exception as e:
+                    errors.append(label)
+                    _update_automation_progress(automation_id,
+                        log_line=f'{label}: {str(e)}', log_type='error')
+                if idx < len(sections) - 1:
+                    time.sleep(2)
+
+        _update_automation_progress(automation_id, status='finished', progress=100,
+            phase='Complete',
+            log_line=f'Refreshed {refreshed}/{len(sections)} sections', log_type='success')
+        return {'status': 'completed', 'refreshed': str(refreshed), 'errors': str(len(errors)),
+                '_manages_own_progress': True}
+
+    def _auto_clean_search_history(config):
+        """Remove old searches from Soulseek."""
+        automation_id = config.get('_automation_id')
+        try:
+            success = run_async(soulseek_client.maintain_search_history_with_buffer(
+                keep_searches=50, trigger_threshold=200
+            ))
+            if success:
+                _update_automation_progress(automation_id,
+                    log_line='Search history maintenance completed', log_type='success')
+                return {'status': 'completed'}
+            else:
+                _update_automation_progress(automation_id,
+                    log_line='No cleanup needed', log_type='skip')
+                return {'status': 'completed'}
+        except Exception as e:
+            return {'status': 'error', 'reason': str(e)}
+
+    def _auto_clean_completed_downloads(config):
+        """Clear completed downloads and empty directories."""
+        automation_id = config.get('_automation_id')
+        try:
+            has_active_batches = False
+            has_post_processing = False
+            with tasks_lock:
+                for batch_data in download_batches.values():
+                    if batch_data.get('phase') not in ['complete', 'error', 'cancelled', None]:
+                        has_active_batches = True
+                        break
+                if not has_active_batches:
+                    for task_data in download_tasks.values():
+                        if task_data.get('status') == 'post_processing':
+                            has_post_processing = True
+                            break
+
+            if has_active_batches:
+                _update_automation_progress(automation_id,
+                    log_line='Skipped — downloads active', log_type='skip')
+                return {'status': 'completed'}
+
+            run_async(soulseek_client.clear_all_completed_downloads())
+            if not has_post_processing:
+                _sweep_empty_download_directories()
+            _update_automation_progress(automation_id,
+                log_line='Download cleanup completed', log_type='success')
+            return {'status': 'completed'}
+        except Exception as e:
+            return {'status': 'error', 'reason': str(e)}
+
     automation_engine.register_action_handler('start_database_update', _auto_start_database_update,
                                               lambda: db_update_state.get('status') == 'running')
     automation_engine.register_action_handler('run_duplicate_cleaner', _auto_run_duplicate_cleaner,
@@ -843,6 +941,9 @@ def _register_automation_handlers():
     automation_engine.register_action_handler('start_quality_scan', _auto_start_quality_scan,
                                               lambda: quality_scanner_state.get('status') == 'running')
     automation_engine.register_action_handler('backup_database', _auto_backup_database)
+    automation_engine.register_action_handler('refresh_beatport_cache', _auto_refresh_beatport_cache)
+    automation_engine.register_action_handler('clean_search_history', _auto_clean_search_history)
+    automation_engine.register_action_handler('clean_completed_downloads', _auto_clean_completed_downloads)
 
     # Register progress tracking callbacks
     def _progress_init(aid, name, action_type):
@@ -4310,6 +4411,12 @@ def get_automation_blocks():
              ]},
             {"type": "backup_database", "label": "Backup Database", "icon": "save",
              "description": "Create timestamped database backup", "available": True},
+            {"type": "refresh_beatport_cache", "label": "Refresh Beatport Cache", "icon": "music",
+             "description": "Scrape Beatport homepage and warm the cache", "available": True},
+            {"type": "clean_search_history", "label": "Clean Search History", "icon": "trash-2",
+             "description": "Remove old searches from Soulseek", "available": True},
+            {"type": "clean_completed_downloads", "label": "Clean Completed Downloads", "icon": "check-square",
+             "description": "Clear completed downloads and empty directories", "available": True},
         ],
         "notifications": [
             {"type": "discord_webhook", "label": "Discord Webhook", "icon": "message", "description": "Send a Discord notification", "available": True,
@@ -13484,19 +13591,15 @@ def get_version_info():
 
 
 def _simple_monitor_task():
-    """The actual monitoring task that runs in the background thread."""
+    """The actual monitoring task that runs in the background thread.
+    Search cleanup and download cleanup are now handled by system automations."""
     print("🔄 Simple background monitor started")
-    last_search_cleanup = 0  # Force initial cleanup on first run
-    search_cleanup_interval = 3600  # 1 hour
-    initial_cleanup_done = False
-    last_download_cleanup = 0
-    download_cleanup_interval = 300  # 5 minutes
-    
+
     while True:
         try:
             with matched_context_lock:
                 pending_count = len(matched_downloads_context)
-            
+
             if pending_count > 0:
                 # Use app_context to safely call endpoint logic from a thread
                 with app.app_context():
@@ -13513,63 +13616,6 @@ def _simple_monitor_task():
                 for key in stale_keys:
                     print(f"🧹 Cleaning up stale retry attempt: {key}")
                     del _download_retry_attempts[key]
-
-            # Automatic search cleanup every hour (or initial cleanup)
-            current_time = time.time()
-            should_cleanup = (current_time - last_search_cleanup > search_cleanup_interval) or not initial_cleanup_done
-            
-            if should_cleanup:
-                try:
-                    if not initial_cleanup_done:
-                        print("🔍 [Auto Cleanup] Performing initial search cleanup in background...")
-                        initial_cleanup_done = True
-                    else:
-                        print("🔍 [Auto Cleanup] Starting scheduled search cleanup...")
-                    
-                    success = run_async(soulseek_client.maintain_search_history_with_buffer(
-                        keep_searches=50, trigger_threshold=200
-                    ))
-                    if success:
-                        cleanup_type = "Initial search history maintenance" if last_search_cleanup == 0 else "Automatic search history maintenance completed"
-                        add_activity_item("🧹", "Search Cleanup", cleanup_type, "Now")
-                        print("✅ [Auto Cleanup] Search history maintenance completed")
-                    else:
-                        print("⚠️ [Auto Cleanup] Search history maintenance returned false")
-                    last_search_cleanup = current_time
-                except Exception as cleanup_error:
-                    print(f"❌ [Auto Cleanup] Error in automatic search cleanup: {cleanup_error}")
-                    last_search_cleanup = current_time  # Still update to avoid spam
-                    initial_cleanup_done = True  # Mark as done even on error to avoid blocking
-
-            # Automatic download cleanup every 5 minutes
-            if current_time - last_download_cleanup > download_cleanup_interval:
-                try:
-                    # Only clear if no batches are actively downloading
-                    has_active_batches = False
-                    has_post_processing = False
-                    with tasks_lock:
-                        for batch_data in download_batches.values():
-                            if batch_data.get('phase') not in ['complete', 'error', 'cancelled', None]:
-                                has_active_batches = True
-                                break
-                        # Also check for any tasks still in post_processing
-                        if not has_active_batches:
-                            for task_data in download_tasks.values():
-                                if task_data.get('status') == 'post_processing':
-                                    has_post_processing = True
-                                    break
-
-                    if not has_active_batches:
-                        run_async(soulseek_client.clear_all_completed_downloads())
-                        # Sweep empty directories left behind by completed downloads
-                        if not has_post_processing:
-                            _sweep_empty_download_directories()
-                        print("✅ [Auto Cleanup] Periodic download cleanup completed")
-
-                    last_download_cleanup = current_time
-                except Exception as dl_cleanup_error:
-                    print(f"❌ [Auto Cleanup] Error in download cleanup: {dl_cleanup_error}")
-                    last_download_cleanup = current_time
 
             time.sleep(1)
         except Exception as e:

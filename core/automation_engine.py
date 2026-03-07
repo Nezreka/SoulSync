@@ -50,6 +50,28 @@ SYSTEM_AUTOMATIONS = [
         'trigger_config': {},
         'action_type': 'start_database_update',
     },
+    # Maintenance automations
+    {
+        'name': 'Refresh Beatport Cache',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 24, 'unit': 'hours'},
+        'action_type': 'refresh_beatport_cache',
+        'initial_delay': 120,
+    },
+    {
+        'name': 'Clean Search History',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'clean_search_history',
+        'initial_delay': 600,
+    },
+    {
+        'name': 'Clean Completed Downloads',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 5, 'unit': 'minutes'},
+        'action_type': 'clean_completed_downloads',
+        'initial_delay': 300,
+    },
 ]
 
 
