@@ -68,6 +68,7 @@ class AutomationEngine:
         self._progress_init_fn = None
         self._progress_finish_fn = None
         self._progress_update_fn = None
+        self._history_record_fn = None
 
         # Event trigger cache: trigger_type → [automation_id, ...]
         self._event_automations = {}
@@ -98,11 +99,12 @@ class AutomationEngine:
         }
         logger.debug(f"Registered action handler: {action_type}")
 
-    def register_progress_callbacks(self, init_fn, finish_fn, update_fn=None):
+    def register_progress_callbacks(self, init_fn, finish_fn, update_fn=None, history_fn=None):
         """Register callbacks for live progress tracking from web_server.py."""
         self._progress_init_fn = init_fn
         self._progress_finish_fn = finish_fn
         self._progress_update_fn = update_fn
+        self._history_record_fn = history_fn
 
     @staticmethod
     def _sanitize_signal_name(name):
@@ -421,6 +423,12 @@ class AutomationEngine:
         error = result.get('error') if result.get('status') == 'error' else None
         self.db.update_automation_run(automation_id, error=error, last_result=last_result)
 
+        if self._history_record_fn:
+            try:
+                self._history_record_fn(automation_id, result)
+            except Exception:
+                pass
+
     # --- Schedule Execution (timer-based) ---
 
     def run_automation(self, automation_id, skip_delay=False):
@@ -550,6 +558,12 @@ class AutomationEngine:
 
         last_result = json.dumps(result) if result else None
         self.db.update_automation_run(automation_id, next_run=next_run_str, error=error, last_result=last_result)
+
+        if self._history_record_fn:
+            try:
+                self._history_record_fn(automation_id, result)
+            except Exception:
+                pass
 
         if self._running:
             self.schedule_automation(automation_id)

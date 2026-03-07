@@ -397,6 +397,23 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_automations_profile ON automations (profile_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_automations_enabled ON automations (enabled)")
 
+            # Automation run history table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS automation_run_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    automation_id INTEGER NOT NULL,
+                    started_at TIMESTAMP,
+                    finished_at TIMESTAMP,
+                    duration_seconds REAL,
+                    status TEXT NOT NULL,
+                    summary TEXT,
+                    result_json TEXT,
+                    log_lines TEXT,
+                    FOREIGN KEY (automation_id) REFERENCES automations(id) ON DELETE CASCADE
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_arh_automation_id ON automation_run_history(automation_id)")
+
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
             self._add_automation_system_column(cursor)
@@ -6969,6 +6986,74 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error updating automation run {automation_id}: {e}")
             return False
+
+    def insert_automation_run_history(self, automation_id, started_at, finished_at,
+                                       duration_seconds, status, summary=None,
+                                       result_json=None, log_lines=None):
+        """Insert a run history entry and enforce 100-row retention cap per automation."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO automation_run_history
+                    (automation_id, started_at, finished_at, duration_seconds, status, summary, result_json, log_lines)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (automation_id, started_at, finished_at, duration_seconds,
+                      status, summary, result_json, log_lines))
+                # Retention: keep only the newest 100 rows per automation
+                cursor.execute("""
+                    DELETE FROM automation_run_history
+                    WHERE automation_id = ? AND id NOT IN (
+                        SELECT id FROM automation_run_history
+                        WHERE automation_id = ?
+                        ORDER BY id DESC LIMIT 100
+                    )
+                """, (automation_id, automation_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error inserting automation run history for {automation_id}: {e}")
+            return False
+
+    def get_automation_run_history(self, automation_id, limit=50, offset=0):
+        """Get run history for an automation, newest first."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT COUNT(*) FROM automation_run_history WHERE automation_id = ?",
+                    (automation_id,))
+                total = cursor.fetchone()[0]
+                cursor.execute("""
+                    SELECT id, automation_id, started_at, finished_at, duration_seconds,
+                           status, summary, result_json, log_lines
+                    FROM automation_run_history
+                    WHERE automation_id = ?
+                    ORDER BY id DESC
+                    LIMIT ? OFFSET ?
+                """, (automation_id, limit, offset))
+                cols = [d[0] for d in cursor.description]
+                rows = [dict(zip(cols, row)) for row in cursor.fetchall()]
+                return {'history': rows, 'total': total}
+        except Exception as e:
+            logger.error(f"Error getting automation run history for {automation_id}: {e}")
+            return {'history': [], 'total': 0}
+
+    def clear_automation_run_history(self, automation_id=None):
+        """Clear run history for a specific automation or all automations."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if automation_id:
+                    cursor.execute("DELETE FROM automation_run_history WHERE automation_id = ?",
+                                   (automation_id,))
+                else:
+                    cursor.execute("DELETE FROM automation_run_history")
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error clearing automation run history: {e}")
+            return 0
 
 # Thread-safe singleton pattern for database access
 _database_instances: Dict[int, MusicDatabase] = {}  # Thread ID -> Database instance

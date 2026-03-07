@@ -29248,3 +29248,89 @@ body {
 .placed-block-config input[type="checkbox"] {
     margin-right: 6px; accent-color: rgb(var(--accent-rgb));
 }
+
+/* --- Automation Run History Modal --- */
+.auto-runs-link {
+    cursor: pointer; text-decoration: underline; text-decoration-style: dotted;
+    text-underline-offset: 2px; color: rgba(255,255,255,0.5);
+    transition: color 0.2s ease;
+}
+.auto-runs-link:hover { color: rgb(var(--accent-light-rgb)); }
+
+.automation-history-modal {
+    max-width: 560px; width: 90%; max-height: 75vh; display: flex; flex-direction: column;
+}
+.history-modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.history-modal-header h3 {
+    margin: 0; font-size: 15px; font-weight: 600; color: #fff;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.history-close-btn {
+    background: none; border: none; color: rgba(255,255,255,0.4); font-size: 22px;
+    cursor: pointer; padding: 0 4px; line-height: 1; transition: color 0.2s;
+}
+.history-close-btn:hover { color: #fff; }
+
+.history-modal-body {
+    padding: 12px 20px 20px; overflow-y: auto; flex: 1;
+}
+.history-loading, .history-empty {
+    text-align: center; color: rgba(255,255,255,0.4); padding: 40px 0; font-size: 13px;
+}
+.history-entries { display: flex; flex-direction: column; gap: 8px; }
+
+.history-entry {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px; overflow: hidden; transition: border-color 0.2s;
+}
+.history-entry:hover { border-color: rgba(255,255,255,0.12); }
+
+.history-entry-header {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    cursor: pointer; user-select: none;
+}
+.history-status-badge {
+    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+    padding: 2px 8px; border-radius: 10px; flex-shrink: 0;
+}
+.history-status-completed { background: rgba(74,222,128,0.15); color: #4ade80; }
+.history-status-error { background: rgba(239,68,68,0.15); color: #ef4444; }
+.history-status-skipped { background: rgba(250,204,21,0.15); color: #facc15; }
+.history-status-timeout { background: rgba(251,146,60,0.15); color: #fb923c; }
+
+.history-time {
+    font-size: 11px; color: rgba(255,255,255,0.4); flex: 1;
+}
+.history-duration {
+    font-size: 10px; color: rgba(255,255,255,0.3);
+    background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 6px;
+}
+.history-expand-icon {
+    font-size: 8px; color: rgba(255,255,255,0.25); transition: transform 0.2s;
+}
+.history-summary {
+    padding: 0 14px 8px; font-size: 12px; color: rgba(255,255,255,0.55); line-height: 1.4;
+}
+
+.history-log-section {
+    max-height: 0; overflow: hidden; transition: max-height 0.3s ease;
+    border-top: 1px solid rgba(255,255,255,0.04);
+}
+.history-log-section.expanded {
+    max-height: 400px; overflow-y: auto;
+}
+.history-log-line {
+    padding: 4px 14px; font-size: 11px; font-family: 'SF Mono', 'Fira Code', monospace;
+    line-height: 1.5; border-bottom: 1px solid rgba(255,255,255,0.02);
+}
+.history-log-info { color: rgba(255,255,255,0.45); }
+.history-log-success { color: #4ade80; }
+.history-log-error { color: #ef4444; }
+.history-log-warning { color: #facc15; }
+
+.history-total {
+    text-align: center; padding: 12px 0 4px; font-size: 11px; color: rgba(255,255,255,0.3);
+}

@@ -43394,7 +43394,7 @@ function renderAutomationCard(a) {
     const _timerTriggers = ['schedule', 'daily_time', 'weekly_time'];
     if (a.next_run && a.enabled && _timerTriggers.includes(a.trigger_type)) metaParts.push('Next: ' + _autoTimeUntil(a.next_run));
     if (!_timerTriggers.includes(a.trigger_type) && a.enabled) metaParts.push('Listening');
-    if (a.run_count) metaParts.push('Runs: ' + a.run_count);
+    if (a.run_count) metaParts.push('<span class="auto-runs-link" onclick="event.stopPropagation(); showAutomationHistory(' + a.id + ', \'' + _escAttr(a.name) + '\')" title="View run history">Runs: ' + a.run_count + '</span>');
     if (a.last_error) metaParts.push('Error: ' + _esc(a.last_error));
 
     const deleteBtn = a.is_system ? '' :
@@ -43619,6 +43619,76 @@ async function runAutomation(id) {
         showToast('Automation triggered', 'success');
         setTimeout(() => loadAutomations(), 1500);
     } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
+async function showAutomationHistory(automationId, automationName) {
+    let modal = document.getElementById('automation-history-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'automation-history-modal';
+        modal.className = 'modal-overlay';
+        document.body.appendChild(modal);
+    }
+    modal.innerHTML = '<div class="modal-container automation-history-modal"><div class="history-modal-header"><h3>Run History: ' + _esc(automationName) + '</h3><button class="history-close-btn" onclick="document.getElementById(\'automation-history-modal\').style.display=\'none\'">&times;</button></div><div class="history-modal-body"><div class="history-loading">Loading...</div></div></div>';
+    modal.style.display = 'flex';
+    modal.onclick = function(e) { if (e.target === modal) modal.style.display = 'none'; };
+
+    try {
+        const res = await fetch('/api/automations/' + automationId + '/history?limit=50');
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        const body = modal.querySelector('.history-modal-body');
+        if (!data.history || data.history.length === 0) {
+            body.innerHTML = '<div class="history-empty">No run history yet. History will be recorded on future runs.</div>';
+            return;
+        }
+        let html = '<div class="history-entries">';
+        data.history.forEach(function(entry) {
+            const statusClass = 'history-status-' + (entry.status || 'completed');
+            const statusLabel = (entry.status || 'completed').charAt(0).toUpperCase() + (entry.status || 'completed').slice(1);
+            const timeAgo = _autoTimeAgo(entry.started_at);
+            const duration = entry.duration_seconds != null ? _formatDuration(entry.duration_seconds) : '';
+            const summary = entry.summary ? _esc(entry.summary) : '';
+            const hasLogs = entry.log_lines && entry.log_lines.length > 0;
+            const entryId = 'history-entry-' + entry.id;
+
+            html += '<div class="history-entry">';
+            html += '<div class="history-entry-header" onclick="var el=document.getElementById(\'' + entryId + '\'); if(el) el.classList.toggle(\'expanded\')">';
+            html += '<span class="history-status-badge ' + statusClass + '">' + statusLabel + '</span>';
+            html += '<span class="history-time">' + timeAgo + '</span>';
+            if (duration) html += '<span class="history-duration">' + duration + '</span>';
+            if (hasLogs) html += '<span class="history-expand-icon">&#9660;</span>';
+            html += '</div>';
+            if (summary) html += '<div class="history-summary">' + summary + '</div>';
+            if (hasLogs) {
+                html += '<div id="' + entryId + '" class="history-log-section">';
+                entry.log_lines.forEach(function(log) {
+                    html += '<div class="history-log-line history-log-' + (log.type || 'info') + '">' + _esc(log.text || '') + '</div>';
+                });
+                html += '</div>';
+            }
+            html += '</div>';
+        });
+        html += '</div>';
+        if (data.total > data.history.length) {
+            html += '<div class="history-total">Showing ' + data.history.length + ' of ' + data.total + ' runs</div>';
+        }
+        body.innerHTML = html;
+    } catch (err) {
+        const body = modal.querySelector('.history-modal-body');
+        if (body) body.innerHTML = '<div class="history-empty">Error loading history: ' + _esc(err.message) + '</div>';
+    }
+}
+
+function _formatDuration(seconds) {
+    if (seconds < 1) return '<1s';
+    if (seconds < 60) return Math.round(seconds) + 's';
+    var m = Math.floor(seconds / 60);
+    var s = Math.round(seconds % 60);
+    if (m < 60) return m + 'm ' + s + 's';
+    var h = Math.floor(m / 60);
+    m = m % 60;
+    return h + 'h ' + m + 'm';
 }
 
 async function saveAutomation() {
