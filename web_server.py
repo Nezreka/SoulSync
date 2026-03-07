@@ -65,7 +65,7 @@ from core.web_scan_manager import WebScanManager
 from core.lyrics_client import lyrics_client
 from database.music_database import get_database
 from services.sync_service import PlaylistSyncService
-from datetime import datetime
+from datetime import datetime, timezone
 import yt_dlp
 from core.matching_engine import MusicMatchingEngine
 from beatport_unified_scraper import BeatportUnifiedScraper
@@ -968,11 +968,11 @@ def _register_automation_handlers():
                 state = automation_progress_states.get(aid)
                 if state:
                     started_at = state.get('started_at')
-                    finished_at = state.get('finished_at') or datetime.now().isoformat()
+                    finished_at = state.get('finished_at') or datetime.now(timezone.utc).isoformat()
                     log_entries = list(state.get('log', []))
                 else:
-                    started_at = datetime.now().isoformat()
-                    finished_at = datetime.now().isoformat()
+                    started_at = datetime.now(timezone.utc).isoformat()
+                    finished_at = datetime.now(timezone.utc).isoformat()
                     log_entries = []
 
             # Compute duration
@@ -1181,7 +1181,7 @@ def _init_automation_progress(automation_id, automation_name, action_type):
             'progress': 0, 'phase': 'Starting...', 'current_item': '',
             'processed': 0, 'total': 0,
             'log': [{'type': 'info', 'text': f'Starting {automation_name}'}],
-            'started_at': datetime.now().isoformat(),
+            'started_at': datetime.now(timezone.utc).isoformat(),
             'finished_at': None,
         }
 
@@ -1202,7 +1202,7 @@ def _update_automation_progress(automation_id, **kwargs):
                 state[k] = v
         # Immediate emit on finish so frontend gets final state without waiting for loop
         if kwargs.get('status') in ('finished', 'error'):
-            state['finished_at'] = datetime.now().isoformat()
+            state['finished_at'] = datetime.now(timezone.utc).isoformat()
             try:
                 socketio.emit('automation:progress', {str(automation_id): dict(state)})
             except Exception:
