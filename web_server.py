@@ -860,7 +860,70 @@ def _register_automation_handlers():
                                      phase='Error' if status == 'error' else 'Complete',
                                      log_line=msg, log_type='error' if status == 'error' else 'success')
 
-    automation_engine.register_progress_callbacks(_progress_init, _progress_finish, _update_automation_progress)
+    def _record_automation_history(aid, result):
+        """Capture progress state into run history before cleanup clears it."""
+        try:
+            with automation_progress_lock:
+                state = automation_progress_states.get(aid)
+                if state:
+                    started_at = state.get('started_at')
+                    finished_at = state.get('finished_at') or datetime.now().isoformat()
+                    log_entries = list(state.get('log', []))
+                else:
+                    started_at = datetime.now().isoformat()
+                    finished_at = datetime.now().isoformat()
+                    log_entries = []
+
+            # Compute duration
+            duration = None
+            if started_at and finished_at:
+                try:
+                    t0 = datetime.fromisoformat(started_at)
+                    t1 = datetime.fromisoformat(finished_at)
+                    duration = (t1 - t0).total_seconds()
+                except Exception:
+                    pass
+
+            # Determine status
+            r_status = result.get('status', 'completed') if result else 'completed'
+            if r_status == 'error':
+                status = 'error'
+            elif r_status == 'skipped':
+                status = 'skipped'
+            elif r_status == 'timeout':
+                status = 'timeout'
+            else:
+                status = 'completed'
+
+            # Extract summary from the last success/error log line
+            summary = None
+            for entry in reversed(log_entries):
+                if entry.get('type') in ('success', 'error'):
+                    summary = entry.get('text', '')
+                    break
+            if not summary and log_entries:
+                summary = log_entries[-1].get('text', '')
+            # Fallback: use reason or error from result when no log entries captured
+            if not summary and result:
+                summary = result.get('reason') or result.get('error') or result.get('status', '')
+
+            result_json = json.dumps({k: v for k, v in result.items() if not k.startswith('_')}) if result else None
+            log_json = json.dumps(log_entries) if log_entries else None
+
+            get_database().insert_automation_run_history(
+                automation_id=aid,
+                started_at=started_at,
+                finished_at=finished_at,
+                duration_seconds=duration,
+                status=status,
+                summary=summary,
+                result_json=result_json,
+                log_lines=log_json
+            )
+        except Exception as e:
+            logger.error(f"Error recording automation history for {aid}: {e}")
+
+    automation_engine.register_progress_callbacks(_progress_init, _progress_finish, _update_automation_progress, _record_automation_history)
 
     # Register permanent callback: when any scan completes, emit library_scan_completed event
     # This replaces the hardcoded scan_completion_callback → trigger_automatic_database_update chain
@@ -4042,6 +4105,34 @@ def get_automation_progress():
                     result[str(aid)] = cp
         return jsonify(result)
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/automations/<int:automation_id>/history', methods=['GET'])
+def get_automation_history(automation_id):
+    """Get run history for a specific automation."""
+    try:
+        limit = request.args.get('limit', 50, type=int)
+        offset = request.args.get('offset', 0, type=int)
+        db = get_database()
+        data = db.get_automation_run_history(automation_id, limit=limit, offset=offset)
+        # Parse log_lines JSON strings for the frontend
+        for entry in data.get('history', []):
+            if entry.get('log_lines'):
+                try:
+                    entry['log_lines'] = json.loads(entry['log_lines'])
+                except (json.JSONDecodeError, TypeError):
+                    entry['log_lines'] = []
+            else:
+                entry['log_lines'] = []
+            if entry.get('result_json'):
+                try:
+                    entry['result_json'] = json.loads(entry['result_json'])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        data['automation_id'] = automation_id
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Error getting automation history: {e}")
         return jsonify({"error": str(e)}), 500
 
 def _collect_known_signals():
