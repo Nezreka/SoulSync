@@ -67,6 +67,7 @@ class AutomationEngine:
         # Progress tracking callbacks (registered by web_server.py)
         self._progress_init_fn = None
         self._progress_finish_fn = None
+        self._progress_update_fn = None
 
         # Event trigger cache: trigger_type → [automation_id, ...]
         self._event_automations = {}
@@ -97,10 +98,11 @@ class AutomationEngine:
         }
         logger.debug(f"Registered action handler: {action_type}")
 
-    def register_progress_callbacks(self, init_fn, finish_fn):
+    def register_progress_callbacks(self, init_fn, finish_fn, update_fn=None):
         """Register callbacks for live progress tracking from web_server.py."""
         self._progress_init_fn = init_fn
         self._progress_finish_fn = finish_fn
+        self._progress_update_fn = update_fn
 
     @staticmethod
     def _sanitize_signal_name(name):
@@ -352,11 +354,25 @@ class AutomationEngine:
         action_config['_automation_name'] = auto.get('name', '')
 
         delay_minutes = action_config.get('delay', 0)
+        _delay_already_inited = False
         if delay_minutes and delay_minutes > 0:
+            # Initialize progress BEFORE delay so card glows during wait
+            if self._progress_init_fn:
+                try: self._progress_init_fn(automation_id, auto.get('name', ''), action_type)
+                except Exception: pass
+                _delay_already_inited = True
+
+            delay_seconds = int(delay_minutes) * 60
             logger.info(f"Event automation '{auto.get('name')}' delaying {delay_minutes}m before action")
-            time.sleep(int(delay_minutes) * 60)
-            if not self._running:
-                return
+            for remaining in range(delay_seconds, 0, -1):
+                if not self._running:
+                    return
+                if self._progress_update_fn and remaining % 5 == 0:
+                    mins, secs = divmod(remaining, 60)
+                    self._progress_update_fn(automation_id,
+                        phase=f'Delay: {mins}m {secs}s remaining',
+                        progress=int((delay_seconds - remaining) / delay_seconds * 10))
+                time.sleep(1)
 
         # notify_only = no action, just send notification with event data
         if action_type == 'notify_only':
@@ -371,9 +387,13 @@ class AutomationEngine:
                 if guard_fn and guard_fn():
                     result = {'status': 'skipped', 'reason': f'{action_type} already running'}
                     logger.info(f"Event automation '{auto.get('name')}' skipped — {action_type} busy")
+                    # If progress was initialized during delay, finalize it
+                    if _delay_already_inited and self._progress_finish_fn:
+                        try: self._progress_finish_fn(automation_id, result)
+                        except Exception: pass
                 else:
-                    # Initialize progress tracking
-                    if self._progress_init_fn:
+                    # Initialize progress tracking (skip if already done during delay)
+                    if not _delay_already_inited and self._progress_init_fn:
                         try: self._progress_init_fn(automation_id, auto.get('name', ''), action_type)
                         except Exception: pass
                     try:
@@ -441,22 +461,40 @@ class AutomationEngine:
 
         # Action delay (skipped for manual run_now)
         delay_minutes = action_config.get('delay', 0)
+        _delay_already_inited = False
         if not skip_delay and delay_minutes and delay_minutes > 0:
+            # Initialize progress BEFORE delay so card glows during wait
+            if self._progress_init_fn:
+                try: self._progress_init_fn(automation_id, auto.get('name', ''), action_type)
+                except Exception: pass
+                _delay_already_inited = True
+
+            delay_seconds = int(delay_minutes) * 60
             logger.info(f"Automation '{auto['name']}' delaying {delay_minutes}m before action")
-            time.sleep(int(delay_minutes) * 60)
-            if not self._running:
-                return
+            for remaining in range(delay_seconds, 0, -1):
+                if not self._running:
+                    return
+                if self._progress_update_fn and remaining % 5 == 0:
+                    mins, secs = divmod(remaining, 60)
+                    self._progress_update_fn(automation_id,
+                        phase=f'Delay: {mins}m {secs}s remaining',
+                        progress=int((delay_seconds - remaining) / delay_seconds * 10))
+                time.sleep(1)
 
         # Check guard (is the operation already running?)
         guard_fn = handler_info.get('guard')
         if guard_fn and guard_fn():
             result = {'status': 'skipped', 'reason': f'{action_type} is already running'}
             logger.info(f"Automation '{auto['name']}' skipped — {action_type} already running")
+            # If progress was initialized during delay, finalize it
+            if _delay_already_inited and self._progress_finish_fn:
+                try: self._progress_finish_fn(automation_id, result)
+                except Exception: pass
             self._finish_run(auto, automation_id, result, error=None)
             return
 
-        # Initialize progress tracking
-        if self._progress_init_fn:
+        # Initialize progress tracking (skip if already done during delay)
+        if not _delay_already_inited and self._progress_init_fn:
             try: self._progress_init_fn(automation_id, auto.get('name', ''), action_type)
             except Exception: pass
 
