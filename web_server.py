@@ -14659,6 +14659,8 @@ def start_wishlist_missing_downloads():
                         spotify_data = {}
 
                 album_data = spotify_data.get('album', {})
+                if not isinstance(album_data, dict):
+                    album_data = {}
                 total_tracks = album_data.get('total_tracks')
                 album_type = album_data.get('album_type', 'album').lower()
 
@@ -16890,7 +16892,8 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                             sp_data = _json.loads(sp_data)
                         except:
                             sp_data = {}
-                    album_id = (sp_data.get('album', {}) or {}).get('id')
+                    album_val = sp_data.get('album')
+                    album_id = album_val.get('id') if isinstance(album_val, dict) else album_val if isinstance(album_val, str) else None
                     disc_num = sp_data.get('disc_number', t.get('disc_number', 1))
                     if album_id:
                         wishlist_album_disc_counts[album_id] = max(
@@ -16924,10 +16927,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         spotify_data = {}
 
                     s_album = spotify_data.get('album') or {}
+                    if isinstance(s_album, str):
+                        s_album = {'name': s_album}  # Normalize string album to dict
                     s_artists = spotify_data.get('artists', [])
 
                     # We need at least an album name and artist
-                    if s_album and s_album.get('name'):
+                    if s_album and isinstance(s_album, dict) and s_album.get('name'):
                         # Construct artist context for folder path.
                         # Priority: 1) watchlist artist name (the artist the user monitors)
                         #           2) album.artists[0]  3) track artists
