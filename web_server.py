@@ -23635,6 +23635,27 @@ def check_watchlist_status():
         print(f"Error checking watchlist status: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/watchlist/check-batch', methods=['POST'])
+def check_watchlist_status_batch():
+    """Check watchlist status for multiple artists in one request"""
+    try:
+        data = request.get_json()
+        artist_ids = data.get('artist_ids', [])
+        if not artist_ids:
+            return jsonify({"success": False, "error": "Missing artist_ids"}), 400
+
+        database = get_database()
+        pid = get_current_profile_id()
+        results = {}
+        for aid in artist_ids:
+            results[aid] = database.is_artist_in_watchlist(aid, profile_id=pid)
+
+        return jsonify({"success": True, "results": results})
+
+    except Exception as e:
+        print(f"Error batch checking watchlist status: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/watchlist/scan', methods=['POST'])
 def start_watchlist_scan():
     """Start a watchlist scan for new releases"""
