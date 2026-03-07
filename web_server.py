@@ -24850,35 +24850,66 @@ def _process_watchlist_scan_automatically(automation_id=None):
             # Populate discovery pool from similar artists (per-profile)
             print("🎵 Starting discovery pool population...")
             watchlist_scan_state['current_phase'] = 'populating_discovery_pool'
+            _update_automation_progress(automation_id, progress=96, phase='Populating discovery pool',
+                                         log_line='Building discovery pool from similar artists...', log_type='info')
             try:
+                def _discovery_progress(event_type, message):
+                    if event_type == 'artist':
+                        _update_automation_progress(automation_id, phase=f'Discovery pool: {message}',
+                                                     log_line=message, log_type='info',
+                                                     current_item=message)
+                    elif event_type == 'phase':
+                        _update_automation_progress(automation_id, phase=message,
+                                                     log_line=message, log_type='info')
+                    elif event_type == 'success':
+                        _update_automation_progress(automation_id,
+                                                     log_line=message, log_type='success')
+                    elif event_type == 'skip':
+                        _update_automation_progress(automation_id,
+                                                     log_line=message, log_type='info')
+
                 for p in all_profiles:
-                    scanner.populate_discovery_pool(profile_id=p['id'])
+                    scanner.populate_discovery_pool(profile_id=p['id'], progress_callback=_discovery_progress)
                 print("✅ Discovery pool population complete")
             except Exception as discovery_error:
                 print(f"⚠️ Error populating discovery pool: {discovery_error}")
                 import traceback
                 traceback.print_exc()
+                _update_automation_progress(automation_id,
+                                             log_line=f'Discovery pool error: {discovery_error}', log_type='error')
 
             # Update ListenBrainz playlists cache
             print("🧠 Starting ListenBrainz playlists update...")
             watchlist_scan_state['current_phase'] = 'updating_listenbrainz'
+            _update_automation_progress(automation_id, progress=97, phase='Updating ListenBrainz',
+                                         log_line='Fetching ListenBrainz playlists...', log_type='info')
             try:
                 from core.listenbrainz_manager import ListenBrainzManager
                 lb_manager = ListenBrainzManager(str(get_database().database_path))
                 lb_result = lb_manager.update_all_playlists()
                 if lb_result.get('success'):
                     summary = lb_result.get('summary', {})
+                    updated = summary.get('updated', 0)
+                    total_lb = summary.get('total', 0)
                     print(f"✅ ListenBrainz update complete: {summary}")
+                    _update_automation_progress(automation_id,
+                                                 log_line=f'ListenBrainz: {updated}/{total_lb} playlists updated', log_type='success')
                 else:
                     print(f"⚠️ ListenBrainz update had issues: {lb_result.get('error', 'Unknown error')}")
+                    _update_automation_progress(automation_id,
+                                                 log_line=f'ListenBrainz: {lb_result.get("error", "Unknown error")}', log_type='error')
             except Exception as lb_error:
                 print(f"⚠️ Error updating ListenBrainz: {lb_error}")
                 import traceback
                 traceback.print_exc()
+                _update_automation_progress(automation_id,
+                                             log_line=f'ListenBrainz error: {lb_error}', log_type='error')
 
             # Update current seasonal playlist (weekly refresh)
             print("🎃 Starting seasonal content update...")
             watchlist_scan_state['current_phase'] = 'updating_seasonal'
+            _update_automation_progress(automation_id, progress=98, phase='Updating seasonal content',
+                                         log_line='Checking seasonal playlists...', log_type='info')
             try:
                 from core.seasonal_discovery import get_seasonal_discovery_service
                 seasonal_service = get_seasonal_discovery_service(spotify_client, database)
@@ -24888,17 +24919,27 @@ def _process_watchlist_scan_automatically(automation_id=None):
                 if current_season:
                     if seasonal_service.should_populate_seasonal_content(current_season, days_threshold=7):
                         print(f"🎃 Updating {current_season} seasonal content...")
+                        _update_automation_progress(automation_id,
+                                                     log_line=f'Updating {current_season} seasonal content...', log_type='info')
                         seasonal_service.populate_seasonal_content(current_season)
                         seasonal_service.curate_seasonal_playlist(current_season)
                         print(f"✅ {current_season.capitalize()} seasonal content updated")
+                        _update_automation_progress(automation_id,
+                                                     log_line=f'{current_season.capitalize()} seasonal content updated', log_type='success')
                     else:
                         print(f"⏭️ {current_season.capitalize()} seasonal content recently updated, skipping")
+                        _update_automation_progress(automation_id,
+                                                     log_line=f'{current_season.capitalize()} seasonal content up to date', log_type='info')
                 else:
                     print("ℹ️ No active season at this time")
+                    _update_automation_progress(automation_id,
+                                                 log_line='No active season', log_type='info')
             except Exception as seasonal_error:
                 print(f"⚠️ Error updating seasonal content: {seasonal_error}")
                 import traceback
                 traceback.print_exc()
+                _update_automation_progress(automation_id,
+                                             log_line=f'Seasonal error: {seasonal_error}', log_type='error')
 
             # Add activity for watchlist scan completion
             if total_added_to_wishlist > 0:
