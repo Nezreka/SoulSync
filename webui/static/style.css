@@ -28820,6 +28820,72 @@ body {
 .automations-container { padding: 20px 24px; }
 .automations-list { display: flex; flex-direction: column; gap: 0; }
 
+/* --- Section Headers (System / My Automations) --- */
+.automations-section {
+    margin-bottom: 8px;
+}
+.automations-section:last-child { margin-bottom: 0; }
+.automations-section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 2px 10px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.automations-section-header:hover .section-label { color: rgba(255,255,255,0.85); }
+.section-chevron {
+    font-size: 11px;
+    color: rgba(255,255,255,0.3);
+    transition: transform 0.25s ease;
+    width: 14px;
+    text-align: center;
+    flex-shrink: 0;
+}
+.automations-section.collapsed .section-chevron { transform: rotate(-90deg); }
+.section-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: rgba(255,255,255,0.4);
+    transition: color 0.2s ease;
+}
+.section-count {
+    font-size: 10px;
+    color: rgba(255,255,255,0.25);
+    padding: 1px 8px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+}
+.section-line {
+    flex: 1;
+    height: 1px;
+    background: rgba(255,255,255,0.06);
+}
+.automations-section-body {
+    overflow: hidden;
+    transition: max-height 0.3s ease, opacity 0.25s ease;
+    max-height: 2000px;
+    opacity: 1;
+}
+.automations-section.collapsed .automations-section-body {
+    max-height: 0;
+    opacity: 0;
+}
+
+/* --- System Automations 2-Column Grid --- */
+.automations-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+}
+@media (max-width: 800px) {
+    .automations-grid { grid-template-columns: 1fr; }
+}
+
 /* --- New Automation Button --- */
 .auto-new-btn {
     background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, rgb(var(--accent-light-rgb)) 100%);
@@ -28892,7 +28958,7 @@ body {
 .automation-card.disabled { opacity: 0.55; }
 .automation-card.disabled:hover { opacity: 0.75; }
 .automation-card.disabled .automation-name { color: rgba(255,255,255,0.5); }
-.automation-card.system { border-left: 3px solid var(--accent, #6366f1); }
+.automation-card.system { border-left: none; padding: 8px 12px; }
 .system-badge { display: inline-block; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 1px 5px; border-radius: 6px; background: rgba(99,102,241,0.2); color: #818cf8; vertical-align: middle; }
 
 .automation-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
