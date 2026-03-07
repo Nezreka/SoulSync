@@ -12935,86 +12935,35 @@ window.matchedDownloadAlbum = matchedDownloadAlbum;
 window.matchedDownloadAlbumTrack = matchedDownloadAlbumTrack;
 
 /**
- * Handle automatic post-download operations: cleanup → scan → database update
- * This replicates the GUI's automatic functionality after download modal completion
+ * Handle post-download cleanup: clear finished downloads from slskd.
+ * Scan and database update are now handled by system automations
+ * (batch_complete → scan_library → library_scan_completed → start_database_update).
  */
 async function handlePostDownloadAutomation(playlistId, process) {
     try {
-        // Check if we have successful downloads that warrant automation
         const successfulDownloads = getSuccessfulDownloadCount(process);
-
         if (successfulDownloads === 0) {
-            console.log(`🔄 [AUTO] No successful downloads for ${playlistId} - skipping automation`);
+            console.log(`🔄 [AUTO] No successful downloads for ${playlistId} - skipping cleanup`);
             return;
         }
+        console.log(`🔄 [AUTO] Post-download cleanup for ${playlistId} (${successfulDownloads} successful downloads)`);
 
-        console.log(`🔄 [AUTO] Starting automatic post-download operations for ${playlistId} (${successfulDownloads} successful downloads)`);
-
-        // Step 1: Clear completed downloads from slskd
-        console.log(`🗑️ [AUTO] Step 1: Clearing completed downloads...`);
-        showToast('🗑️ Clearing completed downloads...', 'info', 3000);
-
+        // Clear completed downloads from slskd
         try {
             const clearResponse = await fetch('/api/downloads/clear-finished', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
             });
-
             if (clearResponse.ok) {
-                console.log(`✅ [AUTO] Step 1 complete: Downloads cleared`);
+                console.log(`✅ [AUTO] Completed downloads cleared`);
             } else {
-                console.warn(`⚠️ [AUTO] Step 1 warning: Clear downloads failed, continuing anyway`);
+                console.warn(`⚠️ [AUTO] Clear downloads failed, continuing anyway`);
             }
         } catch (error) {
-            console.warn(`⚠️ [AUTO] Step 1 error: ${error.message}, continuing anyway`);
+            console.warn(`⚠️ [AUTO] Clear error: ${error.message}`);
         }
-
-        // Step 2: Request media server scan
-        console.log(`📡 [AUTO] Step 2: Requesting media server scan...`);
-        showToast('📡 Scanning media server library...', 'info', 5000);
-
-        try {
-            const scanResponse = await fetch('/api/scan/request', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    reason: `Download modal completed for ${playlistId} (${successfulDownloads} tracks)`,
-                    auto_database_update: true  // This will trigger step 3 automatically after scan completes
-                })
-            });
-
-            const scanResult = await scanResponse.json();
-
-            if (scanResponse.ok && scanResult.success) {
-                console.log(`✅ [AUTO] Step 2 complete: Media scan requested`);
-                console.log(`🔄 [AUTO] Scan info:`, scanResult.scan_info);
-
-                // Show success toast with scan details
-                if (scanResult.scan_info.status === 'scheduled') {
-                    showToast(`📡 Media scan scheduled (${scanResult.scan_info.delay_seconds}s delay)`, 'success', 5000);
-                } else {
-                    showToast('📡 Media scan requested successfully', 'success', 3000);
-                }
-
-                // Database update will be triggered automatically by the scan completion callback
-                if (scanResult.auto_database_update) {
-                    console.log(`🔄 [AUTO] Step 3 will run automatically after scan completes`);
-                    showToast('🔄 Database update will follow automatically', 'info', 3000);
-                }
-            } else {
-                console.error(`❌ [AUTO] Step 2 failed: ${scanResult.error || 'Unknown scan error'}`);
-                showToast('❌ Media scan failed', 'error', 5000);
-            }
-        } catch (error) {
-            console.error(`❌ [AUTO] Step 2 error: ${error.message}`);
-            showToast('❌ Media scan request failed', 'error', 5000);
-        }
-
-        console.log(`🏁 [AUTO] Automatic post-download operations initiated for ${playlistId}`);
-
     } catch (error) {
-        console.error(`❌ [AUTO] Error in post-download automation: ${error.message}`);
-        showToast('❌ Automatic operations failed', 'error', 5000);
+        console.error(`❌ [AUTO] Error in post-download cleanup: ${error.message}`);
     }
 }
 
@@ -15998,6 +15947,31 @@ const TOOL_HELP_CONTENT = {
             <p><code>{files_scanned}</code>, <code>{duplicates_found}</code>, <code>{space_freed}</code></p>
         `
     },
+    'auto-library_scan_completed': {
+        title: 'Library Scan Done',
+        content: `
+            <h4>What is this trigger?</h4>
+            <p>Fires when a media server library scan is considered complete. This only happens after a <strong>Scan Library</strong> action was triggered — it cannot fire on its own.</p>
+
+            <h4>How does it know the scan is done?</h4>
+            <p>Your media server (Plex, Jellyfin, Navidrome) doesn't send a "scan finished" signal back to SoulSync. So after telling the server to scan, SoulSync waits <strong>approximately 5 minutes</strong> and then assumes the scan has finished. This is a generous estimate that works for most libraries.</p>
+
+            <h4>Timing</h4>
+            <p>From the moment a download finishes to when this trigger fires, expect roughly <strong>6-7 minutes</strong>:</p>
+            <ol>
+                <li>60 second debounce wait (groups multiple downloads together)</li>
+                <li>Media server scan triggered</li>
+                <li>~5 minute wait (assumed scan completion)</li>
+                <li>This event fires</li>
+            </ol>
+
+            <h4>Default use</h4>
+            <p>The system automation <strong>Auto-Update Database After Scan</strong> listens for this trigger to start an incremental database update, keeping your SoulSync library in sync with your media server.</p>
+
+            <h4>Available variables</h4>
+            <p><code>{server_type}</code> — which media server was scanned (plex, jellyfin, navidrome)</p>
+        `
+    },
 
     // ==================== Automation Action Help ====================
 
@@ -16040,10 +16014,21 @@ const TOOL_HELP_CONTENT = {
         title: 'Scan Library',
         content: `
             <h4>What does this action do?</h4>
-            <p>Triggers your media server (Plex) to scan its music library folder for new or changed files. This makes newly downloaded music appear in your media server.</p>
+            <p>Tells your media server (Plex, Jellyfin, or Navidrome) to scan its music library folder for new or changed files. This makes newly downloaded music appear in your media server.</p>
+
+            <h4>How it works</h4>
+            <ol>
+                <li>A <strong>60 second debounce</strong> groups rapid requests — if multiple downloads finish close together, only one scan is triggered</li>
+                <li>After the debounce, your media server is told to scan</li>
+                <li>SoulSync waits <strong>~5 minutes</strong> (your media server doesn't report when it's finished, so this is an assumed completion time)</li>
+                <li>The <strong>Library Scan Done</strong> event fires, which can trigger follow-up actions like a database update</li>
+            </ol>
+
+            <h4>Default use</h4>
+            <p>The system automation <strong>Auto-Scan After Downloads</strong> uses this action to automatically scan your library when a batch download completes. You can disable that automation if you prefer to scan manually.</p>
 
             <h4>Note</h4>
-            <p>Jellyfin and Navidrome detect new files automatically in real-time, so this action is primarily useful for Plex.</p>
+            <p>Jellyfin and Navidrome often detect new files automatically, but the scan ensures nothing is missed.</p>
         `
     },
     'auto-refresh_mirrored': {
@@ -29674,13 +29659,12 @@ async function handleMediaScanButtonClick() {
         statusValue.textContent = 'Scanning...';
         statusValue.style.color = 'rgb(var(--accent-rgb))';
 
-        // Request scan
+        // Request scan (database update handled by system automation)
         const response = await fetch('/api/scan/request', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                reason: 'Manual scan triggered from dashboard',
-                auto_database_update: true
+                reason: 'Manual scan triggered from dashboard'
             })
         });
 
@@ -29692,11 +29676,6 @@ async function handleMediaScanButtonClick() {
             let remainingSeconds = delaySeconds;
             let countdownInterval = null;
             let pollInterval = null;
-
-            // Show auto database update message
-            if (result.auto_database_update) {
-                showToast('🔄 Database will update automatically after scan', 'info', 3000);
-            }
 
             // Update last scan time
             const lastTimeEl = document.getElementById('media-scan-last-time');
@@ -43233,7 +43212,7 @@ const _autoIcons = {
     download_quarantined: '\u26A0\uFE0F', wishlist_item_added: '\u2795',
     watchlist_artist_added: '\uD83D\uDC64', watchlist_artist_removed: '\uD83D\uDC64',
     import_completed: '\uD83D\uDCE5', mirrored_playlist_created: '\uD83D\uDCC2',
-    quality_scan_completed: '\uD83D\uDCCA', duplicate_scan_completed: '\uD83D\uDDC2\uFE0F',
+    quality_scan_completed: '\uD83D\uDCCA', duplicate_scan_completed: '\uD83D\uDDC2\uFE0F', library_scan_completed: '\uD83D\uDCE1',
     start_database_update: '\uD83D\uDDC4\uFE0F', run_duplicate_cleaner: '\uD83D\uDDC2\uFE0F',
     clear_quarantine: '\uD83D\uDDD1\uFE0F', cleanup_wishlist: '\uD83E\uDDF9',
     update_discovery_pool: '\uD83E\uDDED', start_quality_scan: '\uD83D\uDCCA',
@@ -43352,7 +43331,7 @@ function _autoFormatTrigger(type, config) {
         watchlist_artist_added: 'Artist Watched', watchlist_artist_removed: 'Artist Unwatched',
         import_completed: 'Import Complete', mirrored_playlist_created: 'Playlist Mirrored',
         quality_scan_completed: 'Quality Scan Done', duplicate_scan_completed: 'Duplicate Scan Done',
-        signal_received: 'Signal Received' };
+        library_scan_completed: 'Library Scan Done', signal_received: 'Signal Received' };
     let label = labels[type] || type || 'Unknown';
     if (config && config.conditions && config.conditions.length) {
         const first = config.conditions[0];

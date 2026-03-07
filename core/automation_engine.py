@@ -37,6 +37,19 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'scan_watchlist',
         'initial_delay': 300,  # 5 minutes after startup
     },
+    # Event-based system automations (no initial_delay/next_run needed)
+    {
+        'name': 'Auto-Scan After Downloads',
+        'trigger_type': 'batch_complete',
+        'trigger_config': {},
+        'action_type': 'scan_library',
+    },
+    {
+        'name': 'Auto-Update Database After Scan',
+        'trigger_type': 'library_scan_completed',
+        'trigger_config': {},
+        'action_type': 'start_database_update',
+    },
 ]
 
 
@@ -120,10 +133,13 @@ class AutomationEngine:
                 existing = self.db.get_system_automation_by_action(spec['action_type'])
 
             if existing:
-                # Reset next_run to initial delay on every startup
-                next_run = (datetime.now() + timedelta(seconds=spec['initial_delay'])).strftime('%Y-%m-%d %H:%M:%S')
-                self.db.update_automation(existing['id'], next_run=next_run)
-                logger.info(f"System automation '{spec['name']}' next_run reset to {spec['initial_delay']}s from now")
+                # Only reset next_run for timer-based triggers that have an initial delay
+                if spec.get('initial_delay') is not None:
+                    next_run = (datetime.now() + timedelta(seconds=spec['initial_delay'])).strftime('%Y-%m-%d %H:%M:%S')
+                    self.db.update_automation(existing['id'], next_run=next_run)
+                    logger.info(f"System automation '{spec['name']}' next_run reset to {spec['initial_delay']}s from now")
+                else:
+                    logger.info(f"System automation '{spec['name']}' ready (event-based)")
 
     def get_system_automation_next_run_seconds(self, action_type):
         """Get seconds until next run for a system automation. Returns 0 if not found or disabled."""
