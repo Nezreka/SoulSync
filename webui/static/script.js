@@ -13441,6 +13441,46 @@ function closeAddToWishlistModal() {
 }
 
 /**
+ * Handle "Download Now" button click from the Add to Wishlist modal.
+ * Captures modal data, closes the wishlist modal, then opens the download missing tracks modal.
+ */
+async function handleWishlistDownloadNow() {
+    if (!currentWishlistModalData) {
+        showToast('No album data available', 'error');
+        return;
+    }
+
+    // Capture data before closeAddToWishlistModal clears it
+    const { album, artist, tracks, albumType } = currentWishlistModalData;
+
+    // Close the wishlist modal
+    closeAddToWishlistModal();
+
+    // Build virtual playlist ID and name (same pattern as createArtistAlbumVirtualPlaylist)
+    const virtualPlaylistId = `artist_album_${artist.id}_${album.id}`;
+    const playlistName = `[${artist.name}] ${album.name}`;
+
+    // If a download process already exists for this album, just show the existing modal
+    if (activeDownloadProcesses[virtualPlaylistId]) {
+        const process = activeDownloadProcesses[virtualPlaylistId];
+        if (process.modalElement) {
+            process.modalElement.style.display = 'flex';
+        }
+        return;
+    }
+
+    // Open download missing modal (reuses existing function)
+    showLoadingOverlay('Loading album...');
+    await openDownloadMissingModalForArtistAlbum(
+        virtualPlaylistId, playlistName, tracks, album, artist, false
+    );
+    hideLoadingOverlay();
+
+    // Register download bubble (reuses existing artist bubble system)
+    registerArtistDownload(artist, album, virtualPlaylistId, albumType);
+}
+
+/**
  * Add all tracks from any download modal to the wishlist
  * Universal handler for all modal types (artist albums, playlists, YouTube, Tidal, etc.)
  */
@@ -13644,6 +13684,7 @@ window.downloadSelectedCategory = downloadSelectedCategory;
 window.openAddToWishlistModal = openAddToWishlistModal;
 window.closeAddToWishlistModal = closeAddToWishlistModal;
 window.handleAddToWishlist = handleAddToWishlist;
+window.handleWishlistDownloadNow = handleWishlistDownloadNow;
 window.addModalTracksToWishlist = addModalTracksToWishlist;
 
 // Helper functions
@@ -26165,6 +26206,7 @@ function updateArtistDownloadsSection() {
     }
     downloadsUpdateTimeout = setTimeout(() => {
         showArtistDownloadsSection();
+        showLibraryDownloadsSection();
         updateDashboardDownloads();
     }, 300); // 300ms debounce
 }
@@ -27086,6 +27128,64 @@ function showArtistDownloadsSection() {
             bubbleCard.addEventListener('click', () => openArtistDownloadModal(artistId));
 
             // Add dynamic glow effect
+            const artist = artistDownloadBubbles[artistId].artist;
+            if (artist.image_url) {
+                extractImageColors(artist.image_url, (colors) => {
+                    applyDynamicGlow(bubbleCard, colors);
+                });
+            }
+        }
+    });
+}
+
+/**
+ * Show download bubbles on the Library page (mirrors showArtistDownloadsSection)
+ */
+function showLibraryDownloadsSection() {
+    const libraryContent = document.querySelector('.library-content');
+    if (!libraryContent) return;
+
+    let downloadsSection = document.getElementById('library-downloads-section');
+
+    // Create section if it doesn't exist
+    if (!downloadsSection) {
+        downloadsSection = document.createElement('div');
+        downloadsSection.id = 'library-downloads-section';
+        downloadsSection.className = 'artist-downloads-section';
+
+        // Insert before the artist grid
+        const artistGrid = document.getElementById('library-artists-grid');
+        if (artistGrid) {
+            libraryContent.insertBefore(downloadsSection, artistGrid);
+        }
+    }
+
+    // Count active artists (reuses artistDownloadBubbles state)
+    const activeArtists = Object.keys(artistDownloadBubbles).filter(artistId =>
+        artistDownloadBubbles[artistId].downloads.length > 0
+    );
+
+    if (activeArtists.length === 0) {
+        downloadsSection.style.display = 'none';
+        return;
+    }
+
+    downloadsSection.style.display = 'block';
+    downloadsSection.innerHTML = `
+        <div class="artist-downloads-header">
+            <h3 class="artist-downloads-title">Current Downloads</h3>
+            <p class="artist-downloads-subtitle">Active download processes</p>
+        </div>
+        <div class="artist-bubble-container">
+            ${activeArtists.map(artistId => createArtistBubbleCard(artistDownloadBubbles[artistId])).join('')}
+        </div>
+    `;
+
+    // Add click handlers + glow effects
+    activeArtists.forEach(artistId => {
+        const bubbleCard = downloadsSection.querySelector(`[data-artist-id="${artistId}"]`);
+        if (bubbleCard) {
+            bubbleCard.addEventListener('click', () => openArtistDownloadModal(artistId));
             const artist = artistDownloadBubbles[artistId].artist;
             if (artist.image_url) {
                 extractImageColors(artist.image_url, (colors) => {
@@ -29948,6 +30048,9 @@ function initializeLibraryPage() {
 
         // Load initial data
         loadLibraryArtists();
+
+        // Show download bubbles if any exist
+        showLibraryDownloadsSection();
 
         libraryPageState.isInitialized = true;
         console.log("✅ Library page initialized successfully");
