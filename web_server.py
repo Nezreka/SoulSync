@@ -661,6 +661,50 @@ def _register_automation_handlers():
             return {'status': 'error', 'reason': db_update_state.get('error_message', 'Unknown error'), '_manages_own_progress': True}
         return {'status': 'completed', 'full_refresh': str(full), '_manages_own_progress': True}
 
+    def _auto_deep_scan_library(config):
+        global _db_update_automation_id
+        automation_id = config.get('_automation_id')
+        if db_update_state.get('status') == 'running':
+            return {'status': 'skipped', 'reason': 'Database update already running'}
+        _db_update_automation_id = automation_id
+        active_server = config_manager.get_active_media_server()
+        with db_update_lock:
+            db_update_state.update({
+                "status": "running", "phase": "Deep scan: Initializing...",
+                "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": ""
+            })
+        db_update_executor.submit(_run_deep_scan_task, active_server)
+
+        # Monitor progress (callbacks handle card updates, we just block until done)
+        time.sleep(1)
+        poll_start = time.time()
+        last_progress_time = time.time()
+        last_progress_val = 0
+        while time.time() - poll_start < 7200:  # Max 2 hours
+            time.sleep(3)
+            with db_update_lock:
+                status = db_update_state.get('status', 'idle')
+                current_progress = db_update_state.get('progress', 0)
+            if status != 'running':
+                break
+            if current_progress != last_progress_val:
+                last_progress_val = current_progress
+                last_progress_time = time.time()
+            elif time.time() - last_progress_time > 600:
+                _update_automation_progress(automation_id,
+                    log_line='Deep scan appears stalled — waiting...', log_type='warning')
+                last_progress_time = time.time()
+        else:
+            _update_automation_progress(automation_id, status='error',
+                phase='Timed out', log_line='Deep scan timed out after 2 hours', log_type='error')
+            return {'status': 'error', 'reason': 'Timed out', '_manages_own_progress': True}
+
+        with db_update_lock:
+            final_status = db_update_state.get('status', 'unknown')
+        if final_status == 'error':
+            return {'status': 'error', 'reason': db_update_state.get('error_message', 'Unknown error'), '_manages_own_progress': True}
+        return {'status': 'completed', '_manages_own_progress': True}
+
     def _auto_run_duplicate_cleaner(config):
         automation_id = config.get('_automation_id')
         if duplicate_cleaner_state.get('status') == 'running':
@@ -932,6 +976,8 @@ def _register_automation_handlers():
             return {'status': 'error', 'reason': str(e)}
 
     automation_engine.register_action_handler('start_database_update', _auto_start_database_update,
+                                              lambda: db_update_state.get('status') == 'running')
+    automation_engine.register_action_handler('deep_scan_library', _auto_deep_scan_library,
                                               lambda: db_update_state.get('status') == 'running')
     automation_engine.register_action_handler('run_duplicate_cleaner', _auto_run_duplicate_cleaner,
                                               lambda: duplicate_cleaner_state.get('status') == 'running')
@@ -4417,6 +4463,8 @@ def get_automation_blocks():
              "description": "Remove old searches from Soulseek", "available": True},
             {"type": "clean_completed_downloads", "label": "Clean Completed Downloads", "icon": "check-square",
              "description": "Clear completed downloads and empty directories", "available": True},
+            {"type": "deep_scan_library", "label": "Deep Scan Library", "icon": "search",
+             "description": "Full library comparison without losing enrichment data", "available": True},
         ],
         "notifications": [
             {"type": "discord_webhook", "label": "Discord Webhook", "icon": "message", "description": "Send a Discord notification", "available": True,
@@ -14227,6 +14275,46 @@ def _run_db_update_task(full_refresh, server_type):
 
     # This is a blocking call that runs the QThread's logic
     db_update_worker.run()
+
+
+def _run_deep_scan_task(server_type):
+    """Run a deep library scan in the background thread."""
+    global db_update_worker
+    media_client = None
+
+    if server_type == "plex":
+        media_client = plex_client
+    elif server_type == "jellyfin":
+        media_client = jellyfin_client
+    elif server_type == "navidrome":
+        media_client = navidrome_client
+
+    if not media_client:
+        _db_update_error_callback(f"Media client for '{server_type}' not available.")
+        return
+
+    with db_update_lock:
+        db_update_worker = DatabaseUpdateWorker(
+            media_client=media_client,
+            full_refresh=False,
+            server_type=server_type,
+            force_sequential=True
+        )
+        try:
+            db_update_worker.progress_updated.connect(_db_update_progress_callback)
+            db_update_worker.phase_changed.connect(_db_update_phase_callback)
+            db_update_worker.artist_processed.connect(_db_update_artist_callback)
+            db_update_worker.finished.connect(_db_update_finished_callback)
+            db_update_worker.error.connect(_db_update_error_callback)
+        except AttributeError:
+            db_update_worker.connect_callback('progress_updated', _db_update_progress_callback)
+            db_update_worker.connect_callback('phase_changed', _db_update_phase_callback)
+            db_update_worker.connect_callback('artist_processed', _db_update_artist_callback)
+            db_update_worker.connect_callback('finished', _db_update_finished_callback)
+            db_update_worker.connect_callback('error', _db_update_error_callback)
+
+    # Run deep scan instead of normal run()
+    db_update_worker.run_deep_scan()
 
 
 @app.route('/api/database/stats', methods=['GET'])
