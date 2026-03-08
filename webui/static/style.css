@@ -29597,6 +29597,22 @@ body {
 .history-log-error { color: #ef4444; }
 .history-log-warning { color: #facc15; }
 
+.history-stats-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px; padding: 10px 14px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+}
+.history-stat-item {
+    background: rgba(0,0,0,0.25); border-radius: 8px; padding: 8px 12px;
+}
+.history-stat-label {
+    font-size: 11px; color: rgba(255,255,255,0.45); margin-bottom: 2px;
+}
+.history-stat-value {
+    font-size: 14px; font-weight: 600; color: #e0e0e0;
+}
+.history-log-skip { color: rgba(255,255,255,0.35); }
+
 .history-total {
     text-align: center; padding: 12px 0 4px; font-size: 11px; color: rgba(255,255,255,0.3);
 }
