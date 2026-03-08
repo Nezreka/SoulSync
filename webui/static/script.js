@@ -22298,6 +22298,9 @@ async function startYouTubeDiscovery(urlHash) {
             state.phase = 'discovering';
         }
 
+        // Update modal buttons to show "Discovering..." instead of "Start Discovery"
+        updateYouTubeModalButtons(urlHash, 'discovering');
+
         // Start polling for progress
         startYouTubeDiscoveryPolling(urlHash);
 
