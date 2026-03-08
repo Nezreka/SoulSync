@@ -21531,7 +21531,12 @@ def start_youtube_discovery(url_hash):
         state['status'] = 'discovering'
         state['discovery_progress'] = 0
         state['spotify_matches'] = 0
-        
+        state['discovery_results'] = []
+
+        # Clear skip_discovery flags on all tracks (in case of prior retry)
+        for track in state['playlist']['tracks']:
+            track.pop('skip_discovery', None)
+
         # Add activity for discovery start
         playlist_name = state['playlist']['name']
         track_count = len(state['playlist']['tracks'])
@@ -21635,6 +21640,40 @@ def update_youtube_discovery_match():
         print(f"✅ Manual match updated: youtube - {identifier} - track {track_index}")
         print(f"   → {result['spotify_artist']} - {result['spotify_track']}")
 
+        # Persist manual fix to DB for mirrored playlists
+        if identifier.startswith('mirrored_'):
+            try:
+                tracks = state['playlist']['tracks']
+                if track_index < len(tracks):
+                    db_track_id = tracks[track_index].get('db_track_id')
+                    if db_track_id:
+                        db = get_database()
+                        artists_list = spotify_track['artists']
+                        if isinstance(artists_list, list):
+                            artists_list = [{'name': a} if isinstance(a, str) else a for a in artists_list]
+                        album_raw = spotify_track.get('album', '')
+                        album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
+                        matched_data = {
+                            'id': spotify_track['id'],
+                            'name': spotify_track['name'],
+                            'artists': artists_list,
+                            'album': album_obj,
+                            'duration_ms': spotify_track.get('duration_ms', 0),
+                            'source': 'spotify',
+                        }
+                        extra_data = {
+                            'discovered': True,
+                            'provider': 'spotify',
+                            'confidence': 1.0,
+                            'matched_data': matched_data,
+                            'manual_match': True,
+                        }
+                        db.update_mirrored_track_extra_data(db_track_id, extra_data)
+                        result['matched_data'] = matched_data
+                        print(f"💾 Persisted manual fix to DB for track {db_track_id}")
+            except Exception as wb_err:
+                print(f"⚠️ Error persisting manual fix to DB: {wb_err}")
+
         return jsonify({'success': True, 'result': result})
 
     except Exception as e:
@@ -21667,6 +21706,10 @@ def _run_youtube_discovery_worker(url_hash):
             try:
                 # Update progress
                 state['discovery_progress'] = int((i / len(tracks)) * 100)
+
+                # Skip tracks flagged by retry (already found)
+                if track.get('skip_discovery'):
+                    continue
 
                 # Search for track using active provider
                 cleaned_title = track['name']
@@ -21891,6 +21934,43 @@ def _run_youtube_discovery_worker(url_hash):
         state['phase'] = 'discovered'
         state['status'] = 'complete'
         state['discovery_progress'] = 100
+
+        # Sort results by index so array position matches result['index'].
+        # Critical after retry where found results are kept at the front
+        # and newly-discovered results are appended out of order.
+        state['discovery_results'].sort(key=lambda r: r.get('index', 0))
+
+        # Write back discovery results to DB for mirrored playlists
+        if url_hash.startswith('mirrored_'):
+            try:
+                db = get_database()
+                for result in state['discovery_results']:
+                    idx = result.get('index', -1)
+                    if idx < 0 or idx >= len(tracks):
+                        continue
+                    db_track_id = tracks[idx].get('db_track_id')
+                    if not db_track_id:
+                        continue
+                    if result.get('status_class') == 'found' and result.get('matched_data'):
+                        extra_data = {
+                            'discovered': True,
+                            'provider': result.get('discovery_source', discovery_source),
+                            'confidence': result.get('confidence', 0),
+                            'matched_data': result['matched_data'],
+                        }
+                        if result.get('manual_match'):
+                            extra_data['manual_match'] = True
+                        db.update_mirrored_track_extra_data(db_track_id, extra_data)
+                    else:
+                        extra_data = {
+                            'discovered': False,
+                            'discovery_attempted': True,
+                            'provider': discovery_source,
+                        }
+                        db.update_mirrored_track_extra_data(db_track_id, extra_data)
+                print(f"💾 Wrote discovery results to DB for {url_hash}")
+            except Exception as wb_err:
+                print(f"⚠️ Error writing discovery results to DB: {wb_err}")
 
         playlist_name = playlist['name']
         source_label = 'Spotify' if use_spotify else 'iTunes'
@@ -29820,13 +29900,97 @@ def prepare_mirrored_discovery(playlist_id):
         url_hash = f"mirrored_{playlist_id}"
 
         # Build track list in the format the YouTube discovery worker expects
-        tracks = [{
-            'id': t.get('source_track_id') or f"mirrored_{t['id']}",
-            'name': t['track_name'],
-            'artists': [t['artist_name']],
-            'album': t.get('album_name', ''),
-            'duration_ms': t.get('duration_ms', 0)
-        } for t in tracks_data]
+        tracks = []
+        for t in tracks_data:
+            # Parse extra_data if present
+            extra = None
+            if t.get('extra_data'):
+                try:
+                    extra = json.loads(t['extra_data']) if isinstance(t['extra_data'], str) else t['extra_data']
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            tracks.append({
+                'id': t.get('source_track_id') or f"mirrored_{t['id']}",
+                'db_track_id': t['id'],
+                'name': t['track_name'],
+                'artists': [t['artist_name']],
+                'album': t.get('album_name', ''),
+                'duration_ms': t.get('duration_ms', 0),
+                'extra_data': extra,
+            })
+
+        # Check for cached discovery results in extra_data
+        pre_discovered_results = []
+        pre_discovered_count = 0
+        has_pending = False
+
+        for idx, track in enumerate(tracks):
+            extra = track.get('extra_data')
+            if extra and extra.get('discovered'):
+                # Previously found match
+                matched = extra.get('matched_data', {})
+                artists_raw = matched.get('artists', [])
+                if artists_raw and isinstance(artists_raw[0], dict):
+                    artist_str = ', '.join(a.get('name', '') for a in artists_raw)
+                else:
+                    artist_str = ', '.join(str(a) for a in artists_raw) if artists_raw else ''
+                album_raw = matched.get('album', '')
+                album_str = album_raw.get('name', '') if isinstance(album_raw, dict) else (str(album_raw) if album_raw else '')
+                dur = track.get('duration_ms', 0)
+                result = {
+                    'index': idx,
+                    'yt_track': track['name'],
+                    'yt_artist': track['artists'][0] if track['artists'] else 'Unknown',
+                    'status': '✅ Found',
+                    'status_class': 'found',
+                    'spotify_track': matched.get('name', ''),
+                    'spotify_artist': artist_str,
+                    'spotify_album': album_str,
+                    'duration': f"{dur // 60000}:{(dur % 60000) // 1000:02d}" if dur else '0:00',
+                    'discovery_source': extra.get('provider', 'spotify'),
+                    'confidence': extra.get('confidence', 0),
+                    'matched_data': matched,
+                    'spotify_data': matched,
+                }
+                if extra.get('manual_match'):
+                    result['manual_match'] = True
+                pre_discovered_results.append(result)
+                pre_discovered_count += 1
+            elif extra and extra.get('discovery_attempted'):
+                # Previously attempted but not found
+                dur = track.get('duration_ms', 0)
+                pre_discovered_results.append({
+                    'index': idx,
+                    'yt_track': track['name'],
+                    'yt_artist': track['artists'][0] if track['artists'] else 'Unknown',
+                    'status': '❌ Not Found',
+                    'status_class': 'not-found',
+                    'spotify_track': '',
+                    'spotify_artist': '',
+                    'spotify_album': '',
+                    'duration': f"{dur // 60000}:{(dur % 60000) // 1000:02d}" if dur else '0:00',
+                    'discovery_source': extra.get('provider', 'spotify'),
+                    'confidence': 0,
+                })
+            elif not extra or (not extra.get('discovered') and not extra.get('discovery_attempted')):
+                # New track — no discovery data yet
+                has_pending = True
+                dur = track.get('duration_ms', 0)
+                pre_discovered_results.append({
+                    'index': idx,
+                    'yt_track': track['name'],
+                    'yt_artist': track['artists'][0] if track['artists'] else 'Unknown',
+                    'status': '🆕 Pending',
+                    'status_class': 'not-found',
+                    'spotify_track': '',
+                    'spotify_artist': '',
+                    'spotify_album': '',
+                    'duration': f"{dur // 60000}:{(dur % 60000) // 1000:02d}" if dur else '0:00',
+                    'confidence': 0,
+                })
+
+        # Only treat as cached if at least one track has been discovered or attempted
+        has_cached = any(t.get('extra_data') and (t['extra_data'].get('discovered') or t['extra_data'].get('discovery_attempted')) for t in tracks)
 
         playlist_data = {
             'id': url_hash,
@@ -29839,12 +30003,12 @@ def prepare_mirrored_discovery(playlist_id):
 
         youtube_playlist_states[url_hash] = {
             'playlist': playlist_data,
-            'phase': 'fresh',
-            'discovery_results': [],
-            'discovery_progress': 0,
-            'spotify_matches': 0,
+            'phase': 'discovered' if has_cached else 'fresh',
+            'discovery_results': pre_discovered_results if has_cached else [],
+            'discovery_progress': 100 if has_cached else 0,
+            'spotify_matches': pre_discovered_count if has_cached else 0,
             'spotify_total': len(tracks),
-            'status': 'parsed',
+            'status': 'complete' if has_cached else 'parsed',
             'url': playlist_data['url'],
             'sync_playlist_id': None,
             'converted_spotify_playlist_id': None,
@@ -29855,10 +30019,86 @@ def prepare_mirrored_discovery(playlist_id):
             'sync_progress': {}
         }
 
-        logger.info(f"Prepared mirrored playlist for discovery: {playlist['name']} ({len(tracks)} tracks)")
-        return jsonify({"success": True, "url_hash": url_hash})
+        logger.info(f"Prepared mirrored playlist for discovery: {playlist['name']} ({len(tracks)} tracks, cached={has_cached}, matches={pre_discovered_count})")
+        return jsonify({
+            "success": True,
+            "url_hash": url_hash,
+            "from_cache": has_cached,
+            "cached_matches": pre_discovered_count,
+            "total_tracks": len(tracks),
+            "has_pending": has_pending,
+        })
     except Exception as e:
         logger.error(f"Error preparing mirrored discovery: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/retry-failed-discovery', methods=['POST'])
+def retry_failed_mirrored_discovery(playlist_id):
+    """Re-run discovery only for tracks that failed or are pending in a mirrored playlist."""
+    try:
+        url_hash = f"mirrored_{playlist_id}"
+        state = youtube_playlist_states.get(url_hash)
+        if not state:
+            return jsonify({"error": "Discovery state not found. Run discovery first."}), 404
+
+        if state.get('phase') == 'discovering':
+            return jsonify({"error": "Discovery already in progress"}), 400
+
+        tracks = state['playlist']['tracks']
+        results = state.get('discovery_results', [])
+
+        # Build set of found track indices
+        found_indices = set()
+        kept_results = []
+        for r in results:
+            if r.get('status_class') == 'found':
+                found_indices.add(r.get('index', -1))
+                kept_results.append(r)
+
+        already_found = len(found_indices)
+        retry_count = len(tracks) - already_found
+
+        if retry_count == 0:
+            return jsonify({"success": True, "retry_count": 0, "already_found": already_found, "message": "All tracks already found"})
+
+        # Flag found tracks to skip, clear flag on others
+        for i, track in enumerate(tracks):
+            track['skip_discovery'] = (i in found_indices)
+
+        # Keep only found results, remove failed/pending
+        state['discovery_results'] = kept_results
+        state['phase'] = 'discovering'
+        state['status'] = 'discovering'
+        state['discovery_progress'] = 0
+        # spotify_matches stays at found count (already_found)
+        state['spotify_matches'] = already_found
+
+        # Clear discovery_attempted in DB for failed tracks so they're retryable
+        try:
+            db = get_database()
+            for i, track in enumerate(tracks):
+                if i not in found_indices:
+                    db_track_id = track.get('db_track_id')
+                    if db_track_id:
+                        db.update_mirrored_track_extra_data(db_track_id, {
+                            'discovered': False,
+                            'discovery_attempted': False,
+                        })
+        except Exception as db_err:
+            print(f"⚠️ Error clearing discovery_attempted in DB: {db_err}")
+
+        # Submit worker
+        future = youtube_discovery_executor.submit(_run_youtube_discovery_worker, url_hash)
+        state['discovery_future'] = future
+
+        print(f"🔄 Retrying failed discovery for {url_hash}: {retry_count} tracks to retry, {already_found} already found")
+        return jsonify({
+            "success": True,
+            "retry_count": retry_count,
+            "already_found": already_found,
+        })
+    except Exception as e:
+        logger.error(f"Error retrying failed discovery: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/mirrored-playlists/discovery-states', methods=['GET'])

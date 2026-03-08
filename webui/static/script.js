@@ -22681,6 +22681,15 @@ function getModalActionButtons(urlHash, phase, state = null) {
                 }
             }
 
+            // Retry Failed button for mirrored playlists
+            if (state && state.is_mirrored_playlist) {
+                const results = state.discovery_results || state.discoveryResults || [];
+                const failedCount = results.filter(r => r.status_class !== 'found').length;
+                if (failedCount > 0) {
+                    buttons += `<button class="modal-btn modal-btn-secondary" onclick="retryFailedMirroredDiscovery('${urlHash}')">🔄 Retry Failed (${failedCount})</button>`;
+                }
+            }
+
             if (!buttons) {
                 buttons = `<div class="modal-info">ℹ️ No Spotify matches found. Discovery complete but no tracks could be matched.</div>`;
             }
@@ -43291,30 +43300,68 @@ async function discoverMirroredPlaylist(playlistId) {
             duration_ms: t.duration_ms || 0
         }));
 
-        // Create state entry reusing the YouTube discovery infrastructure
-        youtubePlaylistStates[tempHash] = {
-            playlist: {
-                name: data.name,
-                tracks: tracks,
-                track_count: tracks.length
-            },
-            phase: 'fresh',
-            discovery_results: [],
-            discovery_progress: 0,
-            spotify_matches: 0,
-            spotify_total: tracks.length,
-            status: 'parsed',
-            url: `mirrored://${data.source}/${data.source_playlist_id}`,
-            sync_playlist_id: null,
-            converted_spotify_playlist_id: null,
-            download_process_id: null,
-            created_at: Date.now() / 1000,
-            last_accessed: Date.now() / 1000,
-            discovery_future: null,
-            sync_progress: {},
-            is_mirrored_playlist: true,
-            mirrored_source: data.source
-        };
+        // Check if backend returned cached results
+        if (prepData.from_cache) {
+            // Fetch the pre-populated status from the backend
+            const statusRes = await fetch(`/api/youtube/discovery/status/${tempHash}`);
+            const statusData = await statusRes.json();
+            if (statusData.error) throw new Error(statusData.error);
+
+            youtubePlaylistStates[tempHash] = {
+                playlist: {
+                    name: data.name,
+                    tracks: tracks,
+                    track_count: tracks.length
+                },
+                phase: statusData.phase || 'discovered',
+                discovery_results: statusData.results || [],
+                discoveryResults: statusData.results || [],
+                discovery_progress: statusData.progress || 100,
+                spotify_matches: statusData.spotify_matches || 0,
+                spotifyMatches: statusData.spotify_matches || 0,
+                spotify_total: tracks.length,
+                status: statusData.status || 'complete',
+                url: `mirrored://${data.source}/${data.source_playlist_id}`,
+                sync_playlist_id: null,
+                converted_spotify_playlist_id: null,
+                download_process_id: null,
+                created_at: Date.now() / 1000,
+                last_accessed: Date.now() / 1000,
+                discovery_future: null,
+                sync_progress: {},
+                is_mirrored_playlist: true,
+                mirrored_source: data.source
+            };
+
+            const cached = prepData.cached_matches || 0;
+            const total = prepData.total_tracks || tracks.length;
+            showToast(`Loaded ${cached}/${total} cached discovery results`, 'success');
+        } else {
+            // No cached data — fresh state
+            youtubePlaylistStates[tempHash] = {
+                playlist: {
+                    name: data.name,
+                    tracks: tracks,
+                    track_count: tracks.length
+                },
+                phase: 'fresh',
+                discovery_results: [],
+                discovery_progress: 0,
+                spotify_matches: 0,
+                spotify_total: tracks.length,
+                status: 'parsed',
+                url: `mirrored://${data.source}/${data.source_playlist_id}`,
+                sync_playlist_id: null,
+                converted_spotify_playlist_id: null,
+                download_process_id: null,
+                created_at: Date.now() / 1000,
+                last_accessed: Date.now() / 1000,
+                discovery_future: null,
+                sync_progress: {},
+                is_mirrored_playlist: true,
+                mirrored_source: data.source
+            };
+        }
 
         openYouTubeDiscoveryModal(tempHash);
     } catch (err) {
@@ -43326,6 +43373,41 @@ async function discoverMirroredPlaylist(playlistId) {
 // ===============================
 // AUTOMATIONS — Visual Builder
 // ===============================
+
+async function retryFailedMirroredDiscovery(urlHash) {
+    // Extract playlist ID from url_hash (format: "mirrored_<id>")
+    const playlistId = urlHash.replace('mirrored_', '');
+    try {
+        const res = await fetch(`/api/mirrored-playlists/${playlistId}/retry-failed-discovery`, { method: 'POST' });
+        const data = await res.json();
+        if (data.error) {
+            showToast(`Error: ${data.error}`, 'error');
+            return;
+        }
+        if (data.retry_count === 0) {
+            showToast('All tracks already found!', 'success');
+            return;
+        }
+
+        // Update frontend state to discovering
+        const state = youtubePlaylistStates[urlHash];
+        if (state) {
+            state.phase = 'discovering';
+            state.status = 'discovering';
+            state.discovery_progress = 0;
+        }
+
+        // Update modal buttons to show discovering state
+        updateYouTubeModalButtons(urlHash, 'discovering');
+
+        // Start polling for progress
+        startYouTubeDiscoveryPolling(urlHash);
+
+        showToast(`Retrying ${data.retry_count} failed tracks...`, 'info');
+    } catch (err) {
+        showToast(`Error retrying discovery: ${err.message}`, 'error');
+    }
+}
 
 let _autoBlocks = null; // cached block definitions from /api/automations/blocks
 let _autoBuilder = { editId: null, when: null, do: null, then: [], isSystem: false };
