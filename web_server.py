@@ -856,7 +856,7 @@ def _register_automation_handlers():
         db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
         if not os.path.exists(db_path):
             return {'status': 'error', 'reason': 'Database file not found'}
-        max_backups = 3
+        max_backups = 5
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         backup_path = f"{db_path}.backup_{timestamp}"
         # Use SQLite backup API for safe hot-copy of active database
