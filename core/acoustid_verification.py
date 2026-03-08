@@ -38,14 +38,18 @@ def _normalize(text: str) -> str:
     if not text:
         return ""
     s = text.lower().strip()
-    # Remove common parenthetical suffixes like (Live), (Remastered), (2025 Remaster), (Radio Edit)
-    s = re.sub(r'\s*\((?:live|(?:\d{4}\s*)?remaster(?:ed)?(?:\s*\d{4})?|deluxe|bonus|radio\s*edit|single\s*edit|album\s*edit|single\s*version|visualize.*?)\)', '', s, flags=re.IGNORECASE)
+    # Remove common parenthetical suffixes like (Live), (Remastered), (Cover), (Instrumental), etc.
+    s = re.sub(r'\s*\((?:live|(?:\d{4}\s*)?remaster(?:ed)?(?:\s*\d{4})?|deluxe|bonus|radio\s*edit|single\s*edit|album\s*edit|single\s*version|cover|acoustic|instrumental|original\s*mix|extended\s*mix|club\s*mix|remix|clean|explicit|visualize.*?)\)', '', s, flags=re.IGNORECASE)
+    # Remove common square bracket suffixes: [Live], [Remastered], [Cover], [Instrumental], etc.
+    s = re.sub(r'\s*\[(?:live|(?:\d{4}\s*)?remaster(?:ed)?(?:\s*\d{4})?|deluxe|bonus|radio\s*edit|single\s*edit|album\s*edit|single\s*version|cover|acoustic|instrumental|original\s*mix|extended\s*mix|club\s*mix|remix|clean|explicit)\]', '', s, flags=re.IGNORECASE)
     # Remove featuring info in parentheses: "(feat. ...)", "(ft. ...)", "(featuring ...)"
     s = re.sub(r'\s*\((?:feat\.?|ft\.?|featuring)\s+[^)]*\)', '', s, flags=re.IGNORECASE)
     # Remove featuring info in square brackets: "[feat. ...]", "[ft. ...]", "[W/ ...]", "[with ...]"
     s = re.sub(r'\s*\[(?:feat\.?|ft\.?|featuring|w/|with)\s+[^\]]*\]', '', s, flags=re.IGNORECASE)
     # Remove trailing featuring info: "feat. ...", "ft. ...", "featuring ..."
     s = re.sub(r'\s+(?:feat\.?|ft\.?|featuring)\s+.*$', '', s, flags=re.IGNORECASE)
+    # Remove dash-separated version tags: "- Vocal", "- Instrumental", "- Acoustic", etc.
+    s = re.sub(r'\s*-\s*(?:vocal|instrumental|acoustic|live|remix|cover|clean|explicit|radio\s*edit|original\s*mix|extended\s*mix|club\s*mix)\s*$', '', s, flags=re.IGNORECASE)
     # Remove soundtrack/source subtitles: ' - From "..." Soundtrack', ' - from the film ...'
     s = re.sub(r'\s*-\s*from\s+.+$', '', s, flags=re.IGNORECASE)
     # Remove non-alphanumeric except spaces
