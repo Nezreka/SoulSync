@@ -4564,6 +4564,25 @@
         </div>
     </div>
 
+    <!-- Confirm Dialog Modal -->
+    <div class="modal-overlay hidden" id="confirm-modal-overlay">
+        <div class="confirm-modal">
+            <div class="confirm-modal-header">
+                <h2 id="confirm-modal-title">Confirm</h2>
+                <button class="confirm-modal-close" onclick="resolveConfirmDialog(false)">✕</button>
+            </div>
+            <div class="confirm-modal-content">
+                <p id="confirm-modal-message"></p>
+            </div>
+            <div class="confirm-modal-actions">
+                <button class="modal-button modal-button--secondary" id="confirm-modal-cancel"
+                    onclick="resolveConfirmDialog(false)">Cancel</button>
+                <button class="modal-button modal-button--primary" id="confirm-modal-confirm"
+                    onclick="resolveConfirmDialog(true)">Confirm</button>
+            </div>
+        </div>
+    </div>
+
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
