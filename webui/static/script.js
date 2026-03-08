@@ -12562,6 +12562,8 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
         state = youtubePlaylistStates[identifier]; // Beatport uses YouTube state infrastructure
     } else if (platform === 'listenbrainz') {
         state = listenbrainzPlaylistStates[identifier]; // ListenBrainz has its own state
+    } else if (platform === 'mirrored') {
+        state = youtubePlaylistStates[identifier]; // Mirrored playlists use YouTube state infrastructure
     }
 
     // Support both camelCase and snake_case for discovery results
@@ -12795,6 +12797,9 @@ async function selectDiscoveryFixTrack(track) {
             backendIdentifier = identifier;
         }
 
+        // Mirrored playlists route through the YouTube endpoint (which already handles mirrored_ prefixes)
+        const apiPlatform = platform === 'mirrored' ? 'youtube' : platform;
+
         const requestBody = {
             identifier: backendIdentifier,
             track_index: trackIndex,
@@ -12810,7 +12815,7 @@ async function selectDiscoveryFixTrack(track) {
         console.log('📡 Request body:', requestBody);
         console.log('📡 Backend identifier:', backendIdentifier);
 
-        const response = await fetch(`/api/${platform}/discovery/update_match`, {
+        const response = await fetch(`/api/${apiPlatform}/discovery/update_match`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody)
@@ -12843,6 +12848,8 @@ async function selectDiscoveryFixTrack(track) {
             state = youtubePlaylistStates[identifier];
         } else if (platform === 'listenbrainz') {
             state = listenbrainzPlaylistStates[identifier];
+        } else if (platform === 'mirrored') {
+            state = youtubePlaylistStates[identifier];
         }
 
         // Support both camelCase and snake_case
