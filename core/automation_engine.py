@@ -84,6 +84,13 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'clean_completed_downloads',
         'initial_delay': 300,
     },
+    {
+        'name': 'Auto-Deep Scan Library',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 7, 'unit': 'days'},
+        'action_type': 'deep_scan_library',
+        'initial_delay': 900,  # 15 min after startup
+    },
 ]
 
 
