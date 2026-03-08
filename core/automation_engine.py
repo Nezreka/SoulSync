@@ -91,6 +91,13 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'deep_scan_library',
         'initial_delay': 900,  # 15 min after startup
     },
+    {
+        'name': 'Auto-Backup Database',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 3, 'unit': 'days'},
+        'action_type': 'backup_database',
+        'initial_delay': 600,  # 10 min after startup
+    },
 ]
 
 
