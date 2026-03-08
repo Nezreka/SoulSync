@@ -13545,14 +13545,30 @@ def get_version_info():
                 "title": "🤖 Automation Engine",
                 "description": "Visual drag-and-drop automation builder with 20+ triggers and 14 actions",
                 "features": [
-                    "• Drag-and-drop builder: connect WHEN triggers → DO actions → NOTIFY alerts",
+                    "• Drag-and-drop builder: connect WHEN triggers → DO actions → THEN notifications/signals",
                     "• Timer triggers: Schedule (interval), Daily Time, Weekly Schedule",
                     "• Event triggers: Track Downloaded, Batch Complete, New Release Found, Playlist Changed, Discovery Complete, and 15 more",
                     "• Actions: Process Wishlist, Scan Watchlist, Refresh/Discover/Sync Playlists, Update Database, Quality Scan, Backup, and more",
+                    "• Multi-THEN slots: attach up to 3 notification or signal actions per automation",
+                    "• Signal system: fire_signal and signal_received for chaining automations together with cycle detection",
                     "• Conditions with match modes (All/Any) and operators (contains, equals, starts_with, not_contains)",
                     "• Configurable delay on actions — wait N minutes after trigger fires before executing",
                     "• System automations for wishlist (every 30 min) and watchlist (every 24 hr) with cross-guards",
-                    "• Run Now button on every card for instant testing"
+                    "• Run Now button on every card for instant testing",
+                    "• Live progress tracking with real-time output panels on every automation card",
+                    "• Rich run history with detailed stats grid (artists, tracks, albums, space freed, etc.)",
+                    "• Stall detection and 2-hour timeout handling for long-running actions",
+                    "• Glow effect on actively running automations"
+                ]
+            },
+            {
+                "title": "💾 Backup Manager",
+                "description": "Database backup system with dashboard management",
+                "features": [
+                    "• Scheduled automatic database backups via automation action",
+                    "• Dashboard tool card to list, download, restore, and delete backups",
+                    "• Rolling cleanup keeps only the 5 most recent backups",
+                    "• Safe hot-copy using SQLite backup API — no downtime during backup"
                 ]
             },
             {
@@ -13562,6 +13578,7 @@ def get_version_info():
                     "• New 'Discover Playlist' automation action matches raw YouTube/Tidal tracks to official Spotify or iTunes metadata",
                     "• Fuzzy title/artist matching with confidence scoring — minimum 0.7 threshold",
                     "• Discovery results cached globally across playlists for instant repeat lookups",
+                    "• Discovery results now persist across refreshes — retry only failed tracks",
                     "• Sync Playlist now only includes discovered tracks — undiscovered tracks are skipped entirely",
                     "• Prevents garbage data (wrong artist, no album, no cover art) from reaching the wishlist",
                     "• Spotify-sourced playlists auto-discovered during refresh at confidence 1.0",
@@ -13587,7 +13604,8 @@ def get_version_info():
                     "• YouTube URLs reconstructed from stored playlist ID for seamless re-parsing",
                     "• Tidal playlists refreshed via Tidal API using stored source ID",
                     "• Discovery data preserved across refreshes — previously matched tracks keep their official metadata",
-                    "• Change detection emits Playlist Changed event for automation chaining"
+                    "• Change detection emits Playlist Changed event for automation chaining",
+                    "• User-configurable YouTube rate limiting and optional cookies for bot detection"
                 ]
             },
             {
@@ -13601,6 +13619,16 @@ def get_version_info():
                     "• Cards reflect live state: Discovering, Discovered, Downloading, Downloaded",
                     "• Download progress survives page refresh — click a 'Downloading...' card to resume viewing",
                     "• Profile-scoped — each profile has its own mirrored playlists"
+                ]
+            },
+            {
+                "title": "🔧 Dashboard Tools",
+                "description": "New tool cards on the dashboard for quick access to common operations",
+                "features": [
+                    "• Discovery Pool card with revamped category-card modal design",
+                    "• Backup Manager card with list, download, restore, and delete",
+                    "• Deep Library Scan for enrichment-safe sync without re-downloading",
+                    "• Download Now button on wishlist modal and library page download bubbles"
                 ]
             },
             {
@@ -13645,7 +13673,8 @@ def get_version_info():
                     "• Add to watchlist button on each artist in library",
                     "• 'Watch All' button on hero slider to quickly add all displayed artists",
                     "• Add all recommended artists to watchlist in one click",
-                    "• View recommended/similar artists panel"
+                    "• View recommended/similar artists panel",
+                    "• Batched watchlist status checks to eliminate rate limit errors"
                 ]
             },
             {
@@ -13661,6 +13690,7 @@ def get_version_info():
                 "description": "Visual improvements and personalization options",
                 "features": [
                     "• Custom accent colors with persistent user preference",
+                    "• Themed confirm dialog modal replacing all native browser confirms",
                     "• Retag tool layout redesign",
                     "• Watchlist page visual redesign"
                 ]
@@ -13669,15 +13699,20 @@ def get_version_info():
                 "title": "🐛 Bug Fixes & Stability",
                 "description": "Reliability improvements",
                 "features": [
+                    "• Fix sync completion not reaching UI after WebSocket reconnect",
+                    "• Fix automation timezone bug causing incorrect scheduling",
+                    "• Fix Tidal OAuth PKCE verification on Flask callback route",
+                    "• Fix batch completion detection for post-processing race condition",
+                    "• Fix similar_artists profile_id column being dropped on startup",
+                    "• Fix download retry fallback not cycling through available sources",
                     "• Fix chromaprint crash (SIGABRT) on 5.1 surround audio files",
                     "• Fix Spotify enrichment worker showing 'Not Authenticated' after re-auth",
-                    "• Fix Spotify worker status priority — paused state shown correctly over auth status",
                     "• Fix infinite monitor loop on post-processing completed tasks",
                     "• Fix cancelled downloads not sending album context to wishlist",
                     "• Fix various artist compilations causing AcoustID check failures",
                     "• Fix ListenBrainz database path not respecting DATABASE_PATH env var",
                     "• Fix deleted content not removed during incremental database updates",
-                    "• Wishlist always uses 'force download all' mode"
+                    "• Podman rootless (keep-id) compatibility for Arch/rootless Docker users"
                 ]
             }
         ]
