@@ -147,6 +147,17 @@ function initializeWebSocket() {
         console.log('WebSocket connected');
         socketConnected = true;
         resubscribeDownloadBatches();
+        // Re-subscribe to any active sync/discovery rooms after reconnect
+        const activeSyncIds = Object.keys(_syncProgressCallbacks);
+        if (activeSyncIds.length > 0) {
+            socket.emit('sync:subscribe', { playlist_ids: activeSyncIds });
+            console.log('🔄 Re-subscribed to sync rooms:', activeSyncIds);
+        }
+        const activeDiscoveryIds = Object.keys(_discoveryProgressCallbacks);
+        if (activeDiscoveryIds.length > 0) {
+            socket.emit('discovery:subscribe', { ids: activeDiscoveryIds });
+            console.log('🔄 Re-subscribed to discovery rooms:', activeDiscoveryIds);
+        }
         // Join profile room for scoped watchlist/wishlist count updates
         if (currentProfile) {
             socket.emit('profile:join', { profile_id: currentProfile.id });
