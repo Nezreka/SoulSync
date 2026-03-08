@@ -15614,9 +15614,8 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
             quality_scanner_state["total"] = total_tracks
             quality_scanner_state["phase"] = f"Scanning {total_tracks} tracks..."
 
-        # Initialize Spotify client for matching
-        spotify_client = SpotifyClient()
-        if not spotify_client.is_authenticated():
+        # Use the module-level spotify_client (already authenticated with cached token)
+        if not spotify_client or not spotify_client.is_spotify_authenticated():
             with quality_scanner_lock:
                 quality_scanner_state["status"] = "error"
                 quality_scanner_state["phase"] = "Spotify not authenticated"
@@ -15628,6 +15627,11 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
 
         # Scan each track
         for idx, track_row in enumerate(tracks_to_scan, 1):
+            # Check for stop request
+            if quality_scanner_state.get('status') != 'running':
+                print(f"🛑 [Quality Scanner] Stop requested, halting at track {idx}/{total_tracks}")
+                break
+
             try:
                 track_id, title, artist_id, album_id, file_path, bitrate, artist_name, album_title = track_row
 
@@ -15676,6 +15680,7 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
                     for query_idx, search_query in enumerate(search_queries):
                         try:
                             spotify_matches = spotify_client.search_tracks(search_query, limit=5)
+                            time.sleep(0.5)  # Rate limit Spotify API calls
 
                             if not spotify_matches:
                                 continue
@@ -15797,13 +15802,15 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
                 print(f"❌ [Quality Scanner] Error processing track: {track_error}")
                 continue
 
-        # Scan complete
+        # Scan complete (don't overwrite if already stopped by user)
         with quality_scanner_lock:
+            was_stopped = quality_scanner_state["status"] != "running"
             quality_scanner_state["status"] = "finished"
             quality_scanner_state["progress"] = 100
-            quality_scanner_state["phase"] = "Scan complete"
+            if not was_stopped:
+                quality_scanner_state["phase"] = "Scan complete"
 
-        print(f"✅ [Quality Scanner] Scan complete: {quality_scanner_state['processed']} processed, "
+        print(f"✅ [Quality Scanner] Scan {'stopped' if was_stopped else 'complete'}: {quality_scanner_state['processed']} processed, "
               f"{quality_scanner_state['low_quality']} low quality, {quality_scanner_state['matched']} matched to Spotify")
 
         # Add activity
