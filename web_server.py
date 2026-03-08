@@ -274,10 +274,22 @@ def _register_automation_handlers():
             return {'status': 'completed'}
         except Exception as e:
             return {'status': 'error', 'error': str(e)}
+    # Note: wishlist processing is async (batch submitted to executor), stats come via batch completion
 
     def _auto_scan_watchlist(config):
         try:
+            pre_state_id = id(watchlist_scan_state)
             _process_watchlist_scan_automatically(automation_id=config.get('_automation_id'))
+            # Only report stats if a fresh scan actually ran (state dict was reassigned)
+            if id(watchlist_scan_state) != pre_state_id:
+                summary = watchlist_scan_state.get('summary', {})
+                return {
+                    'status': 'completed',
+                    'artists_scanned': summary.get('total_artists', 0),
+                    'successful_scans': summary.get('successful_scans', 0),
+                    'new_tracks_found': summary.get('new_tracks_found', 0),
+                    'tracks_added_to_wishlist': summary.get('tracks_added_to_wishlist', 0),
+                }
             return {'status': 'completed'}
         except Exception as e:
             return {'status': 'error', 'error': str(e)}
@@ -347,11 +359,12 @@ def _register_automation_handlers():
                     phase='Timed out', log_line='Library scan timed out after 30 minutes', log_type='error')
                 return {'status': 'error', 'reason': 'Timed out', '_manages_own_progress': True}
 
+            elapsed = round(time.time() - poll_start, 1)
             _update_automation_progress(automation_id, status='finished', progress=100,
                 phase='Complete',
                 log_line='Library scan completed', log_type='success')
 
-            return {'status': 'completed', '_manages_own_progress': True}
+            return {'status': 'completed', '_manages_own_progress': True, 'scan_duration_seconds': elapsed}
 
         except Exception as e:
             _update_automation_progress(automation_id, status='error',
@@ -659,7 +672,17 @@ def _register_automation_handlers():
             final_status = db_update_state.get('status', 'unknown')
         if final_status == 'error':
             return {'status': 'error', 'reason': db_update_state.get('error_message', 'Unknown error'), '_manages_own_progress': True}
-        return {'status': 'completed', 'full_refresh': str(full), '_manages_own_progress': True}
+        with db_update_lock:
+            stats = {
+                'status': 'completed', 'full_refresh': str(full), '_manages_own_progress': True,
+                'artists': db_update_state.get('total', 0),
+                'albums': db_update_state.get('total_albums', 0),
+                'tracks': db_update_state.get('total_tracks', 0),
+                'removed_artists': db_update_state.get('removed_artists', 0),
+                'removed_albums': db_update_state.get('removed_albums', 0),
+                'removed_tracks': db_update_state.get('removed_tracks', 0),
+            }
+        return stats
 
     def _auto_deep_scan_library(config):
         global _db_update_automation_id
@@ -703,7 +726,17 @@ def _register_automation_handlers():
             final_status = db_update_state.get('status', 'unknown')
         if final_status == 'error':
             return {'status': 'error', 'reason': db_update_state.get('error_message', 'Unknown error'), '_manages_own_progress': True}
-        return {'status': 'completed', '_manages_own_progress': True}
+        with db_update_lock:
+            stats = {
+                'status': 'completed', '_manages_own_progress': True,
+                'artists': db_update_state.get('total', 0),
+                'albums': db_update_state.get('total_albums', 0),
+                'tracks': db_update_state.get('total_tracks', 0),
+                'removed_artists': db_update_state.get('removed_artists', 0),
+                'removed_albums': db_update_state.get('removed_albums', 0),
+                'removed_tracks': db_update_state.get('removed_tracks', 0),
+            }
+        return stats
 
     def _auto_run_duplicate_cleaner(config):
         automation_id = config.get('_automation_id')
@@ -748,10 +781,18 @@ def _register_automation_handlers():
 
         dupes = duplicate_cleaner_state.get('duplicates_found', 0)
         removed = duplicate_cleaner_state.get('deleted', 0)
+        space_freed = duplicate_cleaner_state.get('space_freed', 0)
+        scanned = duplicate_cleaner_state.get('files_scanned', 0)
         _update_automation_progress(automation_id, status='finished', progress=100,
             phase='Complete',
             log_line=f'Found {dupes} duplicates, removed {removed} files', log_type='success')
-        return {'status': 'completed', '_manages_own_progress': True}
+        return {
+            'status': 'completed', '_manages_own_progress': True,
+            'files_scanned': scanned,
+            'duplicates_found': dupes,
+            'files_deleted': removed,
+            'space_freed_mb': round(space_freed / (1024 * 1024), 1),
+        }
 
     def _auto_clear_quarantine(config):
         import shutil as _shutil
@@ -848,7 +889,13 @@ def _register_automation_handlers():
         _update_automation_progress(automation_id, status='finished', progress=100,
             phase='Complete',
             log_line=f'Quality scan complete — {issues} issues found', log_type='success')
-        return {'status': 'completed', 'scope': scope, '_manages_own_progress': True}
+        return {
+            'status': 'completed', 'scope': scope, '_manages_own_progress': True,
+            'tracks_scanned': quality_scanner_state.get('processed', 0),
+            'quality_met': quality_scanner_state.get('quality_met', 0),
+            'low_quality': issues,
+            'matched': quality_scanner_state.get('matched', 0),
+        }
 
     def _auto_backup_database(config):
         import sqlite3, glob as _glob
@@ -14175,6 +14222,8 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
     with db_update_lock:
         db_update_state["status"] = "finished"
         db_update_state["phase"] = f"Completed: {successful} successful, {failed} failed{removal_msg}."
+        db_update_state["total_albums"] = total_albums
+        db_update_state["total_tracks"] = total_tracks
         db_update_state["removed_artists"] = removed_artists
         db_update_state["removed_albums"] = removed_albums
         db_update_state["removed_tracks"] = removed_tracks

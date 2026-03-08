@@ -16385,13 +16385,146 @@ const TOOL_HELP_CONTENT = {
             <p>Creates a timestamped backup of SoulSync's SQLite database. Uses the SQLite backup API for a safe hot-copy while the app is running.</p>
 
             <h4>Retention</h4>
-            <p>Keeps the last 3 backups automatically. Older backups are cleaned up to save disk space.</p>
+            <p>Keeps the last 5 backups automatically. Older backups are cleaned up to save disk space.</p>
 
             <h4>Good for</h4>
             <ul>
                 <li>Nightly automated backups</li>
                 <li>Pre-update safety backups</li>
                 <li>Peace of mind for your library data</li>
+            </ul>
+        `
+    },
+    'auto-refresh_beatport_cache': {
+        title: 'Refresh Beatport Cache',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Scrapes the Beatport homepage for top charts and caches the results locally. Keeps the Beatport charts page loading instantly without needing to scrape on every visit.</p>
+
+            <h4>Cache duration</h4>
+            <p>Cache lasts 24 hours. This action refreshes it early so it's always warm when you visit the charts page.</p>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Keeping Beatport charts available instantly</li>
+                <li>Scheduling daily cache refreshes (e.g. every morning)</li>
+            </ul>
+        `
+    },
+    'auto-clean_search_history': {
+        title: 'Clean Search History',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Removes old search queries from Soulseek. This keeps your search history clean and prevents buildup over time.</p>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Periodic housekeeping</li>
+                <li>Keeping Soulseek search history tidy</li>
+            </ul>
+        `
+    },
+    'auto-clean_completed_downloads': {
+        title: 'Clean Completed Downloads',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Clears completed downloads from the transfer list and removes any empty directories left behind in the staging folder.</p>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Automatic cleanup after batch downloads</li>
+                <li>Preventing staging folder clutter</li>
+                <li>Chaining after a batch complete trigger</li>
+            </ul>
+        `
+    },
+    'auto-deep_scan_library': {
+        title: 'Deep Scan Library',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Walks your entire media server library and compares it against SoulSync's database. Adds any new tracks found and removes stale entries that no longer exist on the server.</p>
+
+            <h4>How is this different from Database Update?</h4>
+            <ul>
+                <li><strong>Database Update:</strong> Incremental — only looks for new artists/albums added since last update</li>
+                <li><strong>Deep Scan:</strong> Full comparison — checks every track on the server against the database, catches anything missed</li>
+            </ul>
+
+            <h4>Safety</h4>
+            <ul>
+                <li>Never overwrites existing enrichment data (genres, Spotify IDs, artwork)</li>
+                <li>Only inserts tracks that don't already exist in the database</li>
+                <li>Stale track removal has a 50% safety threshold — if more than half the library appears missing, removal is skipped</li>
+            </ul>
+        `
+    },
+
+    // ==================== Notification/Then-Action Help ====================
+
+    'auto-discord_webhook': {
+        title: 'Discord Webhook',
+        content: `
+            <h4>What does this then-action do?</h4>
+            <p>Sends a notification to a Discord channel via webhook when the automation's action completes.</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>Webhook URL:</strong> The Discord webhook URL for your channel (found in Channel Settings → Integrations → Webhooks)</li>
+                <li><strong>Message Template:</strong> Custom message with variable placeholders</li>
+            </ul>
+
+            <h4>Available variables</h4>
+            <p>Use these in your message template:</p>
+            <ul>
+                <li><code>{time}</code> — When the automation ran</li>
+                <li><code>{name}</code> — Automation name</li>
+                <li><code>{run_count}</code> — How many times this automation has run</li>
+                <li><code>{status}</code> — Result status of the action</li>
+            </ul>
+        `
+    },
+    'auto-pushbullet': {
+        title: 'Pushbullet',
+        content: `
+            <h4>What does this then-action do?</h4>
+            <p>Sends a push notification to your phone or desktop via Pushbullet when the automation's action completes.</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>API Key:</strong> Your Pushbullet access token (found in Pushbullet Settings → Access Tokens)</li>
+                <li><strong>Message Template:</strong> Custom message with variable placeholders</li>
+            </ul>
+
+            <h4>Available variables</h4>
+            <p>Use these in your message template:</p>
+            <ul>
+                <li><code>{time}</code> — When the automation ran</li>
+                <li><code>{name}</code> — Automation name</li>
+                <li><code>{run_count}</code> — How many times this automation has run</li>
+                <li><code>{status}</code> — Result status of the action</li>
+            </ul>
+        `
+    },
+    'auto-telegram': {
+        title: 'Telegram',
+        content: `
+            <h4>What does this then-action do?</h4>
+            <p>Sends a message to a Telegram chat via bot when the automation's action completes.</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>Bot Token:</strong> Your Telegram bot token (from @BotFather)</li>
+                <li><strong>Chat ID:</strong> The chat/group ID to send messages to</li>
+                <li><strong>Message Template:</strong> Custom message with variable placeholders</li>
+            </ul>
+
+            <h4>Available variables</h4>
+            <p>Use these in your message template:</p>
+            <ul>
+                <li><code>{time}</code> — When the automation ran</li>
+                <li><code>{name}</code> — Automation name</li>
+                <li><code>{run_count}</code> — How many times this automation has run</li>
+                <li><code>{status}</code> — Result status of the action</li>
             </ul>
         `
     },
@@ -43723,7 +43856,7 @@ function renderAutomationCard(a) {
     const _timerTriggers = ['schedule', 'daily_time', 'weekly_time'];
     if (a.next_run && a.enabled && _timerTriggers.includes(a.trigger_type)) metaParts.push('<span class="auto-next-run" data-next="' + _escAttr(a.next_run) + '">Next: ' + _autoTimeUntil(a.next_run) + '</span>');
     if (!_timerTriggers.includes(a.trigger_type) && a.enabled) metaParts.push('Listening');
-    if (a.run_count) metaParts.push('<span class="auto-runs-link" onclick="event.stopPropagation(); showAutomationHistory(' + a.id + ', \'' + _escAttr(a.name) + '\')" title="View run history">Runs: ' + a.run_count + '</span>');
+    if (a.run_count) metaParts.push('<span class="auto-runs-link" onclick="event.stopPropagation(); showAutomationHistory(' + a.id + ', \'' + _escAttr(a.name) + '\', \'' + _escAttr(a.action_type || '') + '\')" title="View run history">Runs: ' + a.run_count + '</span>');
     if (a.last_error) metaParts.push('Error: ' + _esc(a.last_error));
 
     const deleteBtn = a.is_system ? '' :
@@ -43964,7 +44097,88 @@ async function runAutomation(id) {
     } catch (err) { showToast('Error: ' + err.message, 'error'); }
 }
 
-async function showAutomationHistory(automationId, automationName) {
+const _RESULT_DISPLAY_MAP = {
+    'start_database_update': [
+        { key: 'artists', label: 'Artists' },
+        { key: 'albums', label: 'Albums' },
+        { key: 'tracks', label: 'Tracks' },
+        { key: 'removed_artists', label: 'Removed Artists', hideZero: true },
+        { key: 'removed_albums', label: 'Removed Albums', hideZero: true },
+        { key: 'removed_tracks', label: 'Removed Tracks', hideZero: true },
+    ],
+    'deep_scan_library': [
+        { key: 'artists', label: 'Artists' },
+        { key: 'albums', label: 'Albums' },
+        { key: 'tracks', label: 'Tracks' },
+        { key: 'removed_artists', label: 'Removed Artists', hideZero: true },
+        { key: 'removed_albums', label: 'Removed Albums', hideZero: true },
+        { key: 'removed_tracks', label: 'Removed Tracks', hideZero: true },
+    ],
+    'scan_watchlist': [
+        { key: 'artists_scanned', label: 'Artists Scanned' },
+        { key: 'successful_scans', label: 'Successful' },
+        { key: 'new_tracks_found', label: 'New Tracks' },
+        { key: 'tracks_added_to_wishlist', label: 'Added to Wishlist' },
+    ],
+    'run_duplicate_cleaner': [
+        { key: 'files_scanned', label: 'Files Scanned' },
+        { key: 'duplicates_found', label: 'Duplicates Found' },
+        { key: 'files_deleted', label: 'Files Deleted' },
+        { key: 'space_freed_mb', label: 'Space Freed (MB)' },
+    ],
+    'start_quality_scan': [
+        { key: 'tracks_scanned', label: 'Tracks Scanned' },
+        { key: 'quality_met', label: 'Quality Met' },
+        { key: 'low_quality', label: 'Low Quality' },
+        { key: 'matched', label: 'Added to Wishlist' },
+    ],
+    'scan_library': [
+        { key: 'scan_duration_seconds', label: 'Duration (s)' },
+    ],
+    'backup_database': [
+        { key: 'size_mb', label: 'Backup Size (MB)' },
+    ],
+    'refresh_mirrored': [
+        { key: 'refreshed', label: 'Playlists Refreshed' },
+        { key: 'errors', label: 'Errors', hideZero: true },
+    ],
+    'clear_quarantine': [
+        { key: 'removed', label: 'Items Removed' },
+    ],
+    'cleanup_wishlist': [
+        { key: 'removed', label: 'Duplicates Removed' },
+    ],
+};
+
+function _renderResultStats(resultJson, actionType) {
+    if (!resultJson || typeof resultJson !== 'object') return '';
+    var fields = _RESULT_DISPLAY_MAP[actionType];
+    var items = [];
+    if (fields) {
+        fields.forEach(function(f) {
+            var val = resultJson[f.key];
+            if (val == null) return;
+            if (f.hideZero && (val === 0 || val === '0')) return;
+            items.push({ label: f.label, value: val });
+        });
+    } else {
+        // Generic fallback: show all non-status, non-underscore keys
+        Object.keys(resultJson).forEach(function(k) {
+            if (k === 'status' || k.startsWith('_')) return;
+            var label = k.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+            items.push({ label: label, value: resultJson[k] });
+        });
+    }
+    if (items.length === 0) return '';
+    var html = '<div class="history-stats-grid">';
+    items.forEach(function(it) {
+        html += '<div class="history-stat-item"><div class="history-stat-label">' + _esc(it.label) + '</div><div class="history-stat-value">' + _esc(String(it.value)) + '</div></div>';
+    });
+    html += '</div>';
+    return html;
+}
+
+async function showAutomationHistory(automationId, automationName, actionType) {
     let modal = document.getElementById('automation-history-modal');
     if (!modal) {
         modal = document.createElement('div');
@@ -44003,6 +44217,9 @@ async function showAutomationHistory(automationId, automationName) {
             if (hasLogs) html += '<span class="history-expand-icon">&#9660;</span>';
             html += '</div>';
             if (summary) html += '<div class="history-summary">' + summary + '</div>';
+            if (entry.result_json && typeof entry.result_json === 'object') {
+                html += _renderResultStats(entry.result_json, actionType);
+            }
             if (hasLogs) {
                 html += '<div id="' + entryId + '" class="history-log-section">';
                 entry.log_lines.forEach(function(log) {
