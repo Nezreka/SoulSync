@@ -502,12 +502,8 @@
                             <div class="tool-card" id="db-updater-card">
                                 <div class="tool-card-header">
                                     <h4 class="tool-card-title">Database Updater</h4>
-                                    <div style="display:flex;gap:4px;">
-                                        <button class="tool-help-button" id="db-backup-button"
-                                            title="Create a rolling backup of the database"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button>
-                                        <button class="tool-help-button" data-tool="db-updater"
-                                            title="Learn more about this tool">?</button>
-                                    </div>
+                                    <button class="tool-help-button" data-tool="db-updater"
+                                        title="Learn more about this tool">?</button>
                                 </div>
                                 <p class="tool-card-info">Last Full Refresh: <span id="db-last-refresh">Never</span></p>
                                 <div class="tool-card-stats">
@@ -747,6 +743,37 @@
                                     <p class="progress-details-label" id="media-scan-progress-label">Waiting for scan
                                         request</p>
                                 </div>
+                            </div>
+
+                            <div class="tool-card" id="backup-manager-card">
+                                <div class="tool-card-header">
+                                    <h4 class="tool-card-title">Backup Manager</h4>
+                                    <button class="tool-help-button" data-tool="backup-manager"
+                                        title="Learn more about this tool">?</button>
+                                </div>
+                                <p class="tool-card-info">Create, download, restore and manage database backups</p>
+                                <div class="tool-card-stats">
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Last Backup:</span>
+                                        <span class="stat-item-value" id="backup-stat-last">Never</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Backups:</span>
+                                        <span class="stat-item-value" id="backup-stat-count">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Latest Size:</span>
+                                        <span class="stat-item-value" id="backup-stat-latest-size">—</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">DB Size:</span>
+                                        <span class="stat-item-value" id="backup-stat-db-size">—</span>
+                                    </div>
+                                </div>
+                                <div class="tool-card-controls">
+                                    <button id="backup-now-button">Backup Now</button>
+                                </div>
+                                <div id="backup-list-container" class="backup-list-container"></div>
                             </div>
                         </div>
                     </div>
