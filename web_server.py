@@ -22925,7 +22925,12 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
 
         # Run the sync (this is a blocking call within this thread)
         result = run_async(sync_service.sync_playlist(playlist, download_missing=False))
-        
+
+        # Clear progress callback immediately to prevent race condition where a
+        # late-firing progress callback overwrites the "finished" state below
+        if sync_service:
+            sync_service.clear_progress_callback(playlist.name)
+
         sync_duration = (time.time() - sync_start_time) * 1000
         total_duration = (time.time() - task_start_time) * 1000
         print(f"⏱️ [TIMING] Sync completed at {time.strftime('%H:%M:%S')} (sync: {sync_duration:.1f}ms, total: {total_duration:.1f}ms)")
