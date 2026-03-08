@@ -52,7 +52,7 @@ echo "🔍 Checking for configuration files..."
 if [ ! -f "/app/config/config.json" ]; then
     echo "   📄 Creating default config.json..."
     cp /defaults/config.json /app/config/config.json
-    chown soulsync:soulsync /app/config/config.json
+    chown soulsync:soulsync /app/config/config.json 2>/dev/null || true
 else
     echo "   ✅ config.json already exists"
 fi
@@ -60,14 +60,14 @@ fi
 if [ ! -f "/app/config/settings.py" ]; then
     echo "   📄 Creating default settings.py..."
     cp /defaults/settings.py /app/config/settings.py
-    chown soulsync:soulsync /app/config/settings.py
+    chown soulsync:soulsync /app/config/settings.py 2>/dev/null || true
 else
     echo "   ✅ settings.py already exists"
 fi
 
 # Ensure all directories exist and have proper permissions
 mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging
-chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging
+chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging 2>/dev/null || true
 
 echo "✅ Configuration initialized successfully"
 
@@ -79,4 +79,9 @@ echo ""
 echo "🚀 Starting SoulSync Web Server..."
 
 # Execute the main command as the soulsync user
-exec gosu soulsync "$@"
+# If already running as the correct user (e.g. Podman rootless with keep-id), skip gosu
+if [ "$(id -u)" = "$PUID" ]; then
+    exec "$@"
+else
+    exec gosu soulsync "$@"
+fi
