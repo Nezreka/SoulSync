@@ -15255,15 +15255,17 @@ def stop_database_update():
         else:
             return jsonify({"success": False, "error": "No update is currently running."}), 404
 
+_BACKUP_FILENAME_RE = re.compile(r'^music_library\.db\.backup_\d{8}_\d{6}$')
+
 @app.route('/api/database/backup', methods=['POST'])
 def backup_database_endpoint():
-    """Create a rolling backup of the database (max 3)."""
+    """Create a rolling backup of the database (max 5)."""
     try:
         import sqlite3, glob as _glob
         db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
         if not os.path.exists(db_path):
             return jsonify({"success": False, "error": "Database file not found"}), 404
-        max_backups = 3
+        max_backups = 5
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         backup_path = f"{db_path}.backup_{timestamp}"
         src = sqlite3.connect(db_path)
@@ -15280,6 +15282,116 @@ def backup_database_endpoint():
             except Exception:
                 pass
         return jsonify({"success": True, "backup_path": backup_path, "size_mb": size_mb})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/database/backups', methods=['GET'])
+def list_backups_endpoint():
+    """List all database backups with metadata."""
+    try:
+        import glob as _glob
+        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+        backup_files = sorted(
+            _glob.glob(f"{db_path}.backup_*"),
+            key=os.path.getmtime,
+            reverse=True
+        )
+        backups = []
+        for fp in backup_files:
+            fname = os.path.basename(fp)
+            if not _BACKUP_FILENAME_RE.match(fname):
+                continue
+            stat = os.stat(fp)
+            backups.append({
+                'filename': fname,
+                'size_mb': round(stat.st_size / (1024 * 1024), 2),
+                'created': datetime.utcfromtimestamp(stat.st_mtime).isoformat()
+            })
+        db_size_mb = round(os.path.getsize(db_path) / (1024 * 1024), 2) if os.path.exists(db_path) else 0
+        return jsonify({
+            'success': True,
+            'backups': backups,
+            'count': len(backups),
+            'db_size_mb': db_size_mb
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/database/backups/<filename>', methods=['DELETE'])
+def delete_backup_endpoint(filename):
+    """Delete a specific database backup."""
+    try:
+        if not _BACKUP_FILENAME_RE.match(filename) or '/' in filename or '\\' in filename or '..' in filename:
+            return jsonify({"success": False, "error": "Invalid backup filename"}), 400
+        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+        backup_path = os.path.join(os.path.dirname(db_path), filename)
+        if not os.path.exists(backup_path):
+            return jsonify({"success": False, "error": "Backup not found"}), 404
+        os.remove(backup_path)
+        return jsonify({"success": True, "deleted": filename})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/database/backups/<filename>/restore', methods=['POST'])
+def restore_backup_endpoint(filename):
+    """Restore the database from a specific backup."""
+    try:
+        import sqlite3
+        if not _BACKUP_FILENAME_RE.match(filename) or '/' in filename or '\\' in filename or '..' in filename:
+            return jsonify({"success": False, "error": "Invalid backup filename"}), 400
+        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+        db_dir = os.path.dirname(db_path)
+        backup_path = os.path.join(db_dir, filename)
+        if not os.path.exists(backup_path):
+            return jsonify({"success": False, "error": "Backup not found"}), 404
+
+        # Create safety backup of current DB before restoring
+        safety_ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        safety_filename = f"music_library.db.backup_{safety_ts}"
+        safety_path = os.path.join(db_dir, safety_filename)
+        src_conn = sqlite3.connect(db_path)
+        dst_conn = sqlite3.connect(safety_path)
+        src_conn.backup(dst_conn)
+        dst_conn.close()
+        src_conn.close()
+
+        # Restore using SQLite backup API (handles concurrent access safely)
+        from database.music_database import close_database, get_database
+        close_database()
+
+        src_restore = sqlite3.connect(backup_path)
+        dst_restore = sqlite3.connect(db_path)
+        src_restore.backup(dst_restore)
+        dst_restore.close()
+        src_restore.close()
+
+        # Reinitialize database and verify
+        db = get_database()
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM artists")
+            artist_count = cursor.fetchone()[0]
+
+        return jsonify({
+            "success": True,
+            "restored_from": filename,
+            "safety_backup": safety_filename,
+            "artist_count": artist_count
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/database/backups/<filename>/download', methods=['GET'])
+def download_backup_endpoint(filename):
+    """Download a specific database backup file."""
+    try:
+        if not _BACKUP_FILENAME_RE.match(filename) or '/' in filename or '\\' in filename or '..' in filename:
+            return jsonify({"success": False, "error": "Invalid backup filename"}), 400
+        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+        backup_path = os.path.join(os.path.dirname(db_path), filename)
+        if not os.path.exists(backup_path):
+            return jsonify({"success": False, "error": "Backup not found"}), 404
+        return send_file(backup_path, as_attachment=True, download_name=filename)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

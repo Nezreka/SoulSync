@@ -15250,6 +15250,132 @@ function stopDuplicateCleanerPolling() {
 }
 
 // ============================================
+// == BACKUP MANAGER                         ==
+// ============================================
+
+async function loadBackupList() {
+    try {
+        const res = await fetch('/api/database/backups');
+        const data = await res.json();
+        if (data.success) {
+            updateBackupManagerUI(data);
+            renderBackupList(data.backups);
+        }
+    } catch (e) {
+        console.error('Failed to load backup list:', e);
+    }
+}
+
+function updateBackupManagerUI(data) {
+    const lastEl = document.getElementById('backup-stat-last');
+    const countEl = document.getElementById('backup-stat-count');
+    const latestSizeEl = document.getElementById('backup-stat-latest-size');
+    const dbSizeEl = document.getElementById('backup-stat-db-size');
+
+    if (countEl) countEl.textContent = data.count;
+    if (dbSizeEl) dbSizeEl.textContent = data.db_size_mb + ' MB';
+
+    if (data.backups && data.backups.length > 0) {
+        const newest = data.backups[0];
+        if (lastEl) lastEl.textContent = timeAgo(newest.created);
+        if (latestSizeEl) latestSizeEl.textContent = newest.size_mb + ' MB';
+    } else {
+        if (lastEl) lastEl.textContent = 'Never';
+        if (latestSizeEl) latestSizeEl.textContent = '—';
+    }
+}
+
+function renderBackupList(backups) {
+    const container = document.getElementById('backup-list-container');
+    if (!container) return;
+    if (!backups || backups.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+
+    container.innerHTML = backups.map(b => {
+        const date = new Date(b.created + (b.created.includes('Z') ? '' : 'Z'));
+        const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+            + ' ' + date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        const safeName = escapeForInlineJs(b.filename);
+        return `<div class="backup-list-item">
+            <div class="backup-list-info">
+                <span class="backup-list-date">${escapeHtml(dateStr)}</span>
+                <span class="backup-list-size">${b.size_mb} MB</span>
+            </div>
+            <div class="backup-list-actions">
+                <button class="backup-dl-btn" onclick="downloadBackup('${safeName}')" title="Download">DL</button>
+                <button class="backup-restore-btn" onclick="restoreBackup('${safeName}')" title="Restore">Restore</button>
+                <button class="backup-delete-btn" onclick="deleteBackup('${safeName}')" title="Delete">Del</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function handleBackupNowClick() {
+    const button = document.getElementById('backup-now-button');
+    if (!button) return;
+    const origText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Backing up...';
+    try {
+        const res = await fetch('/api/database/backup', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Database backed up (${data.size_mb} MB)`, 'success');
+            await loadBackupList();
+        } else {
+            showToast(`Backup failed: ${data.error}`, 'error');
+        }
+    } catch (e) {
+        showToast('Backup request failed', 'error');
+    }
+    button.disabled = false;
+    button.textContent = origText;
+}
+
+function downloadBackup(filename) {
+    const a = document.createElement('a');
+    a.href = `/api/database/backups/${encodeURIComponent(filename)}/download`;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+async function restoreBackup(filename) {
+    if (!confirm(`Restore database from "${filename}"?\n\nA safety backup of the current database will be created first.`)) return;
+    try {
+        const res = await fetch(`/api/database/backups/${encodeURIComponent(filename)}/restore`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Database restored from ${data.restored_from} (${data.artist_count} artists). Safety backup: ${data.safety_backup}`, 'success');
+            await loadBackupList();
+        } else {
+            showToast(`Restore failed: ${data.error}`, 'error');
+        }
+    } catch (e) {
+        showToast('Restore request failed', 'error');
+    }
+}
+
+async function deleteBackup(filename) {
+    if (!confirm(`Delete backup "${filename}"? This cannot be undone.`)) return;
+    try {
+        const res = await fetch(`/api/database/backups/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Backup deleted: ${data.deleted}`, 'success');
+            await loadBackupList();
+        } else {
+            showToast(`Delete failed: ${data.error}`, 'error');
+        }
+    } catch (e) {
+        showToast('Delete request failed', 'error');
+    }
+}
+
+// ============================================
 // == TOOL HELP MODAL                        ==
 // ============================================
 
@@ -16278,6 +16404,35 @@ const TOOL_HELP_CONTENT = {
             <h4>Combining with notifications</h4>
             <p>You can add up to 3 then-actions per automation. For example: Fire Signal + Discord notification + Telegram notification — all run after the action completes.</p>
         `
+    },
+    'backup-manager': {
+        title: 'Backup Manager',
+        content: `
+            <h4>What does this tool do?</h4>
+            <p>The Backup Manager lets you create, view, download, restore, and delete database backups directly from the dashboard.</p>
+
+            <h4>Features</h4>
+            <ul>
+                <li><strong>Backup Now:</strong> Create an instant backup of the current database using SQLite's hot-copy API</li>
+                <li><strong>Download:</strong> Download any backup file to your local machine</li>
+                <li><strong>Restore:</strong> Roll back the database to a previous backup state</li>
+                <li><strong>Delete:</strong> Remove old backups you no longer need</li>
+            </ul>
+
+            <h4>Auto-Backups</h4>
+            <p>SoulSync automatically creates a backup every 3 days via the automation engine. Up to 5 rolling backups are kept (oldest are removed when the limit is exceeded).</p>
+
+            <h4>Restore Safety</h4>
+            <p>When you restore from a backup, a <strong>safety backup</strong> of your current database is created first. This means you can always undo a restore if something goes wrong.</p>
+
+            <h4>Stats Explained</h4>
+            <ul>
+                <li><strong>Last Backup:</strong> When the most recent backup was created</li>
+                <li><strong>Backups:</strong> Total number of backup files available</li>
+                <li><strong>Latest Size:</strong> Size of the most recent backup</li>
+                <li><strong>DB Size:</strong> Current size of the live database</li>
+            </ul>
+        `
     }
 };
 
@@ -16931,11 +17086,6 @@ async function loadDashboardData() {
         updateButton.addEventListener('click', handleDbUpdateButtonClick);
     }
 
-    const backupButton = document.getElementById('db-backup-button');
-    if (backupButton) {
-        backupButton.addEventListener('click', handleDbBackupButtonClick);
-    }
-
     // Attach event listeners for the metadata updater tool
     const metadataButton = document.getElementById('metadata-update-button');
     if (metadataButton) {
@@ -16974,6 +17124,11 @@ async function loadDashboardData() {
 
     // Check active media server and show media scan tool only for Plex
     await checkAndShowMediaScanForPlex();
+
+    // Attach event listener for the backup manager
+    const backupNowButton = document.getElementById('backup-now-button');
+    if (backupNowButton) backupNowButton.addEventListener('click', handleBackupNowClick);
+    loadBackupList();
 
     // Attach event listeners for tool help buttons
     initializeToolHelpButtons();
@@ -19045,26 +19200,6 @@ async function handleDbUpdateButtonClick() {
             showToast('Error sending stop request.', 'error');
         }
     }
-}
-
-async function handleDbBackupButtonClick() {
-    const button = document.getElementById('db-backup-button');
-    const origText = button.textContent;
-    button.disabled = true;
-    button.textContent = 'Backing up...';
-    try {
-        const res = await fetch('/api/database/backup', { method: 'POST' });
-        const data = await res.json();
-        if (data.success) {
-            showToast(`Database backed up (${data.size_mb} MB)`, 'success');
-        } else {
-            showToast(`Backup failed: ${data.error}`, 'error');
-        }
-    } catch (e) {
-        showToast('Backup request failed', 'error');
-    }
-    button.disabled = false;
-    button.textContent = origText;
 }
 
 async function handleWishlistButtonClick() {

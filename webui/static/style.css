@@ -5423,6 +5423,99 @@ body {
     transition: width 0.3s ease;
 }
 
+/* Backup Manager List */
+.backup-list-container {
+    max-height: 200px;
+    overflow-y: auto;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    margin-top: 10px;
+    padding-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.backup-list-container:empty {
+    display: none;
+}
+
+.backup-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 8px;
+    padding: 8px 10px;
+    transition: background 0.2s ease;
+}
+
+.backup-list-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.backup-list-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.backup-list-date {
+    font-size: 12px;
+    color: #e0e0e0;
+    white-space: nowrap;
+}
+
+.backup-list-size {
+    font-size: 11px;
+    color: #888;
+}
+
+.backup-list-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.backup-list-actions button {
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    border-radius: 6px;
+    color: #b3b3b3;
+    font-size: 11px;
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.backup-list-actions .backup-dl-btn:hover {
+    background: rgba(var(--accent-rgb), 0.25);
+    color: rgb(var(--accent-rgb));
+}
+
+.backup-list-actions .backup-restore-btn:hover {
+    background: rgba(255, 183, 77, 0.25);
+    color: #ffb74d;
+}
+
+.backup-list-actions .backup-delete-btn:hover {
+    background: rgba(244, 67, 54, 0.25);
+    color: #f44336;
+}
+
+.backup-list-container::-webkit-scrollbar {
+    width: 4px;
+}
+
+.backup-list-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.backup-list-container::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 2px;
+}
+
 
 /* Activity Feed */
 .activity-feed-container {
