@@ -3800,6 +3800,91 @@ body {
     animation: matchingModalFadeIn 0.4s ease-out;
 }
 
+/* Confirm Dialog Modal */
+.confirm-modal {
+    background: linear-gradient(135deg, #1a1a1a 0%, #121212 100%);
+    border-radius: 20px;
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
+    width: 460px;
+    max-width: 90vw;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 25px 80px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(var(--accent-rgb), 0.1);
+    transform: scale(1);
+    transition: transform 0.4s ease-in-out;
+    overflow: hidden;
+}
+
+.modal-overlay.hidden .confirm-modal {
+    transform: scale(0.9);
+}
+
+.modal-overlay:not(.hidden) .confirm-modal {
+    animation: matchingModalFadeIn 0.4s ease-out;
+}
+
+.confirm-modal-header {
+    padding: 20px 24px 16px 24px;
+    border-bottom: 1px solid rgba(var(--accent-rgb), 0.15);
+    background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.03) 0%, transparent 50%);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+}
+
+#confirm-modal-title {
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.confirm-modal-close {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+    border: none;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.confirm-modal-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    transform: scale(1.1);
+}
+
+.confirm-modal-content {
+    padding: 20px 24px;
+}
+
+#confirm-modal-message {
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 14px;
+    line-height: 1.6;
+    margin: 0;
+    white-space: pre-line;
+}
+
+.confirm-modal-actions {
+    padding: 16px 24px 20px 24px;
+    border-top: 1px solid rgba(var(--accent-rgb), 0.1);
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    border-bottom-left-radius: 20px;
+    border-bottom-right-radius: 20px;
+}
+
 /* GUI-Matching Search Results Styling */
 
 /* Single Track Card (SearchResultItem) */

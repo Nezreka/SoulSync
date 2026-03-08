@@ -123,6 +123,50 @@ function observeLazyBackgrounds(container) {
 }
 
 // ===============================
+// CONFIRM DIALOG (themed replacement for native confirm())
+// ===============================
+let _confirmResolver = null;
+
+function showConfirmDialog({ title = 'Confirm', message = '', confirmText = 'Confirm', cancelText = 'Cancel', destructive = false } = {}) {
+    // Resolve any pending dialog as cancelled before opening a new one
+    if (_confirmResolver) {
+        _confirmResolver(false);
+        _confirmResolver = null;
+    }
+
+    const overlay = document.getElementById('confirm-modal-overlay');
+    const titleEl = document.getElementById('confirm-modal-title');
+    const messageEl = document.getElementById('confirm-modal-message');
+    const confirmBtn = document.getElementById('confirm-modal-confirm');
+    const cancelBtn = document.getElementById('confirm-modal-cancel');
+
+    titleEl.textContent = title;
+    messageEl.textContent = message;
+    confirmBtn.textContent = confirmText;
+    cancelBtn.textContent = cancelText;
+
+    // Toggle destructive (red) vs primary (accent) confirm button
+    confirmBtn.className = destructive
+        ? 'modal-button modal-button--cancel'
+        : 'modal-button modal-button--primary';
+
+    overlay.classList.remove('hidden');
+
+    return new Promise(resolve => {
+        _confirmResolver = resolve;
+    });
+}
+
+function resolveConfirmDialog(result) {
+    const overlay = document.getElementById('confirm-modal-overlay');
+    overlay.classList.add('hidden');
+    if (_confirmResolver) {
+        _confirmResolver(result);
+        _confirmResolver = null;
+    }
+}
+
+// ===============================
 // WEBSOCKET CONNECTION MANAGER
 // ===============================
 let socket = null;
@@ -1084,7 +1128,7 @@ async function loadProfileManageList() {
     // Bind delete buttons
     list.querySelectorAll('.profile-delete-btn').forEach(btn => {
         btn.onclick = async () => {
-            if (!confirm('Delete this profile and all its data?')) return;
+            if (!await showConfirmDialog({ title: 'Delete Profile', message: 'Delete this profile and all its data?', confirmText: 'Delete', destructive: true })) return;
             try {
                 const res = await fetch(`/api/profiles/${btn.dataset.id}`, { method: 'DELETE' });
                 const data = await res.json();
@@ -3691,7 +3735,7 @@ async function testConnection(service) {
 }
 
 async function clearQuarantine() {
-    if (!confirm('Delete all files in the quarantine folder? This cannot be undone.')) return;
+    if (!await showConfirmDialog({ title: 'Clear Quarantine', message: 'Delete all files in the quarantine folder? This cannot be undone.', confirmText: 'Delete', destructive: true })) return;
     try {
         showLoadingOverlay('Clearing quarantine folder...');
         const response = await fetch('/api/quarantine/clear', { method: 'POST' });
@@ -3804,7 +3848,7 @@ function copyApiKey() {
 }
 
 async function revokeApiKey(keyId, label) {
-    if (!confirm(`Revoke API key "${label}"? Any apps using this key will stop working.`)) return;
+    if (!await showConfirmDialog({ title: 'Revoke API Key', message: `Revoke API key "${label}"? Any apps using this key will stop working.`, confirmText: 'Revoke', destructive: true })) return;
 
     try {
         const response = await fetch(`/api/v1/api-keys-internal/revoke/${keyId}`, { method: 'DELETE' });
@@ -3991,7 +4035,7 @@ async function authenticateSpotify() {
 }
 
 async function disconnectSpotify() {
-    if (!confirm('Disconnect Spotify? The app will switch to Apple Music/iTunes for metadata.')) {
+    if (!await showConfirmDialog({ title: 'Disconnect Spotify', message: 'Disconnect Spotify? The app will switch to Apple Music/iTunes for metadata.' })) {
         return;
     }
     try {
@@ -8452,7 +8496,7 @@ function closeWishlistOverviewModal() {
 async function cleanupWishlistOverview() {
     console.log('🧹 cleanupWishlistOverview() called');
 
-    if (!confirm('This will remove all tracks from the wishlist that already exist in your library. Continue?')) {
+    if (!await showConfirmDialog({ title: 'Cleanup Wishlist', message: 'This will remove all tracks from the wishlist that already exist in your library. Continue?' })) {
         return;
     }
 
@@ -8503,7 +8547,7 @@ async function cleanupWishlistOverview() {
 async function clearEntireWishlist() {
     console.log('🗑️ clearEntireWishlist() called');
 
-    if (!confirm('⚠️ WARNING: This will permanently delete ALL tracks from your wishlist.\n\nThis action cannot be undone.\n\nAre you sure you want to continue?')) {
+    if (!await showConfirmDialog({ title: 'Clear Wishlist', message: 'WARNING: This will permanently delete ALL tracks from your wishlist.\n\nThis action cannot be undone.\n\nAre you sure you want to continue?', confirmText: 'Clear All', destructive: true })) {
         console.log('User cancelled confirmation');
         return;
     }
@@ -10015,7 +10059,7 @@ function _renderCandidatesModal(data) {
 }
 
 async function downloadCandidate(taskId, candidate, trackName) {
-    if (!confirm(`Download this file as "${trackName}"?\n\n${candidate.filename?.split(/[/\\]/).pop() || 'Unknown file'}\nfrom ${candidate.username || 'Unknown user'}`)) return;
+    if (!await showConfirmDialog({ title: 'Download File', message: `Download this file as "${trackName}"?\n\n${candidate.filename?.split(/[/\\]/).pop() || 'Unknown file'}\nfrom ${candidate.username || 'Unknown user'}`, confirmText: 'Download' })) return;
     try {
         const resp = await fetch(`/api/downloads/task/${encodeURIComponent(taskId)}/download-candidate`, {
             method: 'POST',
@@ -11526,7 +11570,7 @@ async function clearFinishedDownloads() {
 }
 
 async function cancelAllDownloads() {
-    if (!confirm('Cancel ALL active downloads and clear the transfer list? This cannot be undone.')) {
+    if (!await showConfirmDialog({ title: 'Cancel All Downloads', message: 'Cancel ALL active downloads and clear the transfer list? This cannot be undone.', confirmText: 'Cancel All', destructive: true })) {
         return;
     }
 
@@ -15344,7 +15388,7 @@ function downloadBackup(filename) {
 }
 
 async function restoreBackup(filename) {
-    if (!confirm(`Restore database from "${filename}"?\n\nA safety backup of the current database will be created first.`)) return;
+    if (!await showConfirmDialog({ title: 'Restore Backup', message: `Restore database from "${filename}"?\n\nA safety backup of the current database will be created first.`, confirmText: 'Restore' })) return;
     try {
         const res = await fetch(`/api/database/backups/${encodeURIComponent(filename)}/restore`, { method: 'POST' });
         const data = await res.json();
@@ -15360,7 +15404,7 @@ async function restoreBackup(filename) {
 }
 
 async function deleteBackup(filename) {
-    if (!confirm(`Delete backup "${filename}"? This cannot be undone.`)) return;
+    if (!await showConfirmDialog({ title: 'Delete Backup', message: `Delete backup "${filename}"? This cannot be undone.`, confirmText: 'Delete', destructive: true })) return;
     try {
         const res = await fetch(`/api/database/backups/${encodeURIComponent(filename)}`, { method: 'DELETE' });
         const data = await res.json();
@@ -19159,7 +19203,7 @@ async function handleDbUpdateButtonClick() {
 
         if (isFullRefresh) {
             // Replicates the QMessageBox confirmation from the GUI
-            const confirmed = confirm("⚠️ Full Refresh Warning!\n\nThis will clear and rebuild the database for the active server. It can take a long time. Are you sure you want to proceed?");
+            const confirmed = await showConfirmDialog({ title: 'Full Refresh', message: 'This will clear and rebuild the database for the active server. It can take a long time.\n\nAre you sure you want to proceed?', confirmText: 'Proceed' });
             if (!confirmed) return;
         }
 
@@ -19275,13 +19319,10 @@ async function handleWishlistButtonClick() {
 async function cleanupWishlist(playlistId) {
     try {
         // Show information dialog
-        const confirmed = confirm(
-            "Cleanup Wishlist\n\n" +
-            "This will check all wishlist tracks against your music library and automatically remove " +
-            "any tracks that already exist in your database.\n\n" +
-            "This is a safe operation that only removes tracks you already have. " +
-            "Continue with cleanup?"
-        );
+        const confirmed = await showConfirmDialog({
+            title: 'Cleanup Wishlist',
+            message: 'This will check all wishlist tracks against your music library and automatically remove any tracks that already exist in your database.\n\nThis is a safe operation that only removes tracks you already have. Continue with cleanup?'
+        });
 
         if (!confirmed) {
             return;
@@ -19340,12 +19381,12 @@ async function cleanupWishlist(playlistId) {
 async function clearWishlist(playlistId) {
     try {
         // Show confirmation dialog
-        const confirmed = confirm(
-            "Clear Wishlist\n\n" +
-            "Are you sure you want to clear the entire wishlist?\n\n" +
-            "This will permanently remove all failed tracks from the wishlist. " +
-            "This action cannot be undone."
-        );
+        const confirmed = await showConfirmDialog({
+            title: 'Clear Wishlist',
+            message: 'Are you sure you want to clear the entire wishlist?\n\nThis will permanently remove all failed tracks from the wishlist. This action cannot be undone.',
+            confirmText: 'Clear All',
+            destructive: true
+        });
 
         if (!confirmed) {
             return;
@@ -29615,7 +29656,7 @@ async function batchRemoveFromWatchlist() {
     if (checked.length === 0) return;
 
     const count = checked.length;
-    if (!confirm(`Remove ${count} artist${count !== 1 ? 's' : ''} from your watchlist?`)) return;
+    if (!await showConfirmDialog({ title: 'Remove Artists', message: `Remove ${count} artist${count !== 1 ? 's' : ''} from your watchlist?`, confirmText: 'Remove', destructive: true })) return;
 
     const artistIds = checked.map(cb => cb.getAttribute('data-artist-id'));
 
@@ -42941,7 +42982,7 @@ function closeMirroredModal() {
  * Delete a mirrored playlist after confirmation.
  */
 async function clearMirroredDiscovery(playlistId, name) {
-    if (!confirm(`Clear discovery data for "${name}"? You can re-discover afterwards to get updated cover art.`)) return;
+    if (!await showConfirmDialog({ title: 'Clear Discovery Data', message: `Clear discovery data for "${name}"? You can re-discover afterwards to get updated cover art.` })) return;
     try {
         const res = await fetch(`/api/mirrored-playlists/${playlistId}/clear-discovery`, { method: 'POST' });
         const data = await res.json();
@@ -43236,7 +43277,7 @@ function renderPoolList() {
 }
 
 async function removePoolCacheEntry(entryId) {
-    if (!confirm('Remove this cached match? The track will be re-discovered fresh next time.')) return;
+    if (!await showConfirmDialog({ title: 'Remove Cache Entry', message: 'Remove this cached match? The track will be re-discovered fresh next time.' })) return;
     try {
         const res = await fetch(`/api/discovery-pool/cache/${entryId}`, { method: 'DELETE' });
         const data = await res.json();
@@ -43389,7 +43430,7 @@ async function selectPoolFixTrack(track) {
 }
 
 async function deleteMirroredPlaylist(playlistId, name) {
-    if (!confirm(`Delete mirrored playlist "${name}"?`)) return;
+    if (!await showConfirmDialog({ title: 'Delete Playlist', message: `Delete mirrored playlist "${name}"?`, confirmText: 'Delete', destructive: true })) return;
     try {
         const res = await fetch(`/api/mirrored-playlists/${playlistId}`, { method: 'DELETE' });
         const data = await res.json();
@@ -43792,7 +43833,7 @@ setInterval(() => {
 // --- CRUD ---
 
 async function deleteAutomation(id, name) {
-    if (!confirm('Delete automation "' + name + '"?')) return;
+    if (!await showConfirmDialog({ title: 'Delete Automation', message: `Delete automation "${name}"?`, confirmText: 'Delete', destructive: true })) return;
     try {
         const res = await fetch('/api/automations/' + id, { method: 'DELETE' });
         const data = await res.json();
