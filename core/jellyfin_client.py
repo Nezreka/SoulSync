@@ -113,6 +113,12 @@ class JellyfinTrack:
         
         self._album_id = jellyfin_data.get('AlbumId', '')
         self._artist_ids = [artist.get('Id', '') for artist in jellyfin_data.get('ArtistItems', [])]
+
+        # File path and media info (used by quality scanner and DB update)
+        self.path = jellyfin_data.get('Path')
+        # Extract bitrate from MediaSources if available
+        media_sources = jellyfin_data.get('MediaSources', [])
+        self.bitRate = (media_sources[0].get('Bitrate') or 0) // 1000 if media_sources else None  # Convert bps to kbps
         
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
         if not date_str:
@@ -508,7 +514,7 @@ class JellyfinClient:
                     'ParentId': self.music_library_id,
                     'IncludeItemTypes': 'Audio',
                     'Recursive': True,
-                    'Fields': 'AlbumId,ArtistItems',
+                    'Fields': 'AlbumId,ArtistItems,Path,MediaSources',
                     'SortBy': 'AlbumId,IndexNumber',
                     'SortOrder': 'Ascending',
                     'StartIndex': start_index,
@@ -658,7 +664,7 @@ class JellyfinClient:
                         'ParentId': album_id,
                         'IncludeItemTypes': 'Audio',
                         'Recursive': True,
-                        'Fields': 'AlbumId,ArtistItems',
+                        'Fields': 'AlbumId,ArtistItems,Path,MediaSources',
                         'SortBy': 'IndexNumber',
                         'SortOrder': 'Ascending',
                         'Limit': 200  # Most albums won't have more than 200 tracks
@@ -850,6 +856,7 @@ class JellyfinClient:
             params = {
                 'ParentId': album_id,
                 'IncludeItemTypes': 'Audio',
+                'Fields': 'Path,MediaSources',
                 'SortBy': 'IndexNumber',
                 'SortOrder': 'Ascending',
                 'Limit': 100  # Most albums won't hit this limit
@@ -986,8 +993,8 @@ class JellyfinClient:
                 'IncludeItemTypes': 'Audio',
                 'Recursive': True,
                 'SortBy': 'DateCreated',
-                'SortOrder': 'Descending', 
-                'Fields': 'AlbumId,ArtistItems',
+                'SortOrder': 'Descending',
+                'Fields': 'AlbumId,ArtistItems,Path,MediaSources',
                 'Limit': max_results
             }
             
@@ -1018,7 +1025,7 @@ class JellyfinClient:
                 'Recursive': True,
                 'SortBy': 'DateLastSaved',  # When track metadata was last saved
                 'SortOrder': 'Descending',
-                'Fields': 'AlbumId,ArtistItems',
+                'Fields': 'AlbumId,ArtistItems,Path,MediaSources',
                 'Limit': max_results
             }
             
@@ -1385,7 +1392,7 @@ class JellyfinClient:
                 'ParentId': playlist_id,
                 'IncludeItemTypes': 'Audio',
                 'Recursive': True,
-                'Fields': 'AlbumId,ArtistItems',
+                'Fields': 'AlbumId,ArtistItems,Path,MediaSources',
                 'SortBy': 'SortName',
                 'SortOrder': 'Ascending'
             }
