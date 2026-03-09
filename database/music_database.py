@@ -3515,8 +3515,12 @@ class MusicDatabase:
             # count so edition differences don't make a complete album appear incomplete.
             # e.g. user has standard edition (12 tracks, all present) but Spotify returns
             # deluxe edition count (20) — should show as complete, not 12/20.
-            if expected_track_count is not None and stored_track_count > 0 and owned_tracks >= stored_track_count:
-                # Album is complete by its own metadata — don't inflate expected with a different edition's count
+            if (expected_track_count is not None and stored_track_count > 0
+                    and owned_tracks >= stored_track_count
+                    and stored_track_count >= expected_track_count * 0.6):
+                # Album is complete by its own metadata — don't inflate expected with a different edition's count.
+                # Guard: stored count must be >=60% of expected to look like a plausible edition variant
+                # (standard 12 vs deluxe 20 = 60%), not just Plex's leafCount reflecting partial ownership.
                 expected_tracks = stored_track_count
             elif expected_track_count is not None:
                 expected_tracks = expected_track_count
