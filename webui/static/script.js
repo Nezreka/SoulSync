@@ -1826,6 +1826,7 @@ function handleVolumeChange(event) {
     const npFill = document.getElementById('np-volume-fill');
     if (npVol) npVol.value = volume;
     if (npFill) npFill.style.width = volume + '%';
+    updateNpMuteIcon();
 }
 
 function handleProgressBarChange(event) {
@@ -2446,8 +2447,18 @@ function onAudioEnded() {
     }
 
     // Repeat-one is handled by audioPlayer.loop (set in handleNpRepeat)
-    // Auto-advance to next track if queue exists (guard against race conditions)
-    if (npQueue.length > 0 && !npLoadingQueueItem) { playNextInQueue(); return; }
+    // Auto-advance to next track if queue has a next item (guard against race conditions)
+    if (npQueue.length > 0 && !npLoadingQueueItem) {
+        const hasNext = npShuffleOn
+            ? npQueue.length > 1
+            : (npQueueIndex < npQueue.length - 1 || npRepeatMode === 'all');
+        if (hasNext) { playNextInQueue(); return; }
+    }
+
+    // Radio mode: auto-fetch similar tracks when queue is exhausted
+    if (npRadioMode && currentTrack && currentTrack.id && !npLoadingQueueItem) {
+        npFetchRadioTracks();
+    }
 }
 
 function onAudioError(event) {
@@ -2613,7 +2624,7 @@ function canPlayAudioFormat(extension) {
 // ===============================
 
 let npModalOpen = false;
-let npRepeatMode = 'off';     // 'off' | 'one'
+let npRepeatMode = 'off';     // 'off' | 'all' | 'one'
 let npShuffleOn = false;
 let npQueue = [];
 let npQueueIndex = -1;
@@ -2621,6 +2632,13 @@ let npMuted = false;
 let npPreMuteVolume = 70;
 let npMediaSessionThrottle = 0;
 let npLoadingQueueItem = false;
+let npRadioMode = false;
+let npRecentlyPlayedIds = [];
+let npAudioContext = null;
+let npAnalyser = null;
+let npMediaSource = null;
+let npVizAnimFrame = null;
+let npVizInitialized = false;
 
 function initExpandedPlayer() {
     const closeBtn = document.getElementById('np-close-btn');
@@ -2646,10 +2664,21 @@ function initExpandedPlayer() {
     repeatBtn.addEventListener('click', handleNpRepeat);
     muteBtn.addEventListener('click', handleNpMuteToggle);
 
-    // Progress bar
+    // Progress bar (mouse)
     npProgressBar.addEventListener('input', handleNpProgressBarChange);
     npProgressBar.addEventListener('mousedown', () => { npProgressBar.dataset.seeking = 'true'; });
     npProgressBar.addEventListener('mouseup', () => { delete npProgressBar.dataset.seeking; });
+
+    // Progress bar (touch)
+    npProgressBar.addEventListener('touchstart', () => { npProgressBar.dataset.seeking = 'true'; }, { passive: true });
+    npProgressBar.addEventListener('touchmove', (e) => {
+        const touch = e.touches[0];
+        const rect = npProgressBar.getBoundingClientRect();
+        const pct = Math.max(0, Math.min(100, ((touch.clientX - rect.left) / rect.width) * 100));
+        npProgressBar.value = pct;
+        npProgressBar.dispatchEvent(new Event('input'));
+    }, { passive: true });
+    npProgressBar.addEventListener('touchend', () => { delete npProgressBar.dataset.seeking; }, { passive: true });
 
     // Volume slider
     npVolumeSlider.addEventListener('input', handleNpVolumeChange);
@@ -2686,6 +2715,70 @@ function initExpandedPlayer() {
     const queueClearBtn = document.getElementById('np-queue-clear');
     if (queueClearBtn) queueClearBtn.addEventListener('click', () => { clearQueue(); });
 
+    // Radio mode button
+    const radioBtn = document.getElementById('np-radio-btn');
+    if (radioBtn) {
+        radioBtn.addEventListener('click', () => {
+            npRadioMode = !npRadioMode;
+            radioBtn.classList.toggle('active', npRadioMode);
+            showToast(npRadioMode ? 'Radio mode on — similar tracks will auto-queue' : 'Radio mode off', 'success');
+            // Immediately fetch radio tracks if turned on while playing with empty/exhausted queue
+            if (npRadioMode && currentTrack && currentTrack.id && !npLoadingQueueItem) {
+                const hasNext = npQueue.length > 0 && (npShuffleOn
+                    ? npQueue.length > 1
+                    : (npQueueIndex < npQueue.length - 1 || npRepeatMode === 'all'));
+                if (!hasNext) {
+                    // Add current track to queue first so it appears as "now playing" in context
+                    if (npQueue.length === 0 && currentTrack.is_library) {
+                        npQueue.push({
+                            title: currentTrack.title,
+                            artist: currentTrack.artist,
+                            album: currentTrack.album,
+                            file_path: currentTrack.filename || currentTrack.file_path,
+                            filename: currentTrack.filename || currentTrack.file_path,
+                            is_library: true,
+                            image_url: currentTrack.image_url,
+                            id: currentTrack.id,
+                            artist_id: currentTrack.artist_id,
+                            album_id: currentTrack.album_id,
+                            bitrate: currentTrack.bitrate
+                        });
+                        npQueueIndex = 0;
+                        renderNpQueue();
+                        updateNpPrevNextButtons();
+                    }
+                    npFetchRadioTracks();
+                }
+            }
+        });
+    }
+
+    // Action button (Go to Artist)
+    const gotoArtistBtn = document.getElementById('np-goto-artist');
+    if (gotoArtistBtn) {
+        gotoArtistBtn.addEventListener('click', () => {
+            if (currentTrack && currentTrack.artist_id) {
+                closeNowPlayingModal();
+                navigateToArtistDetail(currentTrack.artist_id, currentTrack.artist || '');
+            }
+        });
+    }
+    // Buffering state listeners on audioPlayer
+    if (audioPlayer) {
+        audioPlayer.addEventListener('waiting', () => {
+            const ring = document.getElementById('np-buffering-ring');
+            if (ring) ring.classList.remove('hidden');
+        });
+        audioPlayer.addEventListener('canplay', () => {
+            const ring = document.getElementById('np-buffering-ring');
+            if (ring) ring.classList.add('hidden');
+        });
+        audioPlayer.addEventListener('playing', () => {
+            const ring = document.getElementById('np-buffering-ring');
+            if (ring) ring.classList.add('hidden');
+        });
+    }
+
     // Init Media Session API
     initMediaSession();
 }
@@ -2697,6 +2790,8 @@ function openNowPlayingModal() {
     overlay.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
     syncExpandedPlayerUI();
+    // Start visualizer if already playing
+    if (isPlaying) { npInitVisualizer(); npStartVisualizerLoop(); }
 }
 
 function closeNowPlayingModal() {
@@ -2705,6 +2800,7 @@ function closeNowPlayingModal() {
     npModalOpen = false;
     overlay.classList.add('hidden');
     document.body.style.overflow = '';
+    npStopVisualizerLoop();
 }
 
 function syncExpandedPlayerUI() {
@@ -2744,6 +2840,7 @@ function updateNpTrackInfo() {
     const artImg = document.getElementById('np-album-art');
     const artPlaceholder = document.getElementById('np-album-art-placeholder');
     const badgesEl = document.getElementById('np-format-badges');
+    const actionBtns = document.getElementById('np-action-buttons');
 
     if (!titleEl) return;
 
@@ -2751,18 +2848,40 @@ function updateNpTrackInfo() {
     const sidebarArt = document.getElementById('sidebar-album-art');
 
     if (currentTrack) {
-        titleEl.textContent = currentTrack.title || 'Unknown Track';
+        // Track text transition animation
+        const textEls = [titleEl, artistEl, albumEl];
+        const oldTitle = titleEl.textContent;
+        const newTitle = currentTrack.title || 'Unknown Track';
+        const trackChanged = oldTitle !== newTitle && oldTitle !== 'No track';
+
+        titleEl.textContent = newTitle;
         artistEl.textContent = currentTrack.artist || 'Unknown Artist';
         albumEl.textContent = currentTrack.album || 'Unknown Album';
 
-        // Album art (modal + sidebar)
+        if (trackChanged) {
+            textEls.forEach(el => {
+                el.classList.remove('np-text-transition');
+                void el.offsetWidth; // force reflow
+                el.classList.add('np-text-transition');
+            });
+        }
+
+        // Album art (modal + sidebar) + ambient glow extraction
         const artUrl = getNpAlbumArtUrl();
         if (artUrl && artImg) {
+            // Only set crossOrigin for external URLs — local paths break with CORS headers
+            if (artUrl.startsWith('http')) {
+                artImg.crossOrigin = 'anonymous';
+            } else {
+                artImg.removeAttribute('crossOrigin');
+            }
             artImg.src = artUrl;
             artImg.classList.remove('hidden');
-            artImg.onerror = () => { artImg.classList.add('hidden'); };
+            artImg.onerror = () => { artImg.classList.add('hidden'); npResetAmbientGlow(); };
+            artImg.onload = () => { npExtractAmbientColor(artImg); };
         } else if (artImg) {
             artImg.classList.add('hidden');
+            npResetAmbientGlow();
         }
         if (sidebarArt) {
             if (artUrl) {
@@ -2774,19 +2893,42 @@ function updateNpTrackInfo() {
             }
         }
 
-        // Format badges
+        // Format badges (richer: include bitrate/sample_rate)
         if (badgesEl) {
             badgesEl.innerHTML = '';
             const filename = currentTrack.filename || '';
             if (filename) {
                 const ext = getFileExtension(filename);
                 if (ext) {
+                    let label = ext.toUpperCase();
+                    if (currentTrack.sample_rate) {
+                        const khz = (currentTrack.sample_rate / 1000);
+                        label += ' ' + (khz % 1 === 0 ? khz.toFixed(0) : khz.toFixed(1)) + 'kHz';
+                    }
                     const badge = document.createElement('span');
                     badge.className = 'np-format-badge' + (ext === 'flac' ? ' flac' : '');
-                    badge.textContent = ext.toUpperCase();
+                    badge.textContent = label;
                     badgesEl.appendChild(badge);
                 }
+                if (currentTrack.bitrate) {
+                    const brBadge = document.createElement('span');
+                    brBadge.className = 'np-format-badge';
+                    brBadge.textContent = currentTrack.bitrate + 'k';
+                    badgesEl.appendChild(brBadge);
+                }
             }
+        }
+
+        // Action buttons visibility
+        if (actionBtns) {
+            const hasArtist = currentTrack.artist_id;
+            actionBtns.classList.toggle('hidden', !hasArtist);
+        }
+
+        // Track recently played for radio mode
+        if (currentTrack.id && !npRecentlyPlayedIds.includes(currentTrack.id)) {
+            npRecentlyPlayedIds.push(currentTrack.id);
+            if (npRecentlyPlayedIds.length > 50) npRecentlyPlayedIds.shift();
         }
     } else {
         titleEl.textContent = 'No track';
@@ -2795,6 +2937,46 @@ function updateNpTrackInfo() {
         if (artImg) artImg.classList.add('hidden');
         if (sidebarArt) sidebarArt.src = '';
         if (badgesEl) badgesEl.innerHTML = '';
+        if (actionBtns) actionBtns.classList.add('hidden');
+        npResetAmbientGlow();
+    }
+}
+
+function npExtractAmbientColor(imgEl) {
+    try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 50;
+        canvas.height = 50;
+        ctx.drawImage(imgEl, 0, 0, 50, 50);
+        const data = ctx.getImageData(0, 0, 50, 50).data;
+        let rSum = 0, gSum = 0, bSum = 0, count = 0;
+        for (let i = 0; i < data.length; i += 16) { // sample every 4th pixel
+            const r = data[i], g = data[i + 1], b = data[i + 2];
+            const brightness = (r + g + b) / 3;
+            if (brightness > 20 && brightness < 230) {
+                rSum += r; gSum += g; bSum += b; count++;
+            }
+        }
+        if (count > 0) {
+            const modal = document.querySelector('.np-modal');
+            if (modal) {
+                modal.style.setProperty('--np-ambient-r', Math.round(rSum / count));
+                modal.style.setProperty('--np-ambient-g', Math.round(gSum / count));
+                modal.style.setProperty('--np-ambient-b', Math.round(bSum / count));
+            }
+        }
+    } catch (e) {
+        // Cross-origin or canvas error — ignore silently
+    }
+}
+
+function npResetAmbientGlow() {
+    const modal = document.querySelector('.np-modal');
+    if (modal) {
+        modal.style.setProperty('--np-ambient-r', '29');
+        modal.style.setProperty('--np-ambient-g', '185');
+        modal.style.setProperty('--np-ambient-b', '84');
     }
 }
 
@@ -2808,6 +2990,14 @@ function updateNpPlayButton() {
 
     const viz = document.getElementById('np-visualizer');
     if (viz) viz.classList.toggle('playing', isPlaying);
+
+    // Drive Web Audio visualizer (only when modal is open to save CPU)
+    if (isPlaying && npModalOpen) {
+        npInitVisualizer();
+        npStartVisualizerLoop();
+    } else {
+        npStopVisualizerLoop();
+    }
 }
 
 function updateNpProgress() {
@@ -2916,10 +3106,15 @@ function handleNpShuffle() {
     npShuffleOn = !npShuffleOn;
     const btn = document.getElementById('np-shuffle-btn');
     if (btn) btn.classList.toggle('active', npShuffleOn);
+    updateNpPrevNextButtons();
 }
 
 function handleNpRepeat() {
+    const badge = document.getElementById('np-repeat-one-badge');
     if (npRepeatMode === 'off') {
+        npRepeatMode = 'all';
+        if (audioPlayer) audioPlayer.loop = false;
+    } else if (npRepeatMode === 'all') {
         npRepeatMode = 'one';
         if (audioPlayer) audioPlayer.loop = true;
     } else {
@@ -2928,6 +3123,8 @@ function handleNpRepeat() {
     }
     const btn = document.getElementById('np-repeat-btn');
     if (btn) btn.classList.toggle('active', npRepeatMode !== 'off');
+    if (badge) badge.classList.toggle('hidden', npRepeatMode !== 'one');
+    updateNpPrevNextButtons();
 }
 
 // ===============================
@@ -2940,7 +3137,7 @@ function addToQueue(track) {
     renderNpQueue();
     updateNpPrevNextButtons();
     // If nothing is currently playing, auto-play the first queued track
-    if (!currentTrack || (!isPlaying && audioPlayer && audioPlayer.paused && audioPlayer.currentTime === 0)) {
+    if (!currentTrack) {
         playQueueItem(npQueue.length - 1);
     }
 }
@@ -2952,6 +3149,7 @@ function removeFromQueue(index) {
     // Adjust current index
     if (npQueue.length === 0) {
         npQueueIndex = -1;
+        // Current track keeps playing but queue is now empty — that's OK
     } else if (index < npQueueIndex) {
         npQueueIndex--;
     } else if (wasCurrentTrack) {
@@ -2986,7 +3184,13 @@ function playNextInQueue() {
         playQueueItem(next);
     } else {
         const next = npQueueIndex + 1;
-        if (next >= npQueue.length) return; // End of queue
+        if (next >= npQueue.length) {
+            // End of queue — repeat-all wraps to start
+            if (npRepeatMode === 'all') {
+                playQueueItem(0);
+            }
+            return;
+        }
         playQueueItem(next);
     }
 }
@@ -3028,7 +3232,12 @@ async function playQueueItem(index) {
                 album: track.album,
                 filename: track.file_path,
                 is_library: true,
-                image_url: track.image_url
+                image_url: track.image_url,
+                id: track.id,
+                artist_id: track.artist_id,
+                album_id: track.album_id,
+                bitrate: track.bitrate,
+                sample_rate: track.sample_rate
             });
             showLoadingAnimation();
 
@@ -3056,7 +3265,12 @@ async function playQueueItem(index) {
                 album: track.album,
                 filename: track.filename || track.file_path,
                 is_library: false,
-                image_url: track.image_url
+                image_url: track.image_url,
+                id: track.id,
+                artist_id: track.artist_id,
+                album_id: track.album_id,
+                bitrate: track.bitrate,
+                sample_rate: track.sample_rate
             });
         }
     } catch (error) {
@@ -3130,7 +3344,7 @@ function updateNpPrevNextButtons() {
         prevBtn.disabled = !canPrev;
     }
     if (nextBtn) {
-        const canNext = npQueue.length > 0 && (npShuffleOn ? npQueue.length > 1 : npQueueIndex < npQueue.length - 1);
+        const canNext = npQueue.length > 0 && (npShuffleOn ? npQueue.length > 1 : (npQueueIndex < npQueue.length - 1 || npRepeatMode === 'all'));
         nextBtn.disabled = !canNext;
     }
 }
@@ -3205,6 +3419,126 @@ function syncVolumeUI(volumePercent) {
 function getNpAlbumArtUrl() {
     if (!currentTrack) return null;
     return currentTrack.image_url || currentTrack.album_cover_url || currentTrack.thumb_url || null;
+}
+
+// ===============================
+// WEB AUDIO VISUALIZER
+// ===============================
+
+function npInitVisualizer() {
+    if (npVizInitialized || !audioPlayer) return;
+    try {
+        if (!npAudioContext) {
+            npAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (!npMediaSource) {
+            npMediaSource = npAudioContext.createMediaElementSource(audioPlayer);
+            npAnalyser = npAudioContext.createAnalyser();
+            npAnalyser.fftSize = 64;
+            npAnalyser.smoothingTimeConstant = 0.8;
+            npMediaSource.connect(npAnalyser);
+            npAnalyser.connect(npAudioContext.destination);
+        }
+        npVizInitialized = true;
+    } catch (e) {
+        console.warn('Web Audio visualizer init failed, using CSS fallback:', e.message);
+        // Mark as CSS fallback
+        const viz = document.getElementById('np-visualizer');
+        if (viz) viz.classList.add('np-viz-css-fallback');
+        npVizInitialized = true; // don't retry
+    }
+}
+
+function npStartVisualizerLoop() {
+    if (npVizAnimFrame) return; // Already running
+    if (!npAnalyser) return; // No analyser — CSS fallback handles it
+
+    if (npAudioContext && npAudioContext.state === 'suspended') {
+        npAudioContext.resume();
+    }
+
+    const bars = document.querySelectorAll('.np-viz-bar');
+    if (bars.length === 0) return;
+    const bufferLength = npAnalyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    function draw() {
+        npVizAnimFrame = requestAnimationFrame(draw);
+        npAnalyser.getByteFrequencyData(dataArray);
+
+        // Map 7 bars to frequency bins (skip bin 0 which is DC offset)
+        const binCount = Math.min(bufferLength - 1, 7);
+        for (let i = 0; i < bars.length; i++) {
+            const binIndex = Math.min(i + 1, bufferLength - 1);
+            const value = dataArray[binIndex] / 255; // 0..1
+            const scale = Math.max(0.08, value); // minimum visible height
+            bars[i].style.transform = `scaleY(${scale})`;
+        }
+    }
+    draw();
+}
+
+function npStopVisualizerLoop() {
+    if (npVizAnimFrame) {
+        cancelAnimationFrame(npVizAnimFrame);
+        npVizAnimFrame = null;
+    }
+    // Reset bars to min
+    const bars = document.querySelectorAll('.np-viz-bar');
+    bars.forEach(bar => { bar.style.transform = 'scaleY(0.125)'; });
+}
+
+// ===============================
+// RADIO MODE
+// ===============================
+
+async function npFetchRadioTracks() {
+    if (!currentTrack || !currentTrack.id) return;
+    try {
+        npLoadingQueueItem = true;
+        const excludeIds = npRecentlyPlayedIds.join(',');
+        const resp = await fetch(`/api/library/radio?track_id=${currentTrack.id}&limit=50&exclude=${encodeURIComponent(excludeIds)}`);
+        if (!resp.ok) {
+            console.warn('Radio endpoint returned', resp.status);
+            npLoadingQueueItem = false;
+            return;
+        }
+        const data = await resp.json();
+        // Bail if radio was toggled off during the fetch
+        if (!npRadioMode) { npLoadingQueueItem = false; return; }
+        if (data.tracks && data.tracks.length > 0) {
+            data.tracks.forEach(t => {
+                npQueue.push({
+                    title: t.title || 'Unknown Track',
+                    artist: t.artist || 'Unknown Artist',
+                    album: t.album || 'Unknown Album',
+                    file_path: t.file_path,
+                    filename: t.file_path,
+                    is_library: true,
+                    image_url: t.image_url || null,
+                    id: t.id,
+                    artist_id: t.artist_id,
+                    album_id: t.album_id,
+                    bitrate: t.bitrate,
+                    sample_rate: t.sample_rate
+                });
+            });
+            showToast(`Radio: Added ${data.tracks.length} similar tracks`, 'success');
+            renderNpQueue();
+            updateNpPrevNextButtons();
+            npLoadingQueueItem = false;
+            // Only auto-advance if nothing is currently playing (triggered by onAudioEnded)
+            if (!isPlaying) {
+                playNextInQueue();
+            }
+        } else {
+            showToast('Radio: No similar tracks found', 'info');
+            npLoadingQueueItem = false;
+        }
+    } catch (e) {
+        console.warn('Radio fetch error:', e);
+        npLoadingQueueItem = false;
+    }
 }
 
 // Media Session API
@@ -33676,7 +34010,12 @@ function renderTrackTable(album) {
                     file_path: track.file_path,
                     filename: track.file_path,
                     is_library: true,
-                    image_url: albumArt
+                    image_url: albumArt,
+                    id: track.id,
+                    artist_id: artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : null,
+                    album_id: album.id,
+                    bitrate: track.bitrate,
+                    sample_rate: track.sample_rate
                 });
             };
             queueTd.appendChild(queueBtn);
@@ -34530,7 +34869,12 @@ async function playLibraryTrack(track, albumTitle, artistName) {
             album: albumTitle || 'Unknown Album',
             filename: track.file_path,
             is_library: true,
-            image_url: albumArt
+            image_url: albumArt,
+            id: track.id,
+            artist_id: track.artist_id,
+            album_id: track.album_id,
+            bitrate: track.bitrate,
+            sample_rate: track.sample_rate
         });
 
         // Show loading state
@@ -34557,6 +34901,8 @@ async function playLibraryTrack(track, albumTitle, artistName) {
             throw new Error(result.error || 'Failed to start library playback');
         }
 
+        // Re-apply repeat-one loop property
+        if (audioPlayer) audioPlayer.loop = (npRepeatMode === 'one');
         // Stream state is already "ready" — start audio playback directly
         await startAudioPlayback();
 
