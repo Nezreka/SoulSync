@@ -20,6 +20,86 @@ import queue
 _request_queue = queue.Queue()
 _queue_processor_running = False
 
+# Global rate limit ban state — when Spotify returns a long Retry-After (>60s),
+# we set this so ALL API calls are suppressed until the ban expires.
+_rate_limit_lock = threading.Lock()
+_rate_limit_until = 0       # Unix timestamp when the ban expires (0 = not banned)
+_rate_limit_retry_after = 0  # Original Retry-After value in seconds
+_rate_limit_endpoint = None  # Which function triggered the ban
+_rate_limit_set_at = 0       # When the ban was set
+
+# Threshold: if Retry-After exceeds this, activate global ban instead of sleeping
+_LONG_RATE_LIMIT_THRESHOLD = 60  # seconds
+
+
+class SpotifyRateLimitError(Exception):
+    """Raised when Spotify API calls are blocked due to active global rate limit ban."""
+    def __init__(self, retry_after, endpoint=None):
+        self.retry_after = retry_after
+        self.endpoint = endpoint
+        super().__init__(f"Spotify rate limited for {retry_after}s (triggered by {endpoint})")
+
+
+def _set_global_rate_limit(retry_after_seconds, endpoint_name):
+    """Activate the global rate limit ban."""
+    global _rate_limit_until, _rate_limit_retry_after, _rate_limit_endpoint, _rate_limit_set_at
+    with _rate_limit_lock:
+        now = time.time()
+        new_until = now + retry_after_seconds
+        # Only update if this extends the existing ban
+        if new_until > _rate_limit_until:
+            _rate_limit_until = new_until
+            _rate_limit_retry_after = retry_after_seconds
+            _rate_limit_endpoint = endpoint_name
+            _rate_limit_set_at = now
+            logger.warning(
+                f"GLOBAL RATE LIMIT ACTIVATED: {retry_after_seconds}s ban "
+                f"(expires {time.strftime('%H:%M:%S', time.localtime(new_until))}) "
+                f"triggered by {endpoint_name}"
+            )
+
+
+def _is_globally_rate_limited():
+    """Check if the global rate limit ban is active."""
+    with _rate_limit_lock:
+        if _rate_limit_until <= 0:
+            return False
+        if time.time() >= _rate_limit_until:
+            # Ban expired — clear it
+            return False
+        return True
+
+
+def _get_rate_limit_info():
+    """Get current rate limit ban details. Returns None if not rate limited."""
+    with _rate_limit_lock:
+        if _rate_limit_until <= 0:
+            return None
+        now = time.time()
+        remaining = _rate_limit_until - now
+        if remaining <= 0:
+            return None
+        return {
+            'active': True,
+            'remaining_seconds': int(remaining),
+            'retry_after': _rate_limit_retry_after,
+            'endpoint': _rate_limit_endpoint,
+            'set_at': _rate_limit_set_at,
+            'expires_at': _rate_limit_until
+        }
+
+
+def _clear_rate_limit():
+    """Manually clear the global rate limit ban (e.g. after disconnect/reconnect)."""
+    global _rate_limit_until, _rate_limit_retry_after, _rate_limit_endpoint, _rate_limit_set_at
+    with _rate_limit_lock:
+        _rate_limit_until = 0
+        _rate_limit_retry_after = 0
+        _rate_limit_endpoint = None
+        _rate_limit_set_at = 0
+    logger.info("Global rate limit ban cleared")
+
+
 def rate_limited(func):
     """Decorator to enforce rate limiting on Spotify API calls with retry and exponential backoff"""
     @wraps(func)
@@ -42,12 +122,14 @@ def rate_limited(func):
 
             try:
                 return func(*args, **kwargs)
+            except SpotifyRateLimitError:
+                raise  # Don't retry our own ban errors
             except Exception as e:
                 error_str = str(e).lower()
                 is_rate_limit = "rate limit" in error_str or "429" in str(e)
                 is_server_error = "502" in str(e) or "503" in str(e)
 
-                if is_rate_limit and attempt < max_retries:
+                if is_rate_limit:
                     # Try to extract Retry-After from spotipy exception headers
                     retry_after = None
                     if hasattr(e, 'headers') and e.headers:
@@ -55,15 +137,26 @@ def rate_limited(func):
 
                     if retry_after:
                         try:
-                            delay = int(retry_after) + 1
+                            delay = int(retry_after)
                         except (ValueError, TypeError):
+                            delay = None
+
+                        # If Retry-After is long, activate global ban instead of sleeping
+                        if delay and delay > _LONG_RATE_LIMIT_THRESHOLD:
+                            _set_global_rate_limit(delay, func.__name__)
+                            raise SpotifyRateLimitError(delay, func.__name__)
+
+                        if delay:
+                            delay = delay + 1
+                        else:
                             delay = 3.0 * (2 ** attempt)
                     else:
                         delay = 3.0 * (2 ** attempt)  # 3, 6, 12, 24, 48
 
-                    logger.warning(f"Spotify rate limit hit, retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries}): {func.__name__}")
-                    time.sleep(delay)
-                    continue
+                    if attempt < max_retries:
+                        logger.warning(f"Spotify rate limit hit, retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries}): {func.__name__}")
+                        time.sleep(delay)
+                        continue
 
                 elif is_server_error and attempt < max_retries:
                     delay = 2.0 * (2 ** attempt)  # 2, 4, 8, 16, 32
@@ -246,7 +339,10 @@ class SpotifyClient:
                 cache_path='config/.spotify_cache'
             )
             
-            self.sp = spotipy.Spotify(auth_manager=auth_manager)
+            self.sp = spotipy.Spotify(auth_manager=auth_manager, retries=0, requests_timeout=15)
+            # retries=0: prevent spotipy from sleeping for Retry-After duration on 429s
+            # (can be hours). Our rate_limited decorator + global ban handle retries instead.
+            # requests_timeout=15: prevent any single request from hanging indefinitely.
             # Don't fetch user info on startup - do it lazily to avoid blocking UI
             self.user_id = None
             logger.info("Spotify client initialized (user info will be fetched when needed)")
@@ -280,15 +376,20 @@ class SpotifyClient:
         if self.sp is None:
             return False
 
+        # If globally rate limited, report as NOT authenticated so callers
+        # skip Spotify and fall through to iTunes fallback naturally.
+        # This prevents any API calls that could extend the ban.
+        if _is_globally_rate_limited():
+            return False
+
         # Check cache first (lock only for brief read)
         with self._auth_cache_lock:
             if self._auth_cached_result is not None and (time.time() - self._auth_cache_time) < self._AUTH_CACHE_TTL:
                 return self._auth_cached_result
 
         # Cache miss — make API call outside the lock.
-        # Use a no-retry client to avoid spotipy blocking for hours on 429s
-        # (Retry-After can be 2+ hours). The main self.sp client keeps its
-        # retries for normal API calls.
+        # Use a dedicated probe client (retries=0) so a 429 here propagates
+        # immediately and we can detect long Retry-After bans.
         try:
             probe = spotipy.Spotify(auth_manager=self.sp.auth_manager, retries=0)
             probe.current_user()
@@ -298,6 +399,17 @@ class SpotifyClient:
             # Rate limit means we ARE authenticated — just throttled
             if "rate" in error_str.lower() or "429" in error_str:
                 logger.warning("Spotify rate limited during auth check — treating as authenticated")
+                # Check if there's a Retry-After header indicating a long ban
+                retry_after = None
+                if hasattr(e, 'headers') and e.headers:
+                    retry_after = e.headers.get('Retry-After') or e.headers.get('retry-after')
+                if retry_after:
+                    try:
+                        delay = int(retry_after)
+                        if delay > _LONG_RATE_LIMIT_THRESHOLD:
+                            _set_global_rate_limit(delay, 'is_spotify_authenticated')
+                    except (ValueError, TypeError):
+                        pass
                 result = True
             else:
                 logger.debug(f"Spotify authentication check failed: {e}")
@@ -310,11 +422,12 @@ class SpotifyClient:
         return result
 
     def disconnect(self):
-        """Disconnect Spotify: clear client, delete cache, invalidate auth cache"""
+        """Disconnect Spotify: clear client, delete cache, invalidate auth cache, clear rate limit"""
         import os
         self.sp = None
         self.user_id = None
         self._invalidate_auth_cache()
+        _clear_rate_limit()
 
         cache_path = 'config/.spotify_cache'
         try:
@@ -325,6 +438,21 @@ class SpotifyClient:
             logger.warning(f"Failed to delete Spotify cache: {e}")
 
         logger.info("Spotify client disconnected")
+
+    @staticmethod
+    def is_rate_limited():
+        """Check if Spotify is globally rate limited."""
+        return _is_globally_rate_limited()
+
+    @staticmethod
+    def get_rate_limit_info():
+        """Get rate limit ban details. Returns None if not rate limited."""
+        return _get_rate_limit_info()
+
+    @staticmethod
+    def clear_rate_limit():
+        """Manually clear the rate limit ban."""
+        _clear_rate_limit()
     
     def _ensure_user_id(self) -> bool:
         """Ensure user_id is loaded (may make API call)"""

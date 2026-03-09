@@ -3350,16 +3350,26 @@ def get_status():
         # Test Spotify - with caching to avoid excessive API calls
         if current_time - _status_cache_timestamps['spotify'] > STATUS_CACHE_TTL:
             spotify_start = time.time()
-            # Single auth check — is_spotify_authenticated() is cached internally (60s TTL)
+            # Auth check first — may detect and set a new rate limit ban via probe
             spotify_connected = spotify_client.is_spotify_authenticated()
             spotify_response_time = (time.time() - spotify_start) * 1000
 
-            music_source = 'spotify' if spotify_connected else 'itunes'
+            # Check rate limit AFTER auth (auth probe may have just set the ban)
+            rate_limit_info = spotify_client.get_rate_limit_info()
+
+            # During rate limit, is_spotify_authenticated() returns False to suppress calls,
+            # but we still report source as 'spotify' so UI doesn't flip to "Apple Music"
+            if rate_limit_info:
+                music_source = 'spotify'
+            else:
+                music_source = 'spotify' if spotify_connected else 'itunes'
 
             _status_cache['spotify'] = {
                 'connected': True,  # Always true — iTunes fallback is always available
                 'response_time': round(spotify_response_time, 1),
-                'source': music_source
+                'source': music_source,
+                'rate_limited': rate_limit_info is not None,
+                'rate_limit': rate_limit_info
             }
             _status_cache_timestamps['spotify'] = current_time
         # else: use cached value
@@ -5302,12 +5312,17 @@ def spotify_disconnect():
     """Disconnect Spotify and fall back to iTunes/Apple Music"""
     global spotify_client
     try:
+        # Pause enrichment worker before disconnecting to prevent it from hammering API
+        if spotify_enrichment_worker:
+            spotify_enrichment_worker.pause()
         spotify_client.disconnect()
         # Immediately update status cache so UI reflects the change
         _status_cache['spotify'] = {
             'connected': True,  # iTunes fallback is always available
             'response_time': 0,
-            'source': 'itunes'
+            'source': 'itunes',
+            'rate_limited': False,
+            'rate_limit': None
         }
         _status_cache_timestamps['spotify'] = time.time()
         add_activity_item("🔌", "Spotify Disconnected", "Switched to Apple Music/iTunes metadata source", "Now")
@@ -5315,6 +5330,25 @@ def spotify_disconnect():
     except Exception as e:
         logger.error(f"Error disconnecting Spotify: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/spotify/rate-limit-status', methods=['GET'])
+def spotify_rate_limit_status():
+    """Get Spotify rate limit ban details"""
+    try:
+        info = spotify_client.get_rate_limit_info()
+        if info:
+            return jsonify({
+                'rate_limited': True,
+                'remaining_seconds': info['remaining_seconds'],
+                'retry_after': info['retry_after'],
+                'endpoint': info['endpoint'],
+                'expires_at': info['expires_at']
+            })
+        return jsonify({'rate_limited': False})
+    except Exception as e:
+        logger.error(f"Error getting Spotify rate limit status: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/tidal/callback')
@@ -34160,8 +34194,15 @@ def _build_status_payload():
     download_mode = config_manager.get('download_source.mode', 'soulseek')
     soulseek_data = dict(_status_cache.get('soulseek', {}))
     soulseek_data['source'] = download_mode
+
+    # Always include fresh rate limit info (it changes over time as ban expires)
+    spotify_data = dict(_status_cache.get('spotify', {}))
+    rate_limit_info = spotify_client.get_rate_limit_info() if spotify_client else None
+    spotify_data['rate_limited'] = rate_limit_info is not None
+    spotify_data['rate_limit'] = rate_limit_info
+
     return {
-        'spotify': _status_cache.get('spotify', {}),
+        'spotify': spotify_data,
         'media_server': _status_cache.get('media_server', {}),
         'soulseek': soulseek_data,
         'active_media_server': config_manager.get_active_media_server()
