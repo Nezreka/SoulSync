@@ -138,6 +138,20 @@
 
             <!-- Media Player Section -->
             <div class="media-player" id="media-player">
+                <!-- Progress bar at top of player -->
+                <div class="player-top-progress">
+                    <div class="progress-bar-container">
+                        <div class="progress-track">
+                            <div class="progress-fill" id="progress-fill"></div>
+                        </div>
+                        <input type="range" class="progress-bar" id="progress-bar" min="0" max="100" value="0" step="0.1">
+                    </div>
+                    <div class="time-display">
+                        <span class="current-time" id="current-time">0:00</span>
+                        <span class="total-time" id="total-time">0:00</span>
+                    </div>
+                </div>
+
                 <!-- Loading Animation -->
                 <div class="loading-animation hidden" id="loading-animation">
                     <div class="loading-bar">
@@ -146,47 +160,46 @@
                     <div class="loading-text">0%</div>
                 </div>
 
-                <!-- Header (always visible) -->
+                <!-- Track info row -->
                 <div class="media-header">
+                    <img class="sidebar-album-art" id="sidebar-album-art" src="" alt="">
                     <div class="media-info">
                         <div class="track-title" id="track-title">No track</div>
                         <div class="artist-name" id="artist-name">Unknown Artist</div>
-                    </div>
-                    <button class="play-button" id="play-button" disabled>▷</button>
-                </div>
-
-                <!-- Expanded Content (hidden initially) -->
-                <div class="media-expanded hidden" id="media-expanded">
-                    <div class="album-name" id="album-name">Unknown Album</div>
-
-                    <!-- Progress Bar and Time Display -->
-                    <div class="progress-section">
-                        <div class="time-display">
-                            <span class="current-time" id="current-time">0:00</span>
-                            <span class="time-separator">/</span>
-                            <span class="total-time" id="total-time">0:00</span>
-                        </div>
-                        <div class="progress-bar-container">
-                            <div class="progress-track">
-                                <div class="progress-fill" id="progress-fill"></div>
-                            </div>
-                            <input type="range" class="progress-bar" id="progress-bar" min="0" max="100" value="0"
-                                step="0.1">
-                        </div>
-                    </div>
-
-                    <div class="media-controls">
-                        <div class="volume-control">
-                            <span class="volume-icon">🔊</span>
-                            <input type="range" class="volume-slider" id="volume-slider" min="0" max="100" value="70">
-                        </div>
-                        <button class="stop-button" id="stop-button" disabled>⏹</button>
+                        <div class="album-name header-album" id="album-name">Unknown Album</div>
                     </div>
                 </div>
+
+                <!-- Controls row (always visible) -->
+                <div class="media-controls-row">
+                    <button class="play-button" id="play-button" disabled>
+                        <svg class="play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                        <svg class="pause-icon" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>
+                    </button>
+                    <div class="volume-control">
+                        <span class="volume-icon">
+                            <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+                        </span>
+                        <input type="range" class="volume-slider" id="volume-slider" min="0" max="100" value="70">
+                    </div>
+                    <button class="stop-button" id="stop-button" disabled>
+                        <svg viewBox="0 0 24 24" fill="currentColor" width="12" height="12"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+                    </button>
+                    <button class="expand-hint" aria-label="Expand player">
+                        <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M3 10l5 4 5-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                </div>
+
+                <!-- Expanded Content (kept for backward compat, hidden) -->
+                <div class="media-expanded hidden" id="media-expanded"></div>
 
                 <!-- No Track Message -->
                 <div class="no-track-message" id="no-track-message">
-                    Start playing music to see controls
+                    <svg class="no-track-icon" viewBox="0 0 48 48" fill="none" width="28" height="28">
+                        <circle cx="24" cy="24" r="22" stroke="currentColor" stroke-width="1.5" opacity="0.25"/>
+                        <path d="M20 16l12 8-12 8z" fill="currentColor" opacity="0.2"/>
+                    </svg>
+                    <span>Play a track to get started</span>
                 </div>
             </div>
 
@@ -4067,6 +4080,107 @@
 
     <!-- Hidden HTML5 Audio Player for Streaming -->
     <audio id="audio-player" style="display: none;"></audio>
+
+    <!-- Expanded Now Playing Modal -->
+    <div class="np-modal-overlay hidden" id="np-modal-overlay">
+        <div class="np-modal">
+            <button class="np-close-btn" id="np-close-btn">&times;</button>
+            <div class="np-body">
+                <!-- Left: album art + track info -->
+                <div class="np-left">
+                    <div class="np-album-art-container">
+                        <img class="np-album-art hidden" id="np-album-art" src="" alt="Album Art">
+                        <div class="np-album-art-placeholder" id="np-album-art-placeholder">
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
+                            </svg>
+                        </div>
+                    </div>
+                    <div class="np-track-info">
+                        <div class="np-track-title" id="np-track-title">No track</div>
+                        <div class="np-artist-name" id="np-artist-name">Unknown Artist</div>
+                        <div class="np-album-name" id="np-album-name">Unknown Album</div>
+                        <div class="np-format-badges" id="np-format-badges"></div>
+                    </div>
+                </div>
+                <!-- Right: controls -->
+                <div class="np-right">
+                    <div class="np-progress-section">
+                        <div class="np-progress-bar-container">
+                            <div class="np-progress-track">
+                                <div class="np-progress-fill" id="np-progress-fill"></div>
+                            </div>
+                            <input type="range" class="np-progress-bar" id="np-progress-bar" min="0" max="100" value="0" step="0.1">
+                        </div>
+                        <div class="np-time-display">
+                            <span class="np-current-time" id="np-current-time">0:00</span>
+                            <span class="np-total-time" id="np-total-time">0:00</span>
+                        </div>
+                    </div>
+                    <div class="np-controls-row">
+                        <button class="np-btn np-btn-shuffle" id="np-shuffle-btn" title="Shuffle">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+                        </button>
+                        <button class="np-btn np-btn-prev" id="np-prev-btn" title="Previous" disabled>
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+                        </button>
+                        <button class="np-btn np-btn-play" id="np-play-btn" title="Play">
+                            <svg class="np-icon-play" width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                            <svg class="np-icon-pause hidden" width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                        </button>
+                        <button class="np-btn np-btn-next" id="np-next-btn" title="Next" disabled>
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+                        </button>
+                        <button class="np-btn np-btn-repeat" id="np-repeat-btn" title="Repeat">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                        </button>
+                    </div>
+                    <div class="np-volume-row">
+                        <button class="np-mute-btn" id="np-mute-btn" title="Mute">
+                            <svg class="np-icon-vol" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                            <svg class="np-icon-muted hidden" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                        </button>
+                        <div class="np-volume-slider-container">
+                            <div class="np-volume-track">
+                                <div class="np-volume-fill" id="np-volume-fill"></div>
+                            </div>
+                            <input type="range" class="np-volume-slider" id="np-volume-slider" min="0" max="100" value="70">
+                        </div>
+                    </div>
+                    <div class="np-stop-row">
+                        <button class="np-btn np-btn-stop" id="np-stop-btn" title="Stop playback">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                            <span>Stop</span>
+                        </button>
+                    </div>
+                    <div class="np-visualizer" id="np-visualizer">
+                        <div class="np-viz-bar"></div>
+                        <div class="np-viz-bar"></div>
+                        <div class="np-viz-bar"></div>
+                        <div class="np-viz-bar"></div>
+                        <div class="np-viz-bar"></div>
+                        <div class="np-viz-bar"></div>
+                        <div class="np-viz-bar"></div>
+                    </div>
+                </div>
+            </div>
+            <!-- Queue Panel -->
+            <div class="np-queue-panel" id="np-queue-panel">
+                <div class="np-queue-header">
+                    <button class="np-queue-toggle" id="np-queue-toggle" title="Toggle queue">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                        <span>Queue</span>
+                        <span class="np-queue-count" id="np-queue-count"></span>
+                    </button>
+                    <button class="np-queue-clear-btn" id="np-queue-clear" title="Clear queue">Clear</button>
+                </div>
+                <div class="np-queue-body hidden" id="np-queue-body">
+                    <div class="np-queue-empty" id="np-queue-empty">Queue is empty</div>
+                    <div class="np-queue-list" id="np-queue-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Matched Download Modal -->
     <div class="modal-overlay hidden" id="matching-modal-overlay">
