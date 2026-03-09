@@ -29,6 +29,9 @@ from config.settings import config_manager
 # Initialize logger
 logger = get_logger("web_server")
 
+# App version — single source of truth for backup metadata, version-info endpoint, etc.
+SOULSYNC_VERSION = "1.8"
+
 # Dedicated source reuse logger — writes to logs/source_reuse.log
 import logging as _logging
 import logging.handlers as _logging_handlers
@@ -14522,9 +14525,9 @@ def get_version_info():
     This provides the same data that the GUI version modal displays.
     """
     version_data = {
-        "version": "1.8",
+        "version": SOULSYNC_VERSION,
         "title": "What's New in SoulSync",
-        "subtitle": "Version 1.8 — Latest Changes",
+        "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
                 "title": "🎵 Now Playing Overhaul",
@@ -16386,14 +16389,27 @@ def backup_database_endpoint():
         dst.close()
         src.close()
         size_mb = round(os.path.getsize(backup_path) / (1024 * 1024), 1)
+        # Write version metadata sidecar
+        meta_path = backup_path + '.meta.json'
+        try:
+            with open(meta_path, 'w') as mf:
+                json.dump({"version": SOULSYNC_VERSION, "created": timestamp}, mf)
+        except Exception:
+            pass  # Non-critical — backup still works without metadata
         # Rolling cleanup
         existing = sorted(_glob.glob(f"{db_path}.backup_*"), key=os.path.getmtime)
+        # Filter out .meta.json files from the backup list
+        existing = [f for f in existing if not f.endswith('.meta.json')]
         while len(existing) > max_backups:
             try:
-                os.remove(existing.pop(0))
+                removed = existing.pop(0)
+                os.remove(removed)
+                # Also remove sidecar if present
+                if os.path.exists(removed + '.meta.json'):
+                    os.remove(removed + '.meta.json')
             except Exception:
                 pass
-        return jsonify({"success": True, "backup_path": backup_path, "size_mb": size_mb})
+        return jsonify({"success": True, "backup_path": backup_path, "size_mb": size_mb, "version": SOULSYNC_VERSION})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -16414,11 +16430,21 @@ def list_backups_endpoint():
             if not _BACKUP_FILENAME_RE.match(fname):
                 continue
             stat = os.stat(fp)
-            backups.append({
+            entry = {
                 'filename': fname,
                 'size_mb': round(stat.st_size / (1024 * 1024), 2),
                 'created': datetime.utcfromtimestamp(stat.st_mtime).isoformat()
-            })
+            }
+            # Read version from sidecar metadata if available
+            meta_path = fp + '.meta.json'
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, 'r') as mf:
+                        meta = json.load(mf)
+                    entry['version'] = meta.get('version')
+                except Exception:
+                    pass
+            backups.append(entry)
         db_size_mb = round(os.path.getsize(db_path) / (1024 * 1024), 2) if os.path.exists(db_path) else 0
         return jsonify({
             'success': True,
@@ -16440,6 +16466,13 @@ def delete_backup_endpoint(filename):
         if not os.path.exists(backup_path):
             return jsonify({"success": False, "error": "Backup not found"}), 404
         os.remove(backup_path)
+        # Also remove sidecar metadata if present
+        meta_path = backup_path + '.meta.json'
+        if os.path.exists(meta_path):
+            try:
+                os.remove(meta_path)
+            except Exception:
+                pass
         return jsonify({"success": True, "deleted": filename})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -16457,6 +16490,31 @@ def restore_backup_endpoint(filename):
         if not os.path.exists(backup_path):
             return jsonify({"success": False, "error": "Backup not found"}), 404
 
+        # Check version compatibility
+        backup_version = None
+        meta_path = backup_path + '.meta.json'
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, 'r') as mf:
+                    meta = json.load(mf)
+                backup_version = meta.get('version')
+            except Exception:
+                pass
+
+        version_warning = None
+        if backup_version and backup_version != SOULSYNC_VERSION:
+            # Allow restore but warn — the caller must pass force=true to confirm
+            force = request.json.get('force', False) if request.is_json else False
+            if not force:
+                return jsonify({
+                    "success": False,
+                    "version_mismatch": True,
+                    "backup_version": backup_version,
+                    "current_version": SOULSYNC_VERSION,
+                    "error": f"This backup was created on SoulSync v{backup_version}, but you're running v{SOULSYNC_VERSION}. Restoring may cause issues. Send force=true to proceed."
+                }), 409
+            version_warning = f"Restored from v{backup_version} backup (current: v{SOULSYNC_VERSION})"
+
         # Create safety backup of current DB before restoring
         safety_ts = datetime.now().strftime('%Y%m%d_%H%M%S')
         safety_filename = f"music_library.db.backup_{safety_ts}"
@@ -16466,6 +16524,12 @@ def restore_backup_endpoint(filename):
         src_conn.backup(dst_conn)
         dst_conn.close()
         src_conn.close()
+        # Write version metadata for the safety backup too
+        try:
+            with open(safety_path + '.meta.json', 'w') as mf:
+                json.dump({"version": SOULSYNC_VERSION, "created": safety_ts}, mf)
+        except Exception:
+            pass
 
         # Restore using SQLite backup API (handles concurrent access safely)
         from database.music_database import close_database, get_database
@@ -16484,12 +16548,17 @@ def restore_backup_endpoint(filename):
             cursor.execute("SELECT COUNT(*) FROM artists")
             artist_count = cursor.fetchone()[0]
 
-        return jsonify({
+        result = {
             "success": True,
             "restored_from": filename,
             "safety_backup": safety_filename,
             "artist_count": artist_count
-        })
+        }
+        if backup_version:
+            result["backup_version"] = backup_version
+        if version_warning:
+            result["version_warning"] = version_warning
+        return jsonify(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

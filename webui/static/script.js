@@ -2327,7 +2327,10 @@ async function startAudioPlayback() {
         }
 
         showToast(userMessage, 'error');
-        clearTrack();
+        // Only clear track if not in queue playback mode — queue handles its own error recovery
+        if (npQueue.length === 0) {
+            clearTrack();
+        }
     }
 }
 
@@ -2503,7 +2506,10 @@ function onAudioError(event) {
             }
 
             showToast(userMessage, 'error');
-            clearTrack();
+            // Only clear track if not in queue playback — queue handles its own recovery
+            if (npQueue.length === 0) {
+                clearTrack();
+            }
         }
     }, 2000);
 }
@@ -3275,8 +3281,15 @@ async function playQueueItem(index) {
         }
     } catch (error) {
         console.error('Queue playback error:', error);
-        showToast(`Playback error: ${error.message}`, 'error');
+        showToast(`Skipping track: ${error.message}`, 'error');
         hideLoadingAnimation();
+        // Auto-skip to next track on failure instead of stopping the queue
+        npLoadingQueueItem = false;
+        const nextIdx = npQueueIndex + 1;
+        if (nextIdx < npQueue.length) {
+            setTimeout(() => playQueueItem(nextIdx), 500);
+        }
+        return;
     } finally {
         npLoadingQueueItem = false;
     }
@@ -16340,10 +16353,12 @@ function renderBackupList(backups) {
         const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
             + ' ' + date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
         const safeName = escapeForInlineJs(b.filename);
+        const versionBadge = b.version ? `<span class="backup-list-version">v${escapeHtml(b.version)}</span>` : '';
         return `<div class="backup-list-item">
             <div class="backup-list-info">
                 <span class="backup-list-date">${escapeHtml(dateStr)}</span>
                 <span class="backup-list-size">${b.size_mb} MB</span>
+                ${versionBadge}
             </div>
             <div class="backup-list-actions">
                 <button class="backup-dl-btn" onclick="downloadBackup('${safeName}')" title="Download">DL</button>
@@ -16385,14 +16400,34 @@ function downloadBackup(filename) {
     document.body.removeChild(a);
 }
 
-async function restoreBackup(filename) {
-    if (!await showConfirmDialog({ title: 'Restore Backup', message: `Restore database from "${filename}"?\n\nA safety backup of the current database will be created first.`, confirmText: 'Restore' })) return;
+async function restoreBackup(filename, force = false) {
+    if (!force) {
+        if (!await showConfirmDialog({ title: 'Restore Backup', message: `Restore database from "${filename}"?\n\nA safety backup of the current database will be created first.`, confirmText: 'Restore' })) return;
+    }
     try {
-        const res = await fetch(`/api/database/backups/${encodeURIComponent(filename)}/restore`, { method: 'POST' });
+        const fetchOpts = { method: 'POST' };
+        if (force) {
+            fetchOpts.headers = { 'Content-Type': 'application/json' };
+            fetchOpts.body = JSON.stringify({ force: true });
+        }
+        const res = await fetch(`/api/database/backups/${encodeURIComponent(filename)}/restore`, fetchOpts);
         const data = await res.json();
         if (data.success) {
-            showToast(`Database restored from ${data.restored_from} (${data.artist_count} artists). Safety backup: ${data.safety_backup}`, 'success');
+            let msg = `Database restored from ${data.restored_from} (${data.artist_count} artists). Safety backup: ${data.safety_backup}`;
+            if (data.version_warning) msg += `\n⚠️ ${data.version_warning}`;
+            showToast(msg, 'success');
             await loadBackupList();
+        } else if (data.version_mismatch) {
+            // Version mismatch — ask user to confirm
+            const confirmed = await showConfirmDialog({
+                title: 'Version Mismatch',
+                message: `This backup was created on SoulSync v${data.backup_version}, but you're running v${data.current_version}.\n\nRestoring an older backup may cause issues if the database schema has changed. A safety backup will be created first.\n\nProceed anyway?`,
+                confirmText: 'Restore Anyway',
+                destructive: true
+            });
+            if (confirmed) {
+                await restoreBackup(filename, true);
+            }
         } else {
             showToast(`Restore failed: ${data.error}`, 'error');
         }

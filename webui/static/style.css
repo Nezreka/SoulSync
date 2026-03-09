@@ -5758,6 +5758,15 @@ body {
     color: #888;
 }
 
+.backup-list-version {
+    font-size: 10px;
+    color: var(--accent-primary, #1db954);
+    background: rgba(29, 185, 84, 0.12);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
 .backup-list-actions {
     display: flex;
     gap: 4px;
