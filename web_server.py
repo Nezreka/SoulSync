@@ -14545,7 +14545,11 @@ def get_version_info():
                     "• Delete tracks and albums from the database (files on disk are never touched)",
                     "• Bulk select and batch edit tracks across albums",
                     "• Two-column album grid with full-width expanded detail panels",
-                    "• MusicBrainz album art via Cover Art Archive in manual match results"
+                    "• MusicBrainz album art via Cover Art Archive in manual match results",
+                    "• Write Tags to File — sync database metadata to audio file tags (MP3/FLAC/OGG/M4A)",
+                    "• Tag preview modal showing a diff of file vs database values before writing",
+                    "• Batch write tags for entire albums or bulk-selected tracks with live progress",
+                    "• Optional cover art embedding during tag writes with per-album caching"
                 ],
                 "usage_note": "Open any artist's detail page and click 'Enhanced' in the view toggle to access the library manager."
             },
@@ -14720,7 +14724,10 @@ def get_version_info():
                     "• Fix various artist compilations causing AcoustID check failures",
                     "• Fix ListenBrainz database path not respecting DATABASE_PATH env var",
                     "• Fix deleted content not removed during incremental database updates",
-                    "• Podman rootless (keep-id) compatibility for Arch/rootless Docker users"
+                    "• Podman rootless (keep-id) compatibility for Arch/rootless Docker users",
+                    "• Fix Docker upgrade crash from stale volume mounts overriding application code",
+                    "• Fix partial DB migrations leaving missing columns after interrupted upgrades",
+                    "• Entrypoint now always updates settings.py to prevent stale config class errors"
                 ]
             }
         ]
