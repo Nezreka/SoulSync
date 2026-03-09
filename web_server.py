@@ -13452,6 +13452,9 @@ def _post_process_matched_download(context_key, context, file_path):
 
             _safe_move_file(file_path, final_path)
 
+            # Store final path for verification wrapper (before lossy copy may override)
+            context['_final_processed_path'] = final_path
+
             # Lossy copy: create MP3 version if enabled
             blasphemy_path = _create_lossy_copy(final_path)
             if blasphemy_path:
@@ -13461,7 +13464,7 @@ def _post_process_matched_download(context_key, context, file_path):
             downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
             _cleanup_empty_directories(downloads_path, file_path)
 
-            print(f"✅ [Playlist Folder Mode] Post-processing complete: {context.get('_final_processed_path', final_path)}")
+            print(f"✅ [Playlist Folder Mode] Post-processing complete: {final_path}")
 
             # WISHLIST REMOVAL: Check if this track should be removed from wishlist
             try:
@@ -13471,8 +13474,18 @@ def _post_process_matched_download(context_key, context, file_path):
 
             _emit_track_downloaded(context)
 
-            # NOTE: Don't call callbacks here - let verification function handle completion
-            # The verification function will check file exists and then call callbacks
+            # Mark as stream processed so the verification worker doesn't search
+            # for the file by its original Soulseek name (which no longer exists after rename)
+            task_id = context.get('task_id')
+            batch_id = context.get('batch_id')
+            if task_id and batch_id:
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['stream_processed'] = True
+                        download_tasks[task_id]['status'] = 'completed'
+                        print(f"✅ [Playlist Folder Mode] Marked task {task_id} as completed")
+                _on_download_completed(batch_id, task_id, success=True)
+
             return  # Skip normal album/artist folder structure processing
 
         is_album_download = context.get("is_album_download", False)
