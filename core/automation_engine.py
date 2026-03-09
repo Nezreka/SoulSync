@@ -167,7 +167,7 @@ class AutomationEngine:
     # --- System Automations ---
 
     def ensure_system_automations(self):
-        """Create system automations if they don't exist, and reset next_run to initial delays on every startup."""
+        """Create system automations if they don't exist, and schedule next_run respecting last_run."""
         for spec in SYSTEM_AUTOMATIONS:
             existing = self.db.get_system_automation_by_action(spec['action_type'])
             if not existing:
@@ -185,11 +185,43 @@ class AutomationEngine:
                 existing = self.db.get_system_automation_by_action(spec['action_type'])
 
             if existing:
-                # Only reset next_run for timer-based triggers that have an initial delay
                 if spec.get('initial_delay') is not None:
-                    nr = _utc_after(spec['initial_delay'])
+                    # Compute full interval from trigger config
+                    full_interval = self._calc_delay_seconds(spec['trigger_config'])
+                    initial_delay = spec['initial_delay']
+
+                    # Only respect last_run for longer intervals (>= 1 hour).
+                    # Short-interval automations (wishlist 30min, clean downloads 5min) are cheap
+                    # and users may expect them to run shortly after startup.
+                    min_interval_for_skip = 3600  # 1 hour
+
+                    # Check if last_run exists and is recent enough to skip the startup scan
+                    last_run_str = existing.get('last_run')
+                    last_error = existing.get('last_error')
+                    if full_interval >= min_interval_for_skip and last_run_str and not last_error:
+                        try:
+                            last_run = datetime.strptime(last_run_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                            elapsed = (_utcnow() - last_run).total_seconds()
+
+                            if elapsed >= 0 and elapsed < full_interval:
+                                # Last run was recent and successful — schedule for when the interval naturally expires
+                                remaining = full_interval - elapsed
+                                nr = _utc_after(remaining)
+                                self.db.update_automation(existing['id'], next_run=nr)
+                                logger.info(f"System automation '{spec['name']}' last ran {elapsed/3600:.1f}h ago (ok), next run in {remaining/3600:.1f}h")
+                                continue
+                            else:
+                                # Overdue or clock skew — run after initial delay
+                                logger.info(f"System automation '{spec['name']}' last ran {elapsed/3600:.1f}h ago (overdue), running in {initial_delay}s")
+                        except (ValueError, TypeError):
+                            pass  # Malformed timestamp — fall through to initial delay
+                    elif last_run_str and last_error:
+                        logger.info(f"System automation '{spec['name']}' last run had error, retrying in {initial_delay}s")
+
+                    # No last_run or overdue — use initial delay
+                    nr = _utc_after(initial_delay)
                     self.db.update_automation(existing['id'], next_run=nr)
-                    logger.info(f"System automation '{spec['name']}' next_run reset to {spec['initial_delay']}s from now")
+                    logger.info(f"System automation '{spec['name']}' next_run set to {initial_delay}s from now")
                 else:
                     logger.info(f"System automation '{spec['name']}' ready (event-based)")
 
