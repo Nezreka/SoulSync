@@ -43112,8 +43112,11 @@ async function clearMirroredDiscovery(playlistId, name) {
         const data = await res.json();
         if (data.success) {
             showToast(`Cleared discovery for ${name} (${data.cleared} tracks)`, 'success');
-            // Also clear the discovery state and remove stale modal DOM
+            // Signal cancellation to any running worker, then clear state
             const hash = `mirrored_${playlistId}`;
+            if (youtubePlaylistStates[hash]) {
+                youtubePlaylistStates[hash].phase = 'cancelled';
+            }
             delete youtubePlaylistStates[hash];
             const staleModal = document.getElementById(`youtube-discovery-modal-${hash}`);
             if (staleModal) staleModal.remove();
