@@ -14122,6 +14122,26 @@ def get_version_info():
         "subtitle": "Version 1.8 — Latest Changes",
         "sections": [
             {
+                "title": "📚 Enhanced Library Manager",
+                "description": "Professional-grade library management view on the artist detail page",
+                "features": [
+                    "• Toggle between Standard and Enhanced views on any artist's discography",
+                    "• Inline metadata editing — click any field to edit artist, album, or track data",
+                    "• Per-service manual matching — click any service chip (Spotify, MusicBrainz, Deezer, AudioDB, iTunes) to search and manually pick the correct match",
+                    "• Per-service enrichment — enrich from individual services with independent locks",
+                    "• Clickable service ID badges that open the entity on the external service website",
+                    "• Match status chips showing matched/not found state for all 5 services on every artist, album, and track",
+                    "• Sortable track table columns — click headers to sort by title, duration, format, bitrate, BPM, disc, or track number",
+                    "• Multi-disc album support with disc number column",
+                    "• Play tracks directly from the library via the sidebar media player",
+                    "• Delete tracks and albums from the database (files on disk are never touched)",
+                    "• Bulk select and batch edit tracks across albums",
+                    "• Two-column album grid with full-width expanded detail panels",
+                    "• MusicBrainz album art via Cover Art Archive in manual match results"
+                ],
+                "usage_note": "Open any artist's detail page and click 'Enhanced' in the view toggle to access the library manager."
+            },
+            {
                 "title": "🤖 Automation Engine",
                 "description": "Visual drag-and-drop automation builder with 20+ triggers and 14 actions",
                 "features": [
