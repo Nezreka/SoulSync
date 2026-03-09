@@ -9298,6 +9298,32 @@ def library_delete_tracks_batch():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/library/radio')
+def library_radio():
+    """Get a smart queue of similar tracks for radio mode auto-play."""
+    try:
+        track_id = request.args.get('track_id')
+        if not track_id:
+            return jsonify({"success": False, "error": "track_id is required"}), 400
+
+        limit = request.args.get('limit', 20, type=int)
+        exclude_raw = request.args.get('exclude', '')
+        exclude_ids = [eid.strip() for eid in exclude_raw.split(',') if eid.strip()] if exclude_raw else None
+
+        database = get_database()
+        result = database.get_radio_tracks(track_id, limit=limit, exclude_ids=exclude_ids)
+
+        if not result.get('success'):
+            return jsonify(result), 404
+
+        return jsonify(result)
+    except Exception as e:
+        print(f"Error getting radio tracks: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # ==================== End Enhanced Library Management ====================
 
 @app.route('/api/stream/start', methods=['POST'])
@@ -14121,6 +14147,22 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": "Version 1.8 — Latest Changes",
         "sections": [
+            {
+                "title": "🎵 Now Playing Overhaul",
+                "description": "Redesigned media player with expanded Now Playing modal and smart radio",
+                "features": [
+                    "• Expanded Now Playing modal — click the sidebar player to open a full-screen playback experience",
+                    "• Album art ambient glow — dominant color extracted from cover art tints the modal background",
+                    "• Smart Radio mode — toggle on to auto-queue up to 50 similar tracks based on genre, mood, style, and artist",
+                    "• Queue system — add tracks from the Enhanced Library Manager, manage queue in the Now Playing modal",
+                    "• Web Audio visualizer — real frequency-driven bars responding to actual audio playback",
+                    "• Repeat modes — off, repeat-all (loop queue), and repeat-one with shuffle support",
+                    "• Redesigned sidebar player — always-visible controls with album art thumbnail and progress bar",
+                    "• Media Session API — OS-level media controls with prev/next track support",
+                    "• Keyboard shortcuts — Space (play/pause), arrows (seek/volume), M (mute), Escape (close)",
+                    "• Track transition animations and buffering state indicator"
+                ]
+            },
             {
                 "title": "📚 Enhanced Library Manager",
                 "description": "Professional-grade library management view on the artist detail page",

@@ -4084,7 +4084,9 @@
     <!-- Expanded Now Playing Modal -->
     <div class="np-modal-overlay hidden" id="np-modal-overlay">
         <div class="np-modal">
-            <button class="np-close-btn" id="np-close-btn">&times;</button>
+            <button class="np-close-btn" id="np-close-btn" title="Minimize">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
             <div class="np-body">
                 <!-- Left: album art + track info -->
                 <div class="np-left">
@@ -4101,6 +4103,12 @@
                         <div class="np-artist-name" id="np-artist-name">Unknown Artist</div>
                         <div class="np-album-name" id="np-album-name">Unknown Album</div>
                         <div class="np-format-badges" id="np-format-badges"></div>
+                    </div>
+                    <div class="np-action-buttons" id="np-action-buttons">
+                        <button class="np-action-btn" id="np-goto-artist" title="Go to Artist">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                            <span>View Artist</span>
+                        </button>
                     </div>
                 </div>
                 <!-- Right: controls -->
@@ -4127,12 +4135,14 @@
                         <button class="np-btn np-btn-play" id="np-play-btn" title="Play">
                             <svg class="np-icon-play" width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                             <svg class="np-icon-pause hidden" width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                            <div class="np-buffering-ring hidden" id="np-buffering-ring"></div>
                         </button>
                         <button class="np-btn np-btn-next" id="np-next-btn" title="Next" disabled>
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
                         </button>
                         <button class="np-btn np-btn-repeat" id="np-repeat-btn" title="Repeat">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                            <span class="np-repeat-one-badge hidden" id="np-repeat-one-badge">1</span>
                         </button>
                     </div>
                     <div class="np-volume-row">
@@ -4172,7 +4182,12 @@
                         <span>Queue</span>
                         <span class="np-queue-count" id="np-queue-count"></span>
                     </button>
-                    <button class="np-queue-clear-btn" id="np-queue-clear" title="Clear queue">Clear</button>
+                    <div class="np-queue-header-actions">
+                        <button class="np-radio-btn" id="np-radio-btn" title="Radio mode - auto-add similar tracks">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M1.5 9.289a15 15 0 0 1 21 0"/></svg>
+                        </button>
+                        <button class="np-queue-clear-btn" id="np-queue-clear" title="Clear queue">Clear</button>
+                    </div>
                 </div>
                 <div class="np-queue-body hidden" id="np-queue-body">
                     <div class="np-queue-empty" id="np-queue-empty">Queue is empty</div>

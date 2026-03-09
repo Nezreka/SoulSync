@@ -7293,6 +7293,172 @@ class MusicDatabase:
             logger.error(f"Error clearing automation run history: {e}")
             return 0
 
+    def get_radio_tracks(self, track_id, limit=20, exclude_ids=None) -> Dict[str, Any]:
+        """Find similar tracks for radio mode auto-play queue.
+
+        Strategy (each tier capped to ensure diversity):
+          1. Same artist, different albums (max 30% of limit)
+          2. Same genre — from album genres + artist genres (other artists)
+          3. Same mood / style — from album + artist metadata
+          4. Random library tracks (fallback)
+
+        Args:
+            track_id: The seed track ID.
+            limit: Maximum number of tracks to return.
+            exclude_ids: Optional list of track IDs to exclude.
+
+        Returns:
+            dict with ``success``, ``tracks`` list.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Resolve the seed track and its album / artist
+                cursor.execute("""
+                    SELECT t.id, t.artist_id, t.album_id,
+                           al.genres  AS album_genres,
+                           al.mood    AS album_mood,
+                           al.style   AS album_style,
+                           ar.name    AS artist_name,
+                           ar.genres  AS artist_genres,
+                           ar.mood    AS artist_mood,
+                           ar.style   AS artist_style
+                    FROM tracks t
+                    JOIN albums al ON al.id = t.album_id
+                    JOIN artists ar ON ar.id = t.artist_id
+                    WHERE t.id = ?
+                """, (track_id,))
+                seed = cursor.fetchone()
+                if not seed:
+                    return {'success': False, 'error': f'Track {track_id} not found'}
+
+                seed = dict(seed)
+                artist_name = seed['artist_name']
+
+                # Build the set of IDs to exclude (seed + caller-supplied)
+                excluded = {str(track_id)}
+                if exclude_ids:
+                    excluded.update(str(eid) for eid in exclude_ids)
+
+                collected: list[dict] = []
+                seen_ids: set[str] = set(excluded)
+
+                def _exclude_placeholders():
+                    return ','.join('?' * len(seen_ids))
+
+                def _exclude_values():
+                    return list(seen_ids)
+
+                _track_select = """
+                    SELECT t.id, t.title, t.track_number, t.duration,
+                           t.file_path, t.bitrate,
+                           t.album_id, t.artist_id,
+                           al.title   AS album,
+                           COALESCE(al.thumb_url, ar.thumb_url) AS image_url,
+                           ar.name    AS artist
+                    FROM tracks t
+                    JOIN albums al ON al.id = t.album_id
+                    JOIN artists ar ON ar.id = t.artist_id
+                """
+
+                def _collect(rows, cap=None):
+                    """Append rows to collected. Stop at cap or limit."""
+                    target = min(limit, (len(collected) + cap)) if cap else limit
+                    for row in rows:
+                        r = dict(row)
+                        rid = str(r['id'])
+                        if rid not in seen_ids:
+                            seen_ids.add(rid)
+                            collected.append(r)
+                            if len(collected) >= target:
+                                return True
+                    return len(collected) >= limit
+
+                def _parse_tags(raw_val):
+                    """Parse a JSON array or comma-separated string into a list."""
+                    if not raw_val:
+                        return []
+                    try:
+                        parsed = json.loads(raw_val)
+                        return parsed if isinstance(parsed, list) else [str(parsed)]
+                    except (json.JSONDecodeError, ValueError):
+                        return [t.strip() for t in raw_val.split(',') if t.strip()]
+
+                # --- 1. Same artist, different albums (capped at 30% of limit) ---
+                same_artist_cap = max(5, limit * 3 // 10)
+                cursor.execute(f"""
+                    {_track_select}
+                    WHERE ar.name = ? AND t.album_id != ? AND t.id NOT IN ({_exclude_placeholders()})
+                    ORDER BY RANDOM()
+                    LIMIT ?
+                """, [artist_name, seed['album_id']] + _exclude_values() + [same_artist_cap])
+                _collect(cursor.fetchall(), cap=same_artist_cap)
+
+                if len(collected) >= limit:
+                    return {'success': True, 'tracks': collected}
+
+                # --- 2. Same genre (album genres + artist genres, other artists) ---
+                genre_list = _parse_tags(seed.get('album_genres'))
+                artist_genre_list = _parse_tags(seed.get('artist_genres'))
+                all_genres = list(dict.fromkeys(genre_list + artist_genre_list))  # dedupe, preserve order
+
+                if all_genres:
+                    genre_conditions = ' OR '.join(
+                        ['al.genres LIKE ?' for _ in all_genres] +
+                        ['ar.genres LIKE ?' for _ in all_genres]
+                    )
+                    genre_params = [f'%{g}%' for g in all_genres] * 2
+                    cursor.execute(f"""
+                        {_track_select}
+                        WHERE ({genre_conditions})
+                          AND ar.name != ?
+                          AND t.id NOT IN ({_exclude_placeholders()})
+                        ORDER BY RANDOM()
+                        LIMIT ?
+                    """, genre_params + [artist_name] + _exclude_values() + [limit - len(collected)])
+                    if _collect(cursor.fetchall()):
+                        return {'success': True, 'tracks': collected}
+
+                # --- 3. Same mood / style (album + artist level) ---
+                for field_name in ('mood', 'style'):
+                    album_tags = _parse_tags(seed.get(f'album_{field_name}'))
+                    artist_tags = _parse_tags(seed.get(f'artist_{field_name}'))
+                    all_tags = list(dict.fromkeys(album_tags + artist_tags))
+
+                    if all_tags:
+                        tag_conditions = ' OR '.join(
+                            [f'al.{field_name} LIKE ?' for _ in all_tags] +
+                            [f'ar.{field_name} LIKE ?' for _ in all_tags]
+                        )
+                        tag_params = [f'%{t}%' for t in all_tags] * 2
+                        cursor.execute(f"""
+                            {_track_select}
+                            WHERE ({tag_conditions})
+                              AND ar.name != ?
+                              AND t.id NOT IN ({_exclude_placeholders()})
+                            ORDER BY RANDOM()
+                            LIMIT ?
+                        """, tag_params + [artist_name] + _exclude_values() + [limit - len(collected)])
+                        if _collect(cursor.fetchall()):
+                            return {'success': True, 'tracks': collected}
+
+                # --- 4. Random library tracks ---
+                if len(collected) < limit:
+                    cursor.execute(f"""
+                        {_track_select}
+                        WHERE t.id NOT IN ({_exclude_placeholders()})
+                        ORDER BY RANDOM()
+                        LIMIT ?
+                    """, _exclude_values() + [limit - len(collected)])
+                    _collect(cursor.fetchall())
+
+                return {'success': True, 'tracks': collected}
+
+        except Exception as e:
+            logger.error(f"Error getting radio tracks for track {track_id}: {e}")
+            return {'success': False, 'error': str(e)}
+
 # Thread-safe singleton pattern for database access
 _database_instances: Dict[int, MusicDatabase] = {}  # Thread ID -> Database instance
 _database_lock = threading.Lock()
