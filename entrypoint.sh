@@ -57,13 +57,11 @@ else
     echo "   ✅ config.json already exists"
 fi
 
-if [ ! -f "/app/config/settings.py" ]; then
-    echo "   📄 Creating default settings.py..."
-    cp /defaults/settings.py /app/config/settings.py
-    chown soulsync:soulsync /app/config/settings.py 2>/dev/null || true
-else
-    echo "   ✅ settings.py already exists"
-fi
+# Always update settings.py — it's application code, not user configuration.
+# Stale versions from older releases cause startup crashes (missing methods).
+echo "   📄 Updating settings.py to current version..."
+cp /defaults/settings.py /app/config/settings.py
+chown soulsync:soulsync /app/config/settings.py 2>/dev/null || true
 
 # Ensure all directories exist and have proper permissions
 mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging
