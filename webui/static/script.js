@@ -33140,6 +33140,8 @@ async function loadEnhancedViewData(artistId) {
         artistDetailPageState.expandedAlbums = new Set();
         artistDetailPageState.selectedTracks = new Set();
         artistDetailPageState.enhancedTrackSort = {};
+        artistDetailPageState.serverType = data.server_type || null;
+        _tagPreviewServerType = data.server_type || null;
         renderEnhancedView();
 
     } catch (error) {
@@ -34902,9 +34904,11 @@ document.addEventListener('click', (e) => {
 // ---- Write Tags to File ----
 
 let _tagPreviewTrackId = null;
+let _tagPreviewServerType = null;
 
 async function showTagPreview(trackId) {
     _tagPreviewTrackId = trackId;
+    _tagPreviewServerType = null;
     const overlay = document.getElementById('tag-preview-overlay');
     const body = document.getElementById('tag-preview-body');
     const title = document.getElementById('tag-preview-title');
@@ -34913,6 +34917,10 @@ async function showTagPreview(trackId) {
     title.textContent = 'Write Tags to File';
     body.innerHTML = '<div class="tag-preview-loading">Loading tag comparison...</div>';
     overlay.classList.remove('hidden');
+
+    // Hide sync checkbox until we know server type
+    const syncLabel = document.getElementById('tag-preview-sync-label');
+    if (syncLabel) syncLabel.classList.add('hidden');
 
     try {
         const response = await fetch(`/api/library/track/${trackId}/tag-preview`);
@@ -34924,6 +34932,14 @@ async function showTagPreview(trackId) {
 
         const diff = result.diff || [];
         const hasChanges = result.has_changes;
+
+        // Show server sync checkbox if a server is connected (not navidrome — it auto-detects)
+        _tagPreviewServerType = result.server_type || null;
+        if (syncLabel && _tagPreviewServerType && _tagPreviewServerType !== 'navidrome') {
+            const syncText = document.getElementById('tag-preview-sync-text');
+            if (syncText) syncText.textContent = `Sync to ${_tagPreviewServerType === 'plex' ? 'Plex' : 'Jellyfin'}`;
+            syncLabel.classList.remove('hidden');
+        }
 
         let html = '<table class="tag-preview-table"><thead><tr>';
         html += '<th>Field</th><th>Current File Tag</th><th></th><th>DB Value</th>';
@@ -34974,18 +34990,25 @@ async function executeWriteTags() {
     }
 
     const embedCover = document.getElementById('tag-preview-embed-cover')?.checked ?? true;
+    const syncToServer = document.getElementById('tag-preview-sync-server')?.checked && _tagPreviewServerType && _tagPreviewServerType !== 'navidrome';
 
     try {
         const response = await fetch(`/api/library/track/${_tagPreviewTrackId}/write-tags`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ embed_cover: embedCover })
+            body: JSON.stringify({ embed_cover: embedCover, sync_to_server: syncToServer })
         });
         const result = await response.json();
         if (!result.success) throw new Error(result.error);
 
         const fieldCount = (result.written_fields || []).length;
-        showToast(`Tags written successfully (${fieldCount} fields)`, 'success');
+        let msg = `Tags written successfully (${fieldCount} fields)`;
+        if (result.server_sync) {
+            const ss = result.server_sync;
+            if (ss.synced > 0) msg += ` — synced to ${_tagPreviewServerType === 'plex' ? 'Plex' : 'Jellyfin'}`;
+            else if (ss.failed > 0) msg += ` — server sync failed`;
+        }
+        showToast(msg, 'success');
         closeTagPreviewModal();
 
     } catch (error) {
@@ -35008,24 +35031,34 @@ async function writeAlbumTags(albumId) {
         return;
     }
 
-    if (!confirm(`Write DB metadata to file tags for all ${tracks.length} tracks in "${album.title}"?`)) return;
-    await _startBatchWriteTags(tracks.map(t => t.id), true);
+    const serverType = artistDetailPageState.serverType;
+    const canSync = serverType && serverType !== 'navidrome';
+    const serverLabel = serverType === 'plex' ? 'Plex' : serverType === 'jellyfin' ? 'Jellyfin' : '';
+    let msg = `Write DB metadata to file tags for all ${tracks.length} tracks in "${album.title}"?`;
+    if (canSync) msg += `\n\nThis will also sync changes to ${serverLabel}.`;
+    if (!confirm(msg)) return;
+    await _startBatchWriteTags(tracks.map(t => t.id), true, canSync);
 }
 
 async function batchWriteTagsSelected() {
     const trackIds = Array.from(artistDetailPageState.selectedTracks);
     if (trackIds.length === 0) return;
 
-    if (!confirm(`Write DB metadata to file tags for ${trackIds.length} selected track(s)?`)) return;
-    await _startBatchWriteTags(trackIds, true);
+    const serverType = artistDetailPageState.serverType;
+    const canSync = serverType && serverType !== 'navidrome';
+    const serverLabel = serverType === 'plex' ? 'Plex' : serverType === 'jellyfin' ? 'Jellyfin' : '';
+    let msg = `Write DB metadata to file tags for ${trackIds.length} selected track(s)?`;
+    if (canSync) msg += `\n\nThis will also sync changes to ${serverLabel}.`;
+    if (!confirm(msg)) return;
+    await _startBatchWriteTags(trackIds, true, canSync);
 }
 
-async function _startBatchWriteTags(trackIds, embedCover) {
+async function _startBatchWriteTags(trackIds, embedCover, syncToServer = false) {
     try {
         const response = await fetch('/api/library/tracks/write-tags-batch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ track_ids: trackIds, embed_cover: embedCover })
+            body: JSON.stringify({ track_ids: trackIds, embed_cover: embedCover, sync_to_server: syncToServer })
         });
         const result = await response.json();
         if (!result.success) throw new Error(result.error);
@@ -35049,12 +35082,25 @@ function _pollBatchWriteTagsStatus() {
             const state = await response.json();
 
             if (state.status === 'running') {
-                const pct = state.total > 0 ? Math.round(state.processed / state.total * 100) : 0;
-                showToast(`Writing tags: ${state.processed}/${state.total} (${pct}%) — ${state.current_track}`, 'info');
+                if (state.sync_phase === 'syncing') {
+                    const serverName = state.sync_server === 'plex' ? 'Plex' : state.sync_server === 'jellyfin' ? 'Jellyfin' : state.sync_server;
+                    showToast(`Syncing to ${serverName}...`, 'info');
+                } else {
+                    const pct = state.total > 0 ? Math.round(state.processed / state.total * 100) : 0;
+                    showToast(`Writing tags: ${state.processed}/${state.total} (${pct}%) — ${state.current_track}`, 'info');
+                }
                 _batchWriteTagsPollTimer = setTimeout(poll, 1000);
             } else if (state.status === 'done') {
-                const msg = `Tags written: ${state.written} succeeded, ${state.failed} failed`;
-                showToast(msg, state.failed > 0 ? 'warning' : 'success');
+                let msg = `Tags written: ${state.written} succeeded, ${state.failed} failed`;
+                if (state.sync_phase === 'done') {
+                    const serverName = state.sync_server === 'plex' ? 'Plex' : state.sync_server === 'jellyfin' ? 'Jellyfin' : state.sync_server;
+                    if (state.sync_synced > 0 && state.sync_failed === 0) {
+                        msg += ` — synced to ${serverName}`;
+                    } else if (state.sync_failed > 0) {
+                        msg += ` — ${serverName} sync: ${state.sync_synced} synced, ${state.sync_failed} failed`;
+                    }
+                }
+                showToast(msg, state.failed > 0 || state.sync_failed > 0 ? 'warning' : 'success');
                 _batchWriteTagsPollTimer = null;
             }
         } catch (error) {

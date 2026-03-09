@@ -8769,6 +8769,17 @@ def get_artist_enhanced_detail(artist_id):
             if album.get('thumb_url'):
                 album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
 
+        # Include server type for sync option
+        active_server = config_manager.get_active_media_server()
+        server_connected = False
+        if active_server == 'plex':
+            server_connected = plex_client.is_connected()
+        elif active_server == 'jellyfin':
+            server_connected = jellyfin_client.is_connected()
+        elif active_server == 'navidrome':
+            server_connected = navidrome_client.is_connected()
+        result['server_type'] = active_server if server_connected else None
+
         return jsonify(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -8902,6 +8913,16 @@ def get_track_tag_preview(track_id):
         diff = build_tag_diff(file_tags, db_data)
         has_changes = any(d['changed'] for d in diff)
 
+        # Include server type so frontend can offer server sync option
+        active_server = config_manager.get_active_media_server()
+        server_connected = False
+        if active_server == 'plex':
+            server_connected = plex_client.is_connected()
+        elif active_server == 'jellyfin':
+            server_connected = jellyfin_client.is_connected()
+        elif active_server == 'navidrome':
+            server_connected = navidrome_client.is_connected()
+
         return jsonify({
             "success": True,
             "file_path": resolved_path,
@@ -8909,6 +8930,7 @@ def get_track_tag_preview(track_id):
             "db_data": db_data,
             "diff": diff,
             "has_changes": has_changes,
+            "server_type": active_server if server_connected else None,
         })
 
     except Exception as e:
@@ -8982,6 +9004,13 @@ def write_track_tags(track_id):
         with file_lock:
             result = write_tags_to_file(resolved_path, db_data, embed_cover=embed_cover, cover_url=cover_url)
 
+        # Sync to media server if requested and write succeeded
+        sync_result = None
+        if result.get('success') and data.get('sync_to_server'):
+            server_type = config_manager.get_active_media_server()
+            sync_result = _sync_tracks_to_server([track_data], server_type)
+            result['server_sync'] = sync_result
+
         return jsonify(result)
 
     except Exception as e:
@@ -8997,6 +9026,10 @@ _write_tags_batch_state = {
     'failed': 0,
     'current_track': '',
     'errors': [],
+    'sync_phase': None,  # None | 'syncing' | 'done'
+    'sync_server': None,
+    'sync_synced': 0,
+    'sync_failed': 0,
 }
 _write_tags_batch_lock = threading.Lock()
 
@@ -9033,6 +9066,8 @@ def write_tracks_tags_batch():
 
         rows = [dict(r) for r in cursor.fetchall()]
 
+        sync_to_server = data.get('sync_to_server', False)
+
         # Initialize state
         with _write_tags_batch_lock:
             _write_tags_batch_state.update({
@@ -9043,6 +9078,10 @@ def write_tracks_tags_batch():
                 'failed': 0,
                 'current_track': '',
                 'errors': [],
+                'sync_phase': None,
+                'sync_server': None,
+                'sync_synced': 0,
+                'sync_failed': 0,
             })
 
         # Count missing DB rows
@@ -9059,6 +9098,8 @@ def write_tracks_tags_batch():
         def _run_batch():
             try:
                 from core.tag_writer import write_tags_to_file, download_cover_art
+
+                written_tracks = []  # Track dicts that were successfully written (for server sync)
 
                 # Pre-download cover art once per unique album URL
                 cover_cache = {}  # url → (bytes, mime) or None
@@ -9129,12 +9170,28 @@ def write_tracks_tags_batch():
                         _write_tags_batch_state['processed'] += 1
                         if write_result.get('success'):
                             _write_tags_batch_state['written'] += 1
+                            written_tracks.append(track_data)
                         else:
                             _write_tags_batch_state['failed'] += 1
                             _write_tags_batch_state['errors'].append({
                                 'track_id': track_data['id'],
                                 'error': write_result.get('error', 'Unknown')
                             })
+
+                # Server sync phase
+                if sync_to_server and written_tracks:
+                    server_type = config_manager.get_active_media_server()
+                    with _write_tags_batch_lock:
+                        _write_tags_batch_state['sync_phase'] = 'syncing'
+                        _write_tags_batch_state['sync_server'] = server_type
+                        _write_tags_batch_state['current_track'] = f'Syncing to {server_type.title()}...'
+
+                    sync_result = _sync_tracks_to_server(written_tracks, server_type)
+
+                    with _write_tags_batch_lock:
+                        _write_tags_batch_state['sync_phase'] = 'done'
+                        _write_tags_batch_state['sync_synced'] = sync_result['synced']
+                        _write_tags_batch_state['sync_failed'] = sync_result['failed']
 
             except Exception as e:
                 logger.error(f"Batch write tags background error: {e}")
@@ -9162,6 +9219,68 @@ def get_write_tags_batch_status():
         state = dict(_write_tags_batch_state)
         state['errors'] = list(_write_tags_batch_state['errors'])  # snapshot to avoid mutation during serialize
         return jsonify(state)
+
+
+def _sync_tracks_to_server(track_rows, server_type):
+    """Sync metadata for tracks to the active media server after writing file tags.
+
+    Args:
+        track_rows: list of track dicts (must include 'id', 'title', 'artist_name', 'album_title', 'year', 'server_source')
+        server_type: 'plex', 'jellyfin', or 'navidrome'
+
+    Returns:
+        dict with 'synced', 'failed', 'skipped' counts and 'errors' list
+    """
+    result = {'synced': 0, 'failed': 0, 'skipped': 0, 'errors': []}
+
+    if server_type == 'navidrome':
+        # Navidrome auto-detects file tag changes, no action needed
+        result['synced'] = len(track_rows)
+        return result
+
+    if server_type == 'plex':
+        for track_data in track_rows:
+            # Only sync tracks that came from this server
+            if track_data.get('server_source') and track_data['server_source'] != 'plex':
+                result['skipped'] += 1
+                continue
+            try:
+                metadata = {}
+                if track_data.get('title'):
+                    metadata['title'] = track_data['title']
+                if track_data.get('artist_name'):
+                    metadata['artist'] = track_data['artist_name']
+                if track_data.get('album_title'):
+                    metadata['album'] = track_data['album_title']
+                if track_data.get('year'):
+                    metadata['year'] = track_data['year']
+                if metadata:
+                    success = plex_client.update_track_metadata(str(track_data['id']), metadata)
+                    if success:
+                        result['synced'] += 1
+                    else:
+                        result['failed'] += 1
+                        result['errors'].append({'track_id': track_data['id'], 'error': 'Plex update returned false'})
+                else:
+                    result['skipped'] += 1
+            except Exception as e:
+                result['failed'] += 1
+                result['errors'].append({'track_id': track_data['id'], 'error': str(e)})
+
+    elif server_type == 'jellyfin':
+        # Jellyfin: just trigger a library scan once after all file writes
+        try:
+            success = jellyfin_client.trigger_library_scan()
+            if success:
+                result['synced'] = len(track_rows)
+            else:
+                result['failed'] = len(track_rows)
+                result['errors'].append({'error': 'Jellyfin library scan failed'})
+        except Exception as e:
+            result['failed'] = len(track_rows)
+            result['errors'].append({'error': f'Jellyfin scan error: {e}'})
+
+    return result
 
 
 def _resolve_library_file_path(file_path):
