@@ -17574,6 +17574,30 @@ const TOOL_HELP_CONTENT = {
             </ul>
         `
     },
+    'auto-full_cleanup': {
+        title: 'Full Cleanup',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Runs all housekeeping tasks in a single sweep:</p>
+            <ol>
+                <li><strong>Clear Quarantine</strong> — permanently deletes all quarantined files</li>
+                <li><strong>Clear Download Queue</strong> — removes completed, errored, and cancelled downloads from Soulseek</li>
+                <li><strong>Sweep Empty Directories</strong> — removes empty folders left behind in the downloads directory</li>
+                <li><strong>Clear Staging Folder</strong> — deletes all files and folders from the import staging area</li>
+                <li><strong>Clean Search History</strong> — trims old Soulseek search queries</li>
+            </ol>
+
+            <h4>Safety</h4>
+            <p>Skips download queue cleanup if batches are actively downloading or post-processing. Each step runs independently — a failure in one step won't stop the others.</p>
+
+            <h4>Good for</h4>
+            <ul>
+                <li>Scheduled housekeeping every 12 hours</li>
+                <li>Keeping disk usage and queue clutter under control</li>
+                <li>Running after large batch downloads complete</li>
+            </ul>
+        `
+    },
     'auto-deep_scan_library': {
         title: 'Deep Scan Library',
         content: `
@@ -47064,6 +47088,7 @@ const _autoIcons = {
     refresh_beatport_cache: '\uD83C\uDFB5',
     clean_search_history: '\uD83D\uDDD1\uFE0F',
     clean_completed_downloads: '\u2705',
+    full_cleanup: '\uD83E\uDDF9',
 };
 
 // --- Load & Render List ---
@@ -47234,7 +47259,8 @@ function _autoFormatAction(type) {
         update_discovery_pool: 'Update Discovery', start_quality_scan: 'Run Quality Scan',
         backup_database: 'Backup Database',
         refresh_beatport_cache: 'Refresh Beatport Cache', clean_search_history: 'Clean Search History',
-        clean_completed_downloads: 'Clean Completed Downloads' };
+        clean_completed_downloads: 'Clean Completed Downloads',
+        full_cleanup: 'Full Cleanup' };
     return labels[type] || type || 'Unknown';
 }
 function _autoFormatNotify(type) {
@@ -47454,6 +47480,11 @@ const _RESULT_DISPLAY_MAP = {
     ],
     'cleanup_wishlist': [
         { key: 'removed', label: 'Duplicates Removed' },
+    ],
+    'full_cleanup': [
+        { key: 'quarantine_removed', label: 'Quarantine Removed' },
+        { key: 'staging_removed', label: 'Staging Removed' },
+        { key: 'total_removed', label: 'Total Items Removed' },
     ],
 };
 
