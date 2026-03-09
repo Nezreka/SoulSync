@@ -1116,39 +1116,55 @@ class MusicDatabase:
         """Add MusicBrainz tracking columns to library tables for metadata enrichment"""
         columns_added = False
         try:
-            # Check if musicbrainz_id column exists in artists table
+            # --- Artists ---
             cursor.execute("PRAGMA table_info(artists)")
             artists_columns = [column[1] for column in cursor.fetchall()]
-            
+
             if 'musicbrainz_id' not in artists_columns:
-                logger.info("Adding MusicBrainz columns to artists table...")
                 cursor.execute("ALTER TABLE artists ADD COLUMN musicbrainz_id TEXT")
+                columns_added = True
+            if 'musicbrainz_last_attempted' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN musicbrainz_last_attempted TIMESTAMP")
+                columns_added = True
+            if 'musicbrainz_match_status' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN musicbrainz_match_status TEXT")
                 columns_added = True
+            if columns_added:
                 logger.info("✅ Added MusicBrainz columns to artists table")
-            
-            # Check if musicbrainz_release_id column exists in albums table
+
+            # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
             albums_columns = [column[1] for column in cursor.fetchall()]
-            
+
+            added_albums = False
             if 'musicbrainz_release_id' not in albums_columns:
-                logger.info("Adding MusicBrainz columns to albums table...")
                 cursor.execute("ALTER TABLE albums ADD COLUMN musicbrainz_release_id TEXT")
+                added_albums = True
+            if 'musicbrainz_last_attempted' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN musicbrainz_last_attempted TIMESTAMP")
+                added_albums = True
+            if 'musicbrainz_match_status' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN musicbrainz_match_status TEXT")
+                added_albums = True
+            if added_albums:
                 columns_added = True
                 logger.info("✅ Added MusicBrainz columns to albums table")
-            
-            # Check if musicbrainz_recording_id column exists in tracks table
+
+            # --- Tracks ---
             cursor.execute("PRAGMA table_info(tracks)")
             tracks_columns = [column[1] for column in cursor.fetchall()]
-            
+
+            added_tracks = False
             if 'musicbrainz_recording_id' not in tracks_columns:
-                logger.info("Adding MusicBrainz columns to tracks table...")
                 cursor.execute("ALTER TABLE tracks ADD COLUMN musicbrainz_recording_id TEXT")
+                added_tracks = True
+            if 'musicbrainz_last_attempted' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN musicbrainz_last_attempted TIMESTAMP")
+                added_tracks = True
+            if 'musicbrainz_match_status' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN musicbrainz_match_status TEXT")
+                added_tracks = True
+            if added_tracks:
                 columns_added = True
                 logger.info("✅ Added MusicBrainz columns to tracks table")
             
@@ -1169,36 +1185,13 @@ class MusicDatabase:
                 )
             """)
             
-            # Only proceed with index creation if we successfully checked for columns
-            # Re-verify columns exist before creating indexes to prevent errors
-            cursor.execute("PRAGMA table_info(artists)")
-            artists_columns = [column[1] for column in cursor.fetchall()]
-            cursor.execute("PRAGMA table_info(albums)")
-            albums_columns = [column[1] for column in cursor.fetchall()]
-            cursor.execute("PRAGMA table_info(tracks)")
-            tracks_columns = [column[1] for column in cursor.fetchall()]
-            
-            # Verify all required columns exist before creating indexes
-            if 'musicbrainz_match_status' in artists_columns:
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_mbid ON artists (musicbrainz_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_mb_status ON artists (musicbrainz_match_status)")
-            else:
-                logger.error("❌ CRITICAL: musicbrainz_match_status column missing from artists table after migration!")
-                raise Exception("MusicBrainz artists column migration failed - column not found after ALTER TABLE")
-            
-            if 'musicbrainz_match_status' in albums_columns:
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_mbid ON albums (musicbrainz_release_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_mb_status ON albums (musicbrainz_match_status)")
-            else:
-                logger.error("❌ CRITICAL: musicbrainz_match_status column missing from albums table after migration!")
-                raise Exception("MusicBrainz albums column migration failed - column not found after ALTER TABLE")
-            
-            if 'musicbrainz_match_status' in tracks_columns:
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mbid ON tracks (musicbrainz_recording_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mb_status ON tracks (musicbrainz_match_status)")
-            else:
-                logger.error("❌ CRITICAL: musicbrainz_match_status column missing from tracks table after migration!")
-                raise Exception("MusicBrainz tracks column migration failed - column not found after ALTER TABLE")
+            # Create indexes (safe even if columns were already present)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_mbid ON artists (musicbrainz_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_mb_status ON artists (musicbrainz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_mbid ON albums (musicbrainz_release_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_mb_status ON albums (musicbrainz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mbid ON tracks (musicbrainz_recording_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mb_status ON tracks (musicbrainz_match_status)")
             
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_entity ON musicbrainz_cache (entity_type, entity_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_mbid ON musicbrainz_cache (musicbrainz_id)")
@@ -1207,47 +1200,44 @@ class MusicDatabase:
                 logger.info("🎉 MusicBrainz migration completed successfully")
             
         except Exception as e:
-            logger.error(f"❌ CRITICAL ERROR in MusicBrainz migration: {e}")
-            logger.error("⚠️  Database may be in an inconsistent state - MusicBrainz features will not work")
-            logger.error("⚠️  You may need to manually add the missing columns or reset your database")
-            # Re-raise the exception to prevent the application from starting with a broken database
-            raise
+            logger.error(f"Error in MusicBrainz migration: {e}")
+            # Don't raise - this is a migration, database can still function
 
     def _add_external_id_columns(self, cursor):
         """Add Spotify/iTunes external ID columns to library tables for enrichment"""
         try:
-            # Artists table
+            # --- Artists ---
             cursor.execute("PRAGMA table_info(artists)")
             artists_columns = [column[1] for column in cursor.fetchall()]
 
             if 'spotify_artist_id' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN spotify_artist_id TEXT")
+            if 'itunes_artist_id' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN itunes_artist_id TEXT")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_spotify_id ON artists (spotify_artist_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_itunes_id ON artists (itunes_artist_id)")
-                logger.info("Added external ID columns to artists table")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_spotify_id ON artists (spotify_artist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_itunes_id ON artists (itunes_artist_id)")
 
-            # Albums table
+            # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
             albums_columns = [column[1] for column in cursor.fetchall()]
 
             if 'spotify_album_id' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN spotify_album_id TEXT")
+            if 'itunes_album_id' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN itunes_album_id TEXT")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_spotify_id ON albums (spotify_album_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_itunes_id ON albums (itunes_album_id)")
-                logger.info("Added external ID columns to albums table")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_spotify_id ON albums (spotify_album_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_itunes_id ON albums (itunes_album_id)")
 
-            # Tracks table
+            # --- Tracks ---
             cursor.execute("PRAGMA table_info(tracks)")
             tracks_columns = [column[1] for column in cursor.fetchall()]
 
             if 'spotify_track_id' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN spotify_track_id TEXT")
+            if 'itunes_track_id' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN itunes_track_id TEXT")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_spotify_id ON tracks (spotify_track_id)")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_itunes_id ON tracks (itunes_track_id)")
-                logger.info("Added external ID columns to tracks table")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_spotify_id ON tracks (spotify_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_itunes_id ON tracks (itunes_track_id)")
 
         except Exception as e:
             logger.error(f"Error adding external ID columns: {e}")

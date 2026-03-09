@@ -63,8 +63,24 @@ from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
 from core.web_scan_manager import WebScanManager
 from core.lyrics_client import lyrics_client
-from database.music_database import get_database
+from database.music_database import get_database, MusicDatabase
 from services.sync_service import PlaylistSyncService
+
+# --- Docker Volume Mount Guard ---
+# Pre-v1.3 docker-compose files mounted soulsync_database:/app/database, which overlays
+# the Python package with stale volume contents. Detect this after import.
+if not hasattr(MusicDatabase, 'get_system_automation_by_action'):
+    print("=" * 70)
+    print("🔴 ERROR: Stale database module detected!")
+    print("   MusicDatabase is missing required methods. This usually means")
+    print("   your docker-compose.yml has an outdated volume mount:")
+    print("")
+    print("   FIX: Change your docker-compose.yml volume:")
+    print("     OLD: soulsync_database:/app/database")
+    print("     NEW: soulsync_database:/app/data")
+    print("")
+    print("   Then run: docker compose down && docker compose up -d")
+    print("=" * 70)
 from datetime import datetime, timezone
 import yt_dlp
 from core.matching_engine import MusicMatchingEngine
@@ -3941,7 +3957,10 @@ def hydrabase_status():
         connected = _hydrabase_ws is not None and _hydrabase_ws.connected
     except Exception:
         connected = False
-    hydra_config = config_manager.get_hydrabase_config()
+    try:
+        hydra_config = config_manager.get_hydrabase_config()
+    except AttributeError:
+        hydra_config = {}
     peer_count = None
     try:
         if hydrabase_client and hydrabase_client.last_peer_count is not None:
@@ -34366,13 +34385,21 @@ if __name__ == '__main__':
     # Register action handlers and start automation engine
     _register_automation_handlers()
     if automation_engine:
-        print("🔧 Starting automation engine...")
-        automation_engine.start()
-        print("✅ Automation engine started")
         try:
-            automation_engine.emit('app_started', {})
-        except Exception:
-            pass
+            print("🔧 Starting automation engine...")
+            automation_engine.start()
+            print("✅ Automation engine started")
+            try:
+                automation_engine.emit('app_started', {})
+            except Exception:
+                pass
+        except AttributeError as e:
+            print(f"⚠️ Automation engine failed to start: {e}")
+            print("   If using Docker, check that your volume mount is /app/data (not /app/database)")
+            logger.error(f"Automation engine start error (possible stale Docker volume): {e}")
+        except Exception as e:
+            print(f"⚠️ Automation engine failed to start: {e}")
+            logger.error(f"Automation engine start error: {e}")
 
     # Add startup activity
     add_activity_item("🚀", "System Started", "SoulSync Web UI Server initialized", "Now")
