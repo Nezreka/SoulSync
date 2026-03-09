@@ -273,35 +273,65 @@ class SpotifyClient:
         with self._auth_cache_lock:
             self._auth_cached_result = None
             self._auth_cache_time = 0
-
     def is_spotify_authenticated(self) -> bool:
         """Check if Spotify client is specifically authenticated (not just iTunes fallback).
-        Results are cached for 60 seconds to avoid excessive API calls."""
+        This implementation only inspects cached tokens and performs at most a silent
+        token refresh. It NEVER triggers an interactive OAuth flow or opens a browser.
+        Results are cached for 60 seconds to avoid excessive work."""
         if self.sp is None:
             return False
 
         # Check cache first (lock only for brief read)
         with self._auth_cache_lock:
-            if self._auth_cached_result is not None and (time.time() - self._auth_cache_time) < self._AUTH_CACHE_TTL:
+            if (
+                self._auth_cached_result is not None
+                and (time.time() - self._auth_cache_time) < self._AUTH_CACHE_TTL
+            ):
                 return self._auth_cached_result
 
-        # Cache miss — make API call outside the lock.
-        # Use a no-retry client to avoid spotipy blocking for hours on 429s
-        # (Retry-After can be 2+ hours). The main self.sp client keeps its
-        # retries for normal API calls.
+        result = False
+
         try:
-            probe = spotipy.Spotify(auth_manager=self.sp.auth_manager, retries=0)
-            probe.current_user()
-            result = True
-        except Exception as e:
-            error_str = str(e)
-            # Rate limit means we ARE authenticated — just throttled
-            if "rate" in error_str.lower() or "429" in error_str:
-                logger.warning("Spotify rate limited during auth check — treating as authenticated")
-                result = True
-            else:
-                logger.debug(f"Spotify authentication check failed: {e}")
+            auth_manager = getattr(self.sp, "auth_manager", None)
+            if auth_manager is None:
                 result = False
+            else:
+                # Prefer the cache handler API if available (newer spotipy)
+                cache_handler = getattr(auth_manager, "cache_handler", None)
+                token_info = None
+                if cache_handler is not None and hasattr(cache_handler, "get_cached_token"):
+                    token_info = cache_handler.get_cached_token()
+                else:
+                    # Fallback: some versions store token_info directly
+                    token_info = getattr(auth_manager, "token_info", None)
+
+                if token_info and isinstance(token_info, dict):
+                    expires_at = token_info.get("expires_at")
+                    refresh_token = token_info.get("refresh_token")
+
+                    # If token is still valid (or no expiry set), treat as authenticated
+                    if not expires_at or expires_at > time.time() + 30:
+                        result = True
+                    # If token is expired but we have a refresh token, try a silent refresh
+                    elif refresh_token:
+                        try:
+                            new_token = auth_manager.refresh_access_token(refresh_token)
+                            if new_token and new_token.get("access_token"):
+                                result = True
+                            else:
+                                result = False
+                        except Exception as refresh_err:
+                            logger.error(f"Spotify token refresh failed: {refresh_err}")
+                            result = False
+                    else:
+                        # Expired and no refresh token
+                        result = False
+                else:
+                    # No cached token
+                    result = False
+        except Exception as e:
+            logger.error(f"Spotify authentication cache check failed: {e}")
+            result = False
 
         with self._auth_cache_lock:
             self._auth_cached_result = result
