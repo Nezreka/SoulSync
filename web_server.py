@@ -14516,6 +14516,7 @@ def check_for_update():
         'update_available': update_available,
         'current_sha': current[:8] if current else None,
         'latest_sha': latest[:8] if latest else None,
+        'is_docker': os.path.exists('/.dockerenv'),
     })
 
 @app.route('/api/version-info', methods=['GET'])
