@@ -13216,7 +13216,9 @@ async function checkForUpdates() {
                 const notified = sessionStorage.getItem('soulsync-update-notified');
                 if (notified !== data.latest_sha) {
                     sessionStorage.setItem('soulsync-update-notified', data.latest_sha);
-                    showToast('A new SoulSync update is available!', 'info');
+                    showToast(data.is_docker
+                        ? 'A new SoulSync update has been pushed to the repo — Docker image will be updated soon!'
+                        : 'A new SoulSync update is available!', 'info');
                 }
             }
         } else {
@@ -13305,11 +13307,14 @@ function populateVersionModal(versionData, updateInfo) {
     if (updateInfo && updateInfo.update_available) {
         const banner = document.createElement('div');
         banner.className = 'version-update-banner';
+        const isDocker = updateInfo.is_docker;
         banner.innerHTML = `
             <div class="version-update-banner-icon">&#x2B06;</div>
             <div class="version-update-banner-text">
-                <strong>New update available</strong>
-                <span>Your version: ${updateInfo.current_sha || 'unknown'} &rarr; Latest: ${updateInfo.latest_sha || 'unknown'}</span>
+                <strong>${isDocker ? 'Repo update detected' : 'New update available'}</strong>
+                <span>${isDocker
+                    ? 'A new update has been pushed to the repo. The Docker image will be updated soon — no action needed yet.'
+                    : `Your version: ${updateInfo.current_sha || 'unknown'} &rarr; Latest: ${updateInfo.latest_sha || 'unknown'}`}</span>
             </div>
         `;
         container.appendChild(banner);
