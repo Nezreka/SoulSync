@@ -238,9 +238,20 @@ class PlaylistSyncService:
                     logger.warning(f"❌ Track {i+1} invalid for playlist: {track} (type: {type(track)}, has ratingKey: {hasattr(track, 'ratingKey') if track else 'N/A'})")
             
             logger.info(f"Playlist validation: {len(valid_tracks)}/{len(media_tracks)} tracks are valid {server_type.title()} objects with ratingKeys")
-            
-            # Use the validated tracks for the sync
-            plex_tracks = valid_tracks # Keep variable name for compatibility with the rest of the function
+
+            # Deduplicate by ratingKey — media servers silently drop duplicates,
+            # so count should reflect what actually ends up in the playlist
+            seen_keys = set()
+            deduped_tracks = []
+            for t in valid_tracks:
+                if t.ratingKey not in seen_keys:
+                    seen_keys.add(t.ratingKey)
+                    deduped_tracks.append(t)
+            if len(deduped_tracks) < len(valid_tracks):
+                logger.info(f"Deduplicated {len(valid_tracks) - len(deduped_tracks)} duplicate ratingKeys ({len(valid_tracks)} → {len(deduped_tracks)} tracks)")
+
+            # Use the deduplicated tracks for the sync
+            plex_tracks = deduped_tracks
             
             # Use active media server for playlist sync
             media_client, server_type = self._get_active_media_client()

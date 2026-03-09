@@ -20852,6 +20852,8 @@ def update_tidal_playlist_phase(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 
+_playlist_discovery_cancelled = set()  # Set of automation_ids that have been cancelled
+
 def _run_playlist_discovery_worker(playlists, automation_id=None):
     """Background worker that discovers Spotify/iTunes metadata for undiscovered
     mirrored playlist tracks. Stores results in extra_data for use by sync."""
@@ -20931,6 +20933,16 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                 log_line=f'{len(undiscovered_tracks)} tracks to discover', log_type='info')
 
             for i, track in enumerate(undiscovered_tracks):
+                # Check for cancellation
+                if automation_id and automation_id in _playlist_discovery_cancelled:
+                    _playlist_discovery_cancelled.discard(automation_id)
+                    print(f"🛑 Playlist discovery cancelled (automation {automation_id})")
+                    _update_automation_progress(automation_id, status='finished', progress=100,
+                                                 phase='Discovery cancelled',
+                                                 log_line=f'Cancelled: {total_discovered} discovered, {total_failed} failed',
+                                                 log_type='info')
+                    return
+
                 total_tracks += 1
                 track_id = track['id']
                 track_name = track.get('track_name', '')
@@ -21995,6 +22007,11 @@ def _run_youtube_discovery_worker(url_hash):
         # Process each track for discovery
         for i, track in enumerate(tracks):
             try:
+                # Check for cancellation (phase changed by reset/delete/close)
+                if state.get('phase') != 'discovering':
+                    print(f"🛑 Discovery cancelled for {url_hash} (phase changed to '{state.get('phase')}')")
+                    return
+
                 # Update progress
                 state['discovery_progress'] = int((i / len(tracks)) * 100)
 
@@ -22297,6 +22314,11 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
         # Process each track for discovery
         for i, track in enumerate(tracks):
             try:
+                # Check for cancellation
+                if state.get('phase') != 'discovering':
+                    print(f"🛑 ListenBrainz discovery cancelled (phase changed to '{state.get('phase')}')")
+                    return
+
                 # Update progress
                 state['discovery_progress'] = int((i / len(tracks)) * 100)
 
@@ -29417,6 +29439,11 @@ def _run_beatport_discovery_worker(url_hash):
         # Process each track for discovery
         for i, track in enumerate(tracks):
             try:
+                # Check for cancellation
+                if state.get('phase') != 'discovering':
+                    print(f"🛑 Beatport discovery cancelled (phase changed to '{state.get('phase')}')")
+                    return
+
                 # Update progress
                 state['discovery_progress'] = int((i / len(tracks)) * 100)
 
