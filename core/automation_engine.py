@@ -98,6 +98,13 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'backup_database',
         'initial_delay': 600,  # 10 min after startup
     },
+    {
+        'name': 'Full Cleanup',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 12, 'unit': 'hours'},
+        'action_type': 'full_cleanup',
+        'initial_delay': 900,  # 15 min after startup
+    },
 ]
 
 

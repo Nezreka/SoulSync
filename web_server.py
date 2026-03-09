@@ -1041,6 +1041,123 @@ def _register_automation_handlers():
         except Exception as e:
             return {'status': 'error', 'reason': str(e)}
 
+    def _auto_full_cleanup(config):
+        """Run all cleanup tasks: quarantine, download queue, empty dirs, staging, search history."""
+        import shutil as _shutil
+        automation_id = config.get('_automation_id')
+        steps = []
+
+        # --- 1. Clear quarantine ---
+        _update_automation_progress(automation_id, phase='Clearing quarantine...', progress=0)
+        quarantine_path = os.path.join(docker_resolve_path(config_manager.get('soulseek.download_path', './downloads')), 'ss_quarantine')
+        q_removed = 0
+        if os.path.exists(quarantine_path):
+            for f in os.listdir(quarantine_path):
+                fp = os.path.join(quarantine_path, f)
+                try:
+                    if os.path.isfile(fp):
+                        os.remove(fp)
+                        q_removed += 1
+                    elif os.path.isdir(fp):
+                        _shutil.rmtree(fp)
+                        q_removed += 1
+                except Exception:
+                    pass
+        steps.append(f'Quarantine: removed {q_removed} items')
+        _update_automation_progress(automation_id,
+            log_line=f'Quarantine: removed {q_removed} items', log_type='success' if q_removed else 'info')
+
+        # --- 2. Clear completed/errored/cancelled downloads from Soulseek queue ---
+        _update_automation_progress(automation_id, phase='Clearing download queue...', progress=20)
+        has_active_batches = False
+        has_post_processing = False
+        with tasks_lock:
+            for batch_data in download_batches.values():
+                if batch_data.get('phase') not in ['complete', 'error', 'cancelled', None]:
+                    has_active_batches = True
+                    break
+            if not has_active_batches:
+                for task_data in download_tasks.values():
+                    if task_data.get('status') == 'post_processing':
+                        has_post_processing = True
+                        break
+        if has_active_batches:
+            steps.append('Download queue: skipped (active batches)')
+            _update_automation_progress(automation_id,
+                log_line='Download queue: skipped (active batches)', log_type='skip')
+        else:
+            try:
+                run_async(soulseek_client.clear_all_completed_downloads())
+                steps.append('Download queue: cleared')
+                _update_automation_progress(automation_id,
+                    log_line='Download queue: cleared', log_type='success')
+            except Exception as e:
+                steps.append(f'Download queue: error ({e})')
+                _update_automation_progress(automation_id,
+                    log_line=f'Download queue: error ({e})', log_type='error')
+
+        # --- 3. Sweep empty download directories ---
+        _update_automation_progress(automation_id, phase='Sweeping empty directories...', progress=40)
+        if has_active_batches or has_post_processing:
+            reason = 'active batches' if has_active_batches else 'post-processing active'
+            steps.append(f'Empty directories: skipped ({reason})')
+            _update_automation_progress(automation_id,
+                log_line=f'Empty directories: skipped ({reason})', log_type='skip')
+        else:
+            dirs_removed = _sweep_empty_download_directories()
+            steps.append(f'Empty directories: removed {dirs_removed}')
+            _update_automation_progress(automation_id,
+                log_line=f'Empty directories: removed {dirs_removed}', log_type='success' if dirs_removed else 'info')
+
+        # --- 4. Clear staging folder ---
+        _update_automation_progress(automation_id, phase='Clearing staging folder...', progress=60)
+        staging_path = _get_staging_path()
+        s_removed = 0
+        if os.path.isdir(staging_path):
+            for f in os.listdir(staging_path):
+                fp = os.path.join(staging_path, f)
+                try:
+                    if os.path.isfile(fp):
+                        os.remove(fp)
+                        s_removed += 1
+                    elif os.path.isdir(fp):
+                        _shutil.rmtree(fp)
+                        s_removed += 1
+                except Exception:
+                    pass
+        steps.append(f'Staging: removed {s_removed} items')
+        _update_automation_progress(automation_id,
+            log_line=f'Staging: removed {s_removed} items', log_type='success' if s_removed else 'info')
+
+        # --- 5. Clean search history ---
+        _update_automation_progress(automation_id, phase='Cleaning search history...', progress=80)
+        try:
+            run_async(soulseek_client.maintain_search_history_with_buffer(
+                keep_searches=50, trigger_threshold=200
+            ))
+            steps.append('Search history: cleaned')
+            _update_automation_progress(automation_id,
+                log_line='Search history: cleaned', log_type='success')
+        except Exception as e:
+            steps.append(f'Search history: error ({e})')
+            _update_automation_progress(automation_id,
+                log_line=f'Search history: error ({e})', log_type='error')
+
+        total_removed = q_removed + s_removed
+        _update_automation_progress(automation_id, status='finished', progress=100,
+            phase='Complete',
+            log_line=f'Full cleanup complete — {total_removed} items removed', log_type='success')
+        return {
+            'status': 'completed',
+            'quarantine_removed': str(q_removed),
+            'staging_removed': str(s_removed),
+            'total_removed': str(total_removed),
+            'steps': steps,
+            '_manages_own_progress': True,
+        }
+
+    automation_engine.register_action_handler('full_cleanup', _auto_full_cleanup)
+
     automation_engine.register_action_handler('start_database_update', _auto_start_database_update,
                                               lambda: db_update_state.get('status') == 'running')
     automation_engine.register_action_handler('deep_scan_library', _auto_deep_scan_library,
@@ -4542,6 +4659,8 @@ def get_automation_blocks():
              "description": "Remove old searches from Soulseek", "available": True},
             {"type": "clean_completed_downloads", "label": "Clean Completed Downloads", "icon": "check-square",
              "description": "Clear completed downloads and empty directories", "available": True},
+            {"type": "full_cleanup", "label": "Full Cleanup", "icon": "trash",
+             "description": "Clear quarantine, download queue, staging folder, and search history in one sweep", "available": True},
             {"type": "deep_scan_library", "label": "Deep Scan Library", "icon": "search",
              "description": "Full library comparison without losing enrichment data", "available": True},
         ],
