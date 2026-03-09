@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
-from core.spotify_client import SpotifyClient
+from core.spotify_client import SpotifyClient, SpotifyRateLimitError
 
 logger = get_logger("spotify_worker")
 
@@ -97,9 +97,13 @@ class SpotifyWorker:
         is_idle = is_actually_running and not self.paused and self.stats['pending'] == 0 and self.current_item is None
 
         try:
-            authenticated = self.client.is_spotify_authenticated()
+            # During rate limit, is_spotify_authenticated() returns False to suppress calls,
+            # but we're still authenticated — just banned. Report truthfully.
+            rate_limited = self.client.is_rate_limited()
+            authenticated = rate_limited or self.client.is_spotify_authenticated()
         except Exception:
             authenticated = False
+            rate_limited = False
 
         return {
             'enabled': True,
@@ -107,6 +111,7 @@ class SpotifyWorker:
             'paused': self.paused,
             'idle': is_idle,
             'authenticated': authenticated,
+            'rate_limited': rate_limited,
             'current_item': self.current_item,
             'stats': self.stats.copy(),
             'progress': progress
@@ -120,6 +125,14 @@ class SpotifyWorker:
             try:
                 if self.paused:
                     time.sleep(1)
+                    continue
+
+                # Rate limit guard — if globally rate limited, sleep until ban expires
+                if self.client.is_rate_limited():
+                    info = self.client.get_rate_limit_info()
+                    remaining = info['remaining_seconds'] if info else 60
+                    logger.debug(f"Spotify globally rate limited, sleeping {remaining}s...")
+                    time.sleep(min(remaining, 60))  # Check again every 60s max
                     continue
 
                 # Auth guard — don't process anything without Spotify auth
@@ -143,6 +156,9 @@ class SpotifyWorker:
                 self._process_item(item)
                 time.sleep(self.inter_item_sleep)
 
+            except SpotifyRateLimitError:
+                logger.debug("Spotify rate limit hit in worker loop, will retry after ban expires")
+                time.sleep(10)
             except Exception as e:
                 logger.error(f"Error in worker loop: {e}")
                 time.sleep(5)
