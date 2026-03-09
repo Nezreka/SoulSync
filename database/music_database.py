@@ -7351,6 +7351,8 @@ class MusicDatabase:
                     JOIN albums al ON al.id = t.album_id
                     JOIN artists ar ON ar.id = t.artist_id
                 """
+                # Only return tracks that have actual files on disk
+                _file_filter = "t.file_path IS NOT NULL AND t.file_path != ''"
 
                 def _collect(rows, cap=None):
                     """Append rows to collected. Stop at cap or limit."""
@@ -7379,7 +7381,7 @@ class MusicDatabase:
                 same_artist_cap = max(5, limit * 3 // 10)
                 cursor.execute(f"""
                     {_track_select}
-                    WHERE ar.name = ? AND t.album_id != ? AND t.id NOT IN ({_exclude_placeholders()})
+                    WHERE {_file_filter} AND ar.name = ? AND t.album_id != ? AND t.id NOT IN ({_exclude_placeholders()})
                     ORDER BY RANDOM()
                     LIMIT ?
                 """, [artist_name, seed['album_id']] + _exclude_values() + [same_artist_cap])
@@ -7401,7 +7403,7 @@ class MusicDatabase:
                     genre_params = [f'%{g}%' for g in all_genres] * 2
                     cursor.execute(f"""
                         {_track_select}
-                        WHERE ({genre_conditions})
+                        WHERE {_file_filter} AND ({genre_conditions})
                           AND ar.name != ?
                           AND t.id NOT IN ({_exclude_placeholders()})
                         ORDER BY RANDOM()
@@ -7424,7 +7426,7 @@ class MusicDatabase:
                         tag_params = [f'%{t}%' for t in all_tags] * 2
                         cursor.execute(f"""
                             {_track_select}
-                            WHERE ({tag_conditions})
+                            WHERE {_file_filter} AND ({tag_conditions})
                               AND ar.name != ?
                               AND t.id NOT IN ({_exclude_placeholders()})
                             ORDER BY RANDOM()
@@ -7437,7 +7439,7 @@ class MusicDatabase:
                 if len(collected) < limit:
                     cursor.execute(f"""
                         {_track_select}
-                        WHERE t.id NOT IN ({_exclude_placeholders()})
+                        WHERE {_file_filter} AND t.id NOT IN ({_exclude_placeholders()})
                         ORDER BY RANDOM()
                         LIMIT ?
                     """, _exclude_values() + [limit - len(collected)])
