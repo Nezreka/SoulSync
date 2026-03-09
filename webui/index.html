@@ -2347,7 +2347,31 @@
                 </div>
                 <div class="enhanced-bulk-bar-actions">
                     <button class="enhanced-bulk-btn secondary" onclick="showBulkEditModal()">Edit Selected</button>
+                    <button class="enhanced-bulk-btn tag-write" onclick="batchWriteTagsSelected()">Write Tags</button>
                     <button class="enhanced-bulk-btn clear" onclick="clearTrackSelection()">Clear Selection</button>
+                </div>
+            </div>
+
+            <!-- Tag Preview Modal -->
+            <div class="modal-overlay hidden" id="tag-preview-overlay">
+                <div class="enhanced-bulk-modal tag-preview-modal">
+                    <div class="enhanced-bulk-modal-header">
+                        <h3 id="tag-preview-title">Write Tags to File</h3>
+                        <button class="enhanced-bulk-modal-close" onclick="closeTagPreviewModal()">&times;</button>
+                    </div>
+                    <div class="enhanced-bulk-modal-body" id="tag-preview-body">
+                        <!-- Populated dynamically -->
+                    </div>
+                    <div class="enhanced-bulk-modal-footer">
+                        <label class="tag-preview-cover-label">
+                            <input type="checkbox" id="tag-preview-embed-cover" checked>
+                            Embed cover art
+                        </label>
+                        <div class="tag-preview-footer-actions">
+                            <button class="enhanced-bulk-btn secondary" onclick="closeTagPreviewModal()">Cancel</button>
+                            <button class="enhanced-bulk-btn primary" id="tag-preview-write-btn" onclick="executeWriteTags()">Write Tags</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 

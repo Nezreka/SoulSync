@@ -33717,6 +33717,14 @@ function renderExpandedAlbumHeader(album) {
     albumEnrichWrap.appendChild(albumEnrichMenu);
     enrichRow.appendChild(albumEnrichWrap);
 
+    // Write Tags button for entire album
+    const writeTagsBtn = document.createElement('button');
+    writeTagsBtn.className = 'enhanced-write-tags-album-btn';
+    writeTagsBtn.innerHTML = '&#9998; Write All Tags';
+    writeTagsBtn.title = 'Write DB metadata to file tags for all tracks in this album';
+    writeTagsBtn.onclick = (e) => { e.stopPropagation(); writeAlbumTags(album.id); };
+    enrichRow.appendChild(writeTagsBtn);
+
     // Delete album button
     const deleteAlbumBtn = document.createElement('button');
     deleteAlbumBtn.className = 'enhanced-delete-album-btn';
@@ -33822,6 +33830,7 @@ function renderTrackTable(album) {
         { label: 'File', cls: 'col-path' },
         { label: 'Match', cls: 'col-match' },
         { label: '', cls: 'col-queue' },
+        { label: '', cls: 'col-writetag' },
         { label: '', cls: 'col-delete' },
     ];
     columns.forEach(col => {
@@ -34021,6 +34030,19 @@ function renderTrackTable(album) {
             queueTd.appendChild(queueBtn);
         }
         tr.appendChild(queueTd);
+
+        // Write Tags button
+        const tagTd = document.createElement('td');
+        tagTd.className = 'col-writetag';
+        if (track.file_path) {
+            const tagBtn = document.createElement('button');
+            tagBtn.className = 'enhanced-write-tag-btn';
+            tagBtn.innerHTML = '&#9998;';
+            tagBtn.title = 'Write tags to file';
+            tagBtn.onclick = (e) => { e.stopPropagation(); showTagPreview(track.id); };
+            tagTd.appendChild(tagBtn);
+        }
+        tr.appendChild(tagTd);
 
         // Delete button
         const delTd = document.createElement('td');
@@ -34836,6 +34858,173 @@ document.addEventListener('click', (e) => {
         document.querySelectorAll('.enhanced-enrich-menu.visible').forEach(m => m.classList.remove('visible'));
     }
 });
+
+// ---- Write Tags to File ----
+
+let _tagPreviewTrackId = null;
+
+async function showTagPreview(trackId) {
+    _tagPreviewTrackId = trackId;
+    const overlay = document.getElementById('tag-preview-overlay');
+    const body = document.getElementById('tag-preview-body');
+    const title = document.getElementById('tag-preview-title');
+    if (!overlay || !body) return;
+
+    title.textContent = 'Write Tags to File';
+    body.innerHTML = '<div class="tag-preview-loading">Loading tag comparison...</div>';
+    overlay.classList.remove('hidden');
+
+    try {
+        const response = await fetch(`/api/library/track/${trackId}/tag-preview`);
+        const result = await response.json();
+        if (!result.success) {
+            body.innerHTML = `<div class="tag-preview-error">${escapeHtml(result.error)}</div>`;
+            return;
+        }
+
+        const diff = result.diff || [];
+        const hasChanges = result.has_changes;
+
+        let html = '<table class="tag-preview-table"><thead><tr>';
+        html += '<th>Field</th><th>Current File Tag</th><th></th><th>DB Value</th>';
+        html += '</tr></thead><tbody>';
+
+        diff.forEach(d => {
+            const rowClass = d.changed ? 'tag-diff-changed' : 'tag-diff-same';
+            const arrow = d.changed ? '<span class="tag-diff-arrow">&rarr;</span>' : '<span class="tag-diff-check">&#10003;</span>';
+            html += `<tr class="${rowClass}">`;
+            html += `<td class="tag-field-name">${d.field}</td>`;
+            html += `<td class="tag-file-value">${escapeHtml(d.file_value) || '<span class="tag-empty">empty</span>'}</td>`;
+            html += `<td class="tag-diff-indicator">${arrow}</td>`;
+            html += `<td class="tag-db-value">${escapeHtml(d.db_value) || '<span class="tag-empty">empty</span>'}</td>`;
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+
+        if (!hasChanges) {
+            html += '<div class="tag-preview-no-changes">File tags already match DB metadata</div>';
+        }
+
+        body.innerHTML = html;
+
+        const writeBtn = document.getElementById('tag-preview-write-btn');
+        if (writeBtn) {
+            writeBtn.disabled = !hasChanges && !document.getElementById('tag-preview-embed-cover')?.checked;
+        }
+
+    } catch (error) {
+        body.innerHTML = `<div class="tag-preview-error">Failed to load preview: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function closeTagPreviewModal() {
+    const overlay = document.getElementById('tag-preview-overlay');
+    if (overlay) overlay.classList.add('hidden');
+    _tagPreviewTrackId = null;
+}
+
+async function executeWriteTags() {
+    if (!_tagPreviewTrackId) return;
+
+    const writeBtn = document.getElementById('tag-preview-write-btn');
+    if (writeBtn) {
+        writeBtn.disabled = true;
+        writeBtn.textContent = 'Writing...';
+    }
+
+    const embedCover = document.getElementById('tag-preview-embed-cover')?.checked ?? true;
+
+    try {
+        const response = await fetch(`/api/library/track/${_tagPreviewTrackId}/write-tags`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ embed_cover: embedCover })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error);
+
+        const fieldCount = (result.written_fields || []).length;
+        showToast(`Tags written successfully (${fieldCount} fields)`, 'success');
+        closeTagPreviewModal();
+
+    } catch (error) {
+        showToast(`Failed to write tags: ${error.message}`, 'error');
+    } finally {
+        if (writeBtn) {
+            writeBtn.disabled = false;
+            writeBtn.textContent = 'Write Tags';
+        }
+    }
+}
+
+async function writeAlbumTags(albumId) {
+    const album = findEnhancedAlbum(albumId);
+    if (!album) return;
+
+    const tracks = (album.tracks || []).filter(t => t.file_path);
+    if (tracks.length === 0) {
+        showToast('No tracks with files in this album', 'error');
+        return;
+    }
+
+    if (!confirm(`Write DB metadata to file tags for all ${tracks.length} tracks in "${album.title}"?`)) return;
+    await _startBatchWriteTags(tracks.map(t => t.id), true);
+}
+
+async function batchWriteTagsSelected() {
+    const trackIds = Array.from(artistDetailPageState.selectedTracks);
+    if (trackIds.length === 0) return;
+
+    if (!confirm(`Write DB metadata to file tags for ${trackIds.length} selected track(s)?`)) return;
+    await _startBatchWriteTags(trackIds, true);
+}
+
+async function _startBatchWriteTags(trackIds, embedCover) {
+    try {
+        const response = await fetch('/api/library/tracks/write-tags-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_ids: trackIds, embed_cover: embedCover })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error);
+
+        showToast(`Writing tags for ${trackIds.length} tracks...`, 'info');
+        _pollBatchWriteTagsStatus();
+
+    } catch (error) {
+        showToast(`Failed to start tag write: ${error.message}`, 'error');
+    }
+}
+
+let _batchWriteTagsPollTimer = null;
+
+function _pollBatchWriteTagsStatus() {
+    if (_batchWriteTagsPollTimer) clearTimeout(_batchWriteTagsPollTimer);
+
+    async function poll() {
+        try {
+            const response = await fetch('/api/library/tracks/write-tags-batch/status');
+            const state = await response.json();
+
+            if (state.status === 'running') {
+                const pct = state.total > 0 ? Math.round(state.processed / state.total * 100) : 0;
+                showToast(`Writing tags: ${state.processed}/${state.total} (${pct}%) — ${state.current_track}`, 'info');
+                _batchWriteTagsPollTimer = setTimeout(poll, 1000);
+            } else if (state.status === 'done') {
+                const msg = `Tags written: ${state.written} succeeded, ${state.failed} failed`;
+                showToast(msg, state.failed > 0 ? 'warning' : 'success');
+                _batchWriteTagsPollTimer = null;
+            }
+        } catch (error) {
+            console.error('Poll write-tags status failed:', error);
+            _batchWriteTagsPollTimer = null;
+        }
+    }
+
+    _batchWriteTagsPollTimer = setTimeout(poll, 800);
+}
 
 async function playLibraryTrack(track, albumTitle, artistName) {
     if (!track.file_path) {

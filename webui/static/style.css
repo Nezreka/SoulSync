@@ -31826,3 +31826,189 @@ textarea.enhanced-meta-field-input {
     border-color: rgba(29, 185, 84, 0.4);
     transform: scale(1.1);
 }
+
+/* ── Write Tags to File ── */
+
+.enhanced-write-tag-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: 1px solid rgba(29, 185, 84, 0.15);
+    background: rgba(29, 185, 84, 0.04);
+    color: rgba(29, 185, 84, 0.5);
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+    padding: 0;
+}
+.enhanced-write-tag-btn:hover {
+    background: rgba(29, 185, 84, 0.12);
+    color: rgba(29, 185, 84, 0.9);
+    border-color: rgba(29, 185, 84, 0.4);
+    transform: scale(1.1);
+}
+
+.enhanced-write-tags-album-btn {
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    background: rgba(29, 185, 84, 0.06);
+    border: 1px solid rgba(29, 185, 84, 0.15);
+    color: rgba(29, 185, 84, 0.6);
+    transition: all 0.15s ease;
+}
+.enhanced-write-tags-album-btn:hover {
+    background: rgba(29, 185, 84, 0.12);
+    color: rgba(29, 185, 84, 0.9);
+    border-color: rgba(29, 185, 84, 0.35);
+}
+
+.enhanced-bulk-btn.tag-write {
+    background: rgba(29, 185, 84, 0.08);
+    border-color: rgba(29, 185, 84, 0.2);
+    color: rgb(var(--accent-rgb));
+}
+.enhanced-bulk-btn.tag-write:hover {
+    background: rgba(29, 185, 84, 0.15);
+    border-color: rgba(29, 185, 84, 0.4);
+}
+
+.col-writetag {
+    width: 32px;
+    text-align: center;
+}
+
+/* Tag Preview Modal */
+.tag-preview-modal {
+    max-width: 700px;
+    width: 90vw;
+}
+
+.tag-preview-loading {
+    text-align: center;
+    padding: 30px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
+}
+
+.tag-preview-error {
+    text-align: center;
+    padding: 20px;
+    color: rgba(255, 80, 80, 0.8);
+    font-size: 14px;
+}
+
+.tag-preview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.tag-preview-table th {
+    text-align: left;
+    padding: 8px 10px;
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: 500;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tag-preview-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.tag-field-name {
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 500;
+    white-space: nowrap;
+    width: 90px;
+}
+
+.tag-file-value {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tag-db-value {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tag-diff-indicator {
+    width: 30px;
+    text-align: center;
+}
+
+.tag-diff-arrow {
+    color: rgb(var(--accent-rgb));
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.tag-diff-check {
+    color: rgba(255, 255, 255, 0.15);
+    font-size: 14px;
+}
+
+tr.tag-diff-changed .tag-file-value {
+    color: rgba(255, 80, 80, 0.6);
+    text-decoration: line-through;
+}
+
+tr.tag-diff-changed .tag-db-value {
+    color: rgb(var(--accent-rgb));
+    font-weight: 500;
+}
+
+tr.tag-diff-same {
+    opacity: 0.5;
+}
+
+.tag-empty {
+    color: rgba(255, 255, 255, 0.15);
+    font-style: italic;
+}
+
+.tag-preview-no-changes {
+    text-align: center;
+    padding: 16px;
+    color: rgba(29, 185, 84, 0.6);
+    font-size: 13px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    margin-top: 8px;
+}
+
+.tag-preview-cover-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.tag-preview-cover-label input[type="checkbox"] {
+    accent-color: rgb(var(--accent-rgb));
+}
+
+.tag-preview-footer-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.tag-preview-modal .enhanced-bulk-modal-footer {
+    justify-content: space-between;
+}
