@@ -5,7 +5,6 @@ let currentPage = 'dashboard';
 let currentTrack = null;
 let isPlaying = false;
 let mediaPlayerExpanded = false;
-let donationAddressesVisible = false;
 let searchResults = [];
 let currentStream = {
     status: 'stopped',
@@ -1271,7 +1270,6 @@ function initApp() {
     initializeNavigation();
     initializeMobileNavigation();
     initializeMediaPlayer();
-    initializeDonationWidget();
     initializeSyncPage();
     initializeWatchlist();
     initializeDownloadManagerToggle();
@@ -2596,32 +2594,17 @@ function canPlayAudioFormat(extension) {
 }
 
 // ===============================
-// DONATION WIDGET
+// SUPPORT MODAL
 // ===============================
 
-function initializeDonationWidget() {
-    const toggleButton = document.getElementById('donation-toggle');
-    toggleButton.addEventListener('click', toggleDonationAddresses);
+function showSupportModal() {
+    const overlay = document.getElementById('support-modal-overlay');
+    if (overlay) overlay.classList.remove('hidden');
 }
 
-function toggleDonationAddresses() {
-    const addresses = document.getElementById('donation-addresses');
-    const toggleButton = document.getElementById('donation-toggle');
-
-    donationAddressesVisible = !donationAddressesVisible;
-
-    if (donationAddressesVisible) {
-        addresses.classList.remove('hidden');
-        toggleButton.textContent = 'Hide';
-    } else {
-        addresses.classList.add('hidden');
-        toggleButton.textContent = 'Show';
-    }
-}
-
-function openKofi() {
-    window.open('https://ko-fi.com/boulderbadgedad', '_blank');
-    console.log('Opening Ko-fi link');
+function closeSupportModal() {
+    const overlay = document.getElementById('support-modal-overlay');
+    if (overlay) overlay.classList.add('hidden');
 }
 
 async function copyAddress(address, cryptoName) {
@@ -12966,7 +12949,8 @@ window.closeMatchingModal = closeMatchingModal;
 window.selectArtist = selectArtist;
 window.selectAlbum = selectAlbum;
 window.navigateToPage = navigateToPage;
-window.openKofi = openKofi;
+window.showSupportModal = showSupportModal;
+window.closeSupportModal = closeSupportModal;
 window.copyAddress = copyAddress;
 window.retryLastSearch = retryLastSearch;
 window.showVersionInfo = showVersionInfo;
