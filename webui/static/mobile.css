@@ -2214,4 +2214,33 @@
     .enhanced-bulk-modal {
         width: calc(100vw - 32px);
     }
+    /* Now Playing Modal */
+    .np-modal {
+        width: 100vw;
+        max-width: none;
+        max-height: none;
+        height: 100vh;
+        border-radius: 0;
+    }
+    .np-body {
+        flex-direction: column;
+        padding: 48px 24px 24px;
+        gap: 24px;
+        overflow-y: auto;
+        max-height: 100vh;
+    }
+    .np-album-art-container {
+        width: 220px;
+        height: 220px;
+        margin: 0 auto;
+    }
+    .np-track-info {
+        width: 100%;
+    }
+    .np-track-title {
+        font-size: 18px;
+    }
+    .np-volume-slider-container {
+        width: 120px;
+    }
 }
