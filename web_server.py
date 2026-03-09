@@ -9804,6 +9804,11 @@ def library_radio():
         if not result.get('success'):
             return jsonify(result), 404
 
+        # Fix image URLs (DB stores server-relative paths that need base URL + auth)
+        for track in result.get('tracks', []):
+            if track.get('image_url'):
+                track['image_url'] = fix_artist_image_url(track['image_url'])
+
         return jsonify(result)
     except Exception as e:
         print(f"Error getting radio tracks: {e}")
