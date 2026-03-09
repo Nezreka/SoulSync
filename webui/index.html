@@ -2248,6 +2248,12 @@
                                 <button class="discography-filter-btn" data-filter="ownership" data-value="owned">Owned</button>
                                 <button class="discography-filter-btn" data-filter="ownership" data-value="missing">Missing</button>
                             </div>
+                            <div class="filter-divider"></div>
+                            <div class="filter-group">
+                                <span class="filter-label">View</span>
+                                <button class="enhanced-view-toggle-btn active" data-view="standard" onclick="toggleEnhancedView(false)">Standard</button>
+                                <button class="enhanced-view-toggle-btn" data-view="enhanced" onclick="toggleEnhancedView(true)">Enhanced</button>
+                            </div>
                         </div>
 
                         <!-- Discography Sections -->
@@ -2294,7 +2300,41 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- Enhanced Library Management View -->
+                        <div class="enhanced-view-container hidden" id="enhanced-view-container">
+                            <!-- Populated dynamically by renderEnhancedView() -->
+                        </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Enhanced Bulk Edit Modal -->
+            <div class="modal-overlay hidden" id="enhanced-bulk-edit-overlay">
+                <div class="enhanced-bulk-modal">
+                    <div class="enhanced-bulk-modal-header">
+                        <h3 id="enhanced-bulk-modal-title">Batch Edit Tracks</h3>
+                        <button class="enhanced-bulk-modal-close" onclick="closeBulkEditModal()">&times;</button>
+                    </div>
+                    <div class="enhanced-bulk-modal-body" id="enhanced-bulk-modal-body">
+                        <!-- Populated dynamically -->
+                    </div>
+                    <div class="enhanced-bulk-modal-footer">
+                        <button class="enhanced-bulk-btn secondary" onclick="closeBulkEditModal()">Cancel</button>
+                        <button class="enhanced-bulk-btn primary" onclick="executeBulkEdit()">Apply Changes</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Enhanced Bulk Actions Bar -->
+            <div class="enhanced-bulk-bar" id="enhanced-bulk-bar">
+                <div class="enhanced-bulk-bar-info">
+                    <span class="enhanced-bulk-bar-count" id="enhanced-bulk-count">0</span>
+                    <span class="enhanced-bulk-bar-label">tracks selected</span>
+                </div>
+                <div class="enhanced-bulk-bar-actions">
+                    <button class="enhanced-bulk-btn secondary" onclick="showBulkEditModal()">Edit Selected</button>
+                    <button class="enhanced-bulk-btn clear" onclick="clearTrackSelection()">Clear Selection</button>
                 </div>
             </div>
 

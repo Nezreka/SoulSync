@@ -6068,6 +6068,197 @@ class MusicDatabase:
                 'error': str(e)
             }
 
+    # ==================== Enhanced Library Management Methods ====================
+
+    # Field whitelists for safe updates
+    ARTIST_EDITABLE_FIELDS = {'name', 'genres', 'summary', 'style', 'mood', 'label'}
+    ALBUM_EDITABLE_FIELDS = {'title', 'year', 'genres', 'style', 'mood', 'label', 'explicit', 'record_type', 'track_count'}
+    TRACK_EDITABLE_FIELDS = {'title', 'track_number', 'bpm', 'explicit', 'style', 'mood'}
+
+    def get_artist_full_detail(self, artist_id) -> Dict[str, Any]:
+        """
+        Get complete artist information with ALL columns, all albums with ALL columns,
+        and all tracks per album with ALL columns. For the enhanced library management view.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Get artist with all columns
+                cursor.execute("SELECT * FROM artists WHERE id = ?", (artist_id,))
+                artist_row = cursor.fetchone()
+                if not artist_row:
+                    return {'success': False, 'error': f'Artist with ID {artist_id} not found'}
+
+                artist_name = artist_row['name']
+                server_source = artist_row['server_source']
+
+                # Parse artist data
+                artist_data = dict(artist_row)
+                # Parse genres JSON
+                if artist_data.get('genres'):
+                    try:
+                        parsed = json.loads(artist_data['genres'])
+                        artist_data['genres'] = parsed if isinstance(parsed, list) else [str(parsed)]
+                    except (json.JSONDecodeError, ValueError):
+                        artist_data['genres'] = [g.strip() for g in artist_data['genres'].split(',') if g.strip()]
+                else:
+                    artist_data['genres'] = []
+
+                # Get all album IDs for this artist (including same-name artists on same server)
+                cursor.execute("""
+                    SELECT id FROM artists
+                    WHERE name = ? AND server_source = ?
+                """, (artist_name, server_source))
+                artist_ids = [row['id'] for row in cursor.fetchall()]
+
+                # Get all albums with all columns
+                placeholders = ','.join('?' * len(artist_ids))
+                cursor.execute(f"""
+                    SELECT * FROM albums
+                    WHERE artist_id IN ({placeholders})
+                    ORDER BY year DESC, title
+                """, artist_ids)
+                album_rows = cursor.fetchall()
+
+                albums = []
+                for album_row in album_rows:
+                    album_data = dict(album_row)
+                    # Parse album genres
+                    if album_data.get('genres'):
+                        try:
+                            parsed = json.loads(album_data['genres'])
+                            album_data['genres'] = parsed if isinstance(parsed, list) else [str(parsed)]
+                        except (json.JSONDecodeError, ValueError):
+                            album_data['genres'] = [g.strip() for g in album_data['genres'].split(',') if g.strip()]
+                    else:
+                        album_data['genres'] = []
+
+                    # Get all tracks for this album with all columns
+                    cursor.execute("""
+                        SELECT * FROM tracks
+                        WHERE album_id = ?
+                        ORDER BY track_number, title
+                    """, (album_data['id'],))
+                    track_rows = cursor.fetchall()
+                    album_data['tracks'] = [dict(tr) for tr in track_rows]
+
+                    # Determine record type from data if not set
+                    if not album_data.get('record_type'):
+                        track_count = len(album_data['tracks']) or album_data.get('track_count') or 0
+                        title_lower = (album_data.get('title') or '').lower()
+                        if any(ind in title_lower for ind in ['single', ' - single', '(single)']) and track_count <= 3:
+                            album_data['record_type'] = 'single'
+                        elif any(ind in title_lower for ind in ['ep', ' - ep', '(ep)', 'extended play']) or (4 <= track_count <= 7):
+                            album_data['record_type'] = 'ep'
+                        else:
+                            album_data['record_type'] = 'album'
+
+                    albums.append(album_data)
+
+                return {
+                    'success': True,
+                    'artist': artist_data,
+                    'albums': albums
+                }
+
+        except Exception as e:
+            logger.error(f"Error getting artist full detail for ID {artist_id}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def update_artist_fields(self, artist_id, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Update artist metadata fields. Only whitelisted fields are accepted."""
+        valid_updates = {k: v for k, v in updates.items() if k in self.ARTIST_EDITABLE_FIELDS}
+        if not valid_updates:
+            return {'success': False, 'error': 'No valid fields to update'}
+
+        # Serialize genres to JSON if present
+        if 'genres' in valid_updates:
+            if isinstance(valid_updates['genres'], list):
+                valid_updates['genres'] = json.dumps(valid_updates['genres'])
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                set_clause = ', '.join(f'{k} = ?' for k in valid_updates)
+                values = list(valid_updates.values()) + [artist_id]
+                cursor.execute(f"UPDATE artists SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?", values)
+                conn.commit()
+                if cursor.rowcount == 0:
+                    return {'success': False, 'error': f'Artist {artist_id} not found'}
+                return {'success': True, 'updated_fields': list(valid_updates.keys())}
+        except Exception as e:
+            logger.error(f"Error updating artist {artist_id}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def update_album_fields(self, album_id, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Update album metadata fields. Only whitelisted fields are accepted."""
+        valid_updates = {k: v for k, v in updates.items() if k in self.ALBUM_EDITABLE_FIELDS}
+        if not valid_updates:
+            return {'success': False, 'error': 'No valid fields to update'}
+
+        if 'genres' in valid_updates:
+            if isinstance(valid_updates['genres'], list):
+                valid_updates['genres'] = json.dumps(valid_updates['genres'])
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                set_clause = ', '.join(f'{k} = ?' for k in valid_updates)
+                values = list(valid_updates.values()) + [album_id]
+                cursor.execute(f"UPDATE albums SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?", values)
+                conn.commit()
+                if cursor.rowcount == 0:
+                    return {'success': False, 'error': f'Album {album_id} not found'}
+                return {'success': True, 'updated_fields': list(valid_updates.keys())}
+        except Exception as e:
+            logger.error(f"Error updating album {album_id}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def update_track_fields(self, track_id, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Update track metadata fields. Only whitelisted fields are accepted."""
+        valid_updates = {k: v for k, v in updates.items() if k in self.TRACK_EDITABLE_FIELDS}
+        if not valid_updates:
+            return {'success': False, 'error': 'No valid fields to update'}
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                set_clause = ', '.join(f'{k} = ?' for k in valid_updates)
+                values = list(valid_updates.values()) + [track_id]
+                cursor.execute(f"UPDATE tracks SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?", values)
+                conn.commit()
+                if cursor.rowcount == 0:
+                    return {'success': False, 'error': f'Track {track_id} not found'}
+                return {'success': True, 'updated_fields': list(valid_updates.keys())}
+        except Exception as e:
+            logger.error(f"Error updating track {track_id}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def batch_update_tracks(self, track_ids: List[str], updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Batch update multiple tracks with the same field values."""
+        valid_updates = {k: v for k, v in updates.items() if k in self.TRACK_EDITABLE_FIELDS}
+        if not valid_updates:
+            return {'success': False, 'error': 'No valid fields to update'}
+        if not track_ids:
+            return {'success': False, 'error': 'No track IDs provided'}
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                set_clause = ', '.join(f'{k} = ?' for k in valid_updates)
+                placeholders = ','.join('?' * len(track_ids))
+                values = list(valid_updates.values()) + list(track_ids)
+                cursor.execute(
+                    f"UPDATE tracks SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
+                    values
+                )
+                conn.commit()
+                return {'success': True, 'updated_count': cursor.rowcount, 'updated_fields': list(valid_updates.keys())}
+        except Exception as e:
+            logger.error(f"Error batch updating tracks: {e}")
+            return {'success': False, 'error': str(e)}
+
     # ==================== Discovery Match Cache Methods ====================
 
     def get_discovery_cache_match(self, normalized_title: str, normalized_artist: str, provider: str) -> Optional[Dict]:

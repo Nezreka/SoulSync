@@ -2172,4 +2172,46 @@
         width: calc(100vw - 32px);
         max-width: 340px;
     }
+
+    /* Enhanced Library Management - Mobile */
+    .enhanced-artist-meta-grid {
+        grid-template-columns: 1fr;
+    }
+    .enhanced-meta-field.wide {
+        grid-column: span 1;
+    }
+    .enhanced-album-row {
+        padding: 10px 12px;
+        gap: 10px;
+    }
+    .enhanced-album-grid {
+        grid-template-columns: 1fr;
+    }
+    .enhanced-album-type-badge {
+        display: none;
+    }
+    .enhanced-album-track-count {
+        font-size: 11px;
+        min-width: 40px;
+    }
+    .enhanced-track-table .col-path,
+    .enhanced-track-table .col-bpm,
+    .enhanced-track-table .col-format,
+    .enhanced-track-table .col-match,
+    .enhanced-track-table .col-disc {
+        display: none;
+    }
+    .enhanced-manual-match-modal {
+        width: 95vw;
+    }
+    .enhanced-album-meta-row {
+        grid-template-columns: 1fr 1fr;
+    }
+    .enhanced-bulk-bar {
+        left: 0;
+        padding: 0 16px;
+    }
+    .enhanced-bulk-modal {
+        width: calc(100vw - 32px);
+    }
 }

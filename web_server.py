@@ -8728,6 +8728,578 @@ def library_check_tracks():
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+# ==================== Enhanced Library Management Endpoints ====================
+
+@app.route('/api/library/artist/<artist_id>/enhanced')
+def get_artist_enhanced_detail(artist_id):
+    """Get full artist detail with all albums and tracks for enhanced library view."""
+    try:
+        database = get_database()
+        result = database.get_artist_full_detail(artist_id)
+        if not result.get('success'):
+            return jsonify(result), 404
+
+        # Fix image URLs for artist and all albums (resolve Plex/Jellyfin relative paths)
+        if result.get('artist', {}).get('thumb_url'):
+            result['artist']['thumb_url'] = fix_artist_image_url(result['artist']['thumb_url'])
+        for album in result.get('albums', []):
+            if album.get('thumb_url'):
+                album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/library/artist/<artist_id>', methods=['PUT'])
+def update_library_artist(artist_id):
+    """Update artist metadata fields."""
+    try:
+        database = get_database()
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+        result = database.update_artist_fields(artist_id, data)
+        if not result.get('success'):
+            return jsonify(result), 400
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/library/album/<album_id>', methods=['PUT'])
+def update_library_album(album_id):
+    """Update album metadata fields."""
+    try:
+        database = get_database()
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+        result = database.update_album_fields(album_id, data)
+        if not result.get('success'):
+            return jsonify(result), 400
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/library/track/<track_id>', methods=['PUT'])
+def update_library_track(track_id):
+    """Update track metadata fields."""
+    try:
+        database = get_database()
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+        result = database.update_track_fields(track_id, data)
+        if not result.get('success'):
+            return jsonify(result), 400
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/library/tracks/batch', methods=['PUT'])
+def batch_update_library_tracks():
+    """Batch update multiple tracks with the same field values."""
+    try:
+        database = get_database()
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+        track_ids = data.get('track_ids', [])
+        updates = data.get('updates', {})
+        if not track_ids or not updates:
+            return jsonify({"success": False, "error": "track_ids and updates are required"}), 400
+        result = database.batch_update_tracks(track_ids, updates)
+        if not result.get('success'):
+            return jsonify(result), 400
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/library/play', methods=['POST'])
+def library_play_track():
+    """Start playing a track directly from the user's library (no download needed)."""
+    try:
+        data = request.get_json()
+        if not data or not data.get('file_path'):
+            return jsonify({"success": False, "error": "file_path is required"}), 400
+
+        file_path = data['file_path']
+
+        # Resolve server-side paths (e.g. /mnt/musicBackup/...) to local transfer path
+        if not os.path.exists(file_path):
+            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+            # Try stripping common server-side prefixes and remapping to transfer dir
+            # The DB stores Plex/media server absolute paths; strip the root to get relative path
+            path_parts = file_path.replace('\\', '/').split('/')
+            # Try progressively shorter prefixes: /mnt/musicBackup/artist/... -> artist/...
+            resolved = None
+            for i in range(1, len(path_parts)):
+                relative = '/'.join(path_parts[i:])
+                candidate = os.path.join(transfer_dir, relative.replace('/', os.sep))
+                if os.path.exists(candidate):
+                    resolved = candidate
+                    break
+            if resolved:
+                file_path = resolved
+            else:
+                return jsonify({"success": False, "error": "File not found on disk"}), 404
+
+        print(f"📚 Library play request: {os.path.basename(file_path)}")
+
+        # Set stream state to ready with the library file path directly
+        with stream_lock:
+            stream_state.update({
+                "status": "ready",
+                "progress": 100,
+                "track_info": {
+                    "title": data.get('title', os.path.basename(file_path)),
+                    "artist": data.get('artist', 'Unknown Artist'),
+                    "album": data.get('album', 'Unknown Album'),
+                },
+                "file_path": file_path,
+                "error_message": None,
+                "is_library": True
+            })
+
+        return jsonify({"success": True, "message": "Library track ready for playback"})
+
+    except Exception as e:
+        print(f"❌ Error playing library track: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes')}
+
+@app.route('/api/library/enrich', methods=['POST'])
+def library_enrich_entity():
+    """Trigger enrichment of a specific entity from a single service.
+    Body: { entity_type: 'artist'|'album'|'track', entity_id: str, service: str,
+            name: str, artist_name: str? }
+    service: 'audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes'
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+
+        entity_type = data.get('entity_type')  # artist, album, track
+        entity_id = data.get('entity_id')
+        service = data.get('service')
+        name = data.get('name', '')
+        artist_name = data.get('artist_name', '')
+
+        if not entity_type or not entity_id or not service:
+            return jsonify({"success": False, "error": "entity_type, entity_id, and service are required"}), 400
+
+        if entity_type not in ('artist', 'album', 'track'):
+            return jsonify({"success": False, "error": "entity_type must be artist, album, or track"}), 400
+
+        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes')
+        if service not in valid_services:
+            return jsonify({"success": False, "error": f"service must be one of: {', '.join(valid_services)}"}), 400
+
+        # Per-service lock to avoid thread-safety issues with shared worker clients
+        lock = _enrichment_locks.get(service)
+        if not lock:
+            return jsonify({"success": False, "error": f"Unknown service: {service}"}), 400
+
+        acquired = lock.acquire(blocking=False)
+        if not acquired:
+            return jsonify({"success": False, "error": f"{service} enrichment already in progress. Please wait."}), 429
+
+        try:
+            results = {}
+            try:
+                result = _run_single_enrichment(service, entity_type, entity_id, name, artist_name)
+                results[service] = result
+            except Exception as e:
+                results[service] = {"success": False, "error": str(e)}
+        finally:
+            lock.release()
+
+        # Re-fetch updated data to return fresh state
+        database = get_database()
+        updated = database.get_artist_full_detail(
+            data.get('artist_id', entity_id) if entity_type == 'artist' else
+            _get_artist_id_for_entity(database, entity_type, entity_id)
+        )
+
+        # Fix image URLs in updated data
+        if updated.get('success'):
+            if updated.get('artist', {}).get('thumb_url'):
+                updated['artist']['thumb_url'] = fix_artist_image_url(updated['artist']['thumb_url'])
+            for album in updated.get('albums', []):
+                if album.get('thumb_url'):
+                    album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
+
+        return jsonify({
+            "success": True,
+            "results": results,
+            "updated_data": updated if updated.get('success') else None
+        })
+
+    except Exception as e:
+        print(f"❌ Error enriching entity: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _get_artist_id_for_entity(database, entity_type, entity_id):
+    """Look up the artist_id for an album or track."""
+    try:
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+            if entity_type == 'album':
+                cursor.execute("SELECT artist_id FROM albums WHERE id = ?", (entity_id,))
+            elif entity_type == 'track':
+                cursor.execute("SELECT artist_id FROM tracks WHERE id = ?", (entity_id,))
+            else:
+                return entity_id
+            row = cursor.fetchone()
+            return row['artist_id'] if row else entity_id
+    except Exception:
+        return entity_id
+
+
+def _run_single_enrichment(service, entity_type, entity_id, name, artist_name):
+    """Run a single enrichment service on a single entity."""
+    if service == 'audiodb':
+        if not audiodb_worker:
+            return {"success": False, "error": "AudioDB worker not initialized"}
+        item = {'type': entity_type, 'id': entity_id, 'name': name}
+        if entity_type in ('album', 'track'):
+            item['artist'] = artist_name
+        audiodb_worker._process_item(item)
+        return {"success": True, "message": f"AudioDB lookup complete for {entity_type}"}
+
+    elif service == 'deezer':
+        if not deezer_worker:
+            return {"success": False, "error": "Deezer worker not initialized"}
+        item = {'type': entity_type, 'id': entity_id, 'name': name, 'artist': artist_name}
+        if entity_type == 'artist':
+            deezer_worker._process_artist(entity_id, name)
+        elif entity_type == 'album':
+            deezer_worker._process_album(entity_id, name, artist_name, item)
+        elif entity_type == 'track':
+            deezer_worker._process_track(entity_id, name, artist_name, item)
+        return {"success": True, "message": f"Deezer lookup complete for {entity_type}"}
+
+    elif service == 'musicbrainz':
+        if not mb_worker:
+            return {"success": False, "error": "MusicBrainz worker not initialized"}
+        item = {'type': entity_type, 'id': entity_id, 'name': name}
+        if entity_type in ('album', 'track'):
+            item['artist'] = artist_name
+        mb_worker._process_item(item)
+        return {"success": True, "message": f"MusicBrainz lookup complete for {entity_type}"}
+
+    elif service == 'spotify':
+        if not spotify_enrichment_worker:
+            return {"success": False, "error": "Spotify worker not initialized"}
+        if entity_type == 'artist':
+            spotify_enrichment_worker._process_artist({'type': 'artist', 'id': entity_id, 'name': name})
+        elif entity_type == 'album':
+            spotify_enrichment_worker._process_album_individual({'type': 'album_individual', 'id': entity_id, 'name': name, 'artist': artist_name})
+        elif entity_type == 'track':
+            spotify_enrichment_worker._process_track_individual({'type': 'track_individual', 'id': entity_id, 'name': name, 'artist': artist_name})
+        return {"success": True, "message": f"Spotify lookup complete for {entity_type}"}
+
+    elif service == 'itunes':
+        if not itunes_enrichment_worker:
+            return {"success": False, "error": "iTunes worker not initialized"}
+        if entity_type == 'artist':
+            itunes_enrichment_worker._process_artist({'type': 'artist', 'id': entity_id, 'name': name})
+        elif entity_type == 'album':
+            itunes_enrichment_worker._process_album_individual({'type': 'album_individual', 'id': entity_id, 'name': name, 'artist': artist_name})
+        elif entity_type == 'track':
+            itunes_enrichment_worker._process_track_individual({'type': 'track_individual', 'id': entity_id, 'name': name, 'artist': artist_name})
+        return {"success": True, "message": f"iTunes lookup complete for {entity_type}"}
+
+    else:
+        return {"success": False, "error": f"Unknown service: {service}"}
+
+
+@app.route('/api/library/search-service', methods=['POST'])
+def library_search_service():
+    """Search a specific service for matching entities (for manual matching).
+    Body: { service: str, entity_type: str, query: str }
+    Returns normalized list of results.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "Invalid or missing JSON body"}), 400
+        service = data.get('service', '')
+        entity_type = data.get('entity_type', '')
+        query = data.get('query', '').strip()
+
+        if not service or not entity_type or not query:
+            return jsonify({"success": False, "error": "service, entity_type, and query are required"}), 400
+
+        results = _search_service(service, entity_type, query)
+        return jsonify({"success": True, "results": results})
+
+    except Exception as e:
+        print(f"❌ Error searching service: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _search_service(service, entity_type, query):
+    """Search a service and return normalized results."""
+    import requests as req_lib
+
+    if service == 'spotify':
+        if not spotify_enrichment_worker or not spotify_enrichment_worker.client:
+            raise ValueError("Spotify worker not initialized")
+        client = spotify_enrichment_worker.client
+        if entity_type == 'artist':
+            items = client.search_artists(query, limit=8)
+            return [{'id': a.id, 'name': a.name, 'image': a.image_url, 'extra': ', '.join(a.genres[:3]) if a.genres else ''} for a in items]
+        elif entity_type == 'album':
+            items = client.search_albums(query, limit=8)
+            return [{'id': a.id, 'name': a.name, 'image': a.image_url, 'extra': f"{', '.join(a.artists)} · {a.release_date or ''}"} for a in items]
+        elif entity_type == 'track':
+            items = client.search_tracks(query, limit=8)
+            return [{'id': t.id, 'name': t.name, 'image': t.image_url, 'extra': f"{', '.join(t.artists)} · {t.album or ''}"} for t in items]
+
+    elif service == 'itunes':
+        if not itunes_enrichment_worker or not itunes_enrichment_worker.client:
+            raise ValueError("iTunes worker not initialized")
+        client = itunes_enrichment_worker.client
+        if entity_type == 'artist':
+            items = client.search_artists(query, limit=8)
+            return [{'id': a.id, 'name': a.name, 'image': a.image_url, 'extra': ', '.join(a.genres[:3]) if a.genres else ''} for a in items]
+        elif entity_type == 'album':
+            items = client.search_albums(query, limit=8)
+            return [{'id': a.id, 'name': a.name, 'image': a.image_url, 'extra': f"{', '.join(a.artists)} · {a.release_date or ''}"} for a in items]
+        elif entity_type == 'track':
+            items = client.search_tracks(query, limit=8)
+            return [{'id': t.id, 'name': t.name, 'image': t.image_url, 'extra': f"{', '.join(t.artists)} · {t.album or ''}"} for t in items]
+
+    elif service == 'musicbrainz':
+        if not mb_worker or not mb_worker.mb_service:
+            raise ValueError("MusicBrainz worker not initialized")
+        mb_client = mb_worker.mb_service.mb_client
+        if entity_type == 'artist':
+            items = mb_client.search_artist(query, limit=8)
+            return [{'id': a['id'], 'name': a.get('name', ''), 'image': None,
+                      'extra': f"Score: {a.get('score', '')} · {a.get('disambiguation', '') or a.get('country', '')}"} for a in items]
+        elif entity_type == 'album':
+            items = mb_client.search_release(query, limit=8)
+            results = []
+            for r in items:
+                artists = ', '.join(ac.get('name', '') for ac in r.get('artist-credit', []) if isinstance(ac, dict))
+                # Cover Art Archive provides album art by release MBID
+                cover_url = f"https://coverartarchive.org/release/{r['id']}/front-250" if r.get('id') else None
+                results.append({'id': r['id'], 'name': r.get('title', ''), 'image': cover_url,
+                                'extra': f"{artists} · {r.get('date', '')} · Score: {r.get('score', '')}"})
+            return results
+        elif entity_type == 'track':
+            items = mb_client.search_recording(query, limit=8)
+            results = []
+            for r in items:
+                artists = ', '.join(ac.get('name', '') for ac in r.get('artist-credit', []) if isinstance(ac, dict))
+                results.append({'id': r['id'], 'name': r.get('title', ''), 'image': None,
+                                'extra': f"{artists} · Score: {r.get('score', '')}"})
+            return results
+
+    elif service == 'deezer':
+        # Deezer client only returns single results, so hit the API directly for multiple
+        type_map = {'artist': 'artist', 'album': 'album', 'track': 'track'}
+        deezer_type = type_map.get(entity_type, 'track')
+        try:
+            resp = req_lib.get(f'https://api.deezer.com/search/{deezer_type}', params={'q': query, 'limit': 8}, timeout=10)
+            data = resp.json().get('data', [])
+        except Exception:
+            data = []
+        results = []
+        for item in data:
+            if entity_type == 'artist':
+                results.append({'id': str(item.get('id', '')), 'name': item.get('name', ''),
+                                'image': item.get('picture_medium'), 'extra': f"{item.get('nb_fan', 0)} fans"})
+            elif entity_type == 'album':
+                artist_name = item.get('artist', {}).get('name', '') if isinstance(item.get('artist'), dict) else ''
+                results.append({'id': str(item.get('id', '')), 'name': item.get('title', ''),
+                                'image': item.get('cover_medium'), 'extra': artist_name})
+            elif entity_type == 'track':
+                artist_name = item.get('artist', {}).get('name', '') if isinstance(item.get('artist'), dict) else ''
+                album_name = item.get('album', {}).get('title', '') if isinstance(item.get('album'), dict) else ''
+                results.append({'id': str(item.get('id', '')), 'name': item.get('title', ''),
+                                'image': item.get('album', {}).get('cover_medium') if isinstance(item.get('album'), dict) else None,
+                                'extra': f"{artist_name} · {album_name}"})
+        return results
+
+    elif service == 'audiodb':
+        if not audiodb_worker or not audiodb_worker.client:
+            raise ValueError("AudioDB worker not initialized")
+        client = audiodb_worker.client
+        result = None
+        if entity_type == 'artist':
+            result = client.search_artist(query)
+        elif entity_type == 'album':
+            # AudioDB album search needs artist + album, try query as-is
+            parts = query.split(' - ', 1) if ' - ' in query else [query, '']
+            result = client.search_album(parts[0], parts[1] if len(parts) > 1 else query)
+        elif entity_type == 'track':
+            parts = query.split(' - ', 1) if ' - ' in query else [query, '']
+            result = client.search_track(parts[0], parts[1] if len(parts) > 1 else query)
+        if result:
+            if entity_type == 'artist':
+                return [{'id': str(result.get('idArtist', '')), 'name': result.get('strArtist', ''),
+                         'image': result.get('strArtistThumb'), 'extra': result.get('strGenre', '')}]
+            elif entity_type == 'album':
+                return [{'id': str(result.get('idAlbum', '')), 'name': result.get('strAlbum', ''),
+                         'image': result.get('strAlbumThumb'), 'extra': f"{result.get('strArtist', '')} · {result.get('intYearReleased', '')}"}]
+            elif entity_type == 'track':
+                return [{'id': str(result.get('idTrack', '')), 'name': result.get('strTrack', ''),
+                         'image': None, 'extra': f"{result.get('strArtist', '')} · {result.get('strAlbum', '')}"}]
+        return []
+
+    return []
+
+
+# Column name mappings for manual matching
+_SERVICE_ID_COLUMNS = {
+    'spotify': {'artist': 'spotify_artist_id', 'album': 'spotify_album_id', 'track': 'spotify_track_id'},
+    'musicbrainz': {'artist': 'musicbrainz_id', 'album': 'musicbrainz_release_id', 'track': 'musicbrainz_recording_id'},
+    'deezer': {'artist': 'deezer_id', 'album': 'deezer_id', 'track': 'deezer_id'},
+    'audiodb': {'artist': 'audiodb_id', 'album': 'audiodb_id', 'track': 'audiodb_id'},
+    'itunes': {'artist': 'itunes_artist_id', 'album': 'itunes_album_id', 'track': 'itunes_track_id'},
+}
+
+@app.route('/api/library/manual-match', methods=['PUT'])
+def library_manual_match():
+    """Manually set a service ID for an entity.
+    Body: { entity_type: str, entity_id: str, service: str, service_id: str, artist_id: str }
+    """
+    try:
+        data = request.get_json()
+        entity_type = data.get('entity_type')
+        entity_id = data.get('entity_id')
+        service = data.get('service')
+        service_id = data.get('service_id')
+
+        if not all([entity_type, entity_id, service, service_id]):
+            return jsonify({"success": False, "error": "entity_type, entity_id, service, and service_id are required"}), 400
+
+        id_col = _SERVICE_ID_COLUMNS.get(service, {}).get(entity_type)
+        if not id_col:
+            return jsonify({"success": False, "error": f"Invalid service/entity_type combination"}), 400
+
+        status_col = f"{service}_match_status"
+        attempted_col = f"{service}_last_attempted"
+        table = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}[entity_type]
+
+        database = get_database()
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                UPDATE {table}
+                SET {id_col} = ?, {status_col} = 'matched', {attempted_col} = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (service_id, entity_id))
+            conn.commit()
+            if cursor.rowcount == 0:
+                return jsonify({"success": False, "error": "Entity not found"}), 404
+
+        # Re-fetch fresh data
+        artist_id = data.get('artist_id', entity_id)
+        if entity_type != 'artist':
+            artist_id = _get_artist_id_for_entity(database, entity_type, entity_id)
+
+        updated = database.get_artist_full_detail(artist_id)
+        if updated.get('success'):
+            if updated.get('artist', {}).get('thumb_url'):
+                updated['artist']['thumb_url'] = fix_artist_image_url(updated['artist']['thumb_url'])
+            for album in updated.get('albums', []):
+                if album.get('thumb_url'):
+                    album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
+
+        return jsonify({
+            "success": True,
+            "message": f"Manually matched {entity_type} to {service} ID: {service_id}",
+            "updated_data": updated if updated.get('success') else None
+        })
+
+    except Exception as e:
+        print(f"❌ Error manual matching: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/track/<int:track_id>', methods=['DELETE'])
+def library_delete_track(track_id):
+    """Delete a single track record from the database (does NOT delete the file on disk)."""
+    try:
+        database = get_database()
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
+            conn.commit()
+            if cursor.rowcount == 0:
+                return jsonify({"success": False, "error": "Track not found"}), 404
+            return jsonify({"success": True, "deleted_count": cursor.rowcount})
+    except Exception as e:
+        print(f"❌ Error deleting track {track_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/album/<int:album_id>', methods=['DELETE'])
+def library_delete_album(album_id):
+    """Delete an album and all its tracks from the database (does NOT delete files on disk)."""
+    try:
+        database = get_database()
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+            # Delete all tracks belonging to this album first
+            cursor.execute("DELETE FROM tracks WHERE album_id = ?", (album_id,))
+            tracks_deleted = cursor.rowcount
+            # Delete the album itself
+            cursor.execute("DELETE FROM albums WHERE id = ?", (album_id,))
+            if cursor.rowcount == 0:
+                conn.rollback()
+                return jsonify({"success": False, "error": "Album not found"}), 404
+            conn.commit()
+            return jsonify({"success": True, "deleted_count": 1, "tracks_deleted": tracks_deleted})
+    except Exception as e:
+        print(f"❌ Error deleting album {album_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/tracks/delete-batch', methods=['POST'])
+def library_delete_tracks_batch():
+    """Delete multiple track records from the database (does NOT delete files on disk).
+    Body: { track_ids: [int] }
+    """
+    try:
+        data = request.get_json()
+        track_ids = data.get('track_ids', [])
+        if not track_ids or not isinstance(track_ids, list):
+            return jsonify({"success": False, "error": "track_ids array is required"}), 400
+
+        database = get_database()
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholders = ','.join('?' for _ in track_ids)
+            cursor.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", track_ids)
+            conn.commit()
+            return jsonify({"success": True, "deleted_count": cursor.rowcount})
+    except Exception as e:
+        print(f"❌ Error batch deleting tracks: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ==================== End Enhanced Library Management ====================
+
 @app.route('/api/stream/start', methods=['POST'])
 def stream_start():
     """Start streaming a track in the background"""
@@ -8751,7 +9323,8 @@ def stream_start():
                 "progress": 0,
                 "track_info": None,
                 "file_path": None,
-                "error_message": None
+                "error_message": None,
+                "is_library": False
             })
         
         # Start new background streaming task
@@ -8886,23 +9459,29 @@ def stream_audio():
 def stream_stop():
     """Stop streaming and clean up"""
     global stream_background_task
-    
+
     try:
         # Cancel background task
         if stream_background_task and not stream_background_task.done():
             stream_background_task.cancel()
-        
-        # Clear Stream folder
-        project_root = os.path.dirname(os.path.abspath(__file__))
-        stream_folder = os.path.join(project_root, 'Stream')
-        
-        if os.path.exists(stream_folder):
-            for filename in os.listdir(stream_folder):
-                file_path = os.path.join(stream_folder, filename)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
-                    print(f"🗑️ Removed stream file: {filename}")
-        
+
+        # Only clear Stream folder if NOT playing a library file
+        with stream_lock:
+            is_library = stream_state.get("is_library", False)
+
+        if not is_library:
+            project_root = os.path.dirname(os.path.abspath(__file__))
+            stream_folder = os.path.join(project_root, 'Stream')
+
+            if os.path.exists(stream_folder):
+                for filename in os.listdir(stream_folder):
+                    file_path = os.path.join(stream_folder, filename)
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
+                        print(f"🗑️ Removed stream file: {filename}")
+        else:
+            print(f"📚 Library playback stopped - skipping file deletion")
+
         # Reset stream state
         with stream_lock:
             stream_state.update({
@@ -8910,11 +9489,12 @@ def stream_stop():
                 "progress": 0,
                 "track_info": None,
                 "file_path": None,
-                "error_message": None
+                "error_message": None,
+                "is_library": False
             })
-        
+
         return jsonify({"success": True, "message": "Stream stopped"})
-        
+
     except Exception as e:
         print(f"❌ Error stopping stream: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
