@@ -14724,7 +14724,8 @@ def get_version_info():
                     "• Write Tags to File — sync database metadata to audio file tags (MP3/FLAC/OGG/M4A)",
                     "• Tag preview modal showing a diff of file vs database values before writing",
                     "• Batch write tags for entire albums or bulk-selected tracks with live progress",
-                    "• Optional cover art embedding during tag writes with per-album caching"
+                    "• Optional cover art embedding during tag writes with per-album caching",
+                    "• Server sync after tag writes — optionally push updated metadata to Plex, Jellyfin, or Navidrome"
                 ],
                 "usage_note": "Open any artist's detail page and click 'Enhanced' in the view toggle to access the library manager."
             },
@@ -14883,9 +14884,24 @@ def get_version_info():
                 ]
             },
             {
+                "title": "🛡️ Spotify Rate Limit Protection",
+                "description": "Smart detection and handling of Spotify API rate limits",
+                "features": [
+                    "• Automatic detection of long rate limit bans (Retry-After > 60s) from Spotify",
+                    "• Global suppression of all Spotify API calls during a ban — no wasted requests that could extend it",
+                    "• Seamless iTunes/Apple Music fallback for searches while Spotify is rate limited",
+                    "• Enrichment worker auto-pauses during rate limit and resumes when ban expires",
+                    "• Frontend popup modal with live countdown timer showing ban duration and triggering endpoint",
+                    "• One-click Disconnect Spotify button in the modal to switch to Apple Music immediately",
+                    "• Dashboard and sidebar indicators show 'Rate Limited' status with remaining time",
+                    "• Auth probe no longer makes API calls during ban — prevents the vicious cycle of auth checks extending the ban"
+                ]
+            },
+            {
                 "title": "🐛 Bug Fixes & Stability",
                 "description": "Reliability improvements",
                 "features": [
+                    "• Fix radio tracks missing cover art when played from the Now Playing modal",
                     "• Fix sync completion not reaching UI after WebSocket reconnect",
                     "• Fix automation timezone bug causing incorrect scheduling",
                     "• Fix Tidal OAuth PKCE verification on Flask callback route",
