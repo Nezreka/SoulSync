@@ -749,88 +749,190 @@ body {
 }
 
 /* Crypto Donation Section */
-.crypto-donation {
-    background: transparent;
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+/* Support Button */
+.support-section {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     margin: 4px 14px;
-    padding: 12px 6px;
+    padding: 8px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
 
-.donation-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 14px 6px 14px;
-}
-
-.donation-title {
-    font-family: 'SF Pro Text', -apple-system, sans-serif;
-    font-size: 9px;
-    font-weight: 600;
+.support-button {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     color: rgba(255, 255, 255, 0.3);
-    letter-spacing: 1px;
-    text-transform: uppercase;
-}
-
-.toggle-button {
-    width: 40px;
-    height: 18px;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 8px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.toggle-button:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: rgba(255, 255, 255, 0.8);
-}
-
-.donation-addresses {
-    padding: 4px 8px 0 8px;
-}
-
-.donation-item {
-    height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 4px 12px;
-    margin: 0 0 2px 0;
-    border-radius: 8px;
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.donation-item:hover {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.donation-name {
     font-family: 'SF Pro Text', -apple-system, sans-serif;
     font-size: 9px;
     font-weight: 500;
+    letter-spacing: 0.5px;
+    padding: 5px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.support-button:hover {
     color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.15);
 }
 
-.donation-address,
-.donation-link {
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 8px;
+/* Support Modal */
+.support-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(12px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 1;
+    transition: opacity 0.3s ease-in-out;
+}
+
+.support-modal-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.support-modal {
+    background: linear-gradient(165deg, #1e1e1e 0%, #161616 100%);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    width: 420px;
+    max-width: 90vw;
+    padding: 40px 36px;
+    text-align: center;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+    transform: scale(1);
+    transition: transform 0.3s ease-in-out;
+    position: relative;
+}
+
+.support-modal-overlay.hidden .support-modal {
+    transform: scale(0.9);
+}
+
+.support-modal-close-btn {
+    position: absolute;
+    top: 14px;
+    right: 18px;
+    background: none;
+    border: none;
     color: rgba(255, 255, 255, 0.3);
+    font-size: 20px;
+    cursor: pointer;
+    transition: color 0.2s;
+    line-height: 1;
 }
 
-.donation-link {
+.support-modal-close-btn:hover {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.support-modal-logo {
+    margin-bottom: 20px;
+}
+
+.support-modal-logo-img {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    margin-bottom: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.support-modal-title {
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    background: linear-gradient(90deg, #ffffff 0%, rgb(var(--accent-light-rgb)) 60%, rgb(var(--accent-rgb)) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -0.5px;
+    margin: 0;
+}
+
+.support-modal-message {
     font-family: 'SF Pro Text', -apple-system, sans-serif;
-    font-style: italic;
-    color: rgba(var(--accent-rgb), 0.5);
+    font-size: 13px;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.5);
+    margin: 0 0 28px 0;
+    max-width: 340px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.support-modal-links {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.support-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-family: 'SF Pro Text', -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-decoration: none;
+    border: 1px solid transparent;
+}
+
+.support-link-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.support-link-kofi {
+    background: rgba(255, 95, 95, 0.12);
+    color: #ff5f5f;
+    border-color: rgba(255, 95, 95, 0.2);
+}
+
+.support-link-kofi:hover {
+    background: rgba(255, 95, 95, 0.2);
+    border-color: rgba(255, 95, 95, 0.35);
+    box-shadow: 0 4px 20px rgba(255, 95, 95, 0.15);
+}
+
+.support-link-btc {
+    background: rgba(247, 147, 26, 0.1);
+    color: #f7931a;
+    border-color: rgba(247, 147, 26, 0.18);
+}
+
+.support-link-btc:hover {
+    background: rgba(247, 147, 26, 0.18);
+    border-color: rgba(247, 147, 26, 0.3);
+    box-shadow: 0 4px 20px rgba(247, 147, 26, 0.12);
+}
+
+.support-link-eth {
+    background: rgba(98, 126, 234, 0.1);
+    color: #627eea;
+    border-color: rgba(98, 126, 234, 0.18);
+}
+
+.support-link-eth:hover {
+    background: rgba(98, 126, 234, 0.18);
+    border-color: rgba(98, 126, 234, 0.3);
+    box-shadow: 0 4px 20px rgba(98, 126, 234, 0.12);
 }
 
 /* Version Section */
