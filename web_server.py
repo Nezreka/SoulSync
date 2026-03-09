@@ -8815,6 +8815,353 @@ def batch_update_library_tracks():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+# ── Write Tags to File endpoints ──
+
+@app.route('/api/library/track/<track_id>/tag-preview', methods=['GET'])
+def get_track_tag_preview(track_id):
+    """Read current file tags and compare against DB metadata for a single track."""
+    try:
+        from core.tag_writer import read_file_tags, build_tag_diff
+        database = get_database()
+
+        # Get track + album + artist data from DB
+        conn = database._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT t.*, a.name as artist_name, al.title as album_title,
+                   al.year, al.genres as album_genres, al.track_count,
+                   al.thumb_url as album_thumb_url, a.thumb_url as artist_thumb_url
+            FROM tracks t
+            JOIN artists a ON t.artist_id = a.id
+            JOIN albums al ON t.album_id = al.id
+            WHERE t.id = ?
+        """, (str(track_id),))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({"success": False, "error": "Track not found"}), 404
+
+        track_data = dict(row)
+        file_path = track_data.get('file_path')
+
+        # Resolve path if needed
+        resolved_path = _resolve_library_file_path(file_path)
+        if not resolved_path:
+            return jsonify({"success": False, "error": "File not found on disk", "file_path": file_path}), 404
+
+        # Read current file tags
+        file_tags = read_file_tags(resolved_path)
+        if file_tags.get('error'):
+            return jsonify({"success": False, "error": file_tags['error']}), 400
+
+        # Parse album genres for diff
+        album_genres = []
+        if track_data.get('album_genres'):
+            try:
+                import json as _json
+                parsed = _json.loads(track_data['album_genres'])
+                album_genres = parsed if isinstance(parsed, list) else [str(parsed)]
+            except (ValueError, TypeError):
+                album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
+
+        # Build DB metadata dict for comparison
+        db_data = {
+            'title': track_data.get('title'),
+            'artist_name': track_data.get('artist_name'),
+            'album_title': track_data.get('album_title'),
+            'year': track_data.get('year'),
+            'genres': album_genres,
+            'track_number': track_data.get('track_number'),
+            'disc_number': track_data.get('disc_number'),
+            'bpm': track_data.get('bpm'),
+            'track_count': track_data.get('track_count'),
+            'thumb_url': track_data.get('album_thumb_url') or track_data.get('artist_thumb_url'),
+        }
+
+        diff = build_tag_diff(file_tags, db_data)
+        has_changes = any(d['changed'] for d in diff)
+
+        return jsonify({
+            "success": True,
+            "file_path": resolved_path,
+            "file_tags": file_tags,
+            "db_data": db_data,
+            "diff": diff,
+            "has_changes": has_changes,
+        })
+
+    except Exception as e:
+        logger.error(f"Tag preview error for track {track_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/track/<track_id>/write-tags', methods=['POST'])
+def write_track_tags(track_id):
+    """Write DB metadata into the audio file tags for a single track."""
+    try:
+        from core.tag_writer import write_tags_to_file
+        database = get_database()
+        data = request.get_json() or {}
+        embed_cover = data.get('embed_cover', True)
+
+        # Get full track data
+        conn = database._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT t.*, a.name as artist_name, al.title as album_title,
+                   al.year, al.genres as album_genres, al.track_count,
+                   al.thumb_url as album_thumb_url, a.thumb_url as artist_thumb_url
+            FROM tracks t
+            JOIN artists a ON t.artist_id = a.id
+            JOIN albums al ON t.album_id = al.id
+            WHERE t.id = ?
+        """, (str(track_id),))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({"success": False, "error": "Track not found"}), 404
+
+        track_data = dict(row)
+        file_path = track_data.get('file_path')
+        resolved_path = _resolve_library_file_path(file_path)
+        if not resolved_path:
+            return jsonify({"success": False, "error": "File not found on disk"}), 404
+
+        # Parse genres
+        album_genres = []
+        if track_data.get('album_genres'):
+            try:
+                import json as _json
+                parsed = _json.loads(track_data['album_genres'])
+                album_genres = parsed if isinstance(parsed, list) else [str(parsed)]
+            except (ValueError, TypeError):
+                album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
+
+        # Build data for writer
+        db_data = {
+            'title': track_data.get('title'),
+            'artist_name': track_data.get('artist_name'),
+            'album_title': track_data.get('album_title'),
+            'year': track_data.get('year'),
+            'genres': album_genres,
+            'track_number': track_data.get('track_number'),
+            'disc_number': track_data.get('disc_number'),
+            'bpm': track_data.get('bpm'),
+            'track_count': track_data.get('track_count'),
+        }
+
+        # Resolve cover URL
+        cover_url = None
+        if embed_cover:
+            thumb = track_data.get('album_thumb_url') or track_data.get('artist_thumb_url')
+            if thumb and thumb.startswith('http'):
+                cover_url = thumb
+
+        # Use file lock for thread safety
+        file_lock = _get_file_lock(resolved_path)
+        with file_lock:
+            result = write_tags_to_file(resolved_path, db_data, embed_cover=embed_cover, cover_url=cover_url)
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Write tags error for track {track_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+_write_tags_batch_state = {
+    'status': 'idle',  # idle | running | done
+    'total': 0,
+    'processed': 0,
+    'written': 0,
+    'failed': 0,
+    'current_track': '',
+    'errors': [],
+}
+_write_tags_batch_lock = threading.Lock()
+
+
+@app.route('/api/library/tracks/write-tags-batch', methods=['POST'])
+def write_tracks_tags_batch():
+    """Write DB metadata into audio file tags for multiple tracks (runs in background)."""
+    try:
+        with _write_tags_batch_lock:
+            if _write_tags_batch_state['status'] == 'running':
+                return jsonify({"success": False, "error": "A batch tag write is already in progress"}), 409
+
+        database = get_database()
+        data = request.get_json()
+        if not data or not data.get('track_ids'):
+            return jsonify({"success": False, "error": "track_ids required"}), 400
+
+        track_ids = data['track_ids']
+        embed_cover = data.get('embed_cover', True)
+
+        # Fetch all track data upfront (in the request thread, fast DB query)
+        conn = database._get_connection()
+        cursor = conn.cursor()
+        placeholders = ','.join('?' * len(track_ids))
+        cursor.execute(f"""
+            SELECT t.*, a.name as artist_name, al.title as album_title,
+                   al.year, al.genres as album_genres, al.track_count,
+                   al.thumb_url as album_thumb_url, a.thumb_url as artist_thumb_url
+            FROM tracks t
+            JOIN artists a ON t.artist_id = a.id
+            JOIN albums al ON t.album_id = al.id
+            WHERE t.id IN ({placeholders})
+        """, [str(tid) for tid in track_ids])
+
+        rows = [dict(r) for r in cursor.fetchall()]
+
+        # Initialize state
+        with _write_tags_batch_lock:
+            _write_tags_batch_state.update({
+                'status': 'running',
+                'total': len(track_ids),
+                'processed': 0,
+                'written': 0,
+                'failed': 0,
+                'current_track': '',
+                'errors': [],
+            })
+
+        # Count missing DB rows
+        found_ids = {str(r['id']) for r in rows}
+        missing = [tid for tid in track_ids if str(tid) not in found_ids]
+        if missing:
+            with _write_tags_batch_lock:
+                _write_tags_batch_state['failed'] += len(missing)
+                _write_tags_batch_state['processed'] += len(missing)
+                for tid in missing:
+                    _write_tags_batch_state['errors'].append({'track_id': tid, 'error': 'Track not found in database'})
+
+        # Run the actual writes in a background thread
+        def _run_batch():
+            try:
+                from core.tag_writer import write_tags_to_file, download_cover_art
+
+                # Pre-download cover art once per unique album URL
+                cover_cache = {}  # url → (bytes, mime) or None
+                if embed_cover:
+                    unique_urls = set()
+                    for td in rows:
+                        thumb = td.get('album_thumb_url') or td.get('artist_thumb_url')
+                        if thumb and thumb.startswith('http'):
+                            unique_urls.add(thumb)
+                    if unique_urls:
+                        with _write_tags_batch_lock:
+                            _write_tags_batch_state['current_track'] = f'Downloading cover art ({len(unique_urls)} album{"s" if len(unique_urls) != 1 else ""})...'
+                        for url in unique_urls:
+                            cover_cache[url] = download_cover_art(url)
+
+                for track_data in rows:
+                    file_path = track_data.get('file_path')
+                    resolved_path = _resolve_library_file_path(file_path)
+                    track_title = track_data.get('title', 'Unknown')
+
+                    with _write_tags_batch_lock:
+                        _write_tags_batch_state['current_track'] = track_title
+
+                    if not resolved_path:
+                        with _write_tags_batch_lock:
+                            _write_tags_batch_state['failed'] += 1
+                            _write_tags_batch_state['processed'] += 1
+                            _write_tags_batch_state['errors'].append({'track_id': track_data['id'], 'error': 'File not found'})
+                        continue
+
+                    # Parse genres
+                    album_genres = []
+                    if track_data.get('album_genres'):
+                        try:
+                            parsed = json.loads(track_data['album_genres'])
+                            album_genres = parsed if isinstance(parsed, list) else [str(parsed)]
+                        except (ValueError, TypeError):
+                            album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
+
+                    db_data = {
+                        'title': track_data.get('title'),
+                        'artist_name': track_data.get('artist_name'),
+                        'album_title': track_data.get('album_title'),
+                        'year': track_data.get('year'),
+                        'genres': album_genres,
+                        'track_number': track_data.get('track_number'),
+                        'disc_number': track_data.get('disc_number'),
+                        'bpm': track_data.get('bpm'),
+                        'track_count': track_data.get('track_count'),
+                    }
+
+                    # Get pre-downloaded cover art for this track's album
+                    art_data = None
+                    if embed_cover:
+                        thumb = track_data.get('album_thumb_url') or track_data.get('artist_thumb_url')
+                        if thumb and thumb.startswith('http'):
+                            art_data = cover_cache.get(thumb)
+
+                    file_lock = _get_file_lock(resolved_path)
+                    with file_lock:
+                        write_result = write_tags_to_file(
+                            resolved_path, db_data,
+                            embed_cover=embed_cover,
+                            cover_data=art_data
+                        )
+
+                    with _write_tags_batch_lock:
+                        _write_tags_batch_state['processed'] += 1
+                        if write_result.get('success'):
+                            _write_tags_batch_state['written'] += 1
+                        else:
+                            _write_tags_batch_state['failed'] += 1
+                            _write_tags_batch_state['errors'].append({
+                                'track_id': track_data['id'],
+                                'error': write_result.get('error', 'Unknown')
+                            })
+
+            except Exception as e:
+                logger.error(f"Batch write tags background error: {e}")
+            finally:
+                with _write_tags_batch_lock:
+                    _write_tags_batch_state['status'] = 'done'
+                    _write_tags_batch_state['current_track'] = ''
+
+        thread = threading.Thread(target=_run_batch, daemon=True, name="WriteTagsBatch")
+        thread.start()
+
+        return jsonify({"success": True, "message": "Batch tag write started", "total": len(track_ids)})
+
+    except Exception as e:
+        logger.error(f"Batch write tags error: {e}")
+        with _write_tags_batch_lock:
+            _write_tags_batch_state['status'] = 'idle'
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/tracks/write-tags-batch/status', methods=['GET'])
+def get_write_tags_batch_status():
+    """Poll the status of a running batch tag write."""
+    with _write_tags_batch_lock:
+        state = dict(_write_tags_batch_state)
+        state['errors'] = list(_write_tags_batch_state['errors'])  # snapshot to avoid mutation during serialize
+        return jsonify(state)
+
+
+def _resolve_library_file_path(file_path):
+    """Resolve a library file path to an actual file on disk."""
+    if not file_path:
+        return None
+    if os.path.exists(file_path):
+        return file_path
+
+    # Try resolving server-side paths to local transfer path
+    transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+    path_parts = file_path.replace('\\', '/').split('/')
+
+    # Try progressively shorter path suffixes (skip index 0 to avoid drive letter issues)
+    for i in range(1, len(path_parts)):
+        candidate = os.path.join(transfer_dir, *path_parts[i:])
+        if os.path.exists(candidate):
+            return candidate
+
+    return None
+
+
 @app.route('/api/library/play', methods=['POST'])
 def library_play_track():
     """Start playing a track directly from the user's library (no download needed)."""
