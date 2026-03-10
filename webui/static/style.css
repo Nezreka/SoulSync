@@ -16372,6 +16372,7 @@ body {
 
     .library-artist-card {
         border-radius: 12px;
+        aspect-ratio: 0.65;
     }
 
     .library-artist-info {
@@ -16380,6 +16381,29 @@ body {
 
     .library-artist-name {
         font-size: 14px;
+    }
+
+    .card-badge-container {
+        top: 4px;
+        right: 4px;
+        gap: 2px;
+    }
+
+    .source-card-icon {
+        width: 18px;
+        height: 18px;
+        font-size: 7px;
+        border-radius: 3px;
+    }
+
+    .source-card-icon img {
+        width: 12px !important;
+    }
+
+    .watch-card-icon {
+        width: 18px !important;
+        height: 18px !important;
+        font-size: 8px !important;
     }
 }
 
@@ -28339,13 +28363,12 @@ body {
 .card-badge-container {
     position: absolute;
     top: 8px;
+    align-items: flex-end;
     right: 8px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
     z-index: 100;
-    max-height: calc(100% - 80px);
-    overflow: hidden;
 }
 
 .source-card-icon {
@@ -28400,6 +28423,42 @@ body {
 
 .genius-card-icon:hover {
     background: #ffff64;
+}
+.watch-card-icon {
+    cursor: pointer;
+    font-size: 10px;
+    white-space: nowrap;
+    width: 24px !important;
+    height: 24px !important;
+    padding: 0 !important;
+    align-self: flex-end;
+    overflow: hidden;
+    transition: width 0.25s ease, padding 0.25s ease;
+}
+.watch-icon-emoji {
+    flex-shrink: 0;
+}
+.watch-icon-label {
+    opacity: 0;
+    max-width: 0;
+    overflow: hidden;
+    transition: opacity 0.2s ease 0.05s, max-width 0.25s ease;
+}
+.library-artist-card:hover .watch-card-icon {
+    width: auto !important;
+    padding: 3px 7px !important;
+}
+.library-artist-card:hover .watch-icon-label {
+    opacity: 1;
+    max-width: 60px;
+    margin-left: 2px;
+}
+.watch-card-icon.watched {
+    background: rgba(255, 193, 7, 0.2);
+    border-color: rgba(255, 193, 7, 0.4);
+}
+.watch-card-icon:hover {
+    background: rgba(255, 193, 7, 0.35);
 }
 
 /* Artist detail page source link buttons */
