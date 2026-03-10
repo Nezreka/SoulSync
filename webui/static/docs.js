@@ -18,7 +18,7 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Overview</h3>
                 <p class="docs-text">SoulSync is a self-hosted music download, sync, and library management platform. It connects to <strong>Spotify</strong>, <strong>Apple Music/iTunes</strong>, <strong>Tidal</strong>, <strong>YouTube</strong>, and <strong>Beatport</strong> for metadata, and uses <strong>Soulseek</strong> (via slskd) as the primary download source. Your library is served through <strong>Plex</strong>, <strong>Jellyfin</strong>, or <strong>Navidrome</strong>.</p>
                 <div class="docs-features">
-                    <div class="docs-feature-card"><h4>&#x1F3B5; Download Music</h4><p>Search and download tracks in FLAC, MP3, and more from Soulseek, with automatic metadata tagging and file organization.</p></div>
+                    <div class="docs-feature-card"><h4>&#x1F3B5; Download Music</h4><p>Search and download tracks in FLAC, MP3, and more from Soulseek, YouTube, or Tidal, with automatic metadata tagging and file organization.</p></div>
                     <div class="docs-feature-card"><h4>&#x1F504; Playlist Sync</h4><p>Mirror playlists from Spotify, YouTube, Tidal, and Beatport. Discover official metadata and sync to your media server.</p></div>
                     <div class="docs-feature-card"><h4>&#x1F4DA; Library Management</h4><p>Browse, edit, and enrich your music library with metadata from 7 services. Write tags directly to audio files.</p></div>
                     <div class="docs-feature-card"><h4>&#x1F916; Automations</h4><p>Schedule tasks, chain workflows with signals, and get notified via Discord, Pushbullet, or Telegram.</p></div>
@@ -30,12 +30,12 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">First-Time Setup</h3>
                 <p class="docs-text">After launching SoulSync, head to the <strong>Settings</strong> page to configure your services. At minimum you need:</p>
                 <ol class="docs-steps">
-                    <li><strong>Soulseek (slskd)</strong> &mdash; Enter your slskd URL and API key. This is required for downloading music.</li>
+                    <li><strong>Download Source</strong> &mdash; Connect at least one download source: Soulseek (slskd), YouTube, or Tidal. Soulseek offers the best quality selection; YouTube and Tidal work as alternatives or fallbacks in Hybrid mode.</li>
                     <li><strong>Media Server</strong> &mdash; Connect Plex, Jellyfin, or Navidrome so SoulSync knows where your library lives and can trigger scans.</li>
                     <li><strong>Spotify (Recommended)</strong> &mdash; Connect Spotify for the richest metadata. Create an app at <strong>developer.spotify.com</strong>, enter your Client ID and Secret, then click Authenticate.</li>
                     <li><strong>Download Path</strong> &mdash; Set your download and transfer paths in the Download Settings section. The transfer path should point to your media server's monitored folder.</li>
                 </ol>
-                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>You can start using SoulSync with just Soulseek connected. Spotify and other services add metadata enrichment but aren't strictly required &mdash; iTunes/Apple Music is always available as a free fallback.</div></div>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>You can start using SoulSync with just one download source (Soulseek, YouTube, or Tidal). Spotify and other services add metadata enrichment but aren't strictly required &mdash; iTunes/Apple Music is always available as a free fallback.</div></div>
             </div>
             <div class="docs-subsection" id="gs-connecting">
                 <h3 class="docs-subsection-title">Connecting Services</h3>
@@ -45,11 +45,12 @@ const DOCS_SECTIONS = [
                     <tbody>
                         <tr><td><strong>Spotify</strong></td><td>Primary metadata source (artists, albums, tracks, cover art, genres)</td><td>OAuth &mdash; Client ID + Secret</td></tr>
                         <tr><td><strong>iTunes / Apple Music</strong></td><td>Fallback metadata source, always free, no auth needed</td><td>None</td></tr>
-                        <tr><td><strong>Soulseek (slskd)</strong></td><td>Music download source</td><td>URL + API key</td></tr>
-                        <tr><td><strong>Plex</strong></td><td>Media server &mdash; library scanning and metadata sync</td><td>URL + Token</td></tr>
-                        <tr><td><strong>Jellyfin</strong></td><td>Media server &mdash; library scanning</td><td>URL + API Key</td></tr>
-                        <tr><td><strong>Navidrome</strong></td><td>Media server &mdash; auto-detects changes</td><td>URL + Username + Password</td></tr>
-                        <tr><td><strong>Tidal</strong></td><td>Playlist import, optional download source</td><td>OAuth &mdash; Client ID + Secret</td></tr>
+                        <tr><td><strong>Soulseek (slskd)</strong></td><td>Download source &mdash; P2P network, best for lossless and rare music</td><td>URL + API key</td></tr>
+                        <tr><td><strong>YouTube</strong></td><td>Download source &mdash; audio extraction via yt-dlp</td><td>None (optional cookies browser)</td></tr>
+                        <tr><td><strong>Tidal</strong></td><td>Download source + playlist import</td><td>OAuth &mdash; Client ID + Secret</td></tr>
+                        <tr><td><strong>Plex</strong></td><td>Media server &mdash; library scanning, metadata sync, audio streaming</td><td>URL + Token</td></tr>
+                        <tr><td><strong>Jellyfin</strong></td><td>Media server &mdash; library scanning, audio streaming</td><td>URL + API Key</td></tr>
+                        <tr><td><strong>Navidrome</strong></td><td>Media server &mdash; auto-detects changes, audio streaming</td><td>URL + Username + Password</td></tr>
                         <tr><td><strong>Last.fm</strong></td><td>Enrichment &mdash; listener stats, tags, bios, similar artists</td><td>API Key</td></tr>
                         <tr><td><strong>Genius</strong></td><td>Enrichment &mdash; lyrics, descriptions, alternate names</td><td>Access Token</td></tr>
                         <tr><td><strong>AcoustID</strong></td><td>Audio fingerprint verification of downloads</td><td>API Key</td></tr>
@@ -62,8 +63,8 @@ const DOCS_SECTIONS = [
                 <p class="docs-text">SoulSync uses a <strong>sidebar navigation</strong> layout. The left sidebar contains links to every page, a media player at the bottom, and service status indicators. The main content area changes based on the selected page.</p>
                 <ul class="docs-list">
                     <li><strong>Dashboard</strong> &mdash; System overview, tool cards, enrichment worker status, activity feed</li>
-                    <li><strong>Sync</strong> &mdash; Import and manage playlists from Spotify, YouTube, Tidal, Beatport</li>
-                    <li><strong>Search</strong> &mdash; Find and download music via enhanced or basic Soulseek search</li>
+                    <li><strong>Sync</strong> &mdash; Import and manage playlists from Spotify, YouTube, Tidal, Beatport, ListenBrainz</li>
+                    <li><strong>Search</strong> &mdash; Find and download music via enhanced or basic search</li>
                     <li><strong>Discover</strong> &mdash; Explore new artists, curated playlists, genre browsers, time machine</li>
                     <li><strong>Artists</strong> &mdash; Search artists, manage your watchlist, scan for new releases</li>
                     <li><strong>Automations</strong> &mdash; Create scheduled tasks and event-driven workflows</li>
