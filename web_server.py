@@ -13852,6 +13852,23 @@ def _post_process_matched_download(context_key, context, file_path):
             print(f"📁 [Playlist Folder Mode] Organizing in playlist folder: {playlist_name}")
 
             file_ext = os.path.splitext(file_path)[1]
+
+            # Build final path FIRST so we can check for already-processed files
+            final_path, _ = _build_final_path_for_track(context, spotify_artist, None, file_ext)
+            print(f"📁 Playlist mode final path: '{final_path}'")
+
+            # RACE CONDITION GUARD: If source file is gone but destination exists,
+            # another thread (stream processor or verification worker) already moved it.
+            # Return early to avoid deleting the successfully processed file.
+            if not os.path.exists(file_path):
+                if os.path.exists(final_path):
+                    print(f"✅ [Playlist Folder Mode] Source gone but destination exists — already processed by another thread: {os.path.basename(final_path)}")
+                    context['_final_processed_path'] = final_path
+                    return
+                else:
+                    pp_logger.info(f"[inner] EXCEPTION in post-processing for {context_key}: Source file not found and destination does not exist: {file_path}")
+                    raise FileNotFoundError(f"Source file not found and destination does not exist: {file_path}")
+
             context['_audio_quality'] = _get_audio_quality_string(file_path)
             if context['_audio_quality']:
                 print(f"🎧 Audio quality detected: {context['_audio_quality']}")
@@ -13859,9 +13876,6 @@ def _post_process_matched_download(context_key, context, file_path):
             # FLAC bit depth filter
             if _check_flac_bit_depth(file_path, context, context_key):
                 return
-
-            final_path, _ = _build_final_path_for_track(context, spotify_artist, None, file_ext)
-            print(f"📁 Playlist mode final path: '{final_path}'")
 
             # Enhance metadata before moving
             try:
@@ -13873,10 +13887,6 @@ def _post_process_matched_download(context_key, context, file_path):
 
             # Move file to playlist folder
             print(f"🚚 Moving '{os.path.basename(file_path)}' to '{final_path}'")
-            if os.path.exists(final_path):
-                print(f"⚠️ File already exists, overwriting: {os.path.basename(final_path)}")
-                os.remove(final_path)
-
             _safe_move_file(file_path, final_path)
 
             # Store final path for verification wrapper (before lossy copy may override)
