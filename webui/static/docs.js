@@ -485,6 +485,7 @@ const DOCS_SECTIONS = [
             { id: 'auto-triggers', title: 'All Triggers' },
             { id: 'auto-actions', title: 'All Actions' },
             { id: 'auto-then', title: 'Then-Actions & Signals' },
+            { id: 'auto-history', title: 'Execution History' },
             { id: 'auto-system', title: 'System Automations' }
         ],
         content: () => `
@@ -568,6 +569,12 @@ const DOCS_SECTIONS = [
                 <p class="docs-text">All notification messages support <strong>variable substitution</strong>: <code>{name}</code>, <code>{status}</code>, <code>{time}</code>, <code>{run_count}</code>, and context-specific variables from the action result.</p>
                 <p class="docs-text"><strong>Test Notifications</strong>: Use the test button next to any notification then-action to send a test message before saving. This verifies your webhook URL, API key, or bot token is working correctly.</p>
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div><strong>Signal chaining</strong> lets you build multi-step workflows. Safety features include cycle detection (DFS), a 5-level chain depth limit, and a 10-second cooldown between signal fires.</div></div>
+            </div>
+            <div class="docs-subsection" id="auto-history">
+                <h3 class="docs-subsection-title">Execution History</h3>
+                <p class="docs-text">Each automation card shows its <strong>last run time</strong> and <strong>run count</strong>. For scheduled automations, a countdown timer shows when the next run will occur.</p>
+                <p class="docs-text">Use the <strong>Run Now</strong> button on any automation card to execute it immediately, regardless of its schedule. The result (success/failure) updates in real-time on the card.</p>
+                <p class="docs-text">The Dashboard activity feed also logs every automation execution with timestamps, so you can review the full history of what ran and when.</p>
             </div>
             <div class="docs-subsection" id="auto-system">
                 <h3 class="docs-subsection-title">System Automations</h3>
@@ -661,7 +668,8 @@ const DOCS_SECTIONS = [
             { id: 'imp-setup', title: 'Staging Setup' },
             { id: 'imp-workflow', title: 'Import Workflow' },
             { id: 'imp-singles', title: 'Singles Import' },
-            { id: 'imp-matching', title: 'Track Matching' }
+            { id: 'imp-matching', title: 'Track Matching' },
+            { id: 'imp-textfile', title: 'Import from Text File' }
         ],
         content: () => `
             <div class="docs-subsection" id="imp-setup">
@@ -693,6 +701,16 @@ const DOCS_SECTIONS = [
                 </ul>
                 <p class="docs-text">After matching, the import process tags files with the official metadata (title, artist, album, track number, cover art) and moves them to your transfer path following the standard file organization template.</p>
             </div>
+            <div class="docs-subsection" id="imp-textfile">
+                <h3 class="docs-subsection-title">Import from Text File</h3>
+                <p class="docs-text">Import track lists from <strong>CSV</strong>, <strong>TSV</strong>, or <strong>TXT</strong> files. Upload a file with columns for artist, album, and track title:</p>
+                <ol class="docs-steps">
+                    <li>Click <strong>Import from File</strong> and select your text file</li>
+                    <li>Choose the <strong>separator</strong> (comma, tab, or pipe)</li>
+                    <li>Map columns to the correct fields (Artist, Album, Track)</li>
+                    <li>SoulSync searches for each track on Spotify/iTunes and adds matches to your wishlist for downloading</li>
+                </ol>
+            </div>
         `
     },
     {
@@ -701,6 +719,7 @@ const DOCS_SECTIONS = [
         icon: '/static/library.png',
         children: [
             { id: 'player-controls', title: 'Playback Controls' },
+            { id: 'player-streaming', title: 'Streaming & Sources' },
             { id: 'player-queue', title: 'Queue & Smart Radio' },
             { id: 'player-shortcuts', title: 'Keyboard Shortcuts' }
         ],
@@ -709,6 +728,16 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Playback Controls</h3>
                 <p class="docs-text">The sidebar media player is always visible when a track is loaded. It shows album art, track info, a seekable progress bar, and playback controls (play/pause, previous, next, volume, repeat, shuffle).</p>
                 <p class="docs-text">Click the sidebar player to open the <strong>Now Playing modal</strong> &mdash; a full-screen experience with large album art, ambient glow (dominant color from cover art), a frequency-driven audio visualizer, and expanded controls.</p>
+            </div>
+            <div class="docs-subsection" id="player-streaming">
+                <h3 class="docs-subsection-title">Streaming & Sources</h3>
+                <p class="docs-text">The media player streams audio directly from your connected media server &mdash; no local file access needed:</p>
+                <ul class="docs-list">
+                    <li><strong>Plex</strong> &mdash; Streams via Plex transcoding API with your Plex token</li>
+                    <li><strong>Jellyfin</strong> &mdash; Streams via Jellyfin audio API</li>
+                    <li><strong>Navidrome</strong> &mdash; Streams via the Subsonic-compatible API</li>
+                </ul>
+                <p class="docs-text">The browser auto-detects which audio formats it can play. Album art, track metadata, and ambient colors are all pulled from your server in real-time.</p>
             </div>
             <div class="docs-subsection" id="player-queue">
                 <h3 class="docs-subsection-title">Queue & Smart Radio</h3>
@@ -739,24 +768,38 @@ const DOCS_SECTIONS = [
         icon: '/static/settings.png',
         children: [
             { id: 'set-services', title: 'Service Credentials' },
+            { id: 'set-media', title: 'Media Server Setup' },
             { id: 'set-download', title: 'Download Settings' },
+            { id: 'set-processing', title: 'Processing & Organization' },
             { id: 'set-quality', title: 'Quality Profiles' },
             { id: 'set-other', title: 'Other Settings' }
         ],
         content: () => `
             <div class="docs-subsection" id="set-services">
                 <h3 class="docs-subsection-title">Service Credentials</h3>
-                <p class="docs-text">Configure credentials for each external service. All fields are saved to your local config &mdash; nothing is sent to external servers except during actual API calls.</p>
+                <p class="docs-text">Configure credentials for each external service. All fields are saved to your local config &mdash; nothing is sent to external servers except during actual API calls. Each service has a <strong>Test Connection</strong> button to verify your credentials are working.</p>
                 <ul class="docs-list">
-                    <li><strong>Spotify</strong> &mdash; Client ID + Secret from developer.spotify.com, then click Authenticate</li>
-                    <li><strong>Plex/Jellyfin/Navidrome</strong> &mdash; Server URL + auth credentials. Use Test Connection to verify.</li>
+                    <li><strong>Spotify</strong> &mdash; Client ID + Secret from developer.spotify.com, then click Authenticate to complete OAuth flow</li>
                     <li><strong>Soulseek (slskd)</strong> &mdash; Your slskd instance URL + API key</li>
                     <li><strong>Tidal</strong> &mdash; Client ID + Secret, then Authenticate via OAuth</li>
                     <li><strong>Last.fm</strong> &mdash; API key from last.fm/api</li>
                     <li><strong>Genius</strong> &mdash; Access token from genius.com/api-clients</li>
                     <li><strong>AcoustID</strong> &mdash; API key from acoustid.org (enables fingerprint verification)</li>
-                    <li><strong>ListenBrainz</strong> &mdash; Base URL + token for listening history</li>
+                    <li><strong>ListenBrainz</strong> &mdash; Base URL + token for listening history and playlist import</li>
                 </ul>
+            </div>
+            <div class="docs-subsection" id="set-media">
+                <h3 class="docs-subsection-title">Media Server Setup</h3>
+                <p class="docs-text">Connect your media server so SoulSync can scan your library, trigger updates, stream audio, and sync metadata:</p>
+                <table class="docs-table">
+                    <thead><tr><th>Server</th><th>Credentials</th><th>Setup Details</th></tr></thead>
+                    <tbody>
+                        <tr><td><strong>Plex</strong></td><td>URL + Token</td><td>After connecting, select which <strong>Music Library</strong> to use from the dropdown. SoulSync scans this library for your collection and triggers scans after downloads.</td></tr>
+                        <tr><td><strong>Jellyfin</strong></td><td>URL + API Key</td><td>Select the <strong>User</strong> and <strong>Music Library</strong> to target. SoulSync uses the Jellyfin API for library scans and can stream audio directly.</td></tr>
+                        <tr><td><strong>Navidrome</strong></td><td>URL + Username + Password</td><td>Select the <strong>Music Folder</strong> to monitor. Navidrome auto-detects new files, so SoulSync doesn't need to trigger scans &mdash; just place files in the right folder.</td></tr>
+                    </tbody>
+                </table>
+                <p class="docs-text">The media player streams audio directly from your connected server &mdash; tracks play through your Plex, Jellyfin, or Navidrome instance without needing local file access.</p>
             </div>
             <div class="docs-subsection" id="set-download">
                 <h3 class="docs-subsection-title">Download Settings</h3>
@@ -768,6 +811,20 @@ const DOCS_SECTIONS = [
                     <li><strong>iTunes Country</strong> &mdash; Storefront region for iTunes/Apple Music lookups (US, GB, FR, JP, etc.). Changes apply immediately to all searches without restarting.</li>
                     <li><strong>Lossy Copy</strong> &mdash; When enabled, creates a lower-bitrate copy (MP3) of every downloaded file alongside the original. Useful for syncing to mobile devices or streaming servers with bandwidth constraints. The copy is placed in a configurable output folder.</li>
                     <li><strong>Content Filtering</strong> &mdash; Toggle explicit content filtering to control whether explicit tracks appear in search results and downloads.</li>
+                </ul>
+            </div>
+            <div class="docs-subsection" id="set-processing">
+                <h3 class="docs-subsection-title">Processing & Organization</h3>
+                <p class="docs-text">Control how downloaded files are processed and organized:</p>
+                <ul class="docs-list">
+                    <li><strong>AcoustID Verification</strong> &mdash; Toggle on/off. When enabled, every download is fingerprinted and compared against the expected track. Failed matches are quarantined.</li>
+                    <li><strong>Metadata Enhancement</strong> &mdash; Master toggle for all enrichment workers. When disabled, no background metadata fetching occurs.</li>
+                    <li><strong>Embed Album Art</strong> &mdash; Automatically embed cover art into audio file tags during post-processing.</li>
+                    <li><strong>File Organization</strong> &mdash; Toggle automatic file renaming and folder placement. When disabled, files stay in the download folder as-is.</li>
+                    <li><strong>Path Template</strong> &mdash; Customize the folder structure using variables: <code>{artist}</code>, <code>{album}</code>, <code>{title}</code>, <code>{track_number}</code>, <code>{year}</code>, <code>{genre}</code>. Default: <code>{artist}/{album}/{track_number} - {title}</code></li>
+                    <li><strong>Disc Label</strong> &mdash; Customize the multi-disc subfolder prefix (default: "Disc"). Multi-disc albums create <code>Disc 1/</code>, <code>Disc 2/</code>, etc.</li>
+                    <li><strong>Soulseek Search Timeout</strong> &mdash; How long to wait for Soulseek search results before giving up (seconds).</li>
+                    <li><strong>Discovery Lookback Period</strong> &mdash; How many weeks back to check for new releases during watchlist scans.</li>
                 </ul>
             </div>
             <div class="docs-subsection" id="set-quality">
