@@ -154,12 +154,8 @@ class GeniusClient:
                     logger.debug(f"Found song match: {result.get('title')} by {result.get('artist_names')}")
                     return result
 
-        # Fall back to first result
-        first = hits[0].get('result')
-        if first:
-            logger.debug(f"Using first result: {first.get('title')} by {first.get('artist_names')}")
-            return first
-
+        # No confident match — let the worker mark as not_found and retry later
+        logger.debug(f"No song match found in search results for: {artist_name} - {track_title}")
         return None
 
     # ── Song Methods ──
@@ -206,15 +202,13 @@ class GeniusClient:
         for hit in hits:
             result = hit.get('result', {})
             primary = result.get('primary_artist', {})
-            if primary and artist_lower in (primary.get('name') or '').lower():
+            primary_name = (primary.get('name') or '').lower()
+            if primary and (artist_lower in primary_name or primary_name in artist_lower):
                 logger.debug(f"Found artist: {primary.get('name')}")
                 return primary
 
-        # Fall back to first result's primary artist
-        first_artist = hits[0].get('result', {}).get('primary_artist')
-        if first_artist:
-            return first_artist
-
+        # No confident match — let the worker mark as not_found and retry later
+        logger.debug(f"No artist match found in search results for: {artist_name}")
         return None
 
     @rate_limited
