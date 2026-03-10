@@ -815,6 +815,9 @@
                             <button class="sync-tab-button" data-tab="beatport">
                                 <span class="tab-icon beatport-icon"></span> Beatport
                             </button>
+                            <button class="sync-tab-button" data-tab="import-file">
+                                <span class="tab-icon import-file-icon"></span> Import
+                            </button>
                             <button class="sync-tab-button" data-tab="mirrored">
                                 <span class="tab-icon mirrored-icon"></span> Mirrored
                             </button>
@@ -1539,6 +1542,95 @@
                                             </div>
                                         </div>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Import File Tab Content -->
+                        <div class="sync-tab-content" id="import-file-tab-content">
+                            <div class="playlist-header">
+                                <h3>Import Playlist from File</h3>
+                            </div>
+
+                            <!-- Step 1: Upload Zone -->
+                            <div id="import-file-upload-zone" class="import-file-zone">
+                                <div class="import-file-zone-inner" id="import-file-dropzone">
+                                    <div class="import-file-zone-icon">📄</div>
+                                    <div class="import-file-zone-title">Drop your file here</div>
+                                    <div class="import-file-zone-subtitle">or click to browse</div>
+                                    <div class="import-file-zone-formats">Supported: CSV, TSV, TXT</div>
+                                    <input type="file" id="import-file-input" accept=".csv,.tsv,.txt" style="display:none">
+                                </div>
+                                <div class="import-file-format-hints">
+                                    <div class="import-file-hint">
+                                        <span class="import-file-hint-label">CSV / TSV</span>
+                                        <span class="import-file-hint-text">First row as headers (e.g. Title, Artist, Album). Columns are auto-detected or can be mapped manually.</span>
+                                    </div>
+                                    <div class="import-file-hint">
+                                        <span class="import-file-hint-label">TXT</span>
+                                        <span class="import-file-hint-text">One track per line (e.g. Artist - Title). Format and separator can be adjusted after upload.</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Step 2: Column Mapping & Preview (hidden until file is parsed) -->
+                            <div id="import-file-preview-section" style="display:none">
+                                <!-- File info bar -->
+                                <div class="import-file-info-bar">
+                                    <span id="import-file-name-label" class="import-file-info-filename"></span>
+                                    <span id="import-file-track-count" class="import-file-info-count"></span>
+                                    <button class="import-file-clear-btn" onclick="importFileClear()" title="Clear and start over">✕</button>
+                                </div>
+
+                                <!-- Format selector (for plain text files) -->
+                                <div id="import-file-text-format" class="import-file-format-bar" style="display:none">
+                                    <span class="import-file-format-label">Line format:</span>
+                                    <select id="import-file-text-order" class="import-file-select" onchange="importFileReparse()">
+                                        <option value="artist-title">Artist - Title</option>
+                                        <option value="title-artist">Title - Artist</option>
+                                    </select>
+                                    <span class="import-file-format-label" style="margin-left:12px">Separator:</span>
+                                    <select id="import-file-text-separator" class="import-file-select" onchange="importFileReparse()">
+                                        <option value=" - "> - </option>
+                                        <option value=" — "> — </option>
+                                        <option value="|">|</option>
+                                        <option value="/">  /  </option>
+                                    </select>
+                                </div>
+
+                                <!-- Column mapping (for CSV/TSV files) -->
+                                <div id="import-file-column-mapping" class="import-file-mapping-bar" style="display:none">
+                                    <span class="import-file-format-label">Column mapping:</span>
+                                    <div id="import-file-mapping-selects" class="import-file-mapping-selects">
+                                        <!-- Dynamically populated with dropdowns per CSV column -->
+                                    </div>
+                                </div>
+
+                                <!-- Preview table -->
+                                <div class="import-file-preview-table-wrap">
+                                    <table class="import-file-preview-table" id="import-file-preview-table">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>Track</th>
+                                                <th>Artist</th>
+                                                <th>Album</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="import-file-preview-tbody">
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <!-- Playlist name + import button -->
+                                <div class="import-file-action-bar">
+                                    <input type="text" id="import-file-playlist-name"
+                                        class="import-file-name-input"
+                                        placeholder="Enter playlist name..." maxlength="200">
+                                    <button class="import-file-import-btn" id="import-file-import-btn"
+                                        onclick="importFileSubmit()" disabled>
+                                        Import as Mirrored Playlist
+                                    </button>
                                 </div>
                             </div>
                         </div>
