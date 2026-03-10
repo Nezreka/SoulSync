@@ -27436,6 +27436,39 @@ body {
     color: #ffc107;
 }
 
+.lastfm-enrich-button.no-auth {
+    background: linear-gradient(135deg,
+            rgba(120, 120, 120, 0.08) 0%,
+            rgba(80, 80, 80, 0.12) 100%);
+    border-color: rgba(120, 120, 120, 0.25);
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.15),
+        0 2px 8px rgba(0, 0, 0, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.lastfm-enrich-button.no-auth .lastfm-enrich-logo {
+    filter: grayscale(1) opacity(0.4);
+}
+
+.lastfm-enrich-button.no-auth .lastfm-enrich-spinner {
+    display: none;
+}
+
+.lastfm-enrich-button.no-auth:hover {
+    border-color: rgba(120, 120, 120, 0.35);
+    box-shadow:
+        0 6px 20px rgba(0, 0, 0, 0.2),
+        0 3px 12px rgba(0, 0, 0, 0.15);
+    opacity: 0.55;
+}
+
+.lastfm-enrich-button.no-auth+.lastfm-enrich-tooltip #lastfm-enrich-tooltip-status {
+    color: rgba(120, 120, 120, 0.8);
+}
+
 .lastfm-enrich-tooltip-content::before {
     content: '';
     position: absolute;
@@ -27627,6 +27660,39 @@ body {
 
 .genius-enrich-button.paused+.genius-enrich-tooltip #genius-enrich-tooltip-status {
     color: #ffc107;
+}
+
+.genius-enrich-button.no-auth {
+    background: linear-gradient(135deg,
+            rgba(120, 120, 120, 0.08) 0%,
+            rgba(80, 80, 80, 0.12) 100%);
+    border-color: rgba(120, 120, 120, 0.25);
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.15),
+        0 2px 8px rgba(0, 0, 0, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.genius-enrich-button.no-auth .genius-enrich-logo {
+    filter: grayscale(1) opacity(0.4);
+}
+
+.genius-enrich-button.no-auth .genius-enrich-spinner {
+    display: none;
+}
+
+.genius-enrich-button.no-auth:hover {
+    border-color: rgba(120, 120, 120, 0.35);
+    box-shadow:
+        0 6px 20px rgba(0, 0, 0, 0.2),
+        0 3px 12px rgba(0, 0, 0, 0.15);
+    opacity: 0.55;
+}
+
+.genius-enrich-button.no-auth+.genius-enrich-tooltip #genius-enrich-tooltip-status {
+    color: rgba(120, 120, 120, 0.8);
 }
 
 .genius-enrich-tooltip-content::before {

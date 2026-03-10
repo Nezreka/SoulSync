@@ -45104,13 +45104,17 @@ function updateLastFMEnrichmentStatusFromData(data) {
     const button = document.getElementById('lastfm-enrich-button');
     if (!button) return;
 
-    button.classList.remove('active', 'paused', 'complete');
-    if (data.idle) {
+    const notAuthenticated = data.authenticated === false;
+
+    button.classList.remove('active', 'paused', 'complete', 'no-auth');
+    if (data.paused) {
+        button.classList.add('paused');
+    } else if (notAuthenticated) {
+        button.classList.add('no-auth');
+    } else if (data.idle) {
         button.classList.add('complete');
     } else if (data.running && !data.paused) {
         button.classList.add('active');
-    } else if (data.paused) {
-        button.classList.add('paused');
     }
 
     const tooltipStatus = document.getElementById('lastfm-enrich-tooltip-status');
@@ -45118,14 +45122,19 @@ function updateLastFMEnrichmentStatusFromData(data) {
     const tooltipProgress = document.getElementById('lastfm-enrich-tooltip-progress');
 
     if (tooltipStatus) {
-        if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
-        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
+        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running) { tooltipStatus.textContent = 'Running'; }
         else { tooltipStatus.textContent = 'Idle'; }
     }
 
     if (tooltipCurrent) {
-        if (data.idle) {
+        if (data.paused) {
+            tooltipCurrent.textContent = notAuthenticated ? 'Add Last.fm API key in Settings to enrich' : 'Click to resume';
+        } else if (notAuthenticated) {
+            tooltipCurrent.textContent = 'Add Last.fm API key in Settings to enrich';
+        } else if (data.idle) {
             tooltipCurrent.textContent = 'All items processed';
         } else if (data.current_item && data.current_item.name) {
             tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
@@ -45133,27 +45142,31 @@ function updateLastFMEnrichmentStatusFromData(data) {
     }
 
     if (data.progress && tooltipProgress) {
-        const artists = data.progress.artists || {};
-        const albums = data.progress.albums || {};
-        const tracks = data.progress.tracks || {};
-
-        const currentType = data.current_item?.type;
-        let progressText = '';
-
-        const artistsComplete = artists.matched >= artists.total;
-        const albumsComplete = albums.matched >= albums.total;
-
-        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
-            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-        } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
-            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-        } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
-            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+        if (notAuthenticated) {
+            tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
         } else {
-            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-        }
+            const artists = data.progress.artists || {};
+            const albums = data.progress.albums || {};
+            const tracks = data.progress.tracks || {};
 
-        tooltipProgress.textContent = progressText;
+            const currentType = data.current_item?.type;
+            let progressText = '';
+
+            const artistsComplete = artists.matched >= artists.total;
+            const albumsComplete = albums.matched >= albums.total;
+
+            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+            } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
+                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+            } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
+                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+            } else {
+                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+            }
+
+            tooltipProgress.textContent = progressText;
+        }
     }
 }
 
@@ -45218,13 +45231,17 @@ function updateGeniusEnrichmentStatusFromData(data) {
     const button = document.getElementById('genius-enrich-button');
     if (!button) return;
 
-    button.classList.remove('active', 'paused', 'complete');
-    if (data.idle) {
+    const notAuthenticated = data.authenticated === false;
+
+    button.classList.remove('active', 'paused', 'complete', 'no-auth');
+    if (data.paused) {
+        button.classList.add('paused');
+    } else if (notAuthenticated) {
+        button.classList.add('no-auth');
+    } else if (data.idle) {
         button.classList.add('complete');
     } else if (data.running && !data.paused) {
         button.classList.add('active');
-    } else if (data.paused) {
-        button.classList.add('paused');
     }
 
     const tooltipStatus = document.getElementById('genius-enrich-tooltip-status');
@@ -45232,14 +45249,19 @@ function updateGeniusEnrichmentStatusFromData(data) {
     const tooltipProgress = document.getElementById('genius-enrich-tooltip-progress');
 
     if (tooltipStatus) {
-        if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
-        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
+        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running) { tooltipStatus.textContent = 'Running'; }
         else { tooltipStatus.textContent = 'Idle'; }
     }
 
     if (tooltipCurrent) {
-        if (data.idle) {
+        if (data.paused) {
+            tooltipCurrent.textContent = notAuthenticated ? 'Add Genius access token in Settings to enrich' : 'Click to resume';
+        } else if (notAuthenticated) {
+            tooltipCurrent.textContent = 'Add Genius access token in Settings to enrich';
+        } else if (data.idle) {
             tooltipCurrent.textContent = 'All items processed';
         } else if (data.current_item && data.current_item.name) {
             tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
@@ -45247,21 +45269,25 @@ function updateGeniusEnrichmentStatusFromData(data) {
     }
 
     if (data.progress && tooltipProgress) {
-        const artists = data.progress.artists || {};
-        const tracks = data.progress.tracks || {};
-
-        const currentType = data.current_item?.type;
-        let progressText = '';
-
-        const artistsComplete = artists.matched >= artists.total;
-
-        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
-            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        if (notAuthenticated) {
+            tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
         } else {
-            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-        }
+            const artists = data.progress.artists || {};
+            const tracks = data.progress.tracks || {};
 
-        tooltipProgress.textContent = progressText;
+            const currentType = data.current_item?.type;
+            let progressText = '';
+
+            const artistsComplete = artists.matched >= artists.total;
+
+            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+            } else {
+                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+            }
+
+            tooltipProgress.textContent = progressText;
+        }
     }
 }
 
