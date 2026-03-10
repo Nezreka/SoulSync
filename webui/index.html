@@ -3246,6 +3246,38 @@
                                     <button class="test-button" onclick="clearQuarantine()" style="margin-top: 10px; background: rgba(255,82,82,0.15); border-color: rgba(255,82,82,0.3); color: #ff5252;">Clear Quarantine</button>
                                 </div>
 
+                                <!-- Last.fm Settings -->
+                                <div class="api-service-frame">
+                                    <h4 class="service-title lastfm-title">Last.fm</h4>
+                                    <div class="form-group">
+                                        <label>API Key:</label>
+                                        <input type="password" id="lastfm-api-key"
+                                            placeholder="Last.fm API Key">
+                                    </div>
+                                    <div class="callback-info">
+                                        <div class="callback-help">Get your API key from <a
+                                                href="https://www.last.fm/api/account/create" target="_blank"
+                                                style="color: #d51007;">Last.fm API Account</a></div>
+                                        <div class="callback-help">Used for artist tags, play counts, and similar artists. Callback URL is not used.</div>
+                                    </div>
+                                </div>
+
+                                <!-- Genius Settings -->
+                                <div class="api-service-frame">
+                                    <h4 class="service-title genius-title">Genius</h4>
+                                    <div class="form-group">
+                                        <label>Client Access Token:</label>
+                                        <input type="password" id="genius-access-token"
+                                            placeholder="Genius Client Access Token">
+                                    </div>
+                                    <div class="callback-info">
+                                        <div class="callback-help">Get your token from <a
+                                                href="https://genius.com/api-clients" target="_blank"
+                                                style="color: #ffff64;">Genius API Clients</a></div>
+                                        <div class="callback-help">Generate a "Client Access Token" — no OAuth flow needed.</div>
+                                    </div>
+                                </div>
+
                                 <!-- Test Connection Buttons -->
                                 <div class="api-test-buttons">
                                     <button class="test-button" onclick="testConnection('spotify')">Test
@@ -3257,6 +3289,10 @@
                                         ListenBrainz</button>
                                     <button class="test-button" onclick="testConnection('acoustid')">Test
                                         AcoustID</button>
+                                    <button class="test-button" onclick="testConnection('lastfm')">Test
+                                        Last.fm</button>
+                                    <button class="test-button" onclick="testConnection('genius')">Test
+                                        Genius</button>
                                 </div>
                             </div>
 

@@ -209,6 +209,12 @@ class ConfigManager:
                 "api_key": "",
                 "enabled": False  # Disabled by default - requires API key and fpcalc
             },
+            "lastfm": {
+                "api_key": ""
+            },
+            "genius": {
+                "access_token": ""
+            },
             "logging": {
                 "path": "logs/app.log",
                 "level": "INFO"

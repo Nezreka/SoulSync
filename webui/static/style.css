@@ -1558,6 +1558,14 @@ body {
     color: #ba55d3;
 }
 
+.lastfm-title {
+    color: #d51007;
+}
+
+.genius-title {
+    color: #ffff64;
+}
+
 /* Server Toggle Buttons - upgraded */
 .server-toggle-container {
     display: flex;

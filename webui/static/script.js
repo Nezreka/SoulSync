@@ -3905,6 +3905,12 @@ async function loadSettingsData() {
         document.getElementById('acoustid-api-key').value = settings.acoustid?.api_key || '';
         document.getElementById('acoustid-enabled').checked = settings.acoustid?.enabled || false;
 
+        // Populate Last.fm settings
+        document.getElementById('lastfm-api-key').value = settings.lastfm?.api_key || '';
+
+        // Populate Genius settings
+        document.getElementById('genius-access-token').value = settings.genius?.access_token || '';
+
         // Populate Download settings (right column)
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
         document.getElementById('transfer-path').value = settings.soulseek?.transfer_path || './Transfer';
@@ -4614,6 +4620,12 @@ async function saveSettings(quiet = false) {
         acoustid: {
             api_key: document.getElementById('acoustid-api-key').value,
             enabled: document.getElementById('acoustid-enabled').checked
+        },
+        lastfm: {
+            api_key: document.getElementById('lastfm-api-key').value
+        },
+        genius: {
+            access_token: document.getElementById('genius-access-token').value
         },
         download_source: {
             mode: document.getElementById('download-source-mode').value,
