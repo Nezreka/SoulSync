@@ -6067,7 +6067,8 @@ class MusicDatabase:
 
                 # Get artist's albums with track counts and completion
                 # Include albums from ALL artists with the same name (fixes duplicate artist issue)
-                # Group by title+year to merge split albums (e.g. Navidrome splitting one album into multiple entries)
+                # Group by artist_id+title+year to merge Navidrome split albums (same artist,
+                # same album split into multiple DB entries) WITHOUT merging across different artists
                 cursor.execute("""
                     SELECT
                         MIN(a.id) as id,
@@ -6076,15 +6077,19 @@ class MusicDatabase:
                         SUM(a.track_count) as track_count,
                         MAX(a.thumb_url) as thumb_url,
                         MAX(a.musicbrainz_release_id) as musicbrainz_release_id,
-                        COUNT(t.id) as owned_tracks
+                        (SELECT COUNT(*) FROM tracks t WHERE t.album_id IN (
+                            SELECT a2.id FROM albums a2
+                            WHERE a2.artist_id = a.artist_id
+                            AND a2.title = a.title
+                            AND COALESCE(a2.year, '') = COALESCE(a.year, '')
+                        )) as owned_tracks
                     FROM albums a
-                    LEFT JOIN tracks t ON a.id = t.album_id
                     WHERE a.artist_id IN (
                         SELECT id FROM artists
                         WHERE name = (SELECT name FROM artists WHERE id = ?)
                         AND server_source = (SELECT server_source FROM artists WHERE id = ?)
                     )
-                    GROUP BY a.title, a.year
+                    GROUP BY a.artist_id, a.title, a.year
                     ORDER BY a.year DESC, a.title
                 """, (artist_id, artist_id))
 
@@ -6096,19 +6101,23 @@ class MusicDatabase:
                 singles = []
 
                 # Get total stats for the artist (including all artists with same name)
-                # Count distinct title+year pairs to avoid overcounting split albums
                 cursor.execute("""
                     SELECT
-                        COUNT(DISTINCT a.title || '::' || COALESCE(CAST(a.year AS TEXT), '')) as album_count,
-                        COUNT(DISTINCT t.id) as track_count
-                    FROM albums a
-                    LEFT JOIN tracks t ON a.id = t.album_id
-                    WHERE a.artist_id IN (
+                        COUNT(*) as album_count,
+                        (SELECT COUNT(*) FROM tracks WHERE album_id IN (
+                            SELECT id FROM albums WHERE artist_id IN (
+                                SELECT id FROM artists
+                                WHERE name = (SELECT name FROM artists WHERE id = ?)
+                                AND server_source = (SELECT server_source FROM artists WHERE id = ?)
+                            )
+                        )) as track_count
+                    FROM albums
+                    WHERE artist_id IN (
                         SELECT id FROM artists
                         WHERE name = (SELECT name FROM artists WHERE id = ?)
                         AND server_source = (SELECT server_source FROM artists WHERE id = ?)
                     )
-                """, (artist_id, artist_id))
+                """, (artist_id, artist_id, artist_id, artist_id))
 
                 stats_row = cursor.fetchone()
                 album_count = stats_row['album_count'] if stats_row else 0
