@@ -232,19 +232,24 @@ class iTunesClient:
     FALLBACK_COUNTRIES = ['US', 'GB', 'FR', 'DE', 'JP', 'AU', 'CA', 'BR', 'KR', 'SE']
 
     def __init__(self, country: str = None):
-        if country is None:
-            try:
-                from config.settings import config_manager
-                country = config_manager.get('itunes.country', 'US')
-            except Exception:
-                country = 'US'
-        self.country = country.upper() if country else "US"
+        self._fixed_country = country.upper() if country else None
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'SoulSync/1.0',
             'Accept': 'application/json'
         })
         logger.info(f"iTunes client initialized for country: {self.country}")
+
+    @property
+    def country(self):
+        """Read country from config dynamically so settings changes take effect immediately."""
+        if self._fixed_country:
+            return self._fixed_country
+        try:
+            from config.settings import config_manager
+            return (config_manager.get('itunes.country', 'US') or 'US').upper()
+        except Exception:
+            return 'US'
     
     def is_authenticated(self) -> bool:
         """
