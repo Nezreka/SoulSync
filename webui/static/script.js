@@ -17583,7 +17583,7 @@ const TOOL_HELP_CONTENT = {
                 <li><strong>Clear Quarantine</strong> — permanently deletes all quarantined files</li>
                 <li><strong>Clear Download Queue</strong> — removes completed, errored, and cancelled downloads from Soulseek</li>
                 <li><strong>Sweep Empty Directories</strong> — removes empty folders left behind in the downloads directory</li>
-                <li><strong>Clear Staging Folder</strong> — deletes all files and folders from the import staging area</li>
+                <li><strong>Sweep Staging Folder</strong> — removes empty directories from the import staging area</li>
                 <li><strong>Clean Search History</strong> — trims old Soulseek search queries</li>
             </ol>
 
@@ -47483,7 +47483,7 @@ const _RESULT_DISPLAY_MAP = {
     ],
     'full_cleanup': [
         { key: 'quarantine_removed', label: 'Quarantine Removed' },
-        { key: 'staging_removed', label: 'Staging Removed' },
+        { key: 'staging_removed', label: 'Staging Dirs Removed' },
         { key: 'total_removed', label: 'Total Items Removed' },
     ],
 };

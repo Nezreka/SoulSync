@@ -1109,25 +1109,33 @@ def _register_automation_handlers():
             _update_automation_progress(automation_id,
                 log_line=f'Empty directories: removed {dirs_removed}', log_type='success' if dirs_removed else 'info')
 
-        # --- 4. Clear staging folder ---
-        _update_automation_progress(automation_id, phase='Clearing staging folder...', progress=60)
+        # --- 4. Sweep empty staging directories ---
+        _update_automation_progress(automation_id, phase='Sweeping staging folder...', progress=60)
         staging_path = _get_staging_path()
         s_removed = 0
         if os.path.isdir(staging_path):
-            for f in os.listdir(staging_path):
-                fp = os.path.join(staging_path, f)
+            for dirpath, _dirnames, _filenames in os.walk(staging_path, topdown=False):
+                if os.path.normpath(dirpath) == os.path.normpath(staging_path):
+                    continue
                 try:
-                    if os.path.isfile(fp):
-                        os.remove(fp)
+                    entries = os.listdir(dirpath)
+                except OSError:
+                    continue
+                visible = [e for e in entries if not e.startswith('.')]
+                if not visible:
+                    for hidden in entries:
+                        try:
+                            os.remove(os.path.join(dirpath, hidden))
+                        except Exception:
+                            pass
+                    try:
+                        os.rmdir(dirpath)
                         s_removed += 1
-                    elif os.path.isdir(fp):
-                        _shutil.rmtree(fp)
-                        s_removed += 1
-                except Exception:
-                    pass
-        steps.append(f'Staging: removed {s_removed} items')
+                    except OSError:
+                        pass
+        steps.append(f'Staging: removed {s_removed} empty directories')
         _update_automation_progress(automation_id,
-            log_line=f'Staging: removed {s_removed} items', log_type='success' if s_removed else 'info')
+            log_line=f'Staging: removed {s_removed} empty directories', log_type='success' if s_removed else 'info')
 
         # --- 5. Clean search history ---
         _update_automation_progress(automation_id, phase='Cleaning search history...', progress=80)
