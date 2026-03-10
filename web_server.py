@@ -14992,7 +14992,12 @@ def get_version_info():
                     "• Library artist cards now show Spotify, iTunes, Last.fm, and Genius service badges alongside MusicBrainz, Deezer, and AudioDB",
                     "• Artist discography page now shows 'View on' buttons for all 7 matched services",
                     "• Redesigned 'View on' buttons with glassmorphic styling matching the app's design language",
-                    "• Compact badge layout on artist cards — no longer overflows on mobile or when all services are matched"
+                    "• Compact badge layout on artist cards — no longer overflows on mobile or when all services are matched",
+                    "• Page headers upgraded with sidebar icons and gradient shimmer styling",
+                    "• Help & Docs page — comprehensive in-app documentation covering every feature, setting, and flow across 71 subsections",
+                    "• Docs sidebar with scroll spy navigation, search filter, and collapsible sections",
+                    "• Genius 429 rate limit fix — exponential backoff (30s → 60s → 120s) now activates properly",
+                    "• Watchlist badge integrated into service badge row with expand-on-hover animation"
                 ]
             },
             {
