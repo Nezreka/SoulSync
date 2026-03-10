@@ -127,6 +127,10 @@
                     <span class="nav-icon"><img src="/static/settings.png" class="nav-icon-img"></span>
                     <span class="nav-text">Settings</span>
                 </button>
+                <button class="nav-button" data-page="help">
+                    <span class="nav-icon"><img src="/static/help.png" class="nav-icon-img" onerror="this.style.display='none'; this.parentElement.textContent='?';"></span>
+                    <span class="nav-text">Help & Docs</span>
+                </button>
                 <button class="nav-button" data-page="hydrabase" id="hydrabase-nav" style="display: none;">
                     <span class="nav-icon"><img src="/static/hydrabase.png?v=1" class="nav-icon-img"></span>
                     <span class="nav-text">Hydrabase</span>
@@ -4317,6 +4321,24 @@
         </div>
     </div>
 
+            <!-- Help & Docs Page -->
+            <div class="page" id="help-page">
+                <div class="docs-layout">
+                    <nav class="docs-sidebar" id="docs-sidebar">
+                        <div class="docs-sidebar-header">
+                            <h3>Documentation</h3>
+                            <input type="text" class="docs-search" id="docs-search" placeholder="Search docs..." autocomplete="off">
+                        </div>
+                        <div class="docs-nav" id="docs-nav">
+                            <!-- Populated by JS -->
+                        </div>
+                    </nav>
+                    <main class="docs-content" id="docs-content">
+                        <!-- Populated by JS -->
+                    </main>
+                </div>
+            </div>
+
         </div> <!-- /main-content -->
     </div> <!-- /main-container -->
 
@@ -5052,6 +5074,7 @@
 
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="{{ url_for('static', filename='docs.js') }}"></script>
 </body>
 
 </html>
