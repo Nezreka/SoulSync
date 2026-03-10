@@ -28250,36 +28250,24 @@ body {
     vertical-align: middle;
 }
 
-.mb-card-icon {
+/* Legacy .mb-card-icon override removed — now handled by .source-card-icon inside .card-badge-container */
+
+/* Badge container for artist cards */
+.card-badge-container {
     position: absolute;
     top: 8px;
     right: 8px;
-    width: 28px;
-    height: 28px;
-    background: rgba(0, 0, 0, 0.75);
-    /* MusicBrainz Purple - Force visible color */
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    border-radius: 4px;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 0.9 !important;
-    /* Force visible */
-    transition: transform 0.2s;
-    cursor: pointer;
-    z-index: 100 !important;
-    /* Force on top */
-    color: white;
-    font-size: 11px;
-    font-weight: 800;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    flex-direction: column;
+    gap: 4px;
+    z-index: 100;
+    max-height: calc(100% - 80px);
+    overflow: hidden;
 }
 
 .source-card-icon {
-    position: absolute;
-    right: 8px;
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
     background: rgba(0, 0, 0, 0.75);
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 4px;
@@ -28289,10 +28277,10 @@ body {
     opacity: 0.9 !important;
     transition: transform 0.2s;
     cursor: pointer;
-    z-index: 100 !important;
     color: white;
-    font-size: 11px;
+    font-size: 9px;
     font-weight: 800;
+    flex-shrink: 0;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
@@ -28313,6 +28301,76 @@ body {
 
 .audiodb-card-icon:hover {
     background: #1a6bc4;
+}
+
+.spotify-card-icon:hover {
+    background: #1db954;
+}
+
+.itunes-card-icon:hover {
+    background: #fc3c44;
+}
+
+.lastfm-card-icon:hover {
+    background: #d51007;
+}
+
+.genius-card-icon:hover {
+    background: #ffff64;
+}
+
+/* Artist detail page source link buttons */
+.source-link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    margin-left: 12px;
+    border-radius: 20px;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(8px);
+    transition: all 0.2s ease;
+    vertical-align: middle;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.source-link-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.25);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.source-link-btn img {
+    height: 20px;
+    width: auto;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.source-link-btn span {
+    vertical-align: middle;
+}
+
+@media (max-width: 768px) {
+    .source-link-btn {
+        padding: 4px 10px;
+        margin-left: 6px;
+        font-size: 0;
+    }
+
+    .source-link-btn img {
+        height: 18px;
+    }
+
+    .source-link-btn span {
+        display: none;
+    }
 }
 
 .watchlist-card-icon {

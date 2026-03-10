@@ -398,9 +398,13 @@ function handleDashboardWishlistCount(data) {
 // END WEBSOCKET CONNECTION MANAGER
 // ===============================
 
-// --- MusicBrainz Integration Constants ---
+// --- Service Integration Logo Constants ---
 const MUSICBRAINZ_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png';
 const DEEZER_LOGO_URL = 'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610';
+const SPOTIFY_LOGO_URL = 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png';
+const ITUNES_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png';
+const LASTFM_LOGO_URL = 'https://www.last.fm/static/images/lastfm_avatar_twitter.52a5d69a85ac.png';
+const GENIUS_LOGO_URL = 'https://images.genius.com/8ed669cadd956443e29c70361ec4f372.1000x1000x1.png';
 function getAudioDBLogoURL() { const el = document.querySelector('img.audiodb-logo'); return el ? el.src : null; }
 
 // --- Wishlist Modal Persistence State Management ---
@@ -31780,8 +31784,11 @@ function createLibraryArtistCard(artist) {
     card.style.position = 'relative';
     card.style.transition = 'transform 0.2s, box-shadow 0.2s';
 
-    // Add source badges (MusicBrainz, Deezer, AudioDB) stacked on top-right
+    // Add source badges stacked on top-right
     const badgeSources = [];
+    if (artist.spotify_artist_id) {
+        badgeSources.push({ cls: 'spotify-card-icon', logo: SPOTIFY_LOGO_URL, fallback: 'SP', title: 'View on Spotify', url: `https://open.spotify.com/artist/${artist.spotify_artist_id}` });
+    }
     if (artist.musicbrainz_id) {
         badgeSources.push({ cls: 'mb-card-icon', logo: MUSICBRAINZ_LOGO_URL, fallback: 'MB', title: 'View on MusicBrainz', url: `https://musicbrainz.org/artist/${artist.musicbrainz_id}` });
     }
@@ -31792,28 +31799,39 @@ function createLibraryArtistCard(artist) {
         const adbSlug = artist.name ? artist.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '') : '';
         badgeSources.push({ cls: 'audiodb-card-icon', logo: getAudioDBLogoURL(), fallback: 'ADB', title: 'View on TheAudioDB', url: `https://www.theaudiodb.com/artist/${artist.audiodb_id}-${adbSlug}` });
     }
-    let badgeOffset = 8;
-    badgeSources.forEach(source => {
-        const icon = document.createElement('div');
-        icon.className = `${source.cls} source-card-icon`;
-        icon.style.top = badgeOffset + 'px';
-        icon.title = source.title;
-        if (source.logo) {
-            const img = document.createElement('img');
-            img.src = source.logo;
-            img.style.cssText = 'width: 20px; height: auto; display: block;';
-            img.onerror = () => { icon.textContent = source.fallback; };
-            icon.appendChild(img);
-        } else {
-            icon.textContent = source.fallback;
-        }
-        icon.onclick = (e) => {
-            e.stopPropagation();
-            window.open(source.url, '_blank');
-        };
-        card.appendChild(icon);
-        badgeOffset += 32;
-    });
+    if (artist.itunes_artist_id) {
+        badgeSources.push({ cls: 'itunes-card-icon', logo: ITUNES_LOGO_URL, fallback: 'IT', title: 'View on Apple Music', url: `https://music.apple.com/artist/${artist.itunes_artist_id}` });
+    }
+    if (artist.lastfm_url) {
+        badgeSources.push({ cls: 'lastfm-card-icon', logo: LASTFM_LOGO_URL, fallback: 'LFM', title: 'View on Last.fm', url: artist.lastfm_url });
+    }
+    if (artist.genius_url) {
+        badgeSources.push({ cls: 'genius-card-icon', logo: GENIUS_LOGO_URL, fallback: 'GEN', title: 'View on Genius', url: artist.genius_url });
+    }
+    if (badgeSources.length > 0) {
+        const badgeContainer = document.createElement('div');
+        badgeContainer.className = 'card-badge-container';
+        badgeSources.forEach(source => {
+            const icon = document.createElement('div');
+            icon.className = `${source.cls} source-card-icon`;
+            icon.title = source.title;
+            if (source.logo) {
+                const img = document.createElement('img');
+                img.src = source.logo;
+                img.style.cssText = 'width: 16px; height: auto; display: block;';
+                img.onerror = () => { icon.textContent = source.fallback; };
+                icon.appendChild(img);
+            } else {
+                icon.textContent = source.fallback;
+            }
+            icon.onclick = (e) => {
+                e.stopPropagation();
+                window.open(source.url, '_blank');
+            };
+            badgeContainer.appendChild(icon);
+        });
+        card.appendChild(badgeContainer);
+    }
 
     // Add watchlist button/indicator on the card
     const hasExternalId = artist.itunes_artist_id || artist.spotify_artist_id;
@@ -32277,9 +32295,13 @@ function updateArtistDetailPageHeaderWithData(artist) {
 
         const adbSlug = artist.name ? artist.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '') : '';
         const sources = [
+            { id: artist.spotify_artist_id, url: `https://open.spotify.com/artist/${artist.spotify_artist_id}`, logo: SPOTIFY_LOGO_URL, label: 'Spotify' },
+            { id: artist.itunes_artist_id, url: `https://music.apple.com/artist/${artist.itunes_artist_id}`, logo: ITUNES_LOGO_URL, label: 'Apple Music' },
             { id: artist.musicbrainz_id, url: `https://musicbrainz.org/artist/${artist.musicbrainz_id}`, logo: MUSICBRAINZ_LOGO_URL, label: 'MusicBrainz' },
             { id: artist.deezer_id, url: `https://www.deezer.com/artist/${artist.deezer_id}`, logo: DEEZER_LOGO_URL, label: 'Deezer' },
             { id: artist.audiodb_id, url: `https://www.theaudiodb.com/artist/${artist.audiodb_id}-${adbSlug}`, logo: getAudioDBLogoURL(), label: 'TheAudioDB' },
+            { id: artist.lastfm_url, url: artist.lastfm_url, logo: LASTFM_LOGO_URL, label: 'Last.fm' },
+            { id: artist.genius_url, url: artist.genius_url, logo: GENIUS_LOGO_URL, label: 'Genius' },
         ];
 
         sources.forEach(source => {
@@ -32289,27 +32311,15 @@ function updateArtistDetailPageHeaderWithData(artist) {
             link.href = source.url;
             link.target = '_blank';
             link.title = `View on ${source.label}`;
-            link.style.padding = '5px 14px';
-            link.style.border = '1px solid rgba(255,255,255,0.1)';
-            link.style.background = 'rgba(0,0,0,0.4)';
-            link.style.borderRadius = '20px';
-            link.style.marginLeft = '16px';
-            link.style.display = 'inline-flex';
-            link.style.alignItems = 'center';
-            link.style.textDecoration = 'none';
-            link.style.verticalAlign = 'middle';
-
-            const span = document.createElement('span');
-            span.style.cssText = `color:rgba(255,255,255,0.9); margin-left:${source.logo ? '10px' : '0'}; font-size: 13px; font-weight: 600; vertical-align: middle;`;
-            span.textContent = `View on ${source.label}`;
 
             if (source.logo) {
                 const img = document.createElement('img');
                 img.src = source.logo;
-                img.style.cssText = 'height: 24px; width: auto; vertical-align: middle; display: inline-block;';
-                img.onerror = () => { img.style.display = 'none'; span.style.marginLeft = '0'; };
+                img.onerror = () => { img.style.display = 'none'; };
                 link.appendChild(img);
             }
+            const span = document.createElement('span');
+            span.textContent = source.label;
             link.appendChild(span);
             mainTitle.appendChild(link);
         });
