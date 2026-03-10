@@ -255,8 +255,8 @@ body {
 }
 
 .nav-icon {
-    width: 28px;
-    height: 28px;
+    width: 40px;
+    height: 40px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -272,6 +272,13 @@ body {
     box-shadow:
         0 2px 4px rgba(0, 0, 0, 0.15),
         inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.nav-icon-img {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    pointer-events: none;
 }
 
 .nav-button:hover .nav-icon {
