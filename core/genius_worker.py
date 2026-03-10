@@ -111,6 +111,7 @@ class GeniusWorker:
             'running': is_actually_running and not self.paused,
             'paused': self.paused,
             'idle': is_idle,
+            'authenticated': bool(self.client and self.client.access_token),
             'current_item': self.current_item,
             'stats': self.stats.copy(),
             'progress': progress
