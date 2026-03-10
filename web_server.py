@@ -3128,7 +3128,14 @@ def run_service_test(service, test_config):
 
             try:
                 # Test ListenBrainz API by validating the token
-                url = "https://api.listenbrainz.org/1/validate-token"
+                custom_base = test_config.get('base_url', '').rstrip('/')
+                if custom_base:
+                    if not custom_base.endswith('/1'):
+                        custom_base += '/1'
+                    lb_api_base = custom_base
+                else:
+                    lb_api_base = "https://api.listenbrainz.org/1"
+                url = f"{lb_api_base}/validate-token"
                 headers = {
                     'Authorization': f'Token {token}'
                 }

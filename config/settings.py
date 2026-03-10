@@ -202,6 +202,7 @@ class ConfigManager:
                 }
             },
             "listenbrainz": {
+                "base_url": "",
                 "token": ""
             },
             "acoustid": {

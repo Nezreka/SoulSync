@@ -3106,6 +3106,11 @@
                                 <div class="api-service-frame">
                                     <h4 class="service-title listenbrainz-title">ListenBrainz</h4>
                                     <div class="form-group">
+                                        <label>API Base URL:</label>
+                                        <input type="text" id="listenbrainz-base-url"
+                                            placeholder="Leave empty for official (api.listenbrainz.org)">
+                                    </div>
+                                    <div class="form-group">
                                         <label>User Token:</label>
                                         <input type="password" id="listenbrainz-token"
                                             placeholder="ListenBrainz User Token">
@@ -3114,6 +3119,7 @@
                                         <div class="callback-help">Get your token from <a
                                                 href="https://listenbrainz.org/profile/" target="_blank"
                                                 style="color: #eb743b;">ListenBrainz Settings</a></div>
+                                        <div class="callback-help">Self-hosted? Enter your server URL (e.g. http://localhost:8093)</div>
                                     </div>
                                 </div>
 
