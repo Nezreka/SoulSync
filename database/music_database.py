@@ -1478,6 +1478,8 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE artists ADD COLUMN genius_description TEXT")
             if 'genius_alt_names' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN genius_alt_names TEXT")
+            if 'genius_url' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN genius_url TEXT")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_lastfm_status ON artists (lastfm_match_status)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_genius_id ON artists (genius_id)")

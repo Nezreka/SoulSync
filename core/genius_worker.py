@@ -352,6 +352,7 @@ class GeniusWorker:
             genius_id = str(full_data.get('id', search_data.get('id', '')))
             description = self.client.extract_description(full_data.get('description'))
             image_url = full_data.get('image_url') or search_data.get('image_url')
+            genius_url = full_data.get('url') or search_data.get('url')
 
             # Alternate names
             alt_names = full_data.get('alternate_names', [])
@@ -364,9 +365,10 @@ class GeniusWorker:
                     genius_last_attempted = CURRENT_TIMESTAMP,
                     genius_description = ?,
                     genius_alt_names = ?,
+                    genius_url = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            """, (genius_id, description, alt_names_json, artist_id))
+            """, (genius_id, description, alt_names_json, genius_url, artist_id))
 
             # Backfill thumb_url
             if image_url:
