@@ -3946,6 +3946,9 @@ async function loadSettingsData() {
         document.getElementById('lossy-copy-options').style.display =
             settings.lossy_copy?.enabled ? 'block' : 'none';
 
+        // Populate Content Filter settings
+        document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
+
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
 
@@ -4636,6 +4639,9 @@ async function saveSettings(quiet = false) {
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked
+        },
+        content_filter: {
+            allow_explicit: document.getElementById('allow-explicit').checked
         },
         lossy_copy: {
             enabled: document.getElementById('lossy-copy-enabled').checked,
