@@ -5919,6 +5919,8 @@ class MusicDatabase:
                         a.itunes_artist_id,
                         a.deezer_id,
                         a.audiodb_id,
+                        a.lastfm_url,
+                        a.genius_url,
                         COUNT(DISTINCT al.id) as album_count,
                         COUNT(DISTINCT t.id) as track_count
                     FROM artists a
@@ -5929,7 +5931,7 @@ class MusicDatabase:
                     WHERE {where_clause}
                         AND a.id = (SELECT MIN(a2.id) FROM artists a2
                                     WHERE a2.name = a.name AND a2.server_source = a.server_source)
-                    GROUP BY a.id, a.name, a.thumb_url, a.genres, a.musicbrainz_id, a.deezer_id, a.audiodb_id
+                    GROUP BY a.id, a.name, a.thumb_url, a.genres, a.musicbrainz_id, a.spotify_artist_id, a.itunes_artist_id, a.deezer_id, a.audiodb_id, a.lastfm_url, a.genius_url
                     ORDER BY a.name COLLATE NOCASE
                     LIMIT ? OFFSET ?
                 """
@@ -5977,6 +5979,8 @@ class MusicDatabase:
                         'itunes_artist_id': row['itunes_artist_id'],
                         'deezer_id': row['deezer_id'],
                         'audiodb_id': row['audiodb_id'],
+                        'lastfm_url': row['lastfm_url'],
+                        'genius_url': row['genius_url'],
                         'album_count': row['album_count'] or 0,
                         'track_count': row['track_count'] or 0,
                         'is_watched': bool(is_watched)
@@ -6032,7 +6036,9 @@ class MusicDatabase:
                 # Get artist information
                 cursor.execute("""
                     SELECT
-                        id, name, thumb_url, genres, server_source, musicbrainz_id, deezer_id, audiodb_id
+                        id, name, thumb_url, genres, server_source,
+                        musicbrainz_id, deezer_id, audiodb_id,
+                        spotify_artist_id, itunes_artist_id, lastfm_url, genius_url
                     FROM artists
                     WHERE id = ?
                 """, (artist_id,))
@@ -6181,6 +6187,10 @@ class MusicDatabase:
                         'musicbrainz_id': artist_row['musicbrainz_id'],
                         'deezer_id': artist_row['deezer_id'],
                         'audiodb_id': artist_row['audiodb_id'],
+                        'spotify_artist_id': artist_row['spotify_artist_id'],
+                        'itunes_artist_id': artist_row['itunes_artist_id'],
+                        'lastfm_url': artist_row['lastfm_url'],
+                        'genius_url': artist_row['genius_url'],
                         'album_count': album_count,
                         'track_count': track_count
                     },
