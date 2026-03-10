@@ -3913,6 +3913,9 @@ async function loadSettingsData() {
         // Populate Genius settings
         document.getElementById('genius-access-token').value = settings.genius?.access_token || '';
 
+        // Populate iTunes settings
+        document.getElementById('itunes-country').value = settings.itunes?.country || 'US';
+
         // Populate Download settings (right column)
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
         document.getElementById('transfer-path').value = settings.soulseek?.transfer_path || './Transfer';
@@ -4628,6 +4631,9 @@ async function saveSettings(quiet = false) {
         },
         genius: {
             access_token: document.getElementById('genius-access-token').value
+        },
+        itunes: {
+            country: document.getElementById('itunes-country').value || 'US'
         },
         download_source: {
             mode: document.getElementById('download-source-mode').value,
