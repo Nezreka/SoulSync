@@ -22253,10 +22253,51 @@ def update_tidal_playlist_phase(playlist_id):
 
 _playlist_discovery_cancelled = set()  # Set of automation_ids that have been cancelled
 
+def _pause_enrichment_workers(label='discovery'):
+    """Pause enrichment workers during discovery to reduce API contention.
+    Returns tuple of (spotify_was_running, itunes_was_running) for resume."""
+    s_was = False
+    i_was = False
+    try:
+        if spotify_enrichment_worker and not spotify_enrichment_worker.paused:
+            spotify_enrichment_worker.pause()
+            s_was = True
+            print(f"⏸️ Paused Spotify enrichment worker during {label}")
+    except Exception:
+        pass
+    try:
+        if itunes_enrichment_worker and not itunes_enrichment_worker.paused:
+            itunes_enrichment_worker.pause()
+            i_was = True
+            print(f"⏸️ Paused iTunes enrichment worker during {label}")
+    except Exception:
+        pass
+    return s_was, i_was
+
+
+def _resume_enrichment_workers(was_running, label='discovery'):
+    """Resume enrichment workers that were paused by _pause_enrichment_workers."""
+    s_was, i_was = was_running
+    try:
+        if s_was and spotify_enrichment_worker:
+            spotify_enrichment_worker.resume()
+            print(f"▶️ Resumed Spotify enrichment worker after {label}")
+    except Exception:
+        pass
+    try:
+        if i_was and itunes_enrichment_worker:
+            itunes_enrichment_worker.resume()
+            print(f"▶️ Resumed iTunes enrichment worker after {label}")
+    except Exception:
+        pass
+
+
 def _run_playlist_discovery_worker(playlists, automation_id=None):
     """Background worker that discovers Spotify/iTunes metadata for undiscovered
     mirrored playlist tracks. Stores results in extra_data for use by sync."""
+    _ew_state = (False, False)
     try:
+        _ew_state = _pause_enrichment_workers('mirrored playlist discovery')
         use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
         discovery_source = 'spotify' if use_spotify else 'itunes'
 
@@ -22512,6 +22553,8 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
         _update_automation_progress(automation_id, status='error', progress=100,
                                      phase='Error',
                                      log_line=f'Error: {str(e)}', log_type='error')
+    finally:
+        _resume_enrichment_workers(_ew_state, 'mirrored playlist discovery')
 
 
 def _extract_artist_name(artist):
@@ -22660,7 +22703,9 @@ def _discovery_score_candidates(source_title, source_artist, source_duration_ms,
 
 def _run_tidal_discovery_worker(playlist_id):
     """Background worker for Tidal discovery process (Spotify preferred, iTunes fallback)"""
+    _ew_state = (False, False)
     try:
+        _ew_state = _pause_enrichment_workers('Tidal discovery')
         state = tidal_discovery_states[playlist_id]
         playlist = state['playlist']
 
@@ -22824,6 +22869,8 @@ def _run_tidal_discovery_worker(playlist_id):
         print(f"❌ Error in Tidal discovery worker: {e}")
         state['phase'] = 'error'
         state['status'] = f'error: {str(e)}'
+    finally:
+        _resume_enrichment_workers(_ew_state, 'Tidal discovery')
 
 
 def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client=None):
@@ -23385,7 +23432,9 @@ def update_youtube_discovery_match():
 
 def _run_youtube_discovery_worker(url_hash):
     """Background worker for YouTube music discovery process (Spotify preferred, iTunes fallback)"""
+    _ew_state = (False, False)
     try:
+        _ew_state = _pause_enrichment_workers('YouTube discovery')
         state = youtube_playlist_states[url_hash]
         playlist = state['playlist']
         tracks = playlist['tracks']
@@ -23689,10 +23738,14 @@ def _run_youtube_discovery_worker(url_hash):
         print(f"❌ Error in YouTube discovery worker: {e}")
         state['status'] = 'error'
         state['phase'] = 'fresh'
+    finally:
+        _resume_enrichment_workers(_ew_state, 'YouTube discovery')
 
 def _run_listenbrainz_discovery_worker(playlist_mbid):
     """Background worker for ListenBrainz music discovery process (Spotify preferred, iTunes fallback)"""
+    _ew_state = (False, False)
     try:
+        _ew_state = _pause_enrichment_workers('ListenBrainz discovery')
         state = listenbrainz_playlist_states[playlist_mbid]
         playlist = state['playlist']
         tracks = playlist['tracks']
@@ -23956,6 +24009,8 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
         print(f"❌ Error in ListenBrainz discovery worker: {e}")
         state['status'] = 'error'
         state['phase'] = 'fresh'
+    finally:
+        _resume_enrichment_workers(_ew_state, 'ListenBrainz discovery')
 
 def _calculate_similarity(str1, str2):
     """Calculate string similarity using simple character overlap"""
@@ -25855,8 +25910,7 @@ def start_watchlist_scan():
         # Start the scan in a background thread
         scan_profile_id = get_current_profile_id()
         def run_scan():
-            _enrichment_was_running = False
-            _itunes_enrichment_was_running = False
+            _ew_state = (False, False)
             try:
                 global watchlist_scan_state, watchlist_auto_scanning, watchlist_auto_scanning_timestamp
                 from core.watchlist_scanner import WatchlistScanner
@@ -25925,14 +25979,7 @@ def start_watchlist_scan():
                 scan_results = []
 
                 # Pause enrichment workers during scan to reduce API contention
-                if spotify_enrichment_worker and not spotify_enrichment_worker.paused:
-                    spotify_enrichment_worker.pause()
-                    _enrichment_was_running = True
-                    print("⏸️ Paused Spotify enrichment worker during watchlist scan")
-                if itunes_enrichment_worker and not itunes_enrichment_worker.paused:
-                    itunes_enrichment_worker.pause()
-                    _itunes_enrichment_was_running = True
-                    print("⏸️ Paused iTunes enrichment worker during watchlist scan")
+                _ew_state = _pause_enrichment_workers('watchlist scan')
 
                 # Dynamic delay calculation based on scan scope
                 lookback_period = scanner._get_lookback_period_setting()
@@ -26225,12 +26272,7 @@ def start_watchlist_scan():
 
             finally:
                 # Resume enrichment workers if we paused them
-                if _enrichment_was_running and spotify_enrichment_worker:
-                    spotify_enrichment_worker.resume()
-                    print("▶️ Resumed Spotify enrichment worker after watchlist scan")
-                if _itunes_enrichment_was_running and itunes_enrichment_worker:
-                    itunes_enrichment_worker.resume()
-                    print("▶️ Resumed iTunes enrichment worker after watchlist scan")
+                _resume_enrichment_workers(_ew_state, 'watchlist scan')
 
                 # Always reset flag when scan completes (success or error)
                 with watchlist_timer_lock:
@@ -26699,8 +26741,7 @@ def _process_watchlist_scan_automatically(automation_id=None):
 
     print("🤖 [Auto-Watchlist] Timer triggered - starting automatic watchlist scan...")
 
-    _enrichment_was_running = False
-    _itunes_enrichment_was_running = False
+    _ew_state = (False, False)
 
     try:
         # CRITICAL FIX: Use smart stuck detection BEFORE acquiring lock
@@ -26785,14 +26826,7 @@ def _process_watchlist_scan_automatically(automation_id=None):
             scan_results = []
 
             # Pause enrichment workers during scan to reduce API contention
-            if spotify_enrichment_worker and not spotify_enrichment_worker.paused:
-                spotify_enrichment_worker.pause()
-                _enrichment_was_running = True
-                print("⏸️ [Auto-Watchlist] Paused Spotify enrichment worker during scan")
-            if itunes_enrichment_worker and not itunes_enrichment_worker.paused:
-                itunes_enrichment_worker.pause()
-                _itunes_enrichment_was_running = True
-                print("⏸️ [Auto-Watchlist] Paused iTunes enrichment worker during scan")
+            _ew_state = _pause_enrichment_workers('auto-watchlist scan')
 
             # Dynamic delay calculation based on scan scope
             lookback_period = scanner._get_lookback_period_setting()
@@ -27155,12 +27189,7 @@ def _process_watchlist_scan_automatically(automation_id=None):
 
     finally:
         # Resume enrichment workers if we paused them
-        if _enrichment_was_running and spotify_enrichment_worker:
-            spotify_enrichment_worker.resume()
-            print("▶️ [Auto-Watchlist] Resumed Spotify enrichment worker after scan")
-        if _itunes_enrichment_was_running and itunes_enrichment_worker:
-            itunes_enrichment_worker.resume()
-            print("▶️ [Auto-Watchlist] Resumed iTunes enrichment worker after scan")
+        _resume_enrichment_workers(_ew_state, 'auto-watchlist scan')
 
         # Always reset flag
         with watchlist_timer_lock:
@@ -30815,7 +30844,9 @@ def clean_beatport_text(text):
 
 def _run_beatport_discovery_worker(url_hash):
     """Background worker for Beatport discovery process (Spotify preferred, iTunes fallback)"""
+    _ew_state = (False, False)
     try:
+        _ew_state = _pause_enrichment_workers('Beatport discovery')
         state = beatport_chart_states[url_hash]
         chart = state['chart']
         tracks = chart['tracks']
@@ -31111,6 +31142,8 @@ def _run_beatport_discovery_worker(url_hash):
         if url_hash in beatport_chart_states:
             beatport_chart_states[url_hash]['status'] = 'error'
             beatport_chart_states[url_hash]['phase'] = 'fresh'
+    finally:
+        _resume_enrichment_workers(_ew_state, 'Beatport discovery')
 
 @app.route('/api/beatport/sync/start/<url_hash>', methods=['POST'])
 def start_beatport_sync(url_hash):
