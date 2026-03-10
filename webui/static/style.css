@@ -409,7 +409,7 @@ body {
     transition: width 0.1s linear;
 }
 
-.progress-bar {
+.player-top-progress .progress-bar {
     position: absolute;
     top: 0;
     left: 0;
@@ -424,14 +424,14 @@ body {
     margin: 0;
 }
 
-.progress-bar::-webkit-slider-track {
+.player-top-progress .progress-bar::-webkit-slider-track {
     width: 100%;
     height: 3px;
     background: transparent;
     border-radius: 2px;
 }
 
-.progress-bar::-webkit-slider-thumb {
+.player-top-progress .progress-bar::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
     width: 10px;
@@ -449,18 +449,18 @@ body {
     opacity: 1;
 }
 
-.progress-bar::-webkit-slider-thumb:hover {
+.player-top-progress .progress-bar::-webkit-slider-thumb:hover {
     transform: scale(1.2);
     box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.2);
 }
 
-.progress-bar::-webkit-slider-thumb:active {
+.player-top-progress .progress-bar::-webkit-slider-thumb:active {
     transform: scale(1.3);
     box-shadow: 0 0 0 6px rgba(var(--accent-rgb), 0.25);
 }
 
 /* Firefox progress bar styling */
-.progress-bar::-moz-range-track {
+.player-top-progress .progress-bar::-moz-range-track {
     width: 100%;
     height: 3px;
     background: transparent;
@@ -468,7 +468,7 @@ body {
     border: none;
 }
 
-.progress-bar::-moz-range-thumb {
+.player-top-progress .progress-bar::-moz-range-thumb {
     width: 10px;
     height: 10px;
     background: #fff;
@@ -5188,6 +5188,7 @@ body {
 .header-actions {
     display: flex;
     gap: 10px;
+    flex-wrap: wrap;
 }
 
 .header-button {
@@ -5203,6 +5204,9 @@ body {
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
     outline: none;
     user-select: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 
     /* Enhanced glassmorphic effect */
     backdrop-filter: blur(8px) saturate(1.2);
