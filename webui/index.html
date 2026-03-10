@@ -235,6 +235,9 @@
             </div>
         </div>
 
+        <!-- Sidebar Audio Visualizer (right edge, outside sidebar to avoid overflow clip) -->
+        <div class="sidebar-visualizer" id="sidebar-visualizer"></div>
+
         <!-- Main Content Area -->
         <div class="main-content">
             <!-- Dashboard Page -->
@@ -3905,6 +3908,18 @@
                                 <div class="form-group" id="custom-color-group" style="display:none;">
                                     <label>Custom Color:</label>
                                     <input type="color" id="accent-custom-color" value="#1db954">
+                                </div>
+                                <div class="form-group">
+                                    <label>Sidebar Visualizer:</label>
+                                    <select id="sidebar-visualizer-type" class="form-select">
+                                        <option value="bars">Bars</option>
+                                        <option value="wave">Wave</option>
+                                        <option value="spectrum">Spectrum</option>
+                                        <option value="mirror">Mirror</option>
+                                        <option value="equalizer">Equalizer</option>
+                                        <option value="none">None</option>
+                                    </select>
+                                    <small style="color: #888;">Audio-reactive visualizer on the sidebar edge when music is playing</small>
                                 </div>
                             </div>
 
