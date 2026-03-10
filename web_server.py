@@ -14976,10 +14976,10 @@ def get_version_info():
                 "features": [
                     "• Toggle between Standard and Enhanced views on any artist's discography",
                     "• Inline metadata editing — click any field to edit artist, album, or track data",
-                    "• Per-service manual matching — click any service chip (Spotify, MusicBrainz, Deezer, AudioDB, iTunes) to search and manually pick the correct match",
+                    "• Per-service manual matching — click any service chip (Spotify, MusicBrainz, Deezer, AudioDB, iTunes, Last.fm, Genius) to search and manually pick the correct match",
                     "• Per-service enrichment — enrich from individual services with independent locks",
                     "• Clickable service ID badges that open the entity on the external service website",
-                    "• Match status chips showing matched/not found state for all 5 services on every artist, album, and track",
+                    "• Match status chips showing matched/not found state for all 7 services on every artist, album, and track",
                     "• Sortable track table columns — click headers to sort by title, duration, format, bitrate, BPM, disc, or track number",
                     "• Multi-disc album support with disc number column",
                     "• Play tracks directly from the library via the sidebar media player",
@@ -15161,6 +15161,20 @@ def get_version_info():
                     "• One-click Disconnect Spotify button in the modal to switch to Apple Music immediately",
                     "• Dashboard and sidebar indicators show 'Rate Limited' status with remaining time",
                     "• Auth probe no longer makes API calls during ban — prevents the vicious cycle of auth checks extending the ban"
+                ]
+            },
+            {
+                "title": "🎶 Last.fm & Genius Enrichment Workers",
+                "description": "Two new background enrichment workers bringing rich metadata to your library",
+                "features": [
+                    "• Last.fm worker enriches artists, albums, and tracks with listener counts, play counts, tags, similar artists, and bios",
+                    "• Genius worker enriches artists and tracks with descriptions, alternate names, lyrics, and song art URLs",
+                    "• Last.fm URLs stored as identifiers — Genius uses numeric IDs",
+                    "• Dashboard buttons with real-time status, progress tracking, and pause/resume controls",
+                    "• Smart no-auth detection — buttons grey out with guidance when API keys are missing",
+                    "• Full Enhanced Library Manager integration — status chips, manual matching, and on-demand enrichment for both services",
+                    "• Settings reload — changing API keys takes effect immediately without restarting",
+                    "• Same retry logic as all other workers: 30-day retry for not found, 7-day retry for errors"
                 ]
             },
             {
