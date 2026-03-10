@@ -33435,6 +33435,8 @@ function renderArtistMetaPanel(artist) {
         { key: 'deezer_id', label: 'Deezer', svc: 'deezer' },
         { key: 'audiodb_id', label: 'AudioDB', svc: 'audiodb' },
         { key: 'itunes_artist_id', label: 'iTunes', svc: 'itunes' },
+        { key: 'lastfm_url', label: 'Last.fm', svc: 'lastfm' },
+        { key: 'genius_url', label: 'Genius', svc: 'genius' },
     ];
     idSources.forEach(src => {
         if (artist[src.key]) {
@@ -33853,6 +33855,7 @@ function renderExpandedAlbumHeader(album) {
         { key: 'deezer_id', label: 'Deezer', svc: 'deezer' },
         { key: 'audiodb_id', label: 'AudioDB', svc: 'audiodb' },
         { key: 'itunes_album_id', label: 'iTunes', svc: 'itunes' },
+        { key: 'lastfm_url', label: 'Last.fm', svc: 'lastfm' },
     ];
     idFields.forEach(f => {
         if (album[f.key]) {
@@ -34385,6 +34388,15 @@ function getServiceUrl(service, entityType, id) {
             artist: `https://music.apple.com/artist/${id}`,
             album: `https://music.apple.com/album/${id}`,
             track: `https://music.apple.com/song/${id}`,
+        },
+        lastfm: {
+            artist: id,  // lastfm_url is already a full URL
+            album: id,
+            track: id,
+        },
+        genius: {
+            artist: id,  // genius_url is already a full URL
+            track: id,   // genius_url on tracks is already a full URL
         },
     };
     return urls[service] && urls[service][entityType] || null;
