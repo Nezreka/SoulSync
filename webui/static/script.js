@@ -7401,7 +7401,7 @@ async function loadListenBrainzPlaylistsFromBackend() {
                             status_class: result.status_class || (result.status === 'found' || result.status === '✅ Found' ? 'found' : (result.status === 'error' ? 'error' : 'not-found')),
                             spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
                             spotify_artist: result.spotify_data && result.spotify_data.artists ?
-                                (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists[0] : result.spotify_data.artists) : (result.spotify_artist || '-'),
+                                (Array.isArray(result.spotify_data.artists) ? (typeof result.spotify_data.artists[0] === 'object' ? result.spotify_data.artists[0].name : result.spotify_data.artists[0]) : result.spotify_data.artists) : (result.spotify_artist || '-'),
                             spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
                             spotify_data: result.spotify_data,
                             duration: result.duration || '0:00'
@@ -25086,7 +25086,7 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
                         status: (r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found') ? '✅ Found' : (r.status === 'error' ? '❌ Error' : '❌ Not Found'),
                         status_class: r.status_class || ((r.status === 'found' || r.status === '✅ Found') ? 'found' : (r.status === 'error' ? 'error' : 'not-found')),
                         spotify_track: r.spotify_data ? r.spotify_data.name : (r.spotify_track || '-'),
-                        spotify_artist: r.spotify_data ? (r.spotify_data.artists && r.spotify_data.artists[0] ? r.spotify_data.artists[0] : '-') : (r.spotify_artist || '-'),
+                        spotify_artist: r.spotify_data ? (r.spotify_data.artists && r.spotify_data.artists[0] ? (typeof r.spotify_data.artists[0] === 'object' ? r.spotify_data.artists[0].name : r.spotify_data.artists[0]) : '-') : (r.spotify_artist || '-'),
                         spotify_album: r.spotify_data ? (typeof r.spotify_data.album === 'object' ? r.spotify_data.album.name : r.spotify_data.album) || '-' : (r.spotify_album || '-'),
                         spotify_data: r.spotify_data, duration: r.duration || '0:00'
                     })),
@@ -25139,7 +25139,7 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
                         status: result.status === 'found' || result.status === '✅ Found' || result.status_class === 'found' ? '✅ Found' : (result.status === 'error' ? '❌ Error' : '❌ Not Found'),
                         status_class: result.status_class || (result.status === 'found' || result.status === '✅ Found' ? 'found' : (result.status === 'error' ? 'error' : 'not-found')),
                         spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
-                        spotify_artist: result.spotify_data ? (result.spotify_data.artists && result.spotify_data.artists[0] ? result.spotify_data.artists[0] : '-') : (result.spotify_artist || '-'),
+                        spotify_artist: result.spotify_data ? (result.spotify_data.artists && result.spotify_data.artists[0] ? (typeof result.spotify_data.artists[0] === 'object' ? result.spotify_data.artists[0].name : result.spotify_data.artists[0]) : '-') : (result.spotify_artist || '-'),
                         spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) || '-' : (result.spotify_album || '-'),
                         spotify_data: result.spotify_data,
                         duration: result.duration || '0:00'
