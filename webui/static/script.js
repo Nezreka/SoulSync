@@ -3898,6 +3898,7 @@ async function loadSettingsData() {
         document.getElementById('soulseek-search-timeout-buffer').value = settings.soulseek?.search_timeout_buffer || 15;
 
         // Populate ListenBrainz settings
+        document.getElementById('listenbrainz-base-url').value = settings.listenbrainz?.base_url || '';
         document.getElementById('listenbrainz-token').value = settings.listenbrainz?.token || '';
 
         // Populate AcoustID settings
@@ -4607,6 +4608,7 @@ async function saveSettings(quiet = false) {
             search_timeout_buffer: parseInt(document.getElementById('soulseek-search-timeout-buffer').value) || 15
         },
         listenbrainz: {
+            base_url: document.getElementById('listenbrainz-base-url').value,
             token: document.getElementById('listenbrainz-token').value
         },
         acoustid: {

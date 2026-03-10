@@ -10,7 +10,15 @@ class ListenBrainzClient:
     """Client for interacting with ListenBrainz API"""
 
     def __init__(self):
-        self.base_url = "https://api.listenbrainz.org/1"
+        custom_url = config_manager.get("listenbrainz.base_url", "")
+        if custom_url:
+            # Strip trailing slashes and ensure /1 API version suffix
+            custom_url = custom_url.rstrip('/')
+            if not custom_url.endswith('/1'):
+                custom_url += '/1'
+            self.base_url = custom_url
+        else:
+            self.base_url = "https://api.listenbrainz.org/1"
         self.token = config_manager.get("listenbrainz.token", "")
         self.username = None
 
