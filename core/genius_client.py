@@ -11,32 +11,45 @@ logger = get_logger("genius_client")
 # Global rate limiting variables
 _last_api_call_time = 0
 _api_call_lock = threading.Lock()
-MIN_API_INTERVAL = 0.5  # 500ms between calls (Genius doesn't publish limits, be conservative)
+MIN_API_INTERVAL = 1.5  # 1.5s between calls — Genius 429s at 500ms
+_rate_limit_backoff = 0  # Extra backoff seconds after 429
+_rate_limit_until = 0    # Timestamp until which all calls should wait
 
 
 def rate_limited(func):
-    """Decorator to enforce rate limiting on Genius API calls"""
+    """Decorator to enforce rate limiting on Genius API calls with exponential backoff on 429"""
     @wraps(func)
     def wrapper(*args, **kwargs):
-        global _last_api_call_time
+        global _last_api_call_time, _rate_limit_backoff, _rate_limit_until
 
         with _api_call_lock:
             current_time = time.time()
-            time_since_last_call = current_time - _last_api_call_time
 
+            # If in backoff period from a previous 429, wait it out
+            if current_time < _rate_limit_until:
+                wait = _rate_limit_until - current_time
+                logger.debug(f"Genius rate limit backoff: waiting {wait:.1f}s")
+                time.sleep(wait)
+
+            time_since_last_call = time.time() - _last_api_call_time
             if time_since_last_call < MIN_API_INTERVAL:
-                sleep_time = MIN_API_INTERVAL - time_since_last_call
-                time.sleep(sleep_time)
+                time.sleep(MIN_API_INTERVAL - time_since_last_call)
 
             _last_api_call_time = time.time()
 
         try:
             result = func(*args, **kwargs)
+            # Success — gradually reduce backoff
+            if _rate_limit_backoff > 0:
+                _rate_limit_backoff = max(0, _rate_limit_backoff - 5)
             return result
         except Exception as e:
-            if "rate limit" in str(e).lower() or "429" in str(e):
-                logger.warning(f"Genius rate limit hit, implementing backoff: {e}")
-                time.sleep(10.0)
+            if "429" in str(e) or "rate limit" in str(e).lower():
+                # Exponential backoff: 30s → 60s → 120s (cap at 120s)
+                _rate_limit_backoff = min(120, max(30, _rate_limit_backoff * 2) if _rate_limit_backoff else 30)
+                _rate_limit_until = time.time() + _rate_limit_backoff
+                logger.warning(f"Genius 429 rate limit — backing off {_rate_limit_backoff}s")
+                time.sleep(_rate_limit_backoff)
             raise e
     return wrapper
 
