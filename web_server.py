@@ -13648,6 +13648,19 @@ def _post_process_matched_download(context_key, context, file_path):
         import time
         from pathlib import Path
 
+        # --- RACE CONDITION GUARD ---
+        # If source file is already gone, another thread (stream processor or
+        # verification worker) already processed it. Check immediately after
+        # acquiring the lock to avoid wasting time on stability checks / acoustid.
+        if not os.path.exists(file_path):
+            existing_final = context.get('_final_processed_path')
+            if existing_final and os.path.exists(existing_final):
+                print(f"✅ [Race Guard] Source gone but destination exists — already processed by another thread: {os.path.basename(existing_final)}")
+                return
+            print(f"⚠️ [Race Guard] Source file gone and no known destination — likely already processed: {os.path.basename(file_path)}")
+            return
+        # --- END RACE CONDITION GUARD ---
+
         # --- FILE STABILITY CHECK ---
         # Wait for the file to stop growing before processing. slskd may still be
         # flushing write buffers when it reports "Completed". We poll the file size
