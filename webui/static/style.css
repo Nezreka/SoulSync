@@ -325,12 +325,12 @@ body {
         inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
-.nav-icon-img {
-    width: 38px;
-    height: 38px;
-    object-fit: contain;
+.nav-svg {
+    width: 22px;
+    height: 22px;
     pointer-events: none;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    color: rgba(var(--accent-rgb), 0.7);
 }
 
 .nav-button:hover .nav-icon {
@@ -341,18 +341,19 @@ body {
     border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.nav-button.active .nav-icon {
-    width: 45px;
-    height: 45px;
-    background: transparent;
-    border: none;
-    box-shadow: none;
+.nav-button:hover .nav-svg {
+    color: rgba(255, 255, 255, 0.95);
 }
 
-.nav-button.active .nav-icon-img {
-    width: 43px;
-    height: 43px;
-    filter: drop-shadow(0 0 8px rgba(var(--accent-rgb), 0.5));
+.nav-button.active .nav-icon {
+    background: rgba(var(--accent-rgb), 0.12);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.15);
+}
+
+.nav-button.active .nav-svg {
+    color: rgba(var(--accent-light-rgb, var(--accent-rgb)), 1);
+    filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.5));
 }
 
 .nav-text {
@@ -5229,8 +5230,8 @@ body {
 
 /* Page header icon — shown beside all page titles */
 .page-header-icon {
-    width: 88px;
-    height: 88px;
+    width: 176px;
+    height: 176px;
     object-fit: contain;
     flex-shrink: 0;
     filter: drop-shadow(0 2px 8px rgba(var(--accent-rgb), 0.3));
@@ -5269,8 +5270,8 @@ body {
 
 @media (max-width: 768px) {
     .page-header-icon {
-        width: 56px;
-        height: 56px;
+        width: 100px;
+        height: 100px;
     }
 }
 
