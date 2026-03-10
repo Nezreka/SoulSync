@@ -110,6 +110,12 @@ class GeniusClient:
         except requests.exceptions.Timeout:
             logger.warning(f"Genius API timeout for endpoint: {endpoint}")
             return None
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 429:
+                # Re-raise 429s so the rate_limited decorator can handle backoff
+                raise
+            logger.error(f"Genius API request error ({endpoint}): {e}")
+            return None
         except Exception as e:
             logger.error(f"Genius API request error ({endpoint}): {e}")
             return None
