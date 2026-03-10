@@ -1305,12 +1305,23 @@ body {
 }
 
 .page-header h2 {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 28px;
     font-weight: 700;
-    color: #ffffff;
     margin: 0;
-    letter-spacing: -0.5px;
+    letter-spacing: -0.3px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.page-header h2 > span {
+    background: linear-gradient(90deg, #ffffff 0%, rgb(var(--accent-light-rgb)) 50%, rgb(var(--accent-rgb)) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: page-title-shimmer 6s ease-in-out infinite;
 }
 
 /* Dashboard Page Styling */
@@ -2512,11 +2523,22 @@ body {
 }
 
 .downloads-header .downloads-title {
-    font-family: 'Segoe UI', sans-serif;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 28px;
     font-weight: 700;
-    color: #ffffff;
-    letter-spacing: 1px;
+    letter-spacing: -0.3px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.downloads-header .downloads-title > span {
+    background: linear-gradient(90deg, #ffffff 0%, rgb(var(--accent-light-rgb)) 50%, rgb(var(--accent-rgb)) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: page-title-shimmer 6s ease-in-out infinite;
 }
 
 .downloads-header .downloads-subtitle {
@@ -5154,23 +5176,51 @@ body {
     gap: 5px;
 }
 
+/* Page header icon — shown beside all page titles */
+.page-header-icon {
+    width: 88px;
+    height: 88px;
+    object-fit: contain;
+    flex-shrink: 0;
+    filter: drop-shadow(0 2px 8px rgba(var(--accent-rgb), 0.3));
+    transition: transform 0.3s ease, filter 0.3s ease;
+}
+
+.page-header-icon:hover {
+    transform: scale(1.08) rotate(-3deg);
+    filter: drop-shadow(0 4px 14px rgba(var(--accent-rgb), 0.5));
+}
+
 .header-title {
     font-size: 30px;
     font-weight: 700;
     margin: 0 0 4px 0;
     line-height: 1.2;
     letter-spacing: -0.5px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.header-title > span {
     background: linear-gradient(90deg, #ffffff 0%, rgb(var(--accent-light-rgb)) 50%, rgb(var(--accent-rgb)) 100%);
     background-size: 200% 100%;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-    animation: dashboard-title-shimmer 6s ease-in-out infinite;
+    animation: page-title-shimmer 6s ease-in-out infinite;
 }
 
-@keyframes dashboard-title-shimmer {
+@keyframes page-title-shimmer {
     0%, 100% { background-position: 0% 50%; }
     50% { background-position: 100% 50%; }
+}
+
+@media (max-width: 768px) {
+    .page-header-icon {
+        width: 56px;
+        height: 56px;
+    }
 }
 
 .header-subtitle {
@@ -6068,7 +6118,19 @@ body {
 .sync-title {
     font-size: 28px;
     font-weight: 700;
-    color: #ffffff;
+    letter-spacing: -0.3px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.sync-title > span {
+    background: linear-gradient(90deg, #ffffff 0%, rgb(var(--accent-light-rgb)) 50%, rgb(var(--accent-rgb)) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: page-title-shimmer 6s ease-in-out infinite;
 }
 
 .sync-subtitle {
@@ -13967,9 +14029,21 @@ body {
 .artists-welcome-title {
     font-size: 36px;
     font-weight: 700;
-    color: #ffffff;
     margin-bottom: 12px;
     font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+    letter-spacing: -0.3px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.artists-welcome-title > span {
+    background: linear-gradient(90deg, #ffffff 0%, rgb(var(--accent-light-rgb)) 50%, rgb(var(--accent-rgb)) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: page-title-shimmer 6s ease-in-out infinite;
 }
 
 .artists-welcome-subtitle {
@@ -15797,12 +15871,21 @@ body {
 .library-title {
     font-size: 28px;
     font-weight: 700;
-    color: #ffffff;
     margin: 0 0 8px 0;
-    background: linear-gradient(135deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb)));
+    letter-spacing: -0.3px;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.library-title > span {
+    background: linear-gradient(90deg, #ffffff 0%, rgb(var(--accent-light-rgb)) 50%, rgb(var(--accent-rgb)) 100%);
+    background-size: 200% 100%;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    animation: page-title-shimmer 6s ease-in-out infinite;
 }
 
 .library-subtitle {
@@ -28533,8 +28616,21 @@ body {
 .import-page-title {
     font-size: 28px;
     font-weight: 700;
-    color: #fff;
     margin: 0;
+    letter-spacing: -0.3px;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.import-page-title > span {
+    background: linear-gradient(90deg, #ffffff 0%, rgb(var(--accent-light-rgb)) 50%, rgb(var(--accent-rgb)) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: page-title-shimmer 6s ease-in-out infinite;
 }
 
 .import-page-refresh-btn {
