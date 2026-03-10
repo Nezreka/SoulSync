@@ -1799,6 +1799,7 @@ function clearTrack() {
     renderNpQueue();
     updateNpPrevNextButtons();
     updateMediaSessionPlaybackState();
+    stopSidebarVisualizer();
     if (npModalOpen) closeNowPlayingModal();
 
     console.log('🧹 Track cleared and media player reset');
@@ -1814,6 +1815,14 @@ function setPlayingState(playing) {
     if (pauseIcon) pauseIcon.style.display = playing ? '' : 'none';
     updateNpPlayButton();
     updateMediaSessionPlaybackState();
+
+    // Sidebar audio visualizer
+    if (playing) {
+        npInitVisualizer();
+        startSidebarVisualizer();
+    } else {
+        stopSidebarVisualizer();
+    }
 }
 
 async function handlePlayPause() {
@@ -3518,6 +3527,312 @@ function npStopVisualizerLoop() {
 }
 
 // ===============================
+// SIDEBAR AUDIO VISUALIZER
+// ===============================
+
+let sidebarVizAnimFrame = null;
+let sidebarVisualizerType = 'bars'; // bars | wave | spectrum | mirror | equalizer | none
+const SIDEBAR_VIZ_BAR_COUNT = 32;
+
+let _sidebarVizBuiltType = null;
+
+function buildSidebarVizElements(type) {
+    const container = document.getElementById('sidebar-visualizer');
+    if (!container) return;
+    if (_sidebarVizBuiltType === type && container.children.length > 0) return;
+    _sidebarVizBuiltType = type;
+    container.innerHTML = '';
+    container.className = 'sidebar-visualizer';
+
+    if (type === 'bars') {
+        container.classList.add('viz-bars');
+        for (let i = 0; i < SIDEBAR_VIZ_BAR_COUNT; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'sidebar-viz-bar';
+            container.appendChild(bar);
+        }
+    } else if (type === 'wave' || type === 'spectrum') {
+        container.classList.add('viz-canvas');
+        const canvas = document.createElement('canvas');
+        canvas.className = 'sidebar-viz-canvas';
+        canvas.width = 10;
+        canvas.height = 600;
+        container.appendChild(canvas);
+    } else if (type === 'mirror') {
+        container.classList.add('viz-mirror');
+        for (let i = 0; i < SIDEBAR_VIZ_BAR_COUNT; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'sidebar-viz-mirror-bar';
+            container.appendChild(bar);
+        }
+    } else if (type === 'equalizer') {
+        container.classList.add('viz-equalizer');
+        for (let i = 0; i < SIDEBAR_VIZ_BAR_COUNT; i++) {
+            const wrap = document.createElement('div');
+            wrap.className = 'sidebar-viz-eq-wrap';
+            const bar = document.createElement('div');
+            bar.className = 'sidebar-viz-eq-bar';
+            const peak = document.createElement('div');
+            peak.className = 'sidebar-viz-eq-peak';
+            wrap.appendChild(bar);
+            wrap.appendChild(peak);
+            container.appendChild(wrap);
+        }
+    }
+}
+
+function startSidebarVisualizer() {
+    const type = sidebarVisualizerType;
+    if (type === 'none') return;
+
+    const container = document.getElementById('sidebar-visualizer');
+    if (!container) return;
+
+    buildSidebarVizElements(type);
+    container.classList.add('active');
+
+    if (sidebarVizAnimFrame) return;
+    if (!npAnalyser) return;
+
+    const bufferLength = npAnalyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    const hueStart = 200, hueRange = 160;
+
+    // Helper: average frequency bins for a given segment index
+    function getBinValue(i, count) {
+        const binsPerSeg = Math.max(1, Math.floor((bufferLength - 1) / count));
+        let sum = 0;
+        const start = i * binsPerSeg + 1;
+        for (let b = 0; b < binsPerSeg; b++) sum += dataArray[Math.min(start + b, bufferLength - 1)];
+        return (sum / binsPerSeg) / 255;
+    }
+
+    // ── Bars ──
+    if (type === 'bars') {
+        const bars = container.querySelectorAll('.sidebar-viz-bar');
+        if (bars.length === 0) return;
+        function drawBars() {
+            sidebarVizAnimFrame = requestAnimationFrame(drawBars);
+            npAnalyser.getByteFrequencyData(dataArray);
+            for (let i = 0; i < bars.length; i++) {
+                const value = getBinValue(i, bars.length);
+                const scale = Math.max(0.08, value);
+                const hue = (hueStart + (i / bars.length) * hueRange + value * 30) % 360;
+                bars[i].style.transform = `scaleX(${scale})`;
+                bars[i].style.backgroundColor = `hsla(${hue}, 80%, ${50 + value * 15}%, ${0.5 + value * 0.5})`;
+            }
+        }
+        drawBars();
+
+    // ── Wave ──
+    } else if (type === 'wave') {
+        const canvas = container.querySelector('.sidebar-viz-canvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        let hueOffset = 0;
+        function drawWave() {
+            sidebarVizAnimFrame = requestAnimationFrame(drawWave);
+            const ch = container.clientHeight;
+            if (ch > 0 && canvas.height !== ch) canvas.height = ch;
+            npAnalyser.getByteFrequencyData(dataArray);
+            const w = canvas.width, h = canvas.height;
+            if (h === 0) return;
+            ctx.clearRect(0, 0, w, h);
+
+            let totalEnergy = 0;
+            for (let i = 1; i < bufferLength; i++) totalEnergy += dataArray[i];
+            const avgEnergy = totalEnergy / (bufferLength - 1) / 255;
+            hueOffset = (hueOffset + 0.5) % 360;
+
+            const segments = 64;
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            for (let i = 0; i <= segments; i++) {
+                const y = (i / segments) * h;
+                const binIdx = Math.min(Math.floor((i / segments) * (bufferLength - 1)) + 1, bufferLength - 1);
+                const value = dataArray[binIdx] / 255;
+                const x = (w / 2) + Math.sin((i / segments) * Math.PI * 4 + Date.now() * 0.003) * value * (w - 2) * 0.4;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            const grad = ctx.createLinearGradient(0, 0, 0, h);
+            grad.addColorStop(0, `hsla(${hueOffset + 200}, 80%, 60%, ${0.3 + avgEnergy * 0.7})`);
+            grad.addColorStop(0.5, `hsla(${hueOffset + 280}, 80%, 55%, ${0.3 + avgEnergy * 0.7})`);
+            grad.addColorStop(1, `hsla(${hueOffset + 360}, 80%, 60%, ${0.3 + avgEnergy * 0.7})`);
+            ctx.strokeStyle = grad;
+            ctx.stroke();
+            ctx.lineWidth = 6;
+            ctx.globalAlpha = 0.15 + avgEnergy * 0.2;
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+        }
+        drawWave();
+
+    // ── Spectrum (mountain/terrain fill) ──
+    } else if (type === 'spectrum') {
+        const canvas = container.querySelector('.sidebar-viz-canvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        let hueOffset = 0;
+        // Smoothed values for fluid motion
+        const smoothed = new Float32Array(64);
+
+        function drawSpectrum() {
+            sidebarVizAnimFrame = requestAnimationFrame(drawSpectrum);
+            const ch = container.clientHeight;
+            if (ch > 0 && canvas.height !== ch) canvas.height = ch;
+            npAnalyser.getByteFrequencyData(dataArray);
+            const w = canvas.width, h = canvas.height;
+            if (h === 0) return;
+            ctx.clearRect(0, 0, w, h);
+
+            hueOffset = (hueOffset + 0.3) % 360;
+            const segments = smoothed.length;
+
+            // Smooth the frequency data
+            for (let i = 0; i < segments; i++) {
+                const binIdx = Math.min(Math.floor((i / segments) * (bufferLength - 1)) + 1, bufferLength - 1);
+                const target = dataArray[binIdx] / 255;
+                smoothed[i] += (target - smoothed[i]) * 0.25;
+            }
+
+            // Draw filled mountain shape from left edge
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            for (let i = 0; i <= segments; i++) {
+                const y = (i / segments) * h;
+                const value = i < segments ? smoothed[i] : smoothed[segments - 1];
+                const x = value * w * 0.95;
+                ctx.lineTo(x, y);
+            }
+            ctx.lineTo(0, h);
+            ctx.closePath();
+
+            // Gradient fill
+            const fillGrad = ctx.createLinearGradient(0, 0, 0, h);
+            fillGrad.addColorStop(0, `hsla(${hueOffset + 200}, 85%, 55%, 0.7)`);
+            fillGrad.addColorStop(0.25, `hsla(${hueOffset + 240}, 80%, 50%, 0.6)`);
+            fillGrad.addColorStop(0.5, `hsla(${hueOffset + 290}, 85%, 50%, 0.65)`);
+            fillGrad.addColorStop(0.75, `hsla(${hueOffset + 330}, 80%, 50%, 0.6)`);
+            fillGrad.addColorStop(1, `hsla(${hueOffset + 360}, 85%, 55%, 0.7)`);
+            ctx.fillStyle = fillGrad;
+            ctx.fill();
+
+            // Bright edge line
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            for (let i = 0; i <= segments; i++) {
+                const y = (i / segments) * h;
+                const value = i < segments ? smoothed[i] : smoothed[segments - 1];
+                ctx.lineTo(value * w * 0.95, y);
+            }
+            const lineGrad = ctx.createLinearGradient(0, 0, 0, h);
+            lineGrad.addColorStop(0, `hsla(${hueOffset + 200}, 90%, 70%, 0.9)`);
+            lineGrad.addColorStop(0.5, `hsla(${hueOffset + 290}, 90%, 65%, 0.9)`);
+            lineGrad.addColorStop(1, `hsla(${hueOffset + 360}, 90%, 70%, 0.9)`);
+            ctx.strokeStyle = lineGrad;
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // Outer glow
+            ctx.lineWidth = 4;
+            ctx.globalAlpha = 0.2;
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+        }
+        drawSpectrum();
+
+    // ── Mirror (bars from center outward) ──
+    } else if (type === 'mirror') {
+        const bars = container.querySelectorAll('.sidebar-viz-mirror-bar');
+        if (bars.length === 0) return;
+        function drawMirror() {
+            sidebarVizAnimFrame = requestAnimationFrame(drawMirror);
+            npAnalyser.getByteFrequencyData(dataArray);
+            const half = Math.floor(bars.length / 2);
+            for (let i = 0; i < half; i++) {
+                const value = getBinValue(i, half);
+                const scale = Math.max(0.06, value);
+                const hue = (hueStart + (i / half) * hueRange + value * 30) % 360;
+                const color = `hsla(${hue}, 80%, ${50 + value * 15}%, ${0.5 + value * 0.5})`;
+                // Top half — mirror index from center
+                const topIdx = half - 1 - i;
+                const bottomIdx = half + i;
+                bars[topIdx].style.transform = `scaleX(${scale})`;
+                bars[topIdx].style.backgroundColor = color;
+                if (bottomIdx < bars.length) {
+                    bars[bottomIdx].style.transform = `scaleX(${scale})`;
+                    bars[bottomIdx].style.backgroundColor = color;
+                }
+            }
+        }
+        drawMirror();
+
+    // ── Equalizer (bars with falling peak indicators) ──
+    } else if (type === 'equalizer') {
+        const wraps = container.querySelectorAll('.sidebar-viz-eq-wrap');
+        if (wraps.length === 0) return;
+        const peaks = new Float32Array(wraps.length);
+        const peakVelocity = new Float32Array(wraps.length);
+
+        function drawEqualizer() {
+            sidebarVizAnimFrame = requestAnimationFrame(drawEqualizer);
+            npAnalyser.getByteFrequencyData(dataArray);
+            for (let i = 0; i < wraps.length; i++) {
+                const value = getBinValue(i, wraps.length);
+                const scale = Math.max(0.06, value);
+                const hue = (hueStart + (i / wraps.length) * hueRange + value * 30) % 360;
+                const barEl = wraps[i].querySelector('.sidebar-viz-eq-bar');
+                const peakEl = wraps[i].querySelector('.sidebar-viz-eq-peak');
+
+                barEl.style.transform = `scaleX(${scale})`;
+                barEl.style.backgroundColor = `hsla(${hue}, 80%, ${50 + value * 15}%, ${0.5 + value * 0.5})`;
+
+                // Peak hold with gravity
+                if (value > peaks[i]) {
+                    peaks[i] = value;
+                    peakVelocity[i] = 0;
+                } else {
+                    peakVelocity[i] += 0.002; // gravity
+                    peaks[i] = Math.max(0, peaks[i] - peakVelocity[i]);
+                }
+                const peakPos = Math.max(0.06, peaks[i]);
+                peakEl.style.left = `${peakPos * 100}%`;
+                peakEl.style.backgroundColor = `hsla(${hue}, 90%, 75%, ${0.6 + peaks[i] * 0.4})`;
+                peakEl.style.boxShadow = `0 0 4px hsla(${hue}, 90%, 70%, ${peaks[i] * 0.5})`;
+            }
+        }
+        drawEqualizer();
+    }
+}
+
+function stopSidebarVisualizer() {
+    if (sidebarVizAnimFrame) {
+        cancelAnimationFrame(sidebarVizAnimFrame);
+        sidebarVizAnimFrame = null;
+    }
+    const container = document.getElementById('sidebar-visualizer');
+    if (container) {
+        container.classList.remove('active');
+    }
+}
+
+// Listen for visualizer type changes in settings — use isPlaying (not wasRunning)
+// so switching from 'none' to a real type while music plays starts the visualizer
+document.addEventListener('change', (e) => {
+    if (e.target.id === 'sidebar-visualizer-type') {
+        const newType = e.target.value;
+        stopSidebarVisualizer();
+        _sidebarVizBuiltType = null; // force rebuild for new type
+        sidebarVisualizerType = newType;
+        if (isPlaying && newType !== 'none') {
+            npInitVisualizer();
+            startSidebarVisualizer();
+        }
+    }
+});
+
+// ===============================
 // RADIO MODE
 // ===============================
 
@@ -3994,6 +4309,12 @@ async function loadSettingsData() {
                 applyAccentColor(accentPreset);
             }
         }
+
+        // Sidebar visualizer type
+        const vizType = settings.ui_appearance?.sidebar_visualizer || 'bars';
+        const vizSelect = document.getElementById('sidebar-visualizer-type');
+        if (vizSelect) vizSelect.value = vizType;
+        sidebarVisualizerType = vizType;
 
         // Populate Logging information (read-only)
         document.getElementById('log-level-display').textContent = settings.logging?.level || 'INFO';
@@ -4685,7 +5006,8 @@ async function saveSettings(quiet = false) {
         },
         ui_appearance: {
             accent_preset: document.getElementById('accent-preset')?.value || '#1db954',
-            accent_color: document.getElementById('accent-custom-color')?.value || '#1db954'
+            accent_color: document.getElementById('accent-custom-color')?.value || '#1db954',
+            sidebar_visualizer: document.getElementById('sidebar-visualizer-type')?.value || 'bars'
         },
         youtube: {
             cookies_browser: document.getElementById('youtube-cookies-browser').value,
