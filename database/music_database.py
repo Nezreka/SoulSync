@@ -1543,6 +1543,29 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genius_id ON tracks (genius_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genius_status ON tracks (genius_match_status)")
 
+            # One-time reset: clear all Genius matches due to blind-fallback bug in search
+            # The old search_artist/search_song returned the first result with no name validation,
+            # causing wrong matches. This reset lets the fixed worker re-enrich everything.
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_genius_search_fix_applied'")
+            if not cursor.fetchone():
+                logger.info("Applying one-time Genius search fix: resetting all artist and track matches for re-enrichment")
+                cursor.execute("""
+                    UPDATE artists SET
+                        genius_id = NULL, genius_match_status = NULL, genius_last_attempted = NULL,
+                        genius_description = NULL, genius_alt_names = NULL, genius_url = NULL
+                    WHERE genius_match_status IS NOT NULL
+                """)
+                artist_count = cursor.rowcount
+                cursor.execute("""
+                    UPDATE tracks SET
+                        genius_id = NULL, genius_match_status = NULL, genius_last_attempted = NULL,
+                        genius_lyrics = NULL, genius_description = NULL, genius_url = NULL
+                    WHERE genius_match_status IS NOT NULL
+                """)
+                track_count = cursor.rowcount
+                cursor.execute("CREATE TABLE _genius_search_fix_applied (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                logger.info(f"Genius search fix applied: reset {artist_count} artists and {track_count} tracks")
+
         except Exception as e:
             logger.error(f"Error adding Last.fm/Genius enrichment columns: {e}")
             # Don't raise - this is a migration, database can still function

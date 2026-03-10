@@ -13495,6 +13495,8 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    position: relative;
+    cursor: default;
 }
 
 .track-artist {
@@ -13504,6 +13506,8 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    position: relative;
+    cursor: default;
 }
 
 .track-duration {
@@ -13521,6 +13525,8 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    position: relative;
+    cursor: default;
 }
 
 .match-found {
@@ -13543,6 +13549,8 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    position: relative;
+    cursor: default;
 }
 
 .download-searching {
@@ -13559,6 +13567,47 @@ body {
 
 .download-failed {
     color: #f44336;
+}
+
+/* Hover/tap tooltip for truncated track and artist names */
+.track-name:hover::after,
+.track-artist:hover::after,
+.track-match-status:hover::after,
+.track-download-status:hover::after {
+    content: attr(title);
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 4px);
+    background: rgba(20, 20, 20, 0.95);
+    color: #ffffff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: normal;
+    word-break: break-word;
+    max-width: 320px;
+    min-width: 120px;
+    z-index: 100;
+    pointer-events: none;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    line-height: 1.4;
+}
+
+/* Only show tooltip when content is actually truncated (has title attr) */
+.track-name:hover::after,
+.track-artist:hover::after,
+.track-match-status:hover::after,
+.track-download-status:hover::after {
+    content: attr(title);
+}
+
+.track-name:not([title]):hover::after,
+.track-artist:not([title]):hover::after,
+.track-match-status:not([title]):hover::after,
+.track-download-status:not([title]):hover::after {
+    display: none;
 }
 
 .track-actions {
