@@ -248,6 +248,9 @@ class ConfigManager:
                 "url": "",
                 "api_key": "",
                 "auto_connect": False
+            },
+            "content_filter": {
+                "allow_explicit": True
             }
         }
 

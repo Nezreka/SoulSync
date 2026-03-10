@@ -3894,7 +3894,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'listenbrainz', 'acoustid', 'import', 'lossy_copy', 'ui_appearance', 'youtube']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'listenbrainz', 'acoustid', 'import', 'lossy_copy', 'ui_appearance', 'youtube', 'content_filter']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -10477,6 +10477,24 @@ def search_match():
         return jsonify({"error": str(e)}), 500
 
 
+def _is_explicit_blocked(track_data):
+    """Check if a track should be blocked by the explicit content filter.
+    Returns True if the track is explicit and explicit content is disabled."""
+    if config_manager.get('content_filter.allow_explicit', True):
+        return False
+    # Check direct explicit field
+    if track_data.get('explicit', False):
+        return True
+    # Check nested spotify_data (wishlist tracks)
+    sp_data = track_data.get('spotify_data', {})
+    if isinstance(sp_data, str):
+        try:
+            sp_data = json.loads(sp_data)
+        except Exception:
+            sp_data = {}
+    return sp_data.get('explicit', False)
+
+
 def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_artist, spotify_album):
     """
     Download album tracks that have been matched to Spotify with full track metadata.
@@ -10495,6 +10513,10 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
         try:
             slskd_track = matched_item['slskd_track']
             spotify_track = matched_item['spotify_track']
+
+            if _is_explicit_blocked(spotify_track):
+                logger.info(f"🚫 [Content Filter] Skipping explicit track: '{spotify_track.get('name')}'")
+                continue
 
             username = slskd_track.get('username')
             filename = slskd_track.get('filename')
@@ -10622,6 +10644,10 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
             corrected_meta = _match_track_to_spotify_title(parsed_meta, official_spotify_tracks)
             # --- END OF CRITICAL STEP ---
 
+            if _is_explicit_blocked(corrected_meta):
+                print(f"🚫 [Content Filter] Skipping explicit track: '{corrected_meta.get('title')}'")
+                continue
+
             # Create a clean context object using the CORRECTED metadata
             individual_track_context = {
                 'username': username,
@@ -10686,6 +10712,8 @@ def start_matched_download():
 
         # NEW: Enhanced single track with full Spotify metadata
         if is_single_track and spotify_track:
+            if _is_explicit_blocked(spotify_track):
+                return jsonify({"success": False, "error": "Explicit content is disabled in settings", "explicit_blocked": True}), 403
             logger.info(f"🎯 Starting enhanced single track download: '{spotify_track['name']}' by {spotify_artist['name']}")
 
             username = download_payload.get('username')
@@ -13065,7 +13093,8 @@ def _get_spotify_album_tracks(spotify_album: dict) -> list:
                 'name': item.get('name'),
                 'track_number': item.get('track_number'),
                 'disc_number': item.get('disc_number', 1),
-                'id': item.get('id')
+                'id': item.get('id'),
+                'explicit': item.get('explicit', False)
             } for item in tracks_data['items']]
         return []
     except Exception as e:
@@ -13092,7 +13121,8 @@ def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -
                     'artist': slsk_track_meta.get('artist'),
                     'album': slsk_track_meta.get('album'),
                     'track_number': sp_track['track_number'],
-                    'disc_number': sp_track.get('disc_number', 1)
+                    'disc_number': sp_track.get('disc_number', 1),
+                    'explicit': sp_track.get('explicit', False)
                 }
 
     # Priority 2: Match by title similarity (if track number fails)
@@ -13106,7 +13136,7 @@ def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -
         if score > best_score:
             best_score = score
             best_match = sp_track
-    
+
     if best_match:
         print(f"✅ Matched track by title similarity ({best_score:.2f}): '{slsk_track_meta['title']}' -> '{best_match['name']}'")
         return {
@@ -13114,7 +13144,8 @@ def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -
             'artist': slsk_track_meta.get('artist'),
             'album': slsk_track_meta.get('album'),
             'track_number': best_match['track_number'],
-            'disc_number': best_match.get('disc_number', 1)
+            'disc_number': best_match.get('disc_number', 1),
+            'explicit': best_match.get('explicit', False)
         }
 
     print(f"⚠️ Could not confidently match track '{slsk_track_meta['title']}'. Using original metadata.")
@@ -18555,6 +18586,14 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
 
         missing_tracks = [res for res in analysis_results if not res['found']]
 
+        # Filter explicit tracks if content filter is enabled
+        if not config_manager.get('content_filter.allow_explicit', True):
+            before_count = len(missing_tracks)
+            missing_tracks = [res for res in missing_tracks if not _is_explicit_blocked(res.get('track', {}))]
+            skipped = before_count - len(missing_tracks)
+            if skipped > 0:
+                print(f"🚫 [Content Filter] Filtered out {skipped} explicit track(s) from download queue")
+
         with tasks_lock:
             if batch_id in download_batches:
                 download_batches[batch_id]['analysis_results'] = analysis_results
@@ -19888,6 +19927,16 @@ def start_playlist_missing_downloads(playlist_id):
     missing_tracks = data.get('missing_tracks', [])
     if not missing_tracks:
         return jsonify({"success": False, "error": "No missing tracks provided"}), 400
+
+    # Filter explicit tracks if content filter is enabled
+    if not config_manager.get('content_filter.allow_explicit', True):
+        before_count = len(missing_tracks)
+        missing_tracks = [t for t in missing_tracks if not _is_explicit_blocked(t.get('track', t))]
+        skipped = before_count - len(missing_tracks)
+        if skipped > 0:
+            print(f"🚫 [Content Filter] Filtered out {skipped} explicit track(s) from playlist download")
+        if not missing_tracks:
+            return jsonify({"success": False, "error": "All tracks were filtered by explicit content setting"}), 400
 
     # Add activity for playlist download missing start
     playlist_name = data.get('playlist_name', f'Playlist {playlist_id}')
