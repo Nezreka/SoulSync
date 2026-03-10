@@ -14978,6 +14978,24 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔧 Recent Updates",
+                "description": "Latest fixes and improvements",
+                "features": [
+                    "• Genius search fix — no longer blindly matches wrong artists (e.g. '50 Cent' → '108'); all bad matches auto-reset on first launch",
+                    "• Library page fix — albums no longer merge across different artists with the same album title/year",
+                    "• Post-processing race condition fix — no more MutagenError on files already moved by another thread",
+                    "• iTunes storefront fallback — ID-based lookups automatically try 10 regional storefronts when the primary country returns no results",
+                    "• iTunes country setting now applies immediately without restart",
+                    "• Download modal progress bars no longer squished by media player CSS bleed",
+                    "• Watchlist/wishlist button text no longer overflows on narrow screens",
+                    "• Hover tooltips on truncated track names in download modals for full text visibility",
+                    "• Library artist cards now show Spotify, iTunes, Last.fm, and Genius service badges alongside MusicBrainz, Deezer, and AudioDB",
+                    "• Artist discography page now shows 'View on' buttons for all 7 matched services",
+                    "• Redesigned 'View on' buttons with glassmorphic styling matching the app's design language",
+                    "• Compact badge layout on artist cards — no longer overflows on mobile or when all services are matched"
+                ]
+            },
+            {
                 "title": "🎵 Now Playing Overhaul",
                 "description": "Redesigned media player with expanded Now Playing modal and smart radio",
                 "features": [
