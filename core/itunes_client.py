@@ -227,15 +227,24 @@ class iTunesClient:
     
     SEARCH_URL = "https://itunes.apple.com/search"
     LOOKUP_URL = "https://itunes.apple.com/lookup"
-    
-    def __init__(self, country: str = "US"):
-        self.country = country
+
+    # Fallback storefronts to try when primary country returns no results
+    FALLBACK_COUNTRIES = ['US', 'GB', 'FR', 'DE', 'JP', 'AU', 'CA', 'BR', 'KR', 'SE']
+
+    def __init__(self, country: str = None):
+        if country is None:
+            try:
+                from config.settings import config_manager
+                country = config_manager.get('itunes.country', 'US')
+            except Exception:
+                country = 'US'
+        self.country = country.upper() if country else "US"
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'SoulSync/1.0',
             'Accept': 'application/json'
         })
-        logger.info(f"iTunes client initialized for country: {country}")
+        logger.info(f"iTunes client initialized for country: {self.country}")
     
     def is_authenticated(self) -> bool:
         """
@@ -281,23 +290,53 @@ class iTunesClient:
             return []
     
     def _lookup(self, **params) -> List[Dict[str, Any]]:
-        """Generic lookup method (not rate limited)"""
+        """Generic lookup method with storefront fallback.
+        Tries the configured country first, then falls back to other storefronts
+        if the result is empty (album/track may be region-restricted)."""
         try:
             params['country'] = self.country
-            
+
             response = self.session.get(
                 self.LOOKUP_URL,
                 params=params,
                 timeout=30
             )
-            
+
             if response.status_code != 200:
                 logger.error(f"iTunes lookup failed with status {response.status_code}")
                 return []
-            
+
             data = response.json()
-            return data.get('results', [])
-            
+            results = data.get('results', [])
+
+            # If we got results, return them
+            if results:
+                return results
+
+            # No results — try fallback storefronts for ID-based lookups
+            # (only worth retrying when looking up a specific ID, not general searches)
+            if 'id' in params:
+                for fallback in self.FALLBACK_COUNTRIES:
+                    if fallback == self.country:
+                        continue
+                    try:
+                        params['country'] = fallback
+                        response = self.session.get(
+                            self.LOOKUP_URL,
+                            params=params,
+                            timeout=15
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            results = data.get('results', [])
+                            if results:
+                                logger.info(f"iTunes lookup found results via fallback storefront: {fallback}")
+                                return results
+                    except Exception:
+                        continue
+
+            return []
+
         except Exception as e:
             logger.error(f"Error in iTunes lookup: {e}")
             return []
