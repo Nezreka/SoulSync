@@ -66,10 +66,61 @@ body {
     flex-direction: column;
     overflow-y: auto;
     overflow-x: hidden;
+    position: relative;
 
     /* Custom scrollbar styling */
     scrollbar-width: thin;
     scrollbar-color: rgba(var(--accent-rgb), 0.4) rgba(255, 255, 255, 0.03);
+}
+
+/* Sidebar ambient aura — uses transform/opacity for GPU-smooth animation */
+.sidebar::before,
+.sidebar::after {
+    content: '';
+    position: fixed;
+    pointer-events: none;
+    border-radius: 50%;
+    filter: blur(40px);
+    will-change: transform, opacity;
+}
+
+.sidebar::before {
+    width: 180px;
+    height: 180px;
+    top: 5%;
+    left: 10px;
+    background: radial-gradient(circle, rgba(var(--accent-rgb), 0.35) 0%, transparent 70%);
+    animation: sidebar-orb-1 16s ease-in-out infinite;
+    z-index: 0;
+}
+
+.sidebar::after {
+    width: 160px;
+    height: 160px;
+    top: 55%;
+    left: 40px;
+    background: radial-gradient(circle, rgba(var(--accent-rgb), 0.30) 0%, transparent 70%);
+    animation: sidebar-orb-2 20s ease-in-out infinite;
+    z-index: 0;
+}
+
+@keyframes sidebar-orb-1 {
+    0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.5; }
+    25% { transform: translate(30px, 80px) scale(1.2); opacity: 1; }
+    50% { transform: translate(-10px, 180px) scale(0.9); opacity: 0.6; }
+    75% { transform: translate(20px, 50px) scale(1.15); opacity: 0.9; }
+}
+
+@keyframes sidebar-orb-2 {
+    0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.6; }
+    30% { transform: translate(-20px, -100px) scale(1.25); opacity: 0.4; }
+    60% { transform: translate(30px, -50px) scale(0.85); opacity: 1; }
+    80% { transform: translate(-10px, 40px) scale(1.1); opacity: 0.5; }
+}
+
+.sidebar > * {
+    position: relative;
+    z-index: 1;
 }
 
 /* Sidebar scrollbar webkit styling */
