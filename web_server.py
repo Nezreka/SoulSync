@@ -3188,6 +3188,36 @@ def run_service_test(service, test_config):
                     return False, f"{message}. {fingerprint_status}"
             except Exception as e:
                 return False, f"AcoustID test error: {str(e)}"
+        elif service == "lastfm":
+            api_key = test_config.get('api_key', '')
+
+            if not api_key:
+                return False, "Missing Last.fm API key."
+
+            try:
+                from core.lastfm_client import LastFMClient
+                client = LastFMClient(api_key=api_key)
+                if client.validate_api_key():
+                    return True, "Successfully connected to Last.fm!"
+                else:
+                    return False, "Invalid Last.fm API key."
+            except Exception as e:
+                return False, f"Last.fm connection error: {str(e)}"
+        elif service == "genius":
+            access_token = test_config.get('access_token', '')
+
+            if not access_token:
+                return False, "Missing Genius access token."
+
+            try:
+                from core.genius_client import GeniusClient
+                client = GeniusClient(access_token=access_token)
+                if client.validate_token():
+                    return True, "Successfully connected to Genius!"
+                else:
+                    return False, "Invalid Genius access token."
+            except Exception as e:
+                return False, f"Genius connection error: {str(e)}"
         return False, "Unknown service."
     except AttributeError as e:
         # This specifically catches the error you reported for Jellyfin
@@ -3901,7 +3931,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'listenbrainz', 'acoustid', 'import', 'lossy_copy', 'ui_appearance', 'youtube', 'content_filter']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'ui_appearance', 'youtube', 'content_filter']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
