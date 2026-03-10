@@ -249,6 +249,8 @@ function initializeWebSocket() {
     socket.on('enrichment:deezer', (data) => updateDeezerStatusFromData(data));
     socket.on('enrichment:spotify-enrichment', (data) => updateSpotifyEnrichmentStatusFromData(data));
     socket.on('enrichment:itunes-enrichment', (data) => updateiTunesEnrichmentStatusFromData(data));
+    socket.on('enrichment:lastfm-enrichment', (data) => updateLastFMEnrichmentStatusFromData(data));
+    socket.on('enrichment:genius-enrichment', (data) => updateGeniusEnrichmentStatusFromData(data));
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
 
@@ -33487,6 +33489,8 @@ function renderArtistMetaPanel(artist) {
         { id: 'deezer', label: 'Deezer', icon: '🟣' },
         { id: 'audiodb', label: 'AudioDB', icon: '🔵' },
         { id: 'itunes', label: 'iTunes', icon: '🔴' },
+        { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
+        { id: 'genius', label: 'Genius', icon: '🟡' },
     ];
     services.forEach(svc => {
         const item = document.createElement('div');
@@ -33515,6 +33519,8 @@ function renderArtistMetaPanel(artist) {
         { key: 'deezer_match_status', label: 'Deezer', attempted: 'deezer_last_attempted', svc: 'deezer' },
         { key: 'audiodb_match_status', label: 'AudioDB', attempted: 'audiodb_last_attempted', svc: 'audiodb' },
         { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
+        { key: 'lastfm_match_status', label: 'Last.fm', attempted: 'lastfm_last_attempted', svc: 'lastfm' },
+        { key: 'genius_match_status', label: 'Genius', attempted: 'genius_last_attempted', svc: 'genius' },
     ];
     statusServices.forEach(s => {
         const status = artist[s.key];
@@ -33867,6 +33873,7 @@ function renderExpandedAlbumHeader(album) {
         { key: 'deezer_match_status', label: 'Deezer', attempted: 'deezer_last_attempted', svc: 'deezer' },
         { key: 'audiodb_match_status', label: 'AudioDB', attempted: 'audiodb_last_attempted', svc: 'audiodb' },
         { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
+        { key: 'lastfm_match_status', label: 'Last.fm', attempted: 'lastfm_last_attempted', svc: 'lastfm' },
     ];
     statusSvcs.forEach(s => {
         const status = album[s.key];
@@ -33906,6 +33913,7 @@ function renderExpandedAlbumHeader(album) {
         { id: 'deezer', label: 'Deezer', icon: '🟣' },
         { id: 'audiodb', label: 'AudioDB', icon: '🔵' },
         { id: 'itunes', label: 'iTunes', icon: '🔴' },
+        { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
     ].forEach(svc => {
         const item = document.createElement('div');
         item.className = 'enhanced-enrich-menu-item';
@@ -34184,6 +34192,8 @@ function renderTrackTable(album) {
             { svc: 'deezer', col: 'deezer_id', label: 'Dz' },
             { svc: 'audiodb', col: 'audiodb_id', label: 'ADB' },
             { svc: 'itunes', col: 'itunes_track_id', label: 'iT' },
+            { svc: 'lastfm', col: 'lastfm_url', label: 'LFM' },
+            { svc: 'genius', col: 'genius_id', label: 'Gen' },
         ];
         const aId = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : null;
         trackServices.forEach(s => {
@@ -34806,7 +34816,7 @@ function openManualMatchModal(entityType, entityId, service, defaultQuery, artis
 
     const serviceLabels = {
         spotify: 'Spotify', musicbrainz: 'MusicBrainz', deezer: 'Deezer',
-        audiodb: 'AudioDB', itunes: 'iTunes'
+        audiodb: 'AudioDB', itunes: 'iTunes', lastfm: 'Last.fm', genius: 'Genius'
     };
 
     const overlay = document.createElement('div');
@@ -34992,10 +35002,19 @@ async function runEnrichment(entityType, entityId, service, name, artistName, ar
     _enrichmentInFlight = true;
 
     // Add loading class to all match chips for this service
+    const chipPrefixes = {
+        'spotify': ['spotify', 'sp'],
+        'musicbrainz': ['musicbrainz', 'mb'],
+        'deezer': ['deezer', 'dz'],
+        'audiodb': ['audiodb', 'adb'],
+        'itunes': ['itunes', 'it'],
+        'lastfm': ['last.fm', 'lfm'],
+        'genius': ['genius', 'gen'],
+    };
+    const prefixes = chipPrefixes[service] || [service];
     document.querySelectorAll('.enhanced-match-chip').forEach(chip => {
         const chipText = chip.textContent.toLowerCase();
-        if (chipText.startsWith(service === 'musicbrainz' ? 'mb' : service) ||
-            (service === 'musicbrainz' && chipText.startsWith('musicbrainz'))) {
+        if (prefixes.some(p => chipText.startsWith(p))) {
             chip.classList.add('loading');
         }
     });
@@ -45061,6 +45080,228 @@ if (document.readyState === 'loading') {
         button.addEventListener('click', toggleiTunesEnrichment);
         updateiTunesEnrichmentStatus();
         setInterval(updateiTunesEnrichmentStatus, 2000);
+    }
+}
+
+// ===================================================================
+// LAST.FM ENRICHMENT STATUS
+// ===================================================================
+
+async function updateLastFMEnrichmentStatus() {
+    if (socketConnected) return;
+    if (document.hidden) return;
+    try {
+        const response = await fetch('/api/lastfm-enrichment/status');
+        if (!response.ok) { console.warn('Last.fm status endpoint unavailable'); return; }
+        const data = await response.json();
+        updateLastFMEnrichmentStatusFromData(data);
+    } catch (error) {
+        console.error('Error updating Last.fm status:', error);
+    }
+}
+
+function updateLastFMEnrichmentStatusFromData(data) {
+    const button = document.getElementById('lastfm-enrich-button');
+    if (!button) return;
+
+    button.classList.remove('active', 'paused', 'complete');
+    if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    } else if (data.paused) {
+        button.classList.add('paused');
+    }
+
+    const tooltipStatus = document.getElementById('lastfm-enrich-tooltip-status');
+    const tooltipCurrent = document.getElementById('lastfm-enrich-tooltip-current');
+    const tooltipProgress = document.getElementById('lastfm-enrich-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
+        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else { tooltipStatus.textContent = 'Idle'; }
+    }
+
+    if (tooltipCurrent) {
+        if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        }
+    }
+
+    if (data.progress && tooltipProgress) {
+        const artists = data.progress.artists || {};
+        const albums = data.progress.albums || {};
+        const tracks = data.progress.tracks || {};
+
+        const currentType = data.current_item?.type;
+        let progressText = '';
+
+        const artistsComplete = artists.matched >= artists.total;
+        const albumsComplete = albums.matched >= albums.total;
+
+        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
+            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+        } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
+            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+        } else {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        }
+
+        tooltipProgress.textContent = progressText;
+    }
+}
+
+async function toggleLastFMEnrichment() {
+    try {
+        const button = document.getElementById('lastfm-enrich-button');
+        if (!button) return;
+
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/lastfm-enrichment/pause' : '/api/lastfm-enrichment/resume';
+
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Last.fm enrichment`);
+        }
+
+        await updateLastFMEnrichmentStatus();
+        console.log(`Last.fm enrichment ${isRunning ? 'paused' : 'resumed'}`);
+
+    } catch (error) {
+        console.error('Error toggling Last.fm enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('lastfm-enrich-button');
+        if (button) {
+            button.addEventListener('click', toggleLastFMEnrichment);
+            updateLastFMEnrichmentStatus();
+            setInterval(updateLastFMEnrichmentStatus, 2000);
+        }
+    });
+} else {
+    const button = document.getElementById('lastfm-enrich-button');
+    if (button) {
+        button.addEventListener('click', toggleLastFMEnrichment);
+        updateLastFMEnrichmentStatus();
+        setInterval(updateLastFMEnrichmentStatus, 2000);
+    }
+}
+
+// ===================================================================
+// GENIUS ENRICHMENT STATUS
+// ===================================================================
+
+async function updateGeniusEnrichmentStatus() {
+    if (socketConnected) return;
+    if (document.hidden) return;
+    try {
+        const response = await fetch('/api/genius-enrichment/status');
+        if (!response.ok) { console.warn('Genius status endpoint unavailable'); return; }
+        const data = await response.json();
+        updateGeniusEnrichmentStatusFromData(data);
+    } catch (error) {
+        console.error('Error updating Genius status:', error);
+    }
+}
+
+function updateGeniusEnrichmentStatusFromData(data) {
+    const button = document.getElementById('genius-enrich-button');
+    if (!button) return;
+
+    button.classList.remove('active', 'paused', 'complete');
+    if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    } else if (data.paused) {
+        button.classList.add('paused');
+    }
+
+    const tooltipStatus = document.getElementById('genius-enrich-tooltip-status');
+    const tooltipCurrent = document.getElementById('genius-enrich-tooltip-current');
+    const tooltipProgress = document.getElementById('genius-enrich-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
+        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else { tooltipStatus.textContent = 'Idle'; }
+    }
+
+    if (tooltipCurrent) {
+        if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        }
+    }
+
+    if (data.progress && tooltipProgress) {
+        const artists = data.progress.artists || {};
+        const tracks = data.progress.tracks || {};
+
+        const currentType = data.current_item?.type;
+        let progressText = '';
+
+        const artistsComplete = artists.matched >= artists.total;
+
+        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+        } else {
+            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+        }
+
+        tooltipProgress.textContent = progressText;
+    }
+}
+
+async function toggleGeniusEnrichment() {
+    try {
+        const button = document.getElementById('genius-enrich-button');
+        if (!button) return;
+
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/genius-enrichment/pause' : '/api/genius-enrichment/resume';
+
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Genius enrichment`);
+        }
+
+        await updateGeniusEnrichmentStatus();
+        console.log(`Genius enrichment ${isRunning ? 'paused' : 'resumed'}`);
+
+    } catch (error) {
+        console.error('Error toggling Genius enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('genius-enrich-button');
+        if (button) {
+            button.addEventListener('click', toggleGeniusEnrichment);
+            updateGeniusEnrichmentStatus();
+            setInterval(updateGeniusEnrichmentStatus, 2000);
+        }
+    });
+} else {
+    const button = document.getElementById('genius-enrich-button');
+    if (button) {
+        button.addEventListener('click', toggleGeniusEnrichment);
+        updateGeniusEnrichmentStatus();
+        setInterval(updateGeniusEnrichmentStatus, 2000);
     }
 }
 
