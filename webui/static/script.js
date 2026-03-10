@@ -20339,6 +20339,9 @@ function initializeSyncPage() {
         mirroredRefreshBtn.addEventListener('click', loadMirroredPlaylists);
     }
 
+    // Initialize import file tab
+    _initImportFileTab();
+
     // Logic for the Beatport clear button
     const beatportClearBtn = document.getElementById('beatport-clear-btn');
     if (beatportClearBtn) {
@@ -45983,6 +45986,385 @@ function importPageClearFinishedJobs() {
     _importQueueRender();
 }
 
+// ── Import File Tab ──────────────────────────────────────────────────
+
+let _importFileState = {
+    rawText: '',
+    fileName: '',
+    fileType: '',      // 'csv' or 'text'
+    headers: [],       // CSV column headers
+    rows: [],          // raw parsed rows (arrays for csv, strings for text)
+    columnMap: {},     // { columnIndex: 'track_name' | 'artist_name' | 'album_name' | 'duration' | 'skip' }
+    parsedTracks: []   // final [{track_name, artist_name, album_name, duration_ms}]
+};
+
+function _initImportFileTab() {
+    const dropzone = document.getElementById('import-file-dropzone');
+    const fileInput = document.getElementById('import-file-input');
+    if (!dropzone || !fileInput) return;
+
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+    dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file) _importFileRead(file);
+    });
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files[0]) _importFileRead(fileInput.files[0]);
+        fileInput.value = '';
+    });
+
+    // Enable/disable import button based on playlist name
+    const nameInput = document.getElementById('import-file-playlist-name');
+    if (nameInput) {
+        nameInput.addEventListener('input', () => {
+            const btn = document.getElementById('import-file-import-btn');
+            if (btn) btn.disabled = !nameInput.value.trim();
+        });
+    }
+}
+
+function _importFileRead(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['csv', 'tsv', 'txt'].includes(ext)) {
+        showToast('Unsupported file type. Use CSV, TSV, or TXT.', 'error');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        _importFileState.rawText = e.target.result;
+        _importFileState.fileName = file.name;
+        _importFileState.fileType = (ext === 'txt') ? 'text' : 'csv';
+        _importFileParseAndPreview();
+    };
+    reader.readAsText(file);
+}
+
+function _importFileDetectDelimiter(firstLine) {
+    const tab = (firstLine.match(/\t/g) || []).length;
+    const semi = (firstLine.match(/;/g) || []).length;
+    const comma = (firstLine.match(/,/g) || []).length;
+    if (tab >= comma && tab >= semi && tab > 0) return '\t';
+    if (semi >= comma && semi > 0) return ';';
+    return ',';
+}
+
+function _importFileParseCsv(text, delimiter) {
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) return { headers: [], rows: [] };
+
+    // Parse CSV with basic quote handling
+    function parseLine(line) {
+        const result = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === '"') {
+                if (inQuotes && i + 1 < line.length && line[i + 1] === '"') {
+                    current += '"';
+                    i++;
+                } else {
+                    inQuotes = !inQuotes;
+                }
+            } else if (ch === delimiter && !inQuotes) {
+                result.push(current.trim());
+                current = '';
+            } else {
+                current += ch;
+            }
+        }
+        result.push(current.trim());
+        return result;
+    }
+
+    const headers = parseLine(lines[0]);
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+        const row = parseLine(lines[i]);
+        if (row.some(cell => cell)) rows.push(row);
+    }
+    return { headers, rows };
+}
+
+function _importFileAutoMapColumns(headers) {
+    const map = {};
+    const lowerHeaders = headers.map(h => h.toLowerCase().trim());
+
+    const trackPatterns = ['track_name', 'track name', 'track', 'title', 'song', 'song_name', 'song name', 'name'];
+    const artistPatterns = ['artist_name', 'artist name', 'artist', 'artists', 'performer'];
+    const albumPatterns = ['album_name', 'album name', 'album'];
+    const durationPatterns = ['duration', 'duration_ms', 'length', 'time'];
+
+    function findMatch(patterns) {
+        for (const p of patterns) {
+            const idx = lowerHeaders.indexOf(p);
+            if (idx !== -1 && !(idx in map)) return idx;
+        }
+        return -1;
+    }
+
+    const trackIdx = findMatch(trackPatterns);
+    if (trackIdx !== -1) map[trackIdx] = 'track_name';
+
+    const artistIdx = findMatch(artistPatterns);
+    if (artistIdx !== -1) map[artistIdx] = 'artist_name';
+
+    const albumIdx = findMatch(albumPatterns);
+    if (albumIdx !== -1) map[albumIdx] = 'album_name';
+
+    const durIdx = findMatch(durationPatterns);
+    if (durIdx !== -1) map[durIdx] = 'duration';
+
+    return map;
+}
+
+function _importFileParseAndPreview() {
+    const state = _importFileState;
+    const text = state.rawText;
+
+    if (state.fileType === 'text') {
+        // Plain text: one track per line
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        state.rows = lines;
+        state.headers = [];
+        state.columnMap = {};
+    } else {
+        // CSV/TSV
+        const firstLine = text.split(/\r?\n/)[0] || '';
+        const delimiter = _importFileDetectDelimiter(firstLine);
+        const { headers, rows } = _importFileParseCsv(text, delimiter);
+        state.headers = headers;
+        state.rows = rows;
+        state.columnMap = _importFileAutoMapColumns(headers);
+    }
+
+    _importFileBuildTracks();
+    _importFileRenderPreview();
+}
+
+function _importFileBuildTracks() {
+    const state = _importFileState;
+    state.parsedTracks = [];
+
+    if (state.fileType === 'text') {
+        const orderEl = document.getElementById('import-file-text-order');
+        const sepEl = document.getElementById('import-file-text-separator');
+        const order = orderEl ? orderEl.value : 'artist-title';
+        const sep = sepEl ? sepEl.value : ' - ';
+
+        for (const line of state.rows) {
+            const parts = line.split(sep);
+            if (parts.length >= 2) {
+                const a = parts[0].trim();
+                const b = parts.slice(1).join(sep).trim();
+                state.parsedTracks.push({
+                    track_name: order === 'artist-title' ? b : a,
+                    artist_name: order === 'artist-title' ? a : b,
+                    album_name: '',
+                    duration_ms: 0
+                });
+            } else {
+                // Can't split — treat whole line as track name
+                state.parsedTracks.push({
+                    track_name: line.trim(),
+                    artist_name: '',
+                    album_name: '',
+                    duration_ms: 0
+                });
+            }
+        }
+    } else {
+        // CSV mapped
+        const map = state.columnMap;
+        const trackCol = Object.keys(map).find(k => map[k] === 'track_name');
+        const artistCol = Object.keys(map).find(k => map[k] === 'artist_name');
+        const albumCol = Object.keys(map).find(k => map[k] === 'album_name');
+        const durCol = Object.keys(map).find(k => map[k] === 'duration');
+
+        for (const row of state.rows) {
+            const track = trackCol !== undefined ? (row[trackCol] || '') : '';
+            const artist = artistCol !== undefined ? (row[artistCol] || '') : '';
+            const album = albumCol !== undefined ? (row[albumCol] || '') : '';
+            let dur = durCol !== undefined ? (row[durCol] || '') : '';
+
+            // Parse duration: could be ms, seconds, or mm:ss
+            let durationMs = 0;
+            if (dur) {
+                dur = dur.trim();
+                if (dur.includes(':')) {
+                    const parts = dur.split(':');
+                    durationMs = (parseInt(parts[0]) * 60 + parseInt(parts[1] || 0)) * 1000;
+                } else {
+                    const num = parseFloat(dur);
+                    durationMs = num > 10000 ? num : num * 1000; // assume ms if > 10000, else seconds
+                }
+                if (isNaN(durationMs)) durationMs = 0;
+            }
+
+            state.parsedTracks.push({
+                track_name: track,
+                artist_name: artist,
+                album_name: album,
+                duration_ms: durationMs
+            });
+        }
+    }
+}
+
+function _importFileRenderPreview() {
+    const state = _importFileState;
+    const validTracks = state.parsedTracks.filter(t => t.track_name || t.artist_name);
+
+    // Show/hide sections
+    document.getElementById('import-file-upload-zone').style.display = 'none';
+    document.getElementById('import-file-preview-section').style.display = '';
+
+    // File info
+    document.getElementById('import-file-name-label').textContent = state.fileName;
+    document.getElementById('import-file-track-count').textContent = `${validTracks.length} track${validTracks.length !== 1 ? 's' : ''} parsed`;
+
+    // Show format controls based on file type
+    document.getElementById('import-file-text-format').style.display = state.fileType === 'text' ? '' : 'none';
+    document.getElementById('import-file-column-mapping').style.display = state.fileType === 'csv' ? '' : 'none';
+
+    // Render column mapping for CSV
+    if (state.fileType === 'csv') {
+        _importFileRenderColumnMapping();
+    }
+
+    // Pre-fill playlist name from filename (strip extension)
+    const nameInput = document.getElementById('import-file-playlist-name');
+    if (nameInput && !nameInput.value) {
+        nameInput.value = state.fileName.replace(/\.[^.]+$/, '');
+    }
+    // Update button state
+    const btn = document.getElementById('import-file-import-btn');
+    if (btn) btn.disabled = !nameInput.value.trim();
+
+    // Render preview table
+    const tbody = document.getElementById('import-file-preview-tbody');
+    tbody.innerHTML = '';
+
+    state.parsedTracks.forEach((t, i) => {
+        const valid = !!(t.track_name || t.artist_name);
+        const tr = document.createElement('tr');
+        if (!valid) tr.classList.add('invalid-row');
+        tr.innerHTML = `
+            <td>${i + 1}</td>
+            <td>${_esc(t.track_name)}</td>
+            <td>${_esc(t.artist_name)}</td>
+            <td>${_esc(t.album_name)}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function _importFileRenderColumnMapping() {
+    const state = _importFileState;
+    const container = document.getElementById('import-file-mapping-selects');
+    container.innerHTML = '';
+
+    const options = ['skip', 'track_name', 'artist_name', 'album_name', 'duration'];
+    const optLabels = { skip: 'Skip', track_name: 'Track', artist_name: 'Artist', album_name: 'Album', duration: 'Duration' };
+
+    state.headers.forEach((header, idx) => {
+        const mapped = state.columnMap[idx] || 'skip';
+        const wrap = document.createElement('div');
+        wrap.className = 'import-file-col-map';
+        if (mapped === 'track_name') wrap.classList.add('mapped-track');
+        else if (mapped === 'artist_name') wrap.classList.add('mapped-artist');
+        else if (mapped === 'album_name') wrap.classList.add('mapped-album');
+
+        const label = document.createElement('span');
+        label.className = 'import-file-col-label';
+        label.textContent = header;
+        label.title = header;
+
+        const sel = document.createElement('select');
+        sel.className = 'import-file-select';
+        options.forEach(o => {
+            const opt = document.createElement('option');
+            opt.value = o;
+            opt.textContent = optLabels[o];
+            if (o === mapped) opt.selected = true;
+            sel.appendChild(opt);
+        });
+        sel.addEventListener('change', () => {
+            if (sel.value === 'skip') {
+                delete state.columnMap[idx];
+            } else {
+                // Remove this mapping from any other column
+                for (const k of Object.keys(state.columnMap)) {
+                    if (state.columnMap[k] === sel.value) delete state.columnMap[k];
+                }
+                state.columnMap[idx] = sel.value;
+            }
+            _importFileBuildTracks();
+            _importFileRenderPreview();
+        });
+
+        wrap.appendChild(label);
+        wrap.appendChild(sel);
+        container.appendChild(wrap);
+    });
+}
+
+function importFileReparse() {
+    _importFileBuildTracks();
+    _importFileRenderPreview();
+}
+
+function importFileClear() {
+    _importFileState = {
+        rawText: '', fileName: '', fileType: '',
+        headers: [], rows: [], columnMap: {}, parsedTracks: []
+    };
+    document.getElementById('import-file-upload-zone').style.display = '';
+    document.getElementById('import-file-preview-section').style.display = 'none';
+    document.getElementById('import-file-playlist-name').value = '';
+    document.getElementById('import-file-preview-tbody').innerHTML = '';
+}
+
+function importFileSubmit() {
+    const nameInput = document.getElementById('import-file-playlist-name');
+    const name = nameInput ? nameInput.value.trim() : '';
+    if (!name) {
+        showToast('Please enter a playlist name.', 'error');
+        nameInput && nameInput.focus();
+        return;
+    }
+
+    const tracks = _importFileState.parsedTracks.filter(t => t.track_name || t.artist_name);
+    if (!tracks.length) {
+        showToast('No valid tracks to import.', 'error');
+        return;
+    }
+
+    // Use a unique ID based on timestamp so multiple imports don't collide
+    const sourceId = `file_${Date.now()}`;
+
+    mirrorPlaylist('file', sourceId, name, tracks, {
+        description: `Imported from ${_importFileState.fileName}`,
+        owner: 'local'
+    });
+
+    showToast(`Imported "${name}" with ${tracks.length} tracks`, 'success');
+    importFileClear();
+
+    // Switch to mirrored tab so user sees the result
+    const mirroredBtn = document.querySelector('.sync-tab-button[data-tab="mirrored"]');
+    if (mirroredBtn) {
+        mirroredBtn.click();
+        // Reload mirrored playlists to show the new one
+        setTimeout(() => loadMirroredPlaylists(), 500);
+    }
+}
+
 // ── Mirrored Playlists ────────────────────────────────────────────────
 
 let mirroredPlaylistsLoaded = false;
@@ -46070,7 +46452,7 @@ function renderMirroredCard(p, container) {
         phaseHtml = `<span style="color:#22c55e;">Downloaded</span>`;
     }
 
-    const sourceIcons = { spotify: '🎵', tidal: '🌊', youtube: '▶', beatport: '🎛' };
+    const sourceIcons = { spotify: '🎵', tidal: '🌊', youtube: '▶', beatport: '🎛', file: '📄' };
     const srcIcon = sourceIcons[p.source] || '📋';
 
     // Discovery ratio
