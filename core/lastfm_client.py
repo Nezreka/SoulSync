@@ -54,8 +54,14 @@ class LastFMClient:
         })
         logger.info("Last.fm client initialized")
 
-    def _make_request(self, method: str, params: Dict = None, timeout: int = 10) -> Optional[Dict]:
-        """Make a request to the Last.fm API"""
+    def _make_request(self, method: str, params: Dict = None, timeout: int = 10, raise_on_transient: bool = False) -> Optional[Dict]:
+        """Make a request to the Last.fm API.
+
+        Args:
+            raise_on_transient: If True, raise exceptions on transient errors (timeouts, HTTP errors)
+                instead of returning None. Used by get_*_info methods so the worker can distinguish
+                'not found' (mark not_found, retry in 30 days) from 'API failed' (mark error, retry in 7 days).
+        """
         if not self.api_key:
             logger.warning("Last.fm API key not configured")
             return None
@@ -85,6 +91,9 @@ class LastFMClient:
                 # Error 6 = "Artist/Album/Track not found" — not a real error
                 if error_code == 6:
                     return None
+                # Transient errors: 11=Service Offline, 16=Temporarily Unavailable, 29=Rate Limit
+                if raise_on_transient and error_code in (11, 16, 29):
+                    raise Exception(f"Last.fm transient error ({error_code}): {error_msg}")
                 logger.error(f"Last.fm API error ({error_code}): {error_msg}")
                 return None
 
@@ -92,9 +101,13 @@ class LastFMClient:
 
         except requests.exceptions.Timeout:
             logger.warning(f"Last.fm API timeout for method: {method}")
+            if raise_on_transient:
+                raise
             return None
         except Exception as e:
             logger.error(f"Last.fm API request error ({method}): {e}")
+            if raise_on_transient:
+                raise
             return None
 
     # ── Artist Methods ──
@@ -134,7 +147,7 @@ class LastFMClient:
         data = self._make_request('artist.getinfo', {
             'artist': artist_name,
             'autocorrect': 1
-        })
+        }, raise_on_transient=True)
         if not data:
             return None
 
@@ -220,7 +233,7 @@ class LastFMClient:
             'artist': artist_name,
             'album': album_title,
             'autocorrect': 1
-        })
+        }, raise_on_transient=True)
         if not data:
             return None
 
@@ -270,7 +283,7 @@ class LastFMClient:
             'artist': artist_name,
             'track': track_title,
             'autocorrect': 1
-        })
+        }, raise_on_transient=True)
         if not data:
             return None
 

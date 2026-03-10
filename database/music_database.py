@@ -316,6 +316,9 @@ class MusicDatabase:
             # Add Spotify/iTunes enrichment tracking columns (migration)
             self._add_spotify_itunes_enrichment_columns(cursor)
 
+            # Add Last.fm and Genius enrichment columns (migration)
+            self._add_lastfm_genius_columns(cursor)
+
             # Bubble snapshots table for persisting UI state across page refreshes
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bubble_snapshots (
@@ -1437,6 +1440,109 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding Spotify/iTunes enrichment columns: {e}")
+            # Don't raise - this is a migration, database can still function
+
+    def _add_lastfm_genius_columns(self, cursor):
+        """Add Last.fm and Genius enrichment tracking + metadata columns to artists, albums, tracks"""
+        try:
+            # --- Artists ---
+            cursor.execute("PRAGMA table_info(artists)")
+            artists_columns = [column[1] for column in cursor.fetchall()]
+
+            # Last.fm columns
+            if 'lastfm_match_status' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_match_status TEXT")
+            if 'lastfm_last_attempted' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_last_attempted TIMESTAMP")
+            if 'lastfm_listeners' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_listeners INTEGER")
+            if 'lastfm_playcount' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_playcount INTEGER")
+            if 'lastfm_tags' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_tags TEXT")
+            if 'lastfm_similar' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_similar TEXT")
+            if 'lastfm_bio' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_bio TEXT")
+            if 'lastfm_url' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN lastfm_url TEXT")
+
+            # Genius columns
+            if 'genius_id' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN genius_id TEXT")
+            if 'genius_match_status' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN genius_match_status TEXT")
+            if 'genius_last_attempted' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN genius_last_attempted TIMESTAMP")
+            if 'genius_description' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN genius_description TEXT")
+            if 'genius_alt_names' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN genius_alt_names TEXT")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_lastfm_status ON artists (lastfm_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_genius_id ON artists (genius_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_genius_status ON artists (genius_match_status)")
+
+            # --- Albums ---
+            cursor.execute("PRAGMA table_info(albums)")
+            albums_columns = [column[1] for column in cursor.fetchall()]
+
+            # Last.fm columns
+            if 'lastfm_match_status' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_match_status TEXT")
+            if 'lastfm_last_attempted' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_last_attempted TIMESTAMP")
+            if 'lastfm_listeners' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_listeners INTEGER")
+            if 'lastfm_playcount' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_playcount INTEGER")
+            if 'lastfm_tags' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_tags TEXT")
+            if 'lastfm_wiki' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_wiki TEXT")
+            if 'lastfm_url' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_url TEXT")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_lastfm_status ON albums (lastfm_match_status)")
+
+            # --- Tracks ---
+            cursor.execute("PRAGMA table_info(tracks)")
+            tracks_columns = [column[1] for column in cursor.fetchall()]
+
+            # Last.fm columns
+            if 'lastfm_match_status' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN lastfm_match_status TEXT")
+            if 'lastfm_last_attempted' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN lastfm_last_attempted TIMESTAMP")
+            if 'lastfm_listeners' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN lastfm_listeners INTEGER")
+            if 'lastfm_playcount' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN lastfm_playcount INTEGER")
+            if 'lastfm_tags' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN lastfm_tags TEXT")
+            if 'lastfm_url' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN lastfm_url TEXT")
+
+            # Genius columns
+            if 'genius_id' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN genius_id TEXT")
+            if 'genius_match_status' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN genius_match_status TEXT")
+            if 'genius_last_attempted' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN genius_last_attempted TIMESTAMP")
+            if 'genius_lyrics' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN genius_lyrics TEXT")
+            if 'genius_description' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN genius_description TEXT")
+            if 'genius_url' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN genius_url TEXT")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_lastfm_status ON tracks (lastfm_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genius_id ON tracks (genius_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genius_status ON tracks (genius_match_status)")
+
+        except Exception as e:
+            logger.error(f"Error adding Last.fm/Genius enrichment columns: {e}")
             # Don't raise - this is a migration, database can still function
 
     def _add_retag_tables(self, cursor):

@@ -93,6 +93,8 @@ from core.audiodb_worker import AudioDBWorker
 from core.deezer_worker import DeezerWorker
 from core.spotify_worker import SpotifyWorker
 from core.itunes_worker import iTunesWorker
+from core.lastfm_worker import LastFMWorker
+from core.genius_worker import GeniusWorker
 from core.hydrabase_worker import HydrabaseWorker
 from core.hydrabase_client import HydrabaseClient
 from core.automation_engine import AutomationEngine
@@ -3956,6 +3958,11 @@ def handle_settings():
                 soulseek_client.youtube.reload_settings()
             # FIX: Re-instantiate the global tidal_client to pick up new settings
             tidal_client = TidalClient()
+            # Reload enrichment worker clients for key-based services
+            if lastfm_worker:
+                lastfm_worker._init_client()
+            if genius_worker:
+                genius_worker._init_client()
             print("✅ Service clients re-initialized with new settings.")
             return jsonify({"success": True, "message": "Settings saved successfully."})
         except Exception as e:
@@ -9553,14 +9560,14 @@ def library_play_track():
         print(f"❌ Error playing library track: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
-_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes')}
+_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius')}
 
 @app.route('/api/library/enrich', methods=['POST'])
 def library_enrich_entity():
     """Trigger enrichment of a specific entity from a single service.
     Body: { entity_type: 'artist'|'album'|'track', entity_id: str, service: str,
             name: str, artist_name: str? }
-    service: 'audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes'
+    service: 'audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius'
     """
     try:
         data = request.get_json()
@@ -9579,7 +9586,7 @@ def library_enrich_entity():
         if entity_type not in ('artist', 'album', 'track'):
             return jsonify({"success": False, "error": "entity_type must be artist, album, or track"}), 400
 
-        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes')
+        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius')
         if service not in valid_services:
             return jsonify({"success": False, "error": f"service must be one of: {', '.join(valid_services)}"}), 400
 
@@ -9701,6 +9708,26 @@ def _run_single_enrichment(service, entity_type, entity_id, name, artist_name):
             itunes_enrichment_worker._process_track_individual({'type': 'track_individual', 'id': entity_id, 'name': name, 'artist': artist_name})
         return {"success": True, "message": f"iTunes lookup complete for {entity_type}"}
 
+    elif service == 'lastfm':
+        if not lastfm_worker:
+            return {"success": False, "error": "Last.fm worker not initialized"}
+        item = {'type': entity_type, 'id': entity_id, 'name': name}
+        if entity_type in ('album', 'track'):
+            item['artist'] = artist_name
+        lastfm_worker._process_item(item)
+        return {"success": True, "message": f"Last.fm lookup complete for {entity_type}"}
+
+    elif service == 'genius':
+        if not genius_worker:
+            return {"success": False, "error": "Genius worker not initialized"}
+        item = {'type': entity_type, 'id': entity_id, 'name': name}
+        if entity_type == 'track':
+            item['artist'] = artist_name
+        elif entity_type == 'album':
+            return {"success": False, "error": "Genius does not support album enrichment"}
+        genius_worker._process_item(item)
+        return {"success": True, "message": f"Genius lookup complete for {entity_type}"}
+
     else:
         return {"success": False, "error": f"Unknown service: {service}"}
 
@@ -9817,6 +9844,48 @@ def _search_service(service, entity_type, query):
                                 'extra': f"{artist_name} · {album_name}"})
         return results
 
+    elif service == 'lastfm':
+        if not lastfm_worker or not lastfm_worker.client:
+            raise ValueError("Last.fm worker not initialized")
+        client = lastfm_worker.client
+        if entity_type == 'artist':
+            result = client.search_artist(query)
+            if result:
+                image = client.get_best_image(result.get('image', []))
+                return [{'id': result.get('url', ''), 'name': result.get('name', ''),
+                         'image': image, 'extra': f"{result.get('listeners', '0')} listeners"}]
+        elif entity_type == 'album':
+            result = client.search_album(query, '')
+            if result:
+                image = client.get_best_image(result.get('image', []))
+                return [{'id': result.get('url', ''), 'name': result.get('name', ''),
+                         'image': image, 'extra': result.get('artist', '')}]
+        elif entity_type == 'track':
+            # search_track takes separate artist/track params
+            parts = query.split(' - ', 1) if ' - ' in query else ['', query]
+            result = client.search_track(parts[0], parts[1])
+            if result:
+                artist_name = result.get('artist', '')
+                return [{'id': result.get('url', ''), 'name': result.get('name', ''),
+                         'image': None, 'extra': f"{artist_name} · {result.get('listeners', '0')} listeners"}]
+        return []
+
+    elif service == 'genius':
+        if not genius_worker or not genius_worker.client:
+            raise ValueError("Genius worker not initialized")
+        client = genius_worker.client
+        if entity_type == 'artist':
+            result = client.search_artist(query)
+            if result:
+                return [{'id': str(result.get('id', '')), 'name': result.get('name', ''),
+                         'image': result.get('image_url'), 'extra': ''}]
+        elif entity_type == 'track':
+            result = client.search_song(query, '')
+            if result:
+                return [{'id': str(result.get('id', '')), 'name': result.get('title', ''),
+                         'image': result.get('song_art_image_url'), 'extra': result.get('artist_names', '')}]
+        return []
+
     elif service == 'audiodb':
         if not audiodb_worker or not audiodb_worker.client:
             raise ValueError("AudioDB worker not initialized")
@@ -9853,6 +9922,8 @@ _SERVICE_ID_COLUMNS = {
     'deezer': {'artist': 'deezer_id', 'album': 'deezer_id', 'track': 'deezer_id'},
     'audiodb': {'artist': 'audiodb_id', 'album': 'audiodb_id', 'track': 'audiodb_id'},
     'itunes': {'artist': 'itunes_artist_id', 'album': 'itunes_album_id', 'track': 'itunes_track_id'},
+    'lastfm': {'artist': 'lastfm_url', 'album': 'lastfm_url', 'track': 'lastfm_url'},
+    'genius': {'artist': 'genius_id', 'track': 'genius_id'},
 }
 
 @app.route('/api/library/manual-match', methods=['PUT'])
@@ -33392,6 +33463,146 @@ def itunes_enrichment_resume():
 
 
 # ================================================================================================
+# LAST.FM ENRICHMENT WORKER
+# ================================================================================================
+
+lastfm_worker = None
+try:
+    from database.music_database import MusicDatabase
+    lastfm_db = MusicDatabase()
+    lastfm_worker = LastFMWorker(database=lastfm_db)
+    lastfm_worker.start()
+    print("✅ Last.fm enrichment worker initialized and started")
+except Exception as e:
+    print(f"⚠️ Last.fm worker initialization failed: {e}")
+    lastfm_worker = None
+
+# --- Last.fm API Endpoints ---
+
+@app.route('/api/lastfm-enrichment/status', methods=['GET'])
+def lastfm_enrichment_status():
+    """Get Last.fm enrichment status for UI polling"""
+    try:
+        if lastfm_worker is None:
+            return jsonify({
+                'enabled': False,
+                'running': False,
+                'paused': False,
+                'current_item': None,
+                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
+                'progress': {}
+            }), 200
+
+        status = lastfm_worker.get_stats()
+        return jsonify(status), 200
+    except Exception as e:
+        logger.error(f"Error getting Last.fm enrichment status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/lastfm-enrichment/pause', methods=['POST'])
+def lastfm_enrichment_pause():
+    """Pause Last.fm enrichment worker"""
+    try:
+        if lastfm_worker is None:
+            return jsonify({'error': 'Last.fm worker not initialized'}), 400
+
+        lastfm_worker.pause()
+        logger.info("Last.fm worker paused via UI")
+        return jsonify({'status': 'paused'}), 200
+    except Exception as e:
+        logger.error(f"Error pausing Last.fm worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/lastfm-enrichment/resume', methods=['POST'])
+def lastfm_enrichment_resume():
+    """Resume Last.fm enrichment worker"""
+    try:
+        if lastfm_worker is None:
+            return jsonify({'error': 'Last.fm worker not initialized'}), 400
+
+        lastfm_worker.resume()
+        logger.info("Last.fm worker resumed via UI")
+        return jsonify({'status': 'running'}), 200
+    except Exception as e:
+        logger.error(f"Error resuming Last.fm worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ================================================================================================
+# END LAST.FM ENRICHMENT INTEGRATION
+# ================================================================================================
+
+
+# ================================================================================================
+# GENIUS ENRICHMENT WORKER
+# ================================================================================================
+
+genius_worker = None
+try:
+    from database.music_database import MusicDatabase
+    genius_db = MusicDatabase()
+    genius_worker = GeniusWorker(database=genius_db)
+    genius_worker.start()
+    print("✅ Genius enrichment worker initialized and started")
+except Exception as e:
+    print(f"⚠️ Genius worker initialization failed: {e}")
+    genius_worker = None
+
+# --- Genius API Endpoints ---
+
+@app.route('/api/genius-enrichment/status', methods=['GET'])
+def genius_enrichment_status():
+    """Get Genius enrichment status for UI polling"""
+    try:
+        if genius_worker is None:
+            return jsonify({
+                'enabled': False,
+                'running': False,
+                'paused': False,
+                'current_item': None,
+                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
+                'progress': {}
+            }), 200
+
+        status = genius_worker.get_stats()
+        return jsonify(status), 200
+    except Exception as e:
+        logger.error(f"Error getting Genius enrichment status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/genius-enrichment/pause', methods=['POST'])
+def genius_enrichment_pause():
+    """Pause Genius enrichment worker"""
+    try:
+        if genius_worker is None:
+            return jsonify({'error': 'Genius worker not initialized'}), 400
+
+        genius_worker.pause()
+        logger.info("Genius worker paused via UI")
+        return jsonify({'status': 'paused'}), 200
+    except Exception as e:
+        logger.error(f"Error pausing Genius worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/genius-enrichment/resume', methods=['POST'])
+def genius_enrichment_resume():
+    """Resume Genius enrichment worker"""
+    try:
+        if genius_worker is None:
+            return jsonify({'error': 'Genius worker not initialized'}), 400
+
+        genius_worker.resume()
+        logger.info("Genius worker resumed via UI")
+        return jsonify({'status': 'running'}), 200
+    except Exception as e:
+        logger.error(f"Error resuming Genius worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ================================================================================================
+# END GENIUS ENRICHMENT INTEGRATION
+# ================================================================================================
+
+
+# ================================================================================================
 # HYDRABASE P2P MIRROR WORKER
 # ================================================================================================
 
@@ -34626,6 +34837,8 @@ def _emit_enrichment_status_loop():
         'deezer': lambda: deezer_worker,
         'spotify-enrichment': lambda: spotify_enrichment_worker,
         'itunes-enrichment': lambda: itunes_enrichment_worker,
+        'lastfm-enrichment': lambda: lastfm_worker,
+        'genius-enrichment': lambda: genius_worker,
         'hydrabase': lambda: hydrabase_worker,
         'repair': lambda: repair_worker,
     }
