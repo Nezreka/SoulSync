@@ -31811,6 +31811,14 @@ function createLibraryArtistCard(artist) {
     if (artist.genius_url) {
         badgeSources.push({ cls: 'genius-card-icon', logo: GENIUS_LOGO_URL, fallback: 'GEN', title: 'View on Genius', url: artist.genius_url });
     }
+    // Add watchlist indicator as the last badge
+    const hasExternalId = artist.itunes_artist_id || artist.spotify_artist_id;
+    if (artist.is_watched) {
+        badgeSources.push({ cls: 'watch-card-icon watched', logo: null, fallback: '👁️', fallbackExpanded: 'Watching', title: 'On your watchlist', url: null, isWatch: true });
+    } else if (hasExternalId) {
+        badgeSources.push({ cls: 'watch-card-icon', logo: null, fallback: '👁️', fallbackExpanded: 'Watch', title: 'Add to Watchlist', url: null, isWatch: true, unwatched: true });
+    }
+
     if (badgeSources.length > 0) {
         const badgeContainer = document.createElement('div');
         badgeContainer.className = 'card-badge-container';
@@ -31824,38 +31832,26 @@ function createLibraryArtistCard(artist) {
                 img.style.cssText = 'width: 16px; height: auto; display: block;';
                 img.onerror = () => { icon.textContent = source.fallback; };
                 icon.appendChild(img);
+            } else if (source.fallbackExpanded) {
+                icon.innerHTML = `<span class="watch-icon-emoji">${source.fallback}</span><span class="watch-icon-label">${source.fallbackExpanded}</span>`;
             } else {
                 icon.textContent = source.fallback;
             }
-            icon.onclick = (e) => {
-                e.stopPropagation();
-                window.open(source.url, '_blank');
-            };
+            if (source.isWatch && source.unwatched) {
+                icon.style.opacity = '0.4';
+                icon.onclick = (e) => {
+                    e.stopPropagation();
+                    toggleLibraryCardWatchlist(icon, artist);
+                };
+            } else if (source.url) {
+                icon.onclick = (e) => {
+                    e.stopPropagation();
+                    window.open(source.url, '_blank');
+                };
+            }
             badgeContainer.appendChild(icon);
         });
         card.appendChild(badgeContainer);
-    }
-
-    // Add watchlist button/indicator on the card
-    const hasExternalId = artist.itunes_artist_id || artist.spotify_artist_id;
-    if (artist.is_watched) {
-        const watchIcon = document.createElement('div');
-        watchIcon.className = 'watchlist-card-icon';
-        watchIcon.title = 'On your watchlist';
-        watchIcon.style.top = badgeOffset + 'px';
-        watchIcon.textContent = '👁️';
-        card.appendChild(watchIcon);
-    } else if (hasExternalId) {
-        const watchBtn = document.createElement('button');
-        watchBtn.className = 'library-card-watchlist-btn';
-        watchBtn.style.top = badgeOffset + 'px';
-        watchBtn.title = 'Add to Watchlist';
-        watchBtn.innerHTML = '<span class="watchlist-icon">👁️</span><span class="watchlist-text">Watch</span>';
-        watchBtn.onclick = (e) => {
-            e.stopPropagation();
-            toggleLibraryCardWatchlist(watchBtn, artist);
-        };
-        card.appendChild(watchBtn);
     }
 
     // Create image element
