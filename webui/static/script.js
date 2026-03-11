@@ -717,6 +717,34 @@ function initAccentColorListeners() {
 // ── Profile System ─────────────────────────────────────────────
 let currentProfile = null;
 
+function getProfileHomePage() {
+    if (!currentProfile) return 'dashboard';
+    if (currentProfile.home_page) return currentProfile.home_page;
+    return currentProfile.is_admin ? 'dashboard' : 'discover';
+}
+
+function isPageAllowed(pageId) {
+    if (!currentProfile) return true;
+    if (currentProfile.id === 1) return true;
+    if (pageId === 'help') return true;
+    if (pageId === 'artist-detail') {
+        // artist-detail requires library access
+        const ap = currentProfile.allowed_pages;
+        if (!ap) return true;
+        return ap.includes('library');
+    }
+    if (pageId === 'settings') return currentProfile.is_admin;
+    const ap = currentProfile.allowed_pages;
+    if (!ap) return true; // null = all pages
+    return ap.includes(pageId);
+}
+
+function canDownload() {
+    if (!currentProfile) return true;
+    if (currentProfile.id === 1) return true;
+    return currentProfile.can_download !== false && currentProfile.can_download !== 0;
+}
+
 function renderProfileAvatar(el, profile) {
     // Renders avatar as image (if avatar_url set) or colored initial fallback
     // Preserves existing classes, ensures 'profile-avatar' is present
@@ -803,10 +831,26 @@ function showProfilePicker(profiles, canCancel = false) {
         grid.appendChild(card);
     });
 
-    // Show manage button only if current profile is admin (not on first load before selection)
+    // Show actions: admin sees "Manage Profiles", non-admin sees "My Profile" (when they have a profile selected)
     const isAdmin = currentProfile ? currentProfile.is_admin : false;
+    const manageBtn = document.getElementById('manage-profiles-btn');
     if (isAdmin) {
         actions.style.display = '';
+        if (manageBtn) {
+            manageBtn.textContent = 'Manage Profiles';
+            // Reset onclick to admin handler (initProfileManagement sets this, but re-affirm here)
+            manageBtn.onclick = () => {
+                document.getElementById('profile-manage-panel').style.display = 'flex';
+                loadProfileManageList();
+            };
+        }
+    } else if (currentProfile && canCancel) {
+        // Non-admin with an active profile: show "My Profile" to edit own settings
+        actions.style.display = '';
+        if (manageBtn) {
+            manageBtn.textContent = 'My Profile';
+            manageBtn.onclick = () => showSelfEditForm();
+        }
     } else {
         actions.style.display = 'none';
     }
@@ -971,12 +1015,28 @@ function updateProfileIndicator() {
         }
     };
 
-    // Hide settings nav for non-admin
-    const settingsBtn = document.querySelector('.nav-button[data-page="settings"]');
-    if (settingsBtn && !currentProfile.is_admin) {
-        settingsBtn.style.display = 'none';
-    } else if (settingsBtn) {
-        settingsBtn.style.display = '';
+    // Filter sidebar pages based on profile permissions
+    document.querySelectorAll('.nav-button[data-page]').forEach(btn => {
+        const page = btn.getAttribute('data-page');
+        if (page === 'hydrabase') return; // Managed by dev mode toggle
+        if (page === 'settings') {
+            // Settings always gated by is_admin
+            btn.style.display = currentProfile.is_admin ? '' : 'none';
+        } else if (page === 'help') {
+            btn.style.display = ''; // Always visible
+        } else if (currentProfile.id === 1) {
+            btn.style.display = ''; // Root admin sees all
+        } else {
+            const ap = currentProfile.allowed_pages;
+            btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';
+        }
+    });
+
+    // Toggle download capability
+    if (canDownload()) {
+        document.body.classList.remove('downloads-disabled');
+    } else {
+        document.body.classList.add('downloads-disabled');
     }
 }
 
@@ -1024,16 +1084,33 @@ function initProfileManagement() {
             const pin = document.getElementById('new-profile-pin').value;
             if (!name) return;
 
+            // Collect profile settings
+            const homePage = document.getElementById('new-profile-home-page').value || null;
+            const pageCheckboxes = document.querySelectorAll('#new-profile-allowed-pages input[type="checkbox"]:not(:disabled)');
+            const allChecked = Array.from(pageCheckboxes).every(cb => cb.checked);
+            const allowedPages = allChecked ? null : Array.from(pageCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
+            const canDl = document.getElementById('new-profile-can-download').checked;
+
             const res = await fetch('/api/profiles', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, avatar_color: selectedColor, avatar_url: avatarUrl || undefined, pin: pin || undefined })
+                body: JSON.stringify({
+                    name, avatar_color: selectedColor,
+                    avatar_url: avatarUrl || undefined,
+                    pin: pin || undefined,
+                    home_page: homePage,
+                    allowed_pages: allowedPages,
+                    can_download: canDl
+                })
             });
             const data = await res.json();
             if (data.success) {
                 document.getElementById('new-profile-name').value = '';
                 document.getElementById('new-profile-avatar-url').value = '';
                 document.getElementById('new-profile-pin').value = '';
+                document.getElementById('new-profile-home-page').value = '';
+                pageCheckboxes.forEach(cb => cb.checked = true);
+                document.getElementById('new-profile-can-download').checked = true;
                 loadProfileManageList();
                 // Show admin PIN section if >1 profiles and admin has no PIN
                 checkAdminPinRequired();
@@ -1096,10 +1173,14 @@ async function loadProfileManageList() {
         nameDiv.className = 'name';
         nameDiv.textContent = p.name + (p.has_pin ? ' 🔒' : '');
         info.appendChild(nameDiv);
-        if (p.is_admin) {
+        const roleTags = [];
+        if (p.is_admin) roleTags.push('Admin');
+        if (p.can_download === false) roleTags.push('No Downloads');
+        if (p.allowed_pages) roleTags.push(`${p.allowed_pages.length} pages`);
+        if (roleTags.length) {
             const roleDiv = document.createElement('div');
             roleDiv.className = 'role';
-            roleDiv.textContent = 'Admin';
+            roleDiv.textContent = roleTags.join(' · ');
             info.appendChild(roleDiv);
         }
         item.appendChild(info);
@@ -1113,6 +1194,10 @@ async function loadProfileManageList() {
         editBtn.dataset.name = p.name;
         editBtn.dataset.color = p.avatar_color || '#6366f1';
         editBtn.dataset.avatarUrl = p.avatar_url || '';
+        editBtn.dataset.homePage = p.home_page || '';
+        editBtn.dataset.allowedPages = p.allowed_pages ? JSON.stringify(p.allowed_pages) : '';
+        editBtn.dataset.canDownload = p.can_download !== false ? '1' : '0';
+        editBtn.dataset.isAdmin = p.is_admin ? '1' : '0';
         editBtn.title = 'Edit profile';
         editBtn.textContent = '✏️';
         actions.appendChild(editBtn);
@@ -1133,7 +1218,12 @@ async function loadProfileManageList() {
     // Bind edit buttons
     list.querySelectorAll('.profile-edit-btn').forEach(btn => {
         btn.onclick = () => {
-            showProfileEditForm(btn.dataset.id, btn.dataset.name, btn.dataset.color, btn.dataset.avatarUrl);
+            showProfileEditForm(btn.dataset.id, btn.dataset.name, btn.dataset.color, btn.dataset.avatarUrl, {
+                home_page: btn.dataset.homePage || '',
+                allowed_pages: btn.dataset.allowedPages ? JSON.parse(btn.dataset.allowedPages) : null,
+                can_download: btn.dataset.canDownload !== '0',
+                is_admin: btn.dataset.isAdmin === '1'
+            });
         };
     });
 
@@ -1157,13 +1247,19 @@ async function loadProfileManageList() {
     checkAdminPinRequired();
 }
 
-function showProfileEditForm(profileId, currentName, currentColor, currentAvatarUrl) {
+function showProfileEditForm(profileId, currentName, currentColor, currentAvatarUrl, profileSettings = {}) {
     const list = document.getElementById('profile-manage-list');
     // Remove any existing edit form
     const existing = document.getElementById('profile-edit-form');
     if (existing) existing.remove();
 
+    const isAdmin = currentProfile && currentProfile.is_admin;
+    const isEditingAdmin = profileSettings.is_admin;
     const editColors = ['#6366f1','#ec4899','#10b981','#f59e0b','#3b82f6','#ef4444','#8b5cf6','#14b8a6'];
+    const pageLabels = {
+        dashboard: 'Dashboard', sync: 'Sync', downloads: 'Search', discover: 'Discover',
+        artists: 'Artists', automations: 'Automations', library: 'Library', import: 'Import'
+    };
 
     const form = document.createElement('div');
     form.id = 'profile-edit-form';
@@ -1201,6 +1297,73 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     });
     form.appendChild(colorRow);
 
+    // Home page selector — visible to everyone (self-edit or admin editing others)
+    const homeLabel = document.createElement('label');
+    homeLabel.className = 'profile-settings-label';
+    homeLabel.textContent = 'Home Page';
+    form.appendChild(homeLabel);
+
+    const homeSelect = document.createElement('select');
+    homeSelect.className = 'profile-input';
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = '';
+    defaultOpt.textContent = isEditingAdmin ? 'Default (Dashboard)' : 'Default (Discover)';
+    homeSelect.appendChild(defaultOpt);
+    // Filter home page options to only allowed pages
+    const allowedSet = profileSettings.allowed_pages;
+    Object.entries(pageLabels).forEach(([id, label]) => {
+        if (allowedSet && !allowedSet.includes(id)) return; // Skip non-permitted
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = label;
+        if (id === profileSettings.home_page) opt.selected = true;
+        homeSelect.appendChild(opt);
+    });
+    form.appendChild(homeSelect);
+
+    // Admin-only settings: allowed pages & can_download
+    let pageCheckboxes = [];
+    let canDlCheckbox = null;
+    if (isAdmin && !isEditingAdmin) {
+        const apLabel = document.createElement('label');
+        apLabel.className = 'profile-settings-label';
+        apLabel.textContent = 'Page Access';
+        form.appendChild(apLabel);
+
+        const apContainer = document.createElement('div');
+        apContainer.className = 'profile-page-checkboxes';
+        Object.entries(pageLabels).forEach(([id, label]) => {
+            const lbl = document.createElement('label');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.value = id;
+            cb.checked = !allowedSet || allowedSet.includes(id);
+            lbl.appendChild(cb);
+            lbl.appendChild(document.createTextNode(' ' + label));
+            apContainer.appendChild(lbl);
+            pageCheckboxes.push(cb);
+        });
+        // Always-on help
+        const helpLbl = document.createElement('label');
+        const helpCb = document.createElement('input');
+        helpCb.type = 'checkbox';
+        helpCb.checked = true;
+        helpCb.disabled = true;
+        helpLbl.appendChild(helpCb);
+        helpLbl.appendChild(document.createTextNode(' Help & Docs'));
+        apContainer.appendChild(helpLbl);
+        form.appendChild(apContainer);
+
+        const dlLabel = document.createElement('label');
+        dlLabel.className = 'profile-checkbox-label';
+        canDlCheckbox = document.createElement('input');
+        canDlCheckbox.type = 'checkbox';
+        canDlCheckbox.checked = profileSettings.can_download !== false;
+        dlLabel.appendChild(canDlCheckbox);
+        dlLabel.appendChild(document.createTextNode(' Can download music'));
+        form.appendChild(dlLabel);
+    }
+
     const btnRow = document.createElement('div');
     btnRow.className = 'profile-edit-buttons';
 
@@ -1211,11 +1374,23 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
         const newName = nameInput.value.trim();
         if (!newName) { alert('Name cannot be empty'); return; }
         const newAvatarUrl = urlInput.value.trim() || null;
+        const payload = { name: newName, avatar_color: editColor, avatar_url: newAvatarUrl };
+
+        // Home page
+        payload.home_page = homeSelect.value || null;
+
+        // Admin-only fields
+        if (isAdmin && !isEditingAdmin && pageCheckboxes.length) {
+            const allChecked = pageCheckboxes.every(cb => cb.checked);
+            payload.allowed_pages = allChecked ? null : pageCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
+            payload.can_download = canDlCheckbox ? canDlCheckbox.checked : true;
+        }
+
         try {
             const res = await fetch(`/api/profiles/${profileId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: newName, avatar_color: editColor, avatar_url: newAvatarUrl })
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (data.success) {
@@ -1224,6 +1399,9 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
                     currentProfile.name = newName;
                     currentProfile.avatar_color = editColor;
                     currentProfile.avatar_url = newAvatarUrl;
+                    if (payload.home_page !== undefined) currentProfile.home_page = payload.home_page;
+                    if (payload.allowed_pages !== undefined) currentProfile.allowed_pages = payload.allowed_pages;
+                    if (payload.can_download !== undefined) currentProfile.can_download = payload.can_download;
                     updateProfileIndicator();
                 }
                 loadProfileManageList();
@@ -1246,6 +1424,117 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     list.appendChild(form);
     nameInput.focus();
     nameInput.select();
+}
+
+function showSelfEditForm() {
+    if (!currentProfile) return;
+    const overlay = document.getElementById('profile-picker-overlay');
+    const container = overlay.querySelector('.profile-picker-container');
+
+    // Hide the picker grid and show self-edit form
+    const grid = document.getElementById('profile-picker-grid');
+    const actions = document.getElementById('profile-picker-actions');
+    grid.style.display = 'none';
+    actions.style.display = 'none';
+
+    // Remove any existing self-edit form
+    const existing = document.getElementById('self-edit-form');
+    if (existing) existing.remove();
+
+    const pageLabels = {
+        dashboard: 'Dashboard', sync: 'Sync', downloads: 'Search', discover: 'Discover',
+        artists: 'Artists', automations: 'Automations', library: 'Library', import: 'Import'
+    };
+
+    const form = document.createElement('div');
+    form.id = 'self-edit-form';
+    form.className = 'profile-edit-form';
+    form.style.marginTop = '16px';
+
+    const title = document.createElement('h3');
+    title.textContent = 'My Profile';
+    title.style.cssText = 'color: #fff; margin: 0 0 12px; font-size: 18px;';
+    form.appendChild(title);
+
+    // Name
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'profile-input';
+    nameInput.value = currentProfile.name;
+    nameInput.maxLength = 20;
+    nameInput.placeholder = 'Profile name';
+    form.appendChild(nameInput);
+
+    // Home page
+    const homeLabel = document.createElement('label');
+    homeLabel.className = 'profile-settings-label';
+    homeLabel.textContent = 'Home Page';
+    form.appendChild(homeLabel);
+
+    const homeSelect = document.createElement('select');
+    homeSelect.className = 'profile-input';
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = '';
+    defaultOpt.textContent = 'Default (Discover)';
+    homeSelect.appendChild(defaultOpt);
+    const ap = currentProfile.allowed_pages;
+    Object.entries(pageLabels).forEach(([id, label]) => {
+        if (ap && !ap.includes(id)) return;
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = label;
+        if (id === currentProfile.home_page) opt.selected = true;
+        homeSelect.appendChild(opt);
+    });
+    form.appendChild(homeSelect);
+
+    // Buttons
+    const btnRow = document.createElement('div');
+    btnRow.className = 'profile-edit-buttons';
+    btnRow.style.marginTop = '12px';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'profile-create-btn';
+    saveBtn.textContent = 'Save';
+    saveBtn.onclick = async () => {
+        const newName = nameInput.value.trim();
+        if (!newName) { alert('Name cannot be empty'); return; }
+        try {
+            const res = await fetch(`/api/profiles/${currentProfile.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: newName, home_page: homeSelect.value || null })
+            });
+            const data = await res.json();
+            if (data.success) {
+                currentProfile.name = newName;
+                currentProfile.home_page = homeSelect.value || null;
+                updateProfileIndicator();
+                closeSelfEdit();
+                hideProfilePicker();
+            } else {
+                alert(data.error || 'Failed to update');
+            }
+        } catch (e) {
+            alert('Connection error');
+        }
+    };
+    btnRow.appendChild(saveBtn);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'profile-picker-cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = () => closeSelfEdit();
+    btnRow.appendChild(cancelBtn);
+
+    form.appendChild(btnRow);
+    container.appendChild(form);
+
+    function closeSelfEdit() {
+        form.remove();
+        grid.style.display = '';
+        actions.style.display = '';
+    }
 }
 
 async function checkAdminPinRequired() {
@@ -1456,6 +1745,15 @@ function initializeDownloadManagerToggle() {
 
 function navigateToPage(pageId) {
     if (pageId === currentPage) return;
+
+    // Permission guard — redirect to home page if not allowed
+    if (!isPageAllowed(pageId)) {
+        const home = getProfileHomePage();
+        if (home !== currentPage && isPageAllowed(home)) {
+            navigateToPage(home);
+        }
+        return;
+    }
 
     // Update navigation buttons (only if there's a nav button for this page)
     document.querySelectorAll('.nav-button').forEach(btn => {
@@ -6724,8 +7022,13 @@ async function loadInitialData() {
         // Load discover download state
         await hydrateDiscoverDownloadsFromSnapshot();
 
-        // Load dashboard data by default
-        await loadDashboardData();
+        // Navigate to user's home page (or dashboard for admin)
+        const homePage = getProfileHomePage();
+        if (homePage !== 'dashboard') {
+            navigateToPage(homePage);
+        } else {
+            await loadDashboardData();
+        }
     } catch (error) {
         console.error('Error loading initial data:', error);
     }
@@ -32465,11 +32768,15 @@ function navigateToArtistDetail(artistId, artistName) {
     artistDetailPageState.enhancedTrackSort = {};
     artistDetailPageState.enhancedView = false;
 
-    // Reset enhanced view toggle to standard
+    // Reset enhanced view toggle to standard (hide for non-admin)
     const toggleBtns = document.querySelectorAll('.enhanced-view-toggle-btn');
+    const isAdminUser = currentProfile && currentProfile.is_admin;
     toggleBtns.forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-view') === 'standard');
     });
+    // Hide the View toggle filter group entirely for non-admin
+    const viewFilterGroup = toggleBtns[0] && toggleBtns[0].closest('.filter-group');
+    if (viewFilterGroup) viewFilterGroup.style.display = isAdminUser ? '' : 'none';
     const enhancedContainer = document.getElementById('enhanced-view-container');
     if (enhancedContainer) enhancedContainer.classList.add('hidden');
     const standardSections = document.querySelector('.discography-sections');
@@ -33593,6 +33900,9 @@ function applyDiscographyFilters() {
 // ==================== Enhanced Library Management View ====================
 
 function toggleEnhancedView(enabled) {
+    // Enhanced view is admin-only (management tool with inline editing)
+    if (enabled && currentProfile && !currentProfile.is_admin) return;
+
     const standardSections = document.querySelector('.discography-sections');
     const enhancedContainer = document.getElementById('enhanced-view-container');
     const toggleBtns = document.querySelectorAll('.enhanced-view-toggle-btn');

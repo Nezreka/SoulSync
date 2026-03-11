@@ -56,6 +56,35 @@
                         <span class="profile-color-swatch" data-color="#14b8a6" style="background:#14b8a6" title="Teal"></span>
                     </div>
                     <input type="password" id="new-profile-pin" class="profile-input" placeholder="PIN (optional)" maxlength="6">
+                    <div class="profile-settings-section">
+                        <label class="profile-settings-label">Home Page</label>
+                        <select id="new-profile-home-page" class="profile-input">
+                            <option value="">Default (Discover)</option>
+                            <option value="dashboard">Dashboard</option>
+                            <option value="sync">Sync</option>
+                            <option value="downloads">Search</option>
+                            <option value="discover">Discover</option>
+                            <option value="artists">Artists</option>
+                            <option value="automations">Automations</option>
+                            <option value="library">Library</option>
+                            <option value="import">Import</option>
+                        </select>
+                        <label class="profile-settings-label">Page Access</label>
+                        <div id="new-profile-allowed-pages" class="profile-page-checkboxes">
+                            <label><input type="checkbox" value="dashboard" checked> Dashboard</label>
+                            <label><input type="checkbox" value="sync" checked> Sync</label>
+                            <label><input type="checkbox" value="downloads" checked> Search</label>
+                            <label><input type="checkbox" value="discover" checked> Discover</label>
+                            <label><input type="checkbox" value="artists" checked> Artists</label>
+                            <label><input type="checkbox" value="automations" checked> Automations</label>
+                            <label><input type="checkbox" value="library" checked> Library</label>
+                            <label><input type="checkbox" value="import" checked> Import</label>
+                            <label><input type="checkbox" value="help" checked disabled> Help & Docs</label>
+                        </div>
+                        <label class="profile-checkbox-label">
+                            <input type="checkbox" id="new-profile-can-download" checked> Can download music
+                        </label>
+                    </div>
                     <button id="create-profile-btn" class="profile-create-btn">Create Profile</button>
                 </div>
                 <div id="admin-pin-section" class="admin-pin-section" style="display: none;">
