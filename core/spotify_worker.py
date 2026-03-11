@@ -97,13 +97,19 @@ class SpotifyWorker:
         is_idle = is_actually_running and not self.paused and self.stats['pending'] == 0 and self.current_item is None
 
         try:
-            # During rate limit, is_spotify_authenticated() returns False to suppress calls,
-            # but we're still authenticated — just banned. Report truthfully.
+            # During rate limit or post-ban cooldown, report as authenticated
+            # but don't call is_spotify_authenticated() — that would trigger an
+            # auth probe which resets the rate limit timer.
             rate_limited = self.client.is_rate_limited()
-            authenticated = rate_limited or self.client.is_spotify_authenticated()
+            in_cooldown = self.client.get_post_ban_cooldown_remaining() > 0
+            if rate_limited or in_cooldown:
+                authenticated = True  # We're authenticated, just banned/cooling down
+            else:
+                authenticated = self.client.is_spotify_authenticated()
         except Exception:
             authenticated = False
             rate_limited = False
+            in_cooldown = False
 
         return {
             'enabled': True,
@@ -133,6 +139,14 @@ class SpotifyWorker:
                     remaining = info['remaining_seconds'] if info else 60
                     logger.debug(f"Spotify globally rate limited, sleeping {remaining}s...")
                     time.sleep(min(remaining, 60))  # Check again every 60s max
+                    continue
+
+                # Post-ban cooldown guard — after ban expires, wait before resuming
+                # to avoid immediately re-triggering the rate limit
+                cooldown = self.client.get_post_ban_cooldown_remaining()
+                if cooldown > 0:
+                    logger.debug(f"Post-ban cooldown active ({cooldown}s left), sleeping...")
+                    time.sleep(min(cooldown, 60))
                     continue
 
                 # Auth guard — don't process anything without Spotify auth

@@ -3529,26 +3529,28 @@ def get_status():
 
         # Test Spotify - with caching to avoid excessive API calls
         if current_time - _status_cache_timestamps['spotify'] > STATUS_CACHE_TTL:
-            spotify_start = time.time()
-            # Auth check first — may detect and set a new rate limit ban via probe
-            spotify_connected = spotify_client.is_spotify_authenticated()
-            spotify_response_time = (time.time() - spotify_start) * 1000
+            # Check is_rate_limited() first — this calls _is_globally_rate_limited() which
+            # records ban-end timestamp if the ban just expired, enabling cooldown detection.
+            is_rate_limited = spotify_client.is_rate_limited()
+            rate_limit_info = spotify_client.get_rate_limit_info() if is_rate_limited else None
+            cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining()
 
-            # Check rate limit AFTER auth (auth probe may have just set the ban)
-            rate_limit_info = spotify_client.get_rate_limit_info()
-
-            # During rate limit, is_spotify_authenticated() returns False to suppress calls,
-            # but we still report source as 'spotify' so UI doesn't flip to "Apple Music"
-            if rate_limit_info:
+            if is_rate_limited or cooldown_remaining > 0:
+                # During rate limit or post-ban cooldown, skip the auth probe entirely.
+                # Probing Spotify here would reset the rate limit timer.
                 music_source = 'spotify'
+                spotify_response_time = 0
             else:
+                spotify_start = time.time()
+                spotify_connected = spotify_client.is_spotify_authenticated()
+                spotify_response_time = (time.time() - spotify_start) * 1000
                 music_source = 'spotify' if spotify_connected else 'itunes'
 
             _status_cache['spotify'] = {
                 'connected': True,  # Always true — iTunes fallback is always available
                 'response_time': round(spotify_response_time, 1),
                 'source': music_source,
-                'rate_limited': rate_limit_info is not None,
+                'rate_limited': is_rate_limited,
                 'rate_limit': rate_limit_info
             }
             _status_cache_timestamps['spotify'] = current_time
@@ -34849,10 +34851,15 @@ def _build_status_payload():
     soulseek_data['source'] = download_mode
 
     # Always include fresh rate limit info (it changes over time as ban expires)
+    # Call is_rate_limited() first to ensure ban-end timestamp is recorded for cooldown
     spotify_data = dict(_status_cache.get('spotify', {}))
-    rate_limit_info = spotify_client.get_rate_limit_info() if spotify_client else None
-    spotify_data['rate_limited'] = rate_limit_info is not None
+    is_rl = spotify_client.is_rate_limited() if spotify_client else False
+    rate_limit_info = spotify_client.get_rate_limit_info() if is_rl else None
+    cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining() if spotify_client else 0
+    spotify_data['rate_limited'] = is_rl
     spotify_data['rate_limit'] = rate_limit_info
+    if cooldown_remaining > 0:
+        spotify_data['post_ban_cooldown'] = cooldown_remaining
 
     return {
         'spotify': spotify_data,
