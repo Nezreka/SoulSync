@@ -149,12 +149,14 @@ class SpotifyWorker:
                     time.sleep(min(cooldown, 60))
                     continue
 
-                # Auth guard — don't process anything without Spotify auth
-                if not self.client.is_spotify_authenticated():
-                    # Try reloading config in case user re-authenticated via settings
+                # Auth guard — check if Spotify client is configured (no API call).
+                # We intentionally avoid calling is_spotify_authenticated() here
+                # because it makes an API probe that can re-trigger rate limits
+                # and lock users in an infinite rate-limit loop.
+                if not self.client.sp:
                     self.client.reload_config()
-                    if not self.client.is_spotify_authenticated():
-                        logger.debug("Spotify not authenticated, sleeping 30s...")
+                    if not self.client.sp:
+                        logger.debug("Spotify not configured, sleeping 30s...")
                         time.sleep(30)
                         continue
 
@@ -343,6 +345,8 @@ class SpotifyWorker:
             elif item_type == 'track_individual':
                 self._process_track_individual(item)
 
+        except SpotifyRateLimitError:
+            raise  # Propagate to main loop so it activates the sleep/ban guard
         except Exception as e:
             logger.error(f"Error processing {item.get('type')} '{item.get('name', '')}': {e}")
             self.stats['errors'] += 1
