@@ -1424,9 +1424,25 @@ body {
             rgba(15, 15, 15, 1) 50%,
             rgba(11, 11, 11, 1) 100%);
     overflow: auto;
+    position: relative;
 }
 
+/* Global page particles canvas — sits behind all page content */
+#page-particles-canvas {
+    position: fixed;
+    top: 0;
+    left: 240px; /* sidebar width */
+    right: 0;
+    bottom: 0;
+    width: calc(100vw - 240px);
+    height: 100vh;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.55;
+}
 .page {
+    position: relative;
+    z-index: 1;
     display: none;
     height: 100%;
     padding: 40px;
@@ -2628,8 +2644,8 @@ body {
     grid-template-columns: 1fr 370px;
     /* Left panel is flexible, right is fixed */
     gap: 24px;
-    height: calc(100vh - 80px);
-    /* Fill page height, accounting for padding */
+    height: 100%;
+    /* Fill parent .page content area */
     padding: 0 40px 40px 40px;
 }
 
@@ -2638,8 +2654,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    overflow: hidden;
-    /* Prevent content from overflowing panels */
+    min-height: 0;
 }
 
 .downloads-side-panel {
@@ -2800,7 +2815,7 @@ body {
 
 /* Search Bar: Replicates create_elegant_search_bar() */
 .search-bar-container {
-    background: linear-gradient(to bottom, rgba(50, 50, 50, 0.8), rgba(40, 40, 40, 0.9));
+    background: linear-gradient(to bottom, rgba(50, 50, 50, 0.55), rgba(40, 40, 40, 0.65));
     border-radius: 12px;
     border: 1px solid rgba(var(--accent-rgb), 0.3);
     padding: 16px 20px;
@@ -2878,15 +2893,15 @@ body {
 
 /* Search Results Area */
 .search-results-container {
-    background: rgba(20, 20, 20, 0.3);
+    background: rgba(20, 20, 20, 0.2);
     border-radius: 12px;
     border: 1px solid rgba(64, 64, 64, 0.2);
     padding: 16px;
     display: flex;
     flex-direction: column;
     flex-grow: 1;
+    min-height: 0;
     /* Take remaining vertical space */
-    overflow: hidden;
 }
 
 .search-results-header h3 {
@@ -3200,7 +3215,7 @@ body {
 
 /* Right Panel: Controls & Download Queue */
 .controls-panel {
-    background: linear-gradient(to bottom, rgba(40, 40, 40, 0.85), rgba(25, 25, 25, 0.95));
+    background: linear-gradient(to bottom, rgba(40, 40, 40, 0.6), rgba(25, 25, 25, 0.7));
     border-radius: 18px;
     border: 1px solid rgba(80, 80, 80, 0.4);
     padding: 14px 8px;
@@ -5041,10 +5056,10 @@ body {
     /* Spacing between sections */
     padding: 28px 24px 30px 24px;
 
-    /* Apple-style liquid glassmorphic foundation */
+    /* Semi-transparent to let page particles show through */
     background: linear-gradient(135deg,
-            rgba(20, 20, 20, 0.85) 0%,
-            rgba(12, 12, 12, 0.92) 100%);
+            rgba(20, 20, 20, 0.55) 0%,
+            rgba(12, 12, 12, 0.62) 100%);
     border-radius: 24px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
@@ -6305,7 +6320,7 @@ body {
 
 .sync-main-panel,
 .sync-sidebar {
-    background: linear-gradient(135deg, rgba(26, 26, 26, 0.95), rgba(18, 18, 18, 0.98));
+    background: linear-gradient(135deg, rgba(26, 26, 26, 0.65), rgba(18, 18, 18, 0.72));
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     padding: 20px;
@@ -24432,7 +24447,7 @@ body {
     display: flex;
     flex-direction: column;
     flex-grow: 1;
-    overflow: hidden;
+    min-height: 0;
 }
 
 /* ========================================= */
@@ -24701,7 +24716,7 @@ body {
     border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
     max-height: min(70vh, 800px);
-    overflow: hidden;
+    overflow-y: auto;
     z-index: 1000;
     backdrop-filter: blur(40px);
     animation: slideDown 0.15s ease-out;
@@ -24958,7 +24973,6 @@ body {
         0 8px 24px rgba(0, 0, 0, 0.4),
         inset 0 1px 0 rgba(255, 255, 255, 0.05);
     position: relative;
-    overflow: hidden;
 }
 
 .enh-dropdown-section::before {
@@ -32027,7 +32041,7 @@ textarea.enhanced-meta-field-input {
 .enhanced-tracks-panel-inner::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb), 0.5); }
 
 /* Loading state for enhanced view */
-.enhanced-loading {
+.enhanced-view-container .enhanced-loading {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -32036,7 +32050,7 @@ textarea.enhanced-meta-field-input {
     color: rgba(255,255,255,0.5);
     font-size: 14px;
 }
-.enhanced-loading::before {
+.enhanced-view-container .enhanced-loading::before {
     content: '';
     width: 20px;
     height: 20px;

@@ -1497,6 +1497,9 @@ function navigateToPage(pageId) {
 
     // Load page-specific data
     loadPageData(pageId);
+
+    // Update page background particles
+    if (window.pageParticles) window.pageParticles.setPage(pageId);
 }
 
 // REPLACE your old loadPageData function with this one:
