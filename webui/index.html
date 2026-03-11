@@ -240,6 +240,9 @@
 
         <!-- Main Content Area -->
         <div class="main-content">
+            <!-- Global particle canvas for page background animations -->
+            <canvas id="page-particles-canvas"></canvas>
+
             <!-- Dashboard Page -->
             <div class="page active" id="dashboard-page">
                 <div class="dashboard-container">
@@ -5090,6 +5093,7 @@
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
     <script src="{{ url_for('static', filename='docs.js') }}"></script>
+    <script src="{{ url_for('static', filename='particles.js') }}"></script>
 </body>
 
 </html>
