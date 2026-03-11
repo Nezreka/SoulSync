@@ -22190,28 +22190,11 @@ def get_tidal_playlist_tracks(playlist_id):
         return jsonify({"error": "Tidal not authenticated."}), 401
     try:
         print(f"🎵 Getting full Tidal playlist with tracks for: {playlist_id}")
-        
-        # First check if this playlist exists in metadata list
-        try:
-            metadata_playlists = tidal_client.get_user_playlists_metadata_only()
-            target_playlist = None
-            for p in metadata_playlists:
-                if p.id == playlist_id:
-                    target_playlist = p
-                    break
-            
-            if not target_playlist:
-                print(f"❌ Playlist {playlist_id} not found in user's Tidal playlists")
-                return jsonify({"error": "Playlist not found in your Tidal library"}), 404
-                
-            print(f"🎵 Found playlist in metadata: {target_playlist.name}")
-        except Exception as e:
-            print(f"❌ Error checking playlist metadata: {e}")
-        
-        # Use same method as sync.py: tidal_client.get_playlist(playlist_id)
+
+        # Fetch this single playlist directly — no need to re-fetch all playlists
         full_playlist = tidal_client.get_playlist(playlist_id)
         if not full_playlist:
-            return jsonify({"error": "Unable to access this Tidal playlist. This may be due to privacy settings or Tidal API restrictions. Please try a different playlist."}), 403
+            return jsonify({"error": "Playlist not found or unable to access. This may be due to privacy settings or Tidal API restrictions."}), 404
             
         if not full_playlist.tracks:
             return jsonify({"error": "This playlist appears to have no tracks or they cannot be accessed"}), 403
@@ -22257,21 +22240,16 @@ tidal_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix=
 def start_tidal_discovery(playlist_id):
     """Start Spotify discovery process for a Tidal playlist"""
     try:
-        # Get playlist data from the initial load
+        # Get playlist data from Tidal
         if not tidal_client or not tidal_client.is_authenticated():
             return jsonify({"error": "Tidal not authenticated."}), 401
-            
-        # Get playlist from tidal client
-        playlists = tidal_client.get_user_playlists_metadata_only()
-        target_playlist = None
-        for p in playlists:
-            if p.id == playlist_id:
-                target_playlist = p
-                break
-                
+
+        # Fetch this single playlist directly — no need to re-fetch all playlists
+        target_playlist = tidal_client.get_playlist(playlist_id)
+
         if not target_playlist:
             return jsonify({"error": "Tidal playlist not found"}), 404
-            
+
         if not target_playlist.tracks:
             return jsonify({"error": "Playlist has no tracks"}), 400
         

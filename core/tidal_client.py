@@ -795,6 +795,9 @@ class TidalClient:
                         # Continue pagination — we lose this batch but can still get remaining
                         batch_tracks = []
 
+                    if len(batch_tracks) < len(track_ids):
+                        logger.warning(f"Page {page_num}: requested {len(track_ids)} tracks but only {len(batch_tracks)} returned (some may be unavailable in your region)")
+
                     tracks.extend(batch_tracks)
                     total_fetched += len(batch_tracks)
                     logger.info(f"Fetched {len(batch_tracks)} tracks in this batch, {total_fetched} total so far")
