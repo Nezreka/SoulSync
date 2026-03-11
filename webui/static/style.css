@@ -5589,7 +5589,7 @@ body {
 .service-card-button {
     width: 100%;
     padding: 10px 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
     border-radius: 12px;
     font-size: 13px;
     font-weight: 600;
@@ -5599,16 +5599,17 @@ body {
     outline: none;
     user-select: none;
 
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.7);
+    background: rgba(var(--accent-rgb), 0.06);
+    color: rgb(var(--accent-light-rgb));
+    letter-spacing: 0.3px;
 }
 
 .service-card-button:hover {
-    background: rgba(var(--accent-rgb), 0.12);
-    border-color: rgba(var(--accent-rgb), 0.25);
-    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.15);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: rgb(var(--accent-neon-rgb));
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 15px rgba(var(--accent-rgb), 0.2), 0 0 8px rgba(var(--accent-rgb), 0.1);
 }
 
 
@@ -5820,7 +5821,7 @@ body {
 
 .tool-card-controls button {
     padding: 10px 20px;
-    border: none;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
     font-size: 14px;
     font-weight: 600;
@@ -5856,16 +5857,16 @@ body {
     align-items: center;
     justify-content: center;
     gap: 10px;
-    background: linear-gradient(135deg, #667eea, #764ba2) !important;
-    padding: 14px 24px !important;
-    font-size: 15px !important;
-    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
+    padding: 14px 24px;
+    font-size: 15px;
+    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.3);
     width: 100%;
 }
 
 .media-scan-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, #7c8ff0, #8a5ab8) !important;
-    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    background: linear-gradient(135deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-neon-rgb)));
+    box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.4);
     transform: translateY(-2px);
 }
 
@@ -6069,15 +6070,18 @@ body {
     display: flex;
     align-items: center;
     gap: 15px;
-    padding: 10px 15px;
+    padding: 10px 15px 10px 12px;
+    border-left: 3px solid rgba(var(--accent-rgb), 0.2);
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
     border-radius: 10px;
     transition: all 0.2s ease;
+    animation: activitySlideIn 0.3s ease-out;
 }
 
 .activity-item:hover {
     background: rgba(var(--accent-rgb), 0.04);
     border-bottom-color: transparent;
+    border-left-color: rgba(var(--accent-rgb), 0.5);
 }
 
 .activity-item:last-child {
@@ -6189,6 +6193,18 @@ body {
 
 .activity-feed-container::-webkit-scrollbar-thumb:hover {
     background: rgba(var(--accent-rgb), 0.5);
+}
+
+/* Activity item entrance animation */
+@keyframes activitySlideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
 }
 
 /* Enhanced Progress Bar Animation */
