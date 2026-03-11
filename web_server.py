@@ -259,38 +259,81 @@ def _make_context_key(username, filename):
     return f"{username}::{normalized}"
 
 # --- Initialize Core Application Components ---
+# Each client is initialized independently so one failure doesn't take down everything.
+# Previously, a single exception set ALL clients to None, breaking the entire app.
 print("🚀 Initializing SoulSync services for Web UI...")
+spotify_client = plex_client = jellyfin_client = navidrome_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
+
 try:
     spotify_client = SpotifyClient()
+    print("  ✅ Spotify client initialized")
+except Exception as e:
+    print(f"  ⚠️ Spotify client failed to initialize: {e}")
+
+try:
     plex_client = PlexClient()
+    print("  ✅ Plex client initialized")
+except Exception as e:
+    print(f"  ⚠️ Plex client failed to initialize: {e}")
+
+try:
     jellyfin_client = JellyfinClient()
+    print("  ✅ Jellyfin client initialized")
+except Exception as e:
+    print(f"  ⚠️ Jellyfin client failed to initialize: {e}")
+
+try:
     navidrome_client = NavidromeClient()
-    # Use DownloadOrchestrator instead of SoulseekClient directly (routes between Soulseek/YouTube)
+    print("  ✅ Navidrome client initialized")
+except Exception as e:
+    print(f"  ⚠️ Navidrome client failed to initialize: {e}")
+
+try:
     soulseek_client = DownloadOrchestrator()
+    print("  ✅ Download orchestrator initialized")
+except Exception as e:
+    print(f"  ⚠️ Download orchestrator failed to initialize: {e}")
+
+try:
     tidal_client = TidalClient()
+    print("  ✅ Tidal client initialized")
+except Exception as e:
+    print(f"  ⚠️ Tidal client failed to initialize: {e}")
+
+try:
     matching_engine = MusicMatchingEngine()
+    print("  ✅ Matching engine initialized")
+except Exception as e:
+    print(f"  ⚠️ Matching engine failed to initialize: {e}")
+
+try:
     sync_service = PlaylistSyncService(spotify_client, plex_client, soulseek_client, jellyfin_client, navidrome_client)
-    
-    # Inject shutdown check callback into YouTube and Tidal clients (avoids circular imports)
-    # The callback uses the global IS_SHUTTING_DOWN flag from this module
+    print("  ✅ Playlist sync service initialized")
+except Exception as e:
+    print(f"  ⚠️ Playlist sync service failed to initialize: {e}")
+
+# Inject shutdown check callback into YouTube and Tidal clients (avoids circular imports)
+if soulseek_client:
     if hasattr(soulseek_client, 'youtube'):
          soulseek_client.youtube.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         print("✅ Configured YouTube client shutdown callback")
+         print("  ✅ Configured YouTube client shutdown callback")
     if hasattr(soulseek_client, 'tidal'):
          soulseek_client.tidal.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         print("✅ Configured Tidal download client shutdown callback")
+         print("  ✅ Configured Tidal download client shutdown callback")
 
-    # Initialize web scan manager for automatic post-download scanning
+# Initialize web scan manager for automatic post-download scanning
+try:
     media_clients = {
         'plex_client': plex_client,
         'jellyfin_client': jellyfin_client,
         'navidrome_client': navidrome_client
     }
     web_scan_manager = WebScanManager(media_clients, delay_seconds=60)
-    print("✅ Core service clients and scan manager initialized.")
+    print("  ✅ Web scan manager initialized")
 except Exception as e:
-    print(f"🔴 FATAL: Error initializing service clients: {e}")
-    spotify_client = plex_client = jellyfin_client = navidrome_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
+    print(f"  ⚠️ Web scan manager failed to initialize: {e}")
+
+print("✅ Core service initialization complete.")
 
 # --- Automation Engine ---
 try:
@@ -3519,8 +3562,8 @@ STATUS_CACHE_TTL = 120  # Cache for 2 minutes (reduces API calls while staying f
 
 @app.route('/status')
 def get_status():
-    if not all([spotify_client, plex_client, jellyfin_client, soulseek_client, config_manager]):
-        return jsonify({"error": "Core services not initialized."}), 500
+    if not config_manager:
+        return jsonify({"error": "Server configuration manager is not initialized."}), 500
     try:
         import time
 
@@ -3529,11 +3572,10 @@ def get_status():
 
         # Test Spotify - with caching to avoid excessive API calls
         if current_time - _status_cache_timestamps['spotify'] > STATUS_CACHE_TTL:
-            # Check is_rate_limited() first — this calls _is_globally_rate_limited() which
-            # records ban-end timestamp if the ban just expired, enabling cooldown detection.
-            is_rate_limited = spotify_client.is_rate_limited()
-            rate_limit_info = spotify_client.get_rate_limit_info() if is_rate_limited else None
-            cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining()
+            # Guard against spotify_client being None (partial init)
+            is_rate_limited = spotify_client.is_rate_limited() if spotify_client else False
+            rate_limit_info = spotify_client.get_rate_limit_info() if (spotify_client and is_rate_limited) else None
+            cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining() if spotify_client else 0
 
             if is_rate_limited or cooldown_remaining > 0:
                 # During rate limit or post-ban cooldown, skip the auth probe entirely.
@@ -3542,7 +3584,7 @@ def get_status():
                 spotify_response_time = 0
             else:
                 spotify_start = time.time()
-                spotify_connected = spotify_client.is_spotify_authenticated()
+                spotify_connected = spotify_client.is_spotify_authenticated() if spotify_client else False
                 spotify_response_time = (time.time() - spotify_start) * 1000
                 music_source = 'spotify' if spotify_connected else 'itunes'
 
@@ -3561,13 +3603,13 @@ def get_status():
         if current_time - _status_cache_timestamps['media_server'] > STATUS_CACHE_TTL:
             media_server_start = time.time()
             media_server_status = False
-            if active_server == "plex":
+            if active_server == "plex" and plex_client:
                 # Use existing instance - has 30s internal connection cache
                 media_server_status = plex_client.is_connected()
-            elif active_server == "jellyfin":
+            elif active_server == "jellyfin" and jellyfin_client:
                 # Use existing instance - has internal connection caching
                 media_server_status = jellyfin_client.is_connected()
-            elif active_server == "navidrome":
+            elif active_server == "navidrome" and navidrome_client:
                 # Use existing instance
                 media_server_status = navidrome_client.is_connected()
             media_server_response_time = (time.time() - media_server_start) * 1000
@@ -3583,7 +3625,7 @@ def get_status():
         if current_time - _status_cache_timestamps['soulseek'] > STATUS_CACHE_TTL:
             soulseek_start = time.time()
             try:
-                soulseek_status = run_async(soulseek_client.check_connection())
+                soulseek_status = run_async(soulseek_client.check_connection()) if soulseek_client else False
             except Exception:
                 soulseek_status = False
             soulseek_response_time = (time.time() - soulseek_start) * 1000
@@ -3966,17 +4008,26 @@ def handle_settings():
             
             add_activity_item("⚙️", "Settings Updated", f"{services_text} configuration saved", "Now")
             
-            spotify_client.reload_config()
-            plex_client.server = None
-            jellyfin_client.reload_config()
-            navidrome_client.reload_config()
+            # Reload service clients with new settings (guard against None from partial init)
+            if spotify_client:
+                spotify_client.reload_config()
+            if plex_client:
+                plex_client.server = None
+            if jellyfin_client:
+                jellyfin_client.reload_config()
+            if navidrome_client:
+                navidrome_client.reload_config()
             # Reload orchestrator settings (download source mode, hybrid_primary, etc.)
-            soulseek_client.reload_settings()
-            # Reload YouTube client settings (rate limiting, cookies)
-            if hasattr(soulseek_client, 'youtube'):
-                soulseek_client.youtube.reload_settings()
+            if soulseek_client:
+                soulseek_client.reload_settings()
+                # Reload YouTube client settings (rate limiting, cookies)
+                if hasattr(soulseek_client, 'youtube'):
+                    soulseek_client.youtube.reload_settings()
             # FIX: Re-instantiate the global tidal_client to pick up new settings
-            tidal_client = TidalClient()
+            try:
+                tidal_client = TidalClient()
+            except Exception:
+                pass  # Keep existing tidal_client if re-init fails
             # Reload enrichment worker clients for key-based services
             if lastfm_worker:
                 lastfm_worker._init_client()
@@ -4789,7 +4840,7 @@ def test_connection_endpoint():
         current_time = time.time()
         if service == 'spotify':
             _status_cache['spotify']['connected'] = True
-            _status_cache['spotify']['source'] = 'spotify' if spotify_client.is_spotify_authenticated() else 'itunes'
+            _status_cache['spotify']['source'] = 'spotify' if (spotify_client and spotify_client.is_spotify_authenticated()) else 'itunes'
             _status_cache_timestamps['spotify'] = current_time
             print("✅ Updated Spotify status cache after successful test")
         elif service in ['plex', 'jellyfin', 'navidrome']:
@@ -4839,7 +4890,7 @@ def test_dashboard_connection_endpoint():
         current_time = time.time()
         if service == 'spotify':
             _status_cache['spotify']['connected'] = True
-            _status_cache['spotify']['source'] = 'spotify' if spotify_client.is_spotify_authenticated() else 'itunes'
+            _status_cache['spotify']['source'] = 'spotify' if (spotify_client and spotify_client.is_spotify_authenticated()) else 'itunes'
             _status_cache_timestamps['spotify'] = current_time
             print("✅ Updated Spotify status cache after successful dashboard test")
         elif service in ['plex', 'jellyfin', 'navidrome']:
