@@ -340,6 +340,7 @@ class MusicDatabase:
             self._add_profile_support_v2(cursor)
             self._add_profile_support_v3(cursor)
             self._add_profile_support_v4(cursor)
+            self._add_profile_settings(cursor)
 
             # Mirrored playlists — persistent backup of parsed playlists from any service
             cursor.execute("""
@@ -2101,6 +2102,34 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error in profile support v4 migration: {e}")
 
+    def _add_profile_settings(self, cursor):
+        """Add home_page, allowed_pages, can_download columns to profiles table"""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_migration_settings' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+
+            logger.info("Applying profile settings migration...")
+
+            for col_sql in [
+                "ALTER TABLE profiles ADD COLUMN home_page TEXT DEFAULT NULL",
+                "ALTER TABLE profiles ADD COLUMN allowed_pages TEXT DEFAULT NULL",
+                "ALTER TABLE profiles ADD COLUMN can_download INTEGER DEFAULT 1",
+            ]:
+                try:
+                    cursor.execute(col_sql)
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value) VALUES ('profiles_migration_settings', '1')
+            """)
+
+            logger.info("Profile settings migration completed successfully")
+
+        except Exception as e:
+            logger.error(f"Error in profile settings migration: {e}")
+
     # ── Profile CRUD ──────────────────────────────────────────────────
 
     def get_all_profiles(self) -> List[Dict[str, Any]]:
@@ -2114,16 +2143,23 @@ class MusicDatabase:
                 cursor.execute("SELECT * FROM profiles ORDER BY id")
                 rows = cursor.fetchall()
                 columns = [desc[0] for desc in cursor.description]
-                return [{
-                    'id': row['id'],
-                    'name': row['name'],
-                    'avatar_color': row['avatar_color'],
-                    'avatar_url': row['avatar_url'] if 'avatar_url' in columns else None,
-                    'is_admin': bool(row['is_admin']),
-                    'has_pin': row['pin_hash'] is not None,
-                    'created_at': row['created_at'],
-                    'updated_at': row['updated_at'],
-                } for row in rows]
+                results = []
+                for row in rows:
+                    ap_raw = row['allowed_pages'] if 'allowed_pages' in columns else None
+                    results.append({
+                        'id': row['id'],
+                        'name': row['name'],
+                        'avatar_color': row['avatar_color'],
+                        'avatar_url': row['avatar_url'] if 'avatar_url' in columns else None,
+                        'is_admin': bool(row['is_admin']),
+                        'has_pin': row['pin_hash'] is not None,
+                        'home_page': row['home_page'] if 'home_page' in columns else None,
+                        'allowed_pages': json.loads(ap_raw) if ap_raw else None,
+                        'can_download': bool(row['can_download']) if 'can_download' in columns else True,
+                        'created_at': row['created_at'],
+                        'updated_at': row['updated_at'],
+                    })
+                return results
         except Exception as e:
             logger.error(f"Error getting profiles: {e}")
             return [{'id': 1, 'name': 'Admin', 'avatar_color': '#6366f1', 'avatar_url': None, 'is_admin': True, 'has_pin': False}]
@@ -2137,6 +2173,7 @@ class MusicDatabase:
                 row = cursor.fetchone()
                 if row:
                     columns = [desc[0] for desc in cursor.description]
+                    ap_raw = row['allowed_pages'] if 'allowed_pages' in columns else None
                     return {
                         'id': row['id'],
                         'name': row['name'],
@@ -2144,6 +2181,9 @@ class MusicDatabase:
                         'avatar_url': row['avatar_url'] if 'avatar_url' in columns else None,
                         'is_admin': bool(row['is_admin']),
                         'has_pin': row['pin_hash'] is not None,
+                        'home_page': row['home_page'] if 'home_page' in columns else None,
+                        'allowed_pages': json.loads(ap_raw) if ap_raw else None,
+                        'can_download': bool(row['can_download']) if 'can_download' in columns else True,
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
                     }
@@ -2154,15 +2194,17 @@ class MusicDatabase:
 
     def create_profile(self, name: str, avatar_color: str = '#6366f1',
                        pin_hash: Optional[str] = None, is_admin: bool = False,
-                       avatar_url: Optional[str] = None) -> Optional[int]:
+                       avatar_url: Optional[str] = None, home_page: Optional[str] = None,
+                       allowed_pages: Optional[list] = None, can_download: bool = True) -> Optional[int]:
         """Create a new profile. Returns new profile ID or None on error."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                ap_json = json.dumps(allowed_pages) if allowed_pages is not None else None
                 cursor.execute("""
-                    INSERT INTO profiles (name, avatar_color, pin_hash, is_admin, avatar_url)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (name, avatar_color, pin_hash, int(is_admin), avatar_url))
+                    INSERT INTO profiles (name, avatar_color, pin_hash, is_admin, avatar_url, home_page, allowed_pages, can_download)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, avatar_color, pin_hash, int(is_admin), avatar_url, home_page, ap_json, int(can_download)))
                 conn.commit()
                 return cursor.lastrowid
         except sqlite3.IntegrityError:
@@ -2173,9 +2215,13 @@ class MusicDatabase:
             return None
 
     def update_profile(self, profile_id: int, **kwargs) -> bool:
-        """Update profile fields. Accepts: name, avatar_color, avatar_url, pin_hash, is_admin."""
-        allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin'}
+        """Update profile fields. Accepts: name, avatar_color, avatar_url, pin_hash, is_admin, home_page, allowed_pages, can_download."""
+        allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin', 'home_page', 'allowed_pages', 'can_download'}
         updates = {k: v for k, v in kwargs.items() if k in allowed}
+        # Serialize allowed_pages list to JSON string for storage
+        if 'allowed_pages' in updates:
+            v = updates['allowed_pages']
+            updates['allowed_pages'] = json.dumps(v) if v is not None else None
         if not updates:
             return False
         try:

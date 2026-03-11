@@ -30238,6 +30238,11 @@ body {
     outline: none;
 }
 
+.profile-pin-input::placeholder {
+    font-size: 13px;
+    letter-spacing: normal;
+}
+
 .profile-pin-input:focus {
     border-color: #6366f1;
 }
@@ -30417,6 +30422,7 @@ body {
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 8px;
+    font-size: 13px;
     color: #e5e7eb;
     font-size: 14px;
     margin-bottom: 10px;
@@ -30426,6 +30432,10 @@ body {
 
 .profile-input:focus {
     border-color: #6366f1;
+}
+
+.profile-input::placeholder {
+    font-size: 12px;
 }
 
 .profile-color-picker {
@@ -30479,6 +30489,76 @@ body {
     color: #9ca3af;
     font-size: 12px;
     margin: 0 0 10px;
+}
+
+/* Profile Settings in Management Panel */
+.profile-settings-section {
+    margin: 12px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.profile-settings-label {
+    color: #d1d5db;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}
+
+.profile-page-checkboxes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 12px;
+}
+
+.profile-page-checkboxes label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #d1d5db;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 3px 0;
+}
+
+.profile-page-checkboxes label input[type="checkbox"] {
+    accent-color: rgba(var(--accent-rgb), 1);
+    cursor: pointer;
+}
+
+.profile-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #d1d5db;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 4px 0;
+}
+
+.profile-checkbox-label input[type="checkbox"] {
+    accent-color: rgba(var(--accent-rgb), 1);
+    cursor: pointer;
+}
+
+/* Download-disabled state — hide download buttons globally */
+body.downloads-disabled .download-result-btn,
+body.downloads-disabled .download-btn,
+body.downloads-disabled .download-button,
+body.downloads-disabled .album-download-btn,
+body.downloads-disabled .download-missing-btn,
+body.downloads-disabled .enh-download-btn,
+body.downloads-disabled .enh-download-all-btn,
+body.downloads-disabled [onclick*="downloadTrack"],
+body.downloads-disabled [onclick*="downloadAlbum"],
+body.downloads-disabled [onclick*="startDownload"],
+body.downloads-disabled [onclick*="startMissingTracksProcess"],
+body.downloads-disabled [onclick*="startWishlistMissingTracksProcess"],
+body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
+    display: none !important;
 }
 
 /* Profile Indicator in Sidebar */

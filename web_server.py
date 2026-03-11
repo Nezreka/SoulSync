@@ -197,6 +197,22 @@ def get_current_profile_id() -> int:
     except AttributeError:
         return 1
 
+# Valid page IDs for profile permission validation
+VALID_PAGE_IDS = {'dashboard', 'sync', 'downloads', 'discover', 'artists', 'automations', 'library', 'import', 'settings', 'help'}
+
+def check_download_permission():
+    """Check if current profile has download permission. Returns error response or None if allowed."""
+    pid = get_current_profile_id()
+    if pid == 1:
+        return None  # Root admin always allowed
+    try:
+        profile = get_database().get_profile(pid)
+        if profile and not profile.get('can_download', True):
+            return jsonify({'success': False, 'error': 'Downloads are disabled for this profile.'}), 403
+    except Exception:
+        pass  # DB error — don't block
+    return None
+
 # --- Docker Helper Functions ---
 def docker_resolve_path(path_str):
     """
@@ -6465,6 +6481,9 @@ def stream_enhanced_search_track():
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Simple download route"""
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
     data = request.get_json()
     if not data:
         return jsonify({"error": "No download data provided."}), 400
@@ -7096,6 +7115,9 @@ def get_task_candidates(task_id):
 @app.route('/api/downloads/task/<task_id>/download-candidate', methods=['POST'])
 def download_selected_candidate(task_id):
     """Restart a not_found/failed task by downloading a user-selected candidate."""
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
     try:
         data = request.get_json()
         if not data or not data.get('username') or not data.get('filename'):
@@ -10806,6 +10828,9 @@ def start_matched_download():
     2. Regular album downloads (fallback)
     3. Single track downloads
     """
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
     try:
         data = request.get_json()
         download_payload = data.get('search_result', {})
@@ -14982,6 +15007,10 @@ def get_version_info():
                 "title": "🔧 Recent Updates",
                 "description": "Latest fixes and improvements",
                 "features": [
+                    "• Profile Permissions — admin can control which pages each user can access and disable download functionality per profile",
+                    "• Per-user home page — every user can choose their own landing page; non-admin defaults to Discover",
+                    "• Enhanced Library Manager restricted to admin profiles only (management tool with inline editing)",
+                    "• Download buttons hidden globally for profiles with downloads disabled, enforced on both frontend and backend",
                     "• Genius search fix — no longer blindly matches wrong artists (e.g. '50 Cent' → '108'); all bad matches auto-reset on first launch",
                     "• Library page fix — albums no longer merge across different artists with the same album title/year",
                     "• Post-processing race condition fix — no more MutagenError on files already moved by another thread",
@@ -15134,13 +15163,18 @@ def get_version_info():
             },
             {
                 "title": "👥 Multi-Profile Support",
-                "description": "Netflix-style profile picker for shared households",
+                "description": "Netflix-style profile picker for shared households with per-profile permissions",
                 "features": [
                     "• Multiple profiles sharing one SoulSync instance with isolated personal data",
                     "• Each profile gets its own watchlist, wishlist, discovery pool, and similar artists",
                     "• Optional PIN protection per profile with admin-only management",
                     "• Profile avatar images via URL with colored-initial fallback",
                     "• Shared music library and service credentials across all profiles",
+                    "• Admin-controlled page access — choose which sidebar pages each profile can see",
+                    "• Per-profile download toggle — disable downloading for specific users (frontend + backend enforced)",
+                    "• Customizable home page — each user picks their own landing page from their permitted pages",
+                    "• Non-admin users default to Discover page instead of Dashboard",
+                    "• Self-service profile editing — non-admin users can change their name and home page",
                     "• Zero-downtime migration — existing data maps to auto-created admin profile",
                     "• Single-user installs see no changes until a second profile is created"
                 ]
@@ -16271,6 +16305,9 @@ def start_wishlist_missing_downloads():
     This endpoint fetches wishlist tracks and manages them with batch processing
     identical to playlist processing, maintaining exactly 3 concurrent downloads.
     """
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
     try:
         # Check if auto-processing is currently running (prevent concurrent wishlist access)
         if is_wishlist_actually_processing():
@@ -20092,6 +20129,9 @@ def start_playlist_missing_downloads(playlist_id):
     This endpoint receives the list of missing tracks and manages them with batch processing
     like the GUI, maintaining exactly 3 concurrent downloads.
     """
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
     data = request.get_json()
     missing_tracks = data.get('missing_tracks', [])
     if not missing_tracks:
@@ -21334,9 +21374,12 @@ def start_missing_tracks_process(playlist_id):
 @app.route('/api/tracks/download_missing', methods=['POST'])
 def start_missing_downloads():
     """Legacy endpoint - redirect to new playlist-based endpoint"""
+    dl_err = check_download_permission()
+    if dl_err:
+        return dl_err
     data = request.get_json()
     missing_tracks = data.get('missing_tracks', [])
-    
+
     if not missing_tracks:
         return jsonify({"success": False, "error": "No missing tracks provided"}), 400
     
@@ -25555,7 +25598,27 @@ def create_profile():
             from werkzeug.security import generate_password_hash
             pin_hash = generate_password_hash(pin, method='pbkdf2:sha256')
 
-        profile_id = database.create_profile(name, avatar_color, pin_hash, is_admin=False, avatar_url=avatar_url)
+        # Profile settings: home_page, allowed_pages, can_download
+        home_page = data.get('home_page') or None
+        allowed_pages = data.get('allowed_pages')  # list or None
+        can_download = data.get('can_download', True)
+
+        # Validate page IDs
+        if home_page and home_page not in VALID_PAGE_IDS:
+            home_page = None
+        if allowed_pages is not None:
+            allowed_pages = [p for p in allowed_pages if p in VALID_PAGE_IDS]
+            # Non-admin should never have 'settings' in allowed_pages
+            if 'settings' in allowed_pages:
+                allowed_pages.remove('settings')
+            # If home_page not in allowed list, reset to first allowed or 'discover'
+            if home_page and home_page not in allowed_pages:
+                home_page = allowed_pages[0] if allowed_pages else None
+
+        profile_id = database.create_profile(
+            name, avatar_color, pin_hash, is_admin=False, avatar_url=avatar_url,
+            home_page=home_page, allowed_pages=allowed_pages, can_download=bool(can_download)
+        )
         if profile_id is None:
             return jsonify({'success': False, 'error': 'Profile name already exists'}), 409
 
@@ -25597,6 +25660,37 @@ def update_profile(profile_id):
                 if target and target['is_admin'] and admin_count <= 1:
                     return jsonify({'success': False, 'error': 'Cannot remove the last admin'}), 400
             kwargs['is_admin'] = int(data['is_admin'])
+
+        # Home page — any user can change their own, admin can change anyone's
+        if 'home_page' in data:
+            hp = data['home_page'] or None
+            if hp and hp not in VALID_PAGE_IDS:
+                hp = None
+            # Non-admin self-edit: validate home_page is in their allowed pages
+            if not current['is_admin'] and current_pid == profile_id:
+                target = database.get_profile(profile_id)
+                ap = target.get('allowed_pages') if target else None
+                if ap is not None and hp and hp not in ap:
+                    return jsonify({'success': False, 'error': 'Page not permitted'}), 400
+            kwargs['home_page'] = hp
+
+        # Allowed pages & can_download — admin only
+        if current['is_admin']:
+            if 'allowed_pages' in data:
+                ap = data['allowed_pages']
+                if ap is not None:
+                    ap = [p for p in ap if p in VALID_PAGE_IDS]
+                    # Non-admin target should never have 'settings'
+                    target = database.get_profile(profile_id)
+                    if target and not target.get('is_admin'):
+                        ap = [p for p in ap if p != 'settings']
+                    # If current home_page not in new allowed list, reset it
+                    current_hp = kwargs.get('home_page') or (target.get('home_page') if target else None)
+                    if current_hp and current_hp not in ap:
+                        kwargs['home_page'] = ap[0] if ap else None
+                kwargs['allowed_pages'] = ap
+            if 'can_download' in data:
+                kwargs['can_download'] = int(bool(data['can_download']))
 
         success = database.update_profile(profile_id, **kwargs)
         return jsonify({'success': success})
