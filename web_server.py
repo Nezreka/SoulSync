@@ -3846,11 +3846,12 @@ def add_activity_item(icon: str, title: str, subtitle: str, time_ago: str = "Now
     """Add activity item to the feed (replicates dashboard.py functionality)"""
     try:
         import time
+        from datetime import datetime, timezone
         activity_item = {
             'icon': icon,
             'title': title,
             'subtitle': subtitle,
-            'time': time_ago,
+            'time': datetime.now(timezone.utc).isoformat(),
             'timestamp': time.time(),
             'show_toast': show_toast
         }
