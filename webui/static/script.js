@@ -29835,21 +29835,16 @@ async function fetchAndUpdateActivityFeed() {
     }
 }
 
+// Cache last feed signature to avoid unnecessary DOM rebuilds (prevents blink)
+let _lastActivityFeedSig = '';
+
 function updateActivityFeed(activities) {
     const feedContainer = document.getElementById('dashboard-activity-feed');
-    if (!feedContainer) {
-        console.warn('Activity feed container not found!');
-        return;
-    }
-
-    console.log('Updating activity feed with', activities.length, 'activities:', activities);
-
-    // Clear existing content
-    feedContainer.innerHTML = '';
+    if (!feedContainer) return;
 
     if (activities.length === 0) {
-        console.log('No activities found, showing placeholder');
-        // Show placeholder if no activities
+        if (_lastActivityFeedSig === 'empty') return;
+        _lastActivityFeedSig = 'empty';
         feedContainer.innerHTML = `
             <div class="activity-item">
                 <span class="activity-icon">📊</span>
@@ -29857,14 +29852,30 @@ function updateActivityFeed(activities) {
                     <p class="activity-title">System Started</p>
                     <p class="activity-subtitle">Dashboard initialized successfully</p>
                 </div>
-                <p class="activity-time">Now</p>
+                <p class="activity-time">Just now</p>
             </div>
         `;
         return;
     }
 
-    // Add activities (limit to 5 most recent)
-    activities.slice(0, 5).forEach((activity, index) => {
+    const items = activities.slice(0, 5);
+    // Build signature from titles+subtitles to detect actual changes
+    const sig = items.map(a => a.title + a.subtitle).join('|');
+    const feedChanged = sig !== _lastActivityFeedSig;
+    _lastActivityFeedSig = sig;
+
+    if (!feedChanged) {
+        // Just update timestamps without rebuilding DOM
+        const timeEls = feedContainer.querySelectorAll('.activity-time');
+        items.forEach((activity, i) => {
+            if (timeEls[i]) timeEls[i].textContent = timeAgo(activity.time);
+        });
+        return;
+    }
+
+    // Full rebuild only when feed content actually changed
+    feedContainer.innerHTML = '';
+    items.forEach((activity, index) => {
         const activityElement = document.createElement('div');
         activityElement.className = 'activity-item';
         activityElement.innerHTML = `
@@ -29873,13 +29884,11 @@ function updateActivityFeed(activities) {
                 <p class="activity-title">${escapeHtml(activity.title)}</p>
                 <p class="activity-subtitle">${escapeHtml(activity.subtitle)}</p>
             </div>
-            <p class="activity-time">${escapeHtml(activity.time)}</p>
+            <p class="activity-time">${timeAgo(activity.time)}</p>
         `;
-
         feedContainer.appendChild(activityElement);
 
-        // Add separator between items (except after last item)
-        if (index < activities.slice(0, 5).length - 1) {
+        if (index < items.length - 1) {
             const separator = document.createElement('div');
             separator.className = 'activity-separator';
             feedContainer.appendChild(separator);
@@ -47365,9 +47374,14 @@ async function hydrateMirroredDiscoveryStates() {
 
 function timeAgo(dateStr) {
     if (!dateStr) return '';
-    const diff = Date.now() - new Date(dateStr + (dateStr.includes('Z') ? '' : 'Z')).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'just now';
+    // Handle ISO formats: "Z" suffix, "+00:00" offset, or bare (assume UTC)
+    let ts = dateStr;
+    if (!ts.includes('Z') && !ts.includes('+') && !ts.includes('-', 10)) ts += 'Z';
+    const diff = Date.now() - new Date(ts).getTime();
+    const secs = Math.floor(diff / 1000);
+    if (secs < 5) return 'just now';
+    if (secs < 60) return `${secs}s ago`;
+    const mins = Math.floor(secs / 60);
     if (mins < 60) return `${mins}m ago`;
     const hrs = Math.floor(mins / 60);
     if (hrs < 24) return `${hrs}h ago`;
