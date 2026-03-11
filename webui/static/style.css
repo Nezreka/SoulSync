@@ -29967,7 +29967,7 @@ body {
     background: linear-gradient(135deg, #1a1a1a 0%, #121212 100%);
     border-radius: 16px;
     border: 1px solid rgba(var(--accent-rgb), 0.2);
-    width: 900px;
+    width: 90%;
     max-width: 95vw;
     max-height: 80vh;
     display: flex;
@@ -30073,11 +30073,11 @@ body {
     vertical-align: middle;
 }
 .candidates-col-index { color: rgba(255,255,255,0.3); width: 32px; text-align: center; }
-.candidates-col-file { width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.candidates-col-quality { width: 100px; white-space: nowrap; }
+.candidates-col-file { width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.candidates-col-quality { width: 110px; white-space: nowrap; }
 .candidates-col-size { width: 70px; white-space: nowrap; }
 .candidates-col-duration { width: 60px; white-space: nowrap; }
-.candidates-col-user { width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.candidates-col-user { width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .candidates-col-action { width: 44px; text-align: center; padding: 6px 4px !important; }
 
 .candidates-quality-badge {

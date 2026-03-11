@@ -6610,7 +6610,7 @@ function initializeSearchModeToggle() {
             const data = await response.json();
 
             if (!data.success || !data.result) {
-                throw new Error('No suitable track found on Soulseek');
+                throw new Error('No suitable track found');
             }
 
             const slskdResult = data.result;

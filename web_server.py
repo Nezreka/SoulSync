@@ -6524,7 +6524,7 @@ def stream_enhanced_search_track():
         logger.warning(f"❌ No suitable matches found after trying {len(search_queries)} queries")
         return jsonify({
             "success": False,
-            "error": "No suitable track found on Soulseek after trying multiple search strategies"
+            "error": "No suitable track found after trying multiple search strategies"
         }), 404
 
     except Exception as e:
@@ -7155,7 +7155,7 @@ def get_task_candidates(task_id):
             "task_id": task_id,
             "track_info": {
                 "name": track_info.get('name', 'Unknown') if isinstance(track_info, dict) else 'Unknown',
-                "artist": track_info.get('artist', 'Unknown') if isinstance(track_info, dict) else 'Unknown',
+                "artist": _get_track_artist_name(track_info) if isinstance(track_info, dict) else 'Unknown',
             },
             "error_message": error_message,
             "candidates": serialized,
@@ -18576,7 +18576,7 @@ def _on_download_completed(batch_id, task_id, success=True):
                     'artist_name': _get_track_artist_name(original_track_info),
                     'retry_count': task.get('retry_count', 0),
                     'spotify_track': spotify_track_data,  # Properly formatted spotify track for wishlist
-                    'failure_reason': 'Download cancelled' if task_status == 'cancelled' else ('Not found on Soulseek' if task_status == 'not_found' else 'Download failed'),
+                    'failure_reason': 'Download cancelled' if task_status == 'cancelled' else ('No matching track found' if task_status == 'not_found' else 'Download failed'),
                     'candidates': task.get('cached_candidates', [])  # Include search results if available
                 }
 
@@ -19678,7 +19678,7 @@ def _download_track_worker(task_id, batch_id=None):
                         search_diagnostics.append(f'"{query}": {result_count} results but none passed quality/artist filters')
                         all_raw_results.extend(tracks_result[:20])  # Keep top results for review
                 else:
-                    search_diagnostics.append(f'"{query}": no results on Soulseek')
+                    search_diagnostics.append(f'"{query}": no results found')
 
             except Exception as e:
                 print(f"⚠️ [Modal Worker] Search failed for query '{query}': {e}")
