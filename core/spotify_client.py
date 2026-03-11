@@ -27,9 +27,15 @@ _rate_limit_until = 0       # Unix timestamp when the ban expires (0 = not banne
 _rate_limit_retry_after = 0  # Original Retry-After value in seconds
 _rate_limit_endpoint = None  # Which function triggered the ban
 _rate_limit_set_at = 0       # When the ban was set
+_rate_limit_ban_ended_at = 0  # When the last ban expired naturally (for post-ban cooldown)
 
 # Threshold: if Retry-After exceeds this, activate global ban instead of sleeping
 _LONG_RATE_LIMIT_THRESHOLD = 60  # seconds
+
+# After a ban expires, wait this long before making any auth probe calls.
+# This prevents the "immediate re-probe → re-ban" cycle where Spotify's server-side
+# cooldown outlasts the Retry-After value they sent us.
+_POST_BAN_COOLDOWN = 300  # 5 minutes
 
 
 class SpotifyRateLimitError(Exception):
@@ -61,13 +67,39 @@ def _set_global_rate_limit(retry_after_seconds, endpoint_name):
 
 def _is_globally_rate_limited():
     """Check if the global rate limit ban is active."""
+    global _rate_limit_ban_ended_at
     with _rate_limit_lock:
         if _rate_limit_until <= 0:
             return False
         if time.time() >= _rate_limit_until:
-            # Ban expired — clear it
+            # Ban expired — record when it ended so post-ban cooldown can apply
+            if _rate_limit_ban_ended_at < _rate_limit_until:
+                _rate_limit_ban_ended_at = time.time()
+                logger.info("Rate limit ban expired, entering post-ban cooldown period")
             return False
         return True
+
+
+def _is_in_post_ban_cooldown():
+    """Check if we're in the post-ban cooldown period.
+    After a ban expires, we wait _POST_BAN_COOLDOWN seconds before allowing
+    auth probes to prevent the re-probe → re-ban cycle."""
+    with _rate_limit_lock:
+        if _rate_limit_ban_ended_at <= 0:
+            return False
+        elapsed = time.time() - _rate_limit_ban_ended_at
+        if elapsed < _POST_BAN_COOLDOWN:
+            return True
+        return False
+
+
+def _get_post_ban_cooldown_remaining():
+    """Get remaining seconds in post-ban cooldown, or 0 if not in cooldown."""
+    with _rate_limit_lock:
+        if _rate_limit_ban_ended_at <= 0:
+            return 0
+        remaining = _POST_BAN_COOLDOWN - (time.time() - _rate_limit_ban_ended_at)
+        return max(0, int(remaining))
 
 
 def _get_rate_limit_info():
@@ -90,14 +122,16 @@ def _get_rate_limit_info():
 
 
 def _clear_rate_limit():
-    """Manually clear the global rate limit ban (e.g. after disconnect/reconnect)."""
-    global _rate_limit_until, _rate_limit_retry_after, _rate_limit_endpoint, _rate_limit_set_at
+    """Manually clear the global rate limit ban AND post-ban cooldown.
+    Used by disconnect/reconnect so the user can immediately retry."""
+    global _rate_limit_until, _rate_limit_retry_after, _rate_limit_endpoint, _rate_limit_set_at, _rate_limit_ban_ended_at
     with _rate_limit_lock:
         _rate_limit_until = 0
         _rate_limit_retry_after = 0
         _rate_limit_endpoint = None
         _rate_limit_set_at = 0
-    logger.info("Global rate limit ban cleared")
+        _rate_limit_ban_ended_at = 0
+    logger.info("Global rate limit ban cleared (including post-ban cooldown)")
 
 
 def rate_limited(func):
@@ -372,7 +406,8 @@ class SpotifyClient:
 
     def is_spotify_authenticated(self) -> bool:
         """Check if Spotify client is specifically authenticated (not just iTunes fallback).
-        Results are cached for 60 seconds to avoid excessive API calls."""
+        Results are cached for 60 seconds to avoid excessive API calls.
+        During rate limit bans and post-ban cooldown, returns False without making API calls."""
         if self.sp is None:
             return False
 
@@ -380,6 +415,14 @@ class SpotifyClient:
         # skip Spotify and fall through to iTunes fallback naturally.
         # This prevents any API calls that could extend the ban.
         if _is_globally_rate_limited():
+            return False
+
+        # Post-ban cooldown: after a ban expires, don't probe Spotify immediately.
+        # Spotify's server-side cooldown can outlast the Retry-After they sent us,
+        # so probing right away would just re-trigger the ban.
+        if _is_in_post_ban_cooldown():
+            remaining = _get_post_ban_cooldown_remaining()
+            logger.debug(f"Post-ban cooldown active ({remaining}s left), skipping auth probe")
             return False
 
         # Check cache first (lock only for brief read)
@@ -453,7 +496,12 @@ class SpotifyClient:
     def clear_rate_limit():
         """Manually clear the rate limit ban."""
         _clear_rate_limit()
-    
+
+    @staticmethod
+    def get_post_ban_cooldown_remaining():
+        """Get remaining seconds in post-ban cooldown, or 0 if not in cooldown."""
+        return _get_post_ban_cooldown_remaining()
+
     def _ensure_user_id(self) -> bool:
         """Ensure user_id is loaded (may make API call)"""
         if self.user_id is None and self.sp is not None:
