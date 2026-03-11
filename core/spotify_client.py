@@ -216,13 +216,12 @@ class Track:
 
     @classmethod
     def from_spotify_track(cls, track_data: Dict[str, Any]) -> 'Track':
-        # Extract album image (medium size preferred)
+        # Extract album image (largest available — Spotify returns images sorted largest first)
         album_image_url = None
         if 'album' in track_data and 'images' in track_data['album']:
             images = track_data['album']['images']
             if images:
-                # Get medium size image (usually index 1), or largest if not available
-                album_image_url = images[1]['url'] if len(images) > 1 else images[0]['url']
+                album_image_url = images[0]['url']
 
         return cls(
             id=track_data['id'],
