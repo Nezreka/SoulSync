@@ -3006,36 +3006,63 @@
                     <!-- Build a Playlist Section -->
                     <div class="discover-section">
                         <div class="discover-section-header">
-                            <h2 class="discover-section-title">🎨 Build a Playlist</h2>
+                            <h2 class="discover-section-title">
+                                Build a Playlist
+                                <span class="bp-info-toggle" onclick="document.getElementById('bp-info-panel').classList.toggle('visible')" title="How it works">?</span>
+                            </h2>
                             <p class="discover-section-subtitle">Create a custom playlist from your favorite artists</p>
+                        </div>
+                        <div class="bp-info-panel" id="bp-info-panel">
+                            <div class="bp-info-content">
+                                <p><strong>How it works:</strong></p>
+                                <ol>
+                                    <li>Search and select 1-5 seed artists you like</li>
+                                    <li>Hit Generate &mdash; the app finds similar artists, pulls their albums, and picks tracks at random</li>
+                                    <li>You get a fresh 50-track playlist mixing your picks with new discoveries</li>
+                                </ol>
+                                <p class="bp-info-note">Tip: The more seed artists you add, the more varied the playlist will be.</p>
+                            </div>
                         </div>
                         <div class="build-playlist-container">
                             <!-- Artist Search -->
                             <div class="build-playlist-search-section">
-                                <input type="text" id="build-playlist-search"
-                                    placeholder="Search for artists (1-5 artists)..."
-                                    oninput="searchBuildPlaylistArtists()" />
+                                <div class="bp-search-input-wrapper">
+                                    <svg class="bp-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                                    <input type="text" id="build-playlist-search"
+                                        placeholder="Search for an artist..."
+                                        oninput="searchBuildPlaylistArtists()"
+                                        autocomplete="off" />
+                                    <div class="bp-search-spinner" id="bp-search-spinner" style="display: none;">
+                                        <div class="loading-spinner" style="width: 18px; height: 18px; border-width: 2px;"></div>
+                                    </div>
+                                </div>
                                 <div id="build-playlist-search-results" class="build-playlist-search-results"></div>
                             </div>
 
                             <!-- Selected Artists -->
                             <div class="build-playlist-selected-section">
-                                <h3>Selected Artists:</h3>
+                                <div class="bp-selected-header">
+                                    <h3>Seed Artists</h3>
+                                    <span class="bp-selected-counter" id="bp-selected-counter">0 / 5</span>
+                                </div>
                                 <div id="build-playlist-selected-artists" class="build-playlist-selected-artists">
-                                    <div class="build-playlist-no-selection">No artists selected. Search and select 1-5
-                                        artists.</div>
+                                    <div class="build-playlist-no-selection">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 32px; height: 32px; opacity: 0.4; margin-bottom: 8px;"><path d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                                        <span>Search above to add seed artists</span>
+                                    </div>
                                 </div>
                             </div>
 
                             <!-- Generate Button -->
                             <div class="build-playlist-actions">
                                 <button id="build-playlist-generate-btn" class="build-playlist-generate-btn"
-                                    onclick="generateBuildPlaylist()" disabled style="opacity: 0.5;">
-                                    Generate Playlist (50 tracks)
+                                    onclick="generateBuildPlaylist()" disabled>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                                    Generate Playlist
                                 </button>
                                 <div id="build-playlist-loading" class="build-playlist-loading" style="display: none;">
                                     <div class="loading-spinner"></div>
-                                    <p>Building your playlist...</p>
+                                    <span>Finding similar artists and building your playlist...</span>
                                 </div>
                             </div>
 
