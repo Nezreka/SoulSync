@@ -21,13 +21,13 @@ logger = get_logger("tidal_client")
 # Global rate limiting variables
 _last_api_call_time = 0
 _api_call_lock = threading.Lock()
-MIN_API_INTERVAL = 0.2  # 200ms between API calls
+MIN_API_INTERVAL = 0.5  # 500ms between API calls
 
 def rate_limited(func):
     """Decorator to enforce rate limiting on Tidal API calls with retry logic"""
     @wraps(func)
     def wrapper(*args, **kwargs):
-        max_retries = 3
+        max_retries = 4
         last_exception = None
 
         for attempt in range(max_retries):
@@ -52,9 +52,10 @@ def rate_limited(func):
 
                 # Only retry on specific errors
                 if "rate limit" in error_str.lower() or "429" in error_str:
-                    logger.warning(f"Rate limit hit on attempt {attempt + 1}/{max_retries}, backing off: {e}")
+                    backoff = 3.0 * (2 ** attempt)  # Exponential: 3s, 6s, 12s, 24s
+                    logger.warning(f"Rate limit hit on attempt {attempt + 1}/{max_retries}, backing off {backoff}s: {e}")
                     if attempt < max_retries - 1:
-                        time.sleep(3.0)
+                        time.sleep(backoff)
                         continue
                 elif "503" in error_str or "502" in error_str:
                     logger.warning(f"Tidal service error on attempt {attempt + 1}/{max_retries}, backing off: {e}")
@@ -739,14 +740,43 @@ class TidalClient:
             tracks = []
             cursor = None
             total_fetched = 0
+            page_num = 0
+            consecutive_failures = 0
+            MAX_PAGE_RETRIES = 3
 
             while True:
+                page_num += 1
+
+                # Rate limit between pagination pages (skip first page)
+                if page_num > 1:
+                    time.sleep(1.0)
+
                 # Fetch a page of track IDs
-                tracks_page = self._get_playlist_tracks_page(playlist_id, cursor)
+                try:
+                    tracks_page = self._get_playlist_tracks_page(playlist_id, cursor)
+                except Exception as e:
+                    error_str = str(e)
+                    if "429" in error_str or "rate limit" in error_str.lower():
+                        consecutive_failures += 1
+                        if consecutive_failures <= MAX_PAGE_RETRIES:
+                            backoff = 10.0 * consecutive_failures  # 10s, 20s, 30s
+                            logger.warning(f"Playlist pagination rate limited on page {page_num}, waiting {backoff}s (attempt {consecutive_failures}/{MAX_PAGE_RETRIES})")
+                            time.sleep(backoff)
+                            page_num -= 1  # Retry same page
+                            continue
+                        else:
+                            logger.error(f"Playlist pagination failed after {MAX_PAGE_RETRIES} retries, returning {total_fetched} tracks fetched so far")
+                            break
+                    else:
+                        logger.error(f"Error fetching playlist page {page_num}: {e}")
+                        break
 
                 if not tracks_page or not tracks_page.get("data"):
                     logger.info(f"No more tracks found, stopping pagination")
                     break
+
+                # Reset failure counter on success
+                consecutive_failures = 0
 
                 # Extract track IDs from this page
                 track_ids = []
@@ -758,7 +788,13 @@ class TidalClient:
 
                 if track_ids:
                     # Batch fetch full track details with artists and albums
-                    batch_tracks = self._get_tracks_batch(track_ids)
+                    try:
+                        batch_tracks = self._get_tracks_batch(track_ids)
+                    except Exception as e:
+                        logger.error(f"Error fetching track details for page {page_num}: {e}")
+                        # Continue pagination — we lose this batch but can still get remaining
+                        batch_tracks = []
+
                     tracks.extend(batch_tracks)
                     total_fetched += len(batch_tracks)
                     logger.info(f"Fetched {len(batch_tracks)} tracks in this batch, {total_fetched} total so far")
@@ -812,6 +848,8 @@ class TidalClient:
 
             return response.json()
 
+        except requests.exceptions.HTTPError:
+            raise  # Let HTTP errors (429, 503, etc.) propagate to rate_limited decorator for retry
         except Exception as e:
             logger.error(f"Error fetching playlist tracks page: {e}")
             return None
@@ -897,6 +935,8 @@ class TidalClient:
 
             return hydrated_tracks
 
+        except requests.exceptions.HTTPError:
+            raise  # Let HTTP errors (429, 503, etc.) propagate to rate_limited decorator for retry
         except Exception as e:
             logger.error(f"Error getting tracks batch: {e}")
             return []
