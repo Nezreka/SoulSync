@@ -441,18 +441,20 @@ class SpotifyClient:
             error_str = str(e)
             # Rate limit means we ARE authenticated — just throttled
             if "rate" in error_str.lower() or "429" in error_str:
-                logger.warning("Spotify rate limited during auth check — treating as authenticated")
-                # Check if there's a Retry-After header indicating a long ban
+                # ANY rate limit on the auth probe means Spotify is actively throttling us.
+                # Always activate a global ban — even with a short or missing Retry-After.
+                # Without this, the probe→429→probe cycle repeats every ~60s forever.
                 retry_after = None
                 if hasattr(e, 'headers') and e.headers:
                     retry_after = e.headers.get('Retry-After') or e.headers.get('retry-after')
-                if retry_after:
-                    try:
-                        delay = int(retry_after)
-                        if delay > _LONG_RATE_LIMIT_THRESHOLD:
-                            _set_global_rate_limit(delay, 'is_spotify_authenticated')
-                    except (ValueError, TypeError):
-                        pass
+                try:
+                    delay = int(retry_after) if retry_after else 0
+                except (ValueError, TypeError):
+                    delay = 0
+                # Minimum 10 minutes for auth probe 429s — these indicate persistent throttling
+                ban_duration = max(delay, 600)
+                _set_global_rate_limit(ban_duration, 'is_spotify_authenticated')
+                logger.warning(f"Auth probe rate limited — activating {ban_duration}s global ban")
                 result = True
             else:
                 logger.debug(f"Spotify authentication check failed: {e}")
