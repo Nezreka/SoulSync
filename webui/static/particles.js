@@ -928,7 +928,7 @@
             },
             draw(p, ctx, accent, time) {
                 const col = shiftAccent(accent, p.hueShift);
-                const energy = Math.abs(p.displacement);
+                const energy = Math.min(1, Math.abs(p.displacement));
                 const alpha = 0.15 + energy * 0.6;
                 const r = p.radius * (1 + energy * 0.5);
 
@@ -967,12 +967,12 @@
             drawGlobal(ctx, parts, accent, time, layerExtras) {
                 const ex = layerExtras || extras;
                 if (!ex.emitters) { ex.emitters = []; ex.waveLines = []; }
-                const maxR = Math.max(canvas.width, canvas.height) * 0.6;
+                const maxR = Math.max(canvas.width, canvas.height) * 0.45;
 
-                // Update emitters — spawn rings
+                // Update emitters — spawn rings (cap at 3 per emitter)
                 for (const em of ex.emitters) {
                     em.timer++;
-                    if (em.timer >= em.interval) {
+                    if (em.timer >= em.interval && em.rings.length < 3) {
                         em.rings.push({ radius: 0, alpha: 0.3 });
                         em.timer = 0;
                     }
@@ -1014,7 +1014,7 @@
                             const diff = Math.abs(dist - ring.radius);
                             if (diff < 30) {
                                 const wave = Math.cos((diff / 30) * Math.PI * 0.5);
-                                p.displacement += wave * ring.alpha * 2.5;
+                                p.displacement += wave * ring.alpha * 1.8;
                             }
                         }
                     }
