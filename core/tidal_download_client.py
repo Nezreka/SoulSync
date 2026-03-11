@@ -533,13 +533,38 @@ class TidalDownloadClient:
                             self.active_downloads[download_id]['transferred'] = downloaded
                             self.active_downloads[download_id]['progress'] = round(progress, 1)
 
+            # Validate download produced a real audio file (not a stub/preview)
+            # A valid audio file should be at least 100KB — anything less is likely
+            # a DRM stub, preview clip, or empty response from Tidal.
+            MIN_AUDIO_SIZE = 100 * 1024  # 100KB
+            if downloaded < MIN_AUDIO_SIZE:
+                logger.error(
+                    f"Tidal download too small ({downloaded} bytes) — likely a stub or "
+                    f"preview. Expected audio file for '{display_name}'. Deleting."
+                )
+                out_path.unlink(missing_ok=True)
+                return None
+
             # HiRes FLAC in MP4 container: extract raw FLAC with FFmpeg if available
             if extension == 'flac' and self._is_mp4_container(out_path):
                 extracted = self._extract_flac_from_mp4(out_path)
                 if extracted:
                     out_path = Path(extracted)
+                else:
+                    # FFmpeg extraction failed — the MP4 container is not playable as-is.
+                    # Delete it rather than leaving an unplayable file.
+                    logger.error(f"Cannot extract FLAC from MP4 container and file is not playable — deleting {out_path.name}")
+                    out_path.unlink(missing_ok=True)
+                    return None
 
-            logger.info(f"Tidal download complete: {out_path}")
+            # Final size check after any extraction
+            final_size = out_path.stat().st_size if out_path.exists() else 0
+            if final_size < MIN_AUDIO_SIZE:
+                logger.error(f"Final file too small after processing ({final_size} bytes) — deleting {out_path.name}")
+                out_path.unlink(missing_ok=True)
+                return None
+
+            logger.info(f"Tidal download complete: {out_path} ({final_size / (1024*1024):.1f} MB)")
             return str(out_path)
 
         except Exception as e:
