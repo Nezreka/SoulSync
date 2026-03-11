@@ -11,7 +11,8 @@ const DOCS_SECTIONS = [
             { id: 'gs-overview', title: 'Overview' },
             { id: 'gs-first-setup', title: 'First-Time Setup' },
             { id: 'gs-connecting', title: 'Connecting Services' },
-            { id: 'gs-interface', title: 'Understanding the Interface' }
+            { id: 'gs-interface', title: 'Understanding the Interface' },
+            { id: 'gs-docker', title: 'Docker & Deployment' }
         ],
         content: () => `
             <div class="docs-subsection" id="gs-overview">
@@ -72,6 +73,23 @@ const DOCS_SECTIONS = [
                     <li><strong>Import</strong> &mdash; Import music files from a staging folder with album/track matching</li>
                     <li><strong>Settings</strong> &mdash; Configure services, download preferences, quality profiles, and more</li>
                 </ul>
+                <p class="docs-text"><strong>Version & Updates</strong>: Click the version number in the sidebar footer to open the <strong>What's New</strong> modal, which shows detailed release notes for every feature and fix. SoulSync automatically checks for updates by comparing your running version against the latest GitHub commit. If an update is available, a banner appears in the modal. Docker users are notified when a new image has been pushed to the repo.</p>
+            </div>
+            <div class="docs-subsection" id="gs-docker">
+                <h3 class="docs-subsection-title">Docker & Deployment</h3>
+                <p class="docs-text">SoulSync runs in Docker with the following environment variables:</p>
+                <table class="docs-table">
+                    <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>DATABASE_PATH</code></td><td><code>./database</code></td><td>Directory where the SQLite database is stored. Mount a volume here to persist data across container restarts.</td></tr>
+                        <tr><td><code>SOULSYNC_CONFIG_PATH</code></td><td><code>./config</code></td><td>Directory where <code>config.json</code> and the encryption key are stored. Mount a volume here to persist settings.</td></tr>
+                        <tr><td><code>SOULSYNC_COMMIT_SHA</code></td><td>(auto)</td><td>Baked in at Docker build time. Used for update detection &mdash; compares against GitHub's latest commit.</td></tr>
+                    </tbody>
+                </table>
+                <p class="docs-text"><strong>Key volume mounts</strong>: Map your download path, transfer path (media server's monitored folder), and staging path to host directories. Ensure the paths configured in SoulSync Settings match the container-side mount points.</p>
+                <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div>If using slskd in a separate container, make sure both containers can access the same download directory. A common issue is slskd writing to a path that SoulSync can't read because the volume mounts don't align. Both containers must see the same files at the same internal path.</div></div>
+                <p class="docs-text"><strong>Podman / Rootless Docker</strong>: SoulSync supports Podman rootless (keep-id) and rootless Docker setups. The entrypoint handles permission alignment automatically.</p>
+                <p class="docs-text"><strong>Config migration</strong>: When upgrading from older versions, SoulSync automatically migrates settings from <code>config.json</code> to the database on first startup. No manual migration is needed.</p>
             </div>
         `
     },
@@ -108,7 +126,8 @@ const DOCS_SECTIONS = [
                     <div class="docs-feature-card"><h4>Genius</h4><p>Lyrics, descriptions, alternate names, song artwork</p></div>
                 </div>
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Workers retry "not found" items every 30 days and errored items every 7 days. You can pause/resume any worker from the dashboard.</div></div>
-                <p class="docs-text"><strong>Rate Limit Protection</strong>: Workers include smart rate limiting for all APIs. If Spotify returns a rate limit (429), a global ban activates &mdash; all Spotify calls are suppressed and searches automatically fall back to iTunes. A countdown modal appears showing ban duration, and the worker auto-resumes when the ban expires. You can manually disconnect Spotify from the modal to clear the ban immediately.</p>
+                <p class="docs-text"><strong>Rate Limit Protection</strong>: Workers include smart rate limiting for all APIs. If Spotify returns a rate limit with a Retry-After greater than 60 seconds, a global ban activates &mdash; all Spotify API calls are suppressed before they're made, and searches automatically fall back to iTunes/Apple Music. A countdown modal appears showing the ban duration, triggering endpoint, and remaining time. The enrichment worker auto-pauses during the ban and resumes when it expires.</p>
+                <p class="docs-text">The rate limit modal provides a <strong>Disconnect Spotify</strong> button that immediately clears the ban, pauses the Spotify enrichment worker, and deletes the local Spotify cache. This lets you switch to Apple Music as your primary metadata source without waiting for the ban to expire.</p>
             </div>
             <div class="docs-subsection" id="dash-tools">
                 <h3 class="docs-subsection-title">Tool Cards</h3>
@@ -155,10 +174,11 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Repair & Maintenance</h3>
                 <p class="docs-text">Additional maintenance tools accessible from the dashboard:</p>
                 <ul class="docs-list">
-                    <li><strong>Quality Scanner</strong> &mdash; Scans your entire library and flags tracks below your quality preferences. Shows a breakdown of formats and bitrates, and identifies tracks where higher-quality versions may be available on Soulseek.</li>
+                    <li><strong>Quality Scanner</strong> &mdash; Scans your entire library and flags tracks below your quality preferences. Shows a breakdown of formats and bitrates, identifies tracks where higher-quality versions may be available, and automatically adds low-quality tracks to your wishlist for re-downloading at better quality.</li>
                     <li><strong>Duplicate Cleaner</strong> &mdash; Identifies duplicate tracks by comparing title, artist, album, and duration. Lets you review duplicates and choose which version to keep (typically the higher-quality one). Frees disk space by removing redundant files.</li>
                     <li><strong>Database Updater</strong> &mdash; Refreshes your library database by scanning your media server. <strong>Incremental</strong> mode only adds new content; <strong>Full Refresh</strong> rebuilds the entire database. <strong>Deep Scan</strong> performs a full comparison without losing any enrichment data from services.</li>
-                    <li><strong>Metadata Updater</strong> &mdash; Triggers enrichment workers to update artist photos, genres, styles, biographies, and related metadata from all connected services (MusicBrainz, Spotify, iTunes, Last.fm, Deezer, AudioDB, Genius).</li>
+                    <li><strong>Metadata Updater</strong> &mdash; Triggers all enrichment workers simultaneously with reset flags, forcing them to re-check every item in your library against all connected services (MusicBrainz, Spotify, iTunes, Last.fm, Deezer, AudioDB, Genius). Useful after connecting a new service or when metadata seems incomplete.</li>
+                    <li><strong>Repair Worker</strong> &mdash; Background service that scans recently downloaded folders and repairs track metadata. It reads album IDs from file tags, fetches official tracklists from Spotify or MusicBrainz, and fixes incorrect or missing track numbers. Runs automatically after batch downloads complete and can be paused/resumed from the dashboard.</li>
                 </ul>
             </div>
             <div class="docs-subsection" id="dash-activity">
@@ -246,7 +266,8 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="sync-m3u">
                 <h3 class="docs-subsection-title">M3U Export</h3>
                 <p class="docs-text">Export any mirrored playlist as an <strong>M3U file</strong> for use in external media players or media servers. Enable M3U export in <strong>Settings</strong> and use the export button on any playlist card.</p>
-                <p class="docs-text">M3U files reference the actual file paths in your library, so they work with any M3U-compatible player. Auto-save can be enabled to regenerate M3U files automatically when playlists are updated.</p>
+                <p class="docs-text">M3U files reference the actual file paths in your library, so they work with any M3U-compatible player.</p>
+                <p class="docs-text"><strong>Auto-Save</strong> &mdash; When enabled in Settings, M3U files are automatically regenerated every time a playlist is synced or updated. <strong>Manual Export</strong> &mdash; The export button on any playlist modal creates an M3U file on demand, even when auto-save is disabled.</p>
             </div>
             <div class="docs-subsection" id="sync-discovery">
                 <h3 class="docs-subsection-title">Discovery Pipeline</h3>
@@ -282,6 +303,7 @@ const DOCS_SECTIONS = [
                     <li>Click an <strong>artist</strong> to view their full discography with download buttons on each release</li>
                     <li>Click an <strong>album</strong> to open the download modal with track selection</li>
                     <li>Click a <strong>track</strong> to search Soulseek for that specific song</li>
+                    <li><strong>Preview tracks</strong> &mdash; Play button on search result tracks lets you stream a preview directly from your download source before committing to a download</li>
                 </ul>
             </div>
             <div class="docs-subsection" id="search-basic">
@@ -313,6 +335,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Download progress</strong> with per-track status indicators (searching, downloading, processing, complete, failed)</li>
                 </ul>
                 <p class="docs-text">Downloads can be started from multiple places: Enhanced Search results, artist discography, Download Missing modal, wishlist auto-processing, and playlist sync.</p>
+                <p class="docs-text"><strong>Download Candidate Selection</strong>: If a download fails or no suitable source is found, you can view the cached search candidates and manually pick an alternative file from a different user. This lets you recover failed downloads without restarting the entire search.</p>
             </div>
             <div class="docs-subsection" id="search-postprocess">
                 <h3 class="docs-subsection-title">Post-Processing Pipeline</h3>
@@ -386,7 +409,9 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Familiar Favorites</strong></td><td>Library</td><td>Well-known tracks from artists you follow</td></tr>
                     </tbody>
                 </table>
-                <p class="docs-text">Each playlist can be played in the media player, downloaded, or synced to your media server. Genre browsers let you filter discovery pool content by specific genres.</p>
+                <p class="docs-text">Each playlist can be played in the media player, downloaded, or synced to your media server.</p>
+                <p class="docs-text"><strong>Genre Browser</strong> &mdash; Filter discovery pool content by specific genres. Browse available genres and view top tracks within each genre category.</p>
+                <p class="docs-text"><strong>ListenBrainz Playlists</strong> &mdash; If ListenBrainz is configured, the Discover page also shows personalized playlists generated from your listening history: Created For You, Your Playlists, and Collaborative playlists.</p>
             </div>
             <div class="docs-subsection" id="disc-build">
                 <h3 class="docs-subsection-title">Build Custom Playlist</h3>
@@ -444,6 +469,7 @@ const DOCS_SECTIONS = [
                     <li>Remove artists individually or in bulk</li>
                     <li>Filter your library by Watched / Unwatched status</li>
                     <li>Use <strong>Watch All</strong> to add all recommended artists at once</li>
+                    <li><strong>Watch All Unwatched</strong> &mdash; Bulk-add every library artist that isn't already on your watchlist</li>
                 </ul>
             </div>
             <div class="docs-subsection" id="art-scanning">
@@ -464,7 +490,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Playlist sync</strong> &mdash; Tracks from mirrored playlists that aren't in your library</li>
                     <li><strong>Manual</strong> &mdash; Individual track or album downloads go through the wishlist</li>
                 </ul>
-                <p class="docs-text"><strong>Auto-Processing</strong>: The system automation runs every 30 minutes, picking up wishlist items and attempting to download them from your configured source. Failed items are retried with increasing backoff.</p>
+                <p class="docs-text"><strong>Auto-Processing</strong>: The system automation runs every 30 minutes, picking up wishlist items and attempting to download them from your configured source. Processing alternates between <strong>album</strong> and <strong>singles</strong> cycles &mdash; one run processes albums, the next run processes singles. If one category is empty, it automatically switches to the other. Failed items are retried with increasing backoff.</p>
                 <p class="docs-text"><strong>Manual Processing</strong>: Use the <strong>Process Wishlist</strong> automation action to trigger processing on demand. Options include processing all items, albums only, or singles only.</p>
                 <p class="docs-text"><strong>Cleanup</strong>: The <strong>Cleanup Wishlist</strong> action removes duplicates (same track added multiple times) and items you already own in your library.</p>
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Each wishlist item tracks its source (watchlist scan, playlist sync, manual), number of retry attempts, last error message, and status (pending, downloading, failed, complete).</div></div>
@@ -528,8 +554,10 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Discovery Complete</strong></td><td>When playlist track discovery finishes</td></tr>
                         <tr><td><strong>Library Scan Done</strong></td><td>When a media library scan finishes</td></tr>
                         <tr><td><strong>Database Updated</strong></td><td>When a library database refresh finishes</td></tr>
-                        <tr><td><strong>Quality/Duplicate Scan Done</strong></td><td>When quality or duplicate scanning finishes</td></tr>
+                        <tr><td><strong>Quality Scan Done</strong></td><td>When quality scan finishes (with counts of quality met vs low quality)</td></tr>
+                        <tr><td><strong>Duplicate Scan Done</strong></td><td>When duplicate cleaner finishes (with files scanned, duplicates found, space freed)</td></tr>
                         <tr><td><strong>Import Complete</strong></td><td>When an album/track import finishes</td></tr>
+                        <tr><td><strong>Playlist Mirrored</strong></td><td>When a new playlist is mirrored for the first time</td></tr>
                         <tr><td><strong>Signal Received</strong></td><td>Custom signal fired by another automation</td></tr>
                     </tbody>
                 </table>
@@ -553,7 +581,10 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Clear Quarantine</strong></td><td>Delete all quarantined files</td></tr>
                         <tr><td><strong>Update Discovery</strong></td><td>Refresh the discovery artist pool</td></tr>
                         <tr><td><strong>Backup Database</strong></td><td>Create a timestamped database backup</td></tr>
-                        <tr><td><strong>Full Cleanup</strong></td><td>Clear quarantine, queue, staging, and search history</td></tr>
+                        <tr><td><strong>Refresh Beatport Cache</strong></td><td>Scrape Beatport homepage and warm the data cache</td></tr>
+                        <tr><td><strong>Clean Search History</strong></td><td>Remove old searches from Soulseek (keeps 50 most recent)</td></tr>
+                        <tr><td><strong>Clean Completed Downloads</strong></td><td>Clear completed downloads and empty directories from the download folder</td></tr>
+                        <tr><td><strong>Full Cleanup</strong></td><td>Clear quarantine, download queue, staging folder, and search history in one sweep</td></tr>
                         <tr><td><strong>Notify Only</strong></td><td>No action &mdash; just trigger notifications</td></tr>
                     </tbody>
                 </table>
@@ -574,7 +605,8 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="auto-history">
                 <h3 class="docs-subsection-title">Execution History</h3>
                 <p class="docs-text">Each automation card shows its <strong>last run time</strong> and <strong>run count</strong>. For scheduled automations, a countdown timer shows when the next run will occur.</p>
-                <p class="docs-text">Use the <strong>Run Now</strong> button on any automation card to execute it immediately, regardless of its schedule. The result (success/failure) updates in real-time on the card.</p>
+                <p class="docs-text">Use the <strong>Run Now</strong> button on any automation card to execute it immediately, regardless of its schedule. The result (success/failure) updates in real-time on the card. Running automations display a glow effect on their card.</p>
+                <p class="docs-text"><strong>Stall detection</strong>: If an automation action runs for more than 2 hours without completing, it is automatically flagged as stalled and terminated to prevent resource leaks.</p>
                 <p class="docs-text">The Dashboard activity feed also logs every automation execution with timestamps, so you can review the full history of what ran and when.</p>
             </div>
             <div class="docs-subsection" id="auto-system">
@@ -619,7 +651,7 @@ const DOCS_SECTIONS = [
             </div>
             <div class="docs-subsection" id="lib-enhanced">
                 <h3 class="docs-subsection-title">Enhanced Library Manager</h3>
-                <p class="docs-text">Toggle <strong>Enhanced</strong> on any artist's detail page to access the professional library management tool:</p>
+                <p class="docs-text">Toggle <strong>Enhanced</strong> on any artist's detail page to access the professional library management tool. This view is <strong>admin-only</strong> &mdash; non-admin profiles see the Standard view only.</p>
                 <ul class="docs-list">
                     <li><strong>Accordion layout</strong> &mdash; Albums as expandable rows showing full track tables</li>
                     <li><strong>Inline editing</strong> &mdash; Click any track title, track number, or BPM to edit in place (Enter saves, Escape cancels)</li>
@@ -752,11 +784,12 @@ const DOCS_SECTIONS = [
                     <thead><tr><th>Key</th><th>Action</th></tr></thead>
                     <tbody>
                         <tr><td><span class="docs-kbd">Space</span></td><td>Play / Pause</td></tr>
-                        <tr><td><span class="docs-kbd">&#x2192;</span></td><td>Next track</td></tr>
-                        <tr><td><span class="docs-kbd">&#x2190;</span></td><td>Previous track</td></tr>
+                        <tr><td><span class="docs-kbd">&#x2192;</span></td><td>Seek forward / Next track</td></tr>
+                        <tr><td><span class="docs-kbd">&#x2190;</span></td><td>Seek backward / Previous track</td></tr>
                         <tr><td><span class="docs-kbd">&#x2191;</span></td><td>Volume up</td></tr>
                         <tr><td><span class="docs-kbd">&#x2193;</span></td><td>Volume down</td></tr>
                         <tr><td><span class="docs-kbd">M</span></td><td>Mute / Unmute</td></tr>
+                        <tr><td><span class="docs-kbd">Escape</span></td><td>Close Now Playing modal</td></tr>
                     </tbody>
                 </table>
                 <p class="docs-text"><strong>Media Session API</strong> &mdash; SoulSync integrates with your OS media controls (lock screen, system tray) for play/pause, next/previous, and seek.</p>
@@ -778,7 +811,7 @@ const DOCS_SECTIONS = [
         content: () => `
             <div class="docs-subsection" id="set-services">
                 <h3 class="docs-subsection-title">Service Credentials</h3>
-                <p class="docs-text">Configure credentials for each external service. All fields are saved to your local config &mdash; nothing is sent to external servers except during actual API calls. Each service has a <strong>Test Connection</strong> button to verify your credentials are working.</p>
+                <p class="docs-text">Configure credentials for each external service. All fields are saved to your local database and <strong>encrypted at rest</strong> using a Fernet key generated on first launch. Nothing is sent to external servers except during actual API calls. Each service has a <strong>Test Connection</strong> button to verify your credentials are working.</p>
                 <ul class="docs-list">
                     <li><strong>Spotify</strong> &mdash; Client ID + Secret from developer.spotify.com, then click Authenticate to complete OAuth flow</li>
                     <li><strong>Soulseek (slskd)</strong> &mdash; Your slskd instance URL + API key</li>
@@ -801,6 +834,7 @@ const DOCS_SECTIONS = [
                     </tbody>
                 </table>
                 <p class="docs-text">The media player streams audio directly from your connected server &mdash; tracks play through your Plex, Jellyfin, or Navidrome instance without needing local file access.</p>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Navidrome users:</strong> If artist images are broken after upgrading, use the <strong>Fix Navidrome URLs</strong> tool in Settings to convert old image URL formats to the correct Subsonic API format.</div></div>
             </div>
             <div class="docs-subsection" id="set-download">
                 <h3 class="docs-subsection-title">Download Settings</h3>
@@ -809,8 +843,8 @@ const DOCS_SECTIONS = [
                     <li><strong>Download Path</strong> &mdash; Where files are initially downloaded and processed</li>
                     <li><strong>Transfer Path</strong> &mdash; Where processed files are moved after tagging and organization. Should point to your media server's monitored folder.</li>
                     <li><strong>Staging Path</strong> &mdash; Folder for the Import feature (files placed here appear on the Import page)</li>
-                    <li><strong>iTunes Country</strong> &mdash; Storefront region for iTunes/Apple Music lookups (US, GB, FR, JP, etc.). Changes apply immediately to all searches without restarting.</li>
-                    <li><strong>Lossy Copy</strong> &mdash; When enabled, creates a lower-bitrate copy (MP3) of every downloaded file alongside the original. Useful for syncing to mobile devices or streaming servers with bandwidth constraints. The copy is placed in a configurable output folder.</li>
+                    <li><strong>iTunes Country</strong> &mdash; Storefront region for iTunes/Apple Music lookups (US, GB, FR, JP, etc.). Changes apply immediately to all searches without restarting. ID-based lookups automatically try up to 10 regional storefronts as fallback when the primary country returns no results.</li>
+                    <li><strong>Lossy Copy</strong> &mdash; When enabled, creates a lower-bitrate MP3 copy of every downloaded file. Configure the output bitrate (default 320kbps) and output folder. Optionally delete the original lossless file after creating the lossy copy. Useful for syncing to mobile devices or streaming servers with bandwidth constraints.</li>
                     <li><strong>Content Filtering</strong> &mdash; Toggle explicit content filtering to control whether explicit tracks appear in search results and downloads.</li>
                 </ul>
             </div>
@@ -836,9 +870,10 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Other Settings</h3>
                 <ul class="docs-list">
                     <li><strong>YouTube Configuration</strong> &mdash; Select cookies browser (Chrome, Firefox, Edge) for bot detection bypass, set download delay (seconds between requests), and minimum confidence threshold for title matching</li>
-                    <li><strong>UI Appearance</strong> &mdash; Custom accent colors with persistent preference. Changes apply immediately across the entire interface.</li>
+                    <li><strong>UI Appearance</strong> &mdash; Custom accent colors with persistent preference. Changes apply immediately across the entire interface. Choose from different <strong>sidebar visualizer types</strong> for the media player audio visualization.</li>
                     <li><strong>API Keys</strong> &mdash; Generate and manage API keys for the REST API. Keys use a <code>sk_</code> prefix and are shown once at creation &mdash; only a SHA-256 hash is stored for security.</li>
                     <li><strong>Path Templates</strong> &mdash; Configure how files are organized in your library. The default template is <code>Artist/Album/TrackNum - Title.ext</code></li>
+                    <li><strong>Log Level</strong> &mdash; Set the application log verbosity (DEBUG, INFO, WARNING, ERROR) from the Settings page. Changes take effect immediately without restart. Useful for troubleshooting issues.</li>
                     <li><strong>WebSocket</strong> &mdash; Real-time status updates are delivered via WebSocket. All downloads, enrichment progress, scan status, and system events push to the UI without polling.</li>
                 </ul>
             </div>
@@ -850,7 +885,9 @@ const DOCS_SECTIONS = [
         icon: '/static/settings.png',
         children: [
             { id: 'prof-overview', title: 'How Profiles Work' },
-            { id: 'prof-manage', title: 'Managing Profiles' }
+            { id: 'prof-manage', title: 'Managing Profiles' },
+            { id: 'prof-permissions', title: 'Permissions & Page Access' },
+            { id: 'prof-home', title: 'Home Page & Preferences' }
         ],
         content: () => `
             <div class="docs-subsection" id="prof-overview">
@@ -862,6 +899,8 @@ const DOCS_SECTIONS = [
                     <li>Discovery pool and similar artists</li>
                     <li>Mirrored playlists</li>
                     <li>Queue and listening state</li>
+                    <li>Home page preference</li>
+                    <li>Page access permissions (admin-controlled)</li>
                 </ul>
                 <p class="docs-text"><strong>Shared across all profiles:</strong> Music library (files and metadata), service credentials, settings, and automations.</p>
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>Single-user installs see no changes until a second profile is created. The first profile is automatically the admin.</div></div>
@@ -869,11 +908,33 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="prof-manage">
                 <h3 class="docs-subsection-title">Managing Profiles</h3>
                 <ul class="docs-list">
-                    <li>Open the profile picker from the sidebar indicator</li>
-                    <li>Click <strong>Manage Profiles</strong> to create, edit, or delete profiles</li>
+                    <li>Open the profile picker by clicking the <strong>profile avatar</strong> in the sidebar header</li>
+                    <li>Admin users see <strong>Manage Profiles</strong> to create, edit, or delete profiles</li>
+                    <li>Non-admin users see <strong>My Profile</strong> to edit their own name and home page</li>
                     <li>Each profile can have a custom name, avatar (image URL or color), and optional 6-digit PIN</li>
-                    <li>Set an <strong>Admin PIN</strong> when multiple profiles exist to protect management</li>
+                    <li>Set an <strong>Admin PIN</strong> when multiple profiles exist to protect the admin account</li>
                     <li>Profile 1 (admin) cannot be deleted</li>
+                </ul>
+            </div>
+            <div class="docs-subsection" id="prof-permissions">
+                <h3 class="docs-subsection-title">Permissions & Page Access</h3>
+                <p class="docs-text">Admins can control what each profile has access to. When creating or editing a non-admin profile:</p>
+                <ul class="docs-list">
+                    <li><strong>Page Access</strong> &mdash; Check or uncheck which sidebar pages the profile can see (Dashboard, Sync, Search, Discover, Artists, Automations, Library, Import). Help & Docs is always accessible. Settings is admin-only.</li>
+                    <li><strong>Can Download Music</strong> &mdash; Toggle whether the profile can initiate downloads. When disabled, all download buttons are hidden and the backend blocks download API calls with a 403 error.</li>
+                    <li><strong>Enhanced Library Manager</strong> &mdash; The Enhanced view toggle on artist detail pages is only available to admin profiles. Non-admin users see the Standard view only.</li>
+                </ul>
+                <p class="docs-text">If the admin removes a page that was set as a user's home page, the home page automatically resets. Navigation guards prevent users from accessing restricted pages even via direct URL or browser history.</p>
+                <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Existing profiles created before permissions were added have full access to all pages by default. The admin must explicitly restrict access per profile.</div></div>
+            </div>
+            <div class="docs-subsection" id="prof-home">
+                <h3 class="docs-subsection-title">Home Page & Preferences</h3>
+                <p class="docs-text">Each user can choose which page they land on when they log in:</p>
+                <ul class="docs-list">
+                    <li><strong>Admin profiles</strong> default to the <strong>Dashboard</strong></li>
+                    <li><strong>Non-admin profiles</strong> default to the <strong>Discover</strong> page &mdash; a friendlier landing page for non-technical users</li>
+                    <li>Any user can change their home page from their profile settings (click profile avatar &rarr; My Profile)</li>
+                    <li>The home page selector only shows pages the user has access to</li>
                 </ul>
             </div>
         `
@@ -914,7 +975,7 @@ const DOCS_SECTIONS = [
                         <tr><td><code>POST /api/database/backup</code></td><td>Create a backup</td></tr>
                     </tbody>
                 </table>
-                <p class="docs-text">The full API has 90+ endpoints covering library, downloads, playlists, automations, settings, and more. Use a reverse proxy (Nginx, Caddy, Traefik) for external access with HTTPS.</p>
+                <p class="docs-text">The full API has 200+ endpoints covering library, downloads, playlists, automations, profiles, settings, and more. Use a reverse proxy (Nginx, Caddy, Traefik) for external access with HTTPS.</p>
             </div>
             <div class="docs-subsection" id="api-websocket">
                 <h3 class="docs-subsection-title">WebSocket Events</h3>
