@@ -12,6 +12,7 @@ const DOCS_SECTIONS = [
             { id: 'gs-first-setup', title: 'First-Time Setup' },
             { id: 'gs-connecting', title: 'Connecting Services' },
             { id: 'gs-interface', title: 'Understanding the Interface' },
+            { id: 'gs-folders', title: 'Folder Setup (Downloads & Transfer)' },
             { id: 'gs-docker', title: 'Docker & Deployment' }
         ],
         content: () => `
@@ -75,6 +76,181 @@ const DOCS_SECTIONS = [
                 </ul>
                 <p class="docs-text"><strong>Version & Updates</strong>: Click the version number in the sidebar footer to open the <strong>What's New</strong> modal, which shows detailed release notes for every feature and fix. SoulSync automatically checks for updates by comparing your running version against the latest GitHub commit. If an update is available, a banner appears in the modal. Docker users are notified when a new image has been pushed to the repo.</p>
             </div>
+            <div class="docs-subsection" id="gs-folders">
+                <h3 class="docs-subsection-title">Folder Setup (Downloads & Transfer)</h3>
+                <p class="docs-text">SoulSync uses <strong>three folders</strong> to manage your music files. <strong>Most setup issues come from incorrect folder configuration</strong> &mdash; especially in Docker. Read this section carefully.</p>
+
+                <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div>
+                    <strong>Docker users &mdash; there are TWO steps, not one!</strong><br><br>
+                    <strong>Step 1:</strong> Map your volumes in <code>docker-compose.yml</code> &mdash; this makes folders <em>accessible</em> to the container.<br>
+                    <strong>Step 2:</strong> Configure the paths in <strong>SoulSync Settings &rarr; Download Settings</strong> &mdash; this tells the app <em>where to look</em>.<br><br>
+                    Setting up docker-compose volumes alone is <strong>not enough</strong>. You must also configure the app settings. If you skip Step 2, downloads will complete but nothing will transfer, post-processing will fail silently, and tracks will re-download repeatedly.
+                </div></div>
+
+                <h4>The Three Folders</h4>
+                <table class="docs-table">
+                    <thead><tr><th>Folder</th><th>Default (Docker)</th><th>Purpose</th></tr></thead>
+                    <tbody>
+                        <tr><td><strong>Download Path</strong></td><td><code>/app/downloads</code></td><td>Where slskd/YouTube/Tidal initially saves downloaded files. This is a <strong>temporary staging area</strong> &mdash; files should not stay here permanently.</td></tr>
+                        <tr><td><strong>Transfer Path</strong></td><td><code>/app/Transfer</code></td><td>Where post-processed files are moved after tagging and renaming. This <strong>must</strong> be the folder your media server (Plex/Jellyfin/Navidrome) monitors.</td></tr>
+                        <tr><td><strong>Staging Path</strong></td><td><code>/app/Staging</code></td><td>For the Import feature only. Drop audio files here to import them into your library via the Import page.</td></tr>
+                    </tbody>
+                </table>
+
+                <h4>How Files Flow</h4>
+                <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>
+                    <strong>The complete download-to-library pipeline:</strong><br><br>
+                    <strong>1.</strong> You search for music in SoulSync and click download<br>
+                    <strong>2.</strong> SoulSync tells slskd to download the file &rarr; slskd saves it to its download folder<br>
+                    <strong>3.</strong> SoulSync detects the completed download in the <strong>Download Path</strong><br>
+                    <strong>4.</strong> Post-processing runs: AcoustID verification &rarr; metadata tagging &rarr; cover art embedding &rarr; lyrics fetch<br>
+                    <strong>5.</strong> File is renamed and organized (e.g., <code>Artist/Album/01 - Title.flac</code>)<br>
+                    <strong>6.</strong> File is moved from Download Path &rarr; <strong>Transfer Path</strong><br>
+                    <strong>7.</strong> Media server scan is triggered &rarr; file appears in your library<br><br>
+                    <strong>If any step fails, the pipeline stops.</strong> The most common failure point is Step 3 &mdash; SoulSync can't find the file because the Download Path doesn't match where slskd actually saved it.
+                </div></div>
+
+                <h4>Docker Setup: The Full Picture</h4>
+                <p class="docs-text">In Docker, every app runs in its own isolated container with its own filesystem. <strong>Volume mounts</strong> in docker-compose create "bridges" between your host folders and the container. But SoulSync doesn't automatically know where those bridges go &mdash; you have to tell it via the Settings page.</p>
+
+                <p class="docs-text">Here's what happens with a properly configured setup:</p>
+
+                <div class="docs-callout info"><span class="docs-callout-icon">&#x1F5C2;&#xFE0F;</span><div>
+                    <strong>HOST (your server)</strong><br>
+                    <code style="color: var(--accent-primary);">/mnt/data/slskd-downloads/</code> &larr; where slskd saves files on your server<br>
+                    <code style="color: #50e050;">/mnt/media/music/</code> &larr; where Plex/Jellyfin/Navidrome watches<br><br>
+                    <strong>docker-compose.yml (the bridges)</strong><br>
+                    <code style="color: var(--accent-primary);">/mnt/data/slskd-downloads</code>:<code>/app/downloads</code><br>
+                    <code style="color: #50e050;">/mnt/media/music</code>:<code>/app/Transfer</code><br><br>
+                    <strong>CONTAINER (what SoulSync sees)</strong><br>
+                    <code>/app/downloads/</code> &larr; same files as <code style="color: var(--accent-primary);">/mnt/data/slskd-downloads/</code><br>
+                    <code>/app/Transfer/</code> &larr; same files as <code style="color: #50e050;">/mnt/media/music/</code><br><br>
+                    <strong>SoulSync Settings (what you enter in the app)</strong><br>
+                    Download Path: <code>/app/downloads</code><br>
+                    Transfer Path: <code>/app/Transfer</code>
+                </div></div>
+
+                <h4>The #1 Mistake: Not Configuring App Settings</h4>
+                <p class="docs-text">Many users set up their docker-compose volumes correctly but <strong>never open SoulSync Settings to configure the paths</strong>. The app defaults may not match your volume mounts. You must go to <strong>Settings &rarr; Download Settings</strong> and verify that:</p>
+                <ul class="docs-list">
+                    <li><strong>Download Path</strong> matches where slskd puts completed files <em>inside the container</em> (usually <code>/app/downloads</code>)</li>
+                    <li><strong>Transfer Path</strong> matches where you mounted your media library <em>inside the container</em> (usually <code>/app/Transfer</code>)</li>
+                </ul>
+                <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div>
+                    <strong>"I set up my docker-compose but nothing transfers"</strong> &mdash; this almost always means the app settings weren't configured. Docker-compose makes the folders accessible. The app settings tell SoulSync where to look. <strong>Both are required.</strong>
+                </div></div>
+
+                <h4>The #2 Mistake: Download Path Doesn't Match slskd</h4>
+                <p class="docs-text">The <strong>Download Path</strong> in SoulSync must point to the <strong>exact same physical folder</strong> where slskd saves its completed downloads. If they don't match, SoulSync can't find the files and post-processing fails silently.</p>
+
+                <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>
+                    <strong>Both SoulSync and slskd must see the same download folder.</strong><br><br>
+                    <strong>slskd container:</strong><br>
+                    &bull; slskd downloads to <code>/downloads/complete</code> inside its own container<br>
+                    &bull; slskd docker-compose: <code>- /mnt/data/slskd-downloads:/downloads/complete</code><br><br>
+                    <strong>SoulSync container:</strong><br>
+                    &bull; SoulSync docker-compose: <code>- /mnt/data/slskd-downloads:/app/downloads</code> (same host folder!)<br>
+                    &bull; SoulSync Setting: Download Path = <code>/app/downloads</code><br><br>
+                    <strong>The key:</strong> both containers mount the <strong>same host folder</strong> (<code>/mnt/data/slskd-downloads</code>). The container-internal paths can be different &mdash; that's fine. What matters is they point to the same physical directory on your server.
+                </div></div>
+
+                <h4>The #3 Mistake: Using Host Paths in Settings</h4>
+                <p class="docs-text">If you're running in Docker, the paths you enter in SoulSync's Settings page must be <strong>container-side paths</strong> (the right side of the <code>:</code> in your volume mount), <strong>not</strong> host paths (the left side). SoulSync runs inside the container and can only see its own filesystem.</p>
+
+                <table class="docs-table">
+                    <thead><tr><th></th><th>Setting Value</th><th>Result</th></tr></thead>
+                    <tbody>
+                        <tr><td>&#x2705;</td><td><code>/app/downloads</code></td><td>Correct &mdash; this is the container-side path (right side of <code>:</code>)</td></tr>
+                        <tr><td>&#x2705;</td><td><code>/app/Transfer</code></td><td>Correct &mdash; this is the container-side path (right side of <code>:</code>)</td></tr>
+                        <tr><td>&#x274C;</td><td><code>/mnt/data/slskd-downloads</code></td><td>Wrong &mdash; this is the host path (left side of <code>:</code>), doesn't exist inside the container</td></tr>
+                        <tr><td>&#x274C;</td><td><code>/mnt/music</code></td><td>Wrong &mdash; host path, the container can't see this</td></tr>
+                        <tr><td>&#x274C;</td><td><code>./downloads</code></td><td>Wrong &mdash; relative path, use the full container path <code>/app/downloads</code></td></tr>
+                    </tbody>
+                </table>
+
+                <h4>Transfer Path = Media Server's Music Folder</h4>
+                <p class="docs-text">Your Transfer Path must ultimately point to the same physical directory your media server monitors. This is how new music appears in Plex/Jellyfin/Navidrome.</p>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>
+                    <strong>Example with Plex:</strong><br><br>
+                    &bull; Plex monitors <code>/mnt/media/music</code> on the host<br>
+                    &bull; SoulSync docker-compose: <code>- /mnt/media/music:/app/Transfer:rw</code><br>
+                    &bull; SoulSync Settings: Transfer Path = <code>/app/Transfer</code><br><br>
+                    <strong>Result:</strong> SoulSync writes to <code>/app/Transfer</code> inside the container &rarr; appears at <code>/mnt/media/music</code> on the host &rarr; Plex sees it and adds it to your library.
+                </div></div>
+
+                <h4>Complete Docker Compose Example (slskd + SoulSync)</h4>
+                <p class="docs-text">Here's a working example showing both slskd and SoulSync configured to share the same download folder:</p>
+                <div class="docs-callout info"><span class="docs-callout-icon">&#x1F4CB;</span><div>
+                    <code><strong># docker-compose.yml</strong></code><br>
+                    <code>services:</code><br>
+                    <code>&nbsp;&nbsp;slskd:</code><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;image: slskd/slskd:latest</code><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;volumes:</code><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: var(--accent-primary);"># slskd saves completed downloads here</span></code><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- /mnt/data/slskd-downloads:/downloads</code><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- /docker/slskd/config:/app</code><br><br>
+                    <code>&nbsp;&nbsp;soulsync:</code><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;image: boulderbadgedad/soulsync:latest</code><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;volumes:</code><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: var(--accent-primary);"># SAME host folder as slskd &mdash; this is the key!</span></code><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- /mnt/data/slskd-downloads:/app/downloads</code><br><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #50e050;"># Your media server's music folder</span></code><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- /mnt/media/music:/app/Transfer:rw</code><br><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #888;"># Config, logs, staging, database</span></code><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- /docker/soulsync/config:/app/config</code><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- /docker/soulsync/logs:/app/logs</code><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- /docker/soulsync/staging:/app/Staging</code><br>
+                    <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- soulsync_database:/app/data</code><br><br>
+                    <code><strong># Then in SoulSync Settings:</strong></code><br>
+                    <code># Download Path: /app/downloads</code><br>
+                    <code># Transfer Path: /app/Transfer</code>
+                </div></div>
+
+                <h4>Setup Checklist</h4>
+                <p class="docs-text">Go through every item. If you miss any single one, the pipeline will break:</p>
+                <ol class="docs-steps">
+                    <li><strong>slskd download folder is mounted in SoulSync's container</strong> &mdash; Both containers must mount the <strong>same host directory</strong>. The host paths (left side of <code>:</code>) must be identical.</li>
+                    <li><strong>Media server's music folder is mounted as Transfer</strong> &mdash; Mount the folder your Plex/Jellyfin/Navidrome monitors as <code>/app/Transfer</code> with <code>:rw</code> permissions.</li>
+                    <li><strong>SoulSync Settings are configured</strong> &mdash; Open <strong>Settings &rarr; Download Settings</strong>. Set Download Path to <code>/app/downloads</code> and Transfer Path to <code>/app/Transfer</code> (or whatever container paths you used on the right side of <code>:</code>).</li>
+                    <li><strong>slskd URL and API key are set</strong> &mdash; In <strong>Settings &rarr; Soulseek</strong>, enter your slskd URL (e.g., <code>http://slskd:5030</code> or <code>http://host.docker.internal:5030</code>) and API key.</li>
+                    <li><strong>PUID/PGID match your host user</strong> &mdash; Run <code>id</code> on your host. Set those values in docker-compose environment variables. Both slskd and SoulSync should use the same PUID/PGID.</li>
+                    <li><strong>Test with one track</strong> &mdash; Download a single track. Watch the logs. If it downloads but doesn't transfer, the paths are wrong.</li>
+                </ol>
+
+                <h4>Permissions</h4>
+                <p class="docs-text">If paths are correct but files still won't transfer, it's usually a permissions issue. SoulSync needs <strong>read + write</strong> access to all three folders.</p>
+                <ul class="docs-list">
+                    <li>Set <code>PUID</code> and <code>PGID</code> in your docker-compose to match the user that owns your music folders (run <code>id</code> on your host to find your UID/GID &mdash; usually 1000/1000)</li>
+                    <li>Ensure the Transfer folder is writable: <code>chmod -R 755 /mnt/media/music</code> (use your actual host path)</li>
+                    <li>If using multiple containers (slskd + SoulSync), both must use the <strong>same PUID/PGID</strong> so file permissions are compatible</li>
+                    <li>NFS/CIFS/network mounts may need additional permissions &mdash; test with a local folder first to isolate the issue</li>
+                </ul>
+
+                <h4>Verifying Your Setup</h4>
+                <p class="docs-text">Run these commands to confirm everything is wired up correctly:</p>
+                <ol class="docs-steps">
+                    <li><strong>Verify downloads are visible:</strong> <code>docker exec soulsync-webui ls -la /app/downloads</code> &mdash; you should see slskd's downloaded files here. If empty or "No such file or directory", your volume mount is wrong.</li>
+                    <li><strong>Verify Transfer is writable:</strong> <code>docker exec soulsync-webui touch /app/Transfer/test.txt && echo "OK"</code> &mdash; then check that <code>test.txt</code> appears in your media server's music folder on the host. Clean up after: <code>rm /mnt/media/music/test.txt</code></li>
+                    <li><strong>Verify permissions:</strong> <code>docker exec soulsync-webui id</code> &mdash; the uid and gid should match your PUID/PGID values.</li>
+                    <li><strong>Verify app settings:</strong> Open SoulSync Settings &rarr; Download Settings. Confirm the Download Path and Transfer Path show container paths (like <code>/app/downloads</code>), not host paths.</li>
+                    <li><strong>Test a single download:</strong> Search for a track, download it, and watch the logs. Enable DEBUG logging in Settings for full detail. Check <code>logs/app.log</code> for any path errors.</li>
+                </ol>
+
+                <h4>Troubleshooting</h4>
+                <table class="docs-table">
+                    <thead><tr><th>Symptom</th><th>Likely Cause</th><th>Fix</th></tr></thead>
+                    <tbody>
+                        <tr><td>Files download but never transfer</td><td>App settings not configured &mdash; docker-compose volumes are set but SoulSync Settings still have defaults or wrong paths</td><td>Open <strong>Settings &rarr; Download Settings</strong> and set Download Path + Transfer Path to your <strong>container-side</strong> mount paths.</td></tr>
+                        <tr><td>Post-processing log is empty</td><td>SoulSync can't find the downloaded file at the expected path &mdash; the Download Path in Settings doesn't match where slskd actually saves files inside the container</td><td>Run <code>docker exec soulsync-webui ls /app/downloads</code> to see what's actually there. The Download Path in Settings must match this path exactly.</td></tr>
+                        <tr><td>Same tracks downloading multiple times</td><td>Post-processing fails so SoulSync thinks the track was never downloaded successfully. On resume, it tries again.</td><td>Fix the folder paths first. Once post-processing works, files move to Transfer and SoulSync knows they exist.</td></tr>
+                        <tr><td>Files not renamed properly</td><td>Post-processing isn't running (path mismatch) or file organization is disabled in Settings</td><td>Verify File Organization is enabled in <strong>Settings &rarr; Processing & Organization</strong>. Fix Download Path first.</td></tr>
+                        <tr><td>Permission denied in logs</td><td>Container user can't write to the Transfer folder on the host</td><td>Set PUID/PGID to match the host user that owns the music folder. Run <code>chmod -R 755</code> on the Transfer host folder.</td></tr>
+                        <tr><td>Media server doesn't see new files</td><td>Transfer Path doesn't map to the folder your media server monitors</td><td>Ensure the <strong>host path</strong> in your SoulSync volume mount (<code>/mnt/media/music:/app/Transfer</code>) is the same folder Plex/Jellyfin/Navidrome watches.</td></tr>
+                        <tr><td>slskd downloads work fine on their own but not through SoulSync</td><td>slskd's download folder and SoulSync's Download Path point to different physical locations</td><td>Both containers must mount the <strong>same host directory</strong>. Check the left side of <code>:</code> in both docker-compose volume entries &mdash; they must match.</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Still stuck?</strong> Enable DEBUG logging in Settings, download a single track, and check <code>logs/app.log</code>. The post-processing log will show exactly where the file pipeline breaks &mdash; whether it's a path not found, permission denied, or verification failure. If the post-processing log is empty, the issue is almost certainly a path mismatch (SoulSync never found the file to process).</div></div>
+            </div>
             <div class="docs-subsection" id="gs-docker">
                 <h3 class="docs-subsection-title">Docker & Deployment</h3>
                 <p class="docs-text">SoulSync runs in Docker with the following environment variables:</p>
@@ -86,8 +262,21 @@ const DOCS_SECTIONS = [
                         <tr><td><code>SOULSYNC_COMMIT_SHA</code></td><td>(auto)</td><td>Baked in at Docker build time. Used for update detection &mdash; compares against GitHub's latest commit.</td></tr>
                     </tbody>
                 </table>
-                <p class="docs-text"><strong>Key volume mounts</strong>: Map your download path, transfer path (media server's monitored folder), and staging path to host directories. Ensure the paths configured in SoulSync Settings match the container-side mount points.</p>
-                <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div>If using slskd in a separate container, make sure both containers can access the same download directory. A common issue is slskd writing to a path that SoulSync can't read because the volume mounts don't align. Both containers must see the same files at the same internal path.</div></div>
+                <h4>Key Volume Mounts</h4>
+                <p class="docs-text">Your docker-compose <code>volumes</code> section must include these mappings. The left side is your host path, the right side is where SoulSync sees it inside the container:</p>
+                <table class="docs-table">
+                    <thead><tr><th>Mount</th><th>Container Path</th><th>What Goes Here</th></tr></thead>
+                    <tbody>
+                        <tr><td>slskd downloads</td><td><code>/app/downloads</code></td><td>Must be the same physical folder slskd writes completed downloads to. Both containers mount the same host directory.</td></tr>
+                        <tr><td>Music library</td><td><code>/app/Transfer</code></td><td>Your media server's monitored music folder. Add <code>:rw</code> to ensure write access.</td></tr>
+                        <tr><td>Staging</td><td><code>/app/Staging</code></td><td>(Optional) For the Import feature &mdash; drop files here to import them.</td></tr>
+                        <tr><td>Config</td><td><code>/app/config</code></td><td>Stores <code>config.json</code> and encryption key. Persists settings across restarts.</td></tr>
+                        <tr><td>Logs</td><td><code>/app/logs</code></td><td>Application logs including <code>app.log</code> and <code>post-processing.log</code>.</td></tr>
+                        <tr><td>Database</td><td><code>/app/data</code></td><td><strong>Must use a named volume</strong> (not a host path). Host path mounts can cause database corruption.</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div><strong>slskd + SoulSync shared downloads:</strong> If slskd runs in a separate container, both containers must mount the <strong>same host directory</strong> for downloads. A common issue is slskd writing to a path that SoulSync can't read because the volume mounts don't align. Both containers must see the same files. See the <strong>Folder Setup</strong> section above for detailed examples.</div></div>
+                <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div><strong>Database volume:</strong> Always use a named volume for the database (<code>soulsync_database:/app/data</code>), never a host path mount. Host path mounts can cause SQLite corruption, especially on networked file systems or when permissions don't align.</div></div>
                 <p class="docs-text"><strong>Podman / Rootless Docker</strong>: SoulSync supports Podman rootless (keep-id) and rootless Docker setups. The entrypoint handles permission alignment automatically.</p>
                 <p class="docs-text"><strong>Config migration</strong>: When upgrading from older versions, SoulSync automatically migrates settings from <code>config.json</code> to the database on first startup. No manual migration is needed.</p>
             </div>
@@ -840,13 +1029,14 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Download Settings</h3>
                 <ul class="docs-list">
                     <li><strong>Download Source Mode</strong> &mdash; Soulseek, YouTube, Tidal, or Hybrid. Hybrid tries your primary source first, then falls back to alternates. See <em>Download Sources</em> in the Music Downloads section for details.</li>
-                    <li><strong>Download Path</strong> &mdash; Where files are initially downloaded and processed</li>
-                    <li><strong>Transfer Path</strong> &mdash; Where processed files are moved after tagging and organization. Should point to your media server's monitored folder.</li>
-                    <li><strong>Staging Path</strong> &mdash; Folder for the Import feature (files placed here appear on the Import page)</li>
+                    <li><strong>Download Path</strong> &mdash; The folder where files are initially downloaded. This <strong>must match</strong> the folder your download source (slskd) writes to. In Docker, this is the container-side mount point (e.g., <code>/app/downloads</code>), not the host path. SoulSync monitors this folder for completed downloads to begin post-processing.</li>
+                    <li><strong>Transfer Path</strong> &mdash; The final destination for processed music files. After tagging, renaming, and organizing, files are moved here. This <strong>must</strong> point to your media server's monitored music folder (the folder Plex/Jellyfin/Navidrome watches for new content). In Docker, use the container-side path (e.g., <code>/app/Transfer</code>).</li>
+                    <li><strong>Staging Path</strong> &mdash; Folder for the Import feature (files placed here appear on the Import page). Separate from the download/transfer pipeline.</li>
                     <li><strong>iTunes Country</strong> &mdash; Storefront region for iTunes/Apple Music lookups (US, GB, FR, JP, etc.). Changes apply immediately to all searches without restarting. ID-based lookups automatically try up to 10 regional storefronts as fallback when the primary country returns no results.</li>
                     <li><strong>Lossy Copy</strong> &mdash; When enabled, creates a lower-bitrate MP3 copy of every downloaded file. Configure the output bitrate (default 320kbps) and output folder. Optionally delete the original lossless file after creating the lossy copy. Useful for syncing to mobile devices or streaming servers with bandwidth constraints.</li>
                     <li><strong>Content Filtering</strong> &mdash; Toggle explicit content filtering to control whether explicit tracks appear in search results and downloads.</li>
                 </ul>
+                <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div><strong>Docker users:</strong> Always use container-side paths in these settings (e.g., <code>/app/downloads</code>, <code>/app/Transfer</code>). Never use host paths like <code>/mnt/music</code> &mdash; the container can't access those. Your docker-compose <code>volumes</code> section is where host paths are mapped to container paths. See <strong>Getting Started &rarr; Folder Setup</strong> for a complete walkthrough.</div></div>
             </div>
             <div class="docs-subsection" id="set-processing">
                 <h3 class="docs-subsection-title">Processing & Organization</h3>
@@ -1100,7 +1290,7 @@ function initializeDocsPage() {
     });
 
     // Search filter
-    const searchInput = document.getElementById('docs-search');
+    const searchInput = document.getElementById('docs-search-input');
     if (searchInput) {
         searchInput.addEventListener('input', () => {
             const q = searchInput.value.toLowerCase().trim();
@@ -1153,6 +1343,14 @@ function initializeDocsPage() {
                 }
             });
 
+            // Default to first section if nothing scrolled past threshold yet
+            if (!activeSection && DOCS_SECTIONS.length) {
+                activeSection = DOCS_SECTIONS[0].id;
+                if (DOCS_SECTIONS[0].children && DOCS_SECTIONS[0].children.length) {
+                    activeChild = DOCS_SECTIONS[0].children[0].id;
+                }
+            }
+
             // Update nav highlighting
             nav.querySelectorAll('.docs-nav-section-title').forEach(t => {
                 const isActive = t.dataset.target === activeSection;
@@ -1168,7 +1366,8 @@ function initializeDocsPage() {
         });
     }
 
-    // Auto-expand first section
+    // Reset scroll position and auto-expand first section
+    if (docsContent) docsContent.scrollTop = 0;
     const firstTitle = nav.querySelector('.docs-nav-section-title');
     if (firstTitle) {
         firstTitle.classList.add('expanded', 'active');
