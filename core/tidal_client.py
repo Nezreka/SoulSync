@@ -209,9 +209,15 @@ class TidalClient:
             if not artists:
                 artists = ['Unknown Artist']
 
+            # Append version info (e.g. "Bloom remix") to title if present
+            track_title = attributes.get('title', 'Unknown Track')
+            track_version = attributes.get('version') or ''
+            if track_version and track_version.lower() not in track_title.lower():
+                track_title = f"{track_title} ({track_version})"
+
             return Track(
                 id=str(track_id),
-                name=attributes.get('title', 'Unknown Track'),
+                name=track_title,
                 artists=artists,
                 duration_ms=attributes.get('duration', 0) * 1000 if attributes.get('duration') else 0,  # Convert to ms
                 external_urls={'tidal': f"https://tidal.com/browse/track/{track_id}"},
@@ -979,9 +985,15 @@ class TidalClient:
             elif 'artist' in item:
                 artists = [item['artist'].get('name', 'Unknown')]
             
+            # Append version info (e.g. "Bloom remix") to title if present
+            track_title = item.get('title', 'Unknown Track')
+            track_version = item.get('version') or ''
+            if track_version and track_version.lower() not in track_title.lower():
+                track_title = f"{track_title} ({track_version})"
+
             track = Track(
                 id=str(track_id),
-                name=item.get('title', 'Unknown Track'),
+                name=track_title,
                 artists=artists,
                 album=item.get('album', {}).get('title', 'Unknown Album'),
                 duration_ms=item.get('duration', 0) * 1000,  # Convert seconds to ms
