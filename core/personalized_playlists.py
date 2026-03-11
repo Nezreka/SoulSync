@@ -860,7 +860,7 @@ class PersonalizedPlaylistsService:
         4. Build playlist from tracks in those albums (max 50 tracks)
 
         Args:
-            seed_artist_ids: List of 1-5 Spotify artist IDs
+            seed_artist_ids: List of 1-5 artist IDs (Spotify or iTunes)
             playlist_size: Maximum tracks in final playlist (default: 50)
 
         Returns:
@@ -871,19 +871,17 @@ class PersonalizedPlaylistsService:
                 logger.error(f"Invalid seed artists count: {len(seed_artist_ids)}")
                 return {'tracks': [], 'error': 'Must provide 1-5 seed artists'}
 
-            if not self.spotify_client or not self.spotify_client.is_authenticated():
-                logger.error("Spotify client not available")
-                return {'tracks': [], 'error': 'Spotify not authenticated'}
+            use_spotify = self.spotify_client and self.spotify_client.sp
+            logger.info(f"Building custom playlist from {len(seed_artist_ids)} seed artists (source: {'spotify' if use_spotify else 'itunes'})")
 
-            logger.info(f"Building custom playlist from {len(seed_artist_ids)} seed artists")
-
-            # Step 1: Get similar artists for each seed from database
+            # Step 1: Get similar artists for each seed
             all_similar_artists = []
-            seen_artist_ids = set(seed_artist_ids)  # Don't include seed artists themselves
+            seen_artist_ids = set(seed_artist_ids)
 
             for seed_artist_id in seed_artist_ids:
                 try:
-                    # Get similar artists from database (cached from MusicMap)
+                    # Try database first (cached from MusicMap/watchlist scans)
+                    db_results = []
                     with self.database._get_connection() as conn:
                         cursor = conn.cursor()
                         cursor.execute("""
@@ -893,23 +891,32 @@ class PersonalizedPlaylistsService:
                             ORDER BY similarity_rank ASC
                             LIMIT 10
                         """, (seed_artist_id,))
+                        db_results = cursor.fetchall()
 
-                        rows = cursor.fetchall()
-
-                        for row in rows:
+                    if db_results:
+                        for row in db_results:
                             artist_id = row['similar_artist_spotify_id']
                             artist_name = row['similar_artist_name']
-
-                            if artist_id not in seen_artist_ids:
-                                # Create artist-like object
-                                all_similar_artists.append({
-                                    'id': artist_id,
-                                    'name': artist_name
-                                })
+                            if artist_id and artist_id not in seen_artist_ids:
+                                all_similar_artists.append({'id': artist_id, 'name': artist_name})
                                 seen_artist_ids.add(artist_id)
-
                                 if len(all_similar_artists) >= 25:
                                     break
+                    elif use_spotify:
+                        # Fallback: fetch related artists from Spotify API
+                        logger.info(f"No cached similar artists for {seed_artist_id}, trying Spotify related artists API")
+                        try:
+                            related = self.spotify_client.sp.artist_related_artists(seed_artist_id)
+                            if related and 'artists' in related:
+                                for artist in related['artists'][:10]:
+                                    artist_id = artist['id']
+                                    if artist_id not in seen_artist_ids:
+                                        all_similar_artists.append({'id': artist_id, 'name': artist['name']})
+                                        seen_artist_ids.add(artist_id)
+                                        if len(all_similar_artists) >= 25:
+                                            break
+                        except Exception as e2:
+                            logger.warning(f"Spotify related artists fallback failed for {seed_artist_id}: {e2}")
 
                     if len(all_similar_artists) >= 25:
                         break
@@ -918,38 +925,49 @@ class PersonalizedPlaylistsService:
                     logger.warning(f"Error getting similar artists for {seed_artist_id}: {e}")
                     continue
 
-            logger.info(f"Found {len(all_similar_artists)} similar artists from database")
+            logger.info(f"Found {len(all_similar_artists)} similar artists")
 
-            if not all_similar_artists:
-                return {'tracks': [], 'error': 'No similar artists found'}
+            # Always include seed artists alongside similar artists
+            # so the playlist has tracks from both the selected and discovered artists
+            artists_for_albums = [{'id': sid, 'name': '', 'is_seed': True} for sid in seed_artist_ids]
+            for sa in all_similar_artists[:22]:  # Cap similar to leave room for seeds
+                artists_for_albums.append({**sa, 'is_seed': False})
 
-            # Limit to 25 similar artists
-            similar_artists_to_use = all_similar_artists[:25]
-
-            # Step 2: Get albums from similar artists
+            # Step 2: Get albums from seed + similar artists
             all_albums = []
-            for artist in similar_artists_to_use:
-                try:
-                    albums = self.spotify_client.get_artist_albums(
-                        artist['id'],
-                        album_type='album,single',
-                        limit=10
-                    )
-
-                    if albums:
-                        all_albums.extend(albums)
-
-                    import time
-                    time.sleep(0.3)  # Rate limiting
-
-                except Exception as e:
-                    logger.warning(f"Error getting albums for {artist['name']}: {e}")
-                    continue
+            if use_spotify:
+                for artist in artists_for_albums:
+                    try:
+                        albums = self.spotify_client.get_artist_albums(
+                            artist['id'],
+                            album_type='album,single',
+                            limit=10
+                        )
+                        if albums:
+                            all_albums.extend(albums)
+                        import time
+                        time.sleep(0.3)
+                    except Exception as e:
+                        logger.warning(f"Error getting albums for {artist.get('name', artist['id'])}: {e}")
+                        continue
+            else:
+                from core.itunes_client import iTunesClient
+                itunes = iTunesClient()
+                for artist in artists_for_albums:
+                    try:
+                        albums = itunes.get_artist_albums(artist['id'], limit=10)
+                        if albums:
+                            all_albums.extend(albums)
+                        import time
+                        time.sleep(0.3)
+                    except Exception as e:
+                        logger.warning(f"Error getting albums for {artist.get('name', artist['id'])}: {e}")
+                        continue
 
             logger.info(f"Found {len(all_albums)} total albums")
 
             if not all_albums:
-                return {'tracks': [], 'error': 'No albums found'}
+                return {'tracks': [], 'error': 'No albums found for the selected artists'}
 
             # Step 3: Select 20 random albums
             random.shuffle(all_albums)
@@ -959,40 +977,73 @@ class PersonalizedPlaylistsService:
 
             # Step 4: Build playlist from tracks in those albums
             all_tracks = []
-            for album in selected_albums:
-                try:
-                    album_data = self.spotify_client.get_album(album.id)
-
-                    if album_data and 'tracks' in album_data:
-                        tracks = album_data['tracks'].get('items', [])
-
-                        for track in tracks:
-                            if track['id']:
-                                # Format in discovery pool format (for rendering + modal compatibility)
-                                all_tracks.append({
-                                    'spotify_track_id': track['id'],
-                                    'track_name': track['name'],
-                                    'artist_name': ', '.join([a['name'] for a in track.get('artists', [])]),
-                                    'album_name': album_data.get('name', 'Unknown'),
-                                    'album_cover_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
-                                    'duration_ms': track.get('duration_ms', 0),
-                                    'popularity': album_data.get('popularity', 0),
-                                    # Also include Spotify format fields for modal
-                                    'id': track['id'],
-                                    'name': track['name'],
-                                    'artists': [a['name'] for a in track.get('artists', [])],
-                                    'album': {
-                                        'name': album_data.get('name', 'Unknown'),
-                                        'images': album_data.get('images', [])
-                                    }
-                                })
-
-                    import time
-                    time.sleep(0.3)  # Rate limiting
-
-                except Exception as e:
-                    logger.warning(f"Error getting tracks from album: {e}")
-                    continue
+            if use_spotify:
+                for album in selected_albums:
+                    try:
+                        album_data = self.spotify_client.get_album(album.id)
+                        if album_data and 'tracks' in album_data:
+                            tracks = album_data['tracks'].get('items', [])
+                            for track in tracks:
+                                if track['id']:
+                                    all_tracks.append({
+                                        'spotify_track_id': track['id'],
+                                        'track_name': track['name'],
+                                        'artist_name': ', '.join([a['name'] for a in track.get('artists', [])]),
+                                        'album_name': album_data.get('name', 'Unknown'),
+                                        'album_cover_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
+                                        'duration_ms': track.get('duration_ms', 0),
+                                        'popularity': album_data.get('popularity', 0),
+                                        'id': track['id'],
+                                        'name': track['name'],
+                                        'artists': [a['name'] for a in track.get('artists', [])],
+                                        'album': {
+                                            'name': album_data.get('name', 'Unknown'),
+                                            'images': album_data.get('images', [])
+                                        }
+                                    })
+                        import time
+                        time.sleep(0.3)
+                    except Exception as e:
+                        logger.warning(f"Error getting tracks from album: {e}")
+                        continue
+            else:
+                from core.itunes_client import iTunesClient
+                itunes = iTunesClient()
+                for album in selected_albums:
+                    try:
+                        album_data = itunes.get_album(album.id, include_tracks=True)
+                        if album_data and 'tracks' in album_data:
+                            tracks = album_data['tracks'].get('items', [])
+                            album_name = album_data.get('name', 'Unknown')
+                            album_images = album_data.get('images', [])
+                            album_cover = album_images[0].get('url') if album_images else None
+                            for track in tracks:
+                                track_id = track.get('id', '')
+                                if track_id:
+                                    # iTunes artists are [{'name': '...'}] dicts
+                                    track_artists = track.get('artists', [])
+                                    artist_names = [a['name'] for a in track_artists] if isinstance(track_artists, list) and track_artists and isinstance(track_artists[0], dict) else (track_artists if isinstance(track_artists, list) else [])
+                                    all_tracks.append({
+                                        'spotify_track_id': track_id,
+                                        'track_name': track.get('name', ''),
+                                        'artist_name': ', '.join(artist_names) if artist_names else 'Unknown',
+                                        'album_name': album_name,
+                                        'album_cover_url': album_cover,
+                                        'duration_ms': track.get('duration_ms', 0),
+                                        'popularity': 0,
+                                        'id': track_id,
+                                        'name': track.get('name', ''),
+                                        'artists': artist_names,
+                                        'album': {
+                                            'name': album_name,
+                                            'images': album_images
+                                        }
+                                    })
+                        import time
+                        time.sleep(0.3)
+                    except Exception as e:
+                        logger.warning(f"Error getting tracks from album: {e}")
+                        continue
 
             logger.info(f"Collected {len(all_tracks)} total tracks")
 
@@ -1012,7 +1063,7 @@ class PersonalizedPlaylistsService:
                 'tracks': final_tracks,
                 'metadata': {
                     'total_tracks': len(final_tracks),
-                    'similar_artists_count': len(similar_artists_to_use),
+                    'similar_artists_count': len(all_similar_artists),
                     'albums_count': len(selected_albums)
                 }
             }

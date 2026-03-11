@@ -28498,15 +28498,37 @@ def search_artists_for_playlist():
             if hydrabase_worker and dev_mode_enabled:
                 hydrabase_worker.enqueue(query, 'artists')
 
-            search_query = f'artist:{query}' if len(query.strip()) <= 4 else query
-            results = spotify_client.sp.search(q=search_query, type='artist', limit=10)
-            if results and 'artists' in results and 'items' in results['artists']:
-                for artist in results['artists']['items']:
+            # Try Spotify first, fall back to iTunes
+            if spotify_client.sp:
+                try:
+                    search_query = f'artist:{query}' if len(query.strip()) <= 4 else query
+                    results = spotify_client.sp.search(q=search_query, type='artist', limit=10)
+                    if results and 'artists' in results and 'items' in results['artists']:
+                        for artist in results['artists']['items']:
+                            artists.append({
+                                'id': artist['id'],
+                                'name': artist['name'],
+                                'image_url': artist['images'][0]['url'] if artist.get('images') else None
+                            })
+                except Exception as e:
+                    logger.warning(f"Spotify artist search failed, falling back to iTunes: {e}")
+
+            if not artists:
+                from core.itunes_client import iTunesClient
+                itunes = iTunesClient()
+                artist_objs = itunes.search_artists(query, limit=10)
+                for artist in artist_objs:
+                    # iTunes artist search rarely returns images — grab from album art
+                    image = artist.image_url
+                    if not image:
+                        image = itunes._get_artist_image_from_albums(artist.id)
                     artists.append({
-                        'id': artist['id'],
-                        'name': artist['name'],
-                        'image_url': artist['images'][0]['url'] if artist.get('images') else None
+                        'id': artist.id,
+                        'name': artist.name,
+                        'image_url': image
                     })
+
+            if artists:
                 # Re-rank: boost exact name matches to the top
                 query_lower = query.lower().strip()
                 artists.sort(key=lambda a: (0 if a['name'].lower().strip() == query_lower else 1))
@@ -28540,6 +28562,9 @@ def generate_custom_playlist():
 
         playlist_size = int(data.get('playlist_size', 50))
         result = service.build_custom_playlist(seed_artist_ids, playlist_size=playlist_size)
+
+        if result.get('error') and not result.get('tracks'):
+            return jsonify({"success": False, "error": result['error']}), 400
 
         return jsonify({
             "success": True,

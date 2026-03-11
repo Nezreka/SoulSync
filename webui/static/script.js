@@ -43707,36 +43707,53 @@ let buildPlaylistSearchTimeout = null;
 async function searchBuildPlaylistArtists() {
     const searchInput = document.getElementById('build-playlist-search');
     const resultsContainer = document.getElementById('build-playlist-search-results');
+    const spinner = document.getElementById('bp-search-spinner');
     const query = searchInput.value.trim();
 
     if (!query) {
         resultsContainer.innerHTML = '';
         resultsContainer.style.display = 'none';
+        if (spinner) spinner.style.display = 'none';
         return;
     }
 
     // Debounce search
     clearTimeout(buildPlaylistSearchTimeout);
     buildPlaylistSearchTimeout = setTimeout(async () => {
+        if (spinner) spinner.style.display = 'flex';
         try {
             const response = await fetch(`/api/discover/build-playlist/search-artists?query=${encodeURIComponent(query)}`);
-            if (!response.ok) return;
-
             const data = await response.json();
+            if (!response.ok) {
+                showToast(data.error || 'Search failed', 'error');
+                return;
+            }
             if (!data.success || !data.artists || data.artists.length === 0) {
-                resultsContainer.innerHTML = '<div class="build-playlist-no-results">No artists found</div>';
+                resultsContainer.innerHTML = '<div class="build-playlist-no-results">No artists found for "' + query.replace(/</g, '&lt;') + '"</div>';
+                resultsContainer.style.display = 'block';
+                return;
+            }
+
+            // Filter out already-selected artists
+            const selectedIds = new Set(buildPlaylistSelectedArtists.map(a => a.id));
+            const filtered = data.artists.filter(a => !selectedIds.has(a.id));
+
+            if (filtered.length === 0) {
+                resultsContainer.innerHTML = '<div class="build-playlist-no-results">All results already selected</div>';
                 resultsContainer.style.display = 'block';
                 return;
             }
 
             // Render search results
             let html = '';
-            data.artists.forEach(artist => {
+            filtered.forEach(artist => {
                 const imageUrl = artist.image_url || '/static/placeholder-album.png';
+                const escapedName = artist.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
                 html += `
-                    <div class="build-playlist-search-result" onclick="addBuildPlaylistArtist('${artist.id}', '${artist.name.replace(/'/g, "\\'")}', '${imageUrl}')">
-                        <img src="${imageUrl}" alt="${artist.name}" loading="lazy">
-                        <span>${artist.name}</span>
+                    <div class="build-playlist-search-result" onclick="addBuildPlaylistArtist('${artist.id}', '${escapedName}', '${imageUrl}')">
+                        <img src="${imageUrl}" alt="${artist.name}" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
+                        <span class="bp-result-name">${artist.name}</span>
+                        <span class="bp-result-add">+ Add</span>
                     </div>
                 `;
             });
@@ -43746,31 +43763,28 @@ async function searchBuildPlaylistArtists() {
 
         } catch (error) {
             console.error('Error searching artists:', error);
+        } finally {
+            if (spinner) spinner.style.display = 'none';
         }
-    }, 300);
+    }, 400);
 }
 
 function addBuildPlaylistArtist(artistId, artistName, imageUrl) {
-    // Check if already selected
     if (buildPlaylistSelectedArtists.some(a => a.id === artistId)) {
-        alert('Artist already selected');
+        showToast('Artist already selected', 'warning');
         return;
     }
-
-    // Check maximum limit
     if (buildPlaylistSelectedArtists.length >= 5) {
-        alert('Maximum 5 artists allowed');
+        showToast('Maximum 5 seed artists', 'warning');
         return;
     }
 
-    // Add to selected artists
     buildPlaylistSelectedArtists.push({
         id: artistId,
         name: artistName,
         image_url: imageUrl
     });
 
-    // Update UI
     renderBuildPlaylistSelectedArtists();
 
     // Clear search
@@ -43787,35 +43801,42 @@ function removeBuildPlaylistArtist(artistId) {
 function renderBuildPlaylistSelectedArtists() {
     const container = document.getElementById('build-playlist-selected-artists');
     const generateBtn = document.getElementById('build-playlist-generate-btn');
+    const counter = document.getElementById('bp-selected-counter');
+    const count = buildPlaylistSelectedArtists.length;
 
-    if (buildPlaylistSelectedArtists.length === 0) {
-        container.innerHTML = '<div class="build-playlist-no-selection">No artists selected. Search and select 1-5 artists.</div>';
+    if (counter) counter.textContent = `${count} / 5`;
+
+    if (count === 0) {
+        container.innerHTML = `
+            <div class="build-playlist-no-selection">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 32px; height: 32px; opacity: 0.4; margin-bottom: 8px;"><path d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                <span>Search above to add seed artists</span>
+            </div>`;
         generateBtn.disabled = true;
-        generateBtn.style.opacity = '0.5';
         return;
     }
 
     let html = '';
     buildPlaylistSelectedArtists.forEach(artist => {
+        const escapedId = artist.id.replace(/'/g, "\\'");
         html += `
             <div class="build-playlist-selected-artist">
-                <img src="${artist.image_url}" alt="${artist.name}" loading="lazy">
+                <img src="${artist.image_url || '/static/placeholder-album.png'}" alt="${artist.name}" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
                 <span>${artist.name}</span>
-                <button onclick="removeBuildPlaylistArtist('${artist.id}')" class="build-playlist-remove-artist">×</button>
+                <button onclick="removeBuildPlaylistArtist('${escapedId}')" class="build-playlist-remove-artist" title="Remove">×</button>
             </div>
         `;
     });
 
     container.innerHTML = html;
     generateBtn.disabled = false;
-    generateBtn.style.opacity = '1';
 }
 
 let buildPlaylistTracks = [];
 
 async function generateBuildPlaylist() {
     if (buildPlaylistSelectedArtists.length === 0) {
-        alert('Please select at least 1 artist');
+        showToast('Please select at least 1 artist', 'warning');
         return;
     }
 
@@ -43827,9 +43848,8 @@ async function generateBuildPlaylist() {
     const titleEl = document.getElementById('build-playlist-results-title');
     const subtitleEl = document.getElementById('build-playlist-results-subtitle');
 
-    // Show loading
+    // Show loading, hide search area
     generateBtn.disabled = true;
-    generateBtn.style.opacity = '0.5';
     loadingIndicator.style.display = 'flex';
     resultsWrapper.style.display = 'none';
     resultsContainer.innerHTML = '';
@@ -43845,13 +43865,12 @@ async function generateBuildPlaylist() {
             })
         });
 
-        if (!response.ok) {
-            throw new Error('Failed to generate playlist');
-        }
-
         const data = await response.json();
-        if (!data.success || !data.playlist || !data.playlist.tracks) {
-            throw new Error('Invalid playlist data');
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Failed to generate playlist');
+        }
+        if (!data.playlist || !data.playlist.tracks || data.playlist.tracks.length === 0) {
+            throw new Error(data.playlist?.error || 'No tracks found. Try different seed artists.');
         }
 
         // Store tracks globally
@@ -43866,9 +43885,18 @@ async function generateBuildPlaylist() {
         const metadata = data.playlist.metadata;
         metadataDisplay.innerHTML = `
             <div class="build-playlist-metadata">
-                <p><strong>Total Tracks:</strong> ${metadata.total_tracks}</p>
-                <p><strong>Similar Artists Used:</strong> ${metadata.similar_artists_count}</p>
-                <p><strong>Albums Sampled:</strong> ${metadata.albums_count}</p>
+                <div class="bp-meta-stat">
+                    <span class="bp-meta-value">${metadata.total_tracks}</span>
+                    <span class="bp-meta-label">Tracks</span>
+                </div>
+                <div class="bp-meta-stat">
+                    <span class="bp-meta-value">${metadata.similar_artists_count}</span>
+                    <span class="bp-meta-label">Similar Artists</span>
+                </div>
+                <div class="bp-meta-stat">
+                    <span class="bp-meta-value">${metadata.albums_count}</span>
+                    <span class="bp-meta-label">Albums Sampled</span>
+                </div>
             </div>
         `;
 
@@ -43880,11 +43908,11 @@ async function generateBuildPlaylist() {
 
     } catch (error) {
         console.error('Error generating playlist:', error);
-        resultsContainer.innerHTML = '<div class="error-message">Failed to generate playlist. Please try again.</div>';
+        resultsWrapper.style.display = 'none';
+        showToast(error.message || 'Failed to generate playlist', 'error');
     } finally {
         loadingIndicator.style.display = 'none';
         generateBtn.disabled = false;
-        generateBtn.style.opacity = '1';
     }
 }
 
