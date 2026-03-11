@@ -3950,7 +3950,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'ui_appearance', 'youtube', 'content_filter', 'itunes']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -15073,7 +15073,7 @@ def get_version_info():
             },
             {
                 "title": "🤖 Automation Engine",
-                "description": "Visual drag-and-drop automation builder with 20+ triggers and 14 actions",
+                "description": "Visual drag-and-drop automation builder with 22 triggers and 19 actions",
                 "features": [
                     "• Drag-and-drop builder: connect WHEN triggers → DO actions → THEN notifications/signals",
                     "• Timer triggers: Schedule (interval), Daily Time, Weekly Schedule",
