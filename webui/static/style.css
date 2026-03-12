@@ -32729,7 +32729,6 @@ textarea.enhanced-meta-field-input {
     width: 500px;
     max-width: 90vw;
     box-shadow: 0 25px 80px rgba(0,0,0,0.7);
-    overflow: hidden;
 }
 .enhanced-bulk-modal-header {
     padding: 20px 24px;
@@ -34104,6 +34103,201 @@ tr.tag-diff-same {
 
 .tag-preview-modal .enhanced-bulk-modal-footer {
     justify-content: space-between;
+}
+
+/* Batch Tag Preview Modal */
+.batch-tag-preview-modal {
+    width: 850px;
+    max-width: 92vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.batch-tag-preview-modal .enhanced-bulk-modal-footer {
+    justify-content: space-between;
+}
+
+.batch-tag-preview-body {
+    overflow-y: auto;
+    max-height: 55vh;
+    padding: 8px 16px 16px !important;
+}
+
+.batch-tag-summary {
+    display: flex;
+    gap: 12px;
+    padding: 10px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.batch-tag-stat {
+    font-size: 12px;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 10px;
+}
+
+.batch-tag-stat.changed {
+    background: rgba(var(--accent-rgb), 0.1);
+    color: rgb(var(--accent-rgb));
+}
+
+.batch-tag-stat.unchanged {
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.batch-tag-stat.errored {
+    background: rgba(255, 80, 80, 0.1);
+    color: rgba(255, 80, 80, 0.7);
+}
+
+.batch-tag-track {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    margin-bottom: 6px;
+}
+
+.batch-tag-track.error {
+    border-color: rgba(255, 80, 80, 0.15);
+}
+
+.batch-tag-track-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.batch-tag-track-header:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.batch-tag-track-number {
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 12px;
+    font-weight: 500;
+    min-width: 20px;
+    text-align: right;
+}
+
+.batch-tag-track-title {
+    flex: 1;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.85);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.batch-tag-track-status {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 8px;
+}
+
+.batch-tag-track-status.changed {
+    background: rgba(var(--accent-rgb), 0.1);
+    color: rgb(var(--accent-rgb));
+}
+
+.batch-tag-track-status.error {
+    background: rgba(255, 80, 80, 0.1);
+    color: rgba(255, 80, 80, 0.7);
+}
+
+.batch-tag-track-status.ok {
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.batch-tag-chevron {
+    color: rgba(255, 255, 255, 0.2);
+    font-size: 11px;
+    transition: transform 0.2s ease;
+}
+
+.batch-tag-track.expanded .batch-tag-chevron {
+    transform: rotate(180deg);
+}
+
+.batch-tag-track-diff {
+    display: none;
+    padding: 0 14px 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.batch-tag-track.expanded .batch-tag-track-diff {
+    display: block;
+}
+
+.batch-tag-track-diff .tag-preview-table {
+    font-size: 12px;
+}
+
+.batch-tag-track-diff .tag-preview-table th {
+    font-size: 10px;
+    padding: 6px 8px;
+}
+
+.batch-tag-track-diff .tag-preview-table td {
+    padding: 5px 8px;
+}
+
+/* Unchanged tracks group */
+.batch-tag-unchanged-group {
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 10px;
+    margin-bottom: 6px;
+    overflow: hidden;
+}
+
+.batch-tag-unchanged-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.35);
+    transition: background 0.15s ease;
+}
+
+.batch-tag-unchanged-header:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.batch-tag-unchanged-list {
+    display: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.batch-tag-unchanged-group.expanded .batch-tag-unchanged-list {
+    display: block;
+}
+
+.batch-tag-unchanged-group.expanded .batch-tag-chevron {
+    transform: rotate(180deg);
+}
+
+.batch-tag-track-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.batch-tag-track-row:last-child {
+    border-bottom: none;
+}
+
+.batch-tag-track-row.unchanged {
+    opacity: 0.5;
 }
 
 /* ======================================================= */

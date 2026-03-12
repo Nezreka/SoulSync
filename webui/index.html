@@ -2598,6 +2598,34 @@
                 </div>
             </div>
 
+            <!-- Batch Tag Preview Modal -->
+            <div class="modal-overlay hidden" id="batch-tag-preview-overlay">
+                <div class="enhanced-bulk-modal batch-tag-preview-modal">
+                    <div class="enhanced-bulk-modal-header">
+                        <h3 id="batch-tag-preview-title">Write Tags</h3>
+                        <button class="enhanced-bulk-modal-close" onclick="closeBatchTagPreviewModal()">&times;</button>
+                    </div>
+                    <div id="batch-tag-preview-summary"></div>
+                    <div class="enhanced-bulk-modal-body batch-tag-preview-body" id="batch-tag-preview-body">
+                        <!-- Populated dynamically -->
+                    </div>
+                    <div class="enhanced-bulk-modal-footer">
+                        <label class="tag-preview-cover-label">
+                            <input type="checkbox" id="batch-tag-preview-embed-cover" checked>
+                            Embed cover art
+                        </label>
+                        <label class="tag-preview-cover-label hidden" id="batch-tag-preview-sync-label">
+                            <input type="checkbox" id="batch-tag-preview-sync-server" checked>
+                            <span id="batch-tag-preview-sync-text">Sync to server</span>
+                        </label>
+                        <div class="tag-preview-footer-actions">
+                            <button class="enhanced-bulk-btn secondary" onclick="closeBatchTagPreviewModal()">Cancel</button>
+                            <button class="enhanced-bulk-btn primary" id="batch-tag-preview-write-btn" onclick="executeBatchWriteTags()">Write Tags</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Discover Page -->
             <div class="page" id="discover-page">
                 <div class="discover-container">

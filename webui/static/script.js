@@ -35130,7 +35130,7 @@ function sortEnhancedTracks(album, field, ascending) {
 
 async function deleteLibraryTrack(trackId, albumId) {
     cancelInlineEdit();
-    if (!confirm('Delete this track from the library? (File on disk is not affected)')) return;
+    if (!await showConfirmDialog({ title: 'Delete Track', message: 'Delete this track from the library? (File on disk is not affected)', confirmText: 'Delete', destructive: true })) return;
     try {
         const response = await fetch(`/api/library/track/${trackId}`, { method: 'DELETE' });
         const result = await response.json();
@@ -35151,7 +35151,7 @@ async function deleteLibraryTrack(trackId, albumId) {
 }
 
 async function deleteLibraryAlbum(albumId) {
-    if (!confirm('Delete this album and all its tracks from the library? (Files on disk are not affected)')) return;
+    if (!await showConfirmDialog({ title: 'Delete Album', message: 'Delete this album and all its tracks from the library? (Files on disk are not affected)', confirmText: 'Delete', destructive: true })) return;
     try {
         const response = await fetch(`/api/library/album/${albumId}`, { method: 'DELETE' });
         const result = await response.json();
@@ -36060,26 +36060,179 @@ async function writeAlbumTags(albumId) {
         return;
     }
 
-    const serverType = artistDetailPageState.serverType;
-    const canSync = serverType && serverType !== 'navidrome';
-    const serverLabel = serverType === 'plex' ? 'Plex' : serverType === 'jellyfin' ? 'Jellyfin' : '';
-    let msg = `Write DB metadata to file tags for all ${tracks.length} tracks in "${album.title}"?`;
-    if (canSync) msg += `\n\nThis will also sync changes to ${serverLabel}.`;
-    if (!confirm(msg)) return;
-    await _startBatchWriteTags(tracks.map(t => t.id), true, canSync);
+    await showBatchTagPreview(tracks.map(t => t.id), album.title);
 }
 
 async function batchWriteTagsSelected() {
     const trackIds = Array.from(artistDetailPageState.selectedTracks);
     if (trackIds.length === 0) return;
 
-    const serverType = artistDetailPageState.serverType;
-    const canSync = serverType && serverType !== 'navidrome';
-    const serverLabel = serverType === 'plex' ? 'Plex' : serverType === 'jellyfin' ? 'Jellyfin' : '';
-    let msg = `Write DB metadata to file tags for ${trackIds.length} selected track(s)?`;
-    if (canSync) msg += `\n\nThis will also sync changes to ${serverLabel}.`;
-    if (!confirm(msg)) return;
-    await _startBatchWriteTags(trackIds, true, canSync);
+    await showBatchTagPreview(trackIds, null);
+}
+
+async function showBatchTagPreview(trackIds, albumTitle) {
+    const overlay = document.getElementById('batch-tag-preview-overlay');
+    const body = document.getElementById('batch-tag-preview-body');
+    const titleEl = document.getElementById('batch-tag-preview-title');
+    const summary = document.getElementById('batch-tag-preview-summary');
+    const writeBtn = document.getElementById('batch-tag-preview-write-btn');
+    if (!overlay || !body) return;
+
+    titleEl.textContent = albumTitle ? `Write Tags — ${albumTitle}` : `Write Tags — ${trackIds.length} Tracks`;
+    body.innerHTML = '<div class="tag-preview-loading">Loading tag previews...</div>';
+    summary.innerHTML = '';
+    writeBtn.disabled = true;
+    overlay.classList.remove('hidden');
+
+    // Hide sync checkbox until we know server type
+    const syncLabel = document.getElementById('batch-tag-preview-sync-label');
+    if (syncLabel) syncLabel.classList.add('hidden');
+
+    try {
+        const response = await fetch('/api/library/tracks/tag-preview-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_ids: trackIds })
+        });
+        const result = await response.json();
+        if (!result.success) {
+            body.innerHTML = `<div class="tag-preview-error">${escapeHtml(result.error)}</div>`;
+            return;
+        }
+
+        const tracks = result.tracks || [];
+        const serverType = result.server_type || null;
+
+        // Show sync checkbox if server connected
+        if (syncLabel && serverType && serverType !== 'navidrome') {
+            const syncText = document.getElementById('batch-tag-preview-sync-text');
+            if (syncText) syncText.textContent = `Sync to ${serverType === 'plex' ? 'Plex' : 'Jellyfin'}`;
+            syncLabel.classList.remove('hidden');
+        }
+
+        // Categorize tracks
+        const withChanges = tracks.filter(t => t.has_changes);
+        const noChanges = tracks.filter(t => !t.error && !t.has_changes);
+        const errors = tracks.filter(t => t.error);
+
+        // Summary bar
+        let summaryHtml = '<div class="batch-tag-summary">';
+        if (withChanges.length > 0) summaryHtml += `<span class="batch-tag-stat changed">${withChanges.length} with changes</span>`;
+        if (noChanges.length > 0) summaryHtml += `<span class="batch-tag-stat unchanged">${noChanges.length} unchanged</span>`;
+        if (errors.length > 0) summaryHtml += `<span class="batch-tag-stat errored">${errors.length} unavailable</span>`;
+        summaryHtml += '</div>';
+        summary.innerHTML = summaryHtml;
+
+        // Build track accordion
+        let html = '';
+
+        // Tracks with changes (expanded by default)
+        withChanges.forEach(track => {
+            html += _renderBatchTrackDiff(track, true);
+        });
+
+        // Errors
+        errors.forEach(track => {
+            html += `<div class="batch-tag-track error">`;
+            html += `<div class="batch-tag-track-header">`;
+            html += `<span class="batch-tag-track-number">${track.track_number || '—'}</span>`;
+            html += `<span class="batch-tag-track-title">${escapeHtml(track.title)}</span>`;
+            html += `<span class="batch-tag-track-status error">${escapeHtml(track.error)}</span>`;
+            html += `</div></div>`;
+        });
+
+        // Unchanged tracks (collapsed)
+        if (noChanges.length > 0) {
+            html += `<div class="batch-tag-unchanged-group">`;
+            html += `<div class="batch-tag-unchanged-header" onclick="this.parentElement.classList.toggle('expanded')">`;
+            html += `<span>${noChanges.length} track${noChanges.length !== 1 ? 's' : ''} already up to date</span>`;
+            html += `<span class="batch-tag-chevron">&#9662;</span>`;
+            html += `</div>`;
+            html += `<div class="batch-tag-unchanged-list">`;
+            noChanges.forEach(track => {
+                html += `<div class="batch-tag-track-row unchanged">`;
+                html += `<span class="batch-tag-track-number">${track.track_number || '—'}</span>`;
+                html += `<span class="batch-tag-track-title">${escapeHtml(track.title)}</span>`;
+                html += `<span class="batch-tag-track-status ok">✓ Tags match</span>`;
+                html += `</div>`;
+            });
+            html += `</div></div>`;
+        }
+
+        if (withChanges.length === 0 && errors.length === 0) {
+            html += '<div class="tag-preview-no-changes">All file tags already match DB metadata</div>';
+        }
+
+        body.innerHTML = html;
+
+        // Store state for write action
+        overlay._batchTrackIds = trackIds;
+        overlay._batchServerType = serverType;
+        writeBtn.disabled = withChanges.length === 0;
+
+    } catch (error) {
+        body.innerHTML = `<div class="tag-preview-error">Failed to load previews: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function _renderBatchTrackDiff(track, expanded) {
+    let html = `<div class="batch-tag-track${expanded ? ' expanded' : ''}">`;
+    html += `<div class="batch-tag-track-header" onclick="this.parentElement.classList.toggle('expanded')">`;
+    html += `<span class="batch-tag-track-number">${track.track_number || '—'}</span>`;
+    html += `<span class="batch-tag-track-title">${escapeHtml(track.title)}</span>`;
+    html += `<span class="batch-tag-track-status changed">${track.changed_count} field${track.changed_count !== 1 ? 's' : ''} changed</span>`;
+    html += `<span class="batch-tag-chevron">&#9662;</span>`;
+    html += `</div>`;
+    html += `<div class="batch-tag-track-diff">`;
+    html += '<table class="tag-preview-table"><thead><tr>';
+    html += '<th>Field</th><th>Current File</th><th></th><th>New Value</th>';
+    html += '</tr></thead><tbody>';
+
+    (track.diff || []).forEach(d => {
+        if (!d.changed) return; // Only show changed fields in batch view
+        html += `<tr class="tag-diff-changed">`;
+        html += `<td class="tag-field-name">${d.field}</td>`;
+        html += `<td class="tag-file-value">${escapeHtml(d.file_value) || '<span class="tag-empty">empty</span>'}</td>`;
+        html += `<td class="tag-diff-indicator"><span class="tag-diff-arrow">&rarr;</span></td>`;
+        html += `<td class="tag-db-value">${escapeHtml(d.db_value) || '<span class="tag-empty">empty</span>'}</td>`;
+        html += '</tr>';
+    });
+
+    html += '</tbody></table></div></div>';
+    return html;
+}
+
+function closeBatchTagPreviewModal() {
+    const overlay = document.getElementById('batch-tag-preview-overlay');
+    if (overlay) {
+        overlay.classList.add('hidden');
+        overlay._batchTrackIds = null;
+        overlay._batchServerType = null;
+    }
+}
+
+async function executeBatchWriteTags() {
+    const overlay = document.getElementById('batch-tag-preview-overlay');
+    const trackIds = overlay?._batchTrackIds;
+    if (!trackIds || trackIds.length === 0) return;
+
+    const writeBtn = document.getElementById('batch-tag-preview-write-btn');
+    if (writeBtn) {
+        writeBtn.disabled = true;
+        writeBtn.textContent = 'Writing...';
+    }
+
+    const embedCover = document.getElementById('batch-tag-preview-embed-cover')?.checked ?? true;
+    const serverType = overlay._batchServerType;
+    const syncToServer = document.getElementById('batch-tag-preview-sync-server')?.checked && serverType && serverType !== 'navidrome';
+
+    closeBatchTagPreviewModal();
+    await _startBatchWriteTags(trackIds, embedCover, syncToServer);
+
+    if (writeBtn) {
+        writeBtn.disabled = false;
+        writeBtn.textContent = 'Write Tags';
+    }
 }
 
 async function _startBatchWriteTags(trackIds, embedCover, syncToServer = false) {
