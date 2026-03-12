@@ -6,6 +6,9 @@
 (function () {
     'use strict';
 
+    // Disable particles on mobile devices for performance
+    if (window.innerWidth <= 768 || /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) return;
+
     const canvas = document.getElementById('page-particles-canvas');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');

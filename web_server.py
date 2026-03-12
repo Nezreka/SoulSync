@@ -24912,11 +24912,16 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
         print(f"   Result details: matched={getattr(result, 'matched_tracks', 'N/A')}, total={getattr(result, 'total_tracks', 'N/A')}")
 
         # Update final state on completion
+        # Convert result to JSON-serializable dict (datetime/errors can't be emitted via SocketIO)
+        result_dict = {
+            k: (v.isoformat() if hasattr(v, 'isoformat') else v)
+            for k, v in result.__dict__.items()
+        }
         with sync_lock:
             sync_states[playlist_id] = {
                 "status": "finished",
-                "progress": result.__dict__,  # Store result as progress for status endpoint compatibility
-                "result": result.__dict__  # Keep result for backward compatibility
+                "progress": result_dict,
+                "result": result_dict
             }
         print(f"🏁 Sync finished for {playlist_id} - state updated")
 
