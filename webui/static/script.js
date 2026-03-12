@@ -251,6 +251,8 @@ function initializeWebSocket() {
     socket.on('enrichment:itunes-enrichment', (data) => updateiTunesEnrichmentStatusFromData(data));
     socket.on('enrichment:lastfm-enrichment', (data) => updateLastFMEnrichmentStatusFromData(data));
     socket.on('enrichment:genius-enrichment', (data) => updateGeniusEnrichmentStatusFromData(data));
+    socket.on('enrichment:tidal-enrichment', (data) => updateTidalEnrichmentStatusFromData(data));
+    socket.on('enrichment:qobuz-enrichment', (data) => updateQobuzEnrichmentStatusFromData(data));
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
 
@@ -405,6 +407,8 @@ const SPOTIFY_LOGO_URL = 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/0
 const ITUNES_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png';
 const LASTFM_LOGO_URL = 'https://www.last.fm/static/images/lastfm_avatar_twitter.52a5d69a85ac.png';
 const GENIUS_LOGO_URL = 'https://images.genius.com/8ed669cadd956443e29c70361ec4f372.1000x1000x1.png';
+const TIDAL_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/74/Tidal_%28service%29_logo.svg/2048px-Tidal_%28service%29_logo.svg.png';
+const QOBUZ_LOGO_URL = 'https://play-lh.googleusercontent.com/TBY_DSvCIF7xIBFCIlxNQf-kJmFjLM1K5p-vGmBLM7XxcREadERFKmyoWz4hHvadpg';
 function getAudioDBLogoURL() { const el = document.querySelector('img.audiodb-logo'); return el ? el.src : null; }
 
 // --- Wishlist Modal Persistence State Management ---
@@ -25325,7 +25329,7 @@ function closeYouTubeDiscoveryModal(urlHash) {
 
             if (isTidal) {
                 // Tidal: Extract playlist ID and reset Tidal state
-                const tidalPlaylistId = state.beatport_chart_hash ? state.beatport_chart_hash.replace('tidal_', '') : null;
+                const tidalPlaylistId = state.tidal_playlist_id || null;
                 if (tidalPlaylistId && tidalPlaylistStates[tidalPlaylistId]) {
                     // Preserve discovery data but reset phase
                     const preservedData = {
@@ -25348,7 +25352,7 @@ function closeYouTubeDiscoveryModal(urlHash) {
 
                     // Update backend state
                     try {
-                        fetch(`/api/tidal/update-phase/${tidalPlaylistId}`, {
+                        fetch(`/api/tidal/update_phase/${tidalPlaylistId}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ phase: 'discovered' })
@@ -25381,7 +25385,7 @@ function closeYouTubeDiscoveryModal(urlHash) {
 
                 // Update backend state
                 try {
-                    fetch(`/api/youtube/update-phase/${urlHash}`, {
+                    fetch(`/api/youtube/update_phase/${urlHash}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ phase: 'discovered' })
@@ -32582,6 +32586,12 @@ function createLibraryArtistCard(artist) {
     if (artist.genius_url) {
         badgeSources.push({ cls: 'genius-card-icon', logo: GENIUS_LOGO_URL, fallback: 'GEN', title: 'View on Genius', url: artist.genius_url });
     }
+    if (artist.tidal_id) {
+        badgeSources.push({ cls: 'tidal-card-icon', logo: TIDAL_LOGO_URL, fallback: 'TD', title: 'View on Tidal', url: `https://tidal.com/browse/artist/${artist.tidal_id}` });
+    }
+    if (artist.qobuz_id) {
+        badgeSources.push({ cls: 'qobuz-card-icon', logo: QOBUZ_LOGO_URL, fallback: 'Qz', title: 'View on Qobuz', url: `https://www.qobuz.com/artist/${artist.qobuz_id}` });
+    }
     // Add watchlist indicator as the last badge
     const hasExternalId = artist.itunes_artist_id || artist.spotify_artist_id;
     if (artist.is_watched) {
@@ -33076,6 +33086,8 @@ function updateArtistDetailPageHeaderWithData(artist) {
             { id: artist.audiodb_id, url: `https://www.theaudiodb.com/artist/${artist.audiodb_id}-${adbSlug}`, logo: getAudioDBLogoURL(), label: 'TheAudioDB' },
             { id: artist.lastfm_url, url: artist.lastfm_url, logo: LASTFM_LOGO_URL, label: 'Last.fm' },
             { id: artist.genius_url, url: artist.genius_url, logo: GENIUS_LOGO_URL, label: 'Genius' },
+            { id: artist.tidal_id, url: `https://tidal.com/browse/artist/${artist.tidal_id}`, logo: TIDAL_LOGO_URL, label: 'Tidal' },
+            { id: artist.qobuz_id, url: `https://www.qobuz.com/artist/${artist.qobuz_id}`, logo: QOBUZ_LOGO_URL, label: 'Qobuz' },
         ];
 
         sources.forEach(source => {
@@ -34230,6 +34242,8 @@ function renderArtistMetaPanel(artist) {
         { key: 'itunes_artist_id', label: 'iTunes', svc: 'itunes' },
         { key: 'lastfm_url', label: 'Last.fm', svc: 'lastfm' },
         { key: 'genius_url', label: 'Genius', svc: 'genius' },
+        { key: 'tidal_id', label: 'Tidal', svc: 'tidal' },
+        { key: 'qobuz_id', label: 'Qobuz', svc: 'qobuz' },
     ];
     idSources.forEach(src => {
         if (artist[src.key]) {
@@ -34286,6 +34300,8 @@ function renderArtistMetaPanel(artist) {
         { id: 'itunes', label: 'iTunes', icon: '🔴' },
         { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
         { id: 'genius', label: 'Genius', icon: '🟡' },
+        { id: 'tidal', label: 'Tidal', icon: '⬛' },
+        { id: 'qobuz', label: 'Qobuz', icon: '🔷' },
     ];
     services.forEach(svc => {
         const item = document.createElement('div');
@@ -34316,6 +34332,8 @@ function renderArtistMetaPanel(artist) {
         { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
         { key: 'lastfm_match_status', label: 'Last.fm', attempted: 'lastfm_last_attempted', svc: 'lastfm' },
         { key: 'genius_match_status', label: 'Genius', attempted: 'genius_last_attempted', svc: 'genius' },
+        { key: 'tidal_match_status', label: 'Tidal', attempted: 'tidal_last_attempted', svc: 'tidal' },
+        { key: 'qobuz_match_status', label: 'Qobuz', attempted: 'qobuz_last_attempted', svc: 'qobuz' },
     ];
     statusServices.forEach(s => {
         const status = artist[s.key];
@@ -46161,6 +46179,256 @@ if (document.readyState === 'loading') {
         button.addEventListener('click', toggleGeniusEnrichment);
         updateGeniusEnrichmentStatus();
         setInterval(updateGeniusEnrichmentStatus, 2000);
+    }
+}
+
+// ===================================================================
+// TIDAL ENRICHMENT WORKER
+// ===================================================================
+
+async function updateTidalEnrichmentStatus() {
+    if (socketConnected) return;
+    if (document.hidden) return;
+    try {
+        const response = await fetch('/api/tidal-enrichment/status');
+        if (!response.ok) { console.warn('Tidal status endpoint unavailable'); return; }
+        const data = await response.json();
+        updateTidalEnrichmentStatusFromData(data);
+    } catch (error) {
+        console.error('Error updating Tidal status:', error);
+    }
+}
+
+function updateTidalEnrichmentStatusFromData(data) {
+    const button = document.getElementById('tidal-enrich-button');
+    if (!button) return;
+
+    const notAuthenticated = data.authenticated === false;
+
+    button.classList.remove('active', 'paused', 'complete', 'no-auth');
+    if (data.paused) {
+        button.classList.add('paused');
+    } else if (notAuthenticated) {
+        button.classList.add('no-auth');
+    } else if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    }
+
+    const tooltipStatus = document.getElementById('tidal-enrich-tooltip-status');
+    const tooltipCurrent = document.getElementById('tidal-enrich-tooltip-current');
+    const tooltipProgress = document.getElementById('tidal-enrich-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
+        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running) { tooltipStatus.textContent = 'Running'; }
+        else { tooltipStatus.textContent = 'Idle'; }
+    }
+
+    if (tooltipCurrent) {
+        if (data.paused) {
+            tooltipCurrent.textContent = notAuthenticated ? 'Connect Tidal in Settings to enrich' : 'Click to resume';
+        } else if (notAuthenticated) {
+            tooltipCurrent.textContent = 'Connect Tidal in Settings to enrich';
+        } else if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        }
+    }
+
+    if (data.progress && tooltipProgress) {
+        if (notAuthenticated) {
+            tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
+        } else {
+            const artists = data.progress.artists || {};
+            const albums = data.progress.albums || {};
+            const tracks = data.progress.tracks || {};
+
+            const currentType = data.current_item?.type;
+            let progressText = '';
+
+            const artistsComplete = artists.matched >= artists.total;
+            const albumsComplete = albums.matched >= albums.total;
+
+            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+            } else if (currentType === 'album' || (!albumsComplete && !currentType)) {
+                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+            } else {
+                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+            }
+
+            tooltipProgress.textContent = progressText;
+        }
+    }
+}
+
+async function toggleTidalEnrichment() {
+    try {
+        const button = document.getElementById('tidal-enrich-button');
+        if (!button) return;
+
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/tidal-enrichment/pause' : '/api/tidal-enrichment/resume';
+
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Tidal enrichment`);
+        }
+
+        await updateTidalEnrichmentStatus();
+        console.log(`Tidal enrichment ${isRunning ? 'paused' : 'resumed'}`);
+
+    } catch (error) {
+        console.error('Error toggling Tidal enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('tidal-enrich-button');
+        if (button) {
+            button.addEventListener('click', toggleTidalEnrichment);
+            updateTidalEnrichmentStatus();
+            setInterval(updateTidalEnrichmentStatus, 2000);
+        }
+    });
+} else {
+    const button = document.getElementById('tidal-enrich-button');
+    if (button) {
+        button.addEventListener('click', toggleTidalEnrichment);
+        updateTidalEnrichmentStatus();
+        setInterval(updateTidalEnrichmentStatus, 2000);
+    }
+}
+
+// ===================================================================
+// QOBUZ ENRICHMENT WORKER
+// ===================================================================
+
+async function updateQobuzEnrichmentStatus() {
+    if (socketConnected) return;
+    if (document.hidden) return;
+    try {
+        const response = await fetch('/api/qobuz-enrichment/status');
+        if (!response.ok) { console.warn('Qobuz status endpoint unavailable'); return; }
+        const data = await response.json();
+        updateQobuzEnrichmentStatusFromData(data);
+    } catch (error) {
+        console.error('Error updating Qobuz status:', error);
+    }
+}
+
+function updateQobuzEnrichmentStatusFromData(data) {
+    const button = document.getElementById('qobuz-enrich-button');
+    if (!button) return;
+
+    const notAuthenticated = data.authenticated === false;
+
+    button.classList.remove('active', 'paused', 'complete', 'no-auth');
+    if (data.paused) {
+        button.classList.add('paused');
+    } else if (notAuthenticated) {
+        button.classList.add('no-auth');
+    } else if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    }
+
+    const tooltipStatus = document.getElementById('qobuz-enrich-tooltip-status');
+    const tooltipCurrent = document.getElementById('qobuz-enrich-tooltip-current');
+    const tooltipProgress = document.getElementById('qobuz-enrich-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
+        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running) { tooltipStatus.textContent = 'Running'; }
+        else { tooltipStatus.textContent = 'Idle'; }
+    }
+
+    if (tooltipCurrent) {
+        if (data.paused) {
+            tooltipCurrent.textContent = notAuthenticated ? 'Connect Qobuz in Settings to enrich' : 'Click to resume';
+        } else if (notAuthenticated) {
+            tooltipCurrent.textContent = 'Connect Qobuz in Settings to enrich';
+        } else if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        }
+    }
+
+    if (data.progress && tooltipProgress) {
+        if (notAuthenticated) {
+            tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
+        } else {
+            const artists = data.progress.artists || {};
+            const albums = data.progress.albums || {};
+            const tracks = data.progress.tracks || {};
+
+            const currentType = data.current_item?.type;
+            let progressText = '';
+
+            const artistsComplete = artists.matched >= artists.total;
+            const albumsComplete = albums.matched >= albums.total;
+
+            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
+            } else if (currentType === 'album' || (!albumsComplete && !currentType)) {
+                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+            } else {
+                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+            }
+
+            tooltipProgress.textContent = progressText;
+        }
+    }
+}
+
+async function toggleQobuzEnrichment() {
+    try {
+        const button = document.getElementById('qobuz-enrich-button');
+        if (!button) return;
+
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/qobuz-enrichment/pause' : '/api/qobuz-enrichment/resume';
+
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Qobuz enrichment`);
+        }
+
+        await updateQobuzEnrichmentStatus();
+        console.log(`Qobuz enrichment ${isRunning ? 'paused' : 'resumed'}`);
+
+    } catch (error) {
+        console.error('Error toggling Qobuz enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('qobuz-enrich-button');
+        if (button) {
+            button.addEventListener('click', toggleQobuzEnrichment);
+            updateQobuzEnrichmentStatus();
+            setInterval(updateQobuzEnrichmentStatus, 2000);
+        }
+    });
+} else {
+    const button = document.getElementById('qobuz-enrich-button');
+    if (button) {
+        button.addEventListener('click', toggleQobuzEnrichment);
+        updateQobuzEnrichmentStatus();
+        setInterval(updateQobuzEnrichmentStatus, 2000);
     }
 }
 

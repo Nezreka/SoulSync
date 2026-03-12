@@ -95,6 +95,8 @@ from core.spotify_worker import SpotifyWorker
 from core.itunes_worker import iTunesWorker
 from core.lastfm_worker import LastFMWorker
 from core.genius_worker import GeniusWorker
+from core.tidal_worker import TidalWorker
+from core.qobuz_worker import QobuzWorker
 from core.hydrabase_worker import HydrabaseWorker
 from core.hydrabase_client import HydrabaseClient
 from core.automation_engine import AutomationEngine
@@ -4038,6 +4040,8 @@ def handle_settings():
                 lastfm_worker._init_client()
             if genius_worker:
                 genius_worker._init_client()
+            if tidal_enrichment_worker:
+                tidal_enrichment_worker.client = tidal_client
             print("✅ Service clients re-initialized with new settings.")
             return jsonify({"success": True, "message": "Settings saved successfully."})
         except Exception as e:
@@ -5626,6 +5630,8 @@ def tidal_callback():
         if success:
             # Re-initialize the main global tidal_client instance with the new token
             tidal_client = TidalClient()
+            if tidal_enrichment_worker:
+                tidal_enrichment_worker.client = tidal_client
             return "<h1>✅ Tidal Authentication Successful!</h1><p>You can now close this window and return to the SoulSync application.</p>"
         else:
             return "<h1>❌ Tidal Authentication Failed</h1><p>Could not exchange authorization code for a token. Please try again.</p>", 400
@@ -9641,14 +9647,14 @@ def library_play_track():
         print(f"❌ Error playing library track: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
-_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius')}
+_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz')}
 
 @app.route('/api/library/enrich', methods=['POST'])
 def library_enrich_entity():
     """Trigger enrichment of a specific entity from a single service.
     Body: { entity_type: 'artist'|'album'|'track', entity_id: str, service: str,
             name: str, artist_name: str? }
-    service: 'audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius'
+    service: 'audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz'
     """
     try:
         data = request.get_json()
@@ -9667,7 +9673,7 @@ def library_enrich_entity():
         if entity_type not in ('artist', 'album', 'track'):
             return jsonify({"success": False, "error": "entity_type must be artist, album, or track"}), 400
 
-        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius')
+        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz')
         if service not in valid_services:
             return jsonify({"success": False, "error": f"service must be one of: {', '.join(valid_services)}"}), 400
 
@@ -9808,6 +9814,30 @@ def _run_single_enrichment(service, entity_type, entity_id, name, artist_name):
             return {"success": False, "error": "Genius does not support album enrichment"}
         genius_worker._process_item(item)
         return {"success": True, "message": f"Genius lookup complete for {entity_type}"}
+
+    elif service == 'tidal':
+        if not tidal_enrichment_worker:
+            return {"success": False, "error": "Tidal worker not initialized"}
+        item = {'type': entity_type, 'id': entity_id, 'name': name, 'artist': artist_name}
+        if entity_type == 'artist':
+            tidal_enrichment_worker._process_artist(entity_id, name)
+        elif entity_type == 'album':
+            tidal_enrichment_worker._process_album(entity_id, name, artist_name, item)
+        elif entity_type == 'track':
+            tidal_enrichment_worker._process_track(entity_id, name, artist_name, item)
+        return {"success": True, "message": f"Tidal lookup complete for {entity_type}"}
+
+    elif service == 'qobuz':
+        if not qobuz_enrichment_worker:
+            return {"success": False, "error": "Qobuz worker not initialized"}
+        item = {'type': entity_type, 'id': entity_id, 'name': name, 'artist': artist_name}
+        if entity_type == 'artist':
+            qobuz_enrichment_worker._process_artist(entity_id, name)
+        elif entity_type == 'album':
+            qobuz_enrichment_worker._process_album(entity_id, name, artist_name, item)
+        elif entity_type == 'track':
+            qobuz_enrichment_worker._process_track(entity_id, name, artist_name, item)
+        return {"success": True, "message": f"Qobuz lookup complete for {entity_type}"}
 
     else:
         return {"success": False, "error": f"Unknown service: {service}"}
@@ -9967,6 +9997,60 @@ def _search_service(service, entity_type, query):
                          'image': result.get('song_art_image_url'), 'extra': result.get('artist_names', '')}]
         return []
 
+    elif service == 'tidal':
+        if not tidal_enrichment_worker or not tidal_enrichment_worker.client:
+            raise ValueError("Tidal worker not initialized")
+        client = tidal_enrichment_worker.client
+        if entity_type == 'artist':
+            result = client.search_artist(query)
+            if result:
+                thumb = result.get('picture', '')
+                if isinstance(thumb, list) and thumb:
+                    thumb = thumb[0].get('url', '') if isinstance(thumb[0], dict) else str(thumb[0])
+                return [{'id': str(result.get('id', '')), 'name': result.get('name', ''),
+                         'image': thumb if isinstance(thumb, str) else None, 'extra': ''}]
+        elif entity_type == 'album':
+            result = client.search_album('', query)
+            if result:
+                return [{'id': str(result.get('id', '')), 'name': result.get('title', ''),
+                         'image': None, 'extra': result.get('artist', {}).get('name', '') if isinstance(result.get('artist'), dict) else ''}]
+        elif entity_type == 'track':
+            result = client.search_track('', query)
+            if result:
+                artist_name = result.get('artist', {}).get('name', '') if isinstance(result.get('artist'), dict) else ''
+                return [{'id': str(result.get('id', '')), 'name': result.get('title', ''),
+                         'image': None, 'extra': artist_name}]
+        return []
+
+    elif service == 'qobuz':
+        if not qobuz_enrichment_worker or not qobuz_enrichment_worker.client:
+            raise ValueError("Qobuz worker not initialized")
+        client = qobuz_enrichment_worker.client
+        if entity_type == 'artist':
+            result = client.search_artist(query)
+            if result:
+                image = result.get('image', {})
+                thumb = image.get('large', image.get('medium', '')) if isinstance(image, dict) else ''
+                return [{'id': str(result.get('id', '')), 'name': result.get('name', ''),
+                         'image': thumb, 'extra': ''}]
+        elif entity_type == 'album':
+            result = client.search_album('', query)
+            if result:
+                artist_name = result.get('artist', {}).get('name', '') if isinstance(result.get('artist'), dict) else ''
+                image = result.get('image', {})
+                thumb = image.get('large', image.get('medium', '')) if isinstance(image, dict) else ''
+                return [{'id': str(result.get('id', '')), 'name': result.get('title', ''),
+                         'image': thumb, 'extra': artist_name}]
+        elif entity_type == 'track':
+            result = client.search_track('', query)
+            if result:
+                artist_name = result.get('performer', {}).get('name', '') if isinstance(result.get('performer'), dict) else ''
+                if not artist_name:
+                    artist_name = result.get('artist', {}).get('name', '') if isinstance(result.get('artist'), dict) else ''
+                return [{'id': str(result.get('id', '')), 'name': result.get('title', ''),
+                         'image': None, 'extra': artist_name}]
+        return []
+
     elif service == 'audiodb':
         if not audiodb_worker or not audiodb_worker.client:
             raise ValueError("AudioDB worker not initialized")
@@ -10005,6 +10089,8 @@ _SERVICE_ID_COLUMNS = {
     'itunes': {'artist': 'itunes_artist_id', 'album': 'itunes_album_id', 'track': 'itunes_track_id'},
     'lastfm': {'artist': 'lastfm_url', 'album': 'lastfm_url', 'track': 'lastfm_url'},
     'genius': {'artist': 'genius_id', 'track': 'genius_id'},
+    'tidal': {'artist': 'tidal_id', 'album': 'tidal_id', 'track': 'tidal_id'},
+    'qobuz': {'artist': 'qobuz_id', 'album': 'qobuz_id', 'track': 'qobuz_id'},
 }
 
 @app.route('/api/library/manual-match', methods=['PUT'])
@@ -22606,47 +22692,46 @@ _playlist_discovery_cancelled = set()  # Set of automation_ids that have been ca
 
 def _pause_enrichment_workers(label='discovery'):
     """Pause enrichment workers during discovery to reduce API contention.
-    Returns tuple of (spotify_was_running, itunes_was_running) for resume."""
-    s_was = False
-    i_was = False
-    try:
-        if spotify_enrichment_worker and not spotify_enrichment_worker.paused:
-            spotify_enrichment_worker.pause()
-            s_was = True
-            print(f"⏸️ Paused Spotify enrichment worker during {label}")
-    except Exception:
-        pass
-    try:
-        if itunes_enrichment_worker and not itunes_enrichment_worker.paused:
-            itunes_enrichment_worker.pause()
-            i_was = True
-            print(f"⏸️ Paused iTunes enrichment worker during {label}")
-    except Exception:
-        pass
-    return s_was, i_was
+    Returns dict of {name: was_running} for resume."""
+    was_running = {}
+    workers = {
+        'Spotify': spotify_enrichment_worker,
+        'iTunes': itunes_enrichment_worker,
+        'Tidal': tidal_enrichment_worker if 'tidal_enrichment_worker' in globals() else None,
+        'Qobuz': qobuz_enrichment_worker if 'qobuz_enrichment_worker' in globals() else None,
+    }
+    for name, worker in workers.items():
+        try:
+            if worker and not worker.paused:
+                worker.pause()
+                was_running[name] = True
+                print(f"⏸️ Paused {name} enrichment worker during {label}")
+        except Exception:
+            pass
+    return was_running
 
 
 def _resume_enrichment_workers(was_running, label='discovery'):
     """Resume enrichment workers that were paused by _pause_enrichment_workers."""
-    s_was, i_was = was_running
-    try:
-        if s_was and spotify_enrichment_worker:
-            spotify_enrichment_worker.resume()
-            print(f"▶️ Resumed Spotify enrichment worker after {label}")
-    except Exception:
-        pass
-    try:
-        if i_was and itunes_enrichment_worker:
-            itunes_enrichment_worker.resume()
-            print(f"▶️ Resumed iTunes enrichment worker after {label}")
-    except Exception:
-        pass
+    workers = {
+        'Spotify': spotify_enrichment_worker,
+        'iTunes': itunes_enrichment_worker,
+        'Tidal': tidal_enrichment_worker if 'tidal_enrichment_worker' in globals() else None,
+        'Qobuz': qobuz_enrichment_worker if 'qobuz_enrichment_worker' in globals() else None,
+    }
+    for name, worker in workers.items():
+        try:
+            if was_running.get(name) and worker:
+                worker.resume()
+                print(f"▶️ Resumed {name} enrichment worker after {label}")
+        except Exception:
+            pass
 
 
 def _run_playlist_discovery_worker(playlists, automation_id=None):
     """Background worker that discovers Spotify/iTunes metadata for undiscovered
     mirrored playlist tracks. Stores results in extra_data for use by sync."""
-    _ew_state = (False, False)
+    _ew_state = {}
     try:
         _ew_state = _pause_enrichment_workers('mirrored playlist discovery')
         use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
@@ -23054,7 +23139,7 @@ def _discovery_score_candidates(source_title, source_artist, source_duration_ms,
 
 def _run_tidal_discovery_worker(playlist_id):
     """Background worker for Tidal discovery process (Spotify preferred, iTunes fallback)"""
-    _ew_state = (False, False)
+    _ew_state = {}
     try:
         _ew_state = _pause_enrichment_workers('Tidal discovery')
         state = tidal_discovery_states[playlist_id]
@@ -23783,7 +23868,7 @@ def update_youtube_discovery_match():
 
 def _run_youtube_discovery_worker(url_hash):
     """Background worker for YouTube music discovery process (Spotify preferred, iTunes fallback)"""
-    _ew_state = (False, False)
+    _ew_state = {}
     try:
         _ew_state = _pause_enrichment_workers('YouTube discovery')
         state = youtube_playlist_states[url_hash]
@@ -24094,7 +24179,7 @@ def _run_youtube_discovery_worker(url_hash):
 
 def _run_listenbrainz_discovery_worker(playlist_mbid):
     """Background worker for ListenBrainz music discovery process (Spotify preferred, iTunes fallback)"""
-    _ew_state = (False, False)
+    _ew_state = {}
     try:
         _ew_state = _pause_enrichment_workers('ListenBrainz discovery')
         state = listenbrainz_playlist_states[playlist_mbid]
@@ -26312,7 +26397,7 @@ def start_watchlist_scan():
         # Start the scan in a background thread
         scan_profile_id = get_current_profile_id()
         def run_scan():
-            _ew_state = (False, False)
+            _ew_state = {}
             try:
                 global watchlist_scan_state, watchlist_auto_scanning, watchlist_auto_scanning_timestamp
                 from core.watchlist_scanner import WatchlistScanner
@@ -27143,7 +27228,7 @@ def _process_watchlist_scan_automatically(automation_id=None):
 
     print("🤖 [Auto-Watchlist] Timer triggered - starting automatic watchlist scan...")
 
-    _ew_state = (False, False)
+    _ew_state = {}
 
     try:
         # CRITICAL FIX: Use smart stuck detection BEFORE acquiring lock
@@ -31271,7 +31356,7 @@ def clean_beatport_text(text):
 
 def _run_beatport_discovery_worker(url_hash):
     """Background worker for Beatport discovery process (Spotify preferred, iTunes fallback)"""
-    _ew_state = (False, False)
+    _ew_state = {}
     try:
         _ew_state = _pause_enrichment_workers('Beatport discovery')
         state = beatport_chart_states[url_hash]
@@ -33142,7 +33227,9 @@ def start_oauth_callback_servers():
                         # Reinitialize the global tidal client with new tokens
                         global tidal_client
                         tidal_client = TidalClient()
-                        
+                        if tidal_enrichment_worker:
+                            tidal_enrichment_worker.client = tidal_client
+
                         add_activity_item("✅", "Tidal Auth Complete", "Successfully authenticated with Tidal", "Now")
                         self.send_response(200)
                         self.send_header('Content-type', 'text/html')
@@ -33869,6 +33956,144 @@ def genius_enrichment_resume():
 
 # ================================================================================================
 # END GENIUS ENRICHMENT INTEGRATION
+# ================================================================================================
+
+# ================================================================================================
+# TIDAL ENRICHMENT WORKER
+# ================================================================================================
+
+tidal_enrichment_worker = None
+try:
+    from database.music_database import MusicDatabase
+    tidal_enrich_db = MusicDatabase()
+    tidal_enrichment_worker = TidalWorker(database=tidal_enrich_db, client=tidal_client)
+    tidal_enrichment_worker.start()
+    print("✅ Tidal enrichment worker initialized and started")
+except Exception as e:
+    print(f"⚠️ Tidal worker initialization failed: {e}")
+    tidal_enrichment_worker = None
+
+# --- Tidal Enrichment API Endpoints ---
+
+@app.route('/api/tidal-enrichment/status', methods=['GET'])
+def tidal_enrichment_status():
+    """Get Tidal enrichment status for UI polling"""
+    try:
+        if tidal_enrichment_worker is None:
+            return jsonify({
+                'enabled': False,
+                'running': False,
+                'paused': False,
+                'authenticated': False,
+                'current_item': None,
+                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
+                'progress': {}
+            }), 200
+
+        status = tidal_enrichment_worker.get_stats()
+        return jsonify(status), 200
+    except Exception as e:
+        logger.error(f"Error getting Tidal enrichment status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tidal-enrichment/pause', methods=['POST'])
+def tidal_enrichment_pause():
+    """Pause Tidal enrichment worker"""
+    try:
+        if tidal_enrichment_worker is None:
+            return jsonify({'error': 'Tidal worker not initialized'}), 400
+
+        tidal_enrichment_worker.pause()
+        logger.info("Tidal worker paused via UI")
+        return jsonify({'status': 'paused'}), 200
+    except Exception as e:
+        logger.error(f"Error pausing Tidal worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tidal-enrichment/resume', methods=['POST'])
+def tidal_enrichment_resume():
+    """Resume Tidal enrichment worker"""
+    try:
+        if tidal_enrichment_worker is None:
+            return jsonify({'error': 'Tidal worker not initialized'}), 400
+
+        tidal_enrichment_worker.resume()
+        logger.info("Tidal worker resumed via UI")
+        return jsonify({'status': 'running'}), 200
+    except Exception as e:
+        logger.error(f"Error resuming Tidal worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ================================================================================================
+# QOBUZ ENRICHMENT WORKER
+# ================================================================================================
+
+qobuz_enrichment_worker = None
+try:
+    from database.music_database import MusicDatabase
+    from core.qobuz_client import QobuzClient
+    qobuz_enrich_db = MusicDatabase()
+    qobuz_enrich_client = QobuzClient()  # Separate client instance for thread safety
+    qobuz_enrichment_worker = QobuzWorker(database=qobuz_enrich_db, client=qobuz_enrich_client)
+    qobuz_enrichment_worker.start()
+    print("✅ Qobuz enrichment worker initialized and started")
+except Exception as e:
+    print(f"⚠️ Qobuz worker initialization failed: {e}")
+    qobuz_enrichment_worker = None
+
+# --- Qobuz Enrichment API Endpoints ---
+
+@app.route('/api/qobuz-enrichment/status', methods=['GET'])
+def qobuz_enrichment_status():
+    """Get Qobuz enrichment status for UI polling"""
+    try:
+        if qobuz_enrichment_worker is None:
+            return jsonify({
+                'enabled': False,
+                'running': False,
+                'paused': False,
+                'authenticated': False,
+                'current_item': None,
+                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
+                'progress': {}
+            }), 200
+
+        status = qobuz_enrichment_worker.get_stats()
+        return jsonify(status), 200
+    except Exception as e:
+        logger.error(f"Error getting Qobuz enrichment status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/qobuz-enrichment/pause', methods=['POST'])
+def qobuz_enrichment_pause():
+    """Pause Qobuz enrichment worker"""
+    try:
+        if qobuz_enrichment_worker is None:
+            return jsonify({'error': 'Qobuz worker not initialized'}), 400
+
+        qobuz_enrichment_worker.pause()
+        logger.info("Qobuz worker paused via UI")
+        return jsonify({'status': 'paused'}), 200
+    except Exception as e:
+        logger.error(f"Error pausing Qobuz worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/qobuz-enrichment/resume', methods=['POST'])
+def qobuz_enrichment_resume():
+    """Resume Qobuz enrichment worker"""
+    try:
+        if qobuz_enrichment_worker is None:
+            return jsonify({'error': 'Qobuz worker not initialized'}), 400
+
+        qobuz_enrichment_worker.resume()
+        logger.info("Qobuz worker resumed via UI")
+        return jsonify({'status': 'running'}), 200
+    except Exception as e:
+        logger.error(f"Error resuming Qobuz worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ================================================================================================
+# END TIDAL/QOBUZ ENRICHMENT INTEGRATION
 # ================================================================================================
 
 
@@ -35114,6 +35339,8 @@ def _emit_enrichment_status_loop():
         'itunes-enrichment': lambda: itunes_enrichment_worker,
         'lastfm-enrichment': lambda: lastfm_worker,
         'genius-enrichment': lambda: genius_worker,
+        'tidal-enrichment': lambda: tidal_enrichment_worker,
+        'qobuz-enrichment': lambda: qobuz_enrichment_worker,
         'hydrabase': lambda: hydrabase_worker,
         'repair': lambda: repair_worker,
     }
