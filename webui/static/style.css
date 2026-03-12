@@ -28245,7 +28245,7 @@ body {
     object-fit: contain;
     opacity: 0.85;
     transition: opacity 0.3s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3)) invert(1);
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3)) invert(1) brightness(1.8);
     border-radius: 50%;
 }
 
@@ -28279,7 +28279,7 @@ body {
 
 .tidal-enrich-button.active .tidal-enrich-logo {
     opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.6)) invert(1);
+    filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.6)) invert(1) brightness(1.8);
 }
 
 .tidal-enrich-button.complete {
@@ -28290,7 +28290,7 @@ body {
 
 .tidal-enrich-button.complete .tidal-enrich-logo {
     opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5)) invert(1);
+    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5)) invert(1) brightness(1.8);
 }
 
 .tidal-enrich-button.complete .tidal-enrich-spinner {
@@ -28382,7 +28382,7 @@ body {
 }
 
 .tidal-enrich-button.no-auth .tidal-enrich-logo {
-    filter: grayscale(1) opacity(0.4);
+    filter: grayscale(1) opacity(0.4) invert(1) brightness(1.8);
 }
 
 .tidal-enrich-button.no-auth .tidal-enrich-spinner {
@@ -28471,7 +28471,7 @@ body {
     object-fit: contain;
     opacity: 0.85;
     transition: opacity 0.3s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3)) invert(1);
     border-radius: 50%;
 }
 
@@ -28505,7 +28505,7 @@ body {
 
 .qobuz-enrich-button.active .qobuz-enrich-logo {
     opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(1, 112, 239, 0.6));
+    filter: drop-shadow(0 0 8px rgba(1, 112, 239, 0.6)) invert(1);
 }
 
 .qobuz-enrich-button.complete {
@@ -28516,7 +28516,7 @@ body {
 
 .qobuz-enrich-button.complete .qobuz-enrich-logo {
     opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
+    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5)) invert(1);
 }
 
 .qobuz-enrich-button.complete .qobuz-enrich-spinner {
@@ -28608,7 +28608,7 @@ body {
 }
 
 .qobuz-enrich-button.no-auth .qobuz-enrich-logo {
-    filter: grayscale(1) opacity(0.4);
+    filter: grayscale(1) opacity(0.4) invert(1);
 }
 
 .qobuz-enrich-button.no-auth .qobuz-enrich-spinner {

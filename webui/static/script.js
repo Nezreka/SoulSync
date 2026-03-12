@@ -407,8 +407,8 @@ const SPOTIFY_LOGO_URL = 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/0
 const ITUNES_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png';
 const LASTFM_LOGO_URL = 'https://www.last.fm/static/images/lastfm_avatar_twitter.52a5d69a85ac.png';
 const GENIUS_LOGO_URL = 'https://images.genius.com/8ed669cadd956443e29c70361ec4f372.1000x1000x1.png';
-const TIDAL_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/74/Tidal_%28service%29_logo.svg/2048px-Tidal_%28service%29_logo.svg.png';
-const QOBUZ_LOGO_URL = 'https://play-lh.googleusercontent.com/TBY_DSvCIF7xIBFCIlxNQf-kJmFjLM1K5p-vGmBLM7XxcREadERFKmyoWz4hHvadpg';
+const TIDAL_LOGO_URL = 'https://www.svgrepo.com/show/519734/tidal.svg';
+const QOBUZ_LOGO_URL = 'https://www.svgrepo.com/show/504778/qobuz.svg';
 function getAudioDBLogoURL() { const el = document.querySelector('img.audiodb-logo'); return el ? el.src : null; }
 
 // --- Wishlist Modal Persistence State Management ---
