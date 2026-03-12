@@ -188,7 +188,7 @@ class ConfigManager:
                 "transfer_path": "./Transfer"
             },
             "download_source": {
-                "mode": "soulseek",  # Options: "soulseek", "youtube", "tidal", "hybrid"
+                "mode": "soulseek",  # Options: "soulseek", "youtube", "tidal", "qobuz", "hybrid"
                 "hybrid_primary": "soulseek",  # Which source to try first in hybrid mode
                 "youtube_min_confidence": 0.65  # Minimum confidence for YouTube matches
             },
@@ -199,6 +199,14 @@ class ConfigManager:
                     "access_token": "",
                     "refresh_token": "",
                     "expiry_time": 0
+                }
+            },
+            "qobuz": {
+                "quality": "lossless",  # Options: "mp3", "lossless", "hires", "hires_max"
+                "session": {
+                    "app_id": "",
+                    "app_secret": "",
+                    "user_auth_token": ""
                 }
             },
             "listenbrainz": {

@@ -3642,6 +3642,7 @@
                                         <option value="soulseek">Soulseek Only</option>
                                         <option value="youtube">YouTube Only</option>
                                         <option value="tidal">Tidal Only</option>
+                                        <option value="qobuz">Qobuz Only</option>
                                         <option value="hybrid">Hybrid (Try both with fallback)</option>
                                     </select>
                                     <div class="setting-help-text">
@@ -3658,6 +3659,7 @@
                                             <option value="soulseek">Try Soulseek First</option>
                                             <option value="youtube">Try YouTube First</option>
                                             <option value="tidal">Try Tidal First</option>
+                                            <option value="qobuz">Try Qobuz First</option>
                                         </select>
                                         <div class="setting-help-text">
                                             Which source to try first when hybrid mode is enabled.
@@ -3698,6 +3700,48 @@
                                             <span id="tidal-download-auth-status" class="setting-help-text" style="margin-left: 8px;"></span>
                                         </div>
                                         <div id="tidal-download-auth-code" style="display: none; margin-top: 8px;" class="setting-help-text">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Qobuz Settings (shown only when qobuz mode is selected) -->
+                                <div id="qobuz-settings-container" style="display: none;">
+                                    <div class="form-group">
+                                        <label>Qobuz Download Quality:</label>
+                                        <select id="qobuz-quality" class="form-select">
+                                            <option value="mp3">MP3 320kbps</option>
+                                            <option value="lossless">Lossless (FLAC 16-bit/44.1kHz)</option>
+                                            <option value="hires">Hi-Res (FLAC 24-bit/96kHz)</option>
+                                            <option value="hires_max">Hi-Res Max (FLAC 24-bit/192kHz)</option>
+                                        </select>
+                                        <div class="setting-help-text">
+                                            Audio quality for Qobuz downloads. Hi-Res requires a Qobuz Studio or Sublime subscription.
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Qobuz Account:</label>
+                                        <div id="qobuz-auth-logged-in" style="display: none; margin-top: 4px;">
+                                            <span id="qobuz-auth-user-info" class="setting-help-text" style="color: #4caf50;"></span>
+                                            <button class="auth-button" onclick="logoutQobuz()" style="margin-left: 8px;">
+                                                Disconnect
+                                            </button>
+                                        </div>
+                                        <div id="qobuz-auth-form" style="margin-top: 4px;">
+                                            <input type="email" id="qobuz-email" class="form-input"
+                                                placeholder="Qobuz email" autocomplete="email"
+                                                style="margin-bottom: 8px;">
+                                            <input type="password" id="qobuz-password" class="form-input"
+                                                placeholder="Qobuz password" autocomplete="current-password"
+                                                style="margin-bottom: 8px;">
+                                            <div class="form-actions">
+                                                <button class="auth-button" id="qobuz-login-btn" onclick="loginQobuz()">
+                                                    Connect Qobuz
+                                                </button>
+                                                <span id="qobuz-auth-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                            </div>
+                                        </div>
+                                        <div class="setting-help-text" style="margin-top: 6px;">
+                                            Requires a paid Qobuz subscription. Streams are DRM-free.
                                         </div>
                                     </div>
                                 </div>
