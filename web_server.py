@@ -13450,6 +13450,19 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         if original_batch_id:
             context['batch_id'] = original_batch_id
 
+        # Check if race guard detected the source file was already gone
+        if context.get('_race_guard_failed'):
+            _pp.info(f"Race guard: source file gone for task {task_id} — marking as failed")
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = 'Source file was already processed or removed by another task'
+            with matched_context_lock:
+                if context_key in matched_downloads_context:
+                    del matched_downloads_context[context_key]
+            _on_download_completed(batch_id, task_id, success=False)
+            return
+
         # Check if AcoustID quarantined the file — no further processing needed
         if context.get('_acoustid_quarantined'):
             failure_msg = context.get('_acoustid_failure_msg', 'AcoustID verification failed')
@@ -13827,7 +13840,8 @@ def _post_process_matched_download(context_key, context, file_path):
             if existing_final and os.path.exists(existing_final):
                 print(f"✅ [Race Guard] Source gone but destination exists — already processed by another thread: {os.path.basename(existing_final)}")
                 return
-            print(f"⚠️ [Race Guard] Source file gone and no known destination — likely already processed: {os.path.basename(file_path)}")
+            print(f"⚠️ [Race Guard] Source file gone and no known destination — marking as failed: {os.path.basename(file_path)}")
+            context['_race_guard_failed'] = True
             return
         # --- END RACE CONDITION GUARD ---
 

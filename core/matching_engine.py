@@ -634,8 +634,20 @@ class MusicMatchingEngine:
         title_words = spotify_cleaned_title.split()
         is_short_title = len(spotify_cleaned_title) <= 5 or len(title_words) == 1
 
+        # --- Minimum Title Gate ---
+        # Reject matches where the title has almost no resemblance to the target.
+        # Without this, artist + album bonus alone can push completely wrong tracks
+        # past the confidence threshold (e.g. "West End Girl" matching "Tennis"
+        # just because they're by the same artist on the same album).
+        if not is_youtube and title_score < 0.30 and not has_word_boundary:
+            logger.debug(
+                f"Title gate reject: '{spotify_track.name}' vs '{slskd_track.filename[:60]}' "
+                f"(title_score={title_score:.2f} < 0.30)"
+            )
+            return 0.0
+
         # --- Final Weighted Score ---
-        
+
         if is_youtube:
             # For YouTube, rely more on Title and Duration since Artist is often missing from video titles
             # and the search query already filtered by artist to some extent.
