@@ -18,11 +18,11 @@ const DOCS_SECTIONS = [
         content: () => `
             <div class="docs-subsection" id="gs-overview">
                 <h3 class="docs-subsection-title">Overview</h3>
-                <p class="docs-text">SoulSync is a self-hosted music download, sync, and library management platform. It connects to <strong>Spotify</strong>, <strong>Apple Music/iTunes</strong>, <strong>Tidal</strong>, <strong>YouTube</strong>, and <strong>Beatport</strong> for metadata, and uses <strong>Soulseek</strong> (via slskd) as the primary download source. Your library is served through <strong>Plex</strong>, <strong>Jellyfin</strong>, or <strong>Navidrome</strong>.</p>
+                <p class="docs-text">SoulSync is a self-hosted music download, sync, and library management platform. It connects to <strong>Spotify</strong>, <strong>Apple Music/iTunes</strong>, <strong>Tidal</strong>, <strong>Qobuz</strong>, <strong>YouTube</strong>, and <strong>Beatport</strong> for metadata, and uses <strong>Soulseek</strong> (via slskd) as the primary download source. Your library is served through <strong>Plex</strong>, <strong>Jellyfin</strong>, or <strong>Navidrome</strong>.</p>
                 <div class="docs-features">
-                    <div class="docs-feature-card"><h4>&#x1F3B5; Download Music</h4><p>Search and download tracks in FLAC, MP3, and more from Soulseek, YouTube, or Tidal, with automatic metadata tagging and file organization.</p></div>
+                    <div class="docs-feature-card"><h4>&#x1F3B5; Download Music</h4><p>Search and download tracks in FLAC, MP3, and more from Soulseek, YouTube, Tidal, or Qobuz, with automatic metadata tagging and file organization.</p></div>
                     <div class="docs-feature-card"><h4>&#x1F504; Playlist Sync</h4><p>Mirror playlists from Spotify, YouTube, Tidal, and Beatport. Discover official metadata and sync to your media server.</p></div>
-                    <div class="docs-feature-card"><h4>&#x1F4DA; Library Management</h4><p>Browse, edit, and enrich your music library with metadata from 7 services. Write tags directly to audio files.</p></div>
+                    <div class="docs-feature-card"><h4>&#x1F4DA; Library Management</h4><p>Browse, edit, and enrich your music library with metadata from 9 services. Write tags directly to audio files.</p></div>
                     <div class="docs-feature-card"><h4>&#x1F916; Automations</h4><p>Schedule tasks, chain workflows with signals, and get notified via Discord, Pushbullet, or Telegram.</p></div>
                     <div class="docs-feature-card"><h4>&#x1F50D; Artist Discovery</h4><p>Discover new artists via similar-artist recommendations, seasonal playlists, genre exploration, and time-machine browsing.</p></div>
                     <div class="docs-feature-card"><h4>&#x1F440; Watchlist</h4><p>Follow artists and automatically scan for new releases. New tracks are added to your wishlist for download.</p></div>
@@ -32,12 +32,12 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">First-Time Setup</h3>
                 <p class="docs-text">After launching SoulSync, head to the <strong>Settings</strong> page to configure your services. At minimum you need:</p>
                 <ol class="docs-steps">
-                    <li><strong>Download Source</strong> &mdash; Connect at least one download source: Soulseek (slskd), YouTube, or Tidal. Soulseek offers the best quality selection; YouTube and Tidal work as alternatives or fallbacks in Hybrid mode.</li>
+                    <li><strong>Download Source</strong> &mdash; Connect at least one download source: Soulseek (slskd), YouTube, Tidal, or Qobuz. Soulseek offers the best quality selection; YouTube, Tidal, and Qobuz work as alternatives or fallbacks in Hybrid mode.</li>
                     <li><strong>Media Server</strong> &mdash; Connect Plex, Jellyfin, or Navidrome so SoulSync knows where your library lives and can trigger scans.</li>
                     <li><strong>Spotify (Recommended)</strong> &mdash; Connect Spotify for the richest metadata. Create an app at <strong>developer.spotify.com</strong>, enter your Client ID and Secret, then click Authenticate.</li>
                     <li><strong>Download Path</strong> &mdash; Set your download and transfer paths in the Download Settings section. The transfer path should point to your media server's monitored folder.</li>
                 </ol>
-                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>You can start using SoulSync with just one download source (Soulseek, YouTube, or Tidal). Spotify and other services add metadata enrichment but aren't strictly required &mdash; iTunes/Apple Music is always available as a free fallback.</div></div>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>You can start using SoulSync with just one download source (Soulseek, YouTube, Tidal, or Qobuz). Spotify and other services add metadata enrichment but aren't strictly required &mdash; iTunes/Apple Music is always available as a free fallback.</div></div>
             </div>
             <div class="docs-subsection" id="gs-connecting">
                 <h3 class="docs-subsection-title">Connecting Services</h3>
@@ -49,7 +49,8 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>iTunes / Apple Music</strong></td><td>Fallback metadata source, always free, no auth needed</td><td>None</td></tr>
                         <tr><td><strong>Soulseek (slskd)</strong></td><td>Download source &mdash; P2P network, best for lossless and rare music</td><td>URL + API key</td></tr>
                         <tr><td><strong>YouTube</strong></td><td>Download source &mdash; audio extraction via yt-dlp</td><td>None (optional cookies browser)</td></tr>
-                        <tr><td><strong>Tidal</strong></td><td>Download source + playlist import</td><td>OAuth &mdash; Client ID + Secret</td></tr>
+                        <tr><td><strong>Tidal</strong></td><td>Download source + playlist import + enrichment</td><td>OAuth &mdash; Client ID + Secret</td></tr>
+                        <tr><td><strong>Qobuz</strong></td><td>Download source + enrichment</td><td>Username + Password (app ID auto-fetched)</td></tr>
                         <tr><td><strong>Plex</strong></td><td>Media server &mdash; library scanning, metadata sync, audio streaming</td><td>URL + Token</td></tr>
                         <tr><td><strong>Jellyfin</strong></td><td>Media server &mdash; library scanning, audio streaming</td><td>URL + API Key</td></tr>
                         <tr><td><strong>Navidrome</strong></td><td>Media server &mdash; auto-detects changes, audio streaming</td><td>URL + Username + Password</td></tr>
@@ -91,7 +92,7 @@ const DOCS_SECTIONS = [
                 <table class="docs-table">
                     <thead><tr><th>Folder</th><th>Default (Docker)</th><th>Purpose</th></tr></thead>
                     <tbody>
-                        <tr><td><strong>Download Path</strong></td><td><code>/app/downloads</code></td><td>Where slskd/YouTube/Tidal initially saves downloaded files. This is a <strong>temporary staging area</strong> &mdash; files should not stay here permanently.</td></tr>
+                        <tr><td><strong>Download Path</strong></td><td><code>/app/downloads</code></td><td>Where slskd/YouTube/Tidal/Qobuz initially saves downloaded files. This is a <strong>temporary staging area</strong> &mdash; files should not stay here permanently.</td></tr>
                         <tr><td><strong>Transfer Path</strong></td><td><code>/app/Transfer</code></td><td>Where post-processed files are moved after tagging and renaming. This <strong>must</strong> be the folder your media server (Plex/Jellyfin/Navidrome) monitors.</td></tr>
                         <tr><td><strong>Staging Path</strong></td><td><code>/app/Staging</code></td><td>For the Import feature only. Drop audio files here to import them into your library via the Import page.</td></tr>
                     </tbody>
@@ -313,6 +314,8 @@ const DOCS_SECTIONS = [
                     <div class="docs-feature-card"><h4>iTunes</h4><p>iTunes/Apple Music IDs, preview links</p></div>
                     <div class="docs-feature-card"><h4>Last.fm</h4><p>Listener/play counts, bios, tags, similar artists for every artist/album/track</p></div>
                     <div class="docs-feature-card"><h4>Genius</h4><p>Lyrics, descriptions, alternate names, song artwork</p></div>
+                    <div class="docs-feature-card"><h4>Tidal</h4><p>Tidal IDs, artist images, album labels, explicit flags, ISRCs</p></div>
+                    <div class="docs-feature-card"><h4>Qobuz</h4><p>Qobuz IDs, artist images, album labels, genres, explicit flags</p></div>
                 </div>
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Workers retry "not found" items every 30 days and errored items every 7 days. You can pause/resume any worker from the dashboard.</div></div>
                 <p class="docs-text"><strong>Rate Limit Protection</strong>: Workers include smart rate limiting for all APIs. If Spotify returns a rate limit with a Retry-After greater than 60 seconds, a global ban activates &mdash; all Spotify API calls are suppressed before they're made, and searches automatically fall back to iTunes/Apple Music. A countdown modal appears showing the ban duration, triggering endpoint, and remaining time. The enrichment worker auto-pauses during the ban and resumes when it expires.</p>
@@ -325,7 +328,7 @@ const DOCS_SECTIONS = [
                     <thead><tr><th>Tool</th><th>What It Does</th></tr></thead>
                     <tbody>
                         <tr><td><strong>Database Updater</strong></td><td>Refreshes your library by scanning your media server. Choose incremental (new only) or full refresh.</td></tr>
-                        <tr><td><strong>Metadata Updater</strong></td><td>Updates artist photos, genres, styles, and biographies from MusicBrainz, Spotify, iTunes, and Last.fm.</td></tr>
+                        <tr><td><strong>Metadata Updater</strong></td><td>Triggers all 9 enrichment workers to re-check your library against all connected services.</td></tr>
                         <tr><td><strong>Quality Scanner</strong></td><td>Scans library for tracks below your quality preferences. Shows how many meet standards and finds replacements.</td></tr>
                         <tr><td><strong>Duplicate Cleaner</strong></td><td>Identifies and removes duplicate tracks from your library, freeing up disk space.</td></tr>
                         <tr><td><strong>Discovery Pool</strong></td><td>View and fix matched/failed discovery results across all mirrored playlists.</td></tr>
@@ -366,7 +369,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Quality Scanner</strong> &mdash; Scans your entire library and flags tracks below your quality preferences. Shows a breakdown of formats and bitrates, identifies tracks where higher-quality versions may be available, and automatically adds low-quality tracks to your wishlist for re-downloading at better quality.</li>
                     <li><strong>Duplicate Cleaner</strong> &mdash; Identifies duplicate tracks by comparing title, artist, album, and duration. Lets you review duplicates and choose which version to keep (typically the higher-quality one). Frees disk space by removing redundant files.</li>
                     <li><strong>Database Updater</strong> &mdash; Refreshes your library database by scanning your media server. <strong>Incremental</strong> mode only adds new content; <strong>Full Refresh</strong> rebuilds the entire database. <strong>Deep Scan</strong> performs a full comparison without losing any enrichment data from services.</li>
-                    <li><strong>Metadata Updater</strong> &mdash; Triggers all enrichment workers simultaneously with reset flags, forcing them to re-check every item in your library against all connected services (MusicBrainz, Spotify, iTunes, Last.fm, Deezer, AudioDB, Genius). Useful after connecting a new service or when metadata seems incomplete.</li>
+                    <li><strong>Metadata Updater</strong> &mdash; Triggers all enrichment workers simultaneously with reset flags, forcing them to re-check every item in your library against all connected services (MusicBrainz, Spotify, iTunes, Last.fm, Deezer, AudioDB, Genius, Tidal, Qobuz). Useful after connecting a new service or when metadata seems incomplete.</li>
                     <li><strong>Repair Worker</strong> &mdash; Background service that scans recently downloaded folders and repairs track metadata. It reads album IDs from file tags, fetches official tracklists from Spotify or MusicBrainz, and fixes incorrect or missing track numbers. Runs automatically after batch downloads complete and can be paused/resumed from the dashboard.</li>
                 </ul>
             </div>
@@ -509,10 +512,11 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Soulseek</strong></td><td>P2P network via slskd &mdash; largest selection of lossless and rare music</td><td>FLAC, rare tracks, DJ sets</td></tr>
                         <tr><td><strong>YouTube</strong></td><td>YouTube audio extraction via yt-dlp</td><td>Live performances, remixes, tracks not on Soulseek</td></tr>
                         <tr><td><strong>Tidal</strong></td><td>Tidal HiFi streaming rip (requires auth)</td><td>Guaranteed quality, official releases</td></tr>
+                        <tr><td><strong>Qobuz</strong></td><td>Qobuz Hi-Res streaming rip (requires auth)</td><td>Audiophile quality, up to 24-bit/192kHz</td></tr>
                         <tr><td><strong>Hybrid</strong></td><td>Tries your primary source first, then automatically falls back to alternates</td><td>Best overall success rate</td></tr>
                     </tbody>
                 </table>
-                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Hybrid mode</strong> is recommended for most users. It tries Soulseek first (best quality), then falls back to YouTube or Tidal if no suitable results are found. The fallback order respects your quality profile settings.</div></div>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Hybrid mode</strong> is recommended for most users. It tries Soulseek first (best quality), then falls back to YouTube, Tidal, or Qobuz if no suitable results are found. The fallback order and priority are configurable via drag-and-drop in Settings.</div></div>
                 <p class="docs-text"><strong>YouTube settings</strong> include cookies browser selection (for bot detection bypass), download delay (seconds between requests), and minimum confidence threshold for title matching.</p>
             </div>
             <div class="docs-subsection" id="search-downloading">
@@ -647,7 +651,7 @@ const DOCS_SECTIONS = [
                     <li>Filter by category, content type (live/compilations/featured), or status (owned/missing)</li>
                     <li>Click any release to open the download modal with track selection</li>
                 </ul>
-                <p class="docs-text">At the top, <strong>View on</strong> buttons link to the artist on each matched external service (Spotify, Apple Music, MusicBrainz, Deezer, AudioDB, Last.fm, Genius). <strong>Service badges</strong> on artist cards also indicate which services have matched this artist.</p>
+                <p class="docs-text">At the top, <strong>View on</strong> buttons link to the artist on each matched external service (Spotify, Apple Music, MusicBrainz, Deezer, AudioDB, Last.fm, Genius, Tidal, Qobuz). <strong>Service badges</strong> on artist cards also indicate which services have matched this artist.</p>
                 <p class="docs-text"><strong>Similar Artists</strong> appear as clickable bubbles below the discography for further exploration and discovery.</p>
             </div>
             <div class="docs-subsection" id="art-watchlist">
@@ -834,7 +838,7 @@ const DOCS_SECTIONS = [
         content: () => `
             <div class="docs-subsection" id="lib-standard">
                 <h3 class="docs-subsection-title">Standard View</h3>
-                <p class="docs-text">The Library page shows all artists in your collection as cards with images, album/track counts, and <strong>service badges</strong> (Spotify, MusicBrainz, Deezer, AudioDB, iTunes, Last.fm, Genius) indicating which services have matched this artist.</p>
+                <p class="docs-text">The Library page shows all artists in your collection as cards with images, album/track counts, and <strong>service badges</strong> (Spotify, MusicBrainz, Deezer, AudioDB, iTunes, Last.fm, Genius, Tidal, Qobuz) indicating which services have matched this artist.</p>
                 <p class="docs-text">Use the <strong>search bar</strong>, <strong>alphabet navigation</strong> (A&ndash;Z, #), and <strong>watchlist filter</strong> (All/Watched/Unwatched) to browse. Click any artist card to view their discography.</p>
                 <p class="docs-text">The artist detail page shows albums, EPs, and singles as cards with completion percentages. Filter by category, content type (live/compilations/featured), or status (owned/missing). At the top, <strong>View on</strong> buttons link to the artist on each matched external service.</p>
             </div>
@@ -852,7 +856,7 @@ const DOCS_SECTIONS = [
             </div>
             <div class="docs-subsection" id="lib-matching">
                 <h3 class="docs-subsection-title">Service Matching</h3>
-                <p class="docs-text">In the Enhanced view, each artist, album, and track shows <strong>match status chips</strong> for all 7 services. Click any chip to manually search and link the correct external ID. Run per-service enrichment from the dropdown to pull in metadata from a specific source.</p>
+                <p class="docs-text">In the Enhanced view, each artist, album, and track shows <strong>match status chips</strong> for all 9 services. Click any chip to manually search and link the correct external ID. Run per-service enrichment from the dropdown to pull in metadata from a specific source.</p>
                 <p class="docs-text">Matched services show as clickable badges linking to the entity on that service's website.</p>
             </div>
             <div class="docs-subsection" id="lib-tags">
@@ -1007,6 +1011,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Tidal</strong> &mdash; Client ID + Secret, then Authenticate via OAuth</li>
                     <li><strong>Last.fm</strong> &mdash; API key from last.fm/api</li>
                     <li><strong>Genius</strong> &mdash; Access token from genius.com/api-clients</li>
+                    <li><strong>Qobuz</strong> &mdash; Username + Password (app ID is auto-fetched)</li>
                     <li><strong>AcoustID</strong> &mdash; API key from acoustid.org (enables fingerprint verification)</li>
                     <li><strong>ListenBrainz</strong> &mdash; Base URL + token for listening history and playlist import</li>
                 </ul>
@@ -1028,7 +1033,7 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="set-download">
                 <h3 class="docs-subsection-title">Download Settings</h3>
                 <ul class="docs-list">
-                    <li><strong>Download Source Mode</strong> &mdash; Soulseek, YouTube, Tidal, or Hybrid. Hybrid tries your primary source first, then falls back to alternates. See <em>Download Sources</em> in the Music Downloads section for details.</li>
+                    <li><strong>Download Source Mode</strong> &mdash; Soulseek, YouTube, Tidal, Qobuz, or Hybrid. Hybrid tries your primary source first, then falls back to alternates with configurable priority via drag-and-drop. See <em>Download Sources</em> in the Music Downloads section for details.</li>
                     <li><strong>Download Path</strong> &mdash; The folder where files are initially downloaded. This <strong>must match</strong> the folder your download source (slskd) writes to. In Docker, this is the container-side mount point (e.g., <code>/app/downloads</code>), not the host path. SoulSync monitors this folder for completed downloads to begin post-processing.</li>
                     <li><strong>Transfer Path</strong> &mdash; The final destination for processed music files. After tagging, renaming, and organizing, files are moved here. This <strong>must</strong> point to your media server's monitored music folder (the folder Plex/Jellyfin/Navidrome watches for new content). In Docker, use the container-side path (e.g., <code>/app/Transfer</code>).</li>
                     <li><strong>Staging Path</strong> &mdash; Folder for the Import feature (files placed here appear on the Import page). Separate from the download/transfer pipeline.</li>
@@ -1176,7 +1181,7 @@ const DOCS_SECTIONS = [
                         <tr><td><code>download_progress</code></td><td>Per-track download progress (speed, ETA, percentage)</td></tr>
                         <tr><td><code>download_complete</code></td><td>Track finished downloading and post-processing</td></tr>
                         <tr><td><code>batch_progress</code></td><td>Album/playlist batch download status</td></tr>
-                        <tr><td><code>worker_status</code></td><td>Enrichment worker status (Spotify, MusicBrainz, Deezer, etc.)</td></tr>
+                        <tr><td><code>worker_status</code></td><td>Enrichment worker status (Spotify, MusicBrainz, Deezer, Tidal, Qobuz, etc.)</td></tr>
                         <tr><td><code>scan_progress</code></td><td>Library scan, quality scan, or duplicate scan progress</td></tr>
                         <tr><td><code>system_status</code></td><td>Service connectivity changes (Spotify rate limit, slskd disconnect)</td></tr>
                         <tr><td><code>activity</code></td><td>System activity feed entries</td></tr>

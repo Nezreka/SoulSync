@@ -17388,7 +17388,7 @@ const TOOL_HELP_CONTENT = {
         title: 'Metadata Updater',
         content: `
             <h4>What does this tool do?</h4>
-            <p>The Metadata Updater enhances your library by fetching artist photos, genres, and album artwork from Spotify.</p>
+            <p>The Metadata Updater triggers all enrichment workers simultaneously, re-checking every item in your library against all connected services (Spotify, MusicBrainz, iTunes, Deezer, AudioDB, Last.fm, Genius, Tidal, Qobuz).</p>
 
             <h4>Refresh Interval Options</h4>
             <ul>
@@ -17400,14 +17400,14 @@ const TOOL_HELP_CONTENT = {
 
             <h4>What gets updated?</h4>
             <ul>
-                <li>Artist profile photos</li>
-                <li>Music genres</li>
-                <li>Album cover artwork</li>
-                <li>Spotify popularity scores</li>
+                <li>Artist profile photos, genres, and descriptions</li>
+                <li>Album cover artwork, labels, and release info</li>
+                <li>Track ISRCs, explicit flags, and external IDs</li>
+                <li>Service match status for all 9 enrichment workers</li>
             </ul>
 
             <h4>Note</h4>
-            <p>This tool is only available for <strong>Plex</strong> media servers. It requires Spotify authentication to fetch metadata.</p>
+            <p>Available for <strong>Plex</strong> and <strong>Jellyfin</strong> media servers. Each enrichment worker only runs if its service is authenticated.</p>
         `
     },
     'quality-scanner': {
