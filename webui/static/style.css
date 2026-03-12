@@ -31953,7 +31953,7 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
     padding: 0;
     margin-bottom: 20px;
     position: relative;
-    overflow: hidden;
+    overflow: visible;
 }
 .enhanced-artist-meta::before {
     content: '';
@@ -31963,6 +31963,7 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
     right: 0;
     height: 2px;
     background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.6) 0%, transparent 100%);
+    border-radius: 16px 16px 0 0;
 }
 .enhanced-artist-meta-header {
     display: flex;
