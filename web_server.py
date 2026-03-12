@@ -9329,6 +9329,111 @@ def get_track_tag_preview(track_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/library/tracks/tag-preview-batch', methods=['POST'])
+def get_batch_tag_preview():
+    """Read current file tags and compare against DB metadata for multiple tracks."""
+    try:
+        from core.tag_writer import read_file_tags, build_tag_diff
+        data = request.get_json()
+        track_ids = data.get('track_ids', [])
+        if not track_ids:
+            return jsonify({"success": False, "error": "No track IDs provided"}), 400
+
+        database = get_database()
+        conn = database._get_connection()
+        cursor = conn.cursor()
+
+        placeholders = ','.join('?' for _ in track_ids)
+        cursor.execute(f"""
+            SELECT t.*, a.name as artist_name, al.title as album_title,
+                   al.year, al.genres as album_genres, al.track_count,
+                   al.thumb_url as album_thumb_url, a.thumb_url as artist_thumb_url
+            FROM tracks t
+            JOIN artists a ON t.artist_id = a.id
+            JOIN albums al ON t.album_id = al.id
+            WHERE t.id IN ({placeholders})
+        """, [str(tid) for tid in track_ids])
+        rows = [dict(r) for r in cursor.fetchall()]
+
+        results = []
+        for track_data in rows:
+            track_id = track_data['id']
+            file_path = track_data.get('file_path')
+            resolved_path = _resolve_library_file_path(file_path)
+
+            entry = {
+                'track_id': track_id,
+                'title': track_data.get('title', 'Unknown'),
+                'track_number': track_data.get('track_number'),
+            }
+
+            if not resolved_path:
+                entry['error'] = 'File not found'
+                results.append(entry)
+                continue
+
+            try:
+                file_tags = read_file_tags(resolved_path)
+                if file_tags.get('error'):
+                    entry['error'] = file_tags['error']
+                    results.append(entry)
+                    continue
+
+                album_genres = []
+                if track_data.get('album_genres'):
+                    try:
+                        parsed = json.loads(track_data['album_genres'])
+                        album_genres = parsed if isinstance(parsed, list) else [str(parsed)]
+                    except (ValueError, TypeError):
+                        album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
+
+                db_data = {
+                    'title': track_data.get('title'),
+                    'artist_name': track_data.get('artist_name'),
+                    'album_title': track_data.get('album_title'),
+                    'year': track_data.get('year'),
+                    'genres': album_genres,
+                    'track_number': track_data.get('track_number'),
+                    'disc_number': track_data.get('disc_number'),
+                    'bpm': track_data.get('bpm'),
+                    'track_count': track_data.get('track_count'),
+                    'thumb_url': track_data.get('album_thumb_url') or track_data.get('artist_thumb_url'),
+                }
+
+                diff = build_tag_diff(file_tags, db_data)
+                has_changes = any(d['changed'] for d in diff)
+                changed_fields = [d for d in diff if d['changed']]
+
+                entry['diff'] = diff
+                entry['has_changes'] = has_changes
+                entry['changed_count'] = len(changed_fields)
+
+            except Exception as e:
+                entry['error'] = str(e)
+
+            results.append(entry)
+
+        # Server type info
+        active_server = config_manager.get_active_media_server()
+        server_connected = False
+        if active_server == 'plex':
+            server_connected = plex_client.is_connected()
+        elif active_server == 'jellyfin':
+            server_connected = jellyfin_client.is_connected()
+        elif active_server == 'navidrome':
+            server_connected = navidrome_client.is_connected()
+
+        return jsonify({
+            "success": True,
+            "tracks": results,
+            "server_type": active_server if server_connected else None,
+        })
+
+    except Exception as e:
+        logger.error(f"Batch tag preview error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/library/track/<track_id>/write-tags', methods=['POST'])
 def write_track_tags(track_id):
     """Write DB metadata into the audio file tags for a single track."""
