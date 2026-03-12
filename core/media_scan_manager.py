@@ -65,25 +65,18 @@ class MediaScanManager:
                                 break
                         
                         if main_window:
-                            if active_server == "jellyfin":
-                                client = getattr(main_window, 'jellyfin_client', None)
+                            server_attr_map = {
+                                'jellyfin': 'jellyfin_client',
+                                'navidrome': 'navidrome_client',
+                                'plex': 'plex_client'
+                            }
+                            client_attr = server_attr_map.get(active_server)
+                            if client_attr:
+                                client = getattr(main_window, client_attr, None)
                                 if client and client.is_connected():
-                                    return client, "jellyfin"
+                                    return client, active_server
                                 else:
-                                    logger.warning("Jellyfin client not connected, falling back to Plex")
-                            elif active_server == "navidrome":
-                                client = getattr(main_window, 'navidrome_client', None)
-                                if client and client.is_connected():
-                                    return client, "navidrome"
-                                else:
-                                    logger.warning("Navidrome client not connected, falling back to Plex")
-
-                            # Default to Plex or fallback
-                            client = getattr(main_window, 'plex_client', None)
-                            if client and client.is_connected():
-                                return client, "plex"
-                            else:
-                                logger.debug(f"Plex client not connected or not found")
+                                    logger.warning(f"{active_server.title()} client not connected — scan skipped")
                         else:
                             logger.debug("No main window found in Qt application")
                     else:
@@ -94,21 +87,19 @@ class MediaScanManager:
                 
                 # Headless mode - try to get clients from global instances
                 import sys
-                for module_name, module in sys.modules.items():
-                    if (hasattr(module, 'plex_client') and hasattr(module, 'jellyfin_client') and
-                        hasattr(module, 'navidrome_client')):
-                        if active_server == "jellyfin":
-                            client = getattr(module, 'jellyfin_client', None)
+                server_attr_map = {
+                    'jellyfin': 'jellyfin_client',
+                    'navidrome': 'navidrome_client',
+                    'plex': 'plex_client'
+                }
+                client_attr = server_attr_map.get(active_server)
+                if client_attr:
+                    for module_name, module in sys.modules.items():
+                        if hasattr(module, client_attr):
+                            client = getattr(module, client_attr, None)
                             if client and hasattr(client, 'is_connected') and client.is_connected():
-                                return client, "jellyfin"
-                        elif active_server == "navidrome":
-                            client = getattr(module, 'navidrome_client', None)
-                            if client and hasattr(client, 'is_connected') and client.is_connected():
-                                return client, "navidrome"
-
-                        client = getattr(module, 'plex_client', None)
-                        if client and hasattr(client, 'is_connected') and client.is_connected():
-                            return client, "plex"
+                                return client, active_server
+                            break
                         
             except Exception as e:
                 logger.debug(f"Could not access clients: {e}")

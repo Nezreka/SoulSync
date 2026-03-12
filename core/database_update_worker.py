@@ -229,7 +229,10 @@ class DatabaseUpdateWorker(QThread):
                     logger.warning(f"Could not clear {self.server_type} cache: {e}")
             
             # Detect and remove content deleted from the media server
-            if not self.full_refresh and self.database:
+            # Only run on full refreshes — fetching the entire catalog on every
+            # incremental scan is too expensive (especially for Plex) and unnecessary
+            # since incremental scans add content, they don't detect removals.
+            if self.full_refresh and self.database:
                 try:
                     removal_results = self._detect_and_remove_stale_content()
                     if removal_results:

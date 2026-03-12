@@ -53,21 +53,17 @@ class WebScanManager:
                 'plex': 'plex_client'
             }
 
-            # Try to get the configured active server first
+            # Try to get the configured active server
             if active_server in server_client_map:
                 client_key = server_client_map[active_server]
                 client = self.media_clients.get(client_key)
                 if client and hasattr(client, 'is_connected') and client.is_connected():
                     return client, active_server
                 else:
-                    logger.warning(f"{active_server.title()} client not connected, falling back to Plex")
+                    logger.warning(f"{active_server.title()} client not connected — scan skipped")
+                    return None, None
 
-            # Fallback to Plex
-            plex_client = self.media_clients.get('plex_client')
-            if plex_client and hasattr(plex_client, 'is_connected') and plex_client.is_connected():
-                return plex_client, "plex"
-
-            logger.error("No active media client available for scanning")
+            logger.error("No active media server configured for scanning")
             return None, None
 
         except Exception as e:
