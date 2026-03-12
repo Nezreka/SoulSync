@@ -2,6 +2,10 @@
 // HELP & DOCS PAGE
 // ===============================
 
+function docsImg(src, alt) {
+    return `<img class="docs-screenshot" src="/static/docs/${src}" alt="${alt}" loading="lazy" onerror="this.style.display='none'">`;
+}
+
 const DOCS_SECTIONS = [
     {
         id: 'getting-started',
@@ -19,6 +23,7 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="gs-overview">
                 <h3 class="docs-subsection-title">Overview</h3>
                 <p class="docs-text">SoulSync is a self-hosted music download, sync, and library management platform. It connects to <strong>Spotify</strong>, <strong>Apple Music/iTunes</strong>, <strong>Tidal</strong>, <strong>Qobuz</strong>, <strong>YouTube</strong>, and <strong>Beatport</strong> for metadata, and uses <strong>Soulseek</strong> (via slskd) as the primary download source. Your library is served through <strong>Plex</strong>, <strong>Jellyfin</strong>, or <strong>Navidrome</strong>.</p>
+                ${docsImg('gs-overview.png', 'SoulSync dashboard overview')}
                 <div class="docs-features">
                     <div class="docs-feature-card"><h4>&#x1F3B5; Download Music</h4><p>Search and download tracks in FLAC, MP3, and more from Soulseek, YouTube, Tidal, or Qobuz, with automatic metadata tagging and file organization.</p></div>
                     <div class="docs-feature-card"><h4>&#x1F504; Playlist Sync</h4><p>Mirror playlists from Spotify, YouTube, Tidal, and Beatport. Discover official metadata and sync to your media server.</p></div>
@@ -37,6 +42,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Spotify (Recommended)</strong> &mdash; Connect Spotify for the richest metadata. Create an app at <strong>developer.spotify.com</strong>, enter your Client ID and Secret, then click Authenticate.</li>
                     <li><strong>Download Path</strong> &mdash; Set your download and transfer paths in the Download Settings section. The transfer path should point to your media server's monitored folder.</li>
                 </ol>
+                ${docsImg('gs-first-setup.png', 'Settings page first-time setup')}
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>You can start using SoulSync with just one download source (Soulseek, YouTube, Tidal, or Qobuz). Spotify and other services add metadata enrichment but aren't strictly required &mdash; iTunes/Apple Music is always available as a free fallback.</div></div>
             </div>
             <div class="docs-subsection" id="gs-connecting">
@@ -60,6 +66,7 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>ListenBrainz</strong></td><td>Listening history and recommendations</td><td>URL + Token</td></tr>
                     </tbody>
                 </table>
+                ${docsImg('gs-connecting.png', 'Service credentials connected')}
             </div>
             <div class="docs-subsection" id="gs-interface">
                 <h3 class="docs-subsection-title">Understanding the Interface</h3>
@@ -75,6 +82,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Import</strong> &mdash; Import music files from a staging folder with album/track matching</li>
                     <li><strong>Settings</strong> &mdash; Configure services, download preferences, quality profiles, and more</li>
                 </ul>
+                ${docsImg('gs-interface.png', 'SoulSync interface layout')}
                 <p class="docs-text"><strong>Version & Updates</strong>: Click the version number in the sidebar footer to open the <strong>What's New</strong> modal, which shows detailed release notes for every feature and fix. SoulSync automatically checks for updates by comparing your running version against the latest GitHub commit. If an update is available, a banner appears in the modal. Docker users are notified when a new image has been pushed to the repo.</p>
             </div>
             <div class="docs-subsection" id="gs-folders">
@@ -97,6 +105,7 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Staging Path</strong></td><td><code>/app/Staging</code></td><td>For the Import feature only. Drop audio files here to import them into your library via the Import page.</td></tr>
                     </tbody>
                 </table>
+                ${docsImg('gs-folders.png', 'Download settings folder configuration')}
 
                 <h4>How Files Flow</h4>
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>
@@ -206,6 +215,7 @@ const DOCS_SECTIONS = [
                     <code># Download Path: /app/downloads</code><br>
                     <code># Transfer Path: /app/Transfer</code>
                 </div></div>
+                ${docsImg('gs-docker.png', 'Docker compose configuration')}
 
                 <h4>Setup Checklist</h4>
                 <p class="docs-text">Go through every item. If you miss any single one, the pipeline will break:</p>
@@ -284,6 +294,140 @@ const DOCS_SECTIONS = [
         `
     },
     {
+        id: 'workflows',
+        title: 'Quick Start Workflows',
+        icon: '/static/help.png',
+        children: [
+            { id: 'wf-first', title: 'What Should I Do First?' },
+            { id: 'wf-download', title: 'How to: Download an Album' },
+            { id: 'wf-sync', title: 'How to: Sync a Spotify Playlist' },
+            { id: 'wf-auto', title: 'How to: Set Up Auto-Downloads' },
+            { id: 'wf-import', title: 'How to: Import Existing Music' },
+            { id: 'wf-media', title: 'How to: Connect Your Media Server' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="wf-first">
+                <h3 class="docs-subsection-title">What Should I Do First?</h3>
+                <p class="docs-text">SoulSync can do a lot, but you don't need to learn everything at once. Here are the <strong>6 essential workflows</strong> that cover 90% of what most users need. Start with whichever one matches your goal, and explore the rest later.</p>
+                <div class="docs-workflow-cards">
+                    <div class="docs-workflow-card" onclick="document.getElementById('wf-download').scrollIntoView({behavior:'smooth'})">
+                        <div class="docs-workflow-card-icon">&#x1F3B5;</div>
+                        <div class="docs-workflow-card-title">Download an Album</div>
+                        <span class="docs-workflow-card-badge">5 steps</span>
+                        <p>Search for any album, pick your tracks, and download in FLAC or MP3 with full metadata.</p>
+                        <a class="docs-workflow-card-link" onclick="event.stopPropagation(); document.getElementById('wf-download').scrollIntoView({behavior:'smooth'})">View Guide &rarr;</a>
+                    </div>
+                    <div class="docs-workflow-card" onclick="document.getElementById('wf-sync').scrollIntoView({behavior:'smooth'})">
+                        <div class="docs-workflow-card-icon">&#x1F504;</div>
+                        <div class="docs-workflow-card-title">Sync a Spotify Playlist</div>
+                        <span class="docs-workflow-card-badge">4 steps</span>
+                        <p>Import your Spotify playlists and download every track to your local library.</p>
+                        <a class="docs-workflow-card-link" onclick="event.stopPropagation(); document.getElementById('wf-sync').scrollIntoView({behavior:'smooth'})">View Guide &rarr;</a>
+                    </div>
+                    <div class="docs-workflow-card" onclick="document.getElementById('wf-auto').scrollIntoView({behavior:'smooth'})">
+                        <div class="docs-workflow-card-icon">&#x1F916;</div>
+                        <div class="docs-workflow-card-title">Set Up Auto-Downloads</div>
+                        <span class="docs-workflow-card-badge">4 steps</span>
+                        <p>Follow your favorite artists and automatically download their new releases.</p>
+                        <a class="docs-workflow-card-link" onclick="event.stopPropagation(); document.getElementById('wf-auto').scrollIntoView({behavior:'smooth'})">View Guide &rarr;</a>
+                    </div>
+                    <div class="docs-workflow-card" onclick="document.getElementById('wf-import').scrollIntoView({behavior:'smooth'})">
+                        <div class="docs-workflow-card-icon">&#x1F4E5;</div>
+                        <div class="docs-workflow-card-title">Import Existing Music</div>
+                        <span class="docs-workflow-card-badge">5 steps</span>
+                        <p>Bring your existing music files into SoulSync with proper tags and organization.</p>
+                        <a class="docs-workflow-card-link" onclick="event.stopPropagation(); document.getElementById('wf-import').scrollIntoView({behavior:'smooth'})">View Guide &rarr;</a>
+                    </div>
+                    <div class="docs-workflow-card" onclick="document.getElementById('wf-media').scrollIntoView({behavior:'smooth'})">
+                        <div class="docs-workflow-card-icon">&#x1F4FA;</div>
+                        <div class="docs-workflow-card-title">Connect Your Media Server</div>
+                        <span class="docs-workflow-card-badge">3 steps</span>
+                        <p>Link Plex, Jellyfin, or Navidrome so downloads appear in your library automatically.</p>
+                        <a class="docs-workflow-card-link" onclick="event.stopPropagation(); document.getElementById('wf-media').scrollIntoView({behavior:'smooth'})">View Guide &rarr;</a>
+                    </div>
+                    <div class="docs-workflow-card">
+                        <div class="docs-workflow-card-icon">&#x1F3C1;</div>
+                        <div class="docs-workflow-card-title">First Things After Setup</div>
+                        <span class="docs-workflow-card-badge">5 steps</span>
+                        <p>Once connected, do these 5 things to get the most out of SoulSync right away.</p>
+                        <a class="docs-workflow-card-link">See below &darr;</a>
+                    </div>
+                </div>
+                <h4>First Things After Setup</h4>
+                <ol class="docs-steps">
+                    <li><strong>Download one album</strong> &mdash; Verify your folder paths and post-processing work end-to-end</li>
+                    <li><strong>Run a Database Update</strong> &mdash; Dashboard &rarr; Database Updater &rarr; Full Refresh to import your existing media server library</li>
+                    <li><strong>Add 5&ndash;10 artists to your Watchlist</strong> &mdash; This seeds the discovery pool for recommendations</li>
+                    <li><strong>Check the Automations page</strong> &mdash; Enable the system automations you want (auto-process wishlist, auto-scan watchlist, auto-backup)</li>
+                    <li><strong>Explore the Discover page</strong> &mdash; Once your watchlist has artists, recommendations and playlists appear here</li>
+                </ol>
+            </div>
+            <div class="docs-subsection" id="wf-download">
+                <h3 class="docs-subsection-title">How to: Download an Album</h3>
+                <p class="docs-text"><strong>Goal:</strong> Find an album and download it to your library with full metadata, cover art, and proper file organization.</p>
+                <p class="docs-text"><strong>Prerequisites:</strong> At least one download source connected (Soulseek, YouTube, Tidal, or Qobuz). Download and Transfer paths configured.</p>
+                <ol class="docs-steps">
+                    <li><strong>Open Search</strong> &mdash; Click the Search page in the sidebar (make sure Enhanced Search is active)</li>
+                    <li><strong>Type the album name</strong> &mdash; Results appear in a categorized dropdown: Artists, Albums, Singles & EPs, Tracks</li>
+                    <li><strong>Click the album result</strong> &mdash; The download modal opens showing cover art, tracklist, and album details</li>
+                    <li><strong>Select tracks</strong> &mdash; All tracks are selected by default. Uncheck any you don't want</li>
+                    <li><strong>Click Download</strong> &mdash; SoulSync searches for each track, downloads, tags, and organizes the files automatically</li>
+                </ol>
+                ${docsImg('wf-download-album.gif', 'Downloading an album')}
+                <p class="docs-text"><strong>Result:</strong> Tracks appear in your Transfer folder as <code>Artist/Album/01 - Title.flac</code> and your media server is notified to scan.</p>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>If a track fails to download, click the retry icon or use the candidate selector to pick an alternative source file from a different user.</div></div>
+            </div>
+            <div class="docs-subsection" id="wf-sync">
+                <h3 class="docs-subsection-title">How to: Sync a Spotify Playlist</h3>
+                <p class="docs-text"><strong>Goal:</strong> Import a Spotify playlist and download all its tracks to your local library.</p>
+                <ol class="docs-steps">
+                    <li><strong>Go to the Sync page</strong> &mdash; Click Sync in the sidebar</li>
+                    <li><strong>Click Refresh</strong> &mdash; Your Spotify playlists load automatically (or paste a playlist URL directly)</li>
+                    <li><strong>Click Sync on a playlist</strong> &mdash; This adds all missing tracks to your wishlist</li>
+                    <li><strong>Wait for auto-processing</strong> &mdash; The wishlist processor runs every 30 minutes and downloads queued tracks. Or click "Process Wishlist" in Automations to start immediately</li>
+                </ol>
+                ${docsImg('wf-sync-playlist.gif', 'Syncing a Spotify playlist')}
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>Use the "Download Missing" button on any playlist to see exactly which tracks are missing and download them all at once.</div></div>
+            </div>
+            <div class="docs-subsection" id="wf-auto">
+                <h3 class="docs-subsection-title">How to: Set Up Auto-Downloads</h3>
+                <p class="docs-text"><strong>Goal:</strong> Automatically download new releases from your favorite artists without manual intervention.</p>
+                <ol class="docs-steps">
+                    <li><strong>Add artists to your Watchlist</strong> &mdash; Search for artists on the Artists page and click the Watch button on each one</li>
+                    <li><strong>Go to Automations</strong> &mdash; The built-in "Auto-Scan Watchlist" automation checks for new releases every 24 hours</li>
+                    <li><strong>Enable "Auto-Process Wishlist"</strong> &mdash; This automation picks up new releases found by the scan and downloads them every 30 minutes</li>
+                    <li><strong>Done!</strong> &mdash; New releases from watched artists are automatically found, queued, downloaded, tagged, and added to your library</li>
+                </ol>
+                ${docsImg('wf-auto-downloads.gif', 'Setting up auto-downloads')}
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>Customize per-artist settings (click the gear icon on a watched artist) to control which release types are included: Albums, EPs, Singles, Live, Remixes, etc.</div></div>
+            </div>
+            <div class="docs-subsection" id="wf-import">
+                <h3 class="docs-subsection-title">How to: Import Existing Music</h3>
+                <p class="docs-text"><strong>Goal:</strong> Bring music files you already have into SoulSync with proper metadata and organization.</p>
+                <ol class="docs-steps">
+                    <li><strong>Place files in your staging folder</strong> &mdash; Put album folders (e.g., <code>Artist - Album/</code>) in the Staging path configured in Settings</li>
+                    <li><strong>Go to the Import page</strong> &mdash; SoulSync detects the files and suggests album matches</li>
+                    <li><strong>Search for the correct album</strong> &mdash; If the auto-suggestion is wrong, search Spotify/iTunes for the right album</li>
+                    <li><strong>Match tracks</strong> &mdash; Drag-and-drop files onto the correct track slots, or click Auto-Match</li>
+                    <li><strong>Click Confirm</strong> &mdash; Files are tagged with official metadata, organized, and moved to your library</li>
+                </ol>
+                ${docsImg('wf-import-music.gif', 'Importing music')}
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>For loose singles (not in album folders), use the Singles tab on the Import page.</div></div>
+            </div>
+            <div class="docs-subsection" id="wf-media">
+                <h3 class="docs-subsection-title">How to: Connect Your Media Server</h3>
+                <p class="docs-text"><strong>Goal:</strong> Link your media server so downloaded music automatically appears in your library and can be streamed via the built-in player.</p>
+                <ol class="docs-steps">
+                    <li><strong>Go to Settings</strong> &mdash; Scroll to the Media Server section</li>
+                    <li><strong>Enter your server details</strong> &mdash; URL and credentials for Plex (URL + Token), Jellyfin (URL + API Key), or Navidrome (URL + Username + Password). Select your music library from the dropdown</li>
+                    <li><strong>Click Test Connection</strong> &mdash; Verify the connection is working. A green checkmark confirms success</li>
+                </ol>
+                ${docsImg('wf-media-server.gif', 'Connecting media server')}
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>Make sure your Transfer Path points to the same folder your media server monitors. This is how new downloads automatically appear in your library.</div></div>
+            </div>
+        `
+    },
+    {
         id: 'dashboard',
         title: 'Dashboard',
         icon: '/static/dashboard.png',
@@ -301,6 +445,7 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Overview & Stats</h3>
                 <p class="docs-text">The dashboard is your command center. At the top you'll see <strong>service status indicators</strong> for Spotify, your media server, and Soulseek &mdash; showing connected/disconnected state at a glance. Below that, stat cards display your library totals: artists, albums, tracks, and total library size.</p>
                 <p class="docs-text">Stats update in real-time via WebSocket &mdash; no page refresh needed.</p>
+                ${docsImg('dash-overview.png', 'Dashboard overview')}
             </div>
             <div class="docs-subsection" id="dash-workers">
                 <h3 class="docs-subsection-title">Enrichment Workers</h3>
@@ -317,9 +462,9 @@ const DOCS_SECTIONS = [
                     <div class="docs-feature-card"><h4>Tidal</h4><p>Tidal IDs, artist images, album labels, explicit flags, ISRCs</p></div>
                     <div class="docs-feature-card"><h4>Qobuz</h4><p>Qobuz IDs, artist images, album labels, genres, explicit flags</p></div>
                 </div>
+                ${docsImg('dash-workers.png', 'Enrichment workers status')}
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Workers retry "not found" items every 30 days and errored items every 7 days. You can pause/resume any worker from the dashboard.</div></div>
-                <p class="docs-text"><strong>Rate Limit Protection</strong>: Workers include smart rate limiting for all APIs. If Spotify returns a rate limit with a Retry-After greater than 60 seconds, a global ban activates &mdash; all Spotify API calls are suppressed before they're made, and searches automatically fall back to iTunes/Apple Music. A countdown modal appears showing the ban duration, triggering endpoint, and remaining time. The enrichment worker auto-pauses during the ban and resumes when it expires.</p>
-                <p class="docs-text">The rate limit modal provides a <strong>Disconnect Spotify</strong> button that immediately clears the ban, pauses the Spotify enrichment worker, and deletes the local Spotify cache. This lets you switch to Apple Music as your primary metadata source without waiting for the ban to expire.</p>
+                <p class="docs-text"><strong>Rate Limit Protection</strong>: Workers include smart rate limiting for all APIs. If Spotify returns a rate limit with a Retry-After greater than 60 seconds, the app seamlessly switches to iTunes/Apple Music &mdash; an amber indicator appears in the sidebar, searches automatically use Apple Music, and the enrichment worker pauses. When the ban expires, everything recovers automatically. No action needed from the user.</p>
             </div>
             <div class="docs-subsection" id="dash-tools">
                 <h3 class="docs-subsection-title">Tool Cards</h3>
@@ -336,6 +481,7 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Backup Manager</strong></td><td>Create, download, restore, and delete database backups. Rolling cleanup keeps the 5 most recent.</td></tr>
                     </tbody>
                 </table>
+                ${docsImg('dash-tools.png', 'Dashboard tool cards')}
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>Each tool card has a help button (?) that opens detailed instructions for that specific tool.</div></div>
             </div>
             <div class="docs-subsection" id="dash-retag">
@@ -348,6 +494,7 @@ const DOCS_SECTIONS = [
                     <li>Review the tag differences &mdash; mismatches are highlighted</li>
                     <li>Click <strong>Retag</strong> to write the corrected metadata to the audio files</li>
                 </ol>
+                ${docsImg('dash-retag.png', 'Retag tool interface')}
                 <p class="docs-text">The retag operation writes title, artist, album artist, album, track number, disc number, year, and genre. Cover art can optionally be re-embedded.</p>
             </div>
             <div class="docs-subsection" id="dash-backup">
@@ -360,6 +507,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Delete</strong> &mdash; Remove individual backups</li>
                     <li><strong>Rolling Cleanup</strong> &mdash; Automatically keeps only the 5 most recent backups to save disk space</li>
                 </ul>
+                ${docsImg('dash-backup.png', 'Backup manager')}
                 <p class="docs-text">The system automation <strong>Auto-Backup Database</strong> creates a backup every 3 days automatically. You can adjust the interval in Automations.</p>
             </div>
             <div class="docs-subsection" id="dash-repair">
@@ -376,6 +524,7 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="dash-activity">
                 <h3 class="docs-subsection-title">Activity Feed</h3>
                 <p class="docs-text">The activity feed at the bottom of the dashboard shows recent system events: downloads completed, syncs started, settings changed, automation runs, and errors. Events appear in real-time via WebSocket.</p>
+                <p class="docs-text">Events include: downloads started/completed/failed, playlist syncs, watchlist scans, automation runs, enrichment worker progress, settings changes, and system errors. The feed shows the 10 most recent events and updates in real-time via WebSocket. Older events are available in the application logs.</p>
             </div>
         `
     },
@@ -398,6 +547,7 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="sync-overview">
                 <h3 class="docs-subsection-title">Overview</h3>
                 <p class="docs-text">The Sync page lets you import playlists from <strong>Spotify</strong>, <strong>YouTube</strong>, <strong>Tidal</strong>, and <strong>Beatport</strong>. Once imported, playlists are <strong>mirrored</strong> &mdash; they persist in your SoulSync instance and can be refreshed, discovered, and synced to your wishlist for downloading.</p>
+                ${docsImg('sync-overview.png', 'Playlist sync page')}
             </div>
             <div class="docs-subsection" id="sync-spotify">
                 <h3 class="docs-subsection-title">Spotify Playlists</h3>
@@ -408,11 +558,13 @@ const DOCS_SECTIONS = [
                     <li><strong>Download Missing</strong> &mdash; Opens a modal showing tracks not in your library, with download controls</li>
                     <li><strong>Sync Playlist</strong> &mdash; Adds tracks to your wishlist for automated downloading</li>
                 </ul>
+                ${docsImg('sync-spotify.png', 'Spotify playlists loaded')}
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>Spotify-sourced playlists are auto-discovered at confidence 1.0 during refresh &mdash; no separate discovery step needed.</div></div>
             </div>
             <div class="docs-subsection" id="sync-youtube">
                 <h3 class="docs-subsection-title">YouTube Playlists</h3>
                 <p class="docs-text">Paste a YouTube playlist URL into the input field and click <strong>Parse Playlist</strong>. SoulSync extracts the track list and attempts to match each track to official Spotify/iTunes metadata.</p>
+                ${docsImg('sync-youtube.png', 'YouTube playlist import')}
                 <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div>YouTube tracks often have non-standard titles (e.g., "Artist - Song (Official Video)"). The discovery pipeline handles this, but some manual fixes may be needed for edge cases.</div></div>
             </div>
             <div class="docs-subsection" id="sync-tidal">
@@ -443,6 +595,7 @@ const DOCS_SECTIONS = [
                 </ul>
                 <p class="docs-text"><strong>Genre Browser</strong> &mdash; Browse 12+ electronic music genres (House, Techno, Drum & Bass, Trance, etc.) with per-genre views: Top 10 tracks, staff picks, hype rankings, latest releases, and new charts.</p>
                 <p class="docs-text"><strong>Charts</strong> &mdash; Top 100 and Hype charts with full track listings. Each track can be manually matched against Spotify for metadata, then synced and downloaded.</p>
+                ${docsImg('sync-beatport.png', 'Beatport genre browser')}
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Beatport data is cached with a configurable TTL. The system automation <strong>Refresh Beatport Cache</strong> runs every 24 hours to keep content fresh.</div></div>
             </div>
             <div class="docs-subsection" id="sync-mirrored">
@@ -454,6 +607,7 @@ const DOCS_SECTIONS = [
                     <li>Download progress survives page refresh</li>
                     <li>Each profile has its own mirrored playlists</li>
                 </ul>
+                ${docsImg('sync-mirror.png', 'Mirrored playlist cards')}
             </div>
             <div class="docs-subsection" id="sync-m3u">
                 <h3 class="docs-subsection-title">M3U Export</h3>
@@ -497,11 +651,13 @@ const DOCS_SECTIONS = [
                     <li>Click a <strong>track</strong> to search Soulseek for that specific song</li>
                     <li><strong>Preview tracks</strong> &mdash; Play button on search result tracks lets you stream a preview directly from your download source before committing to a download</li>
                 </ul>
+                ${docsImg('dl-enhanced-search.png', 'Enhanced search results')}
             </div>
             <div class="docs-subsection" id="search-basic">
                 <h3 class="docs-subsection-title">Basic Search</h3>
                 <p class="docs-text">Toggle to Basic Search mode for direct Soulseek queries. This shows raw search results with detailed info: format, bitrate, quality score, file size, uploader name, upload speed, and availability.</p>
                 <p class="docs-text"><strong>Filters</strong> let you narrow results by type (Albums/Singles), format (FLAC/MP3/OGG/AAC/WMA), and sort by relevance, quality, size, bitrate, duration, or uploader speed.</p>
+                ${docsImg('dl-basic-search.png', 'Basic Soulseek search')}
             </div>
             <div class="docs-subsection" id="search-sources">
                 <h3 class="docs-subsection-title">Download Sources</h3>
@@ -529,6 +685,7 @@ const DOCS_SECTIONS = [
                 </ul>
                 <p class="docs-text">Downloads can be started from multiple places: Enhanced Search results, artist discography, Download Missing modal, wishlist auto-processing, and playlist sync.</p>
                 <p class="docs-text"><strong>Download Candidate Selection</strong>: If a download fails or no suitable source is found, you can view the cached search candidates and manually pick an alternative file from a different user. This lets you recover failed downloads without restarting the entire search.</p>
+                ${docsImg('dl-candidates.png', 'Download candidate selection')}
             </div>
             <div class="docs-subsection" id="search-postprocess">
                 <h3 class="docs-subsection-title">Post-Processing Pipeline</h3>
@@ -542,6 +699,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Lossy Copy</strong> &mdash; If enabled in settings, a lower-bitrate copy is created alongside the original (useful for mobile device syncing).</li>
                     <li><strong>Media Server Scan</strong> &mdash; Your media server (Plex/Jellyfin) is notified to scan for the new file. Navidrome auto-detects changes.</li>
                 </ol>
+                ${docsImg('dl-post-processing.png', 'Post-processing pipeline complete')}
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div><strong>Quarantine</strong>: Files that fail AcoustID verification are moved to a quarantine folder instead of your library. You can review quarantined files and manually approve or delete them. The automation engine can trigger notifications when files are quarantined.</div></div>
             </div>
             <div class="docs-subsection" id="search-quality">
@@ -556,6 +714,7 @@ const DOCS_SECTIONS = [
                     </tbody>
                 </table>
                 <p class="docs-text">Each format has configurable bitrate ranges and a priority order. Enable <strong>Fallback</strong> to accept any quality when preferred formats aren't available.</p>
+                ${docsImg('dl-quality-profiles.png', 'Quality profile settings')}
             </div>
             <div class="docs-subsection" id="search-manager">
                 <h3 class="docs-subsection-title">Download Manager</h3>
@@ -584,6 +743,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Watch All</strong> &mdash; Add all featured artists to your watchlist at once</li>
                     <li><strong>View Recommended</strong> &mdash; See 50+ similar artists with enrichment data</li>
                 </ul>
+                ${docsImg('disc-hero.png', 'Featured artist hero slider')}
             </div>
             <div class="docs-subsection" id="disc-playlists">
                 <h3 class="docs-subsection-title">Discovery & Personalized Playlists</h3>
@@ -602,6 +762,7 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Familiar Favorites</strong></td><td>Library</td><td>Well-known tracks from artists you follow</td></tr>
                     </tbody>
                 </table>
+                ${docsImg('disc-playlists.png', 'Discovery playlist cards')}
                 <p class="docs-text">Each playlist can be played in the media player, downloaded, or synced to your media server.</p>
                 <p class="docs-text"><strong>Genre Browser</strong> &mdash; Filter discovery pool content by specific genres. Browse available genres and view top tracks within each genre category.</p>
                 <p class="docs-text"><strong>ListenBrainz Playlists</strong> &mdash; If ListenBrainz is configured, the Discover page also shows personalized playlists generated from your listening history: Created For You, Your Playlists, and Collaborative playlists.</p>
@@ -609,6 +770,7 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="disc-build">
                 <h3 class="docs-subsection-title">Build Custom Playlist</h3>
                 <p class="docs-text">Search for 1&ndash;5 artists, select them, and click <strong>Generate</strong> to create a custom playlist from their catalogs. You can then download or sync the generated playlist.</p>
+                ${docsImg('disc-build-playlist.png', 'Build custom playlist')}
             </div>
             <div class="docs-subsection" id="disc-seasonal">
                 <h3 class="docs-subsection-title">Seasonal & Curated Content</h3>
@@ -622,6 +784,7 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="disc-timemachine">
                 <h3 class="docs-subsection-title">Time Machine</h3>
                 <p class="docs-text">Browse discovery pool content by <strong>decade</strong> &mdash; tabs from the 1950s through the 2020s. Each decade pulls top tracks from pool artists active in that era.</p>
+                ${docsImg('disc-time-machine.png', 'Time Machine decade browser')}
             </div>
         `
     },
@@ -641,6 +804,7 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="art-search">
                 <h3 class="docs-subsection-title">Artist Search</h3>
                 <p class="docs-text">Search for any artist by name. Results show artist cards with images and genres. Results come from Spotify (or iTunes as fallback). Click any card to open the artist detail view.</p>
+                ${docsImg('art-search.png', 'Artist search results')}
             </div>
             <div class="docs-subsection" id="art-detail">
                 <h3 class="docs-subsection-title">Artist Detail & Discography</h3>
@@ -653,6 +817,7 @@ const DOCS_SECTIONS = [
                 </ul>
                 <p class="docs-text">At the top, <strong>View on</strong> buttons link to the artist on each matched external service (Spotify, Apple Music, MusicBrainz, Deezer, AudioDB, Last.fm, Genius, Tidal, Qobuz). <strong>Service badges</strong> on artist cards also indicate which services have matched this artist.</p>
                 <p class="docs-text"><strong>Similar Artists</strong> appear as clickable bubbles below the discography for further exploration and discovery.</p>
+                ${docsImg('art-detail.png', 'Artist detail page')}
             </div>
             <div class="docs-subsection" id="art-watchlist">
                 <h3 class="docs-subsection-title">Watchlist</h3>
@@ -664,6 +829,7 @@ const DOCS_SECTIONS = [
                     <li>Use <strong>Watch All</strong> to add all recommended artists at once</li>
                     <li><strong>Watch All Unwatched</strong> &mdash; Bulk-add every library artist that isn't already on your watchlist</li>
                 </ul>
+                ${docsImg('art-watchlist.png', 'Watchlist page')}
             </div>
             <div class="docs-subsection" id="art-scanning">
                 <h3 class="docs-subsection-title">New Release Scanning</h3>
@@ -674,6 +840,7 @@ const DOCS_SECTIONS = [
                     <li>Recent wishlist additions feed</li>
                     <li>Stats: artists scanned, new tracks found, tracks added to wishlist</li>
                 </ul>
+                ${docsImg('art-scan.png', 'New release scan panel')}
             </div>
             <div class="docs-subsection" id="art-wishlist">
                 <h3 class="docs-subsection-title">Wishlist</h3>
@@ -687,6 +854,7 @@ const DOCS_SECTIONS = [
                 <p class="docs-text"><strong>Manual Processing</strong>: Use the <strong>Process Wishlist</strong> automation action to trigger processing on demand. Options include processing all items, albums only, or singles only.</p>
                 <p class="docs-text"><strong>Cleanup</strong>: The <strong>Cleanup Wishlist</strong> action removes duplicates (same track added multiple times) and items you already own in your library.</p>
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Each wishlist item tracks its source (watchlist scan, playlist sync, manual), number of retry attempts, last error message, and status (pending, downloading, failed, complete).</div></div>
+                ${docsImg('art-wishlist.png', 'Wishlist queue')}
             </div>
             <div class="docs-subsection" id="art-settings">
                 <h3 class="docs-subsection-title">Watchlist Settings</h3>
@@ -713,6 +881,7 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Overview</h3>
                 <p class="docs-text">Automations let you schedule tasks and react to events with a visual <strong>WHEN &rarr; DO &rarr; THEN</strong> builder. Create custom workflows like "When a download completes, update the database, then notify me on Discord."</p>
                 <p class="docs-text">Each automation card shows its trigger/action flow, last run time, next scheduled run (with countdown), and a <strong>Run Now</strong> button for instant execution.</p>
+                ${docsImg('auto-overview.png', 'Automations page')}
             </div>
             <div class="docs-subsection" id="auto-builder">
                 <h3 class="docs-subsection-title">Builder</h3>
@@ -723,6 +892,7 @@ const DOCS_SECTIONS = [
                     <li><strong>THEN</strong> (Post-Action) &mdash; Up to 3 notification or signal actions after the DO completes</li>
                 </ol>
                 <p class="docs-text">Add <strong>Conditions</strong> to filter when the automation runs. Match modes: All (AND) or Any (OR). Operators: contains, equals, starts_with, not_contains.</p>
+                ${docsImg('auto-builder.png', 'Automation builder')}
             </div>
             <div class="docs-subsection" id="auto-triggers">
                 <h3 class="docs-subsection-title">All Triggers</h3>
@@ -801,6 +971,7 @@ const DOCS_SECTIONS = [
                 <p class="docs-text">Use the <strong>Run Now</strong> button on any automation card to execute it immediately, regardless of its schedule. The result (success/failure) updates in real-time on the card. Running automations display a glow effect on their card.</p>
                 <p class="docs-text"><strong>Stall detection</strong>: If an automation action runs for more than 2 hours without completing, it is automatically flagged as stalled and terminated to prevent resource leaks.</p>
                 <p class="docs-text">The Dashboard activity feed also logs every automation execution with timestamps, so you can review the full history of what ran and when.</p>
+                ${docsImg('auto-history.png', 'Automation execution history')}
             </div>
             <div class="docs-subsection" id="auto-system">
                 <h3 class="docs-subsection-title">System Automations</h3>
@@ -820,6 +991,7 @@ const DOCS_SECTIONS = [
                         <tr><td>Full Cleanup</td><td>Every 12 hours</td></tr>
                     </tbody>
                 </table>
+                ${docsImg('auto-system.png', 'System automations')}
             </div>
         `
     },
@@ -841,6 +1013,7 @@ const DOCS_SECTIONS = [
                 <p class="docs-text">The Library page shows all artists in your collection as cards with images, album/track counts, and <strong>service badges</strong> (Spotify, MusicBrainz, Deezer, AudioDB, iTunes, Last.fm, Genius, Tidal, Qobuz) indicating which services have matched this artist.</p>
                 <p class="docs-text">Use the <strong>search bar</strong>, <strong>alphabet navigation</strong> (A&ndash;Z, #), and <strong>watchlist filter</strong> (All/Watched/Unwatched) to browse. Click any artist card to view their discography.</p>
                 <p class="docs-text">The artist detail page shows albums, EPs, and singles as cards with completion percentages. Filter by category, content type (live/compilations/featured), or status (owned/missing). At the top, <strong>View on</strong> buttons link to the artist on each matched external service.</p>
+                ${docsImg('lib-standard.png', 'Library artist grid')}
             </div>
             <div class="docs-subsection" id="lib-enhanced">
                 <h3 class="docs-subsection-title">Enhanced Library Manager</h3>
@@ -853,6 +1026,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Play tracks</strong> &mdash; Queue button adds tracks to the media player</li>
                     <li><strong>Delete</strong> &mdash; Remove tracks or albums from the database (files on disk are never touched)</li>
                 </ul>
+                ${docsImg('lib-enhanced.png', 'Enhanced Library Manager')}
             </div>
             <div class="docs-subsection" id="lib-matching">
                 <h3 class="docs-subsection-title">Service Matching</h3>
@@ -868,6 +1042,7 @@ const DOCS_SECTIONS = [
                     <li>Optionally enable <strong>Embed cover art</strong> and <strong>Sync to server</strong></li>
                     <li>Click <strong>Write Tags</strong> to apply changes to the file</li>
                 </ol>
+                ${docsImg('lib-tags.png', 'Tag preview modal')}
                 <p class="docs-text">Supports MP3, FLAC, OGG, and M4A via Mutagen. After writing, optional server sync pushes metadata to Plex (per-track update), Jellyfin (library scan), or Navidrome (auto-detects).</p>
             </div>
             <div class="docs-subsection" id="lib-bulk">
@@ -878,6 +1053,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Write Tags</strong> &mdash; Batch write tags to all selected tracks with live progress</li>
                     <li><strong>Clear Selection</strong> &mdash; Deselect all</li>
                 </ul>
+                ${docsImg('lib-bulk.png', 'Bulk operations bar')}
             </div>
             <div class="docs-subsection" id="lib-missing">
                 <h3 class="docs-subsection-title">Download Missing Tracks</h3>
@@ -901,7 +1077,10 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="imp-setup">
                 <h3 class="docs-subsection-title">Staging Setup</h3>
                 <p class="docs-text">Set your <strong>staging folder path</strong> in Settings &rarr; Download Settings. Place audio files you want to import into this folder. SoulSync scans the folder and detects albums from the file structure.</p>
+                <p class="docs-text">Place albums in subfolders (e.g., <code>Artist - Album/</code>) and loose singles at the root level.</p>
                 <p class="docs-text">The import page header shows the total files in staging and their combined size.</p>
+                ${docsImg('imp-staging.png', 'Import staging page')}
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Files not showing up?</strong> Check that your staging folder path is correct in Settings and that the folder has read permissions. Docker users: make sure the staging volume mount is configured in your docker-compose.yml.</div></div>
             </div>
             <div class="docs-subsection" id="imp-workflow">
                 <h3 class="docs-subsection-title">Import Workflow</h3>
@@ -912,6 +1091,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Match tracks</strong> &mdash; Drag-and-drop staged files onto album track slots, or let auto-match attempt it</li>
                     <li>Review the match and click <strong>Confirm</strong> to import &mdash; files are tagged, organized, and added to your library</li>
                 </ol>
+                ${docsImg('imp-matching.png', 'Track matching interface')}
             </div>
             <div class="docs-subsection" id="imp-singles">
                 <h3 class="docs-subsection-title">Singles Import</h3>
@@ -936,6 +1116,7 @@ const DOCS_SECTIONS = [
                     <li>Map columns to the correct fields (Artist, Album, Track)</li>
                     <li>SoulSync searches for each track on Spotify/iTunes and adds matches to your wishlist for downloading</li>
                 </ol>
+                ${docsImg('imp-textfile.png', 'Text file import')}
             </div>
         `
     },
@@ -954,6 +1135,7 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Playback Controls</h3>
                 <p class="docs-text">The sidebar media player is always visible when a track is loaded. It shows album art, track info, a seekable progress bar, and playback controls (play/pause, previous, next, volume, repeat, shuffle).</p>
                 <p class="docs-text">Click the sidebar player to open the <strong>Now Playing modal</strong> &mdash; a full-screen experience with large album art, ambient glow (dominant color from cover art), a frequency-driven audio visualizer, and expanded controls.</p>
+                ${docsImg('player-nowplaying.png', 'Now Playing modal')}
             </div>
             <div class="docs-subsection" id="player-streaming">
                 <h3 class="docs-subsection-title">Streaming & Sources</h3>
@@ -970,6 +1152,7 @@ const DOCS_SECTIONS = [
                 <p class="docs-text">Add tracks to the queue from the Enhanced Library Manager or download results. Manage the queue in the Now Playing modal: reorder, remove individual tracks, or clear all.</p>
                 <p class="docs-text"><strong>Smart Radio</strong> mode (toggle in queue header) automatically adds similar tracks when the queue runs out, based on genre, mood, style, and artist similarity. Playback continues seamlessly.</p>
                 <p class="docs-text"><strong>Repeat modes</strong>: Off &rarr; Repeat All (loop queue) &rarr; Repeat One. <strong>Shuffle</strong> randomizes the next track from the remaining queue.</p>
+                ${docsImg('player-queue.png', 'Queue panel')}
             </div>
             <div class="docs-subsection" id="player-shortcuts">
                 <h3 class="docs-subsection-title">Keyboard Shortcuts</h3>
@@ -1015,6 +1198,7 @@ const DOCS_SECTIONS = [
                     <li><strong>AcoustID</strong> &mdash; API key from acoustid.org (enables fingerprint verification)</li>
                     <li><strong>ListenBrainz</strong> &mdash; Base URL + token for listening history and playlist import</li>
                 </ul>
+                ${docsImg('settings-credentials.png', 'Service credentials')}
             </div>
             <div class="docs-subsection" id="set-media">
                 <h3 class="docs-subsection-title">Media Server Setup</h3>
@@ -1027,6 +1211,7 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Navidrome</strong></td><td>URL + Username + Password</td><td>Select the <strong>Music Folder</strong> to monitor. Navidrome auto-detects new files, so SoulSync doesn't need to trigger scans &mdash; just place files in the right folder.</td></tr>
                     </tbody>
                 </table>
+                ${docsImg('settings-media-server.png', 'Media server setup')}
                 <p class="docs-text">The media player streams audio directly from your connected server &mdash; tracks play through your Plex, Jellyfin, or Navidrome instance without needing local file access.</p>
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Navidrome users:</strong> If artist images are broken after upgrading, use the <strong>Fix Navidrome URLs</strong> tool in Settings to convert old image URL formats to the correct Subsonic API format.</div></div>
             </div>
@@ -1041,6 +1226,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Lossy Copy</strong> &mdash; When enabled, creates a lower-bitrate MP3 copy of every downloaded file. Configure the output bitrate (default 320kbps) and output folder. Optionally delete the original lossless file after creating the lossy copy. Useful for syncing to mobile devices or streaming servers with bandwidth constraints.</li>
                     <li><strong>Content Filtering</strong> &mdash; Toggle explicit content filtering to control whether explicit tracks appear in search results and downloads.</li>
                 </ul>
+                ${docsImg('settings-downloads.png', 'Download settings')}
                 <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div><strong>Docker users:</strong> Always use container-side paths in these settings (e.g., <code>/app/downloads</code>, <code>/app/Transfer</code>). Never use host paths like <code>/mnt/music</code> &mdash; the container can't access those. Your docker-compose <code>volumes</code> section is where host paths are mapped to container paths. See <strong>Getting Started &rarr; Folder Setup</strong> for a complete walkthrough.</div></div>
             </div>
             <div class="docs-subsection" id="set-processing">
@@ -1056,6 +1242,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Soulseek Search Timeout</strong> &mdash; How long to wait for Soulseek search results before giving up (seconds).</li>
                     <li><strong>Discovery Lookback Period</strong> &mdash; How many weeks back to check for new releases during watchlist scans.</li>
                 </ul>
+                ${docsImg('settings-processing.png', 'Processing settings')}
             </div>
             <div class="docs-subsection" id="set-quality">
                 <h3 class="docs-subsection-title">Quality Profiles</h3>
@@ -1110,6 +1297,8 @@ const DOCS_SECTIONS = [
                     <li>Set an <strong>Admin PIN</strong> when multiple profiles exist to protect the admin account</li>
                     <li>Profile 1 (admin) cannot be deleted</li>
                 </ul>
+                <p class="docs-text">PINs are 4-6 digits. If you forget your PIN, the admin can reset it from Manage Profiles. The admin PIN protects settings and destructive operations when multiple profiles exist.</p>
+                ${docsImg('profiles-picker.png', 'Profile picker')}
             </div>
             <div class="docs-subsection" id="prof-permissions">
                 <h3 class="docs-subsection-title">Permissions & Page Access</h3>
@@ -1119,6 +1308,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Can Download Music</strong> &mdash; Toggle whether the profile can initiate downloads. When disabled, all download buttons are hidden and the backend blocks download API calls with a 403 error.</li>
                     <li><strong>Enhanced Library Manager</strong> &mdash; The Enhanced view toggle on artist detail pages is only available to admin profiles. Non-admin users see the Standard view only.</li>
                 </ul>
+                ${docsImg('profiles-permissions.png', 'Profile permissions')}
                 <p class="docs-text">If the admin removes a page that was set as a user's home page, the home page automatically resets. Navigation guards prevent users from accessing restricted pages even via direct URL or browser history.</p>
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Existing profiles created before permissions were added have full access to all pages by default. The admin must explicitly restrict access per profile.</div></div>
             </div>
@@ -1140,7 +1330,18 @@ const DOCS_SECTIONS = [
         icon: '/static/settings.png',
         children: [
             { id: 'api-auth', title: 'Authentication' },
-            { id: 'api-endpoints', title: 'Key Endpoints' },
+            { id: 'api-system', title: 'System & Status' },
+            { id: 'api-search', title: 'Search' },
+            { id: 'api-downloads', title: 'Downloads' },
+            { id: 'api-library', title: 'Library' },
+            { id: 'api-library-edit', title: 'Library Editing' },
+            { id: 'api-playlists', title: 'Playlists' },
+            { id: 'api-watchlist', title: 'Watchlist & Wishlist' },
+            { id: 'api-automations', title: 'Automations' },
+            { id: 'api-import', title: 'Import' },
+            { id: 'api-settings', title: 'Settings' },
+            { id: 'api-enrichment', title: 'Enrichment Workers' },
+            { id: 'api-profiles', title: 'Profiles' },
             { id: 'api-websocket', title: 'WebSocket Events' }
         ],
         content: () => `
@@ -1152,29 +1353,294 @@ const DOCS_SECTIONS = [
                     <li>Query: <code>?api_key=sk_xxxxx</code></li>
                 </ul>
                 <p class="docs-text">Keys use a <code>sk_</code> prefix. The raw key is shown once at creation; only a SHA-256 hash is stored.</p>
+                <div class="docs-code-label">Example: cURL with API key</div>
+                <div class="docs-code-block">curl -H "Authorization: Bearer sk_abc123..." http://localhost:5000/api/system/status</div>
             </div>
-            <div class="docs-subsection" id="api-endpoints">
-                <h3 class="docs-subsection-title">Key Endpoints</h3>
+            <div class="docs-subsection" id="api-system">
+                <h3 class="docs-subsection-title">System & Status</h3>
+                <p class="docs-text">Endpoints for checking system health, service connectivity, and library statistics.</p>
                 <table class="docs-table">
-                    <thead><tr><th>Endpoint</th><th>Description</th></tr></thead>
+                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
                     <tbody>
-                        <tr><td><code>GET /api/system/status</code></td><td>Uptime and service connectivity</td></tr>
-                        <tr><td><code>GET /api/system/stats</code></td><td>Library counts and sizes</td></tr>
-                        <tr><td><code>GET /api/library/artists</code></td><td>Paginated artist list with filters</td></tr>
-                        <tr><td><code>GET /api/artist-detail/{id}</code></td><td>Full artist info and discography</td></tr>
-                        <tr><td><code>POST /api/download</code></td><td>Start a download</td></tr>
-                        <tr><td><code>GET /api/downloads/status</code></td><td>Active download status</td></tr>
-                        <tr><td><code>POST /api/search</code></td><td>Search Soulseek</td></tr>
-                        <tr><td><code>POST /api/enhanced-search</code></td><td>Enhanced metadata search</td></tr>
-                        <tr><td><code>GET /api/automations</code></td><td>List all automations</td></tr>
-                        <tr><td><code>POST /api/database/backup</code></td><td>Create a backup</td></tr>
+                        <tr><td>GET</td><td><code>/api/system/status</code></td><td>Uptime, version, and service connectivity</td></tr>
+                        <tr><td>GET</td><td><code>/api/system/stats</code></td><td>Library counts (artists, albums, tracks) and total size</td></tr>
+                        <tr><td>GET</td><td><code>/api/system/activity</code></td><td>Recent activity feed entries</td></tr>
+                        <tr><td>GET</td><td><code>/api/debug-info</code></td><td>Full debug snapshot: services, paths, workers, recent logs</td></tr>
+                        <tr><td>GET</td><td><code>/api/version</code></td><td>Current version and update availability</td></tr>
                     </tbody>
                 </table>
-                <p class="docs-text">The full API has 200+ endpoints covering library, downloads, playlists, automations, profiles, settings, and more. Use a reverse proxy (Nginx, Caddy, Traefik) for external access with HTTPS.</p>
+                <div class="docs-code-label">Response: GET /api/system/stats</div>
+                <div class="docs-code-block">{
+  "artists": 342,
+  "albums": 1205,
+  "tracks": 14832,
+  "total_size": "128.4 GB",
+  "database_size": "45.2 MB"
+}</div>
+            </div>
+            <div class="docs-subsection" id="api-search">
+                <h3 class="docs-subsection-title">Search</h3>
+                <p class="docs-text">Search for music across metadata sources and Soulseek.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td>POST</td><td><code>/api/enhanced-search</code></td><td>Search Spotify/iTunes for artists, albums, and tracks</td></tr>
+                        <tr><td>POST</td><td><code>/api/search</code></td><td>Search Soulseek directly for files</td></tr>
+                        <tr><td>POST</td><td><code>/api/spotify/search_tracks</code></td><td>Search Spotify for tracks by query</td></tr>
+                        <tr><td>POST</td><td><code>/api/itunes/search_tracks</code></td><td>Search iTunes/Apple Music for tracks</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-code-label">Request: POST /api/enhanced-search</div>
+                <div class="docs-code-block">Content-Type: application/json
+
+{
+  "query": "Radiohead OK Computer",
+  "type": "album"
+}</div>
+            </div>
+            <div class="docs-subsection" id="api-downloads">
+                <h3 class="docs-subsection-title">Downloads</h3>
+                <p class="docs-text">Start, monitor, and manage music downloads.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td>POST</td><td><code>/api/download</code></td><td>Start downloading a track</td></tr>
+                        <tr><td>GET</td><td><code>/api/downloads/status</code></td><td>Current download queue and progress</td></tr>
+                        <tr><td>POST</td><td><code>/api/download/cancel</code></td><td>Cancel an active download</td></tr>
+                        <tr><td>POST</td><td><code>/api/download/album</code></td><td>Start downloading an entire album</td></tr>
+                        <tr><td>GET</td><td><code>/api/downloads/history</code></td><td>Completed and failed download history</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-code-label">Request: POST /api/download</div>
+                <div class="docs-code-block">Content-Type: application/json
+
+{
+  "artist": "Radiohead",
+  "album": "OK Computer",
+  "title": "Karma Police",
+  "spotify_id": "3SVAN3BRByDmHOhKyIDxfC"
+}</div>
+                <div class="docs-code-label">Response</div>
+                <div class="docs-code-block">{
+  "success": true,
+  "task_id": "abc123",
+  "message": "Download started"
+}</div>
+            </div>
+            <div class="docs-subsection" id="api-library">
+                <h3 class="docs-subsection-title">Library</h3>
+                <p class="docs-text">Browse and query your music library.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td>GET</td><td><code>/api/library/artists</code></td><td>Paginated artist list with search and filters</td></tr>
+                        <tr><td>GET</td><td><code>/api/artist-detail/{id}</code></td><td>Full artist info, discography, and match status</td></tr>
+                        <tr><td>GET</td><td><code>/api/library/artist/{id}/enhanced</code></td><td>Enhanced view: full tracks, tags, file paths</td></tr>
+                        <tr><td>GET</td><td><code>/api/library/album/{id}/tracks</code></td><td>Track list for an album</td></tr>
+                        <tr><td>POST</td><td><code>/api/database/update</code></td><td>Trigger library database refresh</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-code-label">Response: GET /api/library/artists?page=1&per_page=20</div>
+                <div class="docs-code-block">{
+  "artists": [
+    {
+      "id": 1,
+      "name": "Radiohead",
+      "album_count": 9,
+      "track_count": 101,
+      "image_url": "https://..."
+    }
+  ],
+  "total": 342,
+  "page": 1,
+  "per_page": 20
+}</div>
+            </div>
+            <div class="docs-subsection" id="api-library-edit">
+                <h3 class="docs-subsection-title">Library Editing</h3>
+                <p class="docs-text">Edit metadata and write tags to files via the Enhanced Library Manager.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td>PUT</td><td><code>/api/library/artist/{id}</code></td><td>Update artist fields (name, genres, label, etc.)</td></tr>
+                        <tr><td>PUT</td><td><code>/api/library/album/{id}</code></td><td>Update album fields</td></tr>
+                        <tr><td>PUT</td><td><code>/api/library/track/{id}</code></td><td>Update track fields (title, track_number, bpm)</td></tr>
+                        <tr><td>POST</td><td><code>/api/library/tracks/batch</code></td><td>Batch update multiple tracks at once</td></tr>
+                        <tr><td>GET</td><td><code>/api/library/track/{id}/tag-preview</code></td><td>Preview tag diff (current file tags vs database)</td></tr>
+                        <tr><td>POST</td><td><code>/api/library/track/{id}/write-tags</code></td><td>Write database metadata to audio file tags</td></tr>
+                        <tr><td>POST</td><td><code>/api/library/tracks/write-tags-batch</code></td><td>Batch write tags to multiple files</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-code-label">Request: PUT /api/library/track/42</div>
+                <div class="docs-code-block">Content-Type: application/json
+
+{
+  "title": "Karma Police",
+  "track_number": 6,
+  "bpm": 75
+}</div>
+            </div>
+            <div class="docs-subsection" id="api-playlists">
+                <h3 class="docs-subsection-title">Playlists</h3>
+                <p class="docs-text">Import, sync, and manage mirrored playlists from external sources.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td>GET</td><td><code>/api/playlists/spotify</code></td><td>List Spotify playlists</td></tr>
+                        <tr><td>POST</td><td><code>/api/playlists/parse</code></td><td>Parse a YouTube/Tidal playlist URL</td></tr>
+                        <tr><td>GET</td><td><code>/api/playlists/mirrored</code></td><td>List all mirrored playlists</td></tr>
+                        <tr><td>POST</td><td><code>/api/playlists/{id}/sync</code></td><td>Sync playlist tracks to wishlist</td></tr>
+                        <tr><td>POST</td><td><code>/api/playlists/{id}/discover</code></td><td>Discover official metadata for playlist tracks</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-code-label">Request: POST /api/playlists/parse</div>
+                <div class="docs-code-block">Content-Type: application/json
+
+{
+  "url": "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
+}</div>
+            </div>
+            <div class="docs-subsection" id="api-watchlist">
+                <h3 class="docs-subsection-title">Watchlist & Wishlist</h3>
+                <p class="docs-text">Manage watched artists and the download wishlist queue.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td>GET</td><td><code>/api/watchlist</code></td><td>List all watched artists</td></tr>
+                        <tr><td>POST</td><td><code>/api/watchlist/add</code></td><td>Add an artist to the watchlist</td></tr>
+                        <tr><td>DELETE</td><td><code>/api/watchlist/{id}</code></td><td>Remove artist from watchlist</td></tr>
+                        <tr><td>GET</td><td><code>/api/wishlist</code></td><td>List all wishlist items with status</td></tr>
+                        <tr><td>POST</td><td><code>/api/wishlist/process</code></td><td>Trigger wishlist processing</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-code-label">Request: POST /api/watchlist/add</div>
+                <div class="docs-code-block">Content-Type: application/json
+
+{
+  "artist_name": "Radiohead",
+  "spotify_id": "4Z8W4fKeB5YxbusRsdQVPb"
+}</div>
+            </div>
+            <div class="docs-subsection" id="api-automations">
+                <h3 class="docs-subsection-title">Automations</h3>
+                <p class="docs-text">Create, manage, and trigger automations.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td>GET</td><td><code>/api/automations</code></td><td>List all automations with status</td></tr>
+                        <tr><td>POST</td><td><code>/api/automations</code></td><td>Create a new automation</td></tr>
+                        <tr><td>PUT</td><td><code>/api/automations/{id}</code></td><td>Update an automation</td></tr>
+                        <tr><td>POST</td><td><code>/api/automations/{id}/run</code></td><td>Run an automation immediately</td></tr>
+                        <tr><td>DELETE</td><td><code>/api/automations/{id}</code></td><td>Delete a custom automation</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-code-label">Response: GET /api/automations</div>
+                <div class="docs-code-block">[
+  {
+    "id": 1,
+    "name": "Auto-Process Wishlist",
+    "trigger_type": "schedule",
+    "action_type": "process_wishlist",
+    "enabled": true,
+    "last_run": "2026-03-12T10:30:00Z",
+    "run_count": 142,
+    "is_system": true
+  }
+]</div>
+            </div>
+            <div class="docs-subsection" id="api-import">
+                <h3 class="docs-subsection-title">Import</h3>
+                <p class="docs-text">Manage the staging folder and import music files.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td>GET</td><td><code>/api/import/staging</code></td><td>List files and folders in the staging directory</td></tr>
+                        <tr><td>POST</td><td><code>/api/import/match</code></td><td>Auto-match staged files to album tracks</td></tr>
+                        <tr><td>POST</td><td><code>/api/import/confirm</code></td><td>Confirm and execute an import</td></tr>
+                        <tr><td>POST</td><td><code>/api/import/search/albums</code></td><td>Search for album matches for staged files</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-code-label">Response: GET /api/import/staging</div>
+                <div class="docs-code-block">{
+  "folders": [
+    {
+      "name": "Radiohead - OK Computer",
+      "files": 12,
+      "size": "485 MB"
+    }
+  ],
+  "singles": 3,
+  "total_size": "512 MB"
+}</div>
+            </div>
+            <div class="docs-subsection" id="api-settings">
+                <h3 class="docs-subsection-title">Settings</h3>
+                <p class="docs-text">Read and update application settings. Admin-only endpoints.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td>GET</td><td><code>/api/settings</code></td><td>Get all current settings</td></tr>
+                        <tr><td>POST</td><td><code>/api/settings</code></td><td>Update settings (partial update supported)</td></tr>
+                        <tr><td>POST</td><td><code>/api/database/backup</code></td><td>Create a database backup</td></tr>
+                        <tr><td>GET</td><td><code>/api/database/backups</code></td><td>List available backups</td></tr>
+                        <tr><td>POST</td><td><code>/api/database/restore</code></td><td>Restore from a backup</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-code-label">Response: POST /api/database/backup</div>
+                <div class="docs-code-block">{
+  "success": true,
+  "filename": "backup_2026-03-12_103000.db",
+  "size": "45.2 MB"
+}</div>
+            </div>
+            <div class="docs-subsection" id="api-enrichment">
+                <h3 class="docs-subsection-title">Enrichment Workers</h3>
+                <p class="docs-text">Monitor and control the background metadata enrichment workers.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td>GET</td><td><code>/api/enrichment/status</code></td><td>Status of all enrichment workers</td></tr>
+                        <tr><td>POST</td><td><code>/api/enrichment/pause</code></td><td>Pause a specific worker</td></tr>
+                        <tr><td>POST</td><td><code>/api/enrichment/resume</code></td><td>Resume a paused worker</td></tr>
+                        <tr><td>POST</td><td><code>/api/enrichment/reset</code></td><td>Reset worker progress and re-scan all items</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-code-label">Response: GET /api/enrichment/status</div>
+                <div class="docs-code-block">{
+  "workers": {
+    "spotify": { "status": "running", "matched": 142, "total": 342, "current": "Radiohead" },
+    "musicbrainz": { "status": "paused", "matched": 98, "total": 342 },
+    "lastfm": { "status": "running", "matched": 320, "total": 342 }
+  }
+}</div>
+            </div>
+            <div class="docs-subsection" id="api-profiles">
+                <h3 class="docs-subsection-title">Profiles</h3>
+                <p class="docs-text">Manage multi-profile support. Admin-only for create/edit/delete.</p>
+                <table class="docs-table">
+                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+                    <tbody>
+                        <tr><td>GET</td><td><code>/api/profiles</code></td><td>List all profiles</td></tr>
+                        <tr><td>POST</td><td><code>/api/profiles</code></td><td>Create a new profile</td></tr>
+                        <tr><td>PUT</td><td><code>/api/profiles/{id}</code></td><td>Update a profile (name, avatar, permissions)</td></tr>
+                        <tr><td>DELETE</td><td><code>/api/profiles/{id}</code></td><td>Delete a profile (admin only, cannot delete profile 1)</td></tr>
+                        <tr><td>POST</td><td><code>/api/profiles/switch</code></td><td>Switch active profile (PIN required if set)</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-code-label">Request: POST /api/profiles</div>
+                <div class="docs-code-block">Content-Type: application/json
+
+{
+  "name": "Family Room",
+  "is_admin": false,
+  "pin": "1234",
+  "allowed_pages": ["search", "discover", "library", "sync"],
+  "can_download": true
+}</div>
             </div>
             <div class="docs-subsection" id="api-websocket">
                 <h3 class="docs-subsection-title">WebSocket Events</h3>
-                <p class="docs-text">SoulSync uses <strong>Socket.IO</strong> for real-time communication. The frontend connects automatically and receives live updates without polling:</p>
+                <p class="docs-text">SoulSync uses <strong>Socket.IO</strong> for real-time communication. The frontend connects automatically and receives live updates without polling. Connect to the same host/port as the web UI.</p>
                 <table class="docs-table">
                     <thead><tr><th>Event</th><th>Description</th></tr></thead>
                     <tbody>
@@ -1185,9 +1651,20 @@ const DOCS_SECTIONS = [
                         <tr><td><code>scan_progress</code></td><td>Library scan, quality scan, or duplicate scan progress</td></tr>
                         <tr><td><code>system_status</code></td><td>Service connectivity changes (Spotify rate limit, slskd disconnect)</td></tr>
                         <tr><td><code>activity</code></td><td>System activity feed entries</td></tr>
+                        <tr><td><code>wishlist_update</code></td><td>Wishlist item added, status changed, or removed</td></tr>
+                        <tr><td><code>automation_run</code></td><td>Automation started, completed, or failed</td></tr>
                     </tbody>
                 </table>
-                <p class="docs-text">All UI elements that show live progress (download bars, worker icons, scan counters) are driven by these WebSocket events.</p>
+                <p class="docs-text">All UI elements that show live progress (download bars, worker icons, scan counters) are driven by these WebSocket events. External clients can connect using any Socket.IO-compatible library and listen for these same events.</p>
+                <div class="docs-code-label">Example: Socket.IO client (JavaScript)</div>
+                <div class="docs-code-block">const socket = io('http://localhost:5000');
+socket.on('download_progress', (data) => {
+  console.log(data.title, data.percent + '%');
+});
+socket.on('activity', (data) => {
+  console.log(data.timestamp, data.message);
+});</div>
+                <p class="docs-text">The full API has 200+ endpoints covering library, downloads, playlists, automations, profiles, settings, and more. Use a reverse proxy (Nginx, Caddy, Traefik) for external access with HTTPS.</p>
             </div>
         `
     }
@@ -1222,6 +1699,68 @@ function initializeDocsPage() {
         navHTML += `</div>`;
     });
     nav.innerHTML = navHTML;
+
+    // Add debug info button to sidebar header
+    const sidebarHeader = document.querySelector('.docs-sidebar-header');
+    if (sidebarHeader) {
+        const debugBtn = document.createElement('button');
+        debugBtn.className = 'docs-debug-button';
+        debugBtn.innerHTML = '&#x1F4CB; Copy Debug Info';
+        debugBtn.onclick = async () => {
+            try {
+                debugBtn.textContent = 'Collecting...';
+                const resp = await fetch('/api/debug-info');
+                const data = await resp.json();
+
+                let text = 'SoulSync Debug Info\n';
+                text += '===================================\n\n';
+                text += `Version: ${data.version}\n`;
+                text += `OS: ${data.os}${data.docker ? ' (Docker)' : ''}\n`;
+                text += `Python: ${data.python}\n\n`;
+
+                text += '-- Services --\n';
+                text += `Music Source: ${data.services?.music_source || 'unknown'}\n`;
+                text += `Spotify: ${data.services?.spotify_connected ? 'Connected' : 'Disconnected'}${data.services?.spotify_rate_limited ? ' (Rate Limited)' : ''}\n`;
+                text += `Media Server: ${data.services?.media_server_type || 'none'} (${data.services?.media_server_connected ? 'Connected' : 'Disconnected'})\n`;
+                text += `Soulseek: ${data.services?.soulseek_connected ? 'Connected' : 'Disconnected'}\n`;
+                text += `Download Source: ${data.services?.download_source || 'unknown'}\n\n`;
+
+                text += '-- Paths --\n';
+                text += `Download: ${data.paths?.download_path || '(not set)'} ${data.paths?.download_path_exists ? '\u2713 exists' : '\u2717 missing'}${data.paths?.download_path_writable ? ' \u2713 writable' : ' \u2717 not writable'}\n`;
+                text += `Transfer: ${data.paths?.transfer_folder || '(not set)'} ${data.paths?.transfer_folder_exists ? '\u2713 exists' : '\u2717 missing'}${data.paths?.transfer_folder_writable ? ' \u2713 writable' : ' \u2717 not writable'}\n`;
+                text += `Staging: ${data.paths?.staging_folder || '(not set)'} ${data.paths?.staging_folder_exists ? '\u2713 exists' : '\u2717 missing'}\n\n`;
+
+                text += '-- Enrichment Workers --\n';
+                if (data.enrichment_workers) {
+                    Object.entries(data.enrichment_workers).forEach(([name, status]) => {
+                        text += `${name}: ${status}\n`;
+                    });
+                }
+                text += '\n';
+
+                text += `Database: ${data.database_size || 'unknown'}\n`;
+                text += `Memory: ${data.memory_usage || 'unknown'}\n\n`;
+
+                text += '-- Recent Logs (last 20 lines) --\n';
+                if (data.recent_logs?.length) {
+                    data.recent_logs.forEach(line => { text += line + '\n'; });
+                }
+
+                await navigator.clipboard.writeText(text);
+                debugBtn.innerHTML = '&#x2705; Copied!';
+                debugBtn.classList.add('copied');
+                setTimeout(() => {
+                    debugBtn.innerHTML = '&#x1F4CB; Copy Debug Info';
+                    debugBtn.classList.remove('copied');
+                }, 2000);
+            } catch (err) {
+                debugBtn.innerHTML = '&#x274C; Failed';
+                console.error('Debug info error:', err);
+                setTimeout(() => { debugBtn.innerHTML = '&#x1F4CB; Copy Debug Info'; }, 2000);
+            }
+        };
+        sidebarHeader.appendChild(debugBtn);
+    }
 
     // Build content
     let contentHTML = '';
@@ -1379,4 +1918,16 @@ function initializeDocsPage() {
         const firstChildren = nav.querySelector('.docs-nav-children');
         if (firstChildren) firstChildren.classList.add('expanded');
     }
+}
+
+function navigateToDocsSection(sectionId) {
+    // Switch to help page
+    if (typeof showPage === 'function') showPage('help');
+    // Wait for docs to initialize
+    setTimeout(() => {
+        const target = document.getElementById(sectionId);
+        if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }, 300);
 }

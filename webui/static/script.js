@@ -5426,11 +5426,11 @@ async function saveSettings(quiet = false) {
             showToast('Settings saved, but quality profile failed to save', 'warning');
             setTimeout(updateServiceStatus, 1000);
         } else {
-            showToast(`Failed to save settings: ${result.error}`, 'error');
+            showToast(`Failed to save settings: ${result.error}`, 'error', 'set-services');
         }
     } catch (error) {
         console.error('Error saving settings:', error);
-        showToast('Failed to save settings', 'error');
+        showToast('Failed to save settings', 'error', 'set-services');
     } finally {
         if (!quiet) hideLoadingOverlay();
     }
@@ -5461,11 +5461,11 @@ async function testConnection(service) {
                 loadNavidromeMusicFolders();
             }
         } else {
-            showToast(`${service} connection failed: ${result.error}`, 'error');
+            showToast(`${service} connection failed: ${result.error}`, 'error', 'gs-connecting');
         }
     } catch (error) {
         console.error(`Error testing ${service} connection:`, error);
-        showToast(`Failed to test ${service} connection`, 'error');
+        showToast(`Failed to test ${service} connection`, 'error', 'gs-connecting');
     } finally {
         hideLoadingOverlay();
     }
@@ -5765,7 +5765,7 @@ async function authenticateSpotify() {
         window.open('/auth/spotify', '_blank');
     } catch (error) {
         console.error('Error authenticating Spotify:', error);
-        showToast('Failed to start Spotify authentication', 'error');
+        showToast('Failed to start Spotify authentication', 'error', 'gs-connecting');
     } finally {
         hideLoadingOverlay();
     }
@@ -13955,7 +13955,7 @@ function hideLoadingOverlay() {
 // Toast deduplication cache
 let recentToasts = new Map();
 
-function showToast(message, type = 'success') {
+function showToast(message, type = 'success', helpSection = null) {
     const container = document.getElementById('toast-container');
 
     // Create a unique key for this toast
@@ -13985,14 +13985,28 @@ function showToast(message, type = 'success') {
     toast.className = `toast ${type}`;
     toast.textContent = message;
 
+    // Add contextual help link if a docs section is specified
+    if (helpSection) {
+        const helpLink = document.createElement('span');
+        helpLink.className = 'toast-help-link';
+        helpLink.textContent = 'Learn more';
+        helpLink.onclick = (e) => {
+            e.stopPropagation();
+            if (typeof navigateToDocsSection === 'function') {
+                navigateToDocsSection(helpSection);
+            }
+        };
+        toast.appendChild(helpLink);
+    }
+
     container.appendChild(toast);
 
-    // Auto-remove after 3 seconds
+    // Auto-remove after 3 seconds (5 seconds if has help link)
     setTimeout(() => {
         if (container.contains(toast)) {
             container.removeChild(toast);
         }
-    }, 3000);
+    }, helpSection ? 5000 : 3000);
 }
 
 function escapeHtml(text) {
@@ -36115,6 +36129,11 @@ function _pollBatchWriteTagsStatus() {
                         msg += ` — ${serverName} sync: ${state.sync_synced} synced, ${state.sync_failed} failed`;
                     }
                 }
+                // Surface the first error reason so users can diagnose (e.g. "File not found")
+                if (state.failed > 0 && state.errors && state.errors.length > 0) {
+                    const firstErr = state.errors[0].error || 'Unknown error';
+                    msg += ` (${firstErr})`;
+                }
                 showToast(msg, state.failed > 0 || state.sync_failed > 0 ? 'warning' : 'success');
                 _batchWriteTagsPollTimer = null;
             }
@@ -40428,11 +40447,11 @@ async function selectNavidromeMusicFolder() {
             showToast(data.message, 'success');
         } else {
             console.error('Failed to set music folder:', data.error);
-            showToast(`Failed to set music folder: ${data.error}`, 'error');
+            showToast(`Failed to set music folder: ${data.error}`, 'error', 'set-media');
         }
     } catch (error) {
         console.error('Error selecting Navidrome music folder:', error);
-        showToast('Error selecting music folder. Please try again.', 'error');
+        showToast('Error selecting music folder. Please try again.', 'error', 'set-media');
     }
 }
 

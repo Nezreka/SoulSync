@@ -3838,6 +3838,86 @@ def get_system_stats():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/debug-info')
+def get_debug_info():
+    """Collect system diagnostics for troubleshooting support requests."""
+    import platform
+    import sys
+    import psutil
+
+    info = {}
+
+    # App info
+    info['version'] = SOULSYNC_VERSION
+    info['os'] = f"{platform.system()} {platform.release()}"
+    info['python'] = sys.version.split()[0]
+    info['docker'] = os.path.exists('/.dockerenv')
+
+    # Paths
+    download_path = config_manager.get('download_path', '')
+    transfer_folder = config_manager.get('transfer_folder', '')
+    staging_folder = config_manager.get('staging_folder', '')
+    info['paths'] = {
+        'download_path': download_path,
+        'download_path_exists': os.path.isdir(download_path) if download_path else False,
+        'download_path_writable': os.access(download_path, os.W_OK) if download_path and os.path.isdir(download_path) else False,
+        'transfer_folder': transfer_folder,
+        'transfer_folder_exists': os.path.isdir(transfer_folder) if transfer_folder else False,
+        'transfer_folder_writable': os.access(transfer_folder, os.W_OK) if transfer_folder and os.path.isdir(transfer_folder) else False,
+        'staging_folder': staging_folder,
+        'staging_folder_exists': os.path.isdir(staging_folder) if staging_folder else False,
+    }
+
+    # Services from status cache
+    spotify_cache = _status_cache.get('spotify', {})
+    media_server_cache = _status_cache.get('media_server', {})
+    soulseek_cache = _status_cache.get('soulseek', {})
+    info['services'] = {
+        'music_source': spotify_cache.get('source', 'unknown'),
+        'spotify_connected': spotify_cache.get('connected', False),
+        'spotify_rate_limited': spotify_cache.get('rate_limited', False),
+        'media_server_type': media_server_cache.get('type', 'none'),
+        'media_server_connected': media_server_cache.get('connected', False),
+        'soulseek_connected': soulseek_cache.get('connected', False),
+        'download_source': config_manager.get('download_source.mode', 'soulseek'),
+    }
+
+    # Enrichment workers
+    workers = {}
+    worker_names = ['musicbrainz', 'audiodb', 'deezer', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz']
+    for name in worker_names:
+        paused_key = f'{name}_enrichment_paused'
+        workers[name] = 'paused' if config_manager.get(paused_key, False) else 'active'
+    info['enrichment_workers'] = workers
+
+    # Database size
+    db_path = os.path.join('database', 'music_library.db')
+    if os.path.exists(db_path):
+        db_size_mb = os.path.getsize(db_path) / (1024 * 1024)
+        info['database_size'] = f"{db_size_mb:.1f} MB"
+    else:
+        info['database_size'] = 'not found'
+
+    # Memory
+    process = psutil.Process(os.getpid())
+    mem = process.memory_info()
+    info['memory_usage'] = f"{mem.rss / (1024 * 1024):.0f} MB"
+
+    # Recent log lines
+    log_path = os.path.join('logs', 'app.log')
+    info['recent_logs'] = []
+    if os.path.exists(log_path):
+        try:
+            with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+                info['recent_logs'] = [line.rstrip() for line in lines[-20:]]
+        except Exception:
+            info['recent_logs'] = ['(could not read log file)']
+
+    return jsonify(info)
+
+
 # Global activity tracking storage
 activity_feed = []
 activity_feed_lock = threading.Lock()
@@ -9601,15 +9681,21 @@ def _resolve_library_file_path(file_path):
     if os.path.exists(file_path):
         return file_path
 
-    # Try resolving server-side paths to local transfer path
+    # Try resolving server-side paths to local directories
+    # Check both transfer path (final music location) and download path (intermediate)
     transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+    download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
     path_parts = file_path.replace('\\', '/').split('/')
 
-    # Try progressively shorter path suffixes (skip index 0 to avoid drive letter issues)
-    for i in range(1, len(path_parts)):
-        candidate = os.path.join(transfer_dir, *path_parts[i:])
-        if os.path.exists(candidate):
-            return candidate
+    # Try progressively shorter path suffixes against each candidate directory
+    # (skip index 0 to avoid drive letter issues)
+    for base_dir in [transfer_dir, download_dir]:
+        if not base_dir or not os.path.isdir(base_dir):
+            continue
+        for i in range(1, len(path_parts)):
+            candidate = os.path.join(base_dir, *path_parts[i:])
+            if os.path.exists(candidate):
+                return candidate
 
     return None
 
