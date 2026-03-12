@@ -4549,6 +4549,7 @@ async function loadSettingsData() {
         document.getElementById('hybrid-primary-source').value = settings.download_source?.hybrid_primary || 'soulseek';
         document.getElementById('youtube-min-confidence').value = settings.download_source?.youtube_min_confidence || 0.65;
         document.getElementById('tidal-download-quality').value = settings.tidal_download?.quality || 'lossless';
+        document.getElementById('qobuz-quality').value = settings.qobuz?.quality || 'lossless';
 
         // Populate YouTube settings
         document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
@@ -4737,20 +4738,19 @@ function updateDownloadSourceUI() {
     const mode = document.getElementById('download-source-mode').value;
     const hybridContainer = document.getElementById('hybrid-settings-container');
     const tidalContainer = document.getElementById('tidal-download-settings-container');
+    const qobuzContainer = document.getElementById('qobuz-settings-container');
     const youtubeContainer = document.getElementById('youtube-settings-container');
 
-    // Show hybrid settings only when hybrid mode is selected
     hybridContainer.style.display = mode === 'hybrid' ? 'block' : 'none';
-
-    // Show Tidal download settings when tidal mode is selected
-    tidalContainer.style.display = mode === 'tidal' ? 'block' : 'none';
-
-    // Show YouTube settings when youtube or hybrid mode is selected
+    tidalContainer.style.display = (mode === 'tidal' || mode === 'hybrid') ? 'block' : 'none';
+    qobuzContainer.style.display = (mode === 'qobuz' || mode === 'hybrid') ? 'block' : 'none';
     youtubeContainer.style.display = (mode === 'youtube' || mode === 'hybrid') ? 'block' : 'none';
 
-    // Check Tidal download auth status when switching to tidal mode
-    if (mode === 'tidal') {
+    if (mode === 'tidal' || mode === 'hybrid') {
         checkTidalDownloadAuthStatus();
+    }
+    if (mode === 'qobuz' || mode === 'hybrid') {
+        checkQobuzAuthStatus();
     }
 }
 
@@ -5271,6 +5271,9 @@ async function saveSettings(quiet = false) {
         },
         tidal_download: {
             quality: document.getElementById('tidal-download-quality').value || 'lossless'
+        },
+        qobuz: {
+            quality: document.getElementById('qobuz-quality').value || 'lossless'
         },
         database: {
             max_workers: parseInt(document.getElementById('max-workers').value)
@@ -5919,6 +5922,87 @@ async function startTidalDownloadAuth() {
         btn.disabled = false;
         btn.textContent = 'Link Tidal Account';
         codeEl.style.display = 'none';
+    }
+}
+
+// ===============================
+// QOBUZ AUTH FUNCTIONS
+// ===============================
+
+async function checkQobuzAuthStatus() {
+    try {
+        const resp = await fetch('/api/qobuz/auth/status');
+        const data = await resp.json();
+        const formEl = document.getElementById('qobuz-auth-form');
+        const loggedInEl = document.getElementById('qobuz-auth-logged-in');
+        const userInfoEl = document.getElementById('qobuz-auth-user-info');
+
+        if (data.authenticated) {
+            const user = data.user || {};
+            userInfoEl.textContent = `Connected: ${user.display_name || 'Qobuz User'} (${user.subscription || 'Active'})`;
+            loggedInEl.style.display = 'flex';
+            formEl.style.display = 'none';
+        } else {
+            loggedInEl.style.display = 'none';
+            formEl.style.display = 'block';
+        }
+    } catch (e) {
+        console.error('Qobuz auth status check failed:', e);
+    }
+}
+
+async function loginQobuz() {
+    const btn = document.getElementById('qobuz-login-btn');
+    const statusEl = document.getElementById('qobuz-auth-status');
+    const email = document.getElementById('qobuz-email').value.trim();
+    const password = document.getElementById('qobuz-password').value;
+
+    if (!email || !password) {
+        showToast('Please enter your Qobuz email and password', 'warning');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Connecting...';
+    statusEl.textContent = '';
+
+    try {
+        const resp = await fetch('/api/qobuz/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+        });
+
+        const data = await resp.json();
+
+        if (data.success) {
+            showToast('Qobuz connected successfully!', 'success');
+            // Clear password field
+            document.getElementById('qobuz-password').value = '';
+            checkQobuzAuthStatus();
+        } else {
+            statusEl.textContent = data.error || 'Login failed';
+            statusEl.style.color = '#ff5555';
+            showToast(data.error || 'Qobuz login failed', 'error');
+        }
+    } catch (error) {
+        console.error('Qobuz login error:', error);
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#ff5555';
+        showToast('Failed to connect to Qobuz', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Connect Qobuz';
+    }
+}
+
+async function logoutQobuz() {
+    try {
+        await fetch('/api/qobuz/auth/logout', { method: 'POST' });
+        showToast('Qobuz disconnected', 'success');
+        checkQobuzAuthStatus();
+    } catch (e) {
+        console.error('Qobuz logout error:', e);
     }
 }
 
