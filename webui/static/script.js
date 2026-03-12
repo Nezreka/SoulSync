@@ -32592,11 +32592,13 @@ function createLibraryArtistCard(artist) {
     if (artist.qobuz_id) {
         badgeSources.push({ cls: 'qobuz-card-icon', logo: QOBUZ_LOGO_URL, fallback: 'Qz', title: 'View on Qobuz', url: `https://www.qobuz.com/artist/${artist.qobuz_id}` });
     }
-    // Add watchlist indicator as the last badge
-    const hasExternalId = artist.itunes_artist_id || artist.spotify_artist_id;
+    // Add watchlist indicator — only if artist has a usable ID for the active source
+    const hasActiveSourceId = currentMusicSourceName === 'Apple Music'
+        ? (artist.itunes_artist_id || artist.spotify_artist_id)
+        : (artist.spotify_artist_id || artist.itunes_artist_id);
     if (artist.is_watched) {
         badgeSources.push({ cls: 'watch-card-icon watched', logo: null, fallback: '👁️', fallbackExpanded: 'Watching', title: 'On your watchlist', url: null, isWatch: true });
-    } else if (hasExternalId) {
+    } else if (hasActiveSourceId) {
         badgeSources.push({ cls: 'watch-card-icon', logo: null, fallback: '👁️', fallbackExpanded: 'Watch', title: 'Add to Watchlist', url: null, isWatch: true, unwatched: true });
     }
 
@@ -32853,15 +32855,18 @@ async function toggleLibraryCardWatchlist(btn, artist) {
     if (btn.disabled) return;
     btn.disabled = true;
 
-    const icon = btn.querySelector('.watchlist-icon');
-    const text = btn.querySelector('.watchlist-text');
-    const isWatching = btn.classList.contains('watching');
+    // Support both badge-style (.watch-icon-label) and button-style (.watchlist-text)
+    const label = btn.querySelector('.watch-icon-label') || btn.querySelector('.watchlist-text');
+    const isWatching = btn.classList.contains('watched') || btn.classList.contains('watching');
 
-    text.textContent = '...';
+    if (label) label.textContent = '...';
 
     try {
-        // Determine external ID: prefer iTunes, fallback Spotify
-        const artistId = artist.itunes_artist_id || artist.spotify_artist_id;
+        // Use the ID matching the active metadata source
+        const artistId = currentMusicSourceName === 'Apple Music'
+            ? (artist.itunes_artist_id || artist.spotify_artist_id)
+            : (artist.spotify_artist_id || artist.itunes_artist_id);
+        if (!artistId) throw new Error('No iTunes or Spotify ID available for this artist');
 
         if (isWatching) {
             const response = await fetch('/api/watchlist/remove', {
@@ -32872,9 +32877,10 @@ async function toggleLibraryCardWatchlist(btn, artist) {
             const data = await response.json();
             if (!data.success) throw new Error(data.error);
 
-            btn.classList.remove('watching');
+            btn.classList.remove('watched', 'watching');
+            btn.style.opacity = '0.4';
             btn.title = 'Add to Watchlist';
-            text.textContent = 'Watch';
+            if (label) label.textContent = 'Watch';
             showToast(`Removed ${artist.name} from watchlist`, 'success');
         } else {
             const response = await fetch('/api/watchlist/add', {
@@ -32885,9 +32891,10 @@ async function toggleLibraryCardWatchlist(btn, artist) {
             const data = await response.json();
             if (!data.success) throw new Error(data.error);
 
-            btn.classList.add('watching');
+            btn.classList.add('watched');
+            btn.style.opacity = '';
             btn.title = 'Remove from Watchlist';
-            text.textContent = 'Watching';
+            if (label) label.textContent = 'Watching';
             showToast(`Added ${artist.name} to watchlist`, 'success');
         }
 
@@ -32896,7 +32903,7 @@ async function toggleLibraryCardWatchlist(btn, artist) {
         }
     } catch (error) {
         console.error('Error toggling library card watchlist:', error);
-        text.textContent = isWatching ? 'Watching' : 'Watch';
+        if (label) label.textContent = isWatching ? 'Watching' : 'Watch';
         showToast(`Error: ${error.message}`, 'error');
     } finally {
         btn.disabled = false;
