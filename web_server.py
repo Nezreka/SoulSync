@@ -18841,18 +18841,97 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
 
         print(f" transitioning batch {batch_id} to download phase with {len(missing_tracks)} tracks.")
 
+        # Read batch context (quick lock) before doing any network I/O
         with tasks_lock:
             if batch_id not in download_batches: return
-
-            download_batches[batch_id]['phase'] = 'downloading'
-
-            # Get batch album context (if this is an artist album download)
             batch = download_batches[batch_id]
             batch_album_context = batch.get('album_context')
             batch_artist_context = batch.get('artist_context')
             batch_is_album = batch.get('is_album_download', False)
             batch_playlist_folder_mode = batch.get('playlist_folder_mode', False)
             batch_playlist_name = batch.get('playlist_name', 'Unknown Playlist')
+
+        # === ALBUM PRE-FLIGHT: Search for complete album folder before track-by-track ===
+        preflight_source = None
+        preflight_tracks = None
+        if batch_is_album and batch_album_context and batch_artist_context:
+            artist_name = batch_artist_context.get('name', '')
+            album_name = batch_album_context.get('name', '')
+            if artist_name and album_name:
+                try:
+                    _sr = source_reuse_logger
+                    _sr.info(f"[Album Pre-flight] Searching for '{artist_name} {album_name}'")
+                    print(f"🔎 [Album Pre-flight] Searching Soulseek for complete album: '{artist_name} - {album_name}'")
+
+                    slsk = soulseek_client.soulseek if hasattr(soulseek_client, 'soulseek') else soulseek_client
+                    album_query = f"{artist_name} {album_name}"
+                    track_results, album_results = run_async(slsk.search(album_query, timeout=30))
+
+                    if album_results:
+                        # Filter by quality preference
+                        quality_filtered = []
+                        for ar in album_results:
+                            filtered_tracks = slsk.filter_results_by_quality_preference(ar.tracks)
+                            if filtered_tracks:
+                                quality_filtered.append((ar, len(filtered_tracks)))
+
+                        if quality_filtered:
+                            # Sort by track count (most complete album first), then quality score
+                            quality_filtered.sort(key=lambda x: (x[1], x[0].quality_score), reverse=True)
+                            best_album = quality_filtered[0][0]
+
+                            _sr.info(f"[Album Pre-flight] Best album result: {best_album.username}:{best_album.album_path} "
+                                     f"({best_album.track_count} tracks, quality={best_album.dominant_quality})")
+                            print(f"📀 [Album Pre-flight] Found album folder: {best_album.username} — "
+                                  f"{best_album.track_count} tracks ({best_album.dominant_quality})")
+
+                            # Browse the user's folder to get all tracks (may have more than search returned)
+                            browse_files = run_async(slsk.browse_user_directory(best_album.username, best_album.album_path))
+                            if browse_files:
+                                folder_tracks = slsk.parse_browse_results_to_tracks(
+                                    best_album.username, browse_files, directory=best_album.album_path
+                                )
+                                if folder_tracks:
+                                    preflight_source = {
+                                        'username': best_album.username,
+                                        'folder_path': best_album.album_path
+                                    }
+                                    preflight_tracks = folder_tracks
+                                    _sr.info(f"[Album Pre-flight] Browsed folder: {len(folder_tracks)} audio tracks available")
+                                    print(f"✅ [Album Pre-flight] Cached {len(folder_tracks)} tracks from {best_album.username} for source reuse")
+                                else:
+                                    _sr.info(f"[Album Pre-flight] Browse returned files but no audio tracks")
+                            else:
+                                # Browse failed — fall back to using the search result tracks directly
+                                _sr.info(f"[Album Pre-flight] Browse failed, using search result tracks directly")
+                                preflight_source = {
+                                    'username': best_album.username,
+                                    'folder_path': best_album.album_path
+                                }
+                                preflight_tracks = best_album.tracks
+                                print(f"✅ [Album Pre-flight] Using {len(best_album.tracks)} tracks from search results (browse unavailable)")
+                        else:
+                            _sr.info(f"[Album Pre-flight] No album results passed quality filter")
+                            print(f"⚠️ [Album Pre-flight] No album results matched quality preferences")
+                    else:
+                        _sr.info(f"[Album Pre-flight] Search returned no album results (got {len(track_results)} individual tracks)")
+                        print(f"⚠️ [Album Pre-flight] No complete album folders found, falling back to track-by-track search")
+
+                except Exception as preflight_err:
+                    print(f"⚠️ [Album Pre-flight] Search failed (non-fatal, falling back to track-by-track): {preflight_err}")
+                    source_reuse_logger.info(f"[Album Pre-flight] Exception: {preflight_err}")
+
+        with tasks_lock:
+            if batch_id not in download_batches: return
+
+            download_batches[batch_id]['phase'] = 'downloading'
+
+            # Store album pre-flight results on batch for source reuse
+            if preflight_source and preflight_tracks:
+                download_batches[batch_id]['last_good_source'] = preflight_source
+                download_batches[batch_id]['source_folder_tracks'] = preflight_tracks
+                download_batches[batch_id]['failed_sources'] = set()
+                print(f"📦 [Album Pre-flight] Pre-loaded source reuse data on batch {batch_id}")
 
             # Compute total_discs for multi-disc album subfolder support
             # Use ALL tracks (tracks_json), not just missing ones, to correctly detect multi-disc
