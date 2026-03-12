@@ -336,7 +336,7 @@ class SpotifyClient:
         self._auth_cache_lock = threading.Lock()
         self._auth_cached_result: Optional[bool] = None
         self._auth_cache_time: float = 0
-        self._AUTH_CACHE_TTL = 60  # seconds
+        self._AUTH_CACHE_TTL = 300  # 5 minutes — auth status rarely changes, no need to probe often
         self._setup_client()
 
     def _is_spotify_id(self, id_str: str) -> bool:
