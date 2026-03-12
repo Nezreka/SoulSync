@@ -369,7 +369,10 @@ class TidalClient:
             response = self.session.post(
                 self.token_url,
                 data=data,
-                headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                headers={
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Accept': 'application/json',
+                },
                 timeout=10
             )
 
@@ -414,7 +417,10 @@ class TidalClient:
             response = self.session.post(
                 self.token_url,
                 data=data,
-                headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                headers={
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Accept': 'application/json',
+                },
                 timeout=10
             )
 
