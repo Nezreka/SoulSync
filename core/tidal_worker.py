@@ -11,6 +11,28 @@ from core.tidal_client import TidalClient
 logger = get_logger("tidal_worker")
 
 
+def _parse_duration_to_ms(duration) -> Optional[int]:
+    """Convert duration to milliseconds. Handles integer seconds and ISO-8601 strings (PT3M36S)."""
+    if not duration:
+        return None
+    if isinstance(duration, (int, float)) and duration > 0:
+        return int(duration * 1000)
+    if isinstance(duration, str) and duration.startswith('PT'):
+        total_seconds = 0
+        hours_match = re.search(r'(\d+)H', duration)
+        minutes_match = re.search(r'(\d+)M', duration)
+        seconds_match = re.search(r'(\d+)S', duration)
+        if hours_match:
+            total_seconds += int(hours_match.group(1)) * 3600
+        if minutes_match:
+            total_seconds += int(minutes_match.group(1)) * 60
+        if seconds_match:
+            total_seconds += int(seconds_match.group(1))
+        if total_seconds > 0:
+            return total_seconds * 1000
+    return None
+
+
 class TidalWorker:
     """Background worker for enriching library artists, albums, and tracks with Tidal metadata"""
 
@@ -332,8 +354,9 @@ class TidalWorker:
         except Exception as e:
             error_str = str(e).lower()
             if '429' in error_str or 'rate limit' in error_str:
-                # Rate limit — don't mark as error, leave for retry on next loop
-                logger.warning(f"Rate limited while processing {item['type']} #{item['id']}, will retry")
+                # Rate limit — don't mark as error, back off then retry
+                logger.warning(f"Rate limited while processing {item['type']} #{item['id']}, backing off 30s")
+                time.sleep(30)
                 return
             logger.error(f"Error processing {item['type']} #{item['id']}: {e}")
             self.stats['errors'] += 1
@@ -590,10 +613,9 @@ class TidalWorker:
                         WHERE id = ? AND track_count IS NULL
                     """, (num_tracks, album_id))
 
-                # Backfill duration (Tidal returns seconds, DB stores milliseconds)
-                duration = data.get('duration')
-                if duration and isinstance(duration, (int, float)) and duration > 0:
-                    duration_ms = int(duration * 1000)
+                # Backfill duration (Tidal returns seconds or ISO-8601, DB stores milliseconds)
+                duration_ms = _parse_duration_to_ms(data.get('duration'))
+                if duration_ms:
                     cursor.execute("""
                         UPDATE albums SET duration = ?
                         WHERE id = ? AND duration IS NULL
@@ -677,9 +699,8 @@ class TidalWorker:
                         WHERE id = ? AND (isrc IS NULL OR isrc = '')
                     """, (isrc, track_id))
 
-                duration = data.get('duration')
-                if duration and isinstance(duration, (int, float)) and duration > 0:
-                    duration_ms = int(duration * 1000)
+                duration_ms = _parse_duration_to_ms(data.get('duration'))
+                if duration_ms:
                     cursor.execute("""
                         UPDATE tracks SET duration = ?
                         WHERE id = ? AND duration IS NULL
