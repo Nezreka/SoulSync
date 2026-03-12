@@ -8,14 +8,22 @@ from .helpers import api_success, api_error
 
 # Keys that must NEVER be exposed via the API
 _SENSITIVE_KEYS = {
+    "spotify.client_id",
     "spotify.client_secret",
-    "soulseek.api_key",
+    "tidal.client_id",
+    "tidal.client_secret",
+    "tidal_tokens",
+    "tidal_download.session",
+    "qobuz.session",
     "plex.token",
     "jellyfin.api_key",
     "navidrome.password",
-    "hydrabase.api_key",
-    "tidal_download.session",
+    "soulseek.api_key",
     "listenbrainz.token",
+    "acoustid.api_key",
+    "lastfm.api_key",
+    "genius.access_token",
+    "hydrabase.api_key",
 }
 
 

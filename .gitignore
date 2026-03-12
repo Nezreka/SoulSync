@@ -7,5 +7,8 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Encryption key (generated per-instance, lives next to database)
+.encryption_key
+
 # Auto-downloaded binaries
 bin/
