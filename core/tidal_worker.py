@@ -621,9 +621,11 @@ class TidalWorker:
                         WHERE id = ? AND duration IS NULL
                     """, (duration_ms, album_id))
 
-                # Backfill copyright
+                # Backfill copyright (can be string or dict with 'text' key in JSON:API)
                 copyright_text = data.get('copyright')
-                if copyright_text:
+                if isinstance(copyright_text, dict):
+                    copyright_text = copyright_text.get('text', copyright_text.get('name', ''))
+                if copyright_text and isinstance(copyright_text, str):
                     cursor.execute("""
                         UPDATE albums SET copyright = ?
                         WHERE id = ? AND (copyright IS NULL OR copyright = '')
@@ -693,7 +695,9 @@ class TidalWorker:
                     """, (1 if explicit else 0, track_id))
 
                 isrc = data.get('isrc')
-                if isrc:
+                if isinstance(isrc, dict):
+                    isrc = isrc.get('value', isrc.get('id', ''))
+                if isrc and isinstance(isrc, str):
                     cursor.execute("""
                         UPDATE tracks SET isrc = ?
                         WHERE id = ? AND (isrc IS NULL OR isrc = '')
@@ -707,7 +711,9 @@ class TidalWorker:
                     """, (duration_ms, track_id))
 
                 copyright_text = data.get('copyright')
-                if copyright_text:
+                if isinstance(copyright_text, dict):
+                    copyright_text = copyright_text.get('text', copyright_text.get('name', ''))
+                if copyright_text and isinstance(copyright_text, str):
                     cursor.execute("""
                         UPDATE tracks SET copyright = ?
                         WHERE id = ? AND (copyright IS NULL OR copyright = '')
