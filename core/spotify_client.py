@@ -140,9 +140,19 @@ def rate_limited(func):
     def wrapper(*args, **kwargs):
         global _last_api_call_time
 
+        # Pre-flight check: if globally rate limited, don't even attempt the API call.
+        # Let the method body run so its internal is_spotify_authenticated() check
+        # returns False and iTunes fallback logic can execute.
+        if _is_globally_rate_limited():
+            return func(*args, **kwargs)
+
         max_retries = 5
 
         for attempt in range(max_retries + 1):
+            # Re-check ban before each retry — a previous attempt may have triggered one
+            if _is_globally_rate_limited():
+                raise SpotifyRateLimitError(0, func.__name__)
+
             # Enforce minimum interval between API calls
             with _api_call_lock:
                 current_time = time.time()
