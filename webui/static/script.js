@@ -35209,6 +35209,16 @@ function getServiceUrl(service, entityType, id) {
             artist: id,  // genius_url is already a full URL
             track: id,   // genius_url on tracks is already a full URL
         },
+        tidal: {
+            artist: `https://tidal.com/browse/artist/${id}`,
+            album: `https://tidal.com/browse/album/${id}`,
+            track: `https://tidal.com/browse/track/${id}`,
+        },
+        qobuz: {
+            artist: `https://www.qobuz.com/artist/${id}`,
+            album: `https://www.qobuz.com/album/${id}`,
+            track: `https://www.qobuz.com/track/${id}`,
+        },
     };
     return urls[service] && urls[service][entityType] || null;
 }

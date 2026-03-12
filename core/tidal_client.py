@@ -696,23 +696,40 @@ class TidalClient:
                 timeout=10
             )
             
+            if response.status_code == 429:
+                raise Exception("Rate limited (429) on search_tracks")
             if response.status_code == 200:
                 data = response.json()
                 tracks = []
-                
-                if 'tracks' in data and 'items' in data['tracks']:
-                    for item in data['tracks']['items']:
-                        track = self._parse_track_data(item)
-                        if track:
-                            tracks.append(track)
-                
+
+                # Handle V2 JSON:API response formats
+                items = []
+                if 'tracks' in data and isinstance(data['tracks'], list):
+                    items = data['tracks']
+                elif 'tracks' in data and 'items' in data['tracks']:
+                    items = data['tracks']['items']
+                elif 'included' in data:
+                    items = [r for r in data['included'] if r.get('type') == 'tracks']
+
+                for item in items:
+                    # Flatten JSON:API resource if needed
+                    if 'attributes' in item and 'id' in item:
+                        flat = dict(item['attributes'])
+                        flat['id'] = item['id']
+                        item = flat
+                    track = self._parse_track_data(item)
+                    if track:
+                        tracks.append(track)
+
                 logger.info(f"Found {len(tracks)} Tidal tracks for query: '{query}'")
                 return tracks
             else:
                 logger.error(f"Tidal search failed: {response.status_code} - {response.text}")
                 return []
-                
+
         except Exception as e:
+            if "429" in str(e):
+                raise  # Let rate_limited decorator handle retry
             logger.error(f"Error searching Tidal tracks: {e}")
             return []
 
@@ -807,6 +824,13 @@ class TidalClient:
                     if 'attributes' in item and 'id' in item:
                         flat = dict(item['attributes'])
                         flat['id'] = item['id']
+                        # Preserve artist relationship for cross-verification
+                        try:
+                            rel_artists = item.get('relationships', {}).get('artists', {}).get('data', [])
+                            if rel_artists:
+                                flat['artist'] = {'id': rel_artists[0].get('id')}
+                        except (AttributeError, IndexError, TypeError):
+                            pass
                         return flat
                     return item
             else:
@@ -857,6 +881,13 @@ class TidalClient:
                     if 'attributes' in item and 'id' in item:
                         flat = dict(item['attributes'])
                         flat['id'] = item['id']
+                        # Preserve artist relationship for cross-verification
+                        try:
+                            rel_artists = item.get('relationships', {}).get('artists', {}).get('data', [])
+                            if rel_artists:
+                                flat['artist'] = {'id': rel_artists[0].get('id')}
+                        except (AttributeError, IndexError, TypeError):
+                            pass
                         return flat
                     return item
             else:

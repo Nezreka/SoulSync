@@ -340,6 +340,11 @@ class QobuzWorker:
                 self._process_track(item_id, item_name, item.get('artist', ''), item)
 
         except Exception as e:
+            error_str = str(e).lower()
+            if '429' in error_str or 'rate limit' in error_str:
+                logger.warning(f"Rate limited while processing {item['type']} #{item['id']}, backing off 30s")
+                time.sleep(30)
+                return
             logger.error(f"Error processing {item['type']} #{item['id']}: {e}")
             self.stats['errors'] += 1
             try:
