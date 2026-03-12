@@ -29210,6 +29210,26 @@ body {
     filter: invert(1);
 }
 
+/* Two-column badge layout for overflow */
+.card-badge-container:has(.badge-overflow-column) {
+    flex-direction: row;
+    gap: 3px;
+    align-items: flex-start;
+}
+
+.badge-primary-column,
+.badge-overflow-column {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 3px;
+}
+
+.badge-overflow-column {
+    width: 24px;
+    flex-shrink: 0;
+}
+
 .watch-card-icon {
     cursor: pointer;
     font-size: 10px;

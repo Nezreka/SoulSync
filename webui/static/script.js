@@ -32603,7 +32603,15 @@ function createLibraryArtistCard(artist) {
     if (badgeSources.length > 0) {
         const badgeContainer = document.createElement('div');
         badgeContainer.className = 'card-badge-container';
-        badgeSources.forEach(source => {
+
+        // Separate service badges from watch badge
+        const serviceBadges = badgeSources.filter(s => !s.isWatch);
+        const watchBadge = badgeSources.find(s => s.isWatch);
+        const maxPerColumn = 6;
+        const needsOverflow = serviceBadges.length > maxPerColumn;
+
+        // Helper to create a badge icon element
+        const createBadgeIcon = (source) => {
             const icon = document.createElement('div');
             icon.className = `${source.cls} source-card-icon`;
             icon.title = source.title;
@@ -32630,8 +32638,38 @@ function createLibraryArtistCard(artist) {
                     window.open(source.url, '_blank');
                 };
             }
-            badgeContainer.appendChild(icon);
-        });
+            return icon;
+        };
+
+        if (needsOverflow) {
+            // Overflow column (left) — watch badge first, then extra service badges
+            const overflowCol = document.createElement('div');
+            overflowCol.className = 'badge-overflow-column';
+            if (watchBadge) {
+                overflowCol.appendChild(createBadgeIcon(watchBadge));
+            }
+            serviceBadges.slice(maxPerColumn).forEach(source => {
+                overflowCol.appendChild(createBadgeIcon(source));
+            });
+            badgeContainer.appendChild(overflowCol);
+
+            // Primary column (right) — first 6 service badges
+            const primaryCol = document.createElement('div');
+            primaryCol.className = 'badge-primary-column';
+            serviceBadges.slice(0, maxPerColumn).forEach(source => {
+                primaryCol.appendChild(createBadgeIcon(source));
+            });
+            badgeContainer.appendChild(primaryCol);
+        } else {
+            // Single column — service badges + watch badge last
+            serviceBadges.forEach(source => {
+                badgeContainer.appendChild(createBadgeIcon(source));
+            });
+            if (watchBadge) {
+                badgeContainer.appendChild(createBadgeIcon(watchBadge));
+            }
+        }
+
         card.appendChild(badgeContainer);
     }
 
