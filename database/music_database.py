@@ -319,6 +319,9 @@ class MusicDatabase:
             # Add Last.fm and Genius enrichment columns (migration)
             self._add_lastfm_genius_columns(cursor)
 
+            # Add Tidal and Qobuz enrichment columns (migration)
+            self._add_tidal_qobuz_enrichment_columns(cursor)
+
             # Bubble snapshots table for persisting UI state across page refreshes
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bubble_snapshots (
@@ -1569,6 +1572,90 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding Last.fm/Genius enrichment columns: {e}")
+            # Don't raise - this is a migration, database can still function
+
+    def _add_tidal_qobuz_enrichment_columns(self, cursor):
+        """Add Tidal and Qobuz enrichment tracking columns to artists, albums, tracks"""
+        try:
+            # --- Artists ---
+            cursor.execute("PRAGMA table_info(artists)")
+            artists_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'tidal_id' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN tidal_id TEXT")
+            if 'tidal_match_status' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN tidal_match_status TEXT")
+            if 'tidal_last_attempted' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN tidal_last_attempted TIMESTAMP")
+            if 'qobuz_id' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN qobuz_id TEXT")
+            if 'qobuz_match_status' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN qobuz_match_status TEXT")
+            if 'qobuz_last_attempted' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN qobuz_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_tidal_id ON artists (tidal_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_tidal_status ON artists (tidal_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_qobuz_id ON artists (qobuz_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_qobuz_status ON artists (qobuz_match_status)")
+
+            # --- Albums ---
+            cursor.execute("PRAGMA table_info(albums)")
+            albums_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'tidal_id' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN tidal_id TEXT")
+            if 'tidal_match_status' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN tidal_match_status TEXT")
+            if 'tidal_last_attempted' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN tidal_last_attempted TIMESTAMP")
+            if 'qobuz_id' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN qobuz_id TEXT")
+            if 'qobuz_match_status' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN qobuz_match_status TEXT")
+            if 'qobuz_last_attempted' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN qobuz_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_tidal_id ON albums (tidal_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_tidal_status ON albums (tidal_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_qobuz_id ON albums (qobuz_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_qobuz_status ON albums (qobuz_match_status)")
+
+            # --- Albums (extra metadata columns) ---
+            if 'upc' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN upc TEXT")
+            if 'copyright' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN copyright TEXT")
+
+            # --- Tracks ---
+            cursor.execute("PRAGMA table_info(tracks)")
+            tracks_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'tidal_id' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN tidal_id TEXT")
+            if 'tidal_match_status' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN tidal_match_status TEXT")
+            if 'tidal_last_attempted' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN tidal_last_attempted TIMESTAMP")
+            if 'qobuz_id' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN qobuz_id TEXT")
+            if 'qobuz_match_status' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN qobuz_match_status TEXT")
+            if 'qobuz_last_attempted' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN qobuz_last_attempted TIMESTAMP")
+            if 'isrc' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN isrc TEXT")
+            if 'copyright' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN copyright TEXT")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_tidal_id ON tracks (tidal_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_tidal_status ON tracks (tidal_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_id ON tracks (qobuz_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_status ON tracks (qobuz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_isrc ON tracks (isrc)")
+
+        except Exception as e:
+            logger.error(f"Error adding Tidal/Qobuz enrichment columns: {e}")
             # Don't raise - this is a migration, database can still function
 
     def _add_retag_tables(self, cursor):

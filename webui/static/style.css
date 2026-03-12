@@ -28202,6 +28202,458 @@ body {
 }
 
 /* ========================================
+   TIDAL ENRICHMENT STATUS BUTTON
+   ======================================== */
+
+.tidal-enrich-button-container {
+    position: relative;
+    display: inline-block;
+    margin-right: 12px;
+}
+
+.tidal-enrich-button {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg, rgba(0, 0, 0, 0.15) 0%, rgba(30, 30, 30, 0.22) 100%);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1.5px solid rgba(255, 255, 255, 0.20);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.tidal-enrich-button:hover {
+    background: linear-gradient(135deg, rgba(0, 0, 0, 0.22) 0%, rgba(30, 30, 30, 0.30) 100%);
+    border-color: rgba(255, 255, 255, 0.35);
+    transform: scale(1.05);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.tidal-enrich-button:active {
+    transform: scale(0.95);
+}
+
+.tidal-enrich-logo {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    opacity: 0.85;
+    transition: opacity 0.3s ease;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3)) invert(1);
+    border-radius: 50%;
+}
+
+.tidal-enrich-button:hover .tidal-enrich-logo {
+    opacity: 1;
+}
+
+.tidal-enrich-spinner {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    border: 3px solid transparent;
+    border-top-color: rgba(255, 255, 255, 0.8);
+    border-right-color: rgba(255, 255, 255, 0.5);
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.tidal-enrich-button.active .tidal-enrich-spinner {
+    opacity: 1;
+    animation: tidal-spin 1.2s linear infinite;
+}
+
+.tidal-enrich-button.active {
+    background: linear-gradient(135deg, rgba(0, 0, 0, 0.28) 0%, rgba(30, 30, 30, 0.36) 100%);
+    border-color: rgba(255, 255, 255, 0.45);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4), 0 3px 12px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.tidal-enrich-button.active .tidal-enrich-logo {
+    opacity: 1;
+    filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.6)) invert(1);
+}
+
+.tidal-enrich-button.complete {
+    background: linear-gradient(135deg, rgba(76, 175, 80, 0.15) 0%, rgba(56, 142, 60, 0.20) 100%);
+    border-color: rgba(76, 175, 80, 0.35);
+    box-shadow: 0 4px 16px rgba(76, 175, 80, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.tidal-enrich-button.complete .tidal-enrich-logo {
+    opacity: 0.85;
+    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5)) invert(1);
+}
+
+.tidal-enrich-button.complete .tidal-enrich-spinner {
+    opacity: 0;
+}
+
+.tidal-enrich-button.paused {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.12) 0%, rgba(255, 152, 0, 0.18) 100%);
+    border-color: rgba(255, 193, 7, 0.35);
+    box-shadow: 0 4px 16px rgba(255, 193, 7, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.tidal-enrich-button.paused:hover {
+    border-color: rgba(255, 193, 7, 0.5);
+    box-shadow: 0 6px 20px rgba(255, 193, 7, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes tidal-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.tidal-enrich-tooltip {
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 12px);
+    transform: translateX(-50%) translateY(-5px);
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+}
+
+.tidal-enrich-button:hover+.tidal-enrich-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
+
+.tidal-enrich-tooltip-content {
+    min-width: 260px;
+    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
+    backdrop-filter: blur(40px) saturate(1.6);
+    -webkit-backdrop-filter: blur(40px) saturate(1.6);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 16px;
+    padding: 16px 18px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.tidal-enrich-tooltip-header {
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    letter-spacing: -0.2px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tidal-enrich-tooltip-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#tidal-enrich-tooltip-status {
+    color: rgb(var(--accent-light-rgb));
+    font-weight: 600;
+}
+
+.tidal-enrich-button.paused+.tidal-enrich-tooltip #tidal-enrich-tooltip-status {
+    color: #ffc107;
+}
+
+.tidal-enrich-button.no-auth {
+    background: linear-gradient(135deg,
+            rgba(120, 120, 120, 0.08) 0%,
+            rgba(80, 80, 80, 0.12) 100%);
+    border-color: rgba(120, 120, 120, 0.25);
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.15),
+        0 2px 8px rgba(0, 0, 0, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.tidal-enrich-button.no-auth .tidal-enrich-logo {
+    filter: grayscale(1) opacity(0.4);
+}
+
+.tidal-enrich-button.no-auth .tidal-enrich-spinner {
+    display: none;
+}
+
+.tidal-enrich-button.no-auth:hover {
+    border-color: rgba(120, 120, 120, 0.35);
+    box-shadow:
+        0 6px 20px rgba(0, 0, 0, 0.2),
+        0 3px 12px rgba(0, 0, 0, 0.15);
+    opacity: 0.55;
+}
+
+.tidal-enrich-button.no-auth+.tidal-enrich-tooltip #tidal-enrich-tooltip-status {
+    color: rgba(120, 120, 120, 0.8);
+}
+
+.tidal-enrich-tooltip-content::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -8px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid rgba(255, 255, 255, 0.3);
+}
+
+.tidal-enrich-tooltip-content::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -7px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
+}
+
+/* ========================================
+   QOBUZ ENRICHMENT STATUS BUTTON
+   ======================================== */
+
+.qobuz-enrich-button-container {
+    position: relative;
+    display: inline-block;
+    margin-right: 12px;
+}
+
+.qobuz-enrich-button {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg, rgba(1, 112, 239, 0.10) 0%, rgba(1, 90, 200, 0.16) 100%);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1.5px solid rgba(1, 112, 239, 0.25);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 16px rgba(1, 112, 239, 0.15), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.qobuz-enrich-button:hover {
+    background: linear-gradient(135deg, rgba(1, 112, 239, 0.16) 0%, rgba(1, 90, 200, 0.22) 100%);
+    border-color: rgba(1, 112, 239, 0.4);
+    transform: scale(1.05);
+    box-shadow: 0 6px 20px rgba(1, 112, 239, 0.25), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.qobuz-enrich-button:active {
+    transform: scale(0.95);
+}
+
+.qobuz-enrich-logo {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    opacity: 0.85;
+    transition: opacity 0.3s ease;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+    border-radius: 50%;
+}
+
+.qobuz-enrich-button:hover .qobuz-enrich-logo {
+    opacity: 1;
+}
+
+.qobuz-enrich-spinner {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    border: 3px solid transparent;
+    border-top-color: rgba(1, 112, 239, 0.8);
+    border-right-color: rgba(1, 112, 239, 0.5);
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.qobuz-enrich-button.active .qobuz-enrich-spinner {
+    opacity: 1;
+    animation: qobuz-spin 1.2s linear infinite;
+}
+
+.qobuz-enrich-button.active {
+    background: linear-gradient(135deg, rgba(1, 112, 239, 0.20) 0%, rgba(1, 90, 200, 0.26) 100%);
+    border-color: rgba(1, 112, 239, 0.5);
+    box-shadow: 0 6px 24px rgba(1, 112, 239, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.qobuz-enrich-button.active .qobuz-enrich-logo {
+    opacity: 1;
+    filter: drop-shadow(0 0 8px rgba(1, 112, 239, 0.6));
+}
+
+.qobuz-enrich-button.complete {
+    background: linear-gradient(135deg, rgba(76, 175, 80, 0.15) 0%, rgba(56, 142, 60, 0.20) 100%);
+    border-color: rgba(76, 175, 80, 0.35);
+    box-shadow: 0 4px 16px rgba(76, 175, 80, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.qobuz-enrich-button.complete .qobuz-enrich-logo {
+    opacity: 0.85;
+    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
+}
+
+.qobuz-enrich-button.complete .qobuz-enrich-spinner {
+    opacity: 0;
+}
+
+.qobuz-enrich-button.paused {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.12) 0%, rgba(255, 152, 0, 0.18) 100%);
+    border-color: rgba(255, 193, 7, 0.35);
+    box-shadow: 0 4px 16px rgba(255, 193, 7, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.qobuz-enrich-button.paused:hover {
+    border-color: rgba(255, 193, 7, 0.5);
+    box-shadow: 0 6px 20px rgba(255, 193, 7, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes qobuz-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.qobuz-enrich-tooltip {
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 12px);
+    transform: translateX(-50%) translateY(-5px);
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+}
+
+.qobuz-enrich-button:hover+.qobuz-enrich-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
+
+.qobuz-enrich-tooltip-content {
+    min-width: 260px;
+    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
+    backdrop-filter: blur(40px) saturate(1.6);
+    -webkit-backdrop-filter: blur(40px) saturate(1.6);
+    border: 1px solid rgba(1, 112, 239, 0.3);
+    border-radius: 16px;
+    padding: 16px 18px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(1, 112, 239, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.qobuz-enrich-tooltip-header {
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(1, 112, 239, 0.95);
+    letter-spacing: -0.2px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.qobuz-enrich-tooltip-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#qobuz-enrich-tooltip-status {
+    color: rgb(var(--accent-light-rgb));
+    font-weight: 600;
+}
+
+.qobuz-enrich-button.paused+.qobuz-enrich-tooltip #qobuz-enrich-tooltip-status {
+    color: #ffc107;
+}
+
+.qobuz-enrich-button.no-auth {
+    background: linear-gradient(135deg,
+            rgba(120, 120, 120, 0.08) 0%,
+            rgba(80, 80, 80, 0.12) 100%);
+    border-color: rgba(120, 120, 120, 0.25);
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.15),
+        0 2px 8px rgba(0, 0, 0, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.qobuz-enrich-button.no-auth .qobuz-enrich-logo {
+    filter: grayscale(1) opacity(0.4);
+}
+
+.qobuz-enrich-button.no-auth .qobuz-enrich-spinner {
+    display: none;
+}
+
+.qobuz-enrich-button.no-auth:hover {
+    border-color: rgba(120, 120, 120, 0.35);
+    box-shadow:
+        0 6px 20px rgba(0, 0, 0, 0.2),
+        0 3px 12px rgba(0, 0, 0, 0.15);
+    opacity: 0.55;
+}
+
+.qobuz-enrich-button.no-auth+.qobuz-enrich-tooltip #qobuz-enrich-tooltip-status {
+    color: rgba(120, 120, 120, 0.8);
+}
+
+.qobuz-enrich-tooltip-content::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -8px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid rgba(1, 112, 239, 0.3);
+}
+
+.qobuz-enrich-tooltip-content::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -7px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
+}
+
+/* ========================================
    HYDRABASE P2P MIRROR WORKER BUTTON
    ======================================== */
 
@@ -31498,6 +31950,8 @@ a.enhanced-id-badge:visited {
 .enhanced-id-badge.audiodb { background: rgba(50, 120, 220, 0.15); color: #5a9de6; border: 1px solid rgba(50, 120, 220, 0.25); }
 .enhanced-id-badge.lastfm { background: rgba(185, 0, 0, 0.15); color: #d42f2f; border: 1px solid rgba(185, 0, 0, 0.25); }
 .enhanced-id-badge.genius { background: rgba(255, 255, 100, 0.12); color: #e8d44d; border: 1px solid rgba(255, 255, 100, 0.2); }
+.enhanced-id-badge.tidal { background: rgba(0, 0, 0, 0.15); color: #ffffff; border: 1px solid rgba(255, 255, 255, 0.2); }
+.enhanced-id-badge.qobuz { background: rgba(1, 112, 239, 0.15); color: #4da6ff; border: 1px solid rgba(1, 112, 239, 0.25); }
 .enhanced-id-badge.server { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.12); }
 
 .enhanced-meta-edit-toggle {

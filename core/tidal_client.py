@@ -714,7 +714,234 @@ class TidalClient:
         except Exception as e:
             logger.error(f"Error searching Tidal tracks: {e}")
             return []
-    
+
+    # ── Enrichment API Methods ──
+
+    @rate_limited
+    def search_artist(self, name: str) -> Optional[Dict]:
+        """Search for an artist by name. Returns first result as raw dict or None."""
+        try:
+            if not self._ensure_valid_token():
+                return None
+
+            params = {
+                'query': name,
+                'type': 'artists',
+                'limit': 1,
+                'countryCode': 'US'
+            }
+
+            response = self.session.get(
+                f"{self.base_url}/searchresults",
+                params=params,
+                timeout=10
+            )
+
+            if response.status_code == 429:
+                raise Exception(f"Rate limited (429) on search_artist")
+            if response.status_code == 200:
+                data = response.json()
+                items = []
+                if 'artists' in data and 'items' in data['artists']:
+                    items = data['artists']['items']
+                elif 'artists' in data and isinstance(data['artists'], list):
+                    items = data['artists']
+                if items:
+                    return items[0]
+            else:
+                logger.debug(f"Tidal artist search failed: {response.status_code}")
+            return None
+
+        except Exception as e:
+            if "429" in str(e):
+                raise  # Let rate_limited decorator handle retry
+            logger.error(f"Error searching Tidal artist: {e}")
+            return None
+
+    @rate_limited
+    def search_album(self, artist: str, title: str) -> Optional[Dict]:
+        """Search for an album by artist + title. Returns first result as raw dict or None."""
+        try:
+            if not self._ensure_valid_token():
+                return None
+
+            query = f"{artist} {title}" if artist else title
+            params = {
+                'query': query,
+                'type': 'albums',
+                'limit': 1,
+                'countryCode': 'US'
+            }
+
+            response = self.session.get(
+                f"{self.base_url}/searchresults",
+                params=params,
+                timeout=10
+            )
+
+            if response.status_code == 429:
+                raise Exception(f"Rate limited (429) on search_album")
+            if response.status_code == 200:
+                data = response.json()
+                items = []
+                if 'albums' in data and 'items' in data['albums']:
+                    items = data['albums']['items']
+                elif 'albums' in data and isinstance(data['albums'], list):
+                    items = data['albums']
+                if items:
+                    return items[0]
+            else:
+                logger.debug(f"Tidal album search failed: {response.status_code}")
+            return None
+
+        except Exception as e:
+            if "429" in str(e):
+                raise  # Let rate_limited decorator handle retry
+            logger.error(f"Error searching Tidal album: {e}")
+            return None
+
+    @rate_limited
+    def search_track(self, artist: str, title: str) -> Optional[Dict]:
+        """Search for a track by artist + title. Returns first result as raw dict or None."""
+        try:
+            if not self._ensure_valid_token():
+                return None
+
+            query = f"{artist} {title}" if artist else title
+            params = {
+                'query': query,
+                'type': 'tracks',
+                'limit': 1,
+                'countryCode': 'US'
+            }
+
+            response = self.session.get(
+                f"{self.base_url}/searchresults",
+                params=params,
+                timeout=10
+            )
+
+            if response.status_code == 429:
+                raise Exception(f"Rate limited (429) on search_track")
+            if response.status_code == 200:
+                data = response.json()
+                items = []
+                if 'tracks' in data and 'items' in data['tracks']:
+                    items = data['tracks']['items']
+                elif 'tracks' in data and isinstance(data['tracks'], list):
+                    items = data['tracks']
+                if items:
+                    return items[0]
+            else:
+                logger.debug(f"Tidal track search failed: {response.status_code}")
+            return None
+
+        except Exception as e:
+            if "429" in str(e):
+                raise  # Let rate_limited decorator handle retry
+            logger.error(f"Error searching Tidal track: {e}")
+            return None
+
+    @rate_limited
+    def get_artist(self, artist_id: str) -> Optional[Dict]:
+        """Get full artist details by Tidal ID."""
+        try:
+            if not self._ensure_valid_token():
+                return None
+
+            response = self.session.get(
+                f"{self.base_url}/artists/{artist_id}",
+                params={'countryCode': 'US'},
+                headers={'accept': 'application/vnd.api+json'},
+                timeout=10
+            )
+
+            if response.status_code == 429:
+                raise Exception(f"Rate limited (429) on get_artist")
+            if response.status_code == 200:
+                data = response.json()
+                # Handle JSON:API format
+                if 'data' in data and 'attributes' in data.get('data', {}):
+                    result = dict(data['data'].get('attributes', {}))
+                    result['id'] = data['data'].get('id', artist_id)
+                    return result
+                return data
+            else:
+                logger.debug(f"Tidal get_artist failed: {response.status_code}")
+            return None
+
+        except Exception as e:
+            if "429" in str(e):
+                raise  # Let rate_limited decorator handle retry
+            logger.error(f"Error getting Tidal artist {artist_id}: {e}")
+            return None
+
+    @rate_limited
+    def get_album(self, album_id: str) -> Optional[Dict]:
+        """Get full album details by Tidal ID."""
+        try:
+            if not self._ensure_valid_token():
+                return None
+
+            response = self.session.get(
+                f"{self.base_url}/albums/{album_id}",
+                params={'countryCode': 'US'},
+                headers={'accept': 'application/vnd.api+json'},
+                timeout=10
+            )
+
+            if response.status_code == 429:
+                raise Exception(f"Rate limited (429) on get_album")
+            if response.status_code == 200:
+                data = response.json()
+                if 'data' in data and 'attributes' in data.get('data', {}):
+                    result = dict(data['data'].get('attributes', {}))
+                    result['id'] = data['data'].get('id', album_id)
+                    return result
+                return data
+            else:
+                logger.debug(f"Tidal get_album failed: {response.status_code}")
+            return None
+
+        except Exception as e:
+            if "429" in str(e):
+                raise  # Let rate_limited decorator handle retry
+            logger.error(f"Error getting Tidal album {album_id}: {e}")
+            return None
+
+    @rate_limited
+    def get_track(self, track_id: str) -> Optional[Dict]:
+        """Get full track details by Tidal ID."""
+        try:
+            if not self._ensure_valid_token():
+                return None
+
+            response = self.session.get(
+                f"{self.base_url}/tracks/{track_id}",
+                params={'countryCode': 'US'},
+                headers={'accept': 'application/vnd.api+json'},
+                timeout=10
+            )
+
+            if response.status_code == 429:
+                raise Exception(f"Rate limited (429) on get_track")
+            if response.status_code == 200:
+                data = response.json()
+                if 'data' in data and 'attributes' in data.get('data', {}):
+                    result = dict(data['data'].get('attributes', {}))
+                    result['id'] = data['data'].get('id', track_id)
+                    return result
+                return data
+            else:
+                logger.debug(f"Tidal get_track failed: {response.status_code}")
+            return None
+
+        except Exception as e:
+            if "429" in str(e):
+                raise  # Let rate_limited decorator handle retry
+            logger.error(f"Error getting Tidal track {track_id}: {e}")
+            return None
+
     @rate_limited
     def get_playlist(self, playlist_id: str) -> Optional[Playlist]:
         """Get playlist details including tracks using JSON:API format"""

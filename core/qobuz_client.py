@@ -34,6 +34,40 @@ logger = get_logger("qobuz_client")
 
 QOBUZ_API_BASE = "https://www.qobuz.com/api.json/0.2/"
 
+# ── Module-level rate limiting (shared across ALL QobuzClient instances) ──
+_qobuz_api_lock = threading.Lock()
+_qobuz_last_api_call = 0.0
+_QOBUZ_MIN_INTERVAL = 1.0  # 1 request/sec (60/min, matches streamrip default)
+
+# Global rate limit ban state (like Spotify's pattern)
+_qobuz_rate_limit_until = 0.0
+_qobuz_rate_limit_lock = threading.Lock()
+
+
+def _qobuz_throttle():
+    """Enforce minimum interval between Qobuz API calls across all instances."""
+    global _qobuz_last_api_call
+    with _qobuz_api_lock:
+        now = time.time()
+        elapsed = now - _qobuz_last_api_call
+        if elapsed < _QOBUZ_MIN_INTERVAL:
+            time.sleep(_QOBUZ_MIN_INTERVAL - elapsed)
+        _qobuz_last_api_call = time.time()
+
+
+def _qobuz_set_rate_limit(retry_after: float = 60.0):
+    """Set a global rate limit ban for all Qobuz instances."""
+    global _qobuz_rate_limit_until
+    with _qobuz_rate_limit_lock:
+        _qobuz_rate_limit_until = time.time() + retry_after
+        logger.warning(f"Qobuz global rate limit set for {retry_after}s")
+
+
+def _qobuz_is_rate_limited() -> bool:
+    """Check if Qobuz is currently rate limited."""
+    with _qobuz_rate_limit_lock:
+        return time.time() < _qobuz_rate_limit_until
+
 # Quality tier definitions (format_id values)
 QOBUZ_QUALITY_MAP = {
     'mp3': {
@@ -450,6 +484,12 @@ class QobuzClient:
             logger.warning("Qobuz not authenticated")
             return None
 
+        if _qobuz_is_rate_limited():
+            logger.debug(f"Qobuz rate limited, skipping {endpoint}")
+            return None
+
+        _qobuz_throttle()
+
         try:
             resp = self.session.get(
                 QOBUZ_API_BASE + endpoint,
@@ -461,6 +501,10 @@ class QobuzClient:
                 logger.warning("Qobuz auth token expired")
                 self.user_auth_token = None
                 return None
+            elif resp.status_code == 429:
+                retry_after = float(resp.headers.get('Retry-After', 60))
+                _qobuz_set_rate_limit(retry_after)
+                return None
             elif resp.status_code != 200:
                 logger.warning(f"Qobuz API error: {endpoint} returned HTTP {resp.status_code}")
                 return None
@@ -469,6 +513,93 @@ class QobuzClient:
 
         except Exception as e:
             logger.error(f"Qobuz API request failed ({endpoint}): {e}")
+            return None
+
+    # ── Enrichment API Methods ──
+
+    def search_artist(self, name: str):
+        """Search for an artist by name. Returns first result as raw dict or None."""
+        try:
+            data = self._api_request('artist/search', {
+                'query': name,
+                'limit': 1,
+            })
+            if data and 'artists' in data:
+                items = data['artists'].get('items', [])
+                if items:
+                    return items[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error searching Qobuz artist: {e}")
+            return None
+
+    def search_album(self, artist: str, title: str):
+        """Search for an album by artist + title. Returns first result as raw dict or None."""
+        try:
+            query = f"{artist} {title}" if artist else title
+            data = self._api_request('album/search', {
+                'query': query,
+                'limit': 1,
+            })
+            if data and 'albums' in data:
+                items = data['albums'].get('items', [])
+                if items:
+                    return items[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error searching Qobuz album: {e}")
+            return None
+
+    def search_track(self, artist: str, title: str):
+        """Search for a track by artist + title. Returns first result as raw dict or None."""
+        try:
+            query = f"{artist} {title}" if artist else title
+            data = self._api_request('track/search', {
+                'query': query,
+                'limit': 1,
+            })
+            if data and 'tracks' in data:
+                items = data['tracks'].get('items', [])
+                if items:
+                    return items[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error searching Qobuz track: {e}")
+            return None
+
+    def get_artist(self, artist_id):
+        """Get full artist details by Qobuz ID."""
+        try:
+            data = self._api_request('artist/get', {
+                'artist_id': artist_id,
+                'extra': 'albums',
+            })
+            return data
+        except Exception as e:
+            logger.error(f"Error getting Qobuz artist {artist_id}: {e}")
+            return None
+
+    def get_album(self, album_id):
+        """Get full album details by Qobuz ID."""
+        try:
+            data = self._api_request('album/get', {
+                'album_id': album_id,
+                'extra': 'tracks',
+            })
+            return data
+        except Exception as e:
+            logger.error(f"Error getting Qobuz album {album_id}: {e}")
+            return None
+
+    def get_track(self, track_id):
+        """Get full track details by Qobuz ID."""
+        try:
+            data = self._api_request('track/get', {
+                'track_id': track_id,
+            })
+            return data
+        except Exception as e:
+            logger.error(f"Error getting Qobuz track {track_id}: {e}")
             return None
 
     async def search(self, query: str, timeout: int = None, progress_callback=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
@@ -603,6 +734,12 @@ class QobuzClient:
             logger.error("No app_secret available for stream URL signing")
             return None
 
+        if _qobuz_is_rate_limited():
+            logger.debug("Qobuz rate limited, skipping stream URL request")
+            return None
+
+        _qobuz_throttle()
+
         ts = str(int(time.time()))
         sig_raw = f"trackgetFileUrlformat_id{format_id}intentstreamtrack_id{track_id}{ts}{self.app_secret}"
         sig = hashlib.md5(sig_raw.encode()).hexdigest()
@@ -622,6 +759,10 @@ class QobuzClient:
 
             if resp.status_code == 401:
                 logger.warning("Qobuz stream URL auth failed — token may be expired")
+                return None
+            elif resp.status_code == 429:
+                retry_after = float(resp.headers.get('Retry-After', 60))
+                _qobuz_set_rate_limit(retry_after)
                 return None
             elif resp.status_code == 400:
                 data = resp.json() if resp.text else {}
