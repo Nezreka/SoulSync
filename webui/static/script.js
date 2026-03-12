@@ -285,11 +285,23 @@ function handleServiceStatusUpdate(data) {
     updateSidebarServiceStatus('media-server', data.media_server);
     updateSidebarServiceStatus('soulseek', data.soulseek);
 
-    // Check for Spotify rate limit
-    if (data.spotify && data.spotify.rate_limited && data.spotify.rate_limit) {
+    // Spotify rate limit / cooldown / recovery
+    if (data.spotify?.rate_limited && data.spotify.rate_limit) {
         handleSpotifyRateLimit(data.spotify.rate_limit);
-    } else if (_spotifyRateLimitShown) {
-        handleSpotifyRateLimit(null);
+        _spotifyInCooldown = false;
+    } else if (data.spotify?.post_ban_cooldown > 0) {
+        if (_spotifyRateLimitShown && !_spotifyInCooldown) {
+            _spotifyRateLimitShown = false;
+            _spotifyInCooldown = true;
+            showToast('Spotify ban expired \u2014 recovering shortly', 'info');
+        }
+    } else {
+        if (_spotifyInCooldown) {
+            _spotifyInCooldown = false;
+            showToast('Spotify access restored', 'success');
+        } else if (_spotifyRateLimitShown) {
+            handleSpotifyRateLimit(null);
+        }
     }
 }
 
@@ -5782,54 +5794,23 @@ async function disconnectSpotify() {
     }
 }
 
-// ── Spotify Rate Limit Modal ──────────────────────────────────────────────
+// ── Spotify Rate Limit Handling ───────────────────────────────────────────
 let _spotifyRateLimitShown = false;
-let _rateLimitCountdownInterval = null;
-let _rateLimitRemainingSeconds = 0;  // Local countdown, synced from server updates
+let _spotifyInCooldown = false;
 
 function handleSpotifyRateLimit(rateLimitInfo) {
     if (!rateLimitInfo || !rateLimitInfo.active) {
-        // Rate limit cleared — hide modal if showing
         if (_spotifyRateLimitShown) {
             _spotifyRateLimitShown = false;
-            closeSpotifyRateLimitModal();
-            showToast('Spotify rate limit expired — API access restored', 'success');
+            showToast('Spotify access restored', 'success');
         }
         return;
     }
-
-    // Sync local countdown from server's authoritative remaining_seconds
-    _rateLimitRemainingSeconds = rateLimitInfo.remaining_seconds;
-
-    // Update static fields (only change on new ban events)
-    const durationEl = document.getElementById('rate-limit-duration');
-    const endpointEl = document.getElementById('rate-limit-endpoint');
-    if (durationEl) durationEl.textContent = formatRateLimitDuration(rateLimitInfo.retry_after);
-    if (endpointEl) endpointEl.textContent = rateLimitInfo.endpoint || 'unknown';
-
-    // Update remaining display
-    const remainingEl = document.getElementById('rate-limit-remaining');
-    if (remainingEl) remainingEl.textContent = formatRateLimitDuration(_rateLimitRemainingSeconds);
-
-    // Show modal and start countdown once per rate limit event
     if (!_spotifyRateLimitShown) {
         _spotifyRateLimitShown = true;
-        const overlay = document.getElementById('spotify-rate-limit-overlay');
-        if (overlay) overlay.classList.remove('hidden');
-
-        // Start local 1s countdown for smooth display between server updates
-        if (_rateLimitCountdownInterval) clearInterval(_rateLimitCountdownInterval);
-        _rateLimitCountdownInterval = setInterval(() => {
-            _rateLimitRemainingSeconds--;
-            if (_rateLimitRemainingSeconds <= 0) {
-                _spotifyRateLimitShown = false;
-                closeSpotifyRateLimitModal();
-                showToast('Spotify rate limit expired — API access restored', 'success');
-                return;
-            }
-            const el = document.getElementById('rate-limit-remaining');
-            if (el) el.textContent = formatRateLimitDuration(_rateLimitRemainingSeconds);
-        }, 1000);
+        _spotifyInCooldown = false;
+        const duration = formatRateLimitDuration(rateLimitInfo.remaining_seconds);
+        showToast(`Spotify rate limited (${duration}) \u2014 using Apple Music`, 'warning');
     }
 }
 
@@ -5841,36 +5822,6 @@ function formatRateLimitDuration(seconds) {
     if (h > 0) return `${h}h ${m}m`;
     if (m > 0) return `${m}m ${s}s`;
     return `${s}s`;
-}
-
-function closeSpotifyRateLimitModal() {
-    const overlay = document.getElementById('spotify-rate-limit-overlay');
-    if (overlay) overlay.classList.add('hidden');
-    if (_rateLimitCountdownInterval) {
-        clearInterval(_rateLimitCountdownInterval);
-        _rateLimitCountdownInterval = null;
-    }
-}
-
-async function disconnectSpotifyFromRateLimitModal() {
-    closeSpotifyRateLimitModal();
-    _spotifyRateLimitShown = false;
-    try {
-        showLoadingOverlay('Disconnecting Spotify...');
-        const response = await fetch('/api/spotify/disconnect', { method: 'POST' });
-        const data = await response.json();
-        if (data.success) {
-            showToast('Spotify disconnected. Now using Apple Music/iTunes.', 'success');
-            await fetchAndUpdateServiceStatus();
-        } else {
-            showToast(`Failed to disconnect: ${data.error}`, 'error');
-        }
-    } catch (error) {
-        console.error('Error disconnecting Spotify:', error);
-        showToast('Failed to disconnect Spotify', 'error');
-    } finally {
-        hideLoadingOverlay();
-    }
 }
 
 async function authenticateTidal() {
@@ -30131,11 +30082,14 @@ function updateServiceStatus(service, statusData) {
     const statusText = document.getElementById(`${service}-status-text`);
 
     if (indicator && statusText) {
-        if (service === 'spotify' && statusData.rate_limited) {
-            indicator.className = 'service-card-indicator disconnected';
-            const remaining = statusData.rate_limit ? formatRateLimitDuration(statusData.rate_limit.remaining_seconds) : '';
-            statusText.textContent = `Rate Limited${remaining ? ' (' + remaining + ')' : ''}`;
-            statusText.className = 'service-card-status-text disconnected';
+        if (service === 'spotify' && (statusData.rate_limited || statusData.post_ban_cooldown)) {
+            indicator.className = 'service-card-indicator rate-limited';
+            const remaining = statusData.rate_limited
+                ? formatRateLimitDuration(statusData.rate_limit?.remaining_seconds || 0)
+                : formatRateLimitDuration(statusData.post_ban_cooldown);
+            const phase = statusData.rate_limited ? 'paused' : 'recovering';
+            statusText.textContent = `Apple Music (Spotify ${phase} \u2014 ${remaining})`;
+            statusText.className = 'service-card-status-text rate-limited';
         } else if (statusData.connected) {
             indicator.className = 'service-card-indicator connected';
             statusText.textContent = `Connected (${statusData.response_time}ms)`;
@@ -30180,9 +30134,11 @@ function updateSidebarServiceStatus(service, statusData) {
         const nameElement = indicator.querySelector('.status-name');
 
         if (dot) {
-            if (service === 'spotify' && statusData.rate_limited) {
-                dot.className = 'status-dot disconnected';
-                dot.title = 'Rate Limited';
+            if (service === 'spotify' && (statusData.rate_limited || statusData.post_ban_cooldown)) {
+                dot.className = 'status-dot rate-limited';
+                dot.title = statusData.rate_limited
+                    ? `Spotify paused \u2014 ${formatRateLimitDuration(statusData.rate_limit?.remaining_seconds || 0)} remaining`
+                    : `Spotify recovering \u2014 ${formatRateLimitDuration(statusData.post_ban_cooldown)} cooldown`;
             } else if (statusData.connected) {
                 dot.className = 'status-dot connected';
                 dot.title = '';
