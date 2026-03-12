@@ -26,7 +26,7 @@ logger = get_logger("download_orchestrator")
 
 class DownloadOrchestrator:
     """
-    Orchestrates downloads between Soulseek and YouTube based on user preferences.
+    Orchestrates downloads between Soulseek, YouTube, Tidal, and Qobuz based on user preferences.
 
     Acts as a drop-in replacement for SoulseekClient by exposing the same async interface.
     Routes requests to the appropriate client(s) based on configured mode.
@@ -42,17 +42,17 @@ class DownloadOrchestrator:
         # Load mode from config
         self.mode = config_manager.get('download_source.mode', 'soulseek')
         self.hybrid_primary = config_manager.get('download_source.hybrid_primary', 'soulseek')
-        self.youtube_min_confidence = config_manager.get('download_source.youtube_min_confidence', 0.65)
+        self.hybrid_secondary = config_manager.get('download_source.hybrid_secondary', 'youtube')
 
         logger.info(f"🎛️  Download Orchestrator initialized - Mode: {self.mode}")
         if self.mode == 'hybrid':
-            logger.info(f"   Primary source: {self.hybrid_primary}")
+            logger.info(f"   Primary: {self.hybrid_primary}, Fallback: {self.hybrid_secondary}")
 
     def reload_settings(self):
         """Reload settings from config (call after settings change)"""
         self.mode = config_manager.get('download_source.mode', 'soulseek')
         self.hybrid_primary = config_manager.get('download_source.hybrid_primary', 'soulseek')
-        self.youtube_min_confidence = config_manager.get('download_source.youtube_min_confidence', 0.65)
+        self.hybrid_secondary = config_manager.get('download_source.hybrid_secondary', 'youtube')
 
         # Reload underlying client configs (SLSKD URL, API key, etc.)
         self.soulseek._setup_client()
@@ -134,7 +134,6 @@ class DownloadOrchestrator:
             return await self.qobuz.search(query, timeout, progress_callback)
 
         elif self.mode == 'hybrid':
-            # Build ordered client list: primary first, then remaining as fallbacks
             clients = {
                 'soulseek': self.soulseek,
                 'youtube': self.youtube,
@@ -142,7 +141,12 @@ class DownloadOrchestrator:
                 'qobuz': self.qobuz,
             }
             primary = self.hybrid_primary if self.hybrid_primary in clients else 'soulseek'
-            fallbacks = [name for name in clients if name != primary]
+            secondary = self.hybrid_secondary if self.hybrid_secondary in clients else 'soulseek'
+
+            # Ensure secondary differs from primary
+            if secondary == primary:
+                # Pick first available source that isn't primary
+                secondary = next((name for name in clients if name != primary), 'soulseek')
 
             # Try primary source first
             logger.info(f"🔍 Hybrid search - trying {primary} first: {query}")
@@ -151,16 +155,15 @@ class DownloadOrchestrator:
                 logger.info(f"✅ {primary} found {len(tracks)} tracks")
                 return (tracks, albums)
 
-            # Try fallbacks in order
-            for fallback_name in fallbacks:
-                logger.info(f"🔄 {primary} found nothing, trying {fallback_name} fallback")
-                tracks, albums = await clients[fallback_name].search(query, timeout, progress_callback)
-                if tracks:
-                    logger.info(f"✅ {fallback_name} found {len(tracks)} tracks")
-                    return (tracks, albums)
+            # Try secondary fallback
+            logger.info(f"🔄 {primary} found nothing, trying {secondary} fallback")
+            tracks, albums = await clients[secondary].search(query, timeout, progress_callback)
+            if tracks:
+                logger.info(f"✅ {secondary} found {len(tracks)} tracks")
+                return (tracks, albums)
 
-            # Nothing found from any source
-            logger.warning(f"❌ Hybrid search exhausted all sources for: {query}")
+            # Nothing found from either source
+            logger.warning(f"❌ Hybrid search: both {primary} and {secondary} found nothing for: {query}")
             return ([], [])
 
         # Fallback: empty results
@@ -190,9 +193,13 @@ class DownloadOrchestrator:
             logger.warning(f"No results found for: {query}")
             return None
 
-        # 2. Filter using Soulseek's quality preferences 
-        # (Works for both YouTube and Soulseek TrackResult objects)
-        filtered_results = self.soulseek.filter_results_by_quality_preference(tracks)
+        # 2. Filter using Soulseek's quality preferences (Soulseek only)
+        # Streaming sources (YouTube/Tidal/Qobuz) handle quality internally
+        is_streaming = tracks[0].username in ('youtube', 'tidal', 'qobuz') if tracks else False
+        if is_streaming:
+            filtered_results = tracks
+        else:
+            filtered_results = self.soulseek.filter_results_by_quality_preference(tracks)
 
         if not filtered_results:
             logger.warning(f"No suitable quality results found for: {query}")
