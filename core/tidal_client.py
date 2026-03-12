@@ -681,16 +681,17 @@ class TidalClient:
             if not self._ensure_valid_token():
                 logger.error("Not authenticated with Tidal")
                 return []
-            
+
+            from urllib.parse import quote
+            encoded_query = quote(query, safe='')
             params = {
-                'query': query,
-                'type': 'tracks',
-                'limit': limit,
-                'countryCode': 'US'  # Default to US
+                'countryCode': 'US',
+                'include': 'tracks',
+                'limit': limit
             }
-            
+
             response = self.session.get(
-                f"{self.base_url}/searchresults",
+                f"{self.base_url}/searchresults/{encoded_query}",
                 params=params,
                 timeout=10
             )
@@ -724,15 +725,16 @@ class TidalClient:
             if not self._ensure_valid_token():
                 return None
 
+            from urllib.parse import quote
+            encoded_query = quote(name, safe='')
             params = {
-                'query': name,
-                'type': 'artists',
-                'limit': 1,
-                'countryCode': 'US'
+                'countryCode': 'US',
+                'include': 'artists',
+                'limit': 1
             }
 
             response = self.session.get(
-                f"{self.base_url}/searchresults",
+                f"{self.base_url}/searchresults/{encoded_query}",
                 params=params,
                 timeout=10
             )
@@ -741,13 +743,22 @@ class TidalClient:
                 raise Exception(f"Rate limited (429) on search_artist")
             if response.status_code == 200:
                 data = response.json()
+                # JSON:API format: included artists in 'artists' or nested in relationships
                 items = []
-                if 'artists' in data and 'items' in data['artists']:
-                    items = data['artists']['items']
-                elif 'artists' in data and isinstance(data['artists'], list):
+                if 'artists' in data and isinstance(data['artists'], list):
                     items = data['artists']
+                elif 'artists' in data and 'items' in data['artists']:
+                    items = data['artists']['items']
+                elif 'included' in data:
+                    items = [r for r in data['included'] if r.get('type') == 'artists']
                 if items:
-                    return items[0]
+                    item = items[0]
+                    # Flatten JSON:API resource if needed
+                    if 'attributes' in item and 'id' in item:
+                        flat = dict(item['attributes'])
+                        flat['id'] = item['id']
+                        return flat
+                    return item
             else:
                 logger.debug(f"Tidal artist search failed: {response.status_code}")
             return None
@@ -765,16 +776,17 @@ class TidalClient:
             if not self._ensure_valid_token():
                 return None
 
+            from urllib.parse import quote
             query = f"{artist} {title}" if artist else title
+            encoded_query = quote(query, safe='')
             params = {
-                'query': query,
-                'type': 'albums',
-                'limit': 1,
-                'countryCode': 'US'
+                'countryCode': 'US',
+                'include': 'albums',
+                'limit': 1
             }
 
             response = self.session.get(
-                f"{self.base_url}/searchresults",
+                f"{self.base_url}/searchresults/{encoded_query}",
                 params=params,
                 timeout=10
             )
@@ -784,12 +796,19 @@ class TidalClient:
             if response.status_code == 200:
                 data = response.json()
                 items = []
-                if 'albums' in data and 'items' in data['albums']:
-                    items = data['albums']['items']
-                elif 'albums' in data and isinstance(data['albums'], list):
+                if 'albums' in data and isinstance(data['albums'], list):
                     items = data['albums']
+                elif 'albums' in data and 'items' in data['albums']:
+                    items = data['albums']['items']
+                elif 'included' in data:
+                    items = [r for r in data['included'] if r.get('type') == 'albums']
                 if items:
-                    return items[0]
+                    item = items[0]
+                    if 'attributes' in item and 'id' in item:
+                        flat = dict(item['attributes'])
+                        flat['id'] = item['id']
+                        return flat
+                    return item
             else:
                 logger.debug(f"Tidal album search failed: {response.status_code}")
             return None
@@ -807,16 +826,17 @@ class TidalClient:
             if not self._ensure_valid_token():
                 return None
 
+            from urllib.parse import quote
             query = f"{artist} {title}" if artist else title
+            encoded_query = quote(query, safe='')
             params = {
-                'query': query,
-                'type': 'tracks',
-                'limit': 1,
-                'countryCode': 'US'
+                'countryCode': 'US',
+                'include': 'tracks',
+                'limit': 1
             }
 
             response = self.session.get(
-                f"{self.base_url}/searchresults",
+                f"{self.base_url}/searchresults/{encoded_query}",
                 params=params,
                 timeout=10
             )
@@ -826,12 +846,19 @@ class TidalClient:
             if response.status_code == 200:
                 data = response.json()
                 items = []
-                if 'tracks' in data and 'items' in data['tracks']:
-                    items = data['tracks']['items']
-                elif 'tracks' in data and isinstance(data['tracks'], list):
+                if 'tracks' in data and isinstance(data['tracks'], list):
                     items = data['tracks']
+                elif 'tracks' in data and 'items' in data['tracks']:
+                    items = data['tracks']['items']
+                elif 'included' in data:
+                    items = [r for r in data['included'] if r.get('type') == 'tracks']
                 if items:
-                    return items[0]
+                    item = items[0]
+                    if 'attributes' in item and 'id' in item:
+                        flat = dict(item['attributes'])
+                        flat['id'] = item['id']
+                        return flat
+                    return item
             else:
                 logger.debug(f"Tidal track search failed: {response.status_code}")
             return None

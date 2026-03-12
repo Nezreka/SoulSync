@@ -29196,6 +29196,20 @@ body {
 .genius-card-icon:hover {
     background: #ffff64;
 }
+
+.tidal-card-icon:hover {
+    background: #000000;
+}
+
+.qobuz-card-icon:hover {
+    background: #0170ef;
+}
+
+.tidal-card-icon img,
+.qobuz-card-icon img {
+    filter: invert(1);
+}
+
 .watch-card-icon {
     cursor: pointer;
     font-size: 10px;
