@@ -4547,7 +4547,8 @@ async function loadSettingsData() {
         // Populate Download Source settings
         document.getElementById('download-source-mode').value = settings.download_source?.mode || 'soulseek';
         document.getElementById('hybrid-primary-source').value = settings.download_source?.hybrid_primary || 'soulseek';
-        document.getElementById('youtube-min-confidence').value = settings.download_source?.youtube_min_confidence || 0.65;
+        document.getElementById('hybrid-secondary-source').value = settings.download_source?.hybrid_secondary || 'youtube';
+        updateHybridSecondaryOptions();
         document.getElementById('tidal-download-quality').value = settings.tidal_download?.quality || 'lossless';
         document.getElementById('qobuz-quality').value = settings.qobuz?.quality || 'lossless';
 
@@ -4751,6 +4752,32 @@ function updateDownloadSourceUI() {
     }
     if (mode === 'qobuz' || mode === 'hybrid') {
         checkQobuzAuthStatus();
+    }
+}
+
+function updateHybridSecondaryOptions() {
+    const primary = document.getElementById('hybrid-primary-source').value;
+    const secondary = document.getElementById('hybrid-secondary-source');
+    const currentValue = secondary.value;
+    const allSources = [
+        { value: 'soulseek', label: 'Soulseek' },
+        { value: 'youtube', label: 'YouTube' },
+        { value: 'tidal', label: 'Tidal' },
+        { value: 'qobuz', label: 'Qobuz' },
+    ];
+
+    secondary.innerHTML = '';
+    for (const source of allSources) {
+        if (source.value === primary) continue;
+        const opt = document.createElement('option');
+        opt.value = source.value;
+        opt.textContent = source.label;
+        secondary.appendChild(opt);
+    }
+
+    // Restore previous selection if still valid, otherwise pick first available
+    if (currentValue !== primary) {
+        secondary.value = currentValue;
     }
 }
 
@@ -5267,7 +5294,7 @@ async function saveSettings(quiet = false) {
         download_source: {
             mode: document.getElementById('download-source-mode').value,
             hybrid_primary: document.getElementById('hybrid-primary-source').value,
-            youtube_min_confidence: parseFloat(document.getElementById('youtube-min-confidence').value) || 0.65
+            hybrid_secondary: document.getElementById('hybrid-secondary-source').value,
         },
         tidal_download: {
             quality: document.getElementById('tidal-download-quality').value || 'lossless'

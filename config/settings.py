@@ -190,7 +190,7 @@ class ConfigManager:
             "download_source": {
                 "mode": "soulseek",  # Options: "soulseek", "youtube", "tidal", "qobuz", "hybrid"
                 "hybrid_primary": "soulseek",  # Which source to try first in hybrid mode
-                "youtube_min_confidence": 0.65  # Minimum confidence for YouTube matches
+                "hybrid_secondary": "youtube",  # Fallback source if primary finds nothing
             },
             "tidal_download": {
                 "quality": "lossless",  # Options: "low", "high", "lossless", "hires"

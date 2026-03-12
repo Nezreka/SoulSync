@@ -811,12 +811,15 @@ class QobuzClient:
                     if not chunk:
                         continue
 
-                    # Check for shutdown
-                    if self.shutdown_check and self.shutdown_check():
-                        logger.info("Server shutting down, aborting Qobuz download mid-stream")
-                        f.close()
-                        out_path.unlink(missing_ok=True)
-                        return None
+                    # Check for shutdown or cancellation
+                    cancelled = False
+                    with self._download_lock:
+                        if download_id in self.active_downloads:
+                            cancelled = self.active_downloads[download_id].get('state') == 'Cancelled'
+                    if cancelled or (self.shutdown_check and self.shutdown_check()):
+                        reason = "cancelled" if cancelled else "server shutting down"
+                        logger.info(f"Aborting Qobuz download mid-stream: {reason}")
+                        break
 
                     f.write(chunk)
                     downloaded += len(chunk)
@@ -839,6 +842,15 @@ class QobuzClient:
                             self.active_downloads[download_id]['progress'] = round(progress, 1)
                             self.active_downloads[download_id]['speed'] = int(speed)
                             self.active_downloads[download_id]['time_remaining'] = time_remaining
+
+            # If download was aborted (shutdown/cancel), clean up partial file
+            abort_check = False
+            with self._download_lock:
+                if download_id in self.active_downloads:
+                    abort_check = self.active_downloads[download_id].get('state') == 'Cancelled'
+            if abort_check or (self.shutdown_check and self.shutdown_check()):
+                out_path.unlink(missing_ok=True)
+                return None
 
             # Validate file size (Qobuz streams are DRM-free so this is mainly for network errors)
             MIN_AUDIO_SIZE = 100 * 1024  # 100KB
