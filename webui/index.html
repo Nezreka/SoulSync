@@ -3273,36 +3273,6 @@
                                     </div>
                                 </div>
 
-                                <!-- Soulseek Settings -->
-                                <div class="api-service-frame">
-                                    <h4 class="service-title soulseek-title">Soulseek</h4>
-                                    <div class="form-group">
-                                        <label>slskd URL:</label>
-                                        <div class="path-input-group">
-                                            <input type="url" id="soulseek-url" placeholder="http://localhost:5030">
-                                            <button class="detect-button"
-                                                onclick="autoDetectSlskd()">Auto-detect</button>
-                                        </div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>API Key:</label>
-                                        <input type="password" id="soulseek-api-key" placeholder="Slskd API Key">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Search Timeout (seconds):</label>
-                                        <input type="number" id="soulseek-search-timeout" placeholder="60" min="15"
-                                            max="300" value="60">
-                                        <small style="color: #888; display: block; margin-top: 5px;">How long to search
-                                            for tracks (15-300 seconds)</small>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Search Timeout Buffer (seconds):</label>
-                                        <input type="number" id="soulseek-search-timeout-buffer" placeholder="15"
-                                            min="5" max="60" value="15">
-                                        <small style="color: #888; display: block; margin-top: 5px;">Extra time to wait
-                                            for late results (5-60 seconds)</small>
-                                    </div>
-                                </div>
 
                                 <!-- ListenBrainz Settings -->
                                 <div class="api-service-frame">
@@ -3422,8 +3392,6 @@
                                     <button class="test-button" onclick="testConnection('spotify')">Test
                                         Spotify</button>
                                     <button class="test-button" onclick="testConnection('tidal')">Test Tidal</button>
-                                    <button class="test-button" onclick="testConnection('soulseek')">Test
-                                        Soulseek</button>
                                     <button class="test-button" onclick="testConnection('listenbrainz')">Test
                                         ListenBrainz</button>
                                     <button class="test-button" onclick="testConnection('acoustid')">Test
@@ -3667,7 +3635,7 @@
                                     </div>
                                     <div class="form-group">
                                         <label>Fallback Source:</label>
-                                        <select id="hybrid-secondary-source" class="form-select">
+                                        <select id="hybrid-secondary-source" class="form-select" onchange="updateDownloadSourceUI()">
                                             <option value="soulseek">Soulseek</option>
                                             <option value="youtube">YouTube</option>
                                             <option value="tidal">Tidal</option>
@@ -3678,6 +3646,39 @@
                                         </div>
                                     </div>
 
+                                </div>
+
+                                <!-- Soulseek Settings (shown when soulseek is active source) -->
+                                <div id="soulseek-settings-container" style="display: none;">
+                                    <div class="form-group">
+                                        <label>slskd URL:</label>
+                                        <div class="path-input-group">
+                                            <input type="url" id="soulseek-url" placeholder="http://localhost:5030">
+                                            <button class="detect-button"
+                                                onclick="autoDetectSlskd()">Auto-detect</button>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>API Key:</label>
+                                        <input type="password" id="soulseek-api-key" placeholder="Slskd API Key">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Search Timeout (seconds):</label>
+                                        <input type="number" id="soulseek-search-timeout" placeholder="60" min="15"
+                                            max="300" value="60">
+                                        <small style="color: #888; display: block; margin-top: 5px;">How long to search
+                                            for tracks (15-300 seconds)</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Search Timeout Buffer (seconds):</label>
+                                        <input type="number" id="soulseek-search-timeout-buffer" placeholder="15"
+                                            min="5" max="60" value="15">
+                                        <small style="color: #888; display: block; margin-top: 5px;">Extra time to wait
+                                            for late results (5-60 seconds)</small>
+                                    </div>
+                                    <div class="form-actions" style="margin-top: 8px;">
+                                        <button class="test-button" onclick="testConnection('soulseek')">Test Soulseek Connection</button>
+                                    </div>
                                 </div>
 
                                 <!-- Tidal Download Settings (shown only when tidal mode is selected) -->

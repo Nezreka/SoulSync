@@ -4738,19 +4738,33 @@ function toggleServer(serverType) {
 function updateDownloadSourceUI() {
     const mode = document.getElementById('download-source-mode').value;
     const hybridContainer = document.getElementById('hybrid-settings-container');
+    const soulseekContainer = document.getElementById('soulseek-settings-container');
     const tidalContainer = document.getElementById('tidal-download-settings-container');
     const qobuzContainer = document.getElementById('qobuz-settings-container');
     const youtubeContainer = document.getElementById('youtube-settings-container');
 
     hybridContainer.style.display = mode === 'hybrid' ? 'block' : 'none';
-    tidalContainer.style.display = (mode === 'tidal' || mode === 'hybrid') ? 'block' : 'none';
-    qobuzContainer.style.display = (mode === 'qobuz' || mode === 'hybrid') ? 'block' : 'none';
-    youtubeContainer.style.display = (mode === 'youtube' || mode === 'hybrid') ? 'block' : 'none';
 
-    if (mode === 'tidal' || mode === 'hybrid') {
+    // Determine which sources are active
+    let activeSources = new Set();
+    if (mode === 'hybrid') {
+        const primary = document.getElementById('hybrid-primary-source').value;
+        const secondary = document.getElementById('hybrid-secondary-source').value;
+        activeSources.add(primary);
+        activeSources.add(secondary);
+    } else {
+        activeSources.add(mode);
+    }
+
+    soulseekContainer.style.display = activeSources.has('soulseek') ? 'block' : 'none';
+    tidalContainer.style.display = activeSources.has('tidal') ? 'block' : 'none';
+    qobuzContainer.style.display = activeSources.has('qobuz') ? 'block' : 'none';
+    youtubeContainer.style.display = activeSources.has('youtube') ? 'block' : 'none';
+
+    if (activeSources.has('tidal')) {
         checkTidalDownloadAuthStatus();
     }
-    if (mode === 'qobuz' || mode === 'hybrid') {
+    if (activeSources.has('qobuz')) {
         checkQobuzAuthStatus();
     }
 }
@@ -4779,6 +4793,9 @@ function updateHybridSecondaryOptions() {
     if (currentValue !== primary) {
         secondary.value = currentValue;
     }
+
+    // Refresh source-specific settings visibility based on new primary/secondary
+    updateDownloadSourceUI();
 }
 
 // ===============================
