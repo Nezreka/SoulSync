@@ -3587,7 +3587,7 @@ def get_status():
             if is_rate_limited or cooldown_remaining > 0:
                 # During rate limit or post-ban cooldown, skip the auth probe entirely.
                 # Probing Spotify here would reset the rate limit timer.
-                music_source = 'spotify'
+                music_source = 'itunes'  # App uses iTunes during ban — reflect truth
                 spotify_response_time = 0
             else:
                 spotify_start = time.time()
@@ -3600,7 +3600,8 @@ def get_status():
                 'response_time': round(spotify_response_time, 1),
                 'source': music_source,
                 'rate_limited': is_rate_limited,
-                'rate_limit': rate_limit_info
+                'rate_limit': rate_limit_info,
+                'post_ban_cooldown': cooldown_remaining if cooldown_remaining > 0 else None
             }
             _status_cache_timestamps['spotify'] = current_time
         # else: use cached value

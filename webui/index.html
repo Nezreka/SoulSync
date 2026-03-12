@@ -4760,42 +4760,6 @@
         </div>
     </div>
 
-    <!-- Spotify Rate Limit Modal -->
-    <div class="modal-overlay hidden" id="spotify-rate-limit-overlay" onclick="closeSpotifyRateLimitModal()">
-        <div class="support-modal" onclick="event.stopPropagation()" style="max-width: 480px;">
-            <div class="support-modal-header">
-                <h2>Spotify Rate Limited</h2>
-                <button class="support-modal-close" onclick="closeSpotifyRateLimitModal()">&times;</button>
-            </div>
-            <div class="support-modal-body" style="padding: 20px;">
-                <p style="margin: 0 0 12px; color: var(--text-secondary); line-height: 1.5;">
-                    Spotify has temporarily blocked API access. All Spotify features (search, enrichment, playlists) are paused until the ban expires.
-                </p>
-                <div style="background: var(--bg-tertiary); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                        <span style="color: var(--text-secondary);">Time remaining</span>
-                        <span id="rate-limit-remaining" style="color: var(--accent); font-weight: 600;">--</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                        <span style="color: var(--text-secondary);">Original ban duration</span>
-                        <span id="rate-limit-duration" style="color: var(--text-primary);">--</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between;">
-                        <span style="color: var(--text-secondary);">Triggered by</span>
-                        <span id="rate-limit-endpoint" style="color: var(--text-primary); font-family: monospace; font-size: 0.85em;">--</span>
-                    </div>
-                </div>
-                <p style="margin: 0 0 16px; color: var(--text-tertiary); font-size: 0.85em; line-height: 1.5;">
-                    You can wait for the ban to expire, or disconnect Spotify entirely and switch to Apple Music/iTunes for metadata.
-                </p>
-                <div style="display: flex; gap: 10px;">
-                    <button onclick="closeSpotifyRateLimitModal()" style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); cursor: pointer;">Wait It Out</button>
-                    <button onclick="disconnectSpotifyFromRateLimitModal()" style="flex: 1; padding: 10px; border-radius: 8px; border: none; background: var(--danger, #e74c3c); color: white; cursor: pointer; font-weight: 600;">Disconnect Spotify</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Add to Wishlist Modal -->
     <div class="modal-overlay hidden" id="add-to-wishlist-modal-overlay">
         <div class="add-to-wishlist-modal" id="add-to-wishlist-modal">
