@@ -97,15 +97,14 @@ class SpotifyWorker:
         is_idle = is_actually_running and not self.paused and self.stats['pending'] == 0 and self.current_item is None
 
         try:
-            # During rate limit or post-ban cooldown, report as authenticated
-            # but don't call is_spotify_authenticated() — that would trigger an
-            # auth probe which resets the rate limit timer.
+            # NEVER call is_spotify_authenticated() here — get_stats() is called
+            # every 2 seconds by the WebSocket status loop. The auth probe has a
+            # 60-second cache, so it would fire a real Spotify API call (current_user)
+            # every 60 seconds indefinitely, wasting API quota and risking rate limits.
+            # Instead, use sp presence as a lightweight proxy for "configured".
             rate_limited = self.client.is_rate_limited()
             in_cooldown = self.client.get_post_ban_cooldown_remaining() > 0
-            if rate_limited or in_cooldown:
-                authenticated = True  # We're authenticated, just banned/cooling down
-            else:
-                authenticated = self.client.is_spotify_authenticated()
+            authenticated = self.client.sp is not None
         except Exception:
             authenticated = False
             rate_limited = False
