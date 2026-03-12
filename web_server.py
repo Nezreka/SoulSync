@@ -6963,8 +6963,17 @@ def get_download_status():
                 for context_key, context, found_path in completed_matched_downloads:
                     try:
                         print(f"🚀 Starting post-processing thread for: {context_key}")
-                        # Start the post-processing in a separate thread
-                        thread = threading.Thread(target=_post_process_matched_download, args=(context_key, context, found_path))
+                        # Use verification wrapper if context has task tracking IDs,
+                        # otherwise call directly (race guard flag still gets set on context)
+                        _pp_task_id = context.get('task_id')
+                        _pp_batch_id = context.get('batch_id')
+                        if _pp_task_id and _pp_batch_id:
+                            _pp_target = _post_process_matched_download_with_verification
+                            _pp_args = (context_key, context, found_path, _pp_task_id, _pp_batch_id)
+                        else:
+                            _pp_target = _post_process_matched_download
+                            _pp_args = (context_key, context, found_path)
+                        thread = threading.Thread(target=_pp_target, args=_pp_args)
                         thread.daemon = True
                         thread.start()
 
@@ -7033,7 +7042,16 @@ def get_download_status():
                                 def process_streaming_download(_ctx_key=context_key, _ctx=context, _path=found_path, _label=source_label):
                                     try:
                                         print(f"🚀 [{_label}] Starting post-processing thread for: {_ctx_key}")
-                                        thread = threading.Thread(target=_post_process_matched_download, args=(_ctx_key, _ctx, _path))
+                                        # Use verification wrapper if context has task tracking IDs
+                                        _st_task_id = _ctx.get('task_id')
+                                        _st_batch_id = _ctx.get('batch_id')
+                                        if _st_task_id and _st_batch_id:
+                                            _st_target = _post_process_matched_download_with_verification
+                                            _st_args = (_ctx_key, _ctx, _path, _st_task_id, _st_batch_id)
+                                        else:
+                                            _st_target = _post_process_matched_download
+                                            _st_args = (_ctx_key, _ctx, _path)
+                                        thread = threading.Thread(target=_st_target, args=_st_args)
                                         thread.daemon = True
                                         thread.start()
                                         _processed_download_ids.add(_ctx_key)
