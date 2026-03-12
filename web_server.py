@@ -30,7 +30,7 @@ from config.settings import config_manager
 logger = get_logger("web_server")
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-SOULSYNC_VERSION = "1.8"
+SOULSYNC_VERSION = "1.9"
 
 # Dedicated source reuse logger — writes to logs/source_reuse.log
 import logging as _logging
@@ -15148,230 +15148,37 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
-                "title": "🔧 Recent Updates",
-                "description": "Latest fixes and improvements",
+                "title": "🎵 Tidal & Qobuz Enrichment Workers",
+                "description": "Two new background enrichment workers for Tidal and Qobuz metadata",
                 "features": [
-                    "• Profile Permissions — admin can control which pages each user can access and disable download functionality per profile",
-                    "• Per-user home page — every user can choose their own landing page; non-admin defaults to Discover",
-                    "• Enhanced Library Manager restricted to admin profiles only (management tool with inline editing)",
-                    "• Download buttons hidden globally for profiles with downloads disabled, enforced on both frontend and backend",
-                    "• Genius search fix — no longer blindly matches wrong artists (e.g. '50 Cent' → '108'); all bad matches auto-reset on first launch",
-                    "• Library page fix — albums no longer merge across different artists with the same album title/year",
-                    "• Post-processing race condition fix — no more MutagenError on files already moved by another thread",
-                    "• iTunes storefront fallback — ID-based lookups automatically try 10 regional storefronts when the primary country returns no results",
-                    "• iTunes country setting now applies immediately without restart",
-                    "• Download modal progress bars no longer squished by media player CSS bleed",
-                    "• Watchlist/wishlist button text no longer overflows on narrow screens",
-                    "• Hover tooltips on truncated track names in download modals for full text visibility",
-                    "• Library artist cards now show Spotify, iTunes, Last.fm, and Genius service badges alongside MusicBrainz, Deezer, and AudioDB",
-                    "• Artist discography page now shows 'View on' buttons for all 7 matched services",
-                    "• Redesigned 'View on' buttons with glassmorphic styling matching the app's design language",
-                    "• Compact badge layout on artist cards — no longer overflows on mobile or when all services are matched",
-                    "• Page headers upgraded with sidebar icons and gradient shimmer styling",
-                    "• Help & Docs page — comprehensive in-app documentation covering every feature, setting, and flow across 71 subsections",
-                    "• Docs sidebar with scroll spy navigation, search filter, and collapsible sections",
-                    "• Genius 429 rate limit fix — exponential backoff (30s → 60s → 120s) now activates properly",
-                    "• Watchlist badge integrated into service badge row with expand-on-hover animation"
+                    "• Tidal worker enriches artists, albums, and tracks with Tidal IDs, thumbnails, and metadata",
+                    "• Qobuz worker enriches artists, albums, and tracks with Qobuz IDs, labels, genres, and metadata",
+                    "• Dashboard buttons with real-time status, progress tracking, and pause/resume controls",
+                    "• Smart no-auth detection — buttons grey out when not authenticated to either service",
+                    "• Module-level rate limiting for Qobuz — shared throttle across all client instances",
+                    "• Full Enhanced Library Manager integration — status chips, manual matching, clickable service badges",
+                    "• Library artist card badges and discography 'View on' buttons for both services",
+                    "• Total enrichment worker count now at 9: Spotify, iTunes, MusicBrainz, AudioDB, Deezer, Last.fm, Genius, Tidal, Qobuz"
                 ]
             },
             {
-                "title": "🎵 Now Playing Overhaul",
-                "description": "Redesigned media player with expanded Now Playing modal and smart radio",
+                "title": "🎧 Full Qobuz Support",
+                "description": "Qobuz added as a first-class download source alongside Tidal and Soulseek",
                 "features": [
-                    "• Expanded Now Playing modal — click the sidebar player to open a full-screen playback experience",
-                    "• Album art ambient glow — dominant color extracted from cover art tints the modal background",
-                    "• Smart Radio mode — toggle on to auto-queue up to 50 similar tracks based on genre, mood, style, and artist",
-                    "• Queue system — add tracks from the Enhanced Library Manager, manage queue in the Now Playing modal",
-                    "• Web Audio visualizer — real frequency-driven bars responding to actual audio playback",
-                    "• Repeat modes — off, repeat-all (loop queue), and repeat-one with shuffle support",
-                    "• Redesigned sidebar player — always-visible controls with album art thumbnail and progress bar",
-                    "• Media Session API — OS-level media controls with prev/next track support",
-                    "• Keyboard shortcuts — Space (play/pause), arrows (seek/volume), M (mute), Escape (close)",
-                    "• Track transition animations and buffering state indicator"
+                    "• Search, browse, and download from Qobuz with quality selection up to Hi-Res 24-bit/192kHz",
+                    "• Qobuz appears as a download source in hybrid mode with configurable priority",
+                    "• Playlist import from Qobuz URLs with mirrored playlist support",
+                    "• Settings page integration with conditional source visibility"
                 ]
             },
             {
-                "title": "📚 Enhanced Library Manager",
-                "description": "Professional-grade library management view on the artist detail page",
+                "title": "🔀 Hybrid Mode Redesign",
+                "description": "Overhauled download source selection and priority system",
                 "features": [
-                    "• Toggle between Standard and Enhanced views on any artist's discography",
-                    "• Inline metadata editing — click any field to edit artist, album, or track data",
-                    "• Per-service manual matching — click any service chip (Spotify, MusicBrainz, Deezer, AudioDB, iTunes, Last.fm, Genius) to search and manually pick the correct match",
-                    "• Per-service enrichment — enrich from individual services with independent locks",
-                    "• Clickable service ID badges that open the entity on the external service website",
-                    "• Match status chips showing matched/not found state for all 7 services on every artist, album, and track",
-                    "• Sortable track table columns — click headers to sort by title, duration, format, bitrate, BPM, disc, or track number",
-                    "• Multi-disc album support with disc number column",
-                    "• Play tracks directly from the library via the sidebar media player",
-                    "• Delete tracks and albums from the database (files on disk are never touched)",
-                    "• Bulk select and batch edit tracks across albums",
-                    "• Two-column album grid with full-width expanded detail panels",
-                    "• MusicBrainz album art via Cover Art Archive in manual match results",
-                    "• Write Tags to File — sync database metadata to audio file tags (MP3/FLAC/OGG/M4A)",
-                    "• Tag preview modal showing a diff of file vs database values before writing",
-                    "• Batch write tags for entire albums or bulk-selected tracks with live progress",
-                    "• Optional cover art embedding during tag writes with per-album caching",
-                    "• Server sync after tag writes — optionally push updated metadata to Plex, Jellyfin, or Navidrome"
-                ],
-                "usage_note": "Open any artist's detail page and click 'Enhanced' in the view toggle to access the library manager."
-            },
-            {
-                "title": "🤖 Automation Engine",
-                "description": "Visual drag-and-drop automation builder with 22 triggers and 19 actions",
-                "features": [
-                    "• Drag-and-drop builder: connect WHEN triggers → DO actions → THEN notifications/signals",
-                    "• Timer triggers: Schedule (interval), Daily Time, Weekly Schedule",
-                    "• Event triggers: Track Downloaded, Batch Complete, New Release Found, Playlist Changed, Discovery Complete, and 15 more",
-                    "• Actions: Process Wishlist, Scan Watchlist, Refresh/Discover/Sync Playlists, Update Database, Quality Scan, Backup, and more",
-                    "• Multi-THEN slots: attach up to 3 notification or signal actions per automation",
-                    "• Signal system: fire_signal and signal_received for chaining automations together with cycle detection",
-                    "• Conditions with match modes (All/Any) and operators (contains, equals, starts_with, not_contains)",
-                    "• Configurable delay on actions — wait N minutes after trigger fires before executing",
-                    "• System automations for wishlist (every 30 min) and watchlist (every 24 hr) with cross-guards",
-                    "• Run Now button on every card for instant testing",
-                    "• Live progress tracking with real-time output panels on every automation card",
-                    "• Rich run history with detailed stats grid (artists, tracks, albums, space freed, etc.)",
-                    "• Stall detection and 2-hour timeout handling for long-running actions",
-                    "• Glow effect on actively running automations"
-                ]
-            },
-            {
-                "title": "💾 Backup Manager",
-                "description": "Database backup system with dashboard management",
-                "features": [
-                    "• Scheduled automatic database backups via automation action",
-                    "• Dashboard tool card to list, download, restore, and delete backups",
-                    "• Rolling cleanup keeps only the 5 most recent backups",
-                    "• Safe hot-copy using SQLite backup API — no downtime during backup"
-                ]
-            },
-            {
-                "title": "🔍 Playlist Discovery Pipeline",
-                "description": "Official Spotify/iTunes metadata enforcement for mirrored playlist sync",
-                "features": [
-                    "• New 'Discover Playlist' automation action matches raw YouTube/Tidal tracks to official Spotify or iTunes metadata",
-                    "• Fuzzy title/artist matching with confidence scoring — minimum 0.7 threshold",
-                    "• Discovery results cached globally across playlists for instant repeat lookups",
-                    "• Discovery results now persist across refreshes — retry only failed tracks",
-                    "• Sync Playlist now only includes discovered tracks — undiscovered tracks are skipped entirely",
-                    "• Prevents garbage data (wrong artist, no album, no cover art) from reaching the wishlist",
-                    "• Spotify-sourced playlists auto-discovered during refresh at confidence 1.0",
-                    "• Chain automations: Refresh → Playlist Changed → Discover → Discovery Complete → Sync"
-                ]
-            },
-            {
-                "title": "🔔 Notification Integrations",
-                "description": "Get alerted when automations run via Discord, Pushbullet, or Telegram",
-                "features": [
-                    "• Discord Webhook — post automation results to any Discord channel",
-                    "• Pushbullet — push notifications to phone and desktop",
-                    "• Telegram Bot — send alerts via Telegram Bot API",
-                    "• Variable substitution in messages: {artist}, {title}, {album}, {quality}, {time}, and more",
-                    "• Attach notifications to any automation — event-based or scheduled"
-                ]
-            },
-            {
-                "title": "🔄 YouTube & Tidal Playlist Refresh",
-                "description": "Automated re-fetching of mirrored playlists from any source",
-                "features": [
-                    "• Refresh Mirrored Playlist action now supports YouTube and Tidal alongside Spotify",
-                    "• YouTube URLs reconstructed from stored playlist ID for seamless re-parsing",
-                    "• Tidal playlists refreshed via Tidal API using stored source ID",
-                    "• Discovery data preserved across refreshes — previously matched tracks keep their official metadata",
-                    "• Change detection emits Playlist Changed event for automation chaining",
-                    "• User-configurable YouTube rate limiting and optional cookies for bot detection"
-                ]
-            },
-            {
-                "title": "📋 Mirrored Playlists",
-                "description": "Persistent cross-service playlist archive on the Sync page",
-                "features": [
-                    "• Automatically mirrors every parsed playlist from Spotify, Tidal, YouTube, and Beatport",
-                    "• New 'Mirrored' tab with source-branded cards showing live discovery and download status",
-                    "• Click any mirrored playlist to browse its full track list or run it through discovery",
-                    "• Re-parsing the same playlist updates the existing mirror — no duplicates",
-                    "• Cards reflect live state: Discovering, Discovered, Downloading, Downloaded",
-                    "• Download progress survives page refresh — click a 'Downloading...' card to resume viewing",
-                    "• Profile-scoped — each profile has its own mirrored playlists"
-                ]
-            },
-            {
-                "title": "🔧 Dashboard Tools",
-                "description": "New tool cards on the dashboard for quick access to common operations",
-                "features": [
-                    "• Discovery Pool card with revamped category-card modal design",
-                    "• Backup Manager card with list, download, restore, and delete",
-                    "• Deep Library Scan for enrichment-safe sync without re-downloading",
-                    "• Download Now button on wishlist modal and library page download bubbles"
-                ]
-            },
-            {
-                "title": "👥 Multi-Profile Support",
-                "description": "Netflix-style profile picker for shared households with per-profile permissions",
-                "features": [
-                    "• Multiple profiles sharing one SoulSync instance with isolated personal data",
-                    "• Each profile gets its own watchlist, wishlist, discovery pool, and similar artists",
-                    "• Optional PIN protection per profile with admin-only management",
-                    "• Profile avatar images via URL with colored-initial fallback",
-                    "• Shared music library and service credentials across all profiles",
-                    "• Admin-controlled page access — choose which sidebar pages each profile can see",
-                    "• Per-profile download toggle — disable downloading for specific users (frontend + backend enforced)",
-                    "• Customizable home page — each user picks their own landing page from their permitted pages",
-                    "• Non-admin users default to Discover page instead of Dashboard",
-                    "• Self-service profile editing — non-admin users can change their name and home page",
-                    "• Zero-downtime migration — existing data maps to auto-created admin profile",
-                    "• Single-user installs see no changes until a second profile is created"
-                ]
-            },
-            {
-                "title": "⚡ WebSocket Real-Time Updates",
-                "description": "Live push updates replace polling for a faster, more responsive UI",
-                "features": [
-                    "• Service status, watchlist count, and download progress pushed via WebSocket",
-                    "• Dashboard stats, activity feed, and database stats update in real-time",
-                    "• Enrichment worker statuses stream live to the sidebar",
-                    "• Tool progress (quality scanner, duplicate cleaner, retag, DB update) pushed instantly",
-                    "• Automatic HTTP polling fallback when WebSocket is unavailable",
-                    "• Profile-scoped WebSocket rooms for per-profile count updates"
-                ]
-            },
-            {
-                "title": "🔑 REST API (v1)",
-                "description": "Full programmatic access to SoulSync with API key authentication",
-                "features": [
-                    "• API key authentication with generation and management UI",
-                    "• Endpoints for library, watchlist, wishlist, downloads, and system status",
-                    "• Reverse proxy support for external access"
-                ]
-            },
-            {
-                "title": "👁️ Watchlist Redesign",
-                "description": "Enriched artist detail view and improved watchlist management",
-                "features": [
-                    "• Redesigned watchlist modal with enriched artist detail view",
-                    "• Add to watchlist button on each artist in library",
-                    "• 'Watch All' button on hero slider to quickly add all displayed artists",
-                    "• Add all recommended artists to watchlist in one click",
-                    "• View recommended/similar artists panel",
-                    "• Batched watchlist status checks to eliminate rate limit errors"
-                ]
-            },
-            {
-                "title": "📦 Import Rebuild",
-                "description": "Import feature moved to its own dedicated page",
-                "features": [
-                    "• Rebuilt import feature on a standalone page with improved workflow",
-                    "• Import staging guide documentation"
-                ]
-            },
-            {
-                "title": "🎨 UI & Customization",
-                "description": "Visual improvements and personalization options",
-                "features": [
-                    "• Custom accent colors with persistent user preference",
-                    "• Themed confirm dialog modal replacing all native browser confirms",
-                    "• Retag tool layout redesign",
-                    "• Watchlist page visual redesign"
+                    "• Redesigned hybrid mode with drag-and-drop source priority ordering",
+                    "• Tidal, Qobuz, and Soulseek sources with per-source quality preferences",
+                    "• Conditional settings — source-specific options only appear when that source is enabled",
+                    "• Reorganized settings page with clearer Download Source section"
                 ]
             },
             {
@@ -15379,51 +15186,103 @@ def get_version_info():
                 "description": "Smart detection and handling of Spotify API rate limits",
                 "features": [
                     "• Automatic detection of long rate limit bans (Retry-After > 60s) from Spotify",
-                    "• Global suppression of all Spotify API calls during a ban — no wasted requests that could extend it",
+                    "• Global suppression of all Spotify API calls during a ban — no wasted requests",
                     "• Seamless iTunes/Apple Music fallback for searches while Spotify is rate limited",
                     "• Enrichment worker auto-pauses during rate limit and resumes when ban expires",
-                    "• Frontend popup modal with live countdown timer showing ban duration and triggering endpoint",
-                    "• One-click Disconnect Spotify button in the modal to switch to Apple Music immediately",
-                    "• Dashboard and sidebar indicators show 'Rate Limited' status with remaining time",
-                    "• Auth probe no longer makes API calls during ban — prevents the vicious cycle of auth checks extending the ban"
+                    "• Frontend modal with live countdown timer showing ban duration and triggering endpoint",
+                    "• One-click Disconnect Spotify button to switch to Apple Music immediately",
+                    "• Auth probe no longer makes API calls during ban — prevents extending the ban"
                 ]
             },
             {
-                "title": "🎶 Last.fm & Genius Enrichment Workers",
-                "description": "Two new background enrichment workers bringing rich metadata to your library",
+                "title": "👤 Profile Permissions & Page Access Control",
+                "description": "Granular admin controls over what each profile can see and do",
                 "features": [
-                    "• Last.fm worker enriches artists, albums, and tracks with listener counts, play counts, tags, similar artists, and bios",
-                    "• Genius worker enriches artists and tracks with descriptions, alternate names, lyrics, and song art URLs",
-                    "• Last.fm URLs stored as identifiers — Genius uses numeric IDs",
-                    "• Dashboard buttons with real-time status, progress tracking, and pause/resume controls",
-                    "• Smart no-auth detection — buttons grey out with guidance when API keys are missing",
-                    "• Full Enhanced Library Manager integration — status chips, manual matching, and on-demand enrichment for both services",
-                    "• Settings reload — changing API keys takes effect immediately without restarting",
-                    "• Same retry logic as all other workers: 30-day retry for not found, 7-day retry for errors"
+                    "• Admin can control which sidebar pages each profile can access",
+                    "• Per-profile download toggle — disable downloading for specific users (frontend + backend enforced)",
+                    "• Per-user home page — every user can choose their own landing page",
+                    "• Enhanced Library Manager restricted to admin profiles only",
+                    "• Non-admin users default to Discover page instead of Dashboard"
+                ]
+            },
+            {
+                "title": "🎵 Now Playing Overhaul",
+                "description": "Redesigned media player with expanded Now Playing modal and smart radio",
+                "features": [
+                    "• Expanded Now Playing modal — click the sidebar player to open a full-screen experience",
+                    "• Album art ambient glow — dominant color from cover art tints the modal background",
+                    "• Smart Radio mode — auto-queue up to 50 similar tracks based on genre, mood, and style",
+                    "• Queue system — add tracks from the library, manage queue in Now Playing modal",
+                    "• Web Audio visualizer — real frequency-driven bars responding to actual playback",
+                    "• Repeat modes (off, repeat-all, repeat-one), shuffle, Media Session API controls",
+                    "• Keyboard shortcuts — Space, arrows, M (mute), Escape (close)"
+                ]
+            },
+            {
+                "title": "📚 Enhanced Library Manager",
+                "description": "Professional-grade library management with tag writing and server sync",
+                "features": [
+                    "• Toggle between Standard and Enhanced views on any artist's discography",
+                    "• Inline metadata editing — click any field to edit artist, album, or track data",
+                    "• Per-service manual matching for all 9 enrichment services",
+                    "• Write Tags to File — sync database metadata to audio file tags (MP3/FLAC/OGG/M4A)",
+                    "• Tag preview modal showing a diff of file vs database values before writing",
+                    "• Batch write tags for entire albums or bulk-selected tracks with live progress",
+                    "• Optional cover art embedding with per-album caching",
+                    "• Server sync after tag writes — push updated metadata to Plex, Jellyfin, or Navidrome",
+                    "• Bulk select and batch edit tracks across albums",
+                    "• Sortable track table columns, multi-disc support, play tracks from library"
+                ],
+                "usage_note": "Open any artist's detail page and click 'Enhanced' in the view toggle to access the library manager."
+            },
+            {
+                "title": "🎶 Last.fm & Genius Enrichment Workers",
+                "description": "Background enrichment workers for Last.fm and Genius metadata",
+                "features": [
+                    "• Last.fm worker enriches artists, albums, and tracks with listener counts, play counts, tags, and bios",
+                    "• Genius worker enriches artists and tracks with descriptions, alternate names, and lyrics",
+                    "• Dashboard buttons with status, progress, and pause/resume controls",
+                    "• No-auth detection — buttons grey out with guidance when API keys are missing",
+                    "• Settings reload — changing API keys takes effect immediately without restarting"
+                ]
+            },
+            {
+                "title": "✨ UI & Visual Overhaul",
+                "description": "Per-page particle animations, sidebar visualizer, and design refresh",
+                "features": [
+                    "• Per-page particle animations with unique themes for each page",
+                    "• Sidebar audio visualizer with 5 reactive styles and settings toggle",
+                    "• Sidebar SVG icons with accent-colored navigation and ambient aura",
+                    "• Page headers with sidebar icons and gradient shimmer styling",
+                    "• Service badges on library artist cards for all 9 enrichment services",
+                    "• Glassmorphic 'View on' buttons on artist discography pages",
+                    "• Help & Docs page — comprehensive in-app documentation covering every feature"
+                ]
+            },
+            {
+                "title": "🔧 Tidal Download Improvements",
+                "description": "Stability and accuracy fixes for Tidal downloads",
+                "features": [
+                    "• Tidal download validation — detect and clean up unplayable hi-res stubs",
+                    "• Tidal playlist pagination rate limiting with exponential backoff",
+                    "• Include Tidal version field in track names — fixes remixes resolving to base title",
+                    "• Direct single-playlist fetch instead of redundantly re-fetching all playlists"
                 ]
             },
             {
                 "title": "🐛 Bug Fixes & Stability",
-                "description": "Reliability improvements",
+                "description": "Reliability improvements across the board",
                 "features": [
-                    "• Fix radio tracks missing cover art when played from the Now Playing modal",
-                    "• Fix sync completion not reaching UI after WebSocket reconnect",
-                    "• Fix automation timezone bug causing incorrect scheduling",
-                    "• Fix Tidal OAuth PKCE verification on Flask callback route",
-                    "• Fix batch completion detection for post-processing race condition",
-                    "• Fix similar_artists profile_id column being dropped on startup",
-                    "• Fix download retry fallback not cycling through available sources",
-                    "• Fix chromaprint crash (SIGABRT) on 5.1 surround audio files",
-                    "• Fix Spotify enrichment worker showing 'Not Authenticated' after re-auth",
-                    "• Fix infinite monitor loop on post-processing completed tasks",
-                    "• Fix cancelled downloads not sending album context to wishlist",
-                    "• Fix various artist compilations causing AcoustID check failures",
-                    "• Fix ListenBrainz database path not respecting DATABASE_PATH env var",
-                    "• Fix deleted content not removed during incremental database updates",
-                    "• Podman rootless (keep-id) compatibility for Arch/rootless Docker users",
-                    "• Fix Docker upgrade crash from stale volume mounts overriding application code",
-                    "• Fix partial DB migrations leaving missing columns after interrupted upgrades",
-                    "• Entrypoint now always updates settings.py to prevent stale config class errors"
+                    "• Fix Genius search blindly matching wrong artists — all bad matches auto-reset",
+                    "• Fix library page albums merging across different artists with same album title/year",
+                    "• Fix post-processing race condition on files already moved by another thread",
+                    "• iTunes storefront fallback — ID lookups automatically try 10 regional storefronts",
+                    "• Fix infinite Spotify rate limit loop from unguarded auth probes",
+                    "• Fix playlist folder downloads marked as failed despite successful processing",
+                    "• Fix Docker upgrade crashes from stale volume mounts and partial DB migrations",
+                    "• Isolate service client initialization so one failure doesn't break the app",
+                    "• Explicit content filter with configurable toggle to skip explicit tracks",
+                    "• Full Cleanup automation for quarantine, downloads, staging, and search history"
                 ]
             }
         ]

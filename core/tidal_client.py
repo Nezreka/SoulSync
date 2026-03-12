@@ -150,8 +150,7 @@ class TidalClient:
     def _setup_session(self):
         """Setup requests session with headers"""
         self.session.headers.update({
-            'Accept': 'application/json',
-            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/vnd.api+json',
             'User-Agent': 'SoulSync/1.0'
         })
     
@@ -370,9 +369,10 @@ class TidalClient:
             response = self.session.post(
                 self.token_url,
                 data=data,
+                headers={'Content-Type': 'application/x-www-form-urlencoded'},
                 timeout=10
             )
-            
+
             if response.status_code == 200:
                 token_data = response.json()
                 self.access_token = token_data.get('access_token')
@@ -414,9 +414,10 @@ class TidalClient:
             response = self.session.post(
                 self.token_url,
                 data=data,
+                headers={'Content-Type': 'application/x-www-form-urlencoded'},
                 timeout=10
             )
-            
+
             if response.status_code == 200:
                 token_data = response.json()
                 self.access_token = token_data.get('access_token')
@@ -691,7 +692,7 @@ class TidalClient:
             }
 
             response = self.session.get(
-                f"{self.base_url}/searchresults/{encoded_query}",
+                f"{self.base_url}/searchResults/{encoded_query}",
                 params=params,
                 timeout=10
             )
@@ -737,21 +738,21 @@ class TidalClient:
 
     @rate_limited
     def search_artist(self, name: str) -> Optional[Dict]:
-        """Search for an artist by name. Returns first result as raw dict or None."""
+        """Search for an artist by name. Returns best matching result as raw dict or None."""
         try:
             if not self._ensure_valid_token():
                 return None
 
             from urllib.parse import quote
+            from difflib import SequenceMatcher
             encoded_query = quote(name, safe='')
             params = {
                 'countryCode': 'US',
                 'include': 'artists',
-                'limit': 1
             }
 
             response = self.session.get(
-                f"{self.base_url}/searchresults/{encoded_query}",
+                f"{self.base_url}/searchResults/{encoded_query}",
                 params=params,
                 timeout=10
             )
@@ -769,13 +770,21 @@ class TidalClient:
                 elif 'included' in data:
                     items = [r for r in data['included'] if r.get('type') == 'artists']
                 if items:
-                    item = items[0]
-                    # Flatten JSON:API resource if needed
-                    if 'attributes' in item and 'id' in item:
-                        flat = dict(item['attributes'])
-                        flat['id'] = item['id']
-                        return flat
-                    return item
+                    # Flatten all items and pick best name match
+                    best_item = None
+                    best_score = 0.0
+                    for item in items:
+                        if 'attributes' in item and 'id' in item:
+                            flat = dict(item['attributes'])
+                            flat['id'] = item['id']
+                        else:
+                            flat = item
+                        item_name = flat.get('name', '')
+                        score = SequenceMatcher(None, name.lower(), item_name.lower()).ratio()
+                        if score > best_score:
+                            best_score = score
+                            best_item = flat
+                    return best_item
             else:
                 logger.debug(f"Tidal artist search failed: {response.status_code}")
             return None
@@ -799,11 +808,10 @@ class TidalClient:
             params = {
                 'countryCode': 'US',
                 'include': 'albums',
-                'limit': 1
             }
 
             response = self.session.get(
-                f"{self.base_url}/searchresults/{encoded_query}",
+                f"{self.base_url}/searchResults/{encoded_query}",
                 params=params,
                 timeout=10
             )
@@ -820,19 +828,29 @@ class TidalClient:
                 elif 'included' in data:
                     items = [r for r in data['included'] if r.get('type') == 'albums']
                 if items:
-                    item = items[0]
-                    if 'attributes' in item and 'id' in item:
-                        flat = dict(item['attributes'])
-                        flat['id'] = item['id']
-                        # Preserve artist relationship for cross-verification
-                        try:
-                            rel_artists = item.get('relationships', {}).get('artists', {}).get('data', [])
-                            if rel_artists:
-                                flat['artist'] = {'id': rel_artists[0].get('id')}
-                        except (AttributeError, IndexError, TypeError):
-                            pass
-                        return flat
-                    return item
+                    # Flatten all items and pick best title match
+                    from difflib import SequenceMatcher
+                    best_item = None
+                    best_score = 0.0
+                    for item in items:
+                        if 'attributes' in item and 'id' in item:
+                            flat = dict(item['attributes'])
+                            flat['id'] = item['id']
+                            # Preserve artist relationship for cross-verification
+                            try:
+                                rel_artists = item.get('relationships', {}).get('artists', {}).get('data', [])
+                                if rel_artists:
+                                    flat['artist'] = {'id': rel_artists[0].get('id')}
+                            except (AttributeError, IndexError, TypeError):
+                                pass
+                        else:
+                            flat = item
+                        item_title = flat.get('title', '')
+                        score = SequenceMatcher(None, title.lower(), item_title.lower()).ratio()
+                        if score > best_score:
+                            best_score = score
+                            best_item = flat
+                    return best_item
             else:
                 logger.debug(f"Tidal album search failed: {response.status_code}")
             return None
@@ -856,11 +874,10 @@ class TidalClient:
             params = {
                 'countryCode': 'US',
                 'include': 'tracks',
-                'limit': 1
             }
 
             response = self.session.get(
-                f"{self.base_url}/searchresults/{encoded_query}",
+                f"{self.base_url}/searchResults/{encoded_query}",
                 params=params,
                 timeout=10
             )
@@ -877,19 +894,29 @@ class TidalClient:
                 elif 'included' in data:
                     items = [r for r in data['included'] if r.get('type') == 'tracks']
                 if items:
-                    item = items[0]
-                    if 'attributes' in item and 'id' in item:
-                        flat = dict(item['attributes'])
-                        flat['id'] = item['id']
-                        # Preserve artist relationship for cross-verification
-                        try:
-                            rel_artists = item.get('relationships', {}).get('artists', {}).get('data', [])
-                            if rel_artists:
-                                flat['artist'] = {'id': rel_artists[0].get('id')}
-                        except (AttributeError, IndexError, TypeError):
-                            pass
-                        return flat
-                    return item
+                    # Flatten all items and pick best title match
+                    from difflib import SequenceMatcher
+                    best_item = None
+                    best_score = 0.0
+                    for item in items:
+                        if 'attributes' in item and 'id' in item:
+                            flat = dict(item['attributes'])
+                            flat['id'] = item['id']
+                            # Preserve artist relationship for cross-verification
+                            try:
+                                rel_artists = item.get('relationships', {}).get('artists', {}).get('data', [])
+                                if rel_artists:
+                                    flat['artist'] = {'id': rel_artists[0].get('id')}
+                            except (AttributeError, IndexError, TypeError):
+                                pass
+                        else:
+                            flat = item
+                        item_title = flat.get('title', '')
+                        score = SequenceMatcher(None, title.lower(), item_title.lower()).ratio()
+                        if score > best_score:
+                            best_score = score
+                            best_item = flat
+                    return best_item
             else:
                 logger.debug(f"Tidal track search failed: {response.status_code}")
             return None
