@@ -55,7 +55,7 @@ if not pp_logger.handlers:
     _pp_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     pp_logger.addHandler(_pp_handler)
     pp_logger.propagate = False
-from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack
+from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack, _is_globally_rate_limited as _spotify_rate_limited
 from core.plex_client import PlexClient
 from core.jellyfin_client import JellyfinClient
 from core.navidrome_client import NavidromeClient
@@ -21578,6 +21578,8 @@ def get_playlist_tracks(playlist_id):
             offset = 0
 
             while True:
+                if _spotify_rate_limited():
+                    return jsonify({"error": "Spotify is currently rate limited. Please try again later."}), 429
                 results = spotify_client.sp.current_user_saved_tracks(limit=limit, offset=offset)
 
                 if not results or 'items' not in results:
@@ -21617,6 +21619,8 @@ def get_playlist_tracks(playlist_id):
             return jsonify(playlist_dict)
 
         # Handle regular playlists
+        if _spotify_rate_limited():
+            return jsonify({"error": "Spotify is currently rate limited. Please try again later."}), 429
         # Fetch raw playlist data to preserve full album objects
         playlist_data = spotify_client.sp.playlist(playlist_id)
 
@@ -23234,7 +23238,7 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
             try:
                 print(f"🔍 Tidal query {query_idx + 1}/{len(search_queries)}: {search_query} ({source_name})")
 
-                if use_spotify:
+                if use_spotify and not _spotify_rate_limited():
                     raw_results = spotify_client.sp.search(q=search_query, type='track', limit=10)
                     if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
                         continue
@@ -23822,7 +23826,7 @@ def _run_youtube_discovery_worker(url_hash):
                         raw_results = None
                         search_results = None
 
-                        if use_spotify:
+                        if use_spotify and not _spotify_rate_limited():
                             raw_results = spotify_client.sp.search(q=search_query, type='track', limit=10)
                             if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
                                 continue
@@ -24131,7 +24135,7 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
                         raw_results = None
                         search_results = None
 
-                        if use_spotify:
+                        if use_spotify and not _spotify_rate_limited():
                             raw_results = spotify_client.sp.search(q=search_query, type='track', limit=10)
                             if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
                                 continue
@@ -26765,7 +26769,7 @@ def watchlist_artist_config(artist_id):
 
             # Get artist info from Spotify (only for Spotify artists)
             artist_info = None
-            if not is_itunes_artist and spotify_client and spotify_client.is_authenticated() and spotify_id:
+            if not is_itunes_artist and spotify_client and spotify_client.is_authenticated() and spotify_id and not _spotify_rate_limited():
                 try:
                     artist_data = spotify_client.sp.artist(spotify_id)
                     if artist_data:
@@ -27820,7 +27824,7 @@ def enrich_similar_artists():
 
         enriched = {}
 
-        if source == 'spotify' and spotify_client and spotify_client.is_authenticated():
+        if source == 'spotify' and spotify_client and spotify_client.is_authenticated() and not _spotify_rate_limited():
             try:
                 batch_result = spotify_client.sp.artists(artist_ids[:50])
                 if batch_result and 'artists' in batch_result:
@@ -28538,7 +28542,7 @@ def search_artists_for_playlist():
                 hydrabase_worker.enqueue(query, 'artists')
 
             # Try Spotify first, fall back to iTunes
-            if spotify_client.sp:
+            if spotify_client.sp and not _spotify_rate_limited():
                 try:
                     search_query = f'artist:{query}' if len(query.strip()) <= 4 else query
                     results = spotify_client.sp.search(q=search_query, type='artist', limit=10)
@@ -31333,7 +31337,7 @@ def _run_beatport_discovery_worker(url_hash):
                         raw_results = None
                         search_results = None
 
-                        if use_spotify:
+                        if use_spotify and not _spotify_rate_limited():
                             raw_results = spotify_client.sp.search(q=search_query, type='track', limit=10)
                             if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
                                 continue
@@ -34521,7 +34525,7 @@ def import_album_process():
 
         # Get artist genres from Spotify if possible
         artist_genres = album.get('genres', [])
-        if not artist_genres and artist_id:
+        if not artist_genres and artist_id and not _spotify_rate_limited():
             try:
                 sp_artist = spotify_client.sp.artist(artist_id) if hasattr(spotify_client, 'sp') and spotify_client.sp else None
                 if sp_artist:
@@ -34701,7 +34705,7 @@ def import_singles_process():
             if spotify_override and spotify_override.get('id'):
                 try:
                     override_id = spotify_override['id']
-                    sp_track = spotify_client.sp.track(override_id) if hasattr(spotify_client, 'sp') and spotify_client.sp else None
+                    sp_track = (spotify_client.sp.track(override_id) if hasattr(spotify_client, 'sp') and spotify_client.sp and not _spotify_rate_limited() else None)
                     if sp_track:
                         sp_track_artists = sp_track.get('artists', [])
                         spotify_track_data = {
@@ -34733,7 +34737,7 @@ def import_singles_process():
                                     'genres': []
                                 }
                                 try:
-                                    sp_a = spotify_client.sp.artist(album_artists[0]['id']) if hasattr(spotify_client, 'sp') and spotify_client.sp else None
+                                    sp_a = (spotify_client.sp.artist(album_artists[0]['id']) if hasattr(spotify_client, 'sp') and spotify_client.sp and not _spotify_rate_limited() else None)
                                     if sp_a:
                                         spotify_artist_data['genres'] = sp_a.get('genres', [])
                                 except Exception:
@@ -34776,7 +34780,7 @@ def import_singles_process():
                                         'genres': []
                                     }
                                     try:
-                                        sp_a = spotify_client.sp.artist(sp_artists[0]['id']) if hasattr(spotify_client, 'sp') and spotify_client.sp else None
+                                        sp_a = (spotify_client.sp.artist(sp_artists[0]['id']) if hasattr(spotify_client, 'sp') and spotify_client.sp and not _spotify_rate_limited() else None)
                                         if sp_a:
                                             spotify_artist_data['genres'] = sp_a.get('genres', [])
                                     except Exception:
