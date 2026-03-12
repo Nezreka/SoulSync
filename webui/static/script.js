@@ -4761,6 +4761,12 @@ function updateDownloadSourceUI() {
     qobuzContainer.style.display = activeSources.has('qobuz') ? 'block' : 'none';
     youtubeContainer.style.display = activeSources.has('youtube') ? 'block' : 'none';
 
+    // Quality profile is Soulseek-only (streaming sources handle quality via their own settings)
+    const qualityProfileSection = document.getElementById('quality-profile-section');
+    if (qualityProfileSection) {
+        qualityProfileSection.style.display = activeSources.has('soulseek') ? '' : 'none';
+    }
+
     if (activeSources.has('tidal')) {
         checkTidalDownloadAuthStatus();
     }

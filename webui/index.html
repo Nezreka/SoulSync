@@ -3403,43 +3403,6 @@
                                 </div>
                             </div>
 
-                            <!-- SoulSync API Keys -->
-                            <div class="settings-group">
-                                <h3>SoulSync API</h3>
-                                <div class="api-service-frame">
-                                    <h4 class="service-title" style="color: #64ffda;">REST API Keys</h4>
-                                    <div class="setting-help-text" style="margin-bottom: 12px; color: #888; font-size: 12px;">
-                                        Generate API keys to access SoulSync remotely via the <code>/api/v1/</code> endpoints.
-                                        Keys are shown once at creation — store them securely.
-                                    </div>
-
-                                    <!-- Existing API Keys List -->
-                                    <div id="api-keys-list" style="margin-bottom: 12px;">
-                                        <div style="color: #666; font-size: 13px; padding: 8px 0;">Loading...</div>
-                                    </div>
-
-                                    <!-- Generate New Key -->
-                                    <div class="form-group" style="margin-bottom: 8px;">
-                                        <label>New Key Label:</label>
-                                        <input type="text" id="api-key-label" placeholder="e.g. Discord Bot, Home Assistant">
-                                    </div>
-                                    <div class="form-actions">
-                                        <button class="auth-button" onclick="generateApiKey()">🔑 Generate API Key</button>
-                                    </div>
-
-                                    <!-- Newly Generated Key Display (hidden by default) -->
-                                    <div id="api-key-generated" style="display: none; margin-top: 12px; padding: 12px; background: rgba(100, 255, 218, 0.08); border: 1px solid rgba(100, 255, 218, 0.2); border-radius: 8px;">
-                                        <div style="font-size: 11px; color: #64ffda; margin-bottom: 6px; font-weight: 600;">
-                                            Copy this key now — it won't be shown again!
-                                        </div>
-                                        <div style="display: flex; align-items: center; gap: 8px;">
-                                            <code id="api-key-value" style="flex: 1; font-size: 12px; word-break: break-all; color: #fff; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;"></code>
-                                            <button onclick="copyApiKey()" style="padding: 6px 12px; background: rgba(100,255,218,0.15); border: 1px solid rgba(100,255,218,0.3); color: #64ffda; border-radius: 4px; cursor: pointer; white-space: nowrap;">Copy</button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
                             <!-- Server Connections -->
                             <div class="settings-group">
                                 <h3>Server Connections</h3>
@@ -3793,6 +3756,122 @@
                                 </div>
                             </div>
 
+                            <!-- File Organization Settings -->
+                            <div class="settings-group">
+                                <h3>📁 File Organization</h3>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="file-organization-enabled" checked>
+                                        Enable custom file organization templates
+                                    </label>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Album Path Template:</label>
+                                    <input type="text" id="template-album-path"
+                                        placeholder="$albumartist/$albumartist - $album/$track - $title">
+                                    <small style="color: #888;">Variables: $albumartist, $artist, $artistletter, $album, $title,
+                                        $track, $disc, $year, $quality (filename only)</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Single Path Template:</label>
+                                    <input type="text" id="template-single-path"
+                                        placeholder="$artist/$artist - $title/$title">
+                                    <small style="color: #888;">Variables: $artist, $artistletter, $title, $album, $year, $quality (filename only)</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Playlist Path Template:</label>
+                                    <input type="text" id="template-playlist-path"
+                                        placeholder="$playlist/$artist - $title">
+                                    <small style="color: #888;">Variables: $playlist, $artist, $artistletter, $title, $year, $quality (filename only)</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Multi-Disc Folder Label:</label>
+                                    <select id="disc-label">
+                                        <option value="Disc">Disc (e.g., Disc 1/)</option>
+                                        <option value="CD">CD (e.g., CD 1/)</option>
+                                    </select>
+                                    <small style="color: #888;">Label used for auto-created disc subfolders on multi-disc albums.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <button class="test-button" onclick="resetFileOrganizationTemplates()"
+                                        style="background: #666;">
+                                        🔄 Reset to Defaults
+                                    </button>
+                                    <small style="color: #888; display: block; margin-top: 8px;">
+                                        Restores original path structure. Your downloads will be organized like before.
+                                    </small>
+                                </div>
+                            </div>
+
+                            <!-- Metadata Enhancement Settings -->
+                            <div class="settings-group">
+                                <h3>🎵 Metadata Enhancement</h3>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="metadata-enabled" checked>
+                                        Enable metadata enhancement with Spotify data
+                                    </label>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="embed-album-art" checked>
+                                        Embed high-quality album art from Spotify
+                                    </label>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Supported Formats:</label>
+                                    <div class="supported-formats">MP3, FLAC, MP4/M4A, OGG</div>
+                                </div>
+                            </div>
+
+                            <!-- Lossy Copy Settings -->
+                            <div class="settings-group">
+                                <h3>📀 Lossy Copy</h3>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="lossy-copy-enabled"
+                                            onchange="document.getElementById('lossy-copy-options').style.display = this.checked ? 'block' : 'none'">
+                                        Create MP3 copy of downloaded FLAC files
+                                    </label>
+                                </div>
+
+                                <div id="lossy-copy-options" style="display: none;">
+                                    <div class="form-group">
+                                        <label>MP3 Bitrate:</label>
+                                        <select id="lossy-copy-bitrate">
+                                            <option value="320">320 kbps</option>
+                                            <option value="256">256 kbps</option>
+                                            <option value="192">192 kbps</option>
+                                            <option value="128">128 kbps</option>
+                                        </select>
+                                    </div>
+                                    <div class="help-text">
+                                        After downloading a FLAC, an MP3 copy at the selected bitrate
+                                        will be created in the same folder. Requires ffmpeg.
+                                    </div>
+                                    <div class="form-group" style="margin-top: 12px;">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="lossy-copy-delete-original">
+                                            Blasphemy Mode — Delete original FLAC after MP3 is created
+                                        </label>
+                                    </div>
+                                    <div class="help-text" style="color: rgba(255, 100, 100, 0.8);">
+                                        Warning: The original high-quality file will be permanently deleted.
+                                        Only the MP3 copy will remain.
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Discovery Settings -->
                             <div class="settings-group">
                                 <h3>🔍 Discovery Pool Settings</h3>
@@ -3814,8 +3893,8 @@
                                 </div>
                             </div>
 
-                            <!-- Quality Profile Settings -->
-                            <div class="settings-group">
+                            <!-- Quality Profile Settings (Soulseek only) -->
+                            <div class="settings-group" id="quality-profile-section">
                                 <h3>🎵 Quality Profile</h3>
 
                                 <!-- Presets -->
@@ -4052,68 +4131,6 @@
                                     faster updates but more server load.</div>
                             </div>
 
-                            <!-- Metadata Enhancement Settings -->
-                            <div class="settings-group">
-                                <h3>🎵 Metadata Enhancement</h3>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="metadata-enabled" checked>
-                                        Enable metadata enhancement with Spotify data
-                                    </label>
-                                </div>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="embed-album-art" checked>
-                                        Embed high-quality album art from Spotify
-                                    </label>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>Supported Formats:</label>
-                                    <div class="supported-formats">MP3, FLAC, MP4/M4A, OGG</div>
-                                </div>
-                            </div>
-
-                            <!-- Lossy Copy Settings -->
-                            <div class="settings-group">
-                                <h3>📀 Lossy Copy</h3>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="lossy-copy-enabled"
-                                            onchange="document.getElementById('lossy-copy-options').style.display = this.checked ? 'block' : 'none'">
-                                        Create MP3 copy of downloaded FLAC files
-                                    </label>
-                                </div>
-
-                                <div id="lossy-copy-options" style="display: none;">
-                                    <div class="form-group">
-                                        <label>MP3 Bitrate:</label>
-                                        <select id="lossy-copy-bitrate">
-                                            <option value="320">320 kbps</option>
-                                            <option value="256">256 kbps</option>
-                                            <option value="192">192 kbps</option>
-                                            <option value="128">128 kbps</option>
-                                        </select>
-                                    </div>
-                                    <div class="help-text">
-                                        After downloading a FLAC, an MP3 copy at the selected bitrate
-                                        will be created in the same folder. Requires ffmpeg.
-                                    </div>
-                                    <div class="form-group" style="margin-top: 12px;">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="lossy-copy-delete-original">
-                                            Blasphemy Mode — Delete original FLAC after MP3 is created
-                                        </label>
-                                    </div>
-                                    <div class="help-text" style="color: rgba(255, 100, 100, 0.8);">
-                                        Warning: The original high-quality file will be permanently deleted.
-                                        Only the MP3 copy will remain.
-                                    </div>
-                                </div>
-                            </div>
 
                             <!-- Content Filter Settings -->
                             <div class="settings-group">
@@ -4131,58 +4148,6 @@
                                 </div>
                             </div>
 
-                            <!-- File Organization Settings -->
-                            <div class="settings-group">
-                                <h3>📁 File Organization</h3>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="file-organization-enabled" checked>
-                                        Enable custom file organization templates
-                                    </label>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>Album Path Template:</label>
-                                    <input type="text" id="template-album-path"
-                                        placeholder="$albumartist/$albumartist - $album/$track - $title">
-                                    <small style="color: #888;">Variables: $albumartist, $artist, $artistletter, $album, $title,
-                                        $track, $disc, $year, $quality (filename only)</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>Single Path Template:</label>
-                                    <input type="text" id="template-single-path"
-                                        placeholder="$artist/$artist - $title/$title">
-                                    <small style="color: #888;">Variables: $artist, $artistletter, $title, $album, $year, $quality (filename only)</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>Playlist Path Template:</label>
-                                    <input type="text" id="template-playlist-path"
-                                        placeholder="$playlist/$artist - $title">
-                                    <small style="color: #888;">Variables: $playlist, $artist, $artistletter, $title, $year, $quality (filename only)</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>Multi-Disc Folder Label:</label>
-                                    <select id="disc-label">
-                                        <option value="Disc">Disc (e.g., Disc 1/)</option>
-                                        <option value="CD">CD (e.g., CD 1/)</option>
-                                    </select>
-                                    <small style="color: #888;">Label used for auto-created disc subfolders on multi-disc albums.</small>
-                                </div>
-
-                                <div class="form-group">
-                                    <button class="test-button" onclick="resetFileOrganizationTemplates()"
-                                        style="background: #666;">
-                                        🔄 Reset to Defaults
-                                    </button>
-                                    <small style="color: #888; display: block; margin-top: 8px;">
-                                        Restores original path structure. Your downloads will be organized like before.
-                                    </small>
-                                </div>
-                            </div>
 
                             <!-- M3U Export Settings -->
                             <div class="settings-group">
@@ -4223,6 +4188,43 @@
                                 <div class="form-group">
                                     <label>Log Path:</label>
                                     <div class="readonly-field" id="log-path-display">logs/app.log</div>
+                                </div>
+                            </div>
+
+                            <!-- SoulSync API Keys -->
+                            <div class="settings-group">
+                                <h3>SoulSync API</h3>
+                                <div class="api-service-frame">
+                                    <h4 class="service-title" style="color: #64ffda;">REST API Keys</h4>
+                                    <div class="setting-help-text" style="margin-bottom: 12px; color: #888; font-size: 12px;">
+                                        Generate API keys to access SoulSync remotely via the <code>/api/v1/</code> endpoints.
+                                        Keys are shown once at creation — store them securely.
+                                    </div>
+
+                                    <!-- Existing API Keys List -->
+                                    <div id="api-keys-list" style="margin-bottom: 12px;">
+                                        <div style="color: #666; font-size: 13px; padding: 8px 0;">Loading...</div>
+                                    </div>
+
+                                    <!-- Generate New Key -->
+                                    <div class="form-group" style="margin-bottom: 8px;">
+                                        <label>New Key Label:</label>
+                                        <input type="text" id="api-key-label" placeholder="e.g. Discord Bot, Home Assistant">
+                                    </div>
+                                    <div class="form-actions">
+                                        <button class="auth-button" onclick="generateApiKey()">🔑 Generate API Key</button>
+                                    </div>
+
+                                    <!-- Newly Generated Key Display (hidden by default) -->
+                                    <div id="api-key-generated" style="display: none; margin-top: 12px; padding: 12px; background: rgba(100, 255, 218, 0.08); border: 1px solid rgba(100, 255, 218, 0.2); border-radius: 8px;">
+                                        <div style="font-size: 11px; color: #64ffda; margin-bottom: 6px; font-weight: 600;">
+                                            Copy this key now — it won't be shown again!
+                                        </div>
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <code id="api-key-value" style="flex: 1; font-size: 12px; word-break: break-all; color: #fff; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;"></code>
+                                            <button onclick="copyApiKey()" style="padding: 6px 12px; background: rgba(100,255,218,0.15); border: 1px solid rgba(100,255,218,0.3); color: #64ffda; border-radius: 4px; cursor: pointer; white-space: nowrap;">Copy</button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
