@@ -4206,15 +4206,20 @@ class MusicDatabase:
             
             # Use the best title similarity (direct or cleaned)
             best_title_similarity = max(title_similarity, clean_title_similarity)
-            
+
+            # Require minimum title similarity to prevent a perfect artist match from
+            # carrying a bad title match over the threshold (e.g. "Time" vs "Time Flies")
+            if best_title_similarity < 0.6:
+                return best_title_similarity * 0.5  # Can never exceed 0.3, well below any threshold
+
             # Weight: 50% title, 50% artist (equal weight to prevent false positives)
             # Also require minimum artist similarity to prevent matching wrong artists
             confidence = (best_title_similarity * 0.5) + (artist_similarity * 0.5)
-            
+
             # Apply artist similarity penalty: if artist match is too low, drastically reduce confidence
             if artist_similarity < 0.6:  # Less than 60% artist match
                 confidence *= 0.3  # Reduce confidence by 70%
-            
+
             return confidence
             
         except Exception as e:
