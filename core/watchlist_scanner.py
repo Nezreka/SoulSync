@@ -1630,7 +1630,7 @@ class WatchlistScanner:
                             else:  # itunes
                                 all_albums = itunes_client.get_artist_albums(
                                     artist_id,
-                                    album_type='album,single',
+                                    album_type='album,single,ep',
                                     limit=50
                                 )
 
@@ -1695,9 +1695,8 @@ class WatchlistScanner:
                                         album_data = itunes_client.get_album(album.id)
                                         if not album_data:
                                             continue
-                                        # iTunes get_album doesn't include tracks inline, need separate call
-                                        tracks_data = itunes_client.get_album_tracks(album.id)
-                                        tracks = tracks_data.get('items', []) if tracks_data else []
+                                        # get_album includes tracks by default (include_tracks=True)
+                                        tracks = album_data.get('tracks', {}).get('items', [])
 
                                     logger.debug(f"    Album {album_idx}: {album_data.get('name', 'Unknown')} ({len(tracks)} tracks)")
 
@@ -1732,13 +1731,39 @@ class WatchlistScanner:
                                             }
 
                                             # Build track data for discovery pool with source-specific IDs
+                                            # iTunes has no popularity data — synthesize from recency + occurrence
+                                            raw_popularity = album_data.get('popularity', 0)
+                                            if source == 'itunes' and raw_popularity == 0:
+                                                # Base 45, boost by recency and artist occurrence count
+                                                synth_pop = 45
+                                                if is_new:
+                                                    synth_pop += 25  # New releases get a big boost
+                                                else:
+                                                    try:
+                                                        release_str = album_data.get('release_date', '')
+                                                        if release_str and len(release_str) >= 10:
+                                                            rel_date = datetime.strptime(release_str[:10], "%Y-%m-%d")
+                                                            age_days = (datetime.now() - rel_date).days
+                                                            if age_days <= 90:
+                                                                synth_pop += 15
+                                                            elif age_days <= 365:
+                                                                synth_pop += 5
+                                                    except:
+                                                        pass
+                                                # Artists that appear similar to multiple watchlist artists are likely more relevant
+                                                if similar_artist.occurrence_count >= 3:
+                                                    synth_pop += 10
+                                                elif similar_artist.occurrence_count >= 2:
+                                                    synth_pop += 5
+                                                raw_popularity = min(synth_pop, 100)
+
                                             track_data = {
                                                 'track_name': track.get('name', 'Unknown Track'),
                                                 'artist_name': similar_artist.similar_artist_name,
                                                 'album_name': album_data.get('name', 'Unknown Album'),
                                                 'album_cover_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
                                                 'duration_ms': track.get('duration_ms', 0),
-                                                'popularity': album_data.get('popularity', 0),
+                                                'popularity': raw_popularity,
                                                 'release_date': album_data.get('release_date', ''),
                                                 'is_new_release': is_new,
                                                 'track_data_json': enhanced_track,
@@ -2204,7 +2229,7 @@ class WatchlistScanner:
                 if itunes_id:
                     try:
                         albums = itunes_api_call_with_retry(
-                            itunes_client.get_artist_albums, itunes_id, album_type='album,single', limit=20
+                            itunes_client.get_artist_albums, itunes_id, album_type='album,single,ep', limit=20
                         )
                         for album in albums or []:
                             process_album(album, artist.artist_name, artist.spotify_artist_id, itunes_id, 'itunes')
@@ -2252,7 +2277,7 @@ class WatchlistScanner:
                 if itunes_id:
                     try:
                         albums = itunes_api_call_with_retry(
-                            itunes_client.get_artist_albums, itunes_id, album_type='album,single', limit=20
+                            itunes_client.get_artist_albums, itunes_id, album_type='album,single,ep', limit=20
                         )
                         for album in albums or []:
                             process_album(album, artist.similar_artist_name, artist.similar_artist_spotify_id, itunes_id, 'itunes')
@@ -2368,7 +2393,10 @@ class WatchlistScanner:
 
                                     # Calculate track score
                                     recency_score = max(0, 100 - (days_old * 7))
-                                    popularity_score = track.get('popularity', album_data.get('popularity', 50))
+                                    popularity_score = track.get('popularity', album_data.get('popularity', 0))
+                                    # iTunes has no popularity — use recency-based synthetic score
+                                    if source == 'itunes' and popularity_score == 0:
+                                        popularity_score = max(40, 70 - days_old)
                                     is_single = album.get('album_type', 'album') == 'single'
                                     single_bonus = 20 if is_single else 0
                                     total_score = (recency_score * 0.5) + (popularity_score * 0.3) + single_bonus

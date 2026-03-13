@@ -298,7 +298,7 @@ class SeasonalDiscoveryService:
 
             # Source 3: General search for seasonal content
             logger.info(f"Searching {source} for {season_key} albums...")
-            search_albums = self._search_spotify_seasonal_albums(season_key, limit=50)
+            search_albums = self._search_seasonal_albums(season_key, limit=50)
             for album in search_albums:
                 if self._add_seasonal_album(season_key, album, source):
                     albums_found += 1
@@ -381,11 +381,8 @@ class SeasonalDiscoveryService:
             return []
 
     def _search_watchlist_seasonal_albums(self, season_key: str) -> List[Dict]:
-        """Search for seasonal albums from watchlist artists"""
+        """Search for seasonal albums from watchlist artists (Spotify + iTunes)"""
         try:
-            if not self.spotify_client or not self.spotify_client.is_authenticated():
-                return []
-
             config = SEASONAL_CONFIG[season_key]
             keywords = config['keywords']
 
@@ -394,18 +391,29 @@ class SeasonalDiscoveryService:
                 return []
 
             seasonal_albums = []
+            source = self._get_source()
+            use_spotify = self.spotify_client and self.spotify_client.is_authenticated()
 
             # IMPROVED: Sample 20 random watchlist artists (up from 10) for more variety
             sampled_artists = random.sample(watchlist_artists, min(20, len(watchlist_artists)))
 
             for artist in sampled_artists:
                 try:
-                    # Get artist's albums (including full albums, singles, and EPs)
-                    albums = self.spotify_client.get_artist_albums(
-                        artist.spotify_artist_id,
-                        album_type='album,single,ep',
-                        limit=50
-                    )
+                    albums = []
+                    if use_spotify and artist.spotify_artist_id:
+                        albums = self.spotify_client.get_artist_albums(
+                            artist.spotify_artist_id,
+                            album_type='album,single,ep',
+                            limit=50
+                        ) or []
+                    elif hasattr(artist, 'itunes_artist_id') and artist.itunes_artist_id:
+                        from core.itunes_client import iTunesClient
+                        itunes_client = iTunesClient()
+                        albums = itunes_client.get_artist_albums(
+                            artist.itunes_artist_id,
+                            album_type='album,single,ep',
+                            limit=50
+                        ) or []
 
                     # Filter albums by seasonal keywords in title
                     for album in albums:
@@ -418,7 +426,8 @@ class SeasonalDiscoveryService:
                                 'artist_name': artist.artist_name,
                                 'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
                                 'release_date': album.release_date if hasattr(album, 'release_date') else None,
-                                'popularity': getattr(album, 'popularity', 50)
+                                'popularity': getattr(album, 'popularity', 50),
+                                '_source': source
                             })
 
                     import time
@@ -434,24 +443,23 @@ class SeasonalDiscoveryService:
             logger.error(f"Error searching watchlist seasonal albums: {e}")
             return []
 
-    def _search_spotify_seasonal_albums(self, season_key: str, limit: int = 50) -> List[Dict]:
+    def _search_seasonal_albums(self, season_key: str, limit: int = 50) -> List[Dict]:
         """
-        Search Spotify for seasonal albums using keyword search.
+        Search for seasonal albums using keyword search (Spotify or iTunes).
 
         IMPROVED: Searches more broadly for full albums to get larger track pools.
         """
         try:
-            if not self.spotify_client or not self.spotify_client.is_authenticated():
-                return []
-
             config = SEASONAL_CONFIG[season_key]
             keywords = config['keywords']
+            source = self._get_source()
+            use_spotify = self.spotify_client and self.spotify_client.is_authenticated()
 
             seasonal_albums = []
             seen_album_ids = set()
 
             # IMPROVED: Search with top 5 keywords (up from 3) for more variety
-            search_keywords = keywords[:5]
+            search_keywords = list(keywords[:5])
 
             # Add specific "album" searches to prioritize full albums over singles
             season_name = config['name'].lower()
@@ -461,41 +469,71 @@ class SeasonalDiscoveryService:
             elif 'halloween' in season_name:
                 search_keywords.append('halloween album')
 
-            for keyword in search_keywords:
-                try:
-                    # IMPROVED: Get 20 albums per keyword (up from 10)
-                    search_results = self.spotify_client.search_albums(keyword, limit=20)
+            if use_spotify:
+                for keyword in search_keywords:
+                    try:
+                        search_results = self.spotify_client.search_albums(keyword, limit=20)
 
-                    for album in search_results:
-                        if album.id in seen_album_ids:
-                            continue
+                        for album in search_results:
+                            if album.id in seen_album_ids:
+                                continue
 
-                        seen_album_ids.add(album.id)
+                            seen_album_ids.add(album.id)
 
-                        seasonal_albums.append({
-                            'spotify_album_id': album.id,
-                            'album_name': album.name,
-                            'artist_name': ', '.join(album.artists) if album.artists else 'Various Artists',
-                            'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
-                            'release_date': album.release_date if hasattr(album, 'release_date') else None,
-                            'popularity': getattr(album, 'popularity', 50)
-                        })
+                            seasonal_albums.append({
+                                'spotify_album_id': album.id,
+                                'album_name': album.name,
+                                'artist_name': ', '.join(album.artists) if album.artists else 'Various Artists',
+                                'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
+                                'release_date': album.release_date if hasattr(album, 'release_date') else None,
+                                'popularity': getattr(album, 'popularity', 50)
+                            })
 
-                    import time
-                    time.sleep(0.3)  # Rate limiting
+                        import time
+                        time.sleep(0.3)  # Rate limiting
 
-                except Exception as e:
-                    logger.debug(f"Error searching Spotify for '{keyword}': {e}")
-                    continue
+                    except Exception as e:
+                        logger.debug(f"Error searching Spotify for '{keyword}': {e}")
+                        continue
+            else:
+                # iTunes fallback
+                from core.itunes_client import iTunesClient
+                itunes_client = iTunesClient()
 
-            logger.info(f"Found {len(seasonal_albums)} seasonal albums from Spotify search")
+                for keyword in search_keywords:
+                    try:
+                        search_results = itunes_client.search_albums(keyword, limit=20)
+
+                        for album in search_results:
+                            if album.id in seen_album_ids:
+                                continue
+
+                            seen_album_ids.add(album.id)
+
+                            seasonal_albums.append({
+                                'spotify_album_id': album.id,  # Column name is spotify_album_id but stores iTunes ID too
+                                'album_name': album.name,
+                                'artist_name': ', '.join(album.artists) if album.artists else 'Various Artists',
+                                'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
+                                'release_date': album.release_date if hasattr(album, 'release_date') else None,
+                                'popularity': 50  # iTunes has no popularity — default mid-range
+                            })
+
+                        import time
+                        time.sleep(0.3)  # Rate limiting
+
+                    except Exception as e:
+                        logger.debug(f"Error searching iTunes for '{keyword}': {e}")
+                        continue
+
+            logger.info(f"Found {len(seasonal_albums)} seasonal albums from {source} search")
 
             # Return up to limit, prioritizing albums with higher popularity
             seasonal_albums.sort(key=lambda a: a.get('popularity', 0), reverse=True)
             return seasonal_albums[:limit]
 
         except Exception as e:
-            logger.error(f"Error searching Spotify seasonal albums: {e}")
+            logger.error(f"Error searching seasonal albums: {e}")
             return []
 
     def _add_seasonal_album(self, season_key: str, album_data: Dict, source: str = 'spotify') -> bool:
@@ -675,46 +713,56 @@ class SeasonalDiscoveryService:
             # Get tracks from seasonal albums (filtered by source)
             seasonal_albums = self.get_seasonal_albums(season_key, limit=50, source=source)
 
+            use_spotify = self.spotify_client and self.spotify_client.is_authenticated()
+
             for album in seasonal_albums:
                 try:
-                    if not self.spotify_client or not self.spotify_client.is_authenticated():
-                        break
+                    album_data = None
+                    album_id = album['spotify_album_id']
 
-                    # Get album tracks
-                    album_data = self.spotify_client.get_album(album['spotify_album_id'])
-                    if album_data and 'tracks' in album_data:
-                        for track in album_data['tracks'].get('items', []):
-                            # Use track's actual artist, not album artist
-                            track_artist = track['artists'][0]['name'] if track.get('artists') else album['artist_name']
+                    if use_spotify:
+                        album_data = self.spotify_client.get_album(album_id)
+                    else:
+                        # iTunes fallback
+                        from core.itunes_client import iTunesClient
+                        itunes_client = iTunesClient()
+                        album_data = itunes_client.get_album(album_id)
 
-                            # Enhance track object with full album data (including total_tracks)
-                            enhanced_track = {
-                                **track,
-                                'album': {
-                                    'id': album_data['id'],
-                                    'name': album_data.get('name', 'Unknown Album'),
-                                    'images': album_data.get('images', []),
-                                    'release_date': album_data.get('release_date', ''),
-                                    'album_type': album_data.get('album_type', 'album'),
-                                    'total_tracks': album_data.get('total_tracks', 0)
-                                }
+                    if not album_data or 'tracks' not in album_data:
+                        continue
+
+                    for track in album_data['tracks'].get('items', []):
+                        # Use track's actual artist, not album artist
+                        track_artist = track['artists'][0]['name'] if track.get('artists') else album['artist_name']
+
+                        # Enhance track object with full album data (including total_tracks)
+                        enhanced_track = {
+                            **track,
+                            'album': {
+                                'id': album_data['id'],
+                                'name': album_data.get('name', 'Unknown Album'),
+                                'images': album_data.get('images', []),
+                                'release_date': album_data.get('release_date', ''),
+                                'album_type': album_data.get('album_type', 'album'),
+                                'total_tracks': album_data.get('total_tracks', 0)
                             }
+                        }
 
-                            track_data = {
-                                'spotify_track_id': track['id'],
-                                'track_name': track['name'],
-                                'artist_name': track_artist,
-                                'album_name': album['album_name'],
-                                'popularity': album.get('popularity', 50),
-                                'album_cover_url': album.get('album_cover_url'),
-                                'duration_ms': track.get('duration_ms', 0),
-                                'track_data_json': enhanced_track  # Add full track data with album info
-                            }
+                        track_data = {
+                            'spotify_track_id': track['id'],  # Stores iTunes track ID when on iTunes source
+                            'track_name': track['name'],
+                            'artist_name': track_artist,
+                            'album_name': album['album_name'],
+                            'popularity': album.get('popularity', 50),
+                            'album_cover_url': album.get('album_cover_url'),
+                            'duration_ms': track.get('duration_ms', 0),
+                            'track_data_json': enhanced_track
+                        }
 
-                            all_tracks.append(track_data)
+                        all_tracks.append(track_data)
 
-                            # Also save track to seasonal_tracks table for later retrieval
-                            self._add_seasonal_track(season_key, track_data, source)
+                        # Also save track to seasonal_tracks table for later retrieval
+                        self._add_seasonal_track(season_key, track_data, source)
 
                     import time
                     time.sleep(0.3)  # Rate limiting
