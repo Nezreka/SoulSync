@@ -1250,9 +1250,15 @@ class TidalClient:
                 # Parse duration (ISO-8601 format like 'PT3M36S')
                 duration_ms = self._parse_iso_duration(attrs.get('duration', ''))
 
+                # Append version info (e.g. "BMotion Remix") to title if present
+                track_title = attrs.get('title', 'Unknown Track')
+                track_version = attrs.get('version') or ''
+                if track_version and track_version.lower() not in track_title.lower():
+                    track_title = f"{track_title} ({track_version})"
+
                 hydrated_tracks.append(Track(
                     id=str(track_id),
-                    name=attrs.get('title', 'Unknown Track'),
+                    name=track_title,
                     artists=artists,
                     album=album,
                     duration_ms=duration_ms,
