@@ -32515,6 +32515,9 @@ textarea.enhanced-meta-field-input {
 .enhanced-track-table .col-path { width: 25%; }
 .enhanced-track-table .col-bpm { width: 60px; text-align: right; }
 .enhanced-track-table .col-actions { width: 50px; text-align: center; }
+.enhanced-track-table .col-queue,
+.enhanced-track-table .col-writetag,
+.enhanced-track-table .col-delete { padding-left: 4px; padding-right: 4px; }
 
 .enhanced-track-table td {
     padding: 8px 10px;
@@ -33112,7 +33115,7 @@ textarea.enhanced-meta-field-input {
     font-size: 12px;
 }
 .enhanced-track-table .col-delete {
-    width: 32px;
+    width: 36px;
     text-align: center;
 }
 .enhanced-delete-btn {
@@ -33893,7 +33896,7 @@ textarea.enhanced-meta-field-input {
 
 /* Queue button in enhanced track table */
 .col-queue {
-    width: 32px;
+    width: 36px;
     text-align: center;
 }
 .enhanced-queue-btn {
@@ -33971,7 +33974,7 @@ textarea.enhanced-meta-field-input {
 }
 
 .col-writetag {
-    width: 32px;
+    width: 36px;
     text-align: center;
 }
 
