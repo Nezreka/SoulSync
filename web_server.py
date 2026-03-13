@@ -13,6 +13,7 @@ import glob
 import uuid
 import re
 import sqlite3
+import types
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -19033,6 +19034,13 @@ def _on_download_completed(batch_id, task_id, success=True):
                         tidal_discovery_states[tidal_playlist_id]['phase'] = 'download_complete'
                         print(f"📋 Updated Tidal playlist {tidal_playlist_id} to download_complete phase")
 
+                # Update Deezer playlist phase to 'download_complete' if this is a Deezer playlist
+                if playlist_id and playlist_id.startswith('deezer_'):
+                    deezer_playlist_id = playlist_id.replace('deezer_', '')
+                    if deezer_playlist_id in deezer_discovery_states:
+                        deezer_discovery_states[deezer_playlist_id]['phase'] = 'download_complete'
+                        print(f"📋 Updated Deezer playlist {deezer_playlist_id} to download_complete phase")
+
                 print(f"🎉 [Batch Manager] Batch {batch_id} complete - stopping monitor")
                 download_monitor.stop_monitoring(batch_id)
 
@@ -22871,6 +22879,40 @@ def update_tidal_discovery_match():
         print(f"✅ Manual match updated: tidal - {identifier} - track {track_index}")
         print(f"   → {result['spotify_artist']} - {result['spotify_track']}")
 
+        # Save manual fix to discovery cache so it appears in discovery pool
+        try:
+            original_track = result.get('tidal_track', {})
+            original_name = original_track.get('name', spotify_track['name'])
+            original_artist = ''
+            original_artists = original_track.get('artists', [])
+            if original_artists:
+                original_artist = original_artists[0] if isinstance(original_artists[0], str) else original_artists[0].get('name', '')
+
+            cache_key = _get_discovery_cache_key(original_name, original_artist)
+            # Normalize artists to plain strings for cache consistency
+            artists_list = spotify_track['artists']
+            if isinstance(artists_list, list):
+                artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
+            album_raw = spotify_track.get('album', '')
+            album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
+
+            matched_data = {
+                'id': spotify_track['id'],
+                'name': spotify_track['name'],
+                'artists': artists_list,
+                'album': album_obj,
+                'duration_ms': spotify_track.get('duration_ms', 0),
+                'source': 'spotify',
+            }
+            cache_db = get_database()
+            cache_db.save_discovery_cache_match(
+                cache_key[0], cache_key[1], 'spotify', 1.0, matched_data,
+                original_name, original_artist
+            )
+            print(f"💾 Manual fix saved to discovery cache: {original_name} by {original_artist}")
+        except Exception as cache_err:
+            print(f"⚠️ Error saving manual fix to discovery cache: {cache_err}")
+
         return jsonify({'success': True, 'result': result})
 
     except Exception as e:
@@ -23972,6 +24014,791 @@ def cancel_tidal_sync(playlist_id):
 
 
 # ===================================================================
+# DEEZER PLAYLIST DISCOVERY API ENDPOINTS
+# ===================================================================
+
+# Global state for Deezer playlist discovery management
+deezer_discovery_states = {}  # Key: playlist_id, Value: discovery state
+deezer_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="deezer_discovery")
+
+# Lazy-initialized global DeezerClient instance
+_deezer_client_instance = None
+_deezer_client_lock = threading.Lock()
+
+def _get_deezer_client():
+    """Get or create the global DeezerClient instance (thread-safe)."""
+    global _deezer_client_instance
+    if _deezer_client_instance is None:
+        with _deezer_client_lock:
+            if _deezer_client_instance is None:
+                from core.deezer_client import DeezerClient
+                _deezer_client_instance = DeezerClient()
+    return _deezer_client_instance
+
+@app.route('/api/deezer/playlist/<playlist_id>', methods=['GET'])
+def get_deezer_playlist(playlist_id):
+    """Fetch a Deezer playlist by ID or URL"""
+    try:
+        from core.deezer_client import DeezerClient
+
+        # Parse URL if needed
+        parsed_id = DeezerClient.parse_playlist_url(playlist_id)
+        if not parsed_id:
+            return jsonify({"error": "Invalid Deezer playlist ID or URL"}), 400
+
+        client = _get_deezer_client()
+        playlist = client.get_playlist(parsed_id)
+
+        if not playlist:
+            return jsonify({"error": "Deezer playlist not found"}), 404
+
+        return jsonify(playlist)
+
+    except Exception as e:
+        print(f"❌ Error fetching Deezer playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/deezer/discovery/start/<playlist_id>', methods=['POST'])
+def start_deezer_discovery(playlist_id):
+    """Start Spotify discovery process for a Deezer playlist"""
+    try:
+        from core.deezer_client import DeezerClient
+
+        # Parse URL if needed
+        parsed_id = DeezerClient.parse_playlist_url(playlist_id)
+        if parsed_id:
+            playlist_id = parsed_id
+
+        # Initialize discovery state if it doesn't exist, or update existing state
+        if playlist_id in deezer_discovery_states:
+            existing_state = deezer_discovery_states[playlist_id]
+            if existing_state['phase'] == 'discovering':
+                return jsonify({"error": "Discovery already in progress"}), 400
+
+            # Fetch fresh playlist data if not already stored
+            if not existing_state.get('playlist'):
+                client = _get_deezer_client()
+                playlist_data = client.get_playlist(playlist_id)
+                if not playlist_data:
+                    return jsonify({"error": "Deezer playlist not found"}), 404
+                existing_state['playlist'] = playlist_data
+
+            # Update existing state for discovery
+            existing_state['phase'] = 'discovering'
+            existing_state['status'] = 'discovering'
+            existing_state['last_accessed'] = time.time()
+            state = existing_state
+        else:
+            # Fetch playlist data from Deezer
+            client = _get_deezer_client()
+            playlist_data = client.get_playlist(playlist_id)
+
+            if not playlist_data:
+                return jsonify({"error": "Deezer playlist not found"}), 404
+
+            if not playlist_data.get('tracks'):
+                return jsonify({"error": "Playlist has no tracks"}), 400
+
+            # Create new state for first-time discovery
+            state = {
+                'playlist': playlist_data,
+                'phase': 'discovering',  # fresh -> discovering -> discovered -> syncing -> sync_complete -> downloading -> download_complete
+                'status': 'discovering',
+                'discovery_progress': 0,
+                'spotify_matches': 0,
+                'spotify_total': len(playlist_data['tracks']),
+                'discovery_results': [],
+                'sync_playlist_id': None,
+                'converted_spotify_playlist_id': None,
+                'download_process_id': None,
+                'created_at': time.time(),
+                'last_accessed': time.time(),
+                'discovery_future': None,
+                'sync_progress': {}
+            }
+            deezer_discovery_states[playlist_id] = state
+
+        # Add activity for discovery start
+        playlist_name = state['playlist']['name']
+        track_count = len(state['playlist']['tracks'])
+        add_activity_item("🔍", "Deezer Discovery Started", f"'{playlist_name}' - {track_count} tracks", "Now")
+
+        # Start discovery worker
+        future = deezer_discovery_executor.submit(_run_deezer_discovery_worker, playlist_id)
+        state['discovery_future'] = future
+
+        print(f"🔍 Started Spotify discovery for Deezer playlist: {playlist_name}")
+        return jsonify({"success": True, "message": "Discovery started"})
+
+    except Exception as e:
+        print(f"❌ Error starting Deezer discovery: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/deezer/discovery/status/<playlist_id>', methods=['GET'])
+def get_deezer_discovery_status(playlist_id):
+    """Get real-time discovery status for a Deezer playlist"""
+    try:
+        if playlist_id not in deezer_discovery_states:
+            return jsonify({"error": "Deezer discovery not found"}), 404
+
+        state = deezer_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()
+
+        response = {
+            'phase': state['phase'],
+            'status': state['status'],
+            'progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'results': state['discovery_results'],
+            'complete': state['phase'] == 'discovered'
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"❌ Error getting Deezer discovery status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/deezer/discovery/update_match', methods=['POST'])
+def update_deezer_discovery_match():
+    """Update a Deezer discovery result with manually selected Spotify track"""
+    try:
+        data = request.get_json()
+        identifier = data.get('identifier')  # playlist_id
+        track_index = data.get('track_index')
+        spotify_track = data.get('spotify_track')
+
+        if not identifier or track_index is None or not spotify_track:
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        # Get the state
+        state = deezer_discovery_states.get(identifier)
+
+        if not state:
+            return jsonify({'error': 'Discovery state not found'}), 404
+
+        if track_index >= len(state['discovery_results']):
+            return jsonify({'error': 'Invalid track index'}), 400
+
+        # Update the result
+        result = state['discovery_results'][track_index]
+        old_status = result.get('status')
+
+        # Update with user-selected track
+        result['status'] = '✅ Found'
+        result['status_class'] = 'found'
+        result['spotify_track'] = spotify_track['name']
+        result['spotify_artist'] = _join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else _extract_artist_name(spotify_track['artists'])
+        result['spotify_album'] = spotify_track['album']
+        result['spotify_id'] = spotify_track['id']
+
+        # Format duration
+        duration_ms = spotify_track.get('duration_ms', 0)
+        if duration_ms:
+            minutes = duration_ms // 60000
+            seconds = (duration_ms % 60000) // 1000
+            result['duration'] = f"{minutes}:{seconds:02d}"
+        else:
+            result['duration'] = '0:00'
+
+        # IMPORTANT: Also set spotify_data for sync/download compatibility
+        result['spotify_data'] = {
+            'id': spotify_track['id'],
+            'name': spotify_track['name'],
+            'artists': spotify_track['artists'],
+            'album': spotify_track['album'],
+            'duration_ms': spotify_track.get('duration_ms', 0)
+        }
+
+        result['manual_match'] = True
+
+        # Update match count if status changed from not found/error
+        if old_status != 'found' and old_status != '✅ Found':
+            state['spotify_matches'] = state.get('spotify_matches', 0) + 1
+
+        print(f"✅ Manual match updated: deezer - {identifier} - track {track_index}")
+        print(f"   → {result['spotify_artist']} - {result['spotify_track']}")
+
+        # Save manual fix to discovery cache so it appears in discovery pool
+        try:
+            original_track = result.get('deezer_track', {})
+            original_name = original_track.get('name', spotify_track['name'])
+            original_artists = original_track.get('artists', [])
+            original_artist = original_artists[0] if original_artists else ''
+
+            cache_key = _get_discovery_cache_key(original_name, original_artist)
+            # Normalize artists to plain strings for cache consistency
+            artists_list = spotify_track['artists']
+            if isinstance(artists_list, list):
+                artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
+            album_raw = spotify_track.get('album', '')
+            album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
+
+            matched_data = {
+                'id': spotify_track['id'],
+                'name': spotify_track['name'],
+                'artists': artists_list,
+                'album': album_obj,
+                'duration_ms': spotify_track.get('duration_ms', 0),
+                'source': 'spotify',
+            }
+            cache_db = get_database()
+            cache_db.save_discovery_cache_match(
+                cache_key[0], cache_key[1], 'spotify', 1.0, matched_data,
+                original_name, original_artist
+            )
+            print(f"💾 Manual fix saved to discovery cache: {original_name} by {original_artist}")
+        except Exception as cache_err:
+            print(f"⚠️ Error saving manual fix to discovery cache: {cache_err}")
+
+        return jsonify({'success': True, 'result': result})
+
+    except Exception as e:
+        print(f"❌ Error updating Deezer discovery match: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/deezer/playlists/states', methods=['GET'])
+def get_deezer_playlist_states():
+    """Get all stored Deezer playlist discovery states for frontend hydration"""
+    try:
+        states = []
+        current_time = time.time()
+
+        for playlist_id, state in deezer_discovery_states.items():
+            state['last_accessed'] = current_time
+
+            state_info = {
+                'playlist_id': playlist_id,
+                'phase': state['phase'],
+                'status': state['status'],
+                'discovery_progress': state['discovery_progress'],
+                'spotify_matches': state['spotify_matches'],
+                'spotify_total': state['spotify_total'],
+                'discovery_results': state['discovery_results'],
+                'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+                'download_process_id': state.get('download_process_id'),
+                'last_accessed': state['last_accessed']
+            }
+            states.append(state_info)
+
+        print(f"🎵 Returning {len(states)} stored Deezer playlist states for hydration")
+        return jsonify({"states": states})
+
+    except Exception as e:
+        print(f"❌ Error getting Deezer playlist states: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/deezer/state/<playlist_id>', methods=['GET'])
+def get_deezer_playlist_state(playlist_id):
+    """Get specific Deezer playlist state (detailed version)"""
+    try:
+        if playlist_id not in deezer_discovery_states:
+            return jsonify({"error": "Deezer playlist not found"}), 404
+
+        state = deezer_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()
+
+        # Deezer playlist is a dict, no __dict__ needed
+        response = {
+            'playlist_id': playlist_id,
+            'playlist': state['playlist'],
+            'phase': state['phase'],
+            'status': state['status'],
+            'discovery_progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'discovery_results': state['discovery_results'],
+            'sync_playlist_id': state.get('sync_playlist_id'),
+            'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+            'download_process_id': state.get('download_process_id'),
+            'sync_progress': state.get('sync_progress', {}),
+            'last_accessed': state['last_accessed']
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"❌ Error getting Deezer playlist state: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/deezer/reset/<playlist_id>', methods=['POST'])
+def reset_deezer_playlist(playlist_id):
+    """Reset Deezer playlist to fresh phase (clear discovery/sync data)"""
+    try:
+        if playlist_id not in deezer_discovery_states:
+            return jsonify({"error": "Deezer playlist not found"}), 404
+
+        state = deezer_discovery_states[playlist_id]
+
+        # Stop any active discovery
+        if 'discovery_future' in state and state['discovery_future']:
+            state['discovery_future'].cancel()
+
+        # Reset state to fresh (preserve original playlist data)
+        state['phase'] = 'fresh'
+        state['status'] = 'fresh'
+        state['discovery_results'] = []
+        state['discovery_progress'] = 0
+        state['spotify_matches'] = 0
+        state['sync_playlist_id'] = None
+        state['converted_spotify_playlist_id'] = None
+        state['download_process_id'] = None
+        state['sync_progress'] = {}
+        state['discovery_future'] = None
+        state['last_accessed'] = time.time()
+
+        print(f"🔄 Reset Deezer playlist to fresh: {playlist_id}")
+        return jsonify({"success": True, "message": "Playlist reset to fresh phase"})
+
+    except Exception as e:
+        print(f"❌ Error resetting Deezer playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/deezer/delete/<playlist_id>', methods=['POST'])
+def delete_deezer_playlist(playlist_id):
+    """Delete Deezer playlist state completely"""
+    try:
+        if playlist_id not in deezer_discovery_states:
+            return jsonify({"error": "Deezer playlist not found"}), 404
+
+        state = deezer_discovery_states[playlist_id]
+
+        # Stop any active discovery
+        if 'discovery_future' in state and state['discovery_future']:
+            state['discovery_future'].cancel()
+
+        # Remove from state dictionary
+        del deezer_discovery_states[playlist_id]
+
+        print(f"🗑️ Deleted Deezer playlist state: {playlist_id}")
+        return jsonify({"success": True, "message": "Playlist deleted"})
+
+    except Exception as e:
+        print(f"❌ Error deleting Deezer playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/deezer/update_phase/<playlist_id>', methods=['POST'])
+def update_deezer_playlist_phase(playlist_id):
+    """Update Deezer playlist phase (used when modal closes to reset from download_complete to discovered)"""
+    try:
+        if playlist_id not in deezer_discovery_states:
+            return jsonify({"error": "Deezer playlist not found"}), 404
+
+        data = request.get_json()
+        if not data or 'phase' not in data:
+            return jsonify({"error": "Phase not provided"}), 400
+
+        new_phase = data['phase']
+        valid_phases = ['fresh', 'discovering', 'discovered', 'syncing', 'sync_complete', 'downloading', 'download_complete']
+
+        if new_phase not in valid_phases:
+            return jsonify({"error": f"Invalid phase. Must be one of: {', '.join(valid_phases)}"}), 400
+
+        state = deezer_discovery_states[playlist_id]
+        old_phase = state.get('phase', 'unknown')
+        state['phase'] = new_phase
+        state['last_accessed'] = time.time()
+
+        print(f"🔄 Updated Deezer playlist {playlist_id} phase: {old_phase} → {new_phase}")
+        return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
+
+    except Exception as e:
+        print(f"❌ Error updating Deezer playlist phase: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+def _run_deezer_discovery_worker(playlist_id):
+    """Background worker for Deezer discovery process (Spotify preferred, iTunes fallback)"""
+    _ew_state = {}
+    try:
+        _ew_state = _pause_enrichment_workers('Deezer discovery')
+        state = deezer_discovery_states[playlist_id]
+        playlist = state['playlist']
+
+        # Determine which provider to use
+        use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
+        discovery_source = 'spotify' if use_spotify else 'itunes'
+
+        # Initialize iTunes client if needed
+        itunes_client_instance = None
+        if not use_spotify:
+            from core.itunes_client import iTunesClient
+            itunes_client_instance = iTunesClient()
+
+        print(f"🎵 Starting Deezer discovery for: {playlist['name']} (using {discovery_source.upper()})")
+
+        # Store discovery source in state for frontend
+        state['discovery_source'] = discovery_source
+
+        successful_discoveries = 0
+        tracks = playlist['tracks']
+
+        for i, deezer_track in enumerate(tracks):
+            if state.get('cancelled', False):
+                break
+
+            try:
+                track_name = deezer_track['name']
+                track_artists = deezer_track['artists']
+                track_id = deezer_track['id']
+                track_album = deezer_track.get('album', '')
+                track_duration_ms = deezer_track.get('duration_ms', 0)
+
+                print(f"🔍 [{i+1}/{len(tracks)}] Searching {discovery_source.upper()}: {track_name} by {', '.join(track_artists)}")
+
+                # Check discovery cache first
+                cache_key = _get_discovery_cache_key(track_name, track_artists[0] if track_artists else '')
+                try:
+                    cache_db = get_database()
+                    cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
+                    if cached_match and _validate_discovery_cache_artist(track_artists[0] if track_artists else '', cached_match):
+                        print(f"⚡ CACHE HIT [{i+1}/{len(tracks)}]: {track_name} by {', '.join(track_artists)}")
+                        # Extract display-friendly artist string from cached match
+                        cached_artists = cached_match.get('artists', [])
+                        if cached_artists:
+                            cached_artist_str = ', '.join(
+                                a if isinstance(a, str) else a.get('name', '') for a in cached_artists
+                            )
+                        else:
+                            cached_artist_str = ''
+                        cached_album = cached_match.get('album', '')
+                        if isinstance(cached_album, dict):
+                            cached_album = cached_album.get('name', '')
+
+                        result = {
+                            'deezer_track': {
+                                'id': track_id,
+                                'name': track_name,
+                                'artists': track_artists or [],
+                                'album': track_album,
+                                'duration_ms': track_duration_ms,
+                            },
+                            'spotify_data': cached_match,
+                            'match_data': cached_match,
+                            'status': '✅ Found',
+                            'status_class': 'found',
+                            'spotify_track': cached_match.get('name', ''),
+                            'spotify_artist': cached_artist_str,
+                            'spotify_album': cached_album,
+                            'spotify_id': cached_match.get('id', ''),
+                            'discovery_source': discovery_source,
+                            'index': i
+                        }
+                        successful_discoveries += 1
+                        state['spotify_matches'] = successful_discoveries
+                        state['discovery_results'].append(result)
+                        state['discovery_progress'] = int(((i + 1) / len(tracks)) * 100)
+                        continue
+                except Exception as cache_err:
+                    print(f"⚠️ Cache lookup error: {cache_err}")
+
+                # Create a SimpleNamespace duck-type object for _search_spotify_for_tidal_track
+                track_ns = types.SimpleNamespace(
+                    id=track_id,
+                    name=track_name,
+                    artists=track_artists,
+                    album=track_album,
+                    duration_ms=track_duration_ms
+                )
+
+                # Use the search function with appropriate provider
+                track_result = _search_spotify_for_tidal_track(
+                    track_ns,
+                    use_spotify=use_spotify,
+                    itunes_client=itunes_client_instance
+                )
+
+                # Create result entry
+                result = {
+                    'deezer_track': {
+                        'id': track_id,
+                        'name': track_name,
+                        'artists': track_artists or [],
+                        'album': track_album,
+                        'duration_ms': track_duration_ms,
+                    },
+                    'spotify_data': None,
+                    'match_data': None,
+                    'status': '❌ Not Found',
+                    'status_class': 'not-found',
+                    'spotify_track': '',
+                    'spotify_artist': '',
+                    'spotify_album': '',
+                    'discovery_source': discovery_source
+                }
+
+                match_confidence = 0.0
+
+                if use_spotify and isinstance(track_result, tuple):
+                    # Spotify: Function returns (Track, raw_data, confidence)
+                    track_obj, raw_track_data, match_confidence = track_result
+                    album_obj = raw_track_data.get('album', {}) if raw_track_data else {}
+
+                    match_data = {
+                        'id': track_obj.id,
+                        'name': track_obj.name,
+                        'artists': track_obj.artists,
+                        'album': album_obj,
+                        'duration_ms': track_obj.duration_ms,
+                        'external_urls': track_obj.external_urls,
+                        'source': 'spotify'
+                    }
+                    result['spotify_data'] = match_data
+                    result['match_data'] = match_data
+                    result['status'] = '✅ Found'
+                    result['status_class'] = 'found'
+                    result['spotify_track'] = track_obj.name
+                    result['spotify_artist'] = ', '.join(track_obj.artists) if isinstance(track_obj.artists, list) else str(track_obj.artists)
+                    result['spotify_album'] = album_obj.get('name', '') if isinstance(album_obj, dict) else str(album_obj)
+                    result['spotify_id'] = track_obj.id
+                    result['confidence'] = match_confidence
+                    successful_discoveries += 1
+                    state['spotify_matches'] = successful_discoveries
+
+                elif not use_spotify and track_result and isinstance(track_result, dict):
+                    # iTunes: Function returns a dict with track data (includes 'confidence' key)
+                    match_confidence = track_result.pop('confidence', 0.80)
+                    match_data = track_result
+                    match_data['source'] = 'itunes'
+                    result['spotify_data'] = match_data
+                    result['match_data'] = match_data
+                    result['status'] = '✅ Found'
+                    result['status_class'] = 'found'
+                    result['spotify_track'] = match_data.get('name', '')
+                    itunes_artists = match_data.get('artists', [])
+                    result['spotify_artist'] = ', '.join(a if isinstance(a, str) else a.get('name', '') for a in itunes_artists) if itunes_artists else ''
+                    result['spotify_album'] = match_data.get('album', {}).get('name', '') if isinstance(match_data.get('album'), dict) else match_data.get('album', '')
+                    result['spotify_id'] = match_data.get('id', '')
+                    result['confidence'] = match_confidence
+                    successful_discoveries += 1
+                    state['spotify_matches'] = successful_discoveries
+
+                # Save to discovery cache if match found
+                if result['status_class'] == 'found' and result.get('match_data'):
+                    try:
+                        cache_db = get_database()
+                        cache_db.save_discovery_cache_match(
+                            cache_key[0], cache_key[1], discovery_source, match_confidence,
+                            result['match_data'], track_name,
+                            track_artists[0] if track_artists else ''
+                        )
+                        print(f"💾 CACHE SAVED: {track_name} (confidence: {match_confidence:.3f})")
+                    except Exception as cache_err:
+                        print(f"⚠️ Cache save error: {cache_err}")
+
+                result['index'] = i
+                state['discovery_results'].append(result)
+                state['discovery_progress'] = int(((i + 1) / len(tracks)) * 100)
+
+                # Add delay between requests
+                time.sleep(0.1)
+
+            except Exception as e:
+                print(f"❌ Error processing track {i+1}: {e}")
+                # Add error result
+                result = {
+                    'deezer_track': {
+                        'name': deezer_track.get('name', 'Unknown'),
+                        'artists': deezer_track.get('artists', []),
+                    },
+                    'spotify_data': None,
+                    'match_data': None,
+                    'status': '❌ Error',
+                    'status_class': 'error',
+                    'spotify_track': '',
+                    'spotify_artist': '',
+                    'spotify_album': '',
+                    'error': str(e),
+                    'discovery_source': discovery_source,
+                    'index': i
+                }
+                state['discovery_results'].append(result)
+                state['discovery_progress'] = int(((i + 1) / len(tracks)) * 100)
+
+        # Mark as complete
+        state['phase'] = 'discovered'
+        state['status'] = 'discovered'
+        state['discovery_progress'] = 100
+
+        # Add activity for discovery completion
+        source_label = discovery_source.upper()
+        add_activity_item("✅", f"Deezer Discovery Complete ({source_label})", f"'{playlist['name']}' - {successful_discoveries}/{len(tracks)} tracks found", "Now")
+
+        print(f"✅ Deezer discovery complete ({source_label}): {successful_discoveries}/{len(tracks)} tracks found")
+
+    except Exception as e:
+        print(f"❌ Error in Deezer discovery worker: {e}")
+        if playlist_id in deezer_discovery_states:
+            deezer_discovery_states[playlist_id]['phase'] = 'error'
+            deezer_discovery_states[playlist_id]['status'] = f'error: {str(e)}'
+    finally:
+        _resume_enrichment_workers(_ew_state, 'Deezer discovery')
+
+
+def convert_deezer_results_to_spotify_tracks(discovery_results):
+    """Convert Deezer discovery results to Spotify tracks format for sync"""
+    spotify_tracks = []
+
+    for result in discovery_results:
+        # Support both data formats: spotify_data (manual fixes) and individual fields (automatic discovery)
+        if result.get('spotify_data'):
+            spotify_data = result['spotify_data']
+
+            track = {
+                'id': spotify_data['id'],
+                'name': spotify_data['name'],
+                'artists': spotify_data['artists'],
+                'album': spotify_data['album'],
+                'duration_ms': spotify_data.get('duration_ms', 0)
+            }
+            spotify_tracks.append(track)
+        elif result.get('spotify_track') and result.get('status_class') == 'found':
+            track = {
+                'id': result.get('spotify_id', 'unknown'),
+                'name': result.get('spotify_track', 'Unknown Track'),
+                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
+                'album': result.get('spotify_album', 'Unknown Album'),
+                'duration_ms': 0
+            }
+            spotify_tracks.append(track)
+
+    print(f"🔄 Converted {len(spotify_tracks)} Deezer matches to Spotify tracks for sync")
+    return spotify_tracks
+
+
+# ===================================================================
+# DEEZER SYNC API ENDPOINTS
+# ===================================================================
+
+@app.route('/api/deezer/sync/start/<playlist_id>', methods=['POST'])
+def start_deezer_sync(playlist_id):
+    """Start sync process for a Deezer playlist using discovered Spotify tracks"""
+    try:
+        if playlist_id not in deezer_discovery_states:
+            return jsonify({"error": "Deezer playlist not found"}), 404
+
+        state = deezer_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()
+
+        if state['phase'] not in ['discovered', 'sync_complete']:
+            return jsonify({"error": "Deezer playlist not ready for sync"}), 400
+
+        # Convert discovery results to Spotify tracks format
+        spotify_tracks = convert_deezer_results_to_spotify_tracks(state['discovery_results'])
+
+        if not spotify_tracks:
+            return jsonify({"error": "No Spotify matches found for sync"}), 400
+
+        # Create a temporary playlist ID for sync tracking
+        sync_playlist_id = f"deezer_{playlist_id}"
+        playlist_name = state['playlist']['name']
+
+        # Add activity for sync start
+        add_activity_item("🔄", "Deezer Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")
+
+        # Update Deezer state
+        state['phase'] = 'syncing'
+        state['sync_playlist_id'] = sync_playlist_id
+        state['sync_progress'] = {}
+
+        # Start the sync using existing sync infrastructure
+        sync_data = {
+            'playlist_id': sync_playlist_id,
+            'playlist_name': playlist_name,
+            'tracks': spotify_tracks
+        }
+
+        with sync_lock:
+            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+
+        # Submit sync task
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks)
+        active_sync_workers[sync_playlist_id] = future
+
+        print(f"🔄 Started Deezer sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
+        return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
+
+    except Exception as e:
+        print(f"❌ Error starting Deezer sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/deezer/sync/status/<playlist_id>', methods=['GET'])
+def get_deezer_sync_status(playlist_id):
+    """Get sync status for a Deezer playlist"""
+    try:
+        if playlist_id not in deezer_discovery_states:
+            return jsonify({"error": "Deezer playlist not found"}), 404
+
+        state = deezer_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()
+        sync_playlist_id = state.get('sync_playlist_id')
+
+        if not sync_playlist_id:
+            return jsonify({"error": "No sync in progress"}), 404
+
+        # Get sync status from existing sync infrastructure
+        with sync_lock:
+            sync_state = sync_states.get(sync_playlist_id, {})
+
+        response = {
+            'phase': state['phase'],
+            'sync_status': sync_state.get('status', 'unknown'),
+            'progress': sync_state.get('progress', {}),
+            'complete': sync_state.get('status') == 'finished',
+            'error': sync_state.get('error')
+        }
+
+        # Update Deezer state if sync completed
+        if sync_state.get('status') == 'finished':
+            state['phase'] = 'sync_complete'
+            state['sync_progress'] = sync_state.get('progress', {})
+            playlist_name = state['playlist']['name']
+            add_activity_item("🔄", "Sync Complete", f"Deezer playlist '{playlist_name}' synced successfully", "Now")
+        elif sync_state.get('status') == 'error':
+            state['phase'] = 'discovered'  # Revert on error
+            playlist_name = state['playlist']['name']
+            add_activity_item("❌", "Sync Failed", f"Deezer playlist '{playlist_name}' sync failed", "Now")
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"❌ Error getting Deezer sync status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/deezer/sync/cancel/<playlist_id>', methods=['POST'])
+def cancel_deezer_sync(playlist_id):
+    """Cancel sync for a Deezer playlist"""
+    try:
+        if playlist_id not in deezer_discovery_states:
+            return jsonify({"error": "Deezer playlist not found"}), 404
+
+        state = deezer_discovery_states[playlist_id]
+        state['last_accessed'] = time.time()
+        sync_playlist_id = state.get('sync_playlist_id')
+
+        if sync_playlist_id:
+            # Cancel the sync using existing sync infrastructure
+            with sync_lock:
+                sync_states[sync_playlist_id] = {"status": "cancelled"}
+
+            # Clean up sync worker
+            if sync_playlist_id in active_sync_workers:
+                del active_sync_workers[sync_playlist_id]
+
+        # Revert Deezer state
+        state['phase'] = 'discovered'
+        state['sync_playlist_id'] = None
+        state['sync_progress'] = {}
+
+        return jsonify({"success": True, "message": "Deezer sync cancelled"})
+
+    except Exception as e:
+        print(f"❌ Error cancelling Deezer sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ===================================================================
 # YOUTUBE PLAYLIST API ENDPOINTS
 # ===================================================================
 
@@ -24167,6 +24994,42 @@ def update_youtube_discovery_match():
         print(f"✅ Manual match updated: youtube - {identifier} - track {track_index}")
         print(f"   → {result['spotify_artist']} - {result['spotify_track']}")
 
+        # Save manual fix to discovery cache so it appears in discovery pool
+        try:
+            # Get original track name from the YouTube/source track data
+            original_track = result.get('youtube_track', result.get('tidal_track', result.get('deezer_track', {})))
+            original_name = original_track.get('name', spotify_track['name'])
+            original_artists = original_track.get('artists', [])
+            if original_artists:
+                original_artist = original_artists[0] if isinstance(original_artists[0], str) else original_artists[0].get('name', '')
+            else:
+                original_artist = ''
+
+            cache_key = _get_discovery_cache_key(original_name, original_artist)
+            # Normalize artists to plain strings for cache consistency
+            artists_list = spotify_track['artists']
+            if isinstance(artists_list, list):
+                artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
+            album_raw = spotify_track.get('album', '')
+            album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
+
+            matched_data = {
+                'id': spotify_track['id'],
+                'name': spotify_track['name'],
+                'artists': artists_list,
+                'album': album_obj,
+                'duration_ms': spotify_track.get('duration_ms', 0),
+                'source': 'spotify',
+            }
+            cache_db = get_database()
+            cache_db.save_discovery_cache_match(
+                cache_key[0], cache_key[1], 'spotify', 1.0, matched_data,
+                original_name, original_artist
+            )
+            print(f"💾 Manual fix saved to discovery cache: {original_name} by {original_artist}")
+        except Exception as cache_err:
+            print(f"⚠️ Error saving manual fix to discovery cache: {cache_err}")
+
         # Persist manual fix to DB for mirrored playlists
         if identifier.startswith('mirrored_'):
             try:
@@ -24175,19 +25038,6 @@ def update_youtube_discovery_match():
                     db_track_id = tracks[track_index].get('db_track_id')
                     if db_track_id:
                         db = get_database()
-                        artists_list = spotify_track['artists']
-                        if isinstance(artists_list, list):
-                            artists_list = [{'name': a} if isinstance(a, str) else a for a in artists_list]
-                        album_raw = spotify_track.get('album', '')
-                        album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
-                        matched_data = {
-                            'id': spotify_track['id'],
-                            'name': spotify_track['name'],
-                            'artists': artists_list,
-                            'album': album_obj,
-                            'duration_ms': spotify_track.get('duration_ms', 0),
-                            'source': 'spotify',
-                        }
                         extra_data = {
                             'discovered': True,
                             'provider': 'spotify',
@@ -35811,6 +36661,7 @@ def _emit_discovery_progress_loop():
     """Push discovery progress to subscribed rooms every 1 second."""
     platform_states = {
         'tidal': lambda: tidal_discovery_states,
+        'deezer': lambda: deezer_discovery_states,
         'youtube': lambda: youtube_playlist_states,
         'beatport': lambda: beatport_chart_states,
         'listenbrainz': lambda: listenbrainz_playlist_states,

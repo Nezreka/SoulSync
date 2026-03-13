@@ -6438,6 +6438,12 @@ body {
     box-shadow: 0 4px 15px rgba(255, 102, 0, 0.3);
 }
 
+.sync-tab-button[data-tab="deezer"].active {
+    background: #a238ff;
+    color: #fff;
+    box-shadow: 0 0 12px rgba(162, 56, 255, 0.4);
+}
+
 .sync-tab-button[data-tab="youtube"].active {
     background: #ff0000;
     color: #fff;
@@ -6463,6 +6469,16 @@ body {
 
 .tidal-icon {
     background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ffffff"><path d="M12.012 3.992L8.008 7.996 12.012 12l4.004-4.004-4.004-4.004zm7.996 8.008L16.004 8.004 12 12.008l4.004 4.004L20.008 12zm-16.008 0L8.004 16.004 12 12l-4.004-4.004L3.996 12zm8.004 4.004L8.004 20.008 12.012 24l4.004-4.004-4.004-3.996z"/></svg>');
+}
+
+.deezer-icon {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Crect x='0' y='18' width='4' height='4' rx='0.5'/%3E%3Crect x='6' y='14' width='4' height='8' rx='0.5'/%3E%3Crect x='12' y='10' width='4' height='12' rx='0.5'/%3E%3Crect x='18' y='6' width='4' height='16' rx='0.5'/%3E%3C/svg%3E");
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
 }
 
 .youtube-icon {
@@ -6967,6 +6983,11 @@ body {
     border-color: rgba(255, 0, 0, 0.25);
     color: #ff4444;
 }
+.mirrored-playlist-card .source-icon.deezer {
+    background: linear-gradient(135deg, rgba(162, 56, 255, 0.2) 0%, rgba(162, 56, 255, 0.08) 100%);
+    border-color: rgba(162, 56, 255, 0.25);
+    color: #a238ff;
+}
 .mirrored-playlist-card .source-icon.beatport {
     background: linear-gradient(135deg, rgba(1, 255, 149, 0.2) 0%, rgba(1, 255, 149, 0.08) 100%);
     border-color: rgba(1, 255, 149, 0.25);
@@ -6992,6 +7013,7 @@ body {
 .mirrored-playlist-card .source-badge.spotify { background: #1db954; }
 .mirrored-playlist-card .source-badge.tidal { background: #ff6600; }
 .mirrored-playlist-card .source-badge.youtube { background: #ff0000; }
+.mirrored-playlist-card .source-badge.deezer { background: #a238ff; }
 .mirrored-playlist-card .source-badge.beatport { background: #01ff95; color: #000; }
 .mirrored-playlist-card .source-badge.file { background: #60a5fa; }
 
@@ -9838,28 +9860,108 @@ body {
     padding: 40px;
 }
 
+/* Playlist URL input section (YouTube, Deezer) */
 .youtube-input-section {
     display: flex;
-    gap: 10px;
+    align-items: center;
+    gap: 0;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 4px;
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
-#youtube-url-input {
-    flex-grow: 1;
-    background: #3a3a3a;
-    border: 1px solid #555555;
-    border-radius: 6px;
-    padding: 10px;
-    color: #ffffff;
+.youtube-input-section:focus-within {
+    border-color: rgba(255, 255, 255, 0.15);
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+}
+
+#youtube-url-input,
+#deezer-url-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    padding: 12px 16px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13.5px;
+    font-family: 'SF Pro Text', -apple-system, sans-serif;
+    outline: none;
+    min-width: 0;
+}
+
+#youtube-url-input::placeholder,
+#deezer-url-input::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+    font-weight: 400;
+}
+
+#youtube-parse-btn,
+#deezer-parse-btn {
+    flex-shrink: 0;
+    padding: 10px 22px;
+    border: none;
+    border-radius: 9px;
+    font-size: 12.5px;
+    font-weight: 600;
+    font-family: 'SF Pro Text', -apple-system, sans-serif;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
 }
 
 #youtube-parse-btn {
-    width: 150px;
-    background: #ff0000;
+    background: linear-gradient(135deg, #ff2020, #e00000);
     color: #fff;
-    border: none;
-    border-radius: 6px;
-    font-weight: bold;
-    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(255, 0, 0, 0.2);
+}
+
+#youtube-parse-btn:hover {
+    background: linear-gradient(135deg, #ff3333, #ff1111);
+    box-shadow: 0 4px 16px rgba(255, 0, 0, 0.3);
+    transform: translateY(-1px);
+}
+
+#youtube-parse-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 4px rgba(255, 0, 0, 0.2);
+}
+
+#deezer-parse-btn {
+    background: linear-gradient(135deg, #a238ff, #b44dff);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(162, 56, 255, 0.2);
+}
+
+#deezer-parse-btn:hover {
+    background: linear-gradient(135deg, #b044ff, #c058ff);
+    box-shadow: 0 4px 16px rgba(162, 56, 255, 0.3);
+    transform: translateY(-1px);
+}
+
+#deezer-parse-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 4px rgba(162, 56, 255, 0.2);
+}
+
+#youtube-parse-btn:disabled,
+#deezer-parse-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* Brand-colored focus glow per tab */
+#youtube-tab-content .youtube-input-section:focus-within {
+    border-color: rgba(255, 0, 0, 0.25);
+    box-shadow: 0 0 16px rgba(255, 0, 0, 0.08);
+}
+
+#deezer-tab-content .youtube-input-section:focus-within {
+    border-color: rgba(162, 56, 255, 0.25);
+    box-shadow: 0 0 16px rgba(162, 56, 255, 0.08);
 }
 
 /* Right Sidebar */
@@ -10294,6 +10396,25 @@ body {
     background: linear-gradient(135deg, #ff7700, #ff8800);
     border: 1px solid #ff7700;
     box-shadow: 0 4px 15px rgba(255, 102, 0, 0.3);
+}
+
+/* ===============================
+   DEEZER PLAYLIST CARD STYLES (extends YouTube card styles)
+   ===============================*/
+
+.deezer-playlist-card .playlist-card-icon {
+    background: rgba(162, 56, 255, 0.2);
+    border-color: #a238ff;
+    color: #a238ff;
+}
+
+.deezer-playlist-card .playlist-card-action-btn {
+    background: linear-gradient(135deg, #a238ff, #b44dff);
+}
+
+.deezer-playlist-card .playlist-card-action-btn:hover {
+    background: linear-gradient(135deg, #b44dff, #c562ff);
+    box-shadow: 0 0 15px rgba(162, 56, 255, 0.4);
 }
 
 /* ===============================
