@@ -3,14 +3,37 @@
 // ===============================
 
 function docsImg(src, alt) {
-    return `<img class="docs-screenshot" src="/static/docs/${src}" alt="${alt}" loading="lazy" onerror="this.style.display='none'">`;
+    return `<div class="docs-screenshot-wrapper" onclick="openDocsLightbox(this)">
+        <img class="docs-screenshot" src="/static/docs/${src}" alt="${alt}" loading="lazy" onerror="this.parentElement.style.display='none'">
+        <span class="docs-screenshot-label">${alt}</span>
+    </div>`;
+}
+
+function openDocsLightbox(wrapper) {
+    const img = wrapper.querySelector('.docs-screenshot');
+    if (!img) return;
+    const existing = document.querySelector('.docs-lightbox');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'docs-lightbox';
+    overlay.innerHTML = `<button class="docs-lightbox-close">&times;</button><img src="${img.src}" alt="${img.alt}">`;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('active'));
+    const close = () => {
+        overlay.classList.remove('active');
+        setTimeout(() => overlay.remove(), 250);
+    };
+    overlay.addEventListener('click', close);
+    document.addEventListener('keydown', function handler(e) {
+        if (e.key === 'Escape') { close(); document.removeEventListener('keydown', handler); }
+    });
 }
 
 const DOCS_SECTIONS = [
     {
         id: 'getting-started',
         title: 'Getting Started',
-        icon: '/static/dashboard.png',
+        icon: '/static/dashboard.jpg',
         children: [
             { id: 'gs-overview', title: 'Overview' },
             { id: 'gs-first-setup', title: 'First-Time Setup' },
@@ -23,7 +46,7 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="gs-overview">
                 <h3 class="docs-subsection-title">Overview</h3>
                 <p class="docs-text">SoulSync is a self-hosted music download, sync, and library management platform. It connects to <strong>Spotify</strong>, <strong>Apple Music/iTunes</strong>, <strong>Tidal</strong>, <strong>Qobuz</strong>, <strong>YouTube</strong>, and <strong>Beatport</strong> for metadata, and uses <strong>Soulseek</strong> (via slskd) as the primary download source. Your library is served through <strong>Plex</strong>, <strong>Jellyfin</strong>, or <strong>Navidrome</strong>.</p>
-                ${docsImg('gs-overview.png', 'SoulSync dashboard overview')}
+                ${docsImg('gs-overview.jpg', 'SoulSync dashboard overview')}
                 <div class="docs-features">
                     <div class="docs-feature-card"><h4>&#x1F3B5; Download Music</h4><p>Search and download tracks in FLAC, MP3, and more from Soulseek, YouTube, Tidal, or Qobuz, with automatic metadata tagging and file organization.</p></div>
                     <div class="docs-feature-card"><h4>&#x1F504; Playlist Sync</h4><p>Mirror playlists from Spotify, YouTube, Tidal, and Beatport. Discover official metadata and sync to your media server.</p></div>
@@ -42,7 +65,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Spotify (Recommended)</strong> &mdash; Connect Spotify for the richest metadata. Create an app at <strong>developer.spotify.com</strong>, enter your Client ID and Secret, then click Authenticate.</li>
                     <li><strong>Download Path</strong> &mdash; Set your download and transfer paths in the Download Settings section. The transfer path should point to your media server's monitored folder.</li>
                 </ol>
-                ${docsImg('gs-first-setup.png', 'Settings page first-time setup')}
+                ${docsImg('gs-first-setup.jpg', 'Settings page first-time setup')}
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>You can start using SoulSync with just one download source (Soulseek, YouTube, Tidal, or Qobuz). Spotify and other services add metadata enrichment but aren't strictly required &mdash; iTunes/Apple Music is always available as a free fallback.</div></div>
             </div>
             <div class="docs-subsection" id="gs-connecting">
@@ -66,7 +89,7 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>ListenBrainz</strong></td><td>Listening history and recommendations</td><td>URL + Token</td></tr>
                     </tbody>
                 </table>
-                ${docsImg('gs-connecting.png', 'Service credentials connected')}
+                ${docsImg('gs-connecting.jpg', 'Service credentials connected')}
             </div>
             <div class="docs-subsection" id="gs-interface">
                 <h3 class="docs-subsection-title">Understanding the Interface</h3>
@@ -82,7 +105,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Import</strong> &mdash; Import music files from a staging folder with album/track matching</li>
                     <li><strong>Settings</strong> &mdash; Configure services, download preferences, quality profiles, and more</li>
                 </ul>
-                ${docsImg('gs-interface.png', 'SoulSync interface layout')}
+                ${docsImg('gs-interface.jpg', 'SoulSync interface layout')}
                 <p class="docs-text"><strong>Version & Updates</strong>: Click the version number in the sidebar footer to open the <strong>What's New</strong> modal, which shows detailed release notes for every feature and fix. SoulSync automatically checks for updates by comparing your running version against the latest GitHub commit. If an update is available, a banner appears in the modal. Docker users are notified when a new image has been pushed to the repo.</p>
             </div>
             <div class="docs-subsection" id="gs-folders">
@@ -105,7 +128,7 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Staging Path</strong></td><td><code>/app/Staging</code></td><td>For the Import feature only. Drop audio files here to import them into your library via the Import page.</td></tr>
                     </tbody>
                 </table>
-                ${docsImg('gs-folders.png', 'Download settings folder configuration')}
+                ${docsImg('gs-folders.jpg', 'Download settings folder configuration')}
 
                 <h4>How Files Flow</h4>
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>
@@ -121,6 +144,7 @@ const DOCS_SECTIONS = [
                 </div></div>
 
                 <h4>Docker Setup: The Full Picture</h4>
+                ${docsImg('gs-folder-docker.jpg', 'Docker folder mapping')}
                 <p class="docs-text">In Docker, every app runs in its own isolated container with its own filesystem. <strong>Volume mounts</strong> in docker-compose create "bridges" between your host folders and the container. But SoulSync doesn't automatically know where those bridges go &mdash; you have to tell it via the Settings page.</p>
 
                 <p class="docs-text">Here's what happens with a properly configured setup:</p>
@@ -215,7 +239,7 @@ const DOCS_SECTIONS = [
                     <code># Download Path: /app/downloads</code><br>
                     <code># Transfer Path: /app/Transfer</code>
                 </div></div>
-                ${docsImg('gs-docker.png', 'Docker compose configuration')}
+                ${docsImg('gs-docker.jpg', 'Docker compose configuration')}
 
                 <h4>Setup Checklist</h4>
                 <p class="docs-text">Go through every item. If you miss any single one, the pipeline will break:</p>
@@ -296,7 +320,7 @@ const DOCS_SECTIONS = [
     {
         id: 'workflows',
         title: 'Quick Start Workflows',
-        icon: '/static/help.png',
+        icon: '/static/help.jpg',
         children: [
             { id: 'wf-first', title: 'What Should I Do First?' },
             { id: 'wf-download', title: 'How to: Download an Album' },
@@ -430,7 +454,7 @@ const DOCS_SECTIONS = [
     {
         id: 'dashboard',
         title: 'Dashboard',
-        icon: '/static/dashboard.png',
+        icon: '/static/dashboard.jpg',
         children: [
             { id: 'dash-overview', title: 'Overview & Stats' },
             { id: 'dash-workers', title: 'Enrichment Workers' },
@@ -445,7 +469,7 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Overview & Stats</h3>
                 <p class="docs-text">The dashboard is your command center. At the top you'll see <strong>service status indicators</strong> for Spotify, your media server, and Soulseek &mdash; showing connected/disconnected state at a glance. Below that, stat cards display your library totals: artists, albums, tracks, and total library size.</p>
                 <p class="docs-text">Stats update in real-time via WebSocket &mdash; no page refresh needed.</p>
-                ${docsImg('dash-overview.png', 'Dashboard overview')}
+                ${docsImg('dash-overview.jpg', 'Dashboard overview')}
             </div>
             <div class="docs-subsection" id="dash-workers">
                 <h3 class="docs-subsection-title">Enrichment Workers</h3>
@@ -462,7 +486,7 @@ const DOCS_SECTIONS = [
                     <div class="docs-feature-card"><h4>Tidal</h4><p>Tidal IDs, artist images, album labels, explicit flags, ISRCs</p></div>
                     <div class="docs-feature-card"><h4>Qobuz</h4><p>Qobuz IDs, artist images, album labels, genres, explicit flags</p></div>
                 </div>
-                ${docsImg('dash-workers.png', 'Enrichment workers status')}
+                ${docsImg('dash-workers.jpg', 'Enrichment workers status')}
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Workers retry "not found" items every 30 days and errored items every 7 days. You can pause/resume any worker from the dashboard.</div></div>
                 <p class="docs-text"><strong>Rate Limit Protection</strong>: Workers include smart rate limiting for all APIs. If Spotify returns a rate limit with a Retry-After greater than 60 seconds, the app seamlessly switches to iTunes/Apple Music &mdash; an amber indicator appears in the sidebar, searches automatically use Apple Music, and the enrichment worker pauses. When the ban expires, everything recovers automatically. No action needed from the user.</p>
             </div>
@@ -481,7 +505,7 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Backup Manager</strong></td><td>Create, download, restore, and delete database backups. Rolling cleanup keeps the 5 most recent.</td></tr>
                     </tbody>
                 </table>
-                ${docsImg('dash-tools.png', 'Dashboard tool cards')}
+                ${docsImg('dash-tools.jpg', 'Dashboard tool cards')}
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>Each tool card has a help button (?) that opens detailed instructions for that specific tool.</div></div>
             </div>
             <div class="docs-subsection" id="dash-retag">
@@ -494,7 +518,7 @@ const DOCS_SECTIONS = [
                     <li>Review the tag differences &mdash; mismatches are highlighted</li>
                     <li>Click <strong>Retag</strong> to write the corrected metadata to the audio files</li>
                 </ol>
-                ${docsImg('dash-retag.png', 'Retag tool interface')}
+                ${docsImg('dash-retag.jpg', 'Retag tool interface')}
                 <p class="docs-text">The retag operation writes title, artist, album artist, album, track number, disc number, year, and genre. Cover art can optionally be re-embedded.</p>
             </div>
             <div class="docs-subsection" id="dash-backup">
@@ -507,7 +531,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Delete</strong> &mdash; Remove individual backups</li>
                     <li><strong>Rolling Cleanup</strong> &mdash; Automatically keeps only the 5 most recent backups to save disk space</li>
                 </ul>
-                ${docsImg('dash-backup.png', 'Backup manager')}
+                ${docsImg('dash-backup.jpg', 'Backup manager')}
                 <p class="docs-text">The system automation <strong>Auto-Backup Database</strong> creates a backup every 3 days automatically. You can adjust the interval in Automations.</p>
             </div>
             <div class="docs-subsection" id="dash-repair">
@@ -531,7 +555,7 @@ const DOCS_SECTIONS = [
     {
         id: 'sync',
         title: 'Playlist Sync',
-        icon: '/static/sync.png',
+        icon: '/static/sync.jpg',
         children: [
             { id: 'sync-overview', title: 'Overview' },
             { id: 'sync-spotify', title: 'Spotify Playlists' },
@@ -547,7 +571,7 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="sync-overview">
                 <h3 class="docs-subsection-title">Overview</h3>
                 <p class="docs-text">The Sync page lets you import playlists from <strong>Spotify</strong>, <strong>YouTube</strong>, <strong>Tidal</strong>, and <strong>Beatport</strong>. Once imported, playlists are <strong>mirrored</strong> &mdash; they persist in your SoulSync instance and can be refreshed, discovered, and synced to your wishlist for downloading.</p>
-                ${docsImg('sync-overview.png', 'Playlist sync page')}
+                ${docsImg('sync-overview.jpg', 'Playlist sync page')}
             </div>
             <div class="docs-subsection" id="sync-spotify">
                 <h3 class="docs-subsection-title">Spotify Playlists</h3>
@@ -558,13 +582,13 @@ const DOCS_SECTIONS = [
                     <li><strong>Download Missing</strong> &mdash; Opens a modal showing tracks not in your library, with download controls</li>
                     <li><strong>Sync Playlist</strong> &mdash; Adds tracks to your wishlist for automated downloading</li>
                 </ul>
-                ${docsImg('sync-spotify.png', 'Spotify playlists loaded')}
+                ${docsImg('sync-spotify.jpg', 'Spotify playlists loaded')}
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>Spotify-sourced playlists are auto-discovered at confidence 1.0 during refresh &mdash; no separate discovery step needed.</div></div>
             </div>
             <div class="docs-subsection" id="sync-youtube">
                 <h3 class="docs-subsection-title">YouTube Playlists</h3>
                 <p class="docs-text">Paste a YouTube playlist URL into the input field and click <strong>Parse Playlist</strong>. SoulSync extracts the track list and attempts to match each track to official Spotify/iTunes metadata.</p>
-                ${docsImg('sync-youtube.png', 'YouTube playlist import')}
+                ${docsImg('sync-youtube.jpg', 'YouTube playlist import')}
                 <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div>YouTube tracks often have non-standard titles (e.g., "Artist - Song (Official Video)"). The discovery pipeline handles this, but some manual fixes may be needed for edge cases.</div></div>
             </div>
             <div class="docs-subsection" id="sync-tidal">
@@ -595,7 +619,7 @@ const DOCS_SECTIONS = [
                 </ul>
                 <p class="docs-text"><strong>Genre Browser</strong> &mdash; Browse 12+ electronic music genres (House, Techno, Drum & Bass, Trance, etc.) with per-genre views: Top 10 tracks, staff picks, hype rankings, latest releases, and new charts.</p>
                 <p class="docs-text"><strong>Charts</strong> &mdash; Top 100 and Hype charts with full track listings. Each track can be manually matched against Spotify for metadata, then synced and downloaded.</p>
-                ${docsImg('sync-beatport.png', 'Beatport genre browser')}
+                ${docsImg('sync-beatport.jpg', 'Beatport genre browser')}
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Beatport data is cached with a configurable TTL. The system automation <strong>Refresh Beatport Cache</strong> runs every 24 hours to keep content fresh.</div></div>
             </div>
             <div class="docs-subsection" id="sync-mirrored">
@@ -607,7 +631,7 @@ const DOCS_SECTIONS = [
                     <li>Download progress survives page refresh</li>
                     <li>Each profile has its own mirrored playlists</li>
                 </ul>
-                ${docsImg('sync-mirror.png', 'Mirrored playlist cards')}
+                ${docsImg('sync-mirror.jpg', 'Mirrored playlist cards')}
             </div>
             <div class="docs-subsection" id="sync-m3u">
                 <h3 class="docs-subsection-title">M3U Export</h3>
@@ -631,7 +655,7 @@ const DOCS_SECTIONS = [
     {
         id: 'search',
         title: 'Music Downloads',
-        icon: '/static/search.png',
+        icon: '/static/search.jpg',
         children: [
             { id: 'search-enhanced', title: 'Enhanced Search' },
             { id: 'search-basic', title: 'Basic Search' },
@@ -651,13 +675,13 @@ const DOCS_SECTIONS = [
                     <li>Click a <strong>track</strong> to search Soulseek for that specific song</li>
                     <li><strong>Preview tracks</strong> &mdash; Play button on search result tracks lets you stream a preview directly from your download source before committing to a download</li>
                 </ul>
-                ${docsImg('dl-enhanced-search.png', 'Enhanced search results')}
+                ${docsImg('dl-enhanced-search.jpg', 'Enhanced search results')}
             </div>
             <div class="docs-subsection" id="search-basic">
                 <h3 class="docs-subsection-title">Basic Search</h3>
                 <p class="docs-text">Toggle to Basic Search mode for direct Soulseek queries. This shows raw search results with detailed info: format, bitrate, quality score, file size, uploader name, upload speed, and availability.</p>
                 <p class="docs-text"><strong>Filters</strong> let you narrow results by type (Albums/Singles), format (FLAC/MP3/OGG/AAC/WMA), and sort by relevance, quality, size, bitrate, duration, or uploader speed.</p>
-                ${docsImg('dl-basic-search.png', 'Basic Soulseek search')}
+                ${docsImg('dl-basic-search.jpg', 'Basic Soulseek search')}
             </div>
             <div class="docs-subsection" id="search-sources">
                 <h3 class="docs-subsection-title">Download Sources</h3>
@@ -685,7 +709,7 @@ const DOCS_SECTIONS = [
                 </ul>
                 <p class="docs-text">Downloads can be started from multiple places: Enhanced Search results, artist discography, Download Missing modal, wishlist auto-processing, and playlist sync.</p>
                 <p class="docs-text"><strong>Download Candidate Selection</strong>: If a download fails or no suitable source is found, you can view the cached search candidates and manually pick an alternative file from a different user. This lets you recover failed downloads without restarting the entire search.</p>
-                ${docsImg('dl-candidates.png', 'Download candidate selection')}
+                ${docsImg('dl-candidates.jpg', 'Download candidate selection')}
             </div>
             <div class="docs-subsection" id="search-postprocess">
                 <h3 class="docs-subsection-title">Post-Processing Pipeline</h3>
@@ -699,7 +723,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Lossy Copy</strong> &mdash; If enabled in settings, a lower-bitrate copy is created alongside the original (useful for mobile device syncing).</li>
                     <li><strong>Media Server Scan</strong> &mdash; Your media server (Plex/Jellyfin) is notified to scan for the new file. Navidrome auto-detects changes.</li>
                 </ol>
-                ${docsImg('dl-post-processing.png', 'Post-processing pipeline complete')}
+                ${docsImg('dl-post-processing.jpg', 'Post-processing pipeline complete')}
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div><strong>Quarantine</strong>: Files that fail AcoustID verification are moved to a quarantine folder instead of your library. You can review quarantined files and manually approve or delete them. The automation engine can trigger notifications when files are quarantined.</div></div>
             </div>
             <div class="docs-subsection" id="search-quality">
@@ -714,7 +738,7 @@ const DOCS_SECTIONS = [
                     </tbody>
                 </table>
                 <p class="docs-text">Each format has configurable bitrate ranges and a priority order. Enable <strong>Fallback</strong> to accept any quality when preferred formats aren't available.</p>
-                ${docsImg('dl-quality-profiles.png', 'Quality profile settings')}
+                ${docsImg('dl-quality-profiles.jpg', 'Quality profile settings')}
             </div>
             <div class="docs-subsection" id="search-manager">
                 <h3 class="docs-subsection-title">Download Manager</h3>
@@ -725,7 +749,7 @@ const DOCS_SECTIONS = [
     {
         id: 'discover',
         title: 'Discover Artists',
-        icon: '/static/discover.png',
+        icon: '/static/discover.jpg',
         children: [
             { id: 'disc-hero', title: 'Featured Artists' },
             { id: 'disc-playlists', title: 'Discovery Playlists' },
@@ -743,7 +767,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Watch All</strong> &mdash; Add all featured artists to your watchlist at once</li>
                     <li><strong>View Recommended</strong> &mdash; See 50+ similar artists with enrichment data</li>
                 </ul>
-                ${docsImg('disc-hero.png', 'Featured artist hero slider')}
+                ${docsImg('disc-hero.jpg', 'Featured artist hero slider')}
             </div>
             <div class="docs-subsection" id="disc-playlists">
                 <h3 class="docs-subsection-title">Discovery & Personalized Playlists</h3>
@@ -762,15 +786,16 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Familiar Favorites</strong></td><td>Library</td><td>Well-known tracks from artists you follow</td></tr>
                     </tbody>
                 </table>
-                ${docsImg('disc-playlists.png', 'Discovery playlist cards')}
+                ${docsImg('disc-playlists.jpg', 'Discovery playlist cards')}
                 <p class="docs-text">Each playlist can be played in the media player, downloaded, or synced to your media server.</p>
                 <p class="docs-text"><strong>Genre Browser</strong> &mdash; Filter discovery pool content by specific genres. Browse available genres and view top tracks within each genre category.</p>
+                ${docsImg('disc-genre-browser.jpg', 'Genre browser')}
                 <p class="docs-text"><strong>ListenBrainz Playlists</strong> &mdash; If ListenBrainz is configured, the Discover page also shows personalized playlists generated from your listening history: Created For You, Your Playlists, and Collaborative playlists.</p>
             </div>
             <div class="docs-subsection" id="disc-build">
                 <h3 class="docs-subsection-title">Build Custom Playlist</h3>
                 <p class="docs-text">Search for 1&ndash;5 artists, select them, and click <strong>Generate</strong> to create a custom playlist from their catalogs. You can then download or sync the generated playlist.</p>
-                ${docsImg('disc-build-playlist.png', 'Build custom playlist')}
+                ${docsImg('disc-build-playlist.jpg', 'Build custom playlist')}
             </div>
             <div class="docs-subsection" id="disc-seasonal">
                 <h3 class="docs-subsection-title">Seasonal & Curated Content</h3>
@@ -784,14 +809,14 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="disc-timemachine">
                 <h3 class="docs-subsection-title">Time Machine</h3>
                 <p class="docs-text">Browse discovery pool content by <strong>decade</strong> &mdash; tabs from the 1950s through the 2020s. Each decade pulls top tracks from pool artists active in that era.</p>
-                ${docsImg('disc-time-machine.png', 'Time Machine decade browser')}
+                ${docsImg('disc-time-machine.jpg', 'Time Machine decade browser')}
             </div>
         `
     },
     {
         id: 'artists',
         title: 'Artists & Watchlist',
-        icon: '/static/artists.png',
+        icon: '/static/artists.jpg',
         children: [
             { id: 'art-search', title: 'Artist Search' },
             { id: 'art-detail', title: 'Artist Detail & Discography' },
@@ -804,7 +829,7 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="art-search">
                 <h3 class="docs-subsection-title">Artist Search</h3>
                 <p class="docs-text">Search for any artist by name. Results show artist cards with images and genres. Results come from Spotify (or iTunes as fallback). Click any card to open the artist detail view.</p>
-                ${docsImg('art-search.png', 'Artist search results')}
+                ${docsImg('art-search.jpg', 'Artist search results')}
             </div>
             <div class="docs-subsection" id="art-detail">
                 <h3 class="docs-subsection-title">Artist Detail & Discography</h3>
@@ -817,7 +842,7 @@ const DOCS_SECTIONS = [
                 </ul>
                 <p class="docs-text">At the top, <strong>View on</strong> buttons link to the artist on each matched external service (Spotify, Apple Music, MusicBrainz, Deezer, AudioDB, Last.fm, Genius, Tidal, Qobuz). <strong>Service badges</strong> on artist cards also indicate which services have matched this artist.</p>
                 <p class="docs-text"><strong>Similar Artists</strong> appear as clickable bubbles below the discography for further exploration and discovery.</p>
-                ${docsImg('art-detail.png', 'Artist detail page')}
+                ${docsImg('art-detail.jpg', 'Artist detail page')}
             </div>
             <div class="docs-subsection" id="art-watchlist">
                 <h3 class="docs-subsection-title">Watchlist</h3>
@@ -829,7 +854,7 @@ const DOCS_SECTIONS = [
                     <li>Use <strong>Watch All</strong> to add all recommended artists at once</li>
                     <li><strong>Watch All Unwatched</strong> &mdash; Bulk-add every library artist that isn't already on your watchlist</li>
                 </ul>
-                ${docsImg('art-watchlist.png', 'Watchlist page')}
+                ${docsImg('art-watchlist.jpg', 'Watchlist page')}
             </div>
             <div class="docs-subsection" id="art-scanning">
                 <h3 class="docs-subsection-title">New Release Scanning</h3>
@@ -840,7 +865,7 @@ const DOCS_SECTIONS = [
                     <li>Recent wishlist additions feed</li>
                     <li>Stats: artists scanned, new tracks found, tracks added to wishlist</li>
                 </ul>
-                ${docsImg('art-scan.png', 'New release scan panel')}
+                ${docsImg('art-scan.jpg', 'New release scan panel')}
             </div>
             <div class="docs-subsection" id="art-wishlist">
                 <h3 class="docs-subsection-title">Wishlist</h3>
@@ -854,7 +879,7 @@ const DOCS_SECTIONS = [
                 <p class="docs-text"><strong>Manual Processing</strong>: Use the <strong>Process Wishlist</strong> automation action to trigger processing on demand. Options include processing all items, albums only, or singles only.</p>
                 <p class="docs-text"><strong>Cleanup</strong>: The <strong>Cleanup Wishlist</strong> action removes duplicates (same track added multiple times) and items you already own in your library.</p>
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Each wishlist item tracks its source (watchlist scan, playlist sync, manual), number of retry attempts, last error message, and status (pending, downloading, failed, complete).</div></div>
-                ${docsImg('art-wishlist.png', 'Wishlist queue')}
+                ${docsImg('art-wishlist.jpg', 'Wishlist queue')}
             </div>
             <div class="docs-subsection" id="art-settings">
                 <h3 class="docs-subsection-title">Watchlist Settings</h3>
@@ -866,7 +891,7 @@ const DOCS_SECTIONS = [
     {
         id: 'automations',
         title: 'Automations',
-        icon: '/static/automation.png',
+        icon: '/static/automation.jpg',
         children: [
             { id: 'auto-overview', title: 'Overview' },
             { id: 'auto-builder', title: 'Builder' },
@@ -881,7 +906,7 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Overview</h3>
                 <p class="docs-text">Automations let you schedule tasks and react to events with a visual <strong>WHEN &rarr; DO &rarr; THEN</strong> builder. Create custom workflows like "When a download completes, update the database, then notify me on Discord."</p>
                 <p class="docs-text">Each automation card shows its trigger/action flow, last run time, next scheduled run (with countdown), and a <strong>Run Now</strong> button for instant execution.</p>
-                ${docsImg('auto-overview.png', 'Automations page')}
+                ${docsImg('auto-overview.jpg', 'Automations page')}
             </div>
             <div class="docs-subsection" id="auto-builder">
                 <h3 class="docs-subsection-title">Builder</h3>
@@ -892,7 +917,7 @@ const DOCS_SECTIONS = [
                     <li><strong>THEN</strong> (Post-Action) &mdash; Up to 3 notification or signal actions after the DO completes</li>
                 </ol>
                 <p class="docs-text">Add <strong>Conditions</strong> to filter when the automation runs. Match modes: All (AND) or Any (OR). Operators: contains, equals, starts_with, not_contains.</p>
-                ${docsImg('auto-builder.png', 'Automation builder')}
+                ${docsImg('auto-builder.jpg', 'Automation builder')}
             </div>
             <div class="docs-subsection" id="auto-triggers">
                 <h3 class="docs-subsection-title">All Triggers</h3>
@@ -971,7 +996,7 @@ const DOCS_SECTIONS = [
                 <p class="docs-text">Use the <strong>Run Now</strong> button on any automation card to execute it immediately, regardless of its schedule. The result (success/failure) updates in real-time on the card. Running automations display a glow effect on their card.</p>
                 <p class="docs-text"><strong>Stall detection</strong>: If an automation action runs for more than 2 hours without completing, it is automatically flagged as stalled and terminated to prevent resource leaks.</p>
                 <p class="docs-text">The Dashboard activity feed also logs every automation execution with timestamps, so you can review the full history of what ran and when.</p>
-                ${docsImg('auto-history.png', 'Automation execution history')}
+                ${docsImg('auto-history.jpg', 'Automation execution history')}
             </div>
             <div class="docs-subsection" id="auto-system">
                 <h3 class="docs-subsection-title">System Automations</h3>
@@ -991,14 +1016,14 @@ const DOCS_SECTIONS = [
                         <tr><td>Full Cleanup</td><td>Every 12 hours</td></tr>
                     </tbody>
                 </table>
-                ${docsImg('auto-system.png', 'System automations')}
+                ${docsImg('auto-system.jpg', 'System automations')}
             </div>
         `
     },
     {
         id: 'library',
         title: 'Music Library',
-        icon: '/static/library.png',
+        icon: '/static/library.jpg',
         children: [
             { id: 'lib-standard', title: 'Standard View' },
             { id: 'lib-enhanced', title: 'Enhanced Library Manager' },
@@ -1013,7 +1038,7 @@ const DOCS_SECTIONS = [
                 <p class="docs-text">The Library page shows all artists in your collection as cards with images, album/track counts, and <strong>service badges</strong> (Spotify, MusicBrainz, Deezer, AudioDB, iTunes, Last.fm, Genius, Tidal, Qobuz) indicating which services have matched this artist.</p>
                 <p class="docs-text">Use the <strong>search bar</strong>, <strong>alphabet navigation</strong> (A&ndash;Z, #), and <strong>watchlist filter</strong> (All/Watched/Unwatched) to browse. Click any artist card to view their discography.</p>
                 <p class="docs-text">The artist detail page shows albums, EPs, and singles as cards with completion percentages. Filter by category, content type (live/compilations/featured), or status (owned/missing). At the top, <strong>View on</strong> buttons link to the artist on each matched external service.</p>
-                ${docsImg('lib-standard.png', 'Library artist grid')}
+                ${docsImg('lib-standard.jpg', 'Library artist grid')}
             </div>
             <div class="docs-subsection" id="lib-enhanced">
                 <h3 class="docs-subsection-title">Enhanced Library Manager</h3>
@@ -1026,7 +1051,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Play tracks</strong> &mdash; Queue button adds tracks to the media player</li>
                     <li><strong>Delete</strong> &mdash; Remove tracks or albums from the database (files on disk are never touched)</li>
                 </ul>
-                ${docsImg('lib-enhanced.png', 'Enhanced Library Manager')}
+                ${docsImg('lib-enhanced.jpg', 'Enhanced Library Manager')}
             </div>
             <div class="docs-subsection" id="lib-matching">
                 <h3 class="docs-subsection-title">Service Matching</h3>
@@ -1042,7 +1067,7 @@ const DOCS_SECTIONS = [
                     <li>Optionally enable <strong>Embed cover art</strong> and <strong>Sync to server</strong></li>
                     <li>Click <strong>Write Tags</strong> to apply changes to the file</li>
                 </ol>
-                ${docsImg('lib-tags.png', 'Tag preview modal')}
+                ${docsImg('lib-tags.jpg', 'Tag preview modal')}
                 <p class="docs-text">Supports MP3, FLAC, OGG, and M4A via Mutagen. After writing, optional server sync pushes metadata to Plex (per-track update), Jellyfin (library scan), or Navidrome (auto-detects).</p>
             </div>
             <div class="docs-subsection" id="lib-bulk">
@@ -1053,7 +1078,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Write Tags</strong> &mdash; Batch write tags to all selected tracks with live progress</li>
                     <li><strong>Clear Selection</strong> &mdash; Deselect all</li>
                 </ul>
-                ${docsImg('lib-bulk.png', 'Bulk operations bar')}
+                ${docsImg('lib-bulk.jpg', 'Bulk operations bar')}
             </div>
             <div class="docs-subsection" id="lib-missing">
                 <h3 class="docs-subsection-title">Download Missing Tracks</h3>
@@ -1065,7 +1090,7 @@ const DOCS_SECTIONS = [
     {
         id: 'import',
         title: 'Import Music',
-        icon: '/static/import.png',
+        icon: '/static/import.jpg',
         children: [
             { id: 'imp-setup', title: 'Staging Setup' },
             { id: 'imp-workflow', title: 'Import Workflow' },
@@ -1079,7 +1104,7 @@ const DOCS_SECTIONS = [
                 <p class="docs-text">Set your <strong>staging folder path</strong> in Settings &rarr; Download Settings. Place audio files you want to import into this folder. SoulSync scans the folder and detects albums from the file structure.</p>
                 <p class="docs-text">Place albums in subfolders (e.g., <code>Artist - Album/</code>) and loose singles at the root level.</p>
                 <p class="docs-text">The import page header shows the total files in staging and their combined size.</p>
-                ${docsImg('imp-staging.png', 'Import staging page')}
+                ${docsImg('imp-staging.jpg', 'Import staging page')}
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Files not showing up?</strong> Check that your staging folder path is correct in Settings and that the folder has read permissions. Docker users: make sure the staging volume mount is configured in your docker-compose.yml.</div></div>
             </div>
             <div class="docs-subsection" id="imp-workflow">
@@ -1091,7 +1116,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Match tracks</strong> &mdash; Drag-and-drop staged files onto album track slots, or let auto-match attempt it</li>
                     <li>Review the match and click <strong>Confirm</strong> to import &mdash; files are tagged, organized, and added to your library</li>
                 </ol>
-                ${docsImg('imp-matching.png', 'Track matching interface')}
+                ${docsImg('imp-matching.jpg', 'Track matching interface')}
             </div>
             <div class="docs-subsection" id="imp-singles">
                 <h3 class="docs-subsection-title">Singles Import</h3>
@@ -1116,14 +1141,14 @@ const DOCS_SECTIONS = [
                     <li>Map columns to the correct fields (Artist, Album, Track)</li>
                     <li>SoulSync searches for each track on Spotify/iTunes and adds matches to your wishlist for downloading</li>
                 </ol>
-                ${docsImg('imp-textfile.png', 'Text file import')}
+                ${docsImg('imp-textfile.jpg', 'Text file import')}
             </div>
         `
     },
     {
         id: 'player',
         title: 'Media Player',
-        icon: '/static/library.png',
+        icon: '/static/library.jpg',
         children: [
             { id: 'player-controls', title: 'Playback Controls' },
             { id: 'player-streaming', title: 'Streaming & Sources' },
@@ -1134,8 +1159,9 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="player-controls">
                 <h3 class="docs-subsection-title">Playback Controls</h3>
                 <p class="docs-text">The sidebar media player is always visible when a track is loaded. It shows album art, track info, a seekable progress bar, and playback controls (play/pause, previous, next, volume, repeat, shuffle).</p>
+                ${docsImg('player-sidebar.jpg', 'Sidebar media player')}
                 <p class="docs-text">Click the sidebar player to open the <strong>Now Playing modal</strong> &mdash; a full-screen experience with large album art, ambient glow (dominant color from cover art), a frequency-driven audio visualizer, and expanded controls.</p>
-                ${docsImg('player-nowplaying.png', 'Now Playing modal')}
+                ${docsImg('player-nowplaying.jpg', 'Now Playing modal')}
             </div>
             <div class="docs-subsection" id="player-streaming">
                 <h3 class="docs-subsection-title">Streaming & Sources</h3>
@@ -1152,7 +1178,7 @@ const DOCS_SECTIONS = [
                 <p class="docs-text">Add tracks to the queue from the Enhanced Library Manager or download results. Manage the queue in the Now Playing modal: reorder, remove individual tracks, or clear all.</p>
                 <p class="docs-text"><strong>Smart Radio</strong> mode (toggle in queue header) automatically adds similar tracks when the queue runs out, based on genre, mood, style, and artist similarity. Playback continues seamlessly.</p>
                 <p class="docs-text"><strong>Repeat modes</strong>: Off &rarr; Repeat All (loop queue) &rarr; Repeat One. <strong>Shuffle</strong> randomizes the next track from the remaining queue.</p>
-                ${docsImg('player-queue.png', 'Queue panel')}
+                ${docsImg('player-queue.jpg', 'Queue panel')}
             </div>
             <div class="docs-subsection" id="player-shortcuts">
                 <h3 class="docs-subsection-title">Keyboard Shortcuts</h3>
@@ -1175,7 +1201,7 @@ const DOCS_SECTIONS = [
     {
         id: 'settings',
         title: 'Settings',
-        icon: '/static/settings.png',
+        icon: '/static/settings.jpg',
         children: [
             { id: 'set-services', title: 'Service Credentials' },
             { id: 'set-media', title: 'Media Server Setup' },
@@ -1198,7 +1224,6 @@ const DOCS_SECTIONS = [
                     <li><strong>AcoustID</strong> &mdash; API key from acoustid.org (enables fingerprint verification)</li>
                     <li><strong>ListenBrainz</strong> &mdash; Base URL + token for listening history and playlist import</li>
                 </ul>
-                ${docsImg('settings-credentials.png', 'Service credentials')}
             </div>
             <div class="docs-subsection" id="set-media">
                 <h3 class="docs-subsection-title">Media Server Setup</h3>
@@ -1211,7 +1236,7 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Navidrome</strong></td><td>URL + Username + Password</td><td>Select the <strong>Music Folder</strong> to monitor. Navidrome auto-detects new files, so SoulSync doesn't need to trigger scans &mdash; just place files in the right folder.</td></tr>
                     </tbody>
                 </table>
-                ${docsImg('settings-media-server.png', 'Media server setup')}
+                ${docsImg('settings-media-server.jpg', 'Media server setup')}
                 <p class="docs-text">The media player streams audio directly from your connected server &mdash; tracks play through your Plex, Jellyfin, or Navidrome instance without needing local file access.</p>
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Navidrome users:</strong> If artist images are broken after upgrading, use the <strong>Fix Navidrome URLs</strong> tool in Settings to convert old image URL formats to the correct Subsonic API format.</div></div>
             </div>
@@ -1226,7 +1251,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Lossy Copy</strong> &mdash; When enabled, creates a lower-bitrate MP3 copy of every downloaded file. Configure the output bitrate (default 320kbps) and output folder. Optionally delete the original lossless file after creating the lossy copy. Useful for syncing to mobile devices or streaming servers with bandwidth constraints.</li>
                     <li><strong>Content Filtering</strong> &mdash; Toggle explicit content filtering to control whether explicit tracks appear in search results and downloads.</li>
                 </ul>
-                ${docsImg('settings-downloads.png', 'Download settings')}
+                ${docsImg('settings-downloads.jpg', 'Download settings')}
                 <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div><strong>Docker users:</strong> Always use container-side paths in these settings (e.g., <code>/app/downloads</code>, <code>/app/Transfer</code>). Never use host paths like <code>/mnt/music</code> &mdash; the container can't access those. Your docker-compose <code>volumes</code> section is where host paths are mapped to container paths. See <strong>Getting Started &rarr; Folder Setup</strong> for a complete walkthrough.</div></div>
             </div>
             <div class="docs-subsection" id="set-processing">
@@ -1242,7 +1267,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Soulseek Search Timeout</strong> &mdash; How long to wait for Soulseek search results before giving up (seconds).</li>
                     <li><strong>Discovery Lookback Period</strong> &mdash; How many weeks back to check for new releases during watchlist scans.</li>
                 </ul>
-                ${docsImg('settings-processing.png', 'Processing settings')}
+                ${docsImg('settings-processing.jpg', 'Processing settings')}
             </div>
             <div class="docs-subsection" id="set-quality">
                 <h3 class="docs-subsection-title">Quality Profiles</h3>
@@ -1264,7 +1289,7 @@ const DOCS_SECTIONS = [
     {
         id: 'profiles',
         title: 'Multi-Profile',
-        icon: '/static/settings.png',
+        icon: '/static/settings.jpg',
         children: [
             { id: 'prof-overview', title: 'How Profiles Work' },
             { id: 'prof-manage', title: 'Managing Profiles' },
@@ -1298,7 +1323,8 @@ const DOCS_SECTIONS = [
                     <li>Profile 1 (admin) cannot be deleted</li>
                 </ul>
                 <p class="docs-text">PINs are 4-6 digits. If you forget your PIN, the admin can reset it from Manage Profiles. The admin PIN protects settings and destructive operations when multiple profiles exist.</p>
-                ${docsImg('profiles-picker.png', 'Profile picker')}
+                ${docsImg('profiles-picker.jpg', 'Profile picker')}
+                ${docsImg('profiles-create.jpg', 'Profile creation')}
             </div>
             <div class="docs-subsection" id="prof-permissions">
                 <h3 class="docs-subsection-title">Permissions & Page Access</h3>
@@ -1308,7 +1334,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Can Download Music</strong> &mdash; Toggle whether the profile can initiate downloads. When disabled, all download buttons are hidden and the backend blocks download API calls with a 403 error.</li>
                     <li><strong>Enhanced Library Manager</strong> &mdash; The Enhanced view toggle on artist detail pages is only available to admin profiles. Non-admin users see the Standard view only.</li>
                 </ul>
-                ${docsImg('profiles-permissions.png', 'Profile permissions')}
+                ${docsImg('profiles-permissions.jpg', 'Profile permissions')}
                 <p class="docs-text">If the admin removes a page that was set as a user's home page, the home page automatically resets. Navigation guards prevent users from accessing restricted pages even via direct URL or browser history.</p>
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Existing profiles created before permissions were added have full access to all pages by default. The admin must explicitly restrict access per profile.</div></div>
             </div>
@@ -1327,7 +1353,7 @@ const DOCS_SECTIONS = [
     {
         id: 'api',
         title: 'REST API',
-        icon: '/static/settings.png',
+        icon: '/static/settings.jpg',
         children: [
             { id: 'api-auth', title: 'Authentication' },
             { id: 'api-system', title: 'System & Status' },
