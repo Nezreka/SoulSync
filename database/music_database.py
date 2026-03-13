@@ -107,6 +107,9 @@ class SimilarArtist:
     similarity_rank: int  # 1-10, where 1 is most similar
     occurrence_count: int  # How many watchlist artists share this similar artist
     last_updated: datetime
+    image_url: Optional[str] = None  # Cached artist image
+    genres: Optional[List[str]] = None  # Cached genres
+    popularity: int = 0  # Cached popularity score
 
 @dataclass
 class DiscoveryTrack:
@@ -1054,8 +1057,16 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE similar_artists ADD COLUMN last_featured TIMESTAMP")
                 logger.info("Added last_featured column to similar_artists table for hero cycling")
 
+            # Migration: Add cached metadata columns to avoid API calls on every page load
+            if 'image_url' not in columns:
+                cursor.execute("ALTER TABLE similar_artists ADD COLUMN image_url TEXT")
+                cursor.execute("ALTER TABLE similar_artists ADD COLUMN genres TEXT")
+                cursor.execute("ALTER TABLE similar_artists ADD COLUMN popularity INTEGER DEFAULT 0")
+                cursor.execute("ALTER TABLE similar_artists ADD COLUMN metadata_updated_at TIMESTAMP")
+                logger.info("Added image_url, genres, popularity, metadata_updated_at columns to similar_artists for hero caching")
+
         except Exception as e:
-            logger.error(f"Error adding last_featured column to similar_artists: {e}")
+            logger.error(f"Error adding columns to similar_artists: {e}")
             # Don't raise - this is a migration, database can still function
 
     def _fix_watchlist_spotify_id_nullable(self, cursor):
@@ -5309,6 +5320,24 @@ class MusicDatabase:
             logger.error(f"Error updating similar artist iTunes ID: {e}")
             return False
 
+    def update_similar_artist_metadata(self, similar_artist_id: int, image_url: str = None,
+                                        genres: list = None, popularity: int = None) -> bool:
+        """Cache artist metadata (image, genres, popularity) to avoid repeated API calls"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                genres_json = json.dumps(genres) if genres else None
+                cursor.execute("""
+                    UPDATE similar_artists
+                    SET image_url = ?, genres = ?, popularity = ?, metadata_updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (image_url, genres_json, popularity or 0, similar_artist_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating similar artist metadata: {e}")
+            return False
+
     def has_fresh_similar_artists(self, source_artist_id: str, days_threshold: int = 30, require_itunes: bool = True, require_spotify: bool = False, profile_id: int = 1) -> bool:
         """
         Check if we have cached similar artists that are still fresh (<days_threshold old).
@@ -5401,7 +5430,10 @@ class MusicDatabase:
                         sa.similar_artist_name,
                         AVG(sa.similarity_rank) as similarity_rank,
                         SUM(sa.occurrence_count) as occurrence_count,
-                        MAX(sa.last_updated) as last_updated
+                        MAX(sa.last_updated) as last_updated,
+                        MAX(sa.image_url) as image_url,
+                        MAX(sa.genres) as genres,
+                        MAX(sa.popularity) as popularity
                     FROM similar_artists sa
                     LEFT JOIN watchlist_artists wa ON (
                         (sa.similar_artist_spotify_id IS NOT NULL AND sa.similar_artist_spotify_id = wa.spotify_artist_id)
@@ -5419,16 +5451,27 @@ class MusicDatabase:
                 """, (profile_id, profile_id, limit))
 
                 rows = cursor.fetchall()
-                return [SimilarArtist(
-                    id=row['id'],
-                    source_artist_id=row['source_artist_id'],
-                    similar_artist_spotify_id=row['similar_artist_spotify_id'],
-                    similar_artist_itunes_id=row['similar_artist_itunes_id'] if 'similar_artist_itunes_id' in row.keys() else None,
-                    similar_artist_name=row['similar_artist_name'],
-                    similarity_rank=int(row['similarity_rank']),
-                    occurrence_count=row['occurrence_count'],
-                    last_updated=datetime.fromisoformat(row['last_updated'])
-                ) for row in rows]
+                results = []
+                for row in rows:
+                    genres_raw = row['genres'] if 'genres' in row.keys() else None
+                    try:
+                        genres_list = json.loads(genres_raw) if genres_raw else None
+                    except (json.JSONDecodeError, TypeError):
+                        genres_list = None
+                    results.append(SimilarArtist(
+                        id=row['id'],
+                        source_artist_id=row['source_artist_id'],
+                        similar_artist_spotify_id=row['similar_artist_spotify_id'],
+                        similar_artist_itunes_id=row['similar_artist_itunes_id'] if 'similar_artist_itunes_id' in row.keys() else None,
+                        similar_artist_name=row['similar_artist_name'],
+                        similarity_rank=int(row['similarity_rank']),
+                        occurrence_count=row['occurrence_count'],
+                        last_updated=datetime.fromisoformat(row['last_updated']),
+                        image_url=row['image_url'] if 'image_url' in row.keys() else None,
+                        genres=genres_list,
+                        popularity=row['popularity'] if 'popularity' in row.keys() else 0,
+                    ))
+                return results
 
         except Exception as e:
             logger.error(f"Error getting top similar artists: {e}")
