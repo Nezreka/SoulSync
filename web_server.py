@@ -23609,6 +23609,9 @@ def _run_tidal_discovery_worker(playlist_id):
                     # Spotify: Function returns (Track, raw_data, confidence)
                     track_obj, raw_track_data, match_confidence = track_result
                     album_obj = raw_track_data.get('album', {}) if raw_track_data else {}
+                    # Extract image URL from album data or track object
+                    _album_images = album_obj.get('images', [])
+                    _image_url = _album_images[0].get('url', '') if _album_images else (getattr(track_obj, 'image_url', '') or '')
 
                     match_data = {
                         'id': track_obj.id,
@@ -23617,6 +23620,7 @@ def _run_tidal_discovery_worker(playlist_id):
                         'album': album_obj,
                         'duration_ms': track_obj.duration_ms,
                         'external_urls': track_obj.external_urls,
+                        'image_url': _image_url,
                         'source': 'spotify'
                     }
                     result['spotify_data'] = match_data
@@ -23631,6 +23635,11 @@ def _run_tidal_discovery_worker(playlist_id):
                     match_confidence = track_result.pop('confidence', 0.80)
                     match_data = track_result
                     match_data['source'] = 'itunes'
+                    # Extract image URL from iTunes album images
+                    _itunes_album = match_data.get('album', {})
+                    _itunes_images = _itunes_album.get('images', []) if isinstance(_itunes_album, dict) else []
+                    if _itunes_images and 'image_url' not in match_data:
+                        match_data['image_url'] = _itunes_images[0].get('url', '')
                     result['spotify_data'] = match_data
                     result['match_data'] = match_data
                     result['status'] = 'found'
@@ -24534,6 +24543,9 @@ def _run_deezer_discovery_worker(playlist_id):
                     # Spotify: Function returns (Track, raw_data, confidence)
                     track_obj, raw_track_data, match_confidence = track_result
                     album_obj = raw_track_data.get('album', {}) if raw_track_data else {}
+                    # Extract image URL from album data or track object
+                    _album_images = album_obj.get('images', [])
+                    _image_url = _album_images[0].get('url', '') if _album_images else (getattr(track_obj, 'image_url', '') or '')
 
                     match_data = {
                         'id': track_obj.id,
@@ -24542,6 +24554,7 @@ def _run_deezer_discovery_worker(playlist_id):
                         'album': album_obj,
                         'duration_ms': track_obj.duration_ms,
                         'external_urls': track_obj.external_urls,
+                        'image_url': _image_url,
                         'source': 'spotify'
                     }
                     result['spotify_data'] = match_data
@@ -24561,6 +24574,11 @@ def _run_deezer_discovery_worker(playlist_id):
                     match_confidence = track_result.pop('confidence', 0.80)
                     match_data = track_result
                     match_data['source'] = 'itunes'
+                    # Extract image URL from iTunes album images
+                    _itunes_album = match_data.get('album', {})
+                    _itunes_images = _itunes_album.get('images', []) if isinstance(_itunes_album, dict) else []
+                    if _itunes_images and 'image_url' not in match_data:
+                        match_data['image_url'] = _itunes_images[0].get('url', '')
                     result['spotify_data'] = match_data
                     result['match_data'] = match_data
                     result['status'] = '✅ Found'
@@ -25273,12 +25291,17 @@ def _run_youtube_discovery_worker(url_hash):
                             'images': [{'url': matched_track.image_url}] if hasattr(matched_track, 'image_url') and matched_track.image_url else []
                         }
 
+                    # Extract image URL for discovery pool display
+                    _yt_album_images = album_data.get('images', [])
+                    _yt_image_url = _yt_album_images[0].get('url', '') if _yt_album_images else (getattr(matched_track, 'image_url', '') or '')
+
                     result['matched_data'] = {
                         'id': matched_track.id,
                         'name': matched_track.name,
                         'artists': matched_track.artists,
                         'album': album_data,
                         'duration_ms': matched_track.duration_ms,
+                        'image_url': _yt_image_url,
                         'source': discovery_source
                     }
                     result['spotify_data'] = result['matched_data']
@@ -25581,12 +25604,17 @@ def _run_listenbrainz_discovery_worker(playlist_mbid):
                             'images': [{'url': matched_track.image_url}] if hasattr(matched_track, 'image_url') and matched_track.image_url else []
                         }
 
+                    # Extract image URL for discovery pool display
+                    _yt_album_images = album_data.get('images', [])
+                    _yt_image_url = _yt_album_images[0].get('url', '') if _yt_album_images else (getattr(matched_track, 'image_url', '') or '')
+
                     result['matched_data'] = {
                         'id': matched_track.id,
                         'name': matched_track.name,
                         'artists': matched_track.artists,
                         'album': album_data,
                         'duration_ms': matched_track.duration_ms,
+                        'image_url': _yt_image_url,
                         'source': discovery_source
                     }
                     result['spotify_data'] = result['matched_data']
@@ -32804,6 +32832,11 @@ def _run_beatport_discovery_worker(url_hash):
                             cache_artists = cache_data.get('artists', [])
                             if cache_artists and isinstance(cache_artists[0], dict):
                                 cache_data['artists'] = [a.get('name', '') for a in cache_artists]
+                            # Extract image URL for discovery pool display
+                            if 'image_url' not in cache_data:
+                                _bp_album = cache_data.get('album', {})
+                                _bp_images = _bp_album.get('images', []) if isinstance(_bp_album, dict) else []
+                                cache_data['image_url'] = _bp_images[0].get('url', '') if _bp_images else ''
                             cache_db = get_database()
                             cache_db.save_discovery_cache_match(
                                 cache_key[0], cache_key[1], discovery_source, best_confidence,
