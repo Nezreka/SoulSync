@@ -134,6 +134,31 @@ def _clear_rate_limit():
     logger.info("Global rate limit ban cleared (including post-ban cooldown)")
 
 
+def _detect_and_set_rate_limit(exception, endpoint_name="unknown"):
+    """Check if a Spotify exception is a 429 rate limit and activate global ban if so.
+    Returns True if rate limit was detected."""
+    error_str = str(exception)
+    if "429" in error_str or "rate limit" in error_str.lower():
+        # Try to extract Retry-After
+        retry_after = None
+        if hasattr(exception, 'headers') and exception.headers:
+            retry_after = exception.headers.get('Retry-After') or exception.headers.get('retry-after')
+        if retry_after:
+            try:
+                delay = int(retry_after)
+            except (ValueError, TypeError):
+                delay = 300  # Default 5 min if can't parse
+        else:
+            # Spotipy "Max Retries" means it already exhausted retries — assume long ban
+            if "max retries" in error_str.lower():
+                delay = 600  # 10 min default for exhausted retries
+            else:
+                delay = 300
+        _set_global_rate_limit(delay, endpoint_name)
+        return True
+    return False
+
+
 def rate_limited(func):
     """Decorator to enforce rate limiting on Spotify API calls with retry and exponential backoff"""
     @wraps(func)
@@ -896,6 +921,7 @@ class SpotifyClient:
                 return album_data
 
             except Exception as e:
+                _detect_and_set_rate_limit(e, 'get_album')
                 logger.error(f"Error fetching album via Spotify: {e}")
                 # Fall through to iTunes fallback
 
@@ -1007,6 +1033,7 @@ class SpotifyClient:
             try:
                 return self.sp.artist(artist_id)
             except Exception as e:
+                _detect_and_set_rate_limit(e, 'get_artist')
                 logger.error(f"Error fetching artist via Spotify: {e}")
                 # Fall through to iTunes fallback
 
