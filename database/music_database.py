@@ -5216,25 +5216,36 @@ class MusicDatabase:
                                       similar_artist_spotify_id: Optional[str] = None,
                                       similar_artist_itunes_id: Optional[str] = None,
                                       similarity_rank: int = 1,
-                                      profile_id: int = 1) -> bool:
+                                      profile_id: int = 1,
+                                      image_url: Optional[str] = None,
+                                      genres: Optional[list] = None,
+                                      popularity: int = 0) -> bool:
         """Add or update a similar artist recommendation (supports both Spotify and iTunes IDs)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                genres_json = json.dumps(genres) if genres else None
 
                 # Use artist name as the unique key (allows storing both IDs for same artist)
                 cursor.execute("""
                     INSERT INTO similar_artists
-                    (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_name, similarity_rank, occurrence_count, last_updated, profile_id)
-                    VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?)
+                    (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_name,
+                     similarity_rank, occurrence_count, last_updated, profile_id,
+                     image_url, genres, popularity, metadata_updated_at)
+                    VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(profile_id, source_artist_id, similar_artist_name)
                     DO UPDATE SET
                         similar_artist_spotify_id = COALESCE(excluded.similar_artist_spotify_id, similar_artist_spotify_id),
                         similar_artist_itunes_id = COALESCE(excluded.similar_artist_itunes_id, similar_artist_itunes_id),
                         similarity_rank = excluded.similarity_rank,
                         occurrence_count = occurrence_count + 1,
-                        last_updated = CURRENT_TIMESTAMP
-                """, (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_name, similarity_rank, profile_id))
+                        last_updated = CURRENT_TIMESTAMP,
+                        image_url = COALESCE(excluded.image_url, image_url),
+                        genres = COALESCE(excluded.genres, genres),
+                        popularity = CASE WHEN excluded.popularity > 0 THEN excluded.popularity ELSE popularity END,
+                        metadata_updated_at = CASE WHEN excluded.image_url IS NOT NULL THEN CURRENT_TIMESTAMP ELSE metadata_updated_at END
+                """, (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_name,
+                      similarity_rank, profile_id, image_url, genres_json, popularity))
 
                 conn.commit()
                 return True
@@ -5336,6 +5347,29 @@ class MusicDatabase:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error updating similar artist metadata: {e}")
+            return False
+
+    def update_similar_artist_metadata_by_external_id(self, external_id: str, source: str = 'spotify',
+                                                       image_url: str = None, genres: list = None,
+                                                       popularity: int = None) -> bool:
+        """Cache artist metadata by Spotify or iTunes ID (updates all rows for that artist)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                genres_json = json.dumps(genres) if genres else None
+                if source == 'spotify':
+                    where_clause = "similar_artist_spotify_id = ?"
+                else:
+                    where_clause = "similar_artist_itunes_id = ?"
+                cursor.execute(f"""
+                    UPDATE similar_artists
+                    SET image_url = ?, genres = ?, popularity = ?, metadata_updated_at = CURRENT_TIMESTAMP
+                    WHERE {where_clause}
+                """, (image_url, genres_json, popularity or 0, external_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating similar artist metadata by external ID: {e}")
             return False
 
     def has_fresh_similar_artists(self, source_artist_id: str, days_threshold: int = 30, require_itunes: bool = True, require_spotify: bool = False, profile_id: int = 1) -> bool:

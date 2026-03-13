@@ -42118,9 +42118,12 @@ async function openRecommendedArtistsModal() {
         renderRecommendedArtistsModal(modal, data.artists);
 
         // Phase 2: Enrich with images/genres progressively in batches of 50
+        // Skip artists that already have cached metadata from the initial response
         const source = data.source || 'spotify';
         const idKey = source === 'spotify' ? 'spotify_artist_id' : 'itunes_artist_id';
-        const allIds = data.artists.map(a => a[idKey]).filter(Boolean);
+        const allIds = data.artists
+            .filter(a => !a.image_url)  // Only enrich artists without cached images
+            .map(a => a[idKey]).filter(Boolean);
 
         for (let i = 0; i < allIds.length; i += 50) {
             const batchIds = allIds.slice(i, i + 50);
