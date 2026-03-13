@@ -18967,14 +18967,45 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
         active_server = config_manager.get_active_media_server()
         analysis_results = []
 
-        # Get force download flag from batch
+        # Get force download flag and album context from batch
         force_download_all = False
+        batch_album_context = None
+        batch_artist_context = None
+        batch_is_album = False
         with tasks_lock:
             if batch_id in download_batches:
                 force_download_all = download_batches[batch_id].get('force_download_all', False)
+                batch_is_album = download_batches[batch_id].get('is_album_download', False)
+                batch_album_context = download_batches[batch_id].get('album_context')
+                batch_artist_context = download_batches[batch_id].get('artist_context')
 
         if force_download_all:
             print(f"🔄 [Force Download] Force download mode enabled for batch {batch_id} - treating all tracks as missing")
+
+        # ALBUM FAST PATH: If this is an album download, try to find the album in the DB first
+        # and match tracks within it — faster and more accurate than N global searches
+        album_tracks_map = {}  # Maps normalized title -> DatabaseTrack for album-scoped matching
+        if batch_is_album and batch_album_context and batch_artist_context and not force_download_all:
+            album_name = batch_album_context.get('name', '')
+            artist_name = batch_artist_context.get('name', '')
+            total_tracks = batch_album_context.get('total_tracks', 0)
+            if album_name and artist_name:
+                try:
+                    db_album, album_confidence = db.check_album_exists_with_editions(
+                        title=album_name, artist=artist_name,
+                        confidence_threshold=0.7,
+                        expected_track_count=total_tracks if total_tracks > 0 else None,
+                        server_source=active_server
+                    )
+                    if db_album and album_confidence >= 0.7:
+                        db_album_tracks = db.get_tracks_by_album(db_album.id)
+                        for t in db_album_tracks:
+                            album_tracks_map[t.title.lower().strip()] = t
+                        print(f"📀 [Album Analysis] Found album '{db_album.title}' in DB with {len(db_album_tracks)} tracks (confidence: {album_confidence:.2f})")
+                    else:
+                        print(f"📀 [Album Analysis] Album '{album_name}' not found in DB — falling back to per-track search")
+                except Exception as album_err:
+                    print(f"⚠️ [Album Analysis] Album lookup error: {album_err} — falling back to per-track search")
 
         for i, track_data in enumerate(tracks_json):
             # Use original table index if provided (for partial track selection),
@@ -18988,6 +19019,36 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
             if force_download_all:
                 print(f"🔄 [Force Download] Skipping database check for '{track_name}' - treating as missing")
                 found, confidence = False, 0.0
+            elif album_tracks_map:
+                # Album-scoped matching: check against known album tracks first
+                track_name_lower = track_name.lower().strip()
+                # Direct title match
+                if track_name_lower in album_tracks_map:
+                    found, confidence = True, 1.0
+                else:
+                    # Fuzzy match against album tracks using string similarity
+                    best_sim = 0.0
+                    for db_title_lower, db_track in album_tracks_map.items():
+                        sim = db._string_similarity(track_name_lower, db_title_lower)
+                        if sim > best_sim:
+                            best_sim = sim
+                    if best_sim >= 0.7:
+                        found, confidence = True, best_sim
+                    else:
+                        # Fall back to global per-track search for this track
+                        for artist in artists:
+                            if isinstance(artist, str):
+                                artist_name = artist
+                            elif isinstance(artist, dict) and 'name' in artist:
+                                artist_name = artist['name']
+                            else:
+                                artist_name = str(artist)
+                            db_track, track_confidence = db.check_track_exists(
+                                track_name, artist_name, confidence_threshold=0.7, server_source=active_server
+                            )
+                            if db_track and track_confidence >= 0.7:
+                                found, confidence = True, track_confidence
+                                break
             else:
                 for artist in artists:
                     # Handle both string format and Spotify API format {'name': 'Artist Name'}
