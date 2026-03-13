@@ -3855,9 +3855,9 @@ def get_debug_info():
     info['docker'] = os.path.exists('/.dockerenv')
 
     # Paths
-    download_path = config_manager.get('download_path', '')
-    transfer_folder = config_manager.get('transfer_folder', '')
-    staging_folder = config_manager.get('staging_folder', '')
+    download_path = config_manager.get('soulseek.download_path', './downloads')
+    transfer_folder = config_manager.get('soulseek.transfer_path', './Transfer')
+    staging_folder = config_manager.get('import.staging_folder', '')
     info['paths'] = {
         'download_path': download_path,
         'download_path_exists': os.path.isdir(download_path) if download_path else False,
@@ -9270,7 +9270,7 @@ def get_track_tag_preview(track_id):
         # Resolve path if needed
         resolved_path = _resolve_library_file_path(file_path)
         if not resolved_path:
-            return jsonify({"success": False, "error": "File not found on disk", "file_path": file_path}), 404
+            return jsonify({"success": False, "error": _get_file_not_found_error(file_path), "file_path": file_path}), 404
 
         # Read current file tags
         file_tags = read_file_tags(resolved_path)
@@ -9368,7 +9368,7 @@ def get_batch_tag_preview():
             }
 
             if not resolved_path:
-                entry['error'] = 'File not found'
+                entry['error'] = _get_file_not_found_error(file_path)
                 results.append(entry)
                 continue
 
@@ -9463,7 +9463,7 @@ def write_track_tags(track_id):
         file_path = track_data.get('file_path')
         resolved_path = _resolve_library_file_path(file_path)
         if not resolved_path:
-            return jsonify({"success": False, "error": "File not found on disk"}), 404
+            return jsonify({"success": False, "error": _get_file_not_found_error(file_path)}), 404
 
         # Parse genres
         album_genres = []
@@ -9623,7 +9623,7 @@ def write_tracks_tags_batch():
                         with _write_tags_batch_lock:
                             _write_tags_batch_state['failed'] += 1
                             _write_tags_batch_state['processed'] += 1
-                            _write_tags_batch_state['errors'].append({'track_id': track_data['id'], 'error': 'File not found'})
+                            _write_tags_batch_state['errors'].append({'track_id': track_data['id'], 'error': _get_file_not_found_error(file_path)})
                         continue
 
                     # Parse genres
@@ -9805,6 +9805,22 @@ def _resolve_library_file_path(file_path):
     return None
 
 
+def _get_file_not_found_error(file_path):
+    """Return a helpful error message when a library file can't be found."""
+    active_server = config_manager.get_active_media_server()
+    if active_server == 'navidrome':
+        # Check if path looks like a Navidrome fake path (no real filesystem root)
+        # Fake paths look like: "Artist/Album/01 - Track.flac" or just "Track.flac"
+        if file_path and ('/' not in file_path or not file_path.startswith('/')):
+            return ('File not found — Navidrome may be sending virtual paths. '
+                    'Go to Navidrome → Profile → Players → select SoulSync → enable "Report Real Path", '
+                    'then run a full database refresh in SoulSync.')
+        return ('File not found on disk — check that your Navidrome music folder '
+                'is mounted in the SoulSync container and that "Report Real Path" is enabled '
+                'in Navidrome\'s player settings.')
+    return 'File not found on disk'
+
+
 @app.route('/api/library/play', methods=['POST'])
 def library_play_track():
     """Start playing a track directly from the user's library (no download needed)."""
@@ -9816,23 +9832,11 @@ def library_play_track():
         file_path = data['file_path']
 
         # Resolve server-side paths (e.g. /mnt/musicBackup/...) to local transfer path
-        if not os.path.exists(file_path):
-            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-            # Try stripping common server-side prefixes and remapping to transfer dir
-            # The DB stores Plex/media server absolute paths; strip the root to get relative path
-            path_parts = file_path.replace('\\', '/').split('/')
-            # Try progressively shorter prefixes: /mnt/musicBackup/artist/... -> artist/...
-            resolved = None
-            for i in range(1, len(path_parts)):
-                relative = '/'.join(path_parts[i:])
-                candidate = os.path.join(transfer_dir, relative.replace('/', os.sep))
-                if os.path.exists(candidate):
-                    resolved = candidate
-                    break
-            if resolved:
-                file_path = resolved
-            else:
-                return jsonify({"success": False, "error": "File not found on disk"}), 404
+        resolved = _resolve_library_file_path(file_path)
+        if resolved:
+            file_path = resolved
+        else:
+            return jsonify({"success": False, "error": _get_file_not_found_error(file_path)}), 404
 
         print(f"📚 Library play request: {os.path.basename(file_path)}")
 
