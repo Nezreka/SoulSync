@@ -706,6 +706,23 @@ function applyAccentColor(hex) {
     if (swatch) swatch.style.background = hex;
 }
 
+function applyParticlesSetting(enabled) {
+    const canvas = document.getElementById('page-particles-canvas');
+    if (canvas) canvas.style.display = enabled ? '' : 'none';
+    if (window.pageParticles) {
+        if (enabled) {
+            const activePage = document.querySelector('.page.active');
+            if (activePage) {
+                window.pageParticles.setPage(activePage.id.replace('-page', ''));
+            }
+        } else {
+            window.pageParticles.stop();
+        }
+    }
+    window._particlesEnabled = enabled;
+    localStorage.setItem('soulsync-particles', String(enabled));
+}
+
 function initAccentColorListeners() {
     const presetSelect = document.getElementById('accent-preset');
     const customGroup = document.getElementById('custom-color-group');
@@ -728,12 +745,27 @@ function initAccentColorListeners() {
             applyAccentColor(customPicker.value);
         });
     }
+
+    // Particles toggle — apply immediately on change
+    const particlesCheckbox = document.getElementById('particles-enabled');
+    if (particlesCheckbox) {
+        particlesCheckbox.addEventListener('change', () => {
+            applyParticlesSetting(particlesCheckbox.checked);
+        });
+    }
 }
 
 // Bootstrap accent from localStorage instantly (prevents default-color flash)
 (function() {
     const saved = localStorage.getItem('soulsync-accent');
     if (saved) applyAccentColor(saved);
+    // Bootstrap particles setting from localStorage
+    const particlesSaved = localStorage.getItem('soulsync-particles');
+    if (particlesSaved === 'false') {
+        window._particlesEnabled = false;
+        const canvas = document.getElementById('page-particles-canvas');
+        if (canvas) canvas.style.display = 'none';
+    }
 })();
 
 // ── Profile System ─────────────────────────────────────────────
@@ -1819,7 +1851,7 @@ function navigateToPage(pageId) {
     loadPageData(pageId);
 
     // Update page background particles
-    if (window.pageParticles) window.pageParticles.setPage(pageId);
+    if (window.pageParticles && window._particlesEnabled !== false) window.pageParticles.setPage(pageId);
 }
 
 // REPLACE your old loadPageData function with this one:
@@ -4641,6 +4673,12 @@ async function loadSettingsData() {
         if (vizSelect) vizSelect.value = vizType;
         sidebarVisualizerType = vizType;
 
+        // Background particles toggle
+        const particlesEnabled = settings.ui_appearance?.particles_enabled !== false; // default true
+        const particlesCheckbox = document.getElementById('particles-enabled');
+        if (particlesCheckbox) particlesCheckbox.checked = particlesEnabled;
+        applyParticlesSetting(particlesEnabled);
+
         // Populate Logging information (read-only)
         document.getElementById('log-level-display').textContent = settings.logging?.level || 'INFO';
         document.getElementById('log-path-display').textContent = settings.logging?.path || 'logs/app.log';
@@ -5383,7 +5421,8 @@ async function saveSettings(quiet = false) {
         ui_appearance: {
             accent_preset: document.getElementById('accent-preset')?.value || '#1db954',
             accent_color: document.getElementById('accent-custom-color')?.value || '#1db954',
-            sidebar_visualizer: document.getElementById('sidebar-visualizer-type')?.value || 'bars'
+            sidebar_visualizer: document.getElementById('sidebar-visualizer-type')?.value || 'bars',
+            particles_enabled: document.getElementById('particles-enabled')?.checked !== false
         },
         youtube: {
             cookies_browser: document.getElementById('youtube-cookies-browser').value,

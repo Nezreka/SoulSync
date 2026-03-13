@@ -21,9 +21,15 @@
 
     // ── Helpers ──
 
+    let _cachedAccent = '29, 185, 84';
+    let _accentCheckFrame = 0;
     function getAccentRGB() {
-        const s = getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb').trim();
-        return s || '29, 185, 84';
+        // Only re-read CSS variable every 60 frames (~1s) to avoid getComputedStyle overhead
+        if (_accentCheckFrame++ % 60 === 0) {
+            const s = getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb').trim();
+            if (s) _cachedAccent = s;
+        }
+        return _cachedAccent;
     }
 
     // Shift an "r, g, b" accent string by a hue offset (degrees), cached per base color
@@ -2286,8 +2292,9 @@
         stop
     };
 
-    // Auto-start for initial page
+    // Auto-start for initial page (respect particles toggle)
     requestAnimationFrame(() => {
+        if (window._particlesEnabled === false) return;
         const activePage = document.querySelector('.page.active');
         if (activePage) {
             const pageId = activePage.id.replace('-page', '');
