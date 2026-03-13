@@ -31710,7 +31710,7 @@ async function showWatchlistModal() {
             <div class="modal-container playlist-modal watchlist-fullscreen">
                 <div class="playlist-modal-header">
                     <div class="playlist-header-content" style="width: 100%;">
-                        <h2>👁️ Watchlist</h2>
+                        <h2><svg class="watchlist-header-icon" width="24" height="24" viewBox="0 0 24 24" fill="rgb(var(--accent-rgb))"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg> Watchlist</h2>
                         <div class="playlist-quick-info">
                             <span class="playlist-track-count">${countData.count} artist${countData.count !== 1 ? 's' : ''}</span>
                             <span class="playlist-owner" id="watchlist-next-auto-timer">Next Auto${countdownText ? ': ' + countdownText : ''}</span>
@@ -31757,24 +31757,26 @@ async function showWatchlistModal() {
                 </div>
 
                 <div class="playlist-modal-body">
-                    <div class="watchlist-actions" style="margin-bottom: 16px; display: flex; gap: 12px; align-items: center; padding: 0 32px; flex-wrap: wrap;">
-                        <button class="playlist-modal-btn playlist-modal-btn-primary"
+                    <div class="watchlist-actions" style="margin-bottom: 16px; display: flex; gap: 12px; align-items: center; padding: 12px 32px; flex-wrap: wrap;">
+                        <button class="playlist-modal-btn playlist-modal-btn-primary watchlist-btn-scan"
                                 id="scan-watchlist-btn"
                                 onclick="startWatchlistScan()"
                                 ${scanStatus === 'scanning' ? 'disabled' : ''}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                             ${scanStatus === 'scanning' ? 'Scanning...' : 'Scan for New Releases'}
                         </button>
-                        <button class="playlist-modal-btn playlist-modal-btn-secondary"
+                        <button class="playlist-modal-btn playlist-modal-btn-secondary watchlist-btn-similar"
                                 id="update-similar-artists-btn"
                                 onclick="updateSimilarArtists()"
                                 ${scanStatus === 'scanning' ? 'disabled' : ''}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                             Update Similar Artists
                         </button>
-                        <button class="playlist-modal-btn playlist-modal-btn-secondary ${globalOverrideActive ? 'watchlist-global-settings-active' : ''}"
+                        <button class="playlist-modal-btn playlist-modal-btn-secondary watchlist-btn-settings ${globalOverrideActive ? 'watchlist-global-settings-active' : ''}"
                                 id="watchlist-global-settings-btn"
-                                onclick="openWatchlistGlobalSettingsModal()"
-                                >
-                            ${globalOverrideActive ? '⚙️ Global Override ON' : '⚙️ Global Settings'}
+                                onclick="openWatchlistGlobalSettingsModal()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                            ${globalOverrideActive ? 'Global Override ON' : 'Global Settings'}
                         </button>
                     </div>
 
@@ -31787,10 +31789,11 @@ async function showWatchlistModal() {
 
                     <!-- Search Bar -->
                     <div class="watchlist-search-container" style="margin-bottom: 12px;">
+                        <svg class="watchlist-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="rgba(255,255,255,0.35)"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
                         <input type="text"
                                id="watchlist-search-input"
                                class="watchlist-search-input"
-                               placeholder="🔍 Search artists..."
+                               placeholder="Search watchlist..."
                                oninput="filterWatchlistArtists()">
                     </div>
 

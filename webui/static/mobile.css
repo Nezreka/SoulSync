@@ -1475,7 +1475,8 @@
     }
 
     .watchlist-card-info {
-        padding: 10px 12px;
+        padding: 0 12px 6px;
+        margin-top: -28px;
     }
 
     .watchlist-card-name {
@@ -1923,16 +1924,17 @@
     }
 
     .watchlist-card-info {
-        padding: 8px 10px;
+        padding: 0 10px 4px;
+        margin-top: -24px;
     }
 
     .watchlist-pill {
         font-size: 8px;
-        padding: 1px 4px;
+        padding: 2px 5px;
     }
 
     .watchlist-card-pills {
-        padding: 0 10px 6px;
+        padding: 2px 10px 8px;
     }
 
     .watchlist-detail-content {
