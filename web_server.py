@@ -3839,12 +3839,26 @@ def get_system_stats():
         return jsonify({'error': str(e)}), 500
 
 
+def _safe_check(fn, default=False):
+    """Safely evaluate a check function, returning default on any error."""
+    try:
+        return fn()
+    except Exception:
+        return default
+
+
 @app.route('/api/debug-info')
 def get_debug_info():
     """Collect system diagnostics for troubleshooting support requests."""
     import platform
     import sys
     import psutil
+    import time
+    from datetime import timedelta
+
+    log_lines = request.args.get('lines', 20, type=int)
+    log_lines = max(10, min(log_lines, 500))
+    log_source = request.args.get('log', 'app')
 
     info = {}
 
@@ -3853,6 +3867,11 @@ def get_debug_info():
     info['os'] = f"{platform.system()} {platform.release()}"
     info['python'] = sys.version.split()[0]
     info['docker'] = os.path.exists('/.dockerenv')
+
+    # Uptime
+    start_time = getattr(app, 'start_time', time.time())
+    uptime_seconds = time.time() - start_time
+    info['uptime'] = str(timedelta(seconds=int(uptime_seconds)))
 
     # Paths
     download_path = config_manager.get('soulseek.download_path', './downloads')
@@ -3881,6 +3900,8 @@ def get_debug_info():
         'media_server_connected': media_server_cache.get('connected', False),
         'soulseek_connected': soulseek_cache.get('connected', False),
         'download_source': config_manager.get('download_source.mode', 'soulseek'),
+        'tidal_connected': _safe_check(lambda: bool(tidal_client and tidal_client.is_authenticated())),
+        'qobuz_connected': _safe_check(lambda: bool(qobuz_enrichment_worker and qobuz_enrichment_worker.client and qobuz_enrichment_worker.client.is_authenticated())),
     }
 
     # Enrichment workers
@@ -3891,6 +3912,68 @@ def get_debug_info():
         workers[name] = 'paused' if config_manager.get(paused_key, False) else 'active'
     info['enrichment_workers'] = workers
 
+    # Library stats
+    try:
+        db = get_db()
+        lib_stats = db.get_statistics()
+        info['library'] = {
+            'artists': lib_stats.get('artists', 0),
+            'albums': lib_stats.get('albums', 0),
+            'tracks': lib_stats.get('tracks', 0),
+        }
+    except Exception:
+        info['library'] = {'artists': 0, 'albums': 0, 'tracks': 0}
+
+    # Watchlist count
+    try:
+        db = get_db()
+        info['watchlist_count'] = db.get_watchlist_count()
+    except Exception:
+        info['watchlist_count'] = 0
+
+    # Automation count
+    try:
+        db = get_db()
+        automations = db.get_automations()
+        info['automations'] = {
+            'total': len(automations),
+            'enabled': len([a for a in automations if a.get('enabled', False)]),
+        }
+    except Exception:
+        info['automations'] = {'total': 0, 'enabled': 0}
+
+    # Active downloads & syncs (use list() snapshots to avoid RuntimeError from concurrent mutation)
+    try:
+        active_downloads = len([bid for bid, bd in list(download_batches.items()) if bd.get('phase') == 'downloading'])
+    except Exception:
+        active_downloads = 0
+    active_syncs = 0
+    try:
+        for pid, ss in list(sync_states.items()):
+            if ss.get('status') == 'syncing':
+                active_syncs += 1
+        for uh, st in list(youtube_playlist_states.items()):
+            if st.get('phase') == 'syncing':
+                active_syncs += 1
+        for pid, st in list(tidal_discovery_states.items()):
+            if st.get('phase') == 'syncing':
+                active_syncs += 1
+    except Exception:
+        pass
+    info['active_downloads'] = active_downloads
+    info['active_syncs'] = active_syncs
+
+    # Config settings relevant to troubleshooting
+    info['config'] = {
+        'source_mode': config_manager.get('download_source.mode', 'soulseek'),
+        'quality_profile': config_manager.get('download_source.quality_profile', 'default'),
+        'organization_template': config_manager.get('organization.folder_template', ''),
+        'post_processing_enabled': config_manager.get('post_processing.enabled', True),
+        'acoustid_enabled': bool(config_manager.get('acoustid.api_key', '')),
+        'auto_scan_enabled': config_manager.get('watchlist.auto_scan', False),
+        'm3u_export_enabled': config_manager.get('m3u.enabled', False),
+    }
+
     # Database size
     db_path = os.path.join('database', 'music_library.db')
     if os.path.exists(db_path):
@@ -3899,21 +3982,49 @@ def get_debug_info():
     else:
         info['database_size'] = 'not found'
 
-    # Memory
+    # Memory & CPU
     process = psutil.Process(os.getpid())
     mem = process.memory_info()
     info['memory_usage'] = f"{mem.rss / (1024 * 1024):.0f} MB"
+    info['system_memory'] = f"{psutil.virtual_memory().percent}%"
+    try:
+        info['cpu_percent'] = f"{process.cpu_percent(interval=0.1):.1f}%"
+    except Exception:
+        info['cpu_percent'] = 'unknown'
+    info['thread_count'] = process.num_threads()
 
-    # Recent log lines
-    log_path = os.path.join('logs', 'app.log')
+    # Log lines
+    log_map = {
+        'app': os.path.join('logs', 'app.log'),
+        'acoustid': os.path.join('logs', 'acoustid.log'),
+        'post_processing': os.path.join('logs', 'post_processing.log'),
+        'source_reuse': os.path.join('logs', 'source_reuse.log'),
+    }
+    log_path = log_map.get(log_source, log_map['app'])
+    info['log_source'] = log_source
+    info['log_lines_requested'] = log_lines
     info['recent_logs'] = []
     if os.path.exists(log_path):
         try:
             with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
                 lines = f.readlines()
-                info['recent_logs'] = [line.rstrip() for line in lines[-20:]]
+                info['recent_logs'] = [line.rstrip() for line in lines[-log_lines:]]
         except Exception:
             info['recent_logs'] = ['(could not read log file)']
+
+    # Available log files
+    info['available_logs'] = []
+    logs_dir = 'logs'
+    if os.path.isdir(logs_dir):
+        for fname in sorted(os.listdir(logs_dir)):
+            if fname.endswith('.log'):
+                fpath = os.path.join(logs_dir, fname)
+                size_kb = os.path.getsize(fpath) / 1024
+                info['available_logs'].append({
+                    'name': fname.replace('.log', ''),
+                    'file': fname,
+                    'size': f"{size_kb:.0f} KB" if size_kb < 1024 else f"{size_kb/1024:.1f} MB",
+                })
 
     return jsonify(info)
 
