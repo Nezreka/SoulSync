@@ -15513,11 +15513,14 @@ def get_version_info():
             },
             {
                 "title": "🛡️ Rate Limit Detection Fix",
-                "description": "Rate limit modal now appears reliably when Spotify returns 429 errors",
+                "description": "Rate limit handling completely overhauled — escalating bans, no more rate limit loops",
                 "features": [
                     "• Fixed rate limits going undetected in get_album, get_artist, and batch artist enrichment",
                     "• These methods previously swallowed 429 exceptions — global ban was never activated",
-                    "• Rate limit modal with countdown timer now triggers correctly from any Spotify API failure",
+                    "• Escalating ban durations — repeated rate limits within 1 hour double the ban (30m → 1h → 2h → 4h max)",
+                    "• Default ban raised from 10 minutes to 30 minutes — prevents rapid re-ban cycling",
+                    "• Exhausted-retry detection — 5 consecutive 429s trigger a 1-hour ban instead of re-raising",
+                    "• Rate limit modal with live countdown timer, ban duration, and triggering endpoint",
                     "• Redundant get_album_tracks API call removed from iTunes discovery pool population"
                 ]
             },
@@ -15550,7 +15553,7 @@ def get_version_info():
                     "• Fix Tidal/Qobuz enrichment backfill failing on dict-type copyright and isrc fields",
                     "• Fix false positive track matching and tag writing visibility for library files",
                     "• Stop unnecessary Spotify API call every 60s from enrichment status polling",
-                    "• Spotify rate limit UX — replaced intrusive modal with ambient sidebar indicators",
+                    "• Spotify rate limit UX — persistent modal with countdown, dismiss, and disconnect buttons",
                     "• Navidrome ReportRealPath guidance when library files can't be found",
                     "• Enhanced library write-all modal and confirmation dialog improvements"
                 ]
@@ -15591,15 +15594,17 @@ def get_version_info():
             },
             {
                 "title": "🛡️ Spotify Rate Limit Protection",
-                "description": "Smart detection and handling of Spotify API rate limits",
+                "description": "Smart detection and handling of Spotify API rate limits with escalating bans",
                 "features": [
                     "• Automatic detection of long rate limit bans (Retry-After > 60s) from Spotify",
+                    "• Escalating ban durations — repeated hits within 1 hour double the ban (30m → 1h → 2h → 4h)",
                     "• Global suppression of all Spotify API calls during a ban — no wasted requests",
                     "• Seamless iTunes/Apple Music fallback for searches while Spotify is rate limited",
                     "• Enrichment worker auto-pauses during rate limit and resumes when ban expires",
-                    "• Frontend modal with live countdown timer showing ban duration and triggering endpoint",
-                    "• One-click Disconnect Spotify button to switch to Apple Music immediately",
-                    "• Auth probe no longer makes API calls during ban — prevents extending the ban"
+                    "• Rate limit modal with live countdown timer, ban duration, triggering endpoint, and dismiss/disconnect buttons",
+                    "• One-click Disconnect Spotify button to clear ban, pause enrichment, and delete cache",
+                    "• Auth probe no longer makes API calls during ban — prevents extending the ban",
+                    "• Cooldown-to-restored transition auto-closes modal and refreshes discover page"
                 ]
             },
             {
@@ -15656,11 +15661,13 @@ def get_version_info():
             },
             {
                 "title": "✨ UI & Visual Overhaul",
-                "description": "Per-page particle animations, sidebar visualizer, and design refresh",
+                "description": "Per-page particle animations, sidebar visualizer, watchlist redesign, and design refresh",
                 "features": [
                     "• Per-page particle animations with unique themes for each page",
+                    "• Particle toggle in Settings — disable background particles to reduce GPU usage",
                     "• Sidebar audio visualizer with 5 reactive styles and settings toggle",
                     "• Sidebar SVG icons with accent-colored navigation and ambient aura",
+                    "• Watchlist modal redesign — gradient overlay cards, staggered entrance animations, SVG icon buttons, glassmorphic styling",
                     "• Page headers with sidebar icons and gradient shimmer styling",
                     "• Service badges on library artist cards for all 9 enrichment services",
                     "• Glassmorphic 'View on' buttons on artist discography pages",
