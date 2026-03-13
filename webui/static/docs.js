@@ -1922,7 +1922,7 @@ function initializeDocsPage() {
 
 function navigateToDocsSection(sectionId) {
     // Switch to help page
-    if (typeof showPage === 'function') showPage('help');
+    if (typeof navigateToPage === 'function') navigateToPage('help');
     // Wait for docs to initialize
     setTimeout(() => {
         const target = document.getElementById(sectionId);
