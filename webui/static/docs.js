@@ -1726,50 +1726,115 @@ function initializeDocsPage() {
     });
     nav.innerHTML = navHTML;
 
-    // Add debug info button to sidebar header
+    // Add debug info panel to sidebar header
     const sidebarHeader = document.querySelector('.docs-sidebar-header');
     if (sidebarHeader) {
-        const debugBtn = document.createElement('button');
-        debugBtn.className = 'docs-debug-button';
-        debugBtn.innerHTML = '&#x1F4CB; Copy Debug Info';
+        const debugWrap = document.createElement('div');
+        debugWrap.className = 'docs-debug-wrap';
+        debugWrap.innerHTML = `
+            <button class="docs-debug-button">&#x1F4CB; Copy Debug Info</button>
+            <div class="docs-debug-options">
+                <div class="docs-debug-row">
+                    <label>Log lines</label>
+                    <select class="docs-debug-select" id="debug-log-lines">
+                        <option value="20">20</option>
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="200">200</option>
+                        <option value="500">500</option>
+                    </select>
+                </div>
+                <div class="docs-debug-row">
+                    <label>Log source</label>
+                    <select class="docs-debug-select" id="debug-log-source">
+                        <option value="app">app.log</option>
+                        <option value="post_processing">post_processing.log</option>
+                        <option value="acoustid">acoustid.log</option>
+                        <option value="source_reuse">source_reuse.log</option>
+                    </select>
+                </div>
+            </div>
+        `;
+        sidebarHeader.appendChild(debugWrap);
+
+        const debugBtn = debugWrap.querySelector('.docs-debug-button');
         debugBtn.onclick = async () => {
+            const logLines = document.getElementById('debug-log-lines').value;
+            const logSource = document.getElementById('debug-log-source').value;
             try {
                 debugBtn.textContent = 'Collecting...';
-                const resp = await fetch('/api/debug-info');
+                const resp = await fetch(`/api/debug-info?lines=${logLines}&log=${logSource}`);
                 const data = await resp.json();
 
+                const ck = '\u2713';
+                const ex = '\u2717';
                 let text = 'SoulSync Debug Info\n';
-                text += '===================================\n\n';
-                text += `Version: ${data.version}\n`;
-                text += `OS: ${data.os}${data.docker ? ' (Docker)' : ''}\n`;
-                text += `Python: ${data.python}\n\n`;
+                text += '═══════════════════════════════════\n\n';
 
-                text += '-- Services --\n';
-                text += `Music Source: ${data.services?.music_source || 'unknown'}\n`;
-                text += `Spotify: ${data.services?.spotify_connected ? 'Connected' : 'Disconnected'}${data.services?.spotify_rate_limited ? ' (Rate Limited)' : ''}\n`;
-                text += `Media Server: ${data.services?.media_server_type || 'none'} (${data.services?.media_server_connected ? 'Connected' : 'Disconnected'})\n`;
-                text += `Soulseek: ${data.services?.soulseek_connected ? 'Connected' : 'Disconnected'}\n`;
-                text += `Download Source: ${data.services?.download_source || 'unknown'}\n\n`;
+                text += '── System ──\n';
+                text += `Version:     ${data.version}\n`;
+                text += `OS:          ${data.os}${data.docker ? ' (Docker)' : ''}\n`;
+                text += `Python:      ${data.python}\n`;
+                text += `Uptime:      ${data.uptime || 'unknown'}\n`;
+                text += `Memory:      ${data.memory_usage || '?'} (system: ${data.system_memory || '?'})\n`;
+                text += `CPU:         ${data.cpu_percent || '?'}\n`;
+                text += `Threads:     ${data.thread_count || '?'}\n\n`;
 
-                text += '-- Paths --\n';
-                text += `Download: ${data.paths?.download_path || '(not set)'} ${data.paths?.download_path_exists ? '\u2713 exists' : '\u2717 missing'}${data.paths?.download_path_writable ? ' \u2713 writable' : ' \u2717 not writable'}\n`;
-                text += `Transfer: ${data.paths?.transfer_folder || '(not set)'} ${data.paths?.transfer_folder_exists ? '\u2713 exists' : '\u2717 missing'}${data.paths?.transfer_folder_writable ? ' \u2713 writable' : ' \u2717 not writable'}\n`;
-                text += `Staging: ${data.paths?.staging_folder || '(not set)'} ${data.paths?.staging_folder_exists ? '\u2713 exists' : '\u2717 missing'}\n\n`;
+                text += '── Services ──\n';
+                text += `Music Source:  ${data.services?.music_source || 'unknown'}\n`;
+                text += `Spotify:       ${data.services?.spotify_connected ? ck + ' Connected' : ex + ' Disconnected'}${data.services?.spotify_rate_limited ? ' (RATE LIMITED)' : ''}\n`;
+                text += `Media Server:  ${data.services?.media_server_type || 'none'} ${data.services?.media_server_connected ? ck + ' Connected' : ex + ' Disconnected'}\n`;
+                text += `Soulseek:      ${data.services?.soulseek_connected ? ck + ' Connected' : ex + ' Disconnected'}\n`;
+                text += `Tidal:         ${data.services?.tidal_connected ? ck + ' Connected' : ex + ' Disconnected'}\n`;
+                text += `Qobuz:         ${data.services?.qobuz_connected ? ck + ' Connected' : ex + ' Disconnected'}\n`;
+                text += `Download Mode: ${data.services?.download_source || 'unknown'}\n\n`;
 
-                text += '-- Enrichment Workers --\n';
-                if (data.enrichment_workers) {
-                    Object.entries(data.enrichment_workers).forEach(([name, status]) => {
-                        text += `${name}: ${status}\n`;
-                    });
+                text += '── Library ──\n';
+                text += `Artists:  ${data.library?.artists?.toLocaleString() || '0'}\n`;
+                text += `Albums:   ${data.library?.albums?.toLocaleString() || '0'}\n`;
+                text += `Tracks:   ${data.library?.tracks?.toLocaleString() || '0'}\n`;
+                text += `Database: ${data.database_size || 'unknown'}\n`;
+                text += `Watchlist: ${data.watchlist_count || 0} artists\n`;
+                text += `Automations: ${data.automations?.enabled || 0} enabled / ${data.automations?.total || 0} total\n\n`;
+
+                text += '── Active ──\n';
+                text += `Downloads: ${data.active_downloads || 0}\n`;
+                text += `Syncs:     ${data.active_syncs || 0}\n\n`;
+
+                text += '── Paths ──\n';
+                const pathStatus = (exists, writable) => exists ? (writable ? ck + ' ok' : ck + ' exists ' + ex + ' not writable') : ex + ' missing';
+                text += `Download: ${data.paths?.download_path || '(not set)'} [${pathStatus(data.paths?.download_path_exists, data.paths?.download_path_writable)}]\n`;
+                text += `Transfer: ${data.paths?.transfer_folder || '(not set)'} [${pathStatus(data.paths?.transfer_folder_exists, data.paths?.transfer_folder_writable)}]\n`;
+                text += `Staging:  ${data.paths?.staging_folder || '(not set)'} [${data.paths?.staging_folder_exists ? ck + ' ok' : ex + ' missing'}]\n\n`;
+
+                text += '── Config ──\n';
+                if (data.config) {
+                    text += `Source Mode:      ${data.config.source_mode || 'unknown'}\n`;
+                    text += `Quality Profile:  ${data.config.quality_profile || 'default'}\n`;
+                    text += `Folder Template:  ${data.config.organization_template || '(default)'}\n`;
+                    text += `Post-Processing:  ${data.config.post_processing_enabled ? 'enabled' : 'disabled'}\n`;
+                    text += `AcoustID:         ${data.config.acoustid_enabled ? 'enabled' : 'disabled'}\n`;
+                    text += `Auto Scan:        ${data.config.auto_scan_enabled ? 'enabled' : 'disabled'}\n`;
+                    text += `M3U Export:       ${data.config.m3u_export_enabled ? 'enabled' : 'disabled'}\n`;
                 }
                 text += '\n';
 
-                text += `Database: ${data.database_size || 'unknown'}\n`;
-                text += `Memory: ${data.memory_usage || 'unknown'}\n\n`;
+                text += '── Enrichment Workers ──\n';
+                if (data.enrichment_workers) {
+                    const active = [], paused = [];
+                    Object.entries(data.enrichment_workers).forEach(([name, status]) => {
+                        (status === 'active' ? active : paused).push(name);
+                    });
+                    text += `Active:  ${active.length > 0 ? active.join(', ') : 'none'}\n`;
+                    text += `Paused:  ${paused.length > 0 ? paused.join(', ') : 'none'}\n`;
+                }
+                text += '\n';
 
-                text += '-- Recent Logs (last 20 lines) --\n';
+                text += `── Logs: ${data.log_source || 'app'}.log (last ${data.recent_logs?.length || 0} lines) ──\n`;
                 if (data.recent_logs?.length) {
                     data.recent_logs.forEach(line => { text += line + '\n'; });
+                } else {
+                    text += '(no log lines)\n';
                 }
 
                 await navigator.clipboard.writeText(text);
@@ -1785,7 +1850,6 @@ function initializeDocsPage() {
                 setTimeout(() => { debugBtn.innerHTML = '&#x1F4CB; Copy Debug Info'; }, 2000);
             }
         };
-        sidebarHeader.appendChild(debugBtn);
     }
 
     // Build content

@@ -34942,6 +34942,67 @@ tr.tag-diff-same {
     border-color: rgb(var(--accent-rgb));
 }
 
+.docs-debug-wrap {
+    margin-top: 12px;
+}
+
+.docs-debug-wrap .docs-debug-button {
+    margin-top: 0;
+}
+
+.docs-debug-options {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.docs-debug-row {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.docs-debug-row label {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.35);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+}
+
+.docs-debug-select {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11.5px;
+    padding: 5px 8px;
+    font-family: 'SF Pro Text', -apple-system, sans-serif;
+    cursor: pointer;
+    transition: border-color 0.2s ease;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='rgba(255,255,255,0.4)'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 22px;
+}
+
+.docs-debug-select:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.docs-debug-select:focus {
+    outline: none;
+    border-color: rgba(var(--accent-rgb), 0.4);
+}
+
+.docs-debug-select option {
+    background: #1a1a2e;
+    color: rgba(255, 255, 255, 0.8);
+}
+
 /* Toast help link */
 .toast-help-link {
     display: inline-block;
