@@ -34683,13 +34683,101 @@ tr.tag-diff-same {
 }
 
 /* Screenshots */
+.docs-screenshot-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 20px 0;
+    cursor: pointer;
+}
+
+.docs-screenshot-wrapper:hover .docs-screenshot {
+    border-color: rgba(var(--accent-light-rgb), 0.3);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(var(--accent-light-rgb), 0.08);
+    transform: translateY(-2px);
+}
+
+.docs-screenshot-wrapper:hover .docs-screenshot-label {
+    color: rgba(255, 255, 255, 0.6);
+}
+
 .docs-screenshot {
     width: 100%;
-    max-width: 900px;
-    border-radius: 12px;
+    max-width: 800px;
+    border-radius: 10px;
     border: 1px solid rgba(255, 255, 255, 0.08);
-    margin: 16px 0;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    transition: all 0.25s ease;
+    opacity: 0;
+    animation: docImgFadeIn 0.4s ease forwards;
+}
+
+.docs-screenshot-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+    margin-top: 8px;
+    letter-spacing: 0.3px;
+    transition: color 0.25s ease;
+}
+
+@keyframes docImgFadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Lightbox overlay for full-size image viewing */
+.docs-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.88);
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    cursor: zoom-out;
+}
+
+.docs-lightbox.active {
+    opacity: 1;
+}
+
+.docs-lightbox img {
+    max-width: 92vw;
+    max-height: 90vh;
+    border-radius: 10px;
+    box-shadow: 0 16px 64px rgba(0, 0, 0, 0.6);
+    transform: scale(0.92);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.docs-lightbox.active img {
+    transform: scale(1);
+}
+
+.docs-lightbox-close {
+    position: absolute;
+    top: 20px;
+    right: 24px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.docs-lightbox-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
 }
 
 /* Bullet lists */
@@ -34911,18 +34999,16 @@ tr.tag-diff-same {
     margin: 16px 0 4px;
 }
 
-/* Screenshot enhancements */
-.docs-screenshot {
-    display: block;
-    loading: lazy;
-}
-
-.docs-screenshot-caption {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.4);
-    text-align: center;
-    margin: -8px 0 16px;
-    font-style: italic;
+/* Screenshot responsive adjustments */
+@media (max-width: 600px) {
+    .docs-screenshot {
+        max-width: 100%;
+        border-radius: 8px;
+    }
+    .docs-lightbox img {
+        max-width: 98vw;
+        border-radius: 6px;
+    }
 }
 
 /* Mobile */
