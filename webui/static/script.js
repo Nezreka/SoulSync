@@ -9031,8 +9031,9 @@ function generateDownloadModalHeroSection(context) {
     let heroBackgroundImage = '';
 
     switch (type) {
+        case 'album':
         case 'artist_album':
-            // Artist album context - show artist + album images
+            // Artist/album context - show artist + album images
             const artistImage = artist?.image_url || artist?.images?.[0]?.url;
             const albumImage = album?.image_url || album?.images?.[0]?.url;
 
@@ -9651,10 +9652,14 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     // CRITICAL FIX: Use album context for discover_album playlists
     const isDiscoverAlbum = virtualPlaylistId.startsWith('discover_album_') || virtualPlaylistId.startsWith('seasonal_album_');
     const heroContext = isDiscoverAlbum && album && artist ? {
-        type: 'album',  // ✅ Show as album, not playlist
+        type: 'album',
+        artist: {
+            name: artist.name,
+            image_url: artist.image_url || null
+        },
         album: {
             name: album.name,
-            artist: artist.name,  // ✅ Use actual artist name, not 'SoulSync'
+            album_type: album.album_type || 'album',
             images: album.images || []
         },
         trackCount: spotifyTracks.length,
