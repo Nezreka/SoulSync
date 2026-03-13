@@ -56,6 +56,8 @@ let activeYouTubePollers = {}; // Key: url_hash, Value: intervalId
 let tidalPlaylists = [];
 let tidalPlaylistStates = {}; // Key: playlist_id, Value: playlist state with phases
 let tidalPlaylistsLoaded = false;
+let deezerPlaylists = [];
+let deezerPlaylistStates = {};
 
 // --- Beatport Chart State Management (Similar to YouTube/Tidal) ---
 let beatportChartStates = {}; // Key: chart_hash, Value: chart state with phases
@@ -14434,6 +14436,8 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
         state = youtubePlaylistStates[identifier]; // Beatport uses YouTube state infrastructure
     } else if (platform === 'listenbrainz') {
         state = listenbrainzPlaylistStates[identifier]; // ListenBrainz has its own state
+    } else if (platform === 'deezer') {
+        state = youtubePlaylistStates[identifier]; // Deezer uses YouTube state infrastructure
     } else if (platform === 'mirrored') {
         state = youtubePlaylistStates[identifier]; // Mirrored playlists use YouTube state infrastructure
     }
@@ -14664,6 +14668,10 @@ async function selectDiscoveryFixTrack(track) {
             // For Tidal, backend expects the actual playlist_id, not url_hash
             const state = youtubePlaylistStates[identifier];
             backendIdentifier = state?.tidal_playlist_id || identifier;
+        } else if (platform === 'deezer') {
+            // For Deezer, backend expects the actual playlist_id, not url_hash
+            const state = youtubePlaylistStates[identifier];
+            backendIdentifier = state?.deezer_playlist_id || identifier;
         } else if (platform === 'beatport') {
             // For Beatport, backend expects url_hash (same as identifier)
             backendIdentifier = identifier;
@@ -14715,6 +14723,8 @@ async function selectDiscoveryFixTrack(track) {
         if (platform === 'youtube') {
             state = listenbrainzPlaylistStates[identifier] || youtubePlaylistStates[identifier];
         } else if (platform === 'tidal') {
+            state = youtubePlaylistStates[identifier];
+        } else if (platform === 'deezer') {
             state = youtubePlaylistStates[identifier];
         } else if (platform === 'beatport') {
             state = youtubePlaylistStates[identifier];
@@ -14768,6 +14778,26 @@ async function selectDiscoveryFixTrack(track) {
                 }
 
                 console.log(`✅ Updated progress: ${state.spotifyMatches}/${spotify_total} (${progress}%)`);
+
+                // Also update the Deezer playlist card if this is a Deezer fix
+                if (platform === 'deezer' && state.deezer_playlist_id) {
+                    const deezerState = deezerPlaylistStates[state.deezer_playlist_id];
+                    if (deezerState) {
+                        deezerState.spotifyMatches = state.spotifyMatches;
+                        updateDeezerCardProgress(state.deezer_playlist_id, {
+                            spotify_matches: state.spotifyMatches,
+                            spotify_total: spotify_total
+                        });
+                    }
+                }
+
+                // Also update the Tidal playlist card if this is a Tidal fix
+                if (platform === 'tidal' && state.tidal_playlist_id) {
+                    const tidalState = tidalPlaylistStates?.[state.tidal_playlist_id];
+                    if (tidalState) {
+                        tidalState.spotifyMatches = state.spotifyMatches;
+                    }
+                }
             }
 
             // Update UI - refresh the table row
@@ -21033,6 +21063,969 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
 }
 
 
+// ===================================================================
+// DEEZER PLAYLIST MANAGEMENT (URL-input like YouTube, reuses YouTube modal)
+// ===================================================================
+
+async function loadDeezerPlaylist() {
+    const urlInput = document.getElementById('deezer-url-input');
+    if (!urlInput) return;
+
+    const rawUrl = urlInput.value.trim();
+    if (!rawUrl) {
+        showToast('Please paste a Deezer playlist URL', 'error');
+        return;
+    }
+
+    // Extract playlist ID from URL
+    // Supports: deezer.com/playlist/{id}, deezer.com/{locale}/playlist/{id}, or raw numeric ID
+    let playlistId = null;
+    const urlMatch = rawUrl.match(/deezer\.com\/(?:[a-z]{2}\/)?playlist\/(\d+)/i);
+    if (urlMatch) {
+        playlistId = urlMatch[1];
+    } else if (/^\d+$/.test(rawUrl)) {
+        playlistId = rawUrl;
+    }
+
+    if (!playlistId) {
+        showToast('Invalid Deezer playlist URL. Expected format: deezer.com/playlist/{id}', 'error');
+        return;
+    }
+
+    // Check if already loaded
+    if (deezerPlaylists.find(p => String(p.id) === String(playlistId))) {
+        showToast('This playlist is already loaded', 'info');
+        urlInput.value = '';
+        return;
+    }
+
+    const parseBtn = document.getElementById('deezer-parse-btn');
+    if (parseBtn) {
+        parseBtn.disabled = true;
+        parseBtn.textContent = 'Loading...';
+    }
+
+    try {
+        const response = await fetch(`/api/deezer/playlist/${playlistId}`);
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch Deezer playlist');
+        }
+
+        const playlist = await response.json();
+        deezerPlaylists.push(playlist);
+
+        // Auto-mirror Deezer playlist
+        if (playlist.tracks && playlist.tracks.length > 0) {
+            mirrorPlaylist('deezer', playlist.id, playlist.name, playlist.tracks.map(t => ({
+                track_name: t.name || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artists || ''),
+                album_name: typeof t.album === 'string' ? t.album : '', duration_ms: t.duration_ms || 0,
+                source_track_id: t.id || ''
+            })), { owner: playlist.owner, image_url: playlist.image_url, description: playlist.description });
+        }
+
+        renderDeezerPlaylists();
+        await loadDeezerPlaylistStatesFromBackend();
+
+        urlInput.value = '';
+        showToast(`Deezer playlist loaded: ${playlist.name} (${playlist.track_count || playlist.tracks.length} tracks)`, 'success');
+        console.log(`🎵 Loaded Deezer playlist: ${playlist.name}`);
+
+    } catch (error) {
+        showToast(`Error loading Deezer playlist: ${error.message}`, 'error');
+    } finally {
+        if (parseBtn) {
+            parseBtn.disabled = false;
+            parseBtn.textContent = 'Load Playlist';
+        }
+    }
+}
+
+function renderDeezerPlaylists() {
+    const container = document.getElementById('deezer-playlist-container');
+    if (deezerPlaylists.length === 0) {
+        container.innerHTML = `<div class="playlist-placeholder">Paste a Deezer playlist URL above to get started.</div>`;
+        return;
+    }
+
+    container.innerHTML = deezerPlaylists.map(p => {
+        if (!deezerPlaylistStates[p.id]) {
+            deezerPlaylistStates[p.id] = {
+                phase: 'fresh',
+                playlist: p
+            };
+        }
+        return createDeezerCard(p);
+    }).join('');
+
+    // Add click handlers to cards
+    deezerPlaylists.forEach(p => {
+        const card = document.getElementById(`deezer-card-${p.id}`);
+        if (card) {
+            card.addEventListener('click', () => handleDeezerCardClick(p.id));
+        }
+    });
+}
+
+function createDeezerCard(playlist) {
+    const state = deezerPlaylistStates[playlist.id];
+    const phase = state.phase;
+
+    let buttonText = getActionButtonText(phase);
+    let phaseText = getPhaseText(phase);
+    let phaseColor = getPhaseColor(phase);
+
+    return `
+        <div class="youtube-playlist-card deezer-playlist-card" id="deezer-card-${playlist.id}">
+            <div class="playlist-card-icon">🎵</div>
+            <div class="playlist-card-content">
+                <div class="playlist-card-name">${escapeHtml(playlist.name)}</div>
+                <div class="playlist-card-info">
+                    <span class="playlist-card-track-count">${playlist.track_count || playlist.tracks.length} tracks</span>
+                    <span class="playlist-card-phase-text" style="color: ${phaseColor};">${phaseText}</span>
+                </div>
+            </div>
+            <div class="playlist-card-progress ${phase === 'fresh' ? 'hidden' : ''}">
+                <!-- Progress will be dynamically updated based on phase -->
+            </div>
+            <button class="playlist-card-action-btn">${buttonText}</button>
+        </div>
+    `;
+}
+
+async function handleDeezerCardClick(playlistId) {
+    const state = deezerPlaylistStates[playlistId];
+    if (!state) {
+        console.error(`No state found for Deezer playlist: ${playlistId}`);
+        showToast('Playlist state not found - try refreshing the page', 'error');
+        return;
+    }
+
+    if (!state.playlist) {
+        console.error(`No playlist data found for Deezer playlist: ${playlistId}`);
+        showToast('Playlist data missing - try refreshing the page', 'error');
+        return;
+    }
+
+    if (!state.phase) {
+        state.phase = 'fresh';
+    }
+
+    console.log(`🎵 [Card Click] Deezer card clicked: ${playlistId}, Phase: ${state.phase}`);
+
+    if (state.phase === 'fresh') {
+        console.log(`🎵 Using pre-loaded Deezer playlist data for: ${state.playlist.name}`);
+        openDeezerDiscoveryModal(playlistId, state.playlist);
+
+    } else if (state.phase === 'discovering' || state.phase === 'discovered' || state.phase === 'syncing' || state.phase === 'sync_complete') {
+        console.log(`🎵 [Card Click] Opening Deezer discovery modal for ${state.phase} phase`);
+
+        if (state.phase === 'discovered' && (!state.discovery_results || state.discovery_results.length === 0)) {
+            try {
+                const stateResponse = await fetch(`/api/deezer/state/${playlistId}`);
+                if (stateResponse.ok) {
+                    const fullState = await stateResponse.json();
+                    if (fullState.discovery_results) {
+                        state.discovery_results = fullState.discovery_results;
+                        state.spotify_matches = fullState.spotify_matches || state.spotify_matches;
+                        state.discovery_progress = fullState.discovery_progress || state.discovery_progress;
+                        deezerPlaylistStates[playlistId] = { ...deezerPlaylistStates[playlistId], ...state };
+                        console.log(`Restored ${fullState.discovery_results.length} discovery results from backend`);
+                    }
+                }
+            } catch (error) {
+                console.error(`Failed to fetch discovery results from backend: ${error}`);
+            }
+        }
+
+        openDeezerDiscoveryModal(playlistId, state.playlist);
+    } else if (state.phase === 'downloading' || state.phase === 'download_complete') {
+        if (state.convertedSpotifyPlaylistId) {
+            if (activeDownloadProcesses[state.convertedSpotifyPlaylistId]) {
+                const process = activeDownloadProcesses[state.convertedSpotifyPlaylistId];
+                if (process.modalElement) {
+                    process.modalElement.style.display = 'flex';
+                } else {
+                    await rehydrateDeezerDownloadModal(playlistId, state);
+                }
+            } else {
+                await rehydrateDeezerDownloadModal(playlistId, state);
+            }
+        } else {
+            if (state.discovery_results && state.discovery_results.length > 0) {
+                openDeezerDiscoveryModal(playlistId, state.playlist);
+            } else {
+                showToast('Unable to open download modal - missing playlist data', 'error');
+            }
+        }
+    }
+}
+
+async function rehydrateDeezerDownloadModal(playlistId, state) {
+    try {
+        if (!state || !state.playlist) {
+            showToast('Cannot open download modal - invalid playlist data', 'error');
+            return;
+        }
+
+        const spotifyTracks = state.discovery_results
+            ?.filter(result => result.spotify_data)
+            ?.map(result => result.spotify_data) || [];
+
+        if (spotifyTracks.length > 0) {
+            const virtualPlaylistId = state.convertedSpotifyPlaylistId || `deezer_${playlistId}`;
+            await openDownloadMissingModalForTidal(virtualPlaylistId, state.playlist.name, spotifyTracks);
+
+            if (state.download_process_id) {
+                const process = activeDownloadProcesses[virtualPlaylistId];
+                if (process) {
+                    process.status = 'running';
+                    process.batchId = state.download_process_id;
+                    const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
+                    const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                    startModalDownloadPolling(virtualPlaylistId);
+                }
+            }
+        } else {
+            showToast('No Spotify tracks found for download', 'error');
+        }
+    } catch (error) {
+        console.error(`Error rehydrating Deezer download modal: ${error}`);
+    }
+}
+
+async function openDeezerDiscoveryModal(playlistId, playlistData) {
+    console.log(`🎵 Opening Deezer discovery modal (reusing YouTube modal): ${playlistData.name}`);
+
+    const fakeUrlHash = `deezer_${playlistId}`;
+
+    const deezerCardState = deezerPlaylistStates[playlistId];
+    const isAlreadyDiscovered = deezerCardState && (deezerCardState.phase === 'discovered' || deezerCardState.phase === 'syncing' || deezerCardState.phase === 'sync_complete');
+    const isCurrentlyDiscovering = deezerCardState && deezerCardState.phase === 'discovering';
+
+    let transformedResults = [];
+    let actualMatches = 0;
+    if (isAlreadyDiscovered && deezerCardState.discovery_results) {
+        transformedResults = deezerCardState.discovery_results.map((result, index) => {
+            const isFound = result.status === 'found' ||
+                result.status === '✅ Found' ||
+                result.status_class === 'found' ||
+                result.spotify_data ||
+                result.spotify_track;
+            if (isFound) actualMatches++;
+
+            return {
+                index: index,
+                yt_track: result.deezer_track ? result.deezer_track.name : 'Unknown',
+                yt_artist: result.deezer_track ? (result.deezer_track.artists ? result.deezer_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                status: isFound ? '✅ Found' : '❌ Not Found',
+                status_class: isFound ? 'found' : 'not-found',
+                spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
+                spotify_artist: result.spotify_data && result.spotify_data.artists ?
+                    (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists.join(', ') : result.spotify_data.artists) : (result.spotify_artist || '-'),
+                spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
+                spotify_data: result.spotify_data,
+                spotify_id: result.spotify_id,
+                manual_match: result.manual_match
+            };
+        });
+        console.log(`🎵 Deezer modal: Calculated ${actualMatches} matches from ${transformedResults.length} results`);
+    }
+
+    const modalPhase = deezerCardState ? deezerCardState.phase : 'fresh';
+    youtubePlaylistStates[fakeUrlHash] = {
+        phase: modalPhase,
+        playlist: {
+            name: playlistData.name,
+            tracks: playlistData.tracks
+        },
+        is_deezer_playlist: true,
+        deezer_playlist_id: playlistId,
+        discovery_progress: isAlreadyDiscovered ? 100 : 0,
+        spotify_matches: isAlreadyDiscovered ? actualMatches : 0,
+        spotifyMatches: isAlreadyDiscovered ? actualMatches : 0,
+        spotify_total: playlistData.tracks.length,
+        discovery_results: transformedResults,
+        discoveryResults: transformedResults,
+        discoveryProgress: isAlreadyDiscovered ? 100 : 0
+    };
+
+    if (!isAlreadyDiscovered && !isCurrentlyDiscovering) {
+        try {
+            console.log(`🔍 Starting Deezer discovery for: ${playlistData.name}`);
+
+            const response = await fetch(`/api/deezer/discovery/start/${playlistId}`, {
+                method: 'POST'
+            });
+
+            const result = await response.json();
+
+            if (result.error) {
+                console.error('Error starting Deezer discovery:', result.error);
+                showToast(`Error starting discovery: ${result.error}`, 'error');
+                return;
+            }
+
+            console.log('Deezer discovery started, beginning polling...');
+
+            deezerPlaylistStates[playlistId].phase = 'discovering';
+            updateDeezerCardPhase(playlistId, 'discovering');
+            youtubePlaylistStates[fakeUrlHash].phase = 'discovering';
+
+            startDeezerDiscoveryPolling(fakeUrlHash, playlistId);
+
+        } catch (error) {
+            console.error('Error starting Deezer discovery:', error);
+            showToast(`Error starting discovery: ${error.message}`, 'error');
+        }
+    } else if (isCurrentlyDiscovering) {
+        console.log(`🔄 Resuming Deezer discovery polling for: ${playlistData.name}`);
+        startDeezerDiscoveryPolling(fakeUrlHash, playlistId);
+    } else if (deezerCardState && deezerCardState.phase === 'syncing') {
+        console.log(`🔄 Resuming Deezer sync polling for: ${playlistData.name}`);
+        startDeezerSyncPolling(fakeUrlHash);
+    } else {
+        console.log('Using existing results - no need to re-discover');
+    }
+
+    openYouTubeDiscoveryModal(fakeUrlHash);
+}
+
+function startDeezerDiscoveryPolling(fakeUrlHash, playlistId) {
+    console.log(`🔄 Starting Deezer discovery polling for: ${playlistId}`);
+
+    if (activeYouTubePollers[fakeUrlHash]) {
+        clearInterval(activeYouTubePollers[fakeUrlHash]);
+    }
+
+    // WebSocket subscription
+    if (socketConnected) {
+        socket.emit('discovery:subscribe', { ids: [playlistId] });
+        _discoveryProgressCallbacks[playlistId] = (data) => {
+            if (data.error) {
+                if (activeYouTubePollers[fakeUrlHash]) { clearInterval(activeYouTubePollers[fakeUrlHash]); delete activeYouTubePollers[fakeUrlHash]; }
+                socket.emit('discovery:unsubscribe', { ids: [playlistId] }); delete _discoveryProgressCallbacks[playlistId];
+                return;
+            }
+            const transformed = {
+                progress: data.progress, spotify_matches: data.spotify_matches, spotify_total: data.spotify_total,
+                results: (data.results || []).map((r, i) => {
+                    const isFound = r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found' || r.spotify_data || r.spotify_track;
+                    return {
+                        index: i, yt_track: r.deezer_track ? r.deezer_track.name : 'Unknown',
+                        yt_artist: r.deezer_track ? (r.deezer_track.artists ? r.deezer_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                        status: isFound ? '✅ Found' : '❌ Not Found', status_class: isFound ? 'found' : 'not-found',
+                        spotify_track: r.spotify_data ? r.spotify_data.name : (r.spotify_track || '-'),
+                        spotify_artist: r.spotify_data && r.spotify_data.artists ? (Array.isArray(r.spotify_data.artists) ? r.spotify_data.artists.join(', ') : r.spotify_data.artists) : (r.spotify_artist || '-'),
+                        spotify_album: r.spotify_data ? (typeof r.spotify_data.album === 'object' ? r.spotify_data.album.name : r.spotify_data.album) : (r.spotify_album || '-'),
+                        spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match
+                    };
+                })
+            };
+            const st = youtubePlaylistStates[fakeUrlHash];
+            if (st) {
+                st.discovery_progress = data.progress; st.discoveryProgress = data.progress;
+                st.spotify_matches = data.spotify_matches; st.spotifyMatches = data.spotify_matches;
+                st.discovery_results = data.results; st.discoveryResults = transformed.results;
+                st.phase = data.phase;
+                updateYouTubeDiscoveryModal(fakeUrlHash, transformed);
+            }
+            if (deezerPlaylistStates[playlistId]) {
+                deezerPlaylistStates[playlistId].phase = data.phase;
+                deezerPlaylistStates[playlistId].discovery_results = data.results;
+                deezerPlaylistStates[playlistId].spotify_matches = data.spotify_matches;
+                deezerPlaylistStates[playlistId].discovery_progress = data.progress;
+                updateDeezerCardPhase(playlistId, data.phase);
+            }
+            updateDeezerCardProgress(playlistId, data);
+            if (data.complete) {
+                if (activeYouTubePollers[fakeUrlHash]) { clearInterval(activeYouTubePollers[fakeUrlHash]); delete activeYouTubePollers[fakeUrlHash]; }
+                socket.emit('discovery:unsubscribe', { ids: [playlistId] }); delete _discoveryProgressCallbacks[playlistId];
+            }
+        };
+    }
+
+    const pollInterval = setInterval(async () => {
+        if (socketConnected) return;
+        try {
+            const response = await fetch(`/api/deezer/discovery/status/${playlistId}`);
+            const status = await response.json();
+
+            if (status.error) {
+                console.error('Error polling Deezer discovery status:', status.error);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[fakeUrlHash];
+                return;
+            }
+
+            const transformedStatus = {
+                progress: status.progress,
+                spotify_matches: status.spotify_matches,
+                spotify_total: status.spotify_total,
+                results: status.results.map((result, index) => {
+                    const isFound = result.status === 'found' ||
+                        result.status === '✅ Found' ||
+                        result.status_class === 'found' ||
+                        result.spotify_data ||
+                        result.spotify_track;
+
+                    return {
+                        index: index,
+                        yt_track: result.deezer_track ? result.deezer_track.name : 'Unknown',
+                        yt_artist: result.deezer_track ? (result.deezer_track.artists ? result.deezer_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                        status: isFound ? '✅ Found' : '❌ Not Found',
+                        status_class: isFound ? 'found' : 'not-found',
+                        spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
+                        spotify_artist: result.spotify_data && result.spotify_data.artists ?
+                            (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists.join(', ') : result.spotify_data.artists) : (result.spotify_artist || '-'),
+                        spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
+                        spotify_data: result.spotify_data,
+                        spotify_id: result.spotify_id,
+                        manual_match: result.manual_match
+                    };
+                })
+            };
+
+            const state = youtubePlaylistStates[fakeUrlHash];
+            if (state) {
+                state.discovery_progress = status.progress;
+                state.discoveryProgress = status.progress;
+                state.spotify_matches = status.spotify_matches;
+                state.spotifyMatches = status.spotify_matches;
+                state.discovery_results = status.results;
+                state.discoveryResults = transformedStatus.results;
+                state.phase = status.phase;
+
+                updateYouTubeDiscoveryModal(fakeUrlHash, transformedStatus);
+
+                if (deezerPlaylistStates[playlistId]) {
+                    deezerPlaylistStates[playlistId].phase = status.phase;
+                    deezerPlaylistStates[playlistId].discovery_results = status.results;
+                    deezerPlaylistStates[playlistId].spotify_matches = status.spotify_matches;
+                    deezerPlaylistStates[playlistId].discovery_progress = status.progress;
+                    updateDeezerCardPhase(playlistId, status.phase);
+                }
+
+                updateDeezerCardProgress(playlistId, status);
+
+                console.log(`🔄 Deezer discovery progress: ${status.progress}% (${status.spotify_matches}/${status.spotify_total} found)`);
+            }
+
+            if (status.complete) {
+                console.log(`Deezer discovery complete: ${status.spotify_matches}/${status.spotify_total} tracks found`);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[fakeUrlHash];
+            }
+
+        } catch (error) {
+            console.error('Error polling Deezer discovery:', error);
+            clearInterval(pollInterval);
+            delete activeYouTubePollers[fakeUrlHash];
+        }
+    }, 1000);
+
+    activeYouTubePollers[fakeUrlHash] = pollInterval;
+}
+
+async function loadDeezerPlaylistStatesFromBackend() {
+    try {
+        console.log('🎵 Loading Deezer playlist states from backend...');
+
+        const response = await fetch('/api/deezer/playlists/states');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch Deezer playlist states');
+        }
+
+        const data = await response.json();
+        const states = data.states || [];
+
+        console.log(`🎵 Found ${states.length} stored Deezer playlist states in backend`);
+
+        if (states.length === 0) return;
+
+        for (const stateInfo of states) {
+            await applyDeezerPlaylistState(stateInfo);
+        }
+
+        // Rehydrate download modals for Deezer playlists in downloading/download_complete phases
+        for (const stateInfo of states) {
+            if ((stateInfo.phase === 'downloading' || stateInfo.phase === 'download_complete') &&
+                stateInfo.converted_spotify_playlist_id && stateInfo.download_process_id) {
+
+                const convertedPlaylistId = stateInfo.converted_spotify_playlist_id;
+
+                if (!activeDownloadProcesses[convertedPlaylistId]) {
+                    console.log(`Rehydrating download modal for Deezer playlist: ${stateInfo.playlist_id}`);
+                    try {
+                        const playlistData = deezerPlaylists.find(p => String(p.id) === String(stateInfo.playlist_id));
+                        if (!playlistData) continue;
+
+                        const spotifyTracks = deezerPlaylistStates[stateInfo.playlist_id]?.discovery_results
+                            ?.filter(result => result.spotify_data)
+                            ?.map(result => result.spotify_data) || [];
+
+                        if (spotifyTracks.length > 0) {
+                            await openDownloadMissingModalForTidal(
+                                convertedPlaylistId,
+                                playlistData.name,
+                                spotifyTracks
+                            );
+
+                            const process = activeDownloadProcesses[convertedPlaylistId];
+                            if (process) {
+                                process.status = 'running';
+                                process.batchId = stateInfo.download_process_id;
+                                const beginBtn = document.getElementById(`begin-analysis-btn-${convertedPlaylistId}`);
+                                const cancelBtn = document.getElementById(`cancel-all-btn-${convertedPlaylistId}`);
+                                if (beginBtn) beginBtn.style.display = 'none';
+                                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                                startModalDownloadPolling(convertedPlaylistId);
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`Error rehydrating Deezer download modal for ${stateInfo.playlist_id}:`, error);
+                    }
+                }
+            }
+        }
+
+        console.log('Deezer playlist states loaded and applied');
+
+    } catch (error) {
+        console.error('Error loading Deezer playlist states:', error);
+    }
+}
+
+async function applyDeezerPlaylistState(stateInfo) {
+    const { playlist_id, phase, discovery_progress, spotify_matches, discovery_results, converted_spotify_playlist_id, download_process_id } = stateInfo;
+
+    try {
+        console.log(`🎵 Applying saved state for Deezer playlist: ${playlist_id}, Phase: ${phase}`);
+
+        const playlistData = deezerPlaylists.find(p => String(p.id) === String(playlist_id));
+        if (!playlistData) {
+            console.warn(`Playlist data not found for state ${playlist_id} - skipping`);
+            return;
+        }
+
+        if (!deezerPlaylistStates[playlist_id]) {
+            deezerPlaylistStates[playlist_id] = {
+                playlist: playlistData,
+                phase: 'fresh'
+            };
+        }
+
+        deezerPlaylistStates[playlist_id].phase = phase;
+        deezerPlaylistStates[playlist_id].discovery_progress = discovery_progress;
+        deezerPlaylistStates[playlist_id].spotify_matches = spotify_matches;
+        deezerPlaylistStates[playlist_id].discovery_results = discovery_results;
+        deezerPlaylistStates[playlist_id].convertedSpotifyPlaylistId = converted_spotify_playlist_id;
+        deezerPlaylistStates[playlist_id].download_process_id = download_process_id;
+        deezerPlaylistStates[playlist_id].playlist = playlistData;
+
+        if (phase !== 'fresh' && phase !== 'discovering') {
+            try {
+                const stateResponse = await fetch(`/api/deezer/state/${playlist_id}`);
+                if (stateResponse.ok) {
+                    const fullState = await stateResponse.json();
+                    if (fullState.discovery_results && deezerPlaylistStates[playlist_id]) {
+                        deezerPlaylistStates[playlist_id].discovery_results = fullState.discovery_results;
+                        deezerPlaylistStates[playlist_id].discovery_progress = fullState.discovery_progress;
+                        deezerPlaylistStates[playlist_id].spotify_matches = fullState.spotify_matches;
+                        deezerPlaylistStates[playlist_id].convertedSpotifyPlaylistId = fullState.converted_spotify_playlist_id;
+                        deezerPlaylistStates[playlist_id].download_process_id = fullState.download_process_id;
+                    }
+                }
+            } catch (error) {
+                console.warn(`Error fetching full discovery results for Deezer playlist ${playlistData.name}:`, error.message);
+            }
+        }
+
+        updateDeezerCardPhase(playlist_id, phase);
+
+        if (phase === 'discovered' && deezerPlaylistStates[playlist_id]) {
+            const progressInfo = {
+                spotify_total: playlistData.track_count || playlistData.tracks?.length || 0,
+                spotify_matches: deezerPlaylistStates[playlist_id].spotify_matches || 0
+            };
+            updateDeezerCardProgress(playlist_id, progressInfo);
+        }
+
+        if (phase === 'discovering') {
+            const fakeUrlHash = `deezer_${playlist_id}`;
+            startDeezerDiscoveryPolling(fakeUrlHash, playlist_id);
+        } else if (phase === 'syncing') {
+            const fakeUrlHash = `deezer_${playlist_id}`;
+            startDeezerSyncPolling(fakeUrlHash);
+        }
+
+    } catch (error) {
+        console.error(`Error applying Deezer playlist state for ${playlist_id}:`, error);
+    }
+}
+
+function updateDeezerCardPhase(playlistId, phase) {
+    const state = deezerPlaylistStates[playlistId];
+    if (!state) return;
+
+    state.phase = phase;
+
+    const card = document.getElementById(`deezer-card-${playlistId}`);
+    if (card) {
+        const newCardHtml = createDeezerCard(state.playlist);
+        card.outerHTML = newCardHtml;
+
+        const newCard = document.getElementById(`deezer-card-${playlistId}`);
+        if (newCard) {
+            newCard.addEventListener('click', () => handleDeezerCardClick(playlistId));
+        }
+
+        if ((phase === 'syncing' || phase === 'sync_complete') && state.lastSyncProgress) {
+            setTimeout(() => {
+                updateDeezerCardSyncProgress(playlistId, state.lastSyncProgress);
+            }, 0);
+        }
+    }
+}
+
+function updateDeezerCardProgress(playlistId, progress) {
+    const state = deezerPlaylistStates[playlistId];
+    if (!state) return;
+
+    const card = document.getElementById(`deezer-card-${playlistId}`);
+    if (!card) return;
+
+    const progressElement = card.querySelector('.playlist-card-progress');
+    if (!progressElement) return;
+
+    progressElement.classList.remove('hidden');
+
+    const total = progress.spotify_total || 0;
+    const matches = progress.spotify_matches || 0;
+
+    if (total > 0) {
+        progressElement.innerHTML = `
+            <div class="playlist-card-sync-status">
+                <span class="sync-stat matched-tracks">✓ ${matches}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat total-tracks">♪ ${total}</span>
+            </div>
+        `;
+    }
+}
+
+// ===============================
+// DEEZER SYNC FUNCTIONALITY
+// ===============================
+
+async function startDeezerPlaylistSync(urlHash) {
+    try {
+        console.log('🎵 Starting Deezer playlist sync:', urlHash);
+
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_deezer_playlist) {
+            console.error('Invalid Deezer playlist state for sync');
+            return;
+        }
+
+        const playlistId = state.deezer_playlist_id;
+        const response = await fetch(`/api/deezer/sync/start/${playlistId}`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            showToast(`Error starting sync: ${result.error}`, 'error');
+            return;
+        }
+
+        const syncPlaylistId = result.sync_playlist_id;
+        if (state) state.syncPlaylistId = syncPlaylistId;
+
+        updateDeezerCardPhase(playlistId, 'syncing');
+        updateDeezerModalButtons(urlHash, 'syncing');
+
+        startDeezerSyncPolling(urlHash, syncPlaylistId);
+
+        showToast('Deezer playlist sync started!', 'success');
+
+    } catch (error) {
+        console.error('Error starting Deezer sync:', error);
+        showToast(`Error starting sync: ${error.message}`, 'error');
+    }
+}
+
+function startDeezerSyncPolling(urlHash, syncPlaylistId) {
+    if (activeYouTubePollers[urlHash]) {
+        clearInterval(activeYouTubePollers[urlHash]);
+    }
+
+    const state = youtubePlaylistStates[urlHash];
+    const playlistId = state.deezer_playlist_id;
+
+    syncPlaylistId = syncPlaylistId || (state && state.syncPlaylistId);
+
+    // WebSocket subscription
+    if (socketConnected && syncPlaylistId) {
+        socket.emit('sync:subscribe', { playlist_ids: [syncPlaylistId] });
+        _syncProgressCallbacks[syncPlaylistId] = (data) => {
+            const progress = data.progress || {};
+            updateDeezerCardSyncProgress(playlistId, progress);
+            updateDeezerModalSyncProgress(urlHash, progress);
+
+            if (data.status === 'finished') {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                if (deezerPlaylistStates[playlistId]) deezerPlaylistStates[playlistId].phase = 'sync_complete';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'sync_complete';
+                updateDeezerCardPhase(playlistId, 'sync_complete');
+                updateDeezerModalButtons(urlHash, 'sync_complete');
+                showToast('Deezer playlist sync complete!', 'success');
+            } else if (data.status === 'error' || data.status === 'cancelled') {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                if (deezerPlaylistStates[playlistId]) deezerPlaylistStates[playlistId].phase = 'discovered';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'discovered';
+                updateDeezerCardPhase(playlistId, 'discovered');
+                updateDeezerModalButtons(urlHash, 'discovered');
+                showToast(`Sync failed: ${data.error || 'Unknown error'}`, 'error');
+            }
+        };
+    }
+
+    const pollFunction = async () => {
+        if (socketConnected) return;
+        try {
+            const response = await fetch(`/api/deezer/sync/status/${playlistId}`);
+            const status = await response.json();
+
+            if (status.error) {
+                console.error('Error polling Deezer sync status:', status.error);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                return;
+            }
+
+            updateDeezerCardSyncProgress(playlistId, status.progress);
+            updateDeezerModalSyncProgress(urlHash, status.progress);
+
+            if (status.complete) {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                if (deezerPlaylistStates[playlistId]) deezerPlaylistStates[playlistId].phase = 'sync_complete';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'sync_complete';
+                updateDeezerCardPhase(playlistId, 'sync_complete');
+                updateDeezerModalButtons(urlHash, 'sync_complete');
+                showToast('Deezer playlist sync complete!', 'success');
+            } else if (status.sync_status === 'error') {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                if (deezerPlaylistStates[playlistId]) deezerPlaylistStates[playlistId].phase = 'discovered';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'discovered';
+                updateDeezerCardPhase(playlistId, 'discovered');
+                updateDeezerModalButtons(urlHash, 'discovered');
+                showToast(`Sync failed: ${status.error || 'Unknown error'}`, 'error');
+            }
+        } catch (error) {
+            console.error('Error polling Deezer sync:', error);
+            if (activeYouTubePollers[urlHash]) {
+                clearInterval(activeYouTubePollers[urlHash]);
+                delete activeYouTubePollers[urlHash];
+            }
+        }
+    };
+
+    if (!socketConnected) pollFunction();
+
+    const pollInterval = setInterval(pollFunction, 1000);
+    activeYouTubePollers[urlHash] = pollInterval;
+}
+
+async function cancelDeezerSync(urlHash) {
+    try {
+        console.log('Cancelling Deezer sync:', urlHash);
+
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_deezer_playlist) {
+            console.error('Invalid Deezer playlist state');
+            return;
+        }
+
+        const playlistId = state.deezer_playlist_id;
+        const response = await fetch(`/api/deezer/sync/cancel/${playlistId}`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            showToast(`Error cancelling sync: ${result.error}`, 'error');
+            return;
+        }
+
+        if (activeYouTubePollers[urlHash]) {
+            clearInterval(activeYouTubePollers[urlHash]);
+            delete activeYouTubePollers[urlHash];
+        }
+
+        const syncId = state && state.syncPlaylistId;
+        if (syncId && _syncProgressCallbacks[syncId]) {
+            if (socketConnected) socket.emit('sync:unsubscribe', { playlist_ids: [syncId] });
+            delete _syncProgressCallbacks[syncId];
+        }
+
+        updateDeezerCardPhase(playlistId, 'discovered');
+        updateDeezerModalButtons(urlHash, 'discovered');
+
+        showToast('Deezer sync cancelled', 'info');
+
+    } catch (error) {
+        console.error('Error cancelling Deezer sync:', error);
+        showToast(`Error cancelling sync: ${error.message}`, 'error');
+    }
+}
+
+function updateDeezerCardSyncProgress(playlistId, progress) {
+    const state = deezerPlaylistStates[playlistId];
+    if (!state || !state.playlist || !progress) return;
+
+    state.lastSyncProgress = progress;
+
+    const card = document.getElementById(`deezer-card-${playlistId}`);
+    if (!card) return;
+
+    const progressElement = card.querySelector('.playlist-card-progress');
+
+    let statusCounterHTML = '';
+    if (progress && progress.total_tracks > 0) {
+        const matched = progress.matched_tracks || 0;
+        const failed = progress.failed_tracks || 0;
+        const total = progress.total_tracks || 0;
+        const processed = matched + failed;
+        const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+        statusCounterHTML = `
+            <div class="playlist-card-sync-status">
+                <span class="sync-stat total-tracks">♪ ${total}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat matched-tracks">✓ ${matched}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat failed-tracks">✗ ${failed}</span>
+                <span class="sync-stat percentage">(${percentage}%)</span>
+            </div>
+        `;
+    }
+
+    if (statusCounterHTML) {
+        progressElement.innerHTML = statusCounterHTML;
+    }
+}
+
+function updateDeezerModalSyncProgress(urlHash, progress) {
+    const statusDisplay = document.getElementById(`deezer-sync-status-${urlHash}`);
+    if (!statusDisplay || !progress) return;
+
+    const totalEl = document.getElementById(`deezer-total-${urlHash}`);
+    const matchedEl = document.getElementById(`deezer-matched-${urlHash}`);
+    const failedEl = document.getElementById(`deezer-failed-${urlHash}`);
+    const percentageEl = document.getElementById(`deezer-percentage-${urlHash}`);
+
+    const total = progress.total_tracks || 0;
+    const matched = progress.matched_tracks || 0;
+    const failed = progress.failed_tracks || 0;
+
+    if (totalEl) totalEl.textContent = total;
+    if (matchedEl) matchedEl.textContent = matched;
+    if (failedEl) failedEl.textContent = failed;
+
+    if (total > 0) {
+        const processed = matched + failed;
+        const percentage = Math.round((processed / total) * 100);
+        if (percentageEl) percentageEl.textContent = percentage;
+    }
+}
+
+function updateDeezerModalButtons(urlHash, phase) {
+    const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+    if (!modal) return;
+
+    const footerLeft = modal.querySelector('.modal-footer-left');
+    if (footerLeft) {
+        footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
+    }
+}
+
+async function startDeezerDownloadMissing(urlHash) {
+    try {
+        console.log('🔍 Starting download missing tracks for Deezer playlist:', urlHash);
+
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_deezer_playlist) {
+            console.error('Invalid Deezer playlist state for download');
+            return;
+        }
+
+        const discoveryResults = state.discoveryResults || state.discovery_results;
+
+        if (!discoveryResults) {
+            showToast('No discovery results available for download', 'error');
+            return;
+        }
+
+        const spotifyTracks = [];
+        for (const result of discoveryResults) {
+            if (result.spotify_data) {
+                spotifyTracks.push(result.spotify_data);
+            } else if (result.spotify_track && result.status_class === 'found') {
+                const albumData = result.spotify_album || 'Unknown Album';
+                const albumObject = typeof albumData === 'object' && albumData !== null
+                    ? albumData
+                    : {
+                        name: typeof albumData === 'string' ? albumData : 'Unknown Album',
+                        album_type: 'album',
+                        images: []
+                    };
+
+                spotifyTracks.push({
+                    id: result.spotify_id || 'unknown',
+                    name: result.spotify_track || 'Unknown Track',
+                    artists: result.spotify_artist ? [result.spotify_artist] : ['Unknown Artist'],
+                    album: albumObject,
+                    duration_ms: 0
+                });
+            }
+        }
+
+        if (spotifyTracks.length === 0) {
+            showToast('No Spotify matches found for download', 'error');
+            return;
+        }
+
+        const virtualPlaylistId = `deezer_${state.deezer_playlist_id}`;
+        const playlistName = state.playlist.name;
+
+        state.convertedSpotifyPlaylistId = virtualPlaylistId;
+
+        const discoveryModal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+        if (discoveryModal) {
+            discoveryModal.classList.add('hidden');
+        }
+
+        await openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks);
+
+    } catch (error) {
+        console.error('Error starting download missing tracks:', error);
+        showToast(`Error starting downloads: ${error.message}`, 'error');
+    }
+}
+
+
 // ===============================
 // SYNC PAGE FUNCTIONALITY (REDESIGNED)
 // ===============================
@@ -21089,6 +22082,19 @@ function initializeSyncPage() {
     if (tidalRefreshBtn) {
         tidalRefreshBtn.removeEventListener('click', loadTidalPlaylists);
         tidalRefreshBtn.addEventListener('click', loadTidalPlaylists);
+    }
+
+    // Logic for the Deezer parse button
+    const deezerParseBtn = document.getElementById('deezer-parse-btn');
+    if (deezerParseBtn) {
+        deezerParseBtn.addEventListener('click', loadDeezerPlaylist);
+    }
+    // Also allow Enter key in the Deezer input
+    const deezerUrlInput = document.getElementById('deezer-url-input');
+    if (deezerUrlInput) {
+        deezerUrlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') loadDeezerPlaylist();
+        });
     }
 
     // Logic for the Mirrored refresh button
@@ -24684,6 +25690,8 @@ function openYouTubeDiscoveryModal(urlHash) {
             console.log('🔄 Resuming sync polling...');
             if (state.is_tidal_playlist) {
                 startTidalSyncPolling(urlHash);
+            } else if (state.is_deezer_playlist) {
+                startDeezerSyncPolling(urlHash);
             } else if (state.is_beatport_playlist) {
                 startBeatportSyncPolling(urlHash);
             } else if (state.is_listenbrainz_playlist) {
@@ -24693,17 +25701,20 @@ function openYouTubeDiscoveryModal(urlHash) {
             }
         }
     } else {
-        // Create new modal (support YouTube, Tidal, Beatport, ListenBrainz, and Mirrored)
+        // Create new modal (support YouTube, Tidal, Deezer, Beatport, ListenBrainz, and Mirrored)
         const isTidal = state.is_tidal_playlist;
+        const isDeezer = state.is_deezer_playlist;
         const isBeatport = state.is_beatport_playlist;
         const isListenBrainz = state.is_listenbrainz_playlist;
         const isMirrored = state.is_mirrored_playlist;
         const modalTitle = isMirrored ? '🎵 Mirrored Playlist Discovery' :
+            isDeezer ? '🎵 Deezer Playlist Discovery' :
             isTidal ? '🎵 Tidal Playlist Discovery' :
             isBeatport ? '🎵 Beatport Chart Discovery' :
                 isListenBrainz ? '🎵 ListenBrainz Playlist Discovery' :
                     '🎵 YouTube Playlist Discovery';
         const sourceLabel = isMirrored ? (state.mirrored_source ? state.mirrored_source.charAt(0).toUpperCase() + state.mirrored_source.slice(1) : 'Source') :
+            isDeezer ? 'Deezer' :
             isTidal ? 'Tidal' :
             isBeatport ? 'Beatport' :
                 isListenBrainz ? 'LB' :
@@ -24715,7 +25726,7 @@ function openYouTubeDiscoveryModal(urlHash) {
                     <div class="modal-header">
                         <h2>${modalTitle}</h2>
                         <div class="modal-subtitle">${state.playlist.name} (${state.playlist.tracks.length} tracks)</div>
-                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport, isListenBrainz, isMirrored)}</div>
+                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport, isListenBrainz, isMirrored, isDeezer)}</div>
                         <button class="modal-close-btn" onclick="closeYouTubeDiscoveryModal('${urlHash}')">✕</button>
                     </div>
 
@@ -24848,6 +25859,8 @@ function openYouTubeDiscoveryModal(urlHash) {
             console.log('🔄 Modal opened in syncing phase - starting immediate polling...');
             if (state.is_tidal_playlist) {
                 startTidalSyncPolling(urlHash);
+            } else if (state.is_deezer_playlist) {
+                startDeezerSyncPolling(urlHash);
             } else if (state.is_beatport_playlist) {
                 startBeatportSyncPolling(urlHash);
             } else {
@@ -24866,6 +25879,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
     }
 
     const isTidal = state && state.is_tidal_playlist;
+    const isDeezer = state && state.is_deezer_playlist;
     const isBeatport = state && state.is_beatport_playlist;
     const isListenBrainz = state && state.is_listenbrainz_playlist;
 
@@ -24882,6 +25896,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                 if (isListenBrainz) {
                     return `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
                 } else if (isTidal) {
+                    return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
+                } else if (isDeezer) {
                     return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
                 } else if (isBeatport) {
                     return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
@@ -24909,6 +25925,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isTidal) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isDeezer) {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isBeatport) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else {
@@ -24923,6 +25941,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isTidal) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startTidalDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isDeezer) {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isBeatport) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else {
@@ -24968,6 +25988,18 @@ function getModalActionButtons(urlHash, phase, state = null) {
                         <span class="sync-separator">/</span>
                         <span class="sync-stat failed-tracks">✗ <span id="tidal-failed-${urlHash}">0</span></span>
                         <span class="sync-stat percentage">(<span id="tidal-percentage-${urlHash}">0</span>%)</span>
+                    </div>
+                `;
+            } else if (isDeezer) {
+                return `
+                    <button class="modal-btn modal-btn-danger" onclick="cancelDeezerSync('${urlHash}')">❌ Cancel Sync</button>
+                    <div class="playlist-modal-sync-status" id="deezer-sync-status-${urlHash}" style="display: flex;">
+                        <span class="sync-stat total-tracks">♪ <span id="deezer-total-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat matched-tracks">✓ <span id="deezer-matched-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat failed-tracks">✗ <span id="deezer-failed-${urlHash}">0</span></span>
+                        <span class="sync-stat percentage">(<span id="deezer-percentage-${urlHash}">0</span>%)</span>
                     </div>
                 `;
             } else if (isBeatport) {
@@ -25043,8 +26075,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
     }
 }
 
-function getModalDescription(phase, isTidal = false, isBeatport = false, isListenBrainz = false, isMirrored = false) {
-    const source = isMirrored ? 'mirrored' : (isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube')));
+function getModalDescription(phase, isTidal = false, isBeatport = false, isListenBrainz = false, isMirrored = false, isDeezer = false) {
+    const source = isMirrored ? 'mirrored' : (isDeezer ? 'Deezer' : (isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube'))));
     switch (phase) {
         case 'fresh':
             return `Ready to discover clean ${currentMusicSourceName} metadata for ${source} tracks...`;
@@ -25076,10 +26108,11 @@ function getInitialProgressText(phase, isTidal = false, isBeatport = false, isLi
 
 function generateTableRowsFromState(state, urlHash) {
     const isTidal = state.is_tidal_playlist;
+    const isDeezer = state.is_deezer_playlist;
     const isBeatport = state.is_beatport_playlist;
     const isListenBrainz = state.is_listenbrainz_playlist;
     const isMirrored = state.is_mirrored_playlist;
-    const platform = isMirrored ? 'mirrored' : (isListenBrainz ? 'listenbrainz' : (isTidal ? 'tidal' : (isBeatport ? 'beatport' : 'youtube')));
+    const platform = isMirrored ? 'mirrored' : (isDeezer ? 'deezer' : (isListenBrainz ? 'listenbrainz' : (isTidal ? 'tidal' : (isBeatport ? 'beatport' : 'youtube'))));
 
     // Support both camelCase and snake_case
     const discoveryResults = state.discoveryResults || state.discovery_results;
@@ -25224,9 +26257,10 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
         if (actionsCell) {
             const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
             const platform = state?.is_mirrored_playlist ? 'mirrored' :
+                (state?.is_deezer_playlist ? 'deezer' :
                 (state?.is_listenbrainz_playlist ? 'listenbrainz' :
                 (state?.is_tidal_playlist ? 'tidal' :
-                    (state?.is_beatport_playlist ? 'beatport' : 'youtube')));
+                    (state?.is_beatport_playlist ? 'beatport' : 'youtube'))));
             actionsCell.innerHTML = generateDiscoveryActionButton(result, urlHash, platform);
         }
     });
@@ -25286,13 +26320,44 @@ function closeYouTubeDiscoveryModal(urlHash) {
     const state = youtubePlaylistStates[urlHash];
     if (state) {
         const isTidal = state.is_tidal_playlist;
+        const isDeezer = state.is_deezer_playlist;
         const isBeatport = state.is_beatport_playlist;
 
         // Reset to 'discovered' phase if modal is closed after completion (like Tidal does)
         if (state.phase === 'sync_complete' || state.phase === 'download_complete') {
-            console.log(`🧹 [Modal Close] Resetting ${isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube')} state after completion`);
+            console.log(`🧹 [Modal Close] Resetting ${isDeezer ? 'Deezer' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube'))} state after completion`);
 
-            if (isTidal) {
+            if (isDeezer) {
+                // Deezer: Extract playlist ID and reset Deezer state
+                const deezerPlaylistId = state.deezer_playlist_id || null;
+                if (deezerPlaylistId && deezerPlaylistStates[deezerPlaylistId]) {
+                    const preservedData = {
+                        playlist: deezerPlaylistStates[deezerPlaylistId].playlist,
+                        discovery_results: deezerPlaylistStates[deezerPlaylistId].discovery_results,
+                        spotify_matches: deezerPlaylistStates[deezerPlaylistId].spotify_matches,
+                        discovery_progress: deezerPlaylistStates[deezerPlaylistId].discovery_progress,
+                        convertedSpotifyPlaylistId: deezerPlaylistStates[deezerPlaylistId].convertedSpotifyPlaylistId
+                    };
+
+                    delete deezerPlaylistStates[deezerPlaylistId].download_process_id;
+                    delete deezerPlaylistStates[deezerPlaylistId].phase;
+
+                    Object.assign(deezerPlaylistStates[deezerPlaylistId], preservedData);
+                    deezerPlaylistStates[deezerPlaylistId].phase = 'discovered';
+
+                    updateDeezerCardPhase(deezerPlaylistId, 'discovered');
+
+                    try {
+                        fetch(`/api/deezer/update_phase/${deezerPlaylistId}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ phase: 'discovered' })
+                        });
+                    } catch (error) {
+                        console.warn('Error updating backend Deezer phase:', error);
+                    }
+                }
+            } else if (isTidal) {
                 // Tidal: Extract playlist ID and reset Tidal state
                 const tidalPlaylistId = state.tidal_playlist_id || null;
                 if (tidalPlaylistId && tidalPlaylistStates[tidalPlaylistId]) {
@@ -25633,6 +26698,7 @@ async function startYouTubeDownloadMissing(urlHash) {
         const isListenBrainz = state.is_listenbrainz_playlist;
         const isBeatport = state.is_beatport_playlist;
         const isTidal = state.is_tidal_playlist;
+        const isDeezer = state.is_deezer_playlist;
 
         // Convert discovery results to a format compatible with the download modal
         const spotifyTracks = discoveryResults
@@ -25668,7 +26734,7 @@ async function startYouTubeDownloadMissing(urlHash) {
         }
 
         // Create a virtual playlist for the download system
-        const virtualPlaylistId = isListenBrainz ? `listenbrainz_${urlHash}` : (isBeatport ? `beatport_${urlHash}` : (isTidal ? `tidal_${urlHash}` : `youtube_${urlHash}`));
+        const virtualPlaylistId = isListenBrainz ? `listenbrainz_${urlHash}` : (isDeezer ? `deezer_${urlHash}` : (isBeatport ? `beatport_${urlHash}` : (isTidal ? `tidal_${urlHash}` : `youtube_${urlHash}`)));
         const playlistName = state.playlist.name;
 
         // Store reference for card navigation

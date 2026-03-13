@@ -1,7 +1,8 @@
+import re
 import requests
 import time
 import threading
-from typing import Dict, Optional, Any
+from typing import Dict, List, Optional, Any
 from functools import wraps
 from utils.logging_config import get_logger
 
@@ -223,3 +224,124 @@ class DeezerClient:
         except Exception as e:
             logger.error(f"Error getting track {track_id}: {e}")
             return None
+
+    @rate_limited
+    def get_playlist(self, playlist_id) -> Optional[Dict[str, Any]]:
+        """
+        Get a playlist with all its tracks by ID.
+
+        Fetches playlist metadata and tracks, paginating if the playlist
+        contains more tracks than a single response returns (400 per page).
+
+        Args:
+            playlist_id: Deezer playlist ID (string or int)
+
+        Returns:
+            Dict with id, name, description, track_count, image_url, owner,
+            and tracks list, or None on error
+        """
+        try:
+            playlist_id = str(playlist_id)
+
+            response = self.session.get(
+                f"{self.BASE_URL}/playlist/{playlist_id}",
+                timeout=15
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            if 'error' in data:
+                logger.error(f"Deezer API error getting playlist {playlist_id}: {data['error']}")
+                return None
+
+            total_tracks = data.get('nb_tracks', 0)
+            raw_tracks = data.get('tracks', {}).get('data', [])
+
+            # Paginate if we didn't get all tracks
+            while len(raw_tracks) < total_tracks:
+                index = len(raw_tracks)
+                logger.debug(f"Paginating playlist {playlist_id} tracks at index {index}")
+                page_response = self.session.get(
+                    f"{self.BASE_URL}/playlist/{playlist_id}/tracks",
+                    params={'index': index, 'limit': 400},
+                    timeout=15
+                )
+                page_response.raise_for_status()
+
+                page_data = page_response.json()
+                if 'error' in page_data:
+                    logger.warning(f"Error paginating playlist tracks at index {index}: {page_data['error']}")
+                    break
+
+                page_tracks = page_data.get('data', [])
+                if not page_tracks:
+                    break
+
+                raw_tracks.extend(page_tracks)
+
+            # Normalize tracks
+            tracks: List[Dict[str, Any]] = []
+            for i, t in enumerate(raw_tracks, start=1):
+                artist_name = t.get('artist', {}).get('name', 'Unknown Artist')
+                # Some tracks list multiple artists separated by commas or slashes
+                tracks.append({
+                    'id': str(t.get('id', '')),
+                    'name': t.get('title', ''),
+                    'artists': [artist_name],
+                    'album': t.get('album', {}).get('title', ''),
+                    'duration_ms': t.get('duration', 0) * 1000,
+                    'track_number': i,
+                })
+
+            result = {
+                'id': str(data.get('id', '')),
+                'name': data.get('title', ''),
+                'description': data.get('description', ''),
+                'track_count': total_tracks,
+                'image_url': data.get('picture_medium', ''),
+                'owner': data.get('creator', {}).get('name', ''),
+                'tracks': tracks,
+            }
+
+            logger.info(f"Fetched playlist '{result['name']}' with {len(tracks)} tracks")
+            return result
+
+        except Exception as e:
+            logger.error(f"Error getting playlist {playlist_id}: {e}")
+            return None
+
+    @staticmethod
+    def parse_playlist_url(url: str) -> Optional[str]:
+        """
+        Extract a Deezer playlist ID from a URL or raw numeric string.
+
+        Supported formats:
+            https://www.deezer.com/playlist/1234567890
+            https://www.deezer.com/en/playlist/1234567890
+            https://deezer.com/playlist/1234567890
+            1234567890
+
+        Args:
+            url: Deezer playlist URL or numeric ID
+
+        Returns:
+            Playlist ID as a string, or None if the input is invalid
+        """
+        if not url or not isinstance(url, str):
+            return None
+
+        url = url.strip()
+
+        # Raw numeric ID
+        if url.isdigit():
+            return url
+
+        # URL pattern: optional www, optional locale segment, /playlist/{id}
+        match = re.match(
+            r'https?://(?:www\.)?deezer\.com/(?:[a-z]{2}/)?playlist/(\d+)',
+            url
+        )
+        if match:
+            return match.group(1)
+
+        return None
