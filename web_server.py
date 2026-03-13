@@ -29235,6 +29235,8 @@ def enrich_similar_artists():
                                     image_url=img_url, genres=genres, popularity=pop
                                 )
                 except Exception as e:
+                    from core.spotify_client import _detect_and_set_rate_limit
+                    _detect_and_set_rate_limit(e, 'enrich_similar_artists')
                     print(f"Error enriching Spotify batch: {e}")
             else:
                 from core.itunes_client import iTunesClient
