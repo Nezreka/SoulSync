@@ -27314,11 +27314,11 @@ body {
     width: 44px;
     height: 44px;
     background: linear-gradient(135deg,
-            rgba(var(--accent-light-rgb), 0.12) 0%,
+            rgba(30, 215, 96, 0.12) 0%,
             rgba(21, 150, 67, 0.18) 100%);
     backdrop-filter: blur(20px) saturate(1.4);
     -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(var(--accent-light-rgb), 0.25);
+    border: 1.5px solid rgba(30, 215, 96, 0.25);
     border-radius: 50%;
     cursor: pointer;
     display: flex;
@@ -27326,19 +27326,19 @@ body {
     justify-content: center;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow:
-        0 4px 16px rgba(var(--accent-light-rgb), 0.2),
+        0 4px 16px rgba(30, 215, 96, 0.2),
         0 2px 8px rgba(0, 0, 0, 0.15),
         inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .spotify-enrich-button:hover {
     background: linear-gradient(135deg,
-            rgba(var(--accent-light-rgb), 0.18) 0%,
+            rgba(30, 215, 96, 0.18) 0%,
             rgba(21, 150, 67, 0.25) 100%);
-    border-color: rgba(var(--accent-light-rgb), 0.4);
+    border-color: rgba(30, 215, 96, 0.4);
     transform: scale(1.05);
     box-shadow:
-        0 6px 20px rgba(var(--accent-light-rgb), 0.3),
+        0 6px 20px rgba(30, 215, 96, 0.3),
         0 3px 12px rgba(0, 0, 0, 0.2),
         inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
@@ -27346,7 +27346,7 @@ body {
 .spotify-enrich-button:active {
     transform: scale(0.95);
     box-shadow:
-        0 2px 8px rgba(var(--accent-light-rgb), 0.15),
+        0 2px 8px rgba(30, 215, 96, 0.15),
         inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -27368,8 +27368,8 @@ body {
     width: 44px;
     height: 44px;
     border: 3px solid transparent;
-    border-top-color: rgba(var(--accent-light-rgb), 0.8);
-    border-right-color: rgba(var(--accent-light-rgb), 0.5);
+    border-top-color: rgba(30, 215, 96, 0.8);
+    border-right-color: rgba(30, 215, 96, 0.5);
     border-radius: 50%;
     opacity: 0;
     transition: opacity 0.3s ease;
@@ -27383,18 +27383,18 @@ body {
 
 .spotify-enrich-button.active {
     background: linear-gradient(135deg,
-            rgba(var(--accent-light-rgb), 0.22) 0%,
+            rgba(30, 215, 96, 0.22) 0%,
             rgba(21, 150, 67, 0.28) 100%);
-    border-color: rgba(var(--accent-light-rgb), 0.5);
+    border-color: rgba(30, 215, 96, 0.5);
     box-shadow:
-        0 6px 24px rgba(var(--accent-light-rgb), 0.4),
+        0 6px 24px rgba(30, 215, 96, 0.4),
         0 3px 12px rgba(0, 0, 0, 0.2),
         inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .spotify-enrich-button.active .spotify-enrich-logo {
     opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(var(--accent-light-rgb), 0.6));
+    filter: drop-shadow(0 0 8px rgba(30, 215, 96, 0.6));
 }
 
 .spotify-enrich-button.complete {
@@ -27502,12 +27502,12 @@ body {
             rgba(20, 20, 20, 0.99) 100%);
     backdrop-filter: blur(40px) saturate(1.6);
     -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid rgba(var(--accent-light-rgb), 0.3);
+    border: 1px solid rgba(30, 215, 96, 0.3);
     border-radius: 16px;
     padding: 16px 18px;
     box-shadow:
         0 12px 40px rgba(0, 0, 0, 0.5),
-        0 6px 20px rgba(var(--accent-light-rgb), 0.25),
+        0 6px 20px rgba(30, 215, 96, 0.25),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
@@ -27515,7 +27515,7 @@ body {
     font-family: 'SF Pro Display', -apple-system, sans-serif;
     font-size: 13px;
     font-weight: 600;
-    color: rgba(var(--accent-light-rgb), 0.95);
+    color: rgba(30, 215, 96, 0.95);
     letter-spacing: -0.2px;
     margin-bottom: 12px;
     padding-bottom: 10px;
@@ -27529,7 +27529,7 @@ body {
 }
 
 #spotify-enrich-tooltip-status {
-    color: rgb(var(--accent-light-rgb));
+    color: rgb(30, 215, 96);
     font-weight: 600;
 }
 
@@ -27547,7 +27547,7 @@ body {
     height: 0;
     border-left: 6px solid transparent;
     border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(var(--accent-light-rgb), 0.3);
+    border-bottom: 8px solid rgba(30, 215, 96, 0.3);
 }
 
 .spotify-enrich-tooltip-content::after {
