@@ -295,12 +295,16 @@ function handleServiceStatusUpdate(data) {
         if (_spotifyRateLimitShown && !_spotifyInCooldown) {
             _spotifyRateLimitShown = false;
             _spotifyInCooldown = true;
+            closeRateLimitModal();
             showToast('Spotify ban expired \u2014 recovering shortly', 'info');
         }
     } else {
         if (_spotifyInCooldown) {
             _spotifyInCooldown = false;
             showToast('Spotify access restored', 'success');
+            if (currentPage === 'discover') {
+                loadDiscoverPage();
+            }
         } else if (_spotifyRateLimitShown) {
             handleSpotifyRateLimit(null);
         }
@@ -5799,20 +5803,102 @@ async function disconnectSpotify() {
 // ── Spotify Rate Limit Handling ───────────────────────────────────────────
 let _spotifyRateLimitShown = false;
 let _spotifyInCooldown = false;
+let _rateLimitModalOpen = false;
+let _rateLimitCountdownInterval = null;
+let _rateLimitExpiresAt = 0;
 
 function handleSpotifyRateLimit(rateLimitInfo) {
     if (!rateLimitInfo || !rateLimitInfo.active) {
         if (_spotifyRateLimitShown) {
             _spotifyRateLimitShown = false;
+            closeRateLimitModal();
             showToast('Spotify access restored', 'success');
+            // Refresh discover page if user is on it — data source switched back to Spotify
+            if (currentPage === 'discover') {
+                console.log('Spotify restored — refreshing discover page data');
+                loadDiscoverPage();
+            }
         }
         return;
+    }
+    // Update countdown if modal is open (status pushes every 10s keep it accurate)
+    if (_rateLimitModalOpen && rateLimitInfo.remaining_seconds) {
+        _rateLimitExpiresAt = Date.now() + (rateLimitInfo.remaining_seconds * 1000);
     }
     if (!_spotifyRateLimitShown) {
         _spotifyRateLimitShown = true;
         _spotifyInCooldown = false;
-        const duration = formatRateLimitDuration(rateLimitInfo.remaining_seconds);
-        showToast(`Spotify rate limited (${duration}) \u2014 using Apple Music`, 'warning');
+        showRateLimitModal(rateLimitInfo);
+        // Refresh discover page if user is on it — data source switched to iTunes
+        if (currentPage === 'discover') {
+            console.log('Spotify rate limited — refreshing discover page with iTunes data');
+            loadDiscoverPage();
+        }
+    }
+}
+
+function showRateLimitModal(rateLimitInfo) {
+    const overlay = document.getElementById('rate-limit-modal-overlay');
+    if (!overlay) return;
+
+    // Populate details
+    const banDuration = document.getElementById('rate-limit-ban-duration');
+    const endpoint = document.getElementById('rate-limit-endpoint');
+    const countdown = document.getElementById('rate-limit-countdown');
+
+    banDuration.textContent = formatRateLimitDuration(rateLimitInfo.retry_after || rateLimitInfo.remaining_seconds);
+    endpoint.textContent = rateLimitInfo.endpoint || 'unknown';
+    countdown.textContent = formatRateLimitDuration(rateLimitInfo.remaining_seconds);
+
+    // Set expiry for live countdown
+    _rateLimitExpiresAt = Date.now() + (rateLimitInfo.remaining_seconds * 1000);
+
+    // Start live countdown timer
+    if (_rateLimitCountdownInterval) clearInterval(_rateLimitCountdownInterval);
+    _rateLimitCountdownInterval = setInterval(() => {
+        const remaining = Math.max(0, Math.round((_rateLimitExpiresAt - Date.now()) / 1000));
+        countdown.textContent = formatRateLimitDuration(remaining);
+        if (remaining <= 0) {
+            clearInterval(_rateLimitCountdownInterval);
+            _rateLimitCountdownInterval = null;
+        }
+    }, 1000);
+
+    overlay.classList.remove('hidden');
+    _rateLimitModalOpen = true;
+}
+
+function closeRateLimitModal() {
+    const overlay = document.getElementById('rate-limit-modal-overlay');
+    if (overlay) overlay.classList.add('hidden');
+    if (_rateLimitCountdownInterval) {
+        clearInterval(_rateLimitCountdownInterval);
+        _rateLimitCountdownInterval = null;
+    }
+    _rateLimitModalOpen = false;
+}
+
+async function disconnectSpotifyFromRateLimit() {
+    closeRateLimitModal();
+    try {
+        showLoadingOverlay('Disconnecting Spotify...');
+        const response = await fetch('/api/spotify/disconnect', { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            _spotifyRateLimitShown = false;
+            showToast('Spotify disconnected. Now using Apple Music/iTunes.', 'success');
+            await fetchAndUpdateServiceStatus();
+            if (currentPage === 'discover') {
+                loadDiscoverPage();
+            }
+        } else {
+            showToast(`Failed to disconnect: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error disconnecting Spotify:', error);
+        showToast('Failed to disconnect Spotify', 'error');
+    } finally {
+        hideLoadingOverlay();
     }
 }
 

@@ -28,6 +28,8 @@ _rate_limit_retry_after = 0  # Original Retry-After value in seconds
 _rate_limit_endpoint = None  # Which function triggered the ban
 _rate_limit_set_at = 0       # When the ban was set
 _rate_limit_ban_ended_at = 0  # When the last ban expired naturally (for post-ban cooldown)
+_rate_limit_hit_count = 0    # How many times we've been rate limited recently (for escalation)
+_rate_limit_first_hit = 0    # Timestamp of the first hit in the current escalation window
 
 # Threshold: if Retry-After exceeds this, activate global ban instead of sleeping
 _LONG_RATE_LIMIT_THRESHOLD = 60  # seconds
@@ -36,6 +38,12 @@ _LONG_RATE_LIMIT_THRESHOLD = 60  # seconds
 # This prevents the "immediate re-probe → re-ban" cycle where Spotify's server-side
 # cooldown outlasts the Retry-After value they sent us.
 _POST_BAN_COOLDOWN = 300  # 5 minutes
+
+# Escalation: if we get rate limited again within this window, increase ban duration
+_ESCALATION_WINDOW = 3600   # 1 hour — if re-limited within this, escalate
+_ESCALATION_MAX = 14400     # 4 hours max ban
+_BASE_UNKNOWN_BAN = 1800    # 30 min default when Retry-After header is missing
+_BASE_MAX_RETRIES_BAN = 3600  # 1 hour default when spotipy exhausted all retries
 
 
 class SpotifyRateLimitError(Exception):
@@ -46,11 +54,32 @@ class SpotifyRateLimitError(Exception):
         super().__init__(f"Spotify rate limited for {retry_after}s (triggered by {endpoint})")
 
 
-def _set_global_rate_limit(retry_after_seconds, endpoint_name):
-    """Activate the global rate limit ban."""
+def _set_global_rate_limit(retry_after_seconds, endpoint_name, has_real_header=False):
+    """Activate the global rate limit ban. Escalates duration on repeated hits."""
     global _rate_limit_until, _rate_limit_retry_after, _rate_limit_endpoint, _rate_limit_set_at
+    global _rate_limit_hit_count, _rate_limit_first_hit
     with _rate_limit_lock:
         now = time.time()
+
+        # Escalation: if we're hitting rate limits repeatedly, increase the ban
+        if not has_real_header:
+            # Only escalate when we don't have a real Retry-After (i.e., we're guessing)
+            if now - _rate_limit_first_hit < _ESCALATION_WINDOW and _rate_limit_first_hit > 0:
+                _rate_limit_hit_count += 1
+            else:
+                # New escalation window
+                _rate_limit_hit_count = 1
+                _rate_limit_first_hit = now
+
+            if _rate_limit_hit_count > 1:
+                # Double the ban for each repeated hit, up to max
+                escalated = retry_after_seconds * (2 ** (_rate_limit_hit_count - 1))
+                retry_after_seconds = min(escalated, _ESCALATION_MAX)
+                logger.warning(
+                    f"Rate limit escalation: hit #{_rate_limit_hit_count} within window, "
+                    f"ban escalated to {retry_after_seconds}s"
+                )
+
         new_until = now + retry_after_seconds
         # Only update if this extends the existing ban
         if new_until > _rate_limit_until:
@@ -125,12 +154,15 @@ def _clear_rate_limit():
     """Manually clear the global rate limit ban AND post-ban cooldown.
     Used by disconnect/reconnect so the user can immediately retry."""
     global _rate_limit_until, _rate_limit_retry_after, _rate_limit_endpoint, _rate_limit_set_at, _rate_limit_ban_ended_at
+    global _rate_limit_hit_count, _rate_limit_first_hit
     with _rate_limit_lock:
         _rate_limit_until = 0
         _rate_limit_retry_after = 0
         _rate_limit_endpoint = None
         _rate_limit_set_at = 0
         _rate_limit_ban_ended_at = 0
+        _rate_limit_hit_count = 0
+        _rate_limit_first_hit = 0
     logger.info("Global rate limit ban cleared (including post-ban cooldown)")
 
 
@@ -138,23 +170,34 @@ def _detect_and_set_rate_limit(exception, endpoint_name="unknown"):
     """Check if a Spotify exception is a 429 rate limit and activate global ban if so.
     Returns True if rate limit was detected."""
     error_str = str(exception)
-    if "429" in error_str or "rate limit" in error_str.lower():
-        # Try to extract Retry-After
+    # Check both string matching and http_status attribute (SpotifyException has it)
+    is_429 = getattr(exception, 'http_status', None) == 429
+    is_rate_limit_str = "429" in error_str or "rate limit" in error_str.lower()
+
+    if is_429 or is_rate_limit_str:
+        # Try to extract Retry-After from exception headers
         retry_after = None
+        has_real_header = False
         if hasattr(exception, 'headers') and exception.headers:
             retry_after = exception.headers.get('Retry-After') or exception.headers.get('retry-after')
+
         if retry_after:
             try:
                 delay = int(retry_after)
+                has_real_header = True
+                logger.info(f"Rate limit detected on {endpoint_name} — Retry-After header: {delay}s")
             except (ValueError, TypeError):
-                delay = 300  # Default 5 min if can't parse
+                delay = _BASE_UNKNOWN_BAN
+                logger.warning(f"Rate limit detected on {endpoint_name} — unparseable Retry-After: {retry_after}")
         else:
-            # Spotipy "Max Retries" means it already exhausted retries — assume long ban
+            # No Retry-After header available
             if "max retries" in error_str.lower():
-                delay = 600  # 10 min default for exhausted retries
+                delay = _BASE_MAX_RETRIES_BAN  # 1 hour — retries exhausted
             else:
-                delay = 300
-        _set_global_rate_limit(delay, endpoint_name)
+                delay = _BASE_UNKNOWN_BAN  # 30 min
+            logger.warning(f"Rate limit detected on {endpoint_name} — no Retry-After header, using {delay}s default")
+
+        _set_global_rate_limit(delay, endpoint_name, has_real_header=has_real_header)
         return True
     return False
 
@@ -212,7 +255,7 @@ def rate_limited(func):
 
                         # If Retry-After is long, activate global ban instead of sleeping
                         if delay and delay > _LONG_RATE_LIMIT_THRESHOLD:
-                            _set_global_rate_limit(delay, func.__name__)
+                            _set_global_rate_limit(delay, func.__name__, has_real_header=True)
                             raise SpotifyRateLimitError(delay, func.__name__)
 
                         if delay:
@@ -226,6 +269,11 @@ def rate_limited(func):
                         logger.warning(f"Spotify rate limit hit, retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries}): {func.__name__}")
                         time.sleep(delay)
                         continue
+                    else:
+                        # All retries exhausted on 429s — activate global ban.
+                        # Don't trust the Retry-After header here — we already retried
+                        # with it multiple times and still got 429'd, so it's too short.
+                        _set_global_rate_limit(_BASE_MAX_RETRIES_BAN, func.__name__)
 
                 elif is_server_error and attempt < max_retries:
                     delay = 2.0 * (2 ** attempt)  # 2, 4, 8, 16, 32
@@ -481,13 +529,16 @@ class SpotifyClient:
                 retry_after = None
                 if hasattr(e, 'headers') and e.headers:
                     retry_after = e.headers.get('Retry-After') or e.headers.get('retry-after')
+                has_real_header = False
                 try:
                     delay = int(retry_after) if retry_after else 0
+                    if retry_after:
+                        has_real_header = True
                 except (ValueError, TypeError):
                     delay = 0
-                # Minimum 10 minutes for auth probe 429s — these indicate persistent throttling
-                ban_duration = max(delay, 600)
-                _set_global_rate_limit(ban_duration, 'is_spotify_authenticated')
+                # Minimum 30 min for auth probe 429s — these indicate persistent throttling
+                ban_duration = max(delay, _BASE_UNKNOWN_BAN)
+                _set_global_rate_limit(ban_duration, 'is_spotify_authenticated', has_real_header=has_real_header)
                 logger.warning(f"Auth probe rate limited — activating {ban_duration}s global ban")
                 result = True
             else:

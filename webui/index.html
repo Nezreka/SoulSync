@@ -5248,6 +5248,48 @@
         </div>
     </div>
 
+    <!-- Spotify Rate Limit Modal -->
+    <div class="modal-overlay hidden" id="rate-limit-modal-overlay">
+        <div class="confirm-modal rate-limit-modal">
+            <div class="confirm-modal-header rate-limit-modal-header">
+                <div class="rate-limit-title-row">
+                    <svg class="rate-limit-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    <h2>Spotify Rate Limited</h2>
+                </div>
+                <button class="confirm-modal-close" onclick="closeRateLimitModal()">✕</button>
+            </div>
+            <div class="confirm-modal-content rate-limit-modal-content">
+                <p class="rate-limit-description">Spotify has temporarily blocked API access. All Spotify features (search, enrichment, playlists) are paused until the ban expires.</p>
+                <div class="rate-limit-details">
+                    <div class="rate-limit-detail-row">
+                        <span class="rate-limit-label">Ban Duration</span>
+                        <span class="rate-limit-value" id="rate-limit-ban-duration">—</span>
+                    </div>
+                    <div class="rate-limit-detail-row">
+                        <span class="rate-limit-label">Triggered By</span>
+                        <span class="rate-limit-value rate-limit-endpoint" id="rate-limit-endpoint">—</span>
+                    </div>
+                    <div class="rate-limit-detail-row">
+                        <span class="rate-limit-label">Time Remaining</span>
+                        <span class="rate-limit-value rate-limit-countdown" id="rate-limit-countdown">—</span>
+                    </div>
+                </div>
+                <p class="rate-limit-hint">You can wait for the ban to expire (the app uses Apple Music in the meantime) or disconnect Spotify to clear the ban immediately.</p>
+            </div>
+            <div class="confirm-modal-actions rate-limit-modal-actions">
+                <button class="modal-button modal-button--secondary" onclick="closeRateLimitModal()">Dismiss</button>
+                <button class="modal-button rate-limit-disconnect-btn" onclick="disconnectSpotifyFromRateLimit()">
+                    Disconnect Spotify
+                    <span class="rate-limit-disconnect-sub">Clear ban, pause enrichment &amp; switch to iTunes</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
     <script src="{{ url_for('static', filename='docs.js') }}"></script>
