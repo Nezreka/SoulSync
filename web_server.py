@@ -15668,6 +15668,7 @@ def get_version_info():
                     "• Sidebar audio visualizer with 5 reactive styles and settings toggle",
                     "• Sidebar SVG icons with accent-colored navigation and ambient aura",
                     "• Watchlist modal redesign — gradient overlay cards, staggered entrance animations, SVG icon buttons, glassmorphic styling",
+                    "• Settings page visual refresh — dashboard header, custom toggle switches, refined input styling",
                     "• Page headers with sidebar icons and gradient shimmer styling",
                     "• Service badges on library artist cards for all 9 enrichment services",
                     "• Glassmorphic 'View on' buttons on artist discography pages",
