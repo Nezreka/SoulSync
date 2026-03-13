@@ -49742,7 +49742,9 @@ function renderPoolList() {
             const matchedArtists = (md.artists || []).map(a => typeof a === 'string' ? a : (a.name || '')).join(', ');
             const conf = Math.round((e.confidence || 0) * 100);
             const confClass = conf >= 80 ? 'high' : (conf >= 70 ? 'mid' : 'low');
-            const imgUrl = md.image_url || '';
+            const album = md.album || {};
+            const albumImages = (typeof album === 'object' && album.images) ? album.images : [];
+            const imgUrl = md.image_url || (albumImages.length > 0 ? albumImages[0].url || '' : '');
             return `
                 <div class="pool-track-row pool-matched">
                     ${imgUrl ? `<img class="pool-match-image" src="${_esc(imgUrl)}" alt="" onerror="this.style.display='none'" />` : '<div class="pool-match-image-placeholder"></div>'}
