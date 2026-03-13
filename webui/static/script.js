@@ -751,6 +751,7 @@ function initAccentColorListeners() {
     if (particlesCheckbox) {
         particlesCheckbox.addEventListener('change', () => {
             applyParticlesSetting(particlesCheckbox.checked);
+            // Server save handled by the global debouncedAutoSaveSettings listener on all checkboxes
         });
     }
 }

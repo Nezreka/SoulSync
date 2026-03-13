@@ -3284,10 +3284,15 @@
 
             <!-- Settings Page -->
             <div class="page" id="settings-page">
-                <div class="page-header">
-                    <h2><img src="/static/settings.png" class="page-header-icon" alt=""><span>Settings</span></h2>
-                    <button class="save-button" onclick="document.getElementById('save-settings').click()">💾 Save
-                        Settings</button>
+                <div class="dashboard-header">
+                    <div class="header-text">
+                        <h2 class="header-title"><img src="/static/settings.png" class="page-header-icon" alt=""><span>Settings</span></h2>
+                        <p class="header-subtitle">Configure services, downloads, and preferences</p>
+                    </div>
+                    <div class="header-spacer"></div>
+                    <div class="header-actions">
+                        <button class="save-button" onclick="document.getElementById('save-settings').click()">Save Settings</button>
+                    </div>
                 </div>
                 <div class="settings-content">
                     <!-- Two Column Layout -->
@@ -3559,7 +3564,7 @@
                                         <label>API Timeout (seconds):</label>
                                         <input type="number" id="jellyfin-timeout" placeholder="120" min="15"
                                             max="300" value="120">
-                                        <small style="color: #888; display: block; margin-top: 5px;">Timeout for
+                                        <small class="settings-hint">Timeout for
                                             bulk API requests during database sync (15-300s). Increase if your
                                             Jellyfin server is slow to respond.</small>
                                     </div>
@@ -3716,14 +3721,14 @@
                                         <label>Search Timeout (seconds):</label>
                                         <input type="number" id="soulseek-search-timeout" placeholder="60" min="15"
                                             max="300" value="60">
-                                        <small style="color: #888; display: block; margin-top: 5px;">How long to search
+                                        <small class="settings-hint">How long to search
                                             for tracks (15-300 seconds)</small>
                                     </div>
                                     <div class="form-group">
                                         <label>Search Timeout Buffer (seconds):</label>
                                         <input type="number" id="soulseek-search-timeout-buffer" placeholder="15"
                                             min="5" max="60" value="15">
-                                        <small style="color: #888; display: block; margin-top: 5px;">Extra time to wait
+                                        <small class="settings-hint">Extra time to wait
                                             for late results (5-60 seconds)</small>
                                     </div>
                                     <div class="form-actions" style="margin-top: 8px;">
@@ -4033,7 +4038,7 @@
                                     <label>Album Path Template:</label>
                                     <input type="text" id="template-album-path"
                                         placeholder="$albumartist/$albumartist - $album/$track - $title">
-                                    <small style="color: #888;">Variables: $albumartist, $artist, $artistletter, $album, $title,
+                                    <small class="settings-hint">Variables: $albumartist, $artist, $artistletter, $album, $title,
                                         $track, $disc, $year, $quality (filename only)</small>
                                 </div>
 
@@ -4041,14 +4046,14 @@
                                     <label>Single Path Template:</label>
                                     <input type="text" id="template-single-path"
                                         placeholder="$artist/$artist - $title/$title">
-                                    <small style="color: #888;">Variables: $artist, $artistletter, $title, $album, $year, $quality (filename only)</small>
+                                    <small class="settings-hint">Variables: $artist, $artistletter, $title, $album, $year, $quality (filename only)</small>
                                 </div>
 
                                 <div class="form-group">
                                     <label>Playlist Path Template:</label>
                                     <input type="text" id="template-playlist-path"
                                         placeholder="$playlist/$artist - $title">
-                                    <small style="color: #888;">Variables: $playlist, $artist, $artistletter, $title, $year, $quality (filename only)</small>
+                                    <small class="settings-hint">Variables: $playlist, $artist, $artistletter, $title, $year, $quality (filename only)</small>
                                 </div>
 
                                 <div class="form-group">
@@ -4057,7 +4062,7 @@
                                         <option value="Disc">Disc (e.g., Disc 1/)</option>
                                         <option value="CD">CD (e.g., CD 1/)</option>
                                     </select>
-                                    <small style="color: #888;">Label used for auto-created disc subfolders on multi-disc albums.</small>
+                                    <small class="settings-hint">Label used for auto-created disc subfolders on multi-disc albums.</small>
                                 </div>
 
                                 <div class="form-group">
@@ -4065,7 +4070,7 @@
                                         style="background: #666;">
                                         🔄 Reset to Defaults
                                     </button>
-                                    <small style="color: #888; display: block; margin-top: 8px;">
+                                    <small class="settings-hint">
                                         Restores original path structure. Your downloads will be organized like before.
                                     </small>
                                 </div>
@@ -4177,7 +4182,7 @@
                                         </select>
                                         <div class="accent-preview-swatch" id="accent-preview-swatch"></div>
                                     </div>
-                                    <small style="color: #888;">Changes the accent color across the entire UI</small>
+                                    <small class="settings-hint">Changes the accent color across the entire UI</small>
                                 </div>
                                 <div class="form-group" id="custom-color-group" style="display:none;">
                                     <label>Custom Color:</label>
@@ -4193,14 +4198,14 @@
                                         <option value="equalizer">Equalizer</option>
                                         <option value="none">None</option>
                                     </select>
-                                    <small style="color: #888;">Audio-reactive visualizer on the sidebar edge when music is playing</small>
+                                    <small class="settings-hint">Audio-reactive visualizer on the sidebar edge when music is playing</small>
                                 </div>
                                 <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="particles-enabled" checked>
                                         Background Particles
                                     </label>
-                                    <small style="color: #888;">Animated particle effects behind each page. Disable to reduce GPU usage.</small>
+                                    <small class="settings-hint">Animated particle effects behind each page. Disable to reduce GPU usage.</small>
                                 </div>
                             </div>
 
@@ -4340,7 +4345,7 @@
 
                     <!-- Save Button -->
                     <div class="settings-actions">
-                        <button class="save-button" id="save-settings">💾 Save Settings</button>
+                        <button class="save-button" id="save-settings">Save Settings</button>
                     </div>
                 </div>
             </div>

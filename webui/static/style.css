@@ -1634,12 +1634,13 @@ body {
     width: 100%;
     display: flex;
     flex-direction: column;
+    padding: 0 4px;
 }
 
 .settings-columns {
     display: flex;
-    gap: 24px;
-    margin-bottom: 32px;
+    gap: 20px;
+    margin-bottom: 24px;
 }
 
 .settings-left-column,
@@ -1649,7 +1650,7 @@ body {
     min-width: 380px;
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 16px;
 }
 
 /* Glassmorphic cards */
@@ -1679,57 +1680,63 @@ body {
 
 .settings-group:hover {
     border-color: rgba(255, 255, 255, 0.12);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 20px rgba(var(--accent-rgb), 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.07);
-    transform: translateY(-1px);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45), 0 0 16px rgba(var(--accent-rgb), 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
 .settings-group h3 {
     font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 700;
-    color: #ffffff;
+    color: rgba(255, 255, 255, 0.95);
     margin-bottom: 14px;
-    margin-top: 8px;
+    margin-top: 6px;
     padding-left: 10px;
     padding-right: 5px;
     padding-bottom: 10px;
-    border-bottom: 2px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     position: relative;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .settings-group h3::after {
     content: '';
     position: absolute;
-    bottom: -2px;
+    bottom: -1px;
     left: 10px;
-    width: 50px;
-    height: 2px;
+    width: 40px;
+    height: 1px;
     background: linear-gradient(90deg,
-            rgba(var(--accent-rgb), 0.8) 0%,
+            rgba(var(--accent-rgb), 0.7) 0%,
             transparent 100%);
 }
 
 /* API Service Frames - upgraded inner cards */
 .api-service-frame {
-    background: linear-gradient(135deg, rgba(40, 40, 40, 0.5), rgba(25, 25, 25, 0.7));
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
     padding: 12px 14px 14px 14px;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     transition: all 0.2s ease;
 }
 
 .api-service-frame:hover {
     border-color: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.03);
 }
 
 .service-title {
     font-family: 'SF Pro Text', -apple-system, sans-serif;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
     margin-top: 0;
-    letter-spacing: 0.2px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
 }
 
 .spotify-title {
@@ -1876,6 +1883,17 @@ body {
     margin-bottom: 12px;
 }
 
+.form-group small,
+.settings-group small,
+.settings-hint {
+    display: block;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.35);
+    line-height: 1.4;
+    margin-top: 5px;
+    padding-left: 1px;
+}
+
 .form-group {
     option {
         color: black;
@@ -1889,45 +1907,54 @@ body {
 .form-group label {
     display: block;
     font-size: 11px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.8);
-    margin-bottom: 4px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 5px;
+    letter-spacing: 0.2px;
 }
 
-.form-group input,
+.form-group input:not([type="checkbox"]):not([type="color"]),
 .form-group select {
     width: 100%;
-    padding: 8px 12px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03));
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
+    padding: 9px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
     color: #ffffff;
     font-size: 12px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.25s ease;
 }
 
-.form-group input:focus,
+.form-group input:not([type="checkbox"]):hover,
+.form-group select:hover {
+    border-color: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.form-group input:not([type="checkbox"]):not([type="color"]):focus,
 .form-group select:focus {
     outline: none;
-    border-color: rgba(var(--accent-rgb), 0.6);
-    background: rgba(var(--accent-rgb), 0.05);
-    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12), 0 0 16px rgba(var(--accent-rgb), 0.08);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    background: rgba(var(--accent-rgb), 0.06);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1), 0 0 12px rgba(var(--accent-rgb), 0.06);
 }
 
-.form-group input::placeholder {
-    color: rgba(255, 255, 255, 0.3);
+.form-group input:not([type="checkbox"])::placeholder {
+    color: rgba(255, 255, 255, 0.25);
 }
 
-/* Checkbox Styling */
+/* Checkbox Styling — toggle switch */
 .checkbox-label {
     display: flex !important;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     cursor: pointer;
     font-size: 12px !important;
+    font-weight: 500;
     margin-bottom: 0 !important;
-    padding: 4px 0;
+    padding: 6px 0;
     transition: color 0.2s ease;
+    color: rgba(255, 255, 255, 0.8);
 }
 
 .checkbox-label:hover {
@@ -1935,11 +1962,43 @@ body {
 }
 
 .checkbox-label input[type="checkbox"] {
-    width: 16px !important;
-    height: 16px !important;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    width: 34px !important;
+    height: 18px !important;
+    min-height: 0 !important;
     margin: 0 !important;
-    accent-color: rgb(var(--accent-light-rgb));
+    padding: 0 !important;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 18px;
     cursor: pointer;
+    position: relative;
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+}
+
+.checkbox-label input[type="checkbox"]::before {
+    content: '';
+    position: absolute;
+    height: 12px;
+    width: 12px;
+    left: 2px;
+    top: 2px;
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 50%;
+    transition: all 0.3s ease;
+}
+
+.checkbox-label input[type="checkbox"]:checked {
+    background: rgba(var(--accent-rgb), 0.5);
+    border-color: rgba(var(--accent-rgb), 0.5);
+}
+
+.checkbox-label input[type="checkbox"]:checked::before {
+    transform: translateX(16px);
+    background: rgb(var(--accent-light-rgb));
 }
 
 /* Accent Color Selector */
@@ -2033,9 +2092,19 @@ body {
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    border: none;
+    transition: all 0.2s ease;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     white-space: nowrap;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.test-button:hover,
+.detect-button:hover {
+    background: rgba(var(--accent-rgb), 0.15);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    color: rgb(var(--accent-light-rgb));
+    transform: translateY(-1px);
 }
 
 /* ===== QUALITY PROFILE STYLES ===== */
@@ -2325,21 +2394,28 @@ body {
 /* Save Button - gradient with glow */
 .save-button {
     background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
-    border: none;
-    border-radius: 16px;
+    border: 1.5px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
     color: #000000;
     font-size: 14px;
     font-weight: 700;
-    padding: 12px 32px;
+    padding: 10px 28px;
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.3);
+    box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35), 0 2px 6px rgba(0, 0, 0, 0.2);
+    letter-spacing: 0.3px;
+    backdrop-filter: blur(12px);
+    position: relative;
 }
 
 .save-button:hover {
-    background: linear-gradient(135deg, rgb(var(--accent-light-rgb)), #22e968);
-    transform: translateY(-1px);
-    box-shadow: 0 6px 24px rgba(var(--accent-rgb), 0.4);
+    background: linear-gradient(135deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb)));
+    transform: translateY(-2px);
+    box-shadow: 0 6px 28px rgba(var(--accent-rgb), 0.5), 0 3px 10px rgba(0, 0, 0, 0.25);
+}
+
+.save-button:active {
+    transform: translateY(0) scale(0.97);
 }
 
 .settings-actions {
