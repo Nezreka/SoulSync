@@ -28994,25 +28994,9 @@ def get_discover_hero():
                     "is_watchlist": True
                 }
 
-                # Try to get artist image
-                try:
-                    if active_source == 'itunes' and artist.itunes_artist_id:
-                        itunes_artist = itunes_client.get_artist(artist.itunes_artist_id)
-                        if itunes_artist:
-                            # Use canonical name from iTunes API (normalized to 'name' field)
-                            artist_data['artist_name'] = itunes_artist.get('name', artist.artist_name)
-                            artist_data['image_url'] = itunes_artist.get('images', [{}])[0].get('url') if itunes_artist.get('images') else None
-                            artist_data['genres'] = itunes_artist.get('genres', [])
-                    elif active_source == 'spotify' and artist.spotify_artist_id:
-                        if spotify_client and spotify_client.is_authenticated():
-                            sp_artist = spotify_client.get_artist(artist.spotify_artist_id)
-                            if sp_artist and sp_artist.get('images'):
-                                # Use canonical name from Spotify API
-                                artist_data['artist_name'] = sp_artist.get('name', artist.artist_name)
-                                artist_data['image_url'] = sp_artist['images'][0]['url'] if sp_artist['images'] else None
-                                artist_data['genres'] = sp_artist.get('genres', [])
-                except Exception as img_err:
-                    print(f"Could not fetch watchlist artist image: {img_err}")
+                # Use cached image from watchlist — no API call needed
+                if hasattr(artist, 'image_url') and artist.image_url:
+                    artist_data['image_url'] = artist.image_url
 
                 hero_artists.append(artist_data)
 
@@ -29062,7 +29046,7 @@ def get_discover_hero():
         # Take top 10 (already ordered by least-recently-featured, then quality)
         similar_artists = valid_artists[:10]
 
-        # Convert to JSON format with data enrichment from appropriate source
+        # Convert to JSON format — use cached metadata, only fetch from API if missing
         hero_artists = []
         for artist in similar_artists:
             # Use the ID for the active source, falling back to the other if needed
@@ -29074,34 +29058,48 @@ def get_discover_hero():
             artist_data = {
                 "spotify_artist_id": artist.similar_artist_spotify_id,
                 "itunes_artist_id": artist.similar_artist_itunes_id,
-                "artist_id": artist_id,  # The ID for the current active source
+                "artist_id": artist_id,
                 "artist_name": artist.similar_artist_name,
                 "occurrence_count": artist.occurrence_count,
                 "similarity_rank": artist.similarity_rank,
                 "source": active_source
             }
 
-            # Try to get artist image from the active source
-            try:
-                if active_source == 'spotify' and artist.similar_artist_spotify_id:
-                    if spotify_client and spotify_client.is_authenticated():
-                        sp_artist = spotify_client.get_artist(artist.similar_artist_spotify_id)
-                        if sp_artist and sp_artist.get('images'):
-                            # Use canonical name from Spotify API to ensure it matches the image
-                            artist_data['artist_name'] = sp_artist.get('name', artist.similar_artist_name)
-                            artist_data['image_url'] = sp_artist['images'][0]['url'] if sp_artist['images'] else None
-                            artist_data['genres'] = sp_artist.get('genres', [])
-                            artist_data['popularity'] = sp_artist.get('popularity', 0)
-                elif active_source == 'itunes' and artist.similar_artist_itunes_id:
-                    itunes_artist = itunes_client.get_artist(artist.similar_artist_itunes_id)
-                    if itunes_artist:
-                        # iTunes client normalizes to Spotify format, so use 'name' not 'artistName'
-                        artist_data['artist_name'] = itunes_artist.get('name', artist.similar_artist_name)
-                        artist_data['image_url'] = itunes_artist.get('images', [{}])[0].get('url') if itunes_artist.get('images') else None
-                        artist_data['genres'] = itunes_artist.get('genres', [])
-                        artist_data['popularity'] = itunes_artist.get('popularity', 0)
-            except Exception as img_err:
-                print(f"Could not fetch artist image: {img_err}")
+            # Use cached metadata if available
+            if artist.image_url:
+                artist_data['image_url'] = artist.image_url
+                artist_data['genres'] = artist.genres or []
+                artist_data['popularity'] = artist.popularity or 0
+            else:
+                # No cached metadata — fetch from API and cache for next time
+                try:
+                    if active_source == 'spotify' and artist.similar_artist_spotify_id:
+                        if spotify_client and spotify_client.is_authenticated():
+                            sp_artist = spotify_client.get_artist(artist.similar_artist_spotify_id)
+                            if sp_artist and sp_artist.get('images'):
+                                artist_data['artist_name'] = sp_artist.get('name', artist.similar_artist_name)
+                                artist_data['image_url'] = sp_artist['images'][0]['url'] if sp_artist['images'] else None
+                                artist_data['genres'] = sp_artist.get('genres', [])
+                                artist_data['popularity'] = sp_artist.get('popularity', 0)
+                                # Cache it
+                                database.update_similar_artist_metadata(
+                                    artist.id, artist_data.get('image_url'),
+                                    artist_data.get('genres'), artist_data.get('popularity')
+                                )
+                    elif active_source == 'itunes' and artist.similar_artist_itunes_id:
+                        itunes_artist = itunes_client.get_artist(artist.similar_artist_itunes_id)
+                        if itunes_artist:
+                            artist_data['artist_name'] = itunes_artist.get('name', artist.similar_artist_name)
+                            artist_data['image_url'] = itunes_artist.get('images', [{}])[0].get('url') if itunes_artist.get('images') else None
+                            artist_data['genres'] = itunes_artist.get('genres', [])
+                            artist_data['popularity'] = itunes_artist.get('popularity', 0)
+                            # Cache it
+                            database.update_similar_artist_metadata(
+                                artist.id, artist_data.get('image_url'),
+                                artist_data.get('genres'), artist_data.get('popularity')
+                            )
+                except Exception as img_err:
+                    print(f"Could not fetch artist image: {img_err}")
 
             hero_artists.append(artist_data)
 
