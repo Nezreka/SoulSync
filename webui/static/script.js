@@ -47036,6 +47036,11 @@ async function toggleSpotifyEnrichment() {
 
         const response = await fetch(endpoint, { method: 'POST' });
         if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            if (data.rate_limited) {
+                showToast('Cannot resume — Spotify is rate limited', 'warning');
+                return;
+            }
             throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Spotify enrichment`);
         }
 

@@ -15488,6 +15488,74 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🎧 Deezer Playlist Sync",
+                "description": "Full Deezer integration for playlist sync alongside Spotify, Tidal, and YouTube",
+                "features": [
+                    "• Import and sync Deezer playlists with full track matching and discovery",
+                    "• Deezer discovery worker with Spotify/iTunes match caching",
+                    "• Fix modal for unmatched Deezer tracks with manual search",
+                    "• Manual fixes persist to discovery cache across restarts"
+                ]
+            },
+            {
+                "title": "🚀 Discovery Page Improvements",
+                "description": "Better playlist generation, caching, and iTunes parity",
+                "features": [
+                    "• iTunes discovery playlists now produce quality results — synthetic popularity scoring replaces broken 0-popularity tiering",
+                    "• EPs included in iTunes discovery pool (previously excluded)",
+                    "• Popular Picks and Hidden Gems playlists now work correctly for iTunes users",
+                    "• Seasonal playlists fully work with iTunes — album search, watchlist search, and track fetching",
+                    "• Similar artist metadata (images, genres, popularity) cached at scan time — no more redundant API calls",
+                    "• Hero slider loads instantly from cache instead of making 10 Spotify API calls per page load",
+                    "• View Recommended modal uses cached data — only uncached artists trigger API calls",
+                    "• Album art now displays in discovery pool modal for both Spotify and iTunes matches"
+                ]
+            },
+            {
+                "title": "🛡️ Rate Limit Detection Fix",
+                "description": "Rate limit modal now appears reliably when Spotify returns 429 errors",
+                "features": [
+                    "• Fixed rate limits going undetected in get_album, get_artist, and batch artist enrichment",
+                    "• These methods previously swallowed 429 exceptions — global ban was never activated",
+                    "• Rate limit modal with countdown timer now triggers correctly from any Spotify API failure",
+                    "• Redundant get_album_tracks API call removed from iTunes discovery pool population"
+                ]
+            },
+            {
+                "title": "📦 Download & Matching Fixes",
+                "description": "Accuracy improvements for album downloads and track matching",
+                "features": [
+                    "• Album download pre-flight search finds complete album folders before track-by-track downloading",
+                    "• Fix wrong track downloads when album name matches a track title in hybrid mode",
+                    "• Improved album download analysis with album-scoped track matching",
+                    "• Fix Tidal playlist sync dropping remix/version info from track titles",
+                    "• Race guard verification extended to all download source monitors"
+                ]
+            },
+            {
+                "title": "🔒 Security & Config",
+                "description": "Encryption at rest and config improvements",
+                "features": [
+                    "• Sensitive config values (API keys, passwords, tokens) encrypted at rest with Fernet",
+                    "• Transparent migration — existing plaintext values auto-encrypt on first load",
+                    "• Tidal OAuth fix — override Accept header on token requests"
+                ]
+            },
+            {
+                "title": "🐛 Recent Bug Fixes",
+                "description": "Stability and UX fixes",
+                "features": [
+                    "• Fix sync stuck at 80% — serialize datetime in SyncResult for WebSocket emit",
+                    "• Fix automated scans for non-Plex servers and incremental scan performance",
+                    "• Fix Tidal/Qobuz enrichment backfill failing on dict-type copyright and isrc fields",
+                    "• Fix false positive track matching and tag writing visibility for library files",
+                    "• Stop unnecessary Spotify API call every 60s from enrichment status polling",
+                    "• Spotify rate limit UX — replaced intrusive modal with ambient sidebar indicators",
+                    "• Navidrome ReportRealPath guidance when library files can't be found",
+                    "• Enhanced library write-all modal and confirmation dialog improvements"
+                ]
+            },
+            {
                 "title": "🎵 Tidal & Qobuz Enrichment Workers",
                 "description": "Two new background enrichment workers for Tidal and Qobuz metadata",
                 "features": [
@@ -35020,6 +35088,10 @@ def spotify_enrichment_resume():
     try:
         if spotify_enrichment_worker is None:
             return jsonify({'error': 'Spotify enrichment worker not initialized'}), 400
+
+        # Block resume while Spotify is rate limited
+        if _spotify_rate_limited():
+            return jsonify({'error': 'Cannot resume while Spotify is rate limited', 'rate_limited': True}), 429
 
         spotify_enrichment_worker.resume()
         logger.info("Spotify enrichment worker resumed via UI")
