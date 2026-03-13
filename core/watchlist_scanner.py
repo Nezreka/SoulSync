@@ -1483,14 +1483,17 @@ class WatchlistScanner:
             stored_count = 0
             for rank, similar_artist in enumerate(similar_artists, 1):
                 try:
-                    # similar_artist has 'name', 'spotify_id', and 'itunes_id' keys
+                    # similar_artist has 'name', 'spotify_id', 'itunes_id', 'image_url', 'genres', 'popularity'
                     success = self.database.add_or_update_similar_artist(
                         source_artist_id=source_artist_id,
                         similar_artist_name=similar_artist['name'],
                         similar_artist_spotify_id=similar_artist.get('spotify_id'),
                         similar_artist_itunes_id=similar_artist.get('itunes_id'),
                         similarity_rank=rank,
-                        profile_id=profile_id
+                        profile_id=profile_id,
+                        image_url=similar_artist.get('image_url'),
+                        genres=similar_artist.get('genres'),
+                        popularity=similar_artist.get('popularity', 0)
                     )
 
                     if success:

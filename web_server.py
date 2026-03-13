@@ -29142,7 +29142,7 @@ def get_discover_similar_artists():
             else:
                 artist_id = artist.similar_artist_itunes_id or artist.similar_artist_spotify_id
 
-            result_artists.append({
+            artist_data = {
                 "artist_id": artist_id,
                 "spotify_artist_id": artist.similar_artist_spotify_id,
                 "itunes_artist_id": artist.similar_artist_itunes_id,
@@ -29150,7 +29150,15 @@ def get_discover_similar_artists():
                 "occurrence_count": artist.occurrence_count,
                 "similarity_rank": artist.similarity_rank,
                 "source": active_source,
-            })
+            }
+            # Include cached metadata if available
+            if artist.image_url:
+                artist_data["image_url"] = artist.image_url
+            if artist.genres:
+                artist_data["genres"] = artist.genres[:3]
+            if artist.popularity:
+                artist_data["popularity"] = artist.popularity
+            result_artists.append(artist_data)
 
         print(f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for {active_source}")
 
@@ -29168,7 +29176,9 @@ def get_discover_similar_artists():
 
 @app.route('/api/discover/similar-artists/enrich', methods=['POST'])
 def enrich_similar_artists():
-    """Enrich a batch of artist IDs with images/genres from Spotify or iTunes"""
+    """Enrich a batch of artist IDs with images/genres from Spotify or iTunes.
+    Uses cached metadata from DB when available, only makes API calls for uncached artists,
+    and saves new results back to DB for future use."""
     try:
         data = request.get_json()
         artist_ids = data.get('artist_ids', [])
@@ -29177,37 +29187,82 @@ def enrich_similar_artists():
         if not artist_ids:
             return jsonify({"success": True, "artists": {}})
 
+        database = get_database()
         enriched = {}
+        uncached_ids = []
 
-        if source == 'spotify' and spotify_client and spotify_client.is_authenticated() and not _spotify_rate_limited():
-            try:
-                batch_result = spotify_client.sp.artists(artist_ids[:50])
-                if batch_result and 'artists' in batch_result:
-                    for sp_artist in batch_result['artists']:
-                        if sp_artist:
-                            enriched[sp_artist['id']] = {
-                                "artist_name": sp_artist.get('name'),
-                                "image_url": sp_artist['images'][0]['url'] if sp_artist.get('images') else None,
-                                "genres": sp_artist.get('genres', [])[:3],
-                                "popularity": sp_artist.get('popularity', 0)
-                            }
-            except Exception as e:
-                print(f"Error enriching Spotify batch: {e}")
-        else:
-            from core.itunes_client import iTunesClient
-            itunes_client = iTunesClient()
-            for aid in artist_ids[:50]:
+        # Check DB cache first — get all similar artists and index by external ID
+        cached_artists = database.get_top_similar_artists(limit=500, profile_id=get_current_profile_id())
+        cache_map = {}
+        for artist in cached_artists:
+            ext_id = artist.similar_artist_spotify_id if source == 'spotify' else artist.similar_artist_itunes_id
+            if ext_id and ext_id not in cache_map:
+                cache_map[ext_id] = artist
+
+        for aid in artist_ids[:50]:
+            cached = cache_map.get(aid)
+            if cached and cached.image_url:
+                # Use cached metadata
+                enriched[aid] = {
+                    "artist_name": cached.similar_artist_name,
+                    "image_url": cached.image_url,
+                    "genres": cached.genres[:3] if cached.genres else [],
+                    "popularity": cached.popularity or 0
+                }
+            else:
+                uncached_ids.append(aid)
+
+        # Only make API calls for uncached artists
+        if uncached_ids:
+            if source == 'spotify' and spotify_client and spotify_client.is_authenticated() and not _spotify_rate_limited():
                 try:
-                    itunes_artist = itunes_client.get_artist(aid)
-                    if itunes_artist:
-                        enriched[aid] = {
-                            "artist_name": itunes_artist.get('name'),
-                            "image_url": itunes_artist.get('images', [{}])[0].get('url') if itunes_artist.get('images') else None,
-                            "genres": itunes_artist.get('genres', [])[:3],
-                            "popularity": 0
-                        }
-                except Exception:
-                    pass
+                    batch_result = spotify_client.sp.artists(uncached_ids[:50])
+                    if batch_result and 'artists' in batch_result:
+                        for sp_artist in batch_result['artists']:
+                            if sp_artist:
+                                img_url = sp_artist['images'][0].get('url') if sp_artist.get('images') else None
+                                genres = sp_artist.get('genres', [])[:3]
+                                pop = sp_artist.get('popularity', 0)
+                                enriched[sp_artist['id']] = {
+                                    "artist_name": sp_artist.get('name'),
+                                    "image_url": img_url,
+                                    "genres": genres,
+                                    "popularity": pop
+                                }
+                                # Cache to DB for future use
+                                database.update_similar_artist_metadata_by_external_id(
+                                    sp_artist['id'], 'spotify',
+                                    image_url=img_url, genres=genres, popularity=pop
+                                )
+                except Exception as e:
+                    print(f"Error enriching Spotify batch: {e}")
+            else:
+                from core.itunes_client import iTunesClient
+                itunes_client = iTunesClient()
+                for aid in uncached_ids[:50]:
+                    try:
+                        itunes_artist = itunes_client.get_artist(aid)
+                        if itunes_artist:
+                            img_url = itunes_artist.get('images', [{}])[0].get('url') if itunes_artist.get('images') else None
+                            genres = itunes_artist.get('genres', [])[:3]
+                            enriched[aid] = {
+                                "artist_name": itunes_artist.get('name'),
+                                "image_url": img_url,
+                                "genres": genres,
+                                "popularity": 0
+                            }
+                            # Cache to DB for future use
+                            database.update_similar_artist_metadata_by_external_id(
+                                aid, 'itunes',
+                                image_url=img_url, genres=genres, popularity=0
+                            )
+                    except Exception:
+                        pass
+
+        cached_count = len(enriched) - len([aid for aid in uncached_ids if aid in enriched])
+        api_count = len([aid for aid in uncached_ids if aid in enriched])
+        if uncached_ids:
+            print(f"[Enrich] {cached_count} from cache, {api_count} from API ({len(uncached_ids) - api_count} missed)")
 
         return jsonify({"success": True, "artists": enriched})
 
