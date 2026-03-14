@@ -16242,6 +16242,57 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "📋 Library Issue Reporting",
+                "description": "Report and track issues for tracks, albums, and artists directly from the library",
+                "features": [
+                    "• Report issues on any library item — tracks, albums, or artists — with category, priority, and notes",
+                    "• Actionable issue detail modal with album art, artist photo overlay, genre tags, and format badges",
+                    "• Download Album and Add to Wishlist buttons directly from the issue modal (admin only)",
+                    "• Enhanced-library-style track listing with format and bitrate indicators",
+                    "• Smart album fetch — uses Spotify ID when available, falls back to enhanced search"
+                ]
+            },
+            {
+                "title": "📁 Album File Reorganization",
+                "description": "Reorganize album files on disk from the Enhanced Library Manager",
+                "features": [
+                    "• Move and rename album files to match your configured folder template",
+                    "• Preview the reorganization with before/after file paths before applying",
+                    "• Supports multi-disc albums with automatic disc subfolder creation",
+                    "• Database paths updated automatically after files are moved"
+                ]
+            },
+            {
+                "title": "📖 Interactive REST API Docs",
+                "description": "Full API documentation with a built-in endpoint tester",
+                "features": [
+                    "• Comprehensive docs for all API endpoints organized by category",
+                    "• Built-in endpoint tester — execute API calls directly from the docs page",
+                    "• JSON response viewer with syntax highlighting and copy support",
+                    "• Complete metadata serialization for all entity types"
+                ]
+            },
+            {
+                "title": "👁️ Watchlist Improvements",
+                "description": "Smarter cross-provider matching, manual artist linking, and scan timestamp fixes",
+                "features": [
+                    "• Cross-provider artist matching now uses fuzzy name comparison instead of blindly taking the first result",
+                    "• Manual artist linking UI — change the linked Spotify/iTunes artist from the watchlist config modal",
+                    "• Mismatch warning when the linked provider artist name differs from the watchlist entry",
+                    "• Watchlist settings gear button accessible from artist detail page and artist cards",
+                    "• Scan timestamps preserved for UI display — 'Never scanned' no longer shows after lookback changes",
+                    "• Lookback period changes use a one-time rescan flag instead of wiping all timestamps"
+                ]
+            },
+            {
+                "title": "🔊 AcoustID Verification Fix",
+                "description": "More accurate audio file verification with broader title normalization",
+                "features": [
+                    "• Strip ALL parentheticals in title normalization — fixes false mismatches for parody, soundtrack, and featured artist suffixes",
+                    "• Previously only whitelisted suffixes like (Live) and (Remastered) were stripped"
+                ]
+            },
+            {
                 "title": "🎧 Deezer Playlist Sync",
                 "description": "Full Deezer integration for playlist sync alongside Spotify, Tidal, and YouTube",
                 "features": [
@@ -16422,7 +16473,7 @@ def get_version_info():
                     "• Sidebar audio visualizer with 5 reactive styles and settings toggle",
                     "• Sidebar SVG icons with accent-colored navigation and ambient aura",
                     "• Watchlist modal redesign — gradient overlay cards, staggered entrance animations, SVG icon buttons, glassmorphic styling",
-                    "• Settings page visual refresh — dashboard header, custom toggle switches, refined input styling",
+                    "• Settings page visual refresh — premium header, custom toggle switches, refined input styling",
                     "• Page headers with sidebar icons and gradient shimmer styling",
                     "• Service badges on library artist cards for all 9 enrichment services",
                     "• Glassmorphic 'View on' buttons on artist discography pages",
