@@ -355,6 +355,9 @@ class MusicDatabase:
             # Universal metadata cache (Spotify + iTunes API responses)
             self._add_metadata_cache_tables(cursor)
 
+            # Repair worker v2 tables (findings + job runs)
+            self._add_repair_worker_tables(cursor)
+
             # Mirrored playlists — persistent backup of parsed playlists from any service
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS mirrored_playlists (
@@ -2376,6 +2379,64 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error creating metadata cache tables: {e}")
+
+    def _add_repair_worker_tables(self, cursor):
+        """Create repair_findings and repair_job_runs tables for the multi-job repair worker."""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'repair_worker_v2' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+
+            logger.info("Creating repair worker v2 tables...")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS repair_findings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT NOT NULL,
+                    finding_type TEXT NOT NULL,
+                    severity TEXT NOT NULL DEFAULT 'info',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    entity_type TEXT,
+                    entity_id TEXT,
+                    file_path TEXT,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    details_json TEXT DEFAULT '{}',
+                    user_action TEXT,
+                    resolved_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_rf_job ON repair_findings (job_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_rf_status ON repair_findings (status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_rf_type ON repair_findings (finding_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_rf_created ON repair_findings (created_at)")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS repair_job_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT NOT NULL,
+                    started_at TIMESTAMP NOT NULL,
+                    finished_at TIMESTAMP,
+                    duration_seconds REAL,
+                    items_scanned INTEGER DEFAULT 0,
+                    findings_created INTEGER DEFAULT 0,
+                    auto_fixed INTEGER DEFAULT 0,
+                    errors INTEGER DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'running'
+                )
+            """)
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_rjr_job ON repair_job_runs (job_id)")
+
+            cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('repair_worker_v2', '1')")
+
+            logger.info("Repair worker v2 tables created successfully")
+
+        except Exception as e:
+            logger.error(f"Error creating repair worker v2 tables: {e}")
 
     # ── Profile CRUD ──────────────────────────────────────────────────
 

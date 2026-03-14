@@ -38901,3 +38901,695 @@ tr.tag-diff-same {
         flex-direction: column;
     }
 }
+
+/* ================================================================
+   LIBRARY MAINTENANCE MODAL
+   ================================================================ */
+
+/* Findings badge on header button */
+.repair-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    line-height: 1;
+    z-index: 10;
+}
+
+/* Modal overlay */
+.repair-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+}
+
+.repair-modal {
+    background: rgba(14, 14, 14, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    width: 90vw;
+    max-width: 900px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+
+.repair-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.repair-modal-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #fff;
+    margin: 0;
+}
+
+.repair-modal-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.repair-modal-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 24px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.repair-modal-close:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Master toggle */
+.repair-master-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+}
+
+.repair-toggle-label {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    font-weight: 500;
+}
+
+.repair-toggle-slider {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    transition: background 0.2s ease;
+    display: inline-block;
+}
+
+.repair-toggle-slider::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s ease;
+}
+
+.repair-master-toggle input {
+    display: none;
+}
+
+.repair-master-toggle input:checked + .repair-toggle-slider {
+    background: var(--accent-color, #6366f1);
+}
+
+.repair-master-toggle input:checked + .repair-toggle-slider::after {
+    transform: translateX(20px);
+}
+
+.repair-toggle-slider.small {
+    width: 36px;
+    height: 20px;
+    border-radius: 10px;
+}
+
+.repair-toggle-slider.small::after {
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+}
+
+.repair-job-toggle input:checked + .repair-toggle-slider.small::after {
+    transform: translateX(16px);
+}
+
+.repair-job-toggle input {
+    display: none;
+}
+
+.repair-job-toggle input:checked + .repair-toggle-slider.small {
+    background: var(--accent-color, #6366f1);
+}
+
+/* Tabs */
+.repair-tabs {
+    display: flex;
+    gap: 0;
+    padding: 0 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.repair-tab {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
+    font-weight: 500;
+    padding: 12px 20px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.repair-tab:hover {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.repair-tab.active {
+    color: var(--accent-color, #6366f1);
+    border-bottom-color: var(--accent-color, #6366f1);
+}
+
+.repair-tab-badge {
+    background: #ef4444;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 5px;
+}
+
+/* Tab content */
+.repair-tab-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 24px;
+}
+
+.repair-loading, .repair-empty {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.4);
+    padding: 48px 20px;
+    font-size: 14px;
+}
+
+/* ── Jobs Tab ── */
+.repair-jobs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.repair-job-card {
+    background: rgba(22, 22, 22, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: border-color 0.2s ease;
+}
+
+.repair-job-card:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.repair-job-card.running {
+    border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.3);
+}
+
+.repair-job-main {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 14px 16px;
+    gap: 16px;
+}
+
+.repair-job-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.repair-job-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+}
+
+.repair-job-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.repair-job-status-pill {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.repair-job-status-pill.running {
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.15);
+    color: var(--accent-color, #6366f1);
+}
+
+.repair-job-status-pill.idle {
+    background: rgba(34, 197, 94, 0.12);
+    color: #22c55e;
+}
+
+.repair-job-status-pill.disabled {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.repair-job-autofix-pill {
+    font-size: 10px;
+    font-weight: 500;
+    padding: 2px 6px;
+    border-radius: 8px;
+    background: rgba(59, 130, 246, 0.12);
+    color: #60a5fa;
+}
+
+.repair-job-desc {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+    margin-bottom: 4px;
+}
+
+.repair-job-meta {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.repair-job-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.repair-run-btn, .repair-settings-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.5);
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    transition: all 0.2s ease;
+}
+
+.repair-run-btn:hover, .repair-settings-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Job settings panel */
+.repair-job-settings {
+    padding: 12px 16px 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.repair-setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    gap: 12px;
+}
+
+.repair-setting-row label {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.repair-setting-input {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: #fff;
+    padding: 5px 10px;
+    font-size: 12px;
+    width: 100px;
+    text-align: right;
+}
+
+.repair-setting-input[type="checkbox"] {
+    width: auto;
+    accent-color: var(--accent-color, #6366f1);
+}
+
+.repair-save-settings-btn {
+    margin-top: 10px;
+    background: var(--accent-color, #6366f1);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 16px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.2s ease;
+}
+
+.repair-save-settings-btn:hover {
+    opacity: 0.85;
+}
+
+/* ── Findings Tab ── */
+.repair-findings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.repair-findings-filters {
+    display: flex;
+    gap: 8px;
+}
+
+.repair-findings-filters select {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: #fff;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.repair-findings-filters select option {
+    background: #1a1a1a;
+}
+
+.repair-findings-bulk {
+    display: flex;
+    gap: 8px;
+}
+
+.repair-bulk-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.7);
+    padding: 6px 14px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.repair-bulk-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+.repair-findings-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.repair-finding-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    background: rgba(22, 22, 22, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    transition: border-color 0.2s ease;
+}
+
+.repair-finding-card:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.repair-finding-card.warning {
+    border-left: 3px solid rgba(245, 158, 11, 0.5);
+}
+
+.repair-finding-card.critical {
+    border-left: 3px solid rgba(239, 68, 68, 0.5);
+}
+
+.repair-finding-card.info {
+    border-left: 3px solid rgba(59, 130, 246, 0.3);
+}
+
+.repair-finding-select {
+    padding-top: 2px;
+    flex-shrink: 0;
+}
+
+.repair-finding-select input[type="checkbox"] {
+    accent-color: var(--accent-color, #6366f1);
+}
+
+.repair-finding-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.repair-finding-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    margin-bottom: 3px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.repair-finding-icon {
+    font-size: 12px;
+}
+
+.repair-finding-status-badge {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 8px;
+    text-transform: uppercase;
+}
+
+.repair-finding-status-badge.resolved {
+    background: rgba(34, 197, 94, 0.12);
+    color: #22c55e;
+}
+
+.repair-finding-status-badge.dismissed {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.repair-finding-desc {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.repair-finding-meta {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.25);
+}
+
+.repair-finding-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.repair-finding-btn {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 5px;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.repair-finding-btn.resolve {
+    color: #22c55e;
+}
+
+.repair-finding-btn.resolve:hover {
+    background: rgba(34, 197, 94, 0.15);
+    border-color: rgba(34, 197, 94, 0.3);
+}
+
+.repair-finding-btn.dismiss {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.repair-finding-btn.dismiss:hover {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+
+/* Pagination */
+.repair-findings-pagination {
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+    padding: 12px 0 4px;
+}
+
+.repair-page-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.5);
+    padding: 4px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s ease;
+}
+
+.repair-page-btn.active {
+    background: var(--accent-color, #6366f1);
+    color: #fff;
+    border-color: var(--accent-color, #6366f1);
+}
+
+.repair-page-btn:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+/* ── History Tab ── */
+.repair-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.repair-history-entry {
+    padding: 10px 14px;
+    background: rgba(22, 22, 22, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+}
+
+.repair-history-job {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.repair-history-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+}
+
+.repair-history-status {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 8px;
+    text-transform: uppercase;
+}
+
+.repair-history-status.success {
+    background: rgba(34, 197, 94, 0.12);
+    color: #22c55e;
+}
+
+.repair-history-status.error {
+    background: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+}
+
+.repair-history-status.running {
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.12);
+    color: var(--accent-color, #6366f1);
+}
+
+.repair-history-meta {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+    .repair-modal {
+        width: 98vw;
+        max-height: 92vh;
+        border-radius: 12px;
+    }
+
+    .repair-modal-header {
+        padding: 14px 16px;
+    }
+
+    .repair-tab-content {
+        padding: 12px 14px;
+    }
+
+    .repair-findings-filters {
+        flex-wrap: wrap;
+    }
+
+    .repair-job-main {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .repair-job-actions {
+        align-self: flex-end;
+    }
+}

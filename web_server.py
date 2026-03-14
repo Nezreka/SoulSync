@@ -36697,6 +36697,7 @@ try:
     repair_db = MusicDatabase()
     transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
     repair_worker = RepairWorker(database=repair_db, transfer_folder=transfer_path)
+    repair_worker.set_config_manager(config_manager)
     repair_worker.start()
     print("✅ Repair worker initialized and started")
 except Exception as e:
@@ -36707,14 +36708,17 @@ except Exception as e:
 
 @app.route('/api/repair/status', methods=['GET'])
 def repair_status():
-    """Get repair worker status for UI polling"""
+    """Get repair worker status"""
     try:
         if repair_worker is None:
             return jsonify({
                 'enabled': False,
                 'running': False,
-                'paused': False,
+                'paused': True,
+                'idle': False,
                 'current_item': None,
+                'current_job': None,
+                'findings_pending': 0,
                 'stats': {'scanned': 0, 'repaired': 0, 'skipped': 0, 'errors': 0, 'pending': 0},
                 'progress': {}
             }), 200
@@ -36725,32 +36729,203 @@ def repair_status():
         logger.error(f"Error getting repair status: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/repair/pause', methods=['POST'])
-def repair_pause():
-    """Pause repair worker"""
+@app.route('/api/repair/toggle', methods=['POST'])
+def repair_toggle():
+    """Toggle master enable/disable"""
     try:
         if repair_worker is None:
             return jsonify({'error': 'Repair worker not initialized'}), 400
 
+        new_state = repair_worker.toggle()
+        logger.info("Repair worker %s via UI", "enabled" if new_state else "disabled")
+        return jsonify({'enabled': new_state}), 200
+    except Exception as e:
+        logger.error(f"Error toggling repair worker: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# Backward compat aliases
+@app.route('/api/repair/pause', methods=['POST'])
+def repair_pause():
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
         repair_worker.pause()
-        logger.info("Repair worker paused via UI")
         return jsonify({'status': 'paused'}), 200
     except Exception as e:
-        logger.error(f"Error pausing repair worker: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/repair/resume', methods=['POST'])
 def repair_resume():
-    """Resume repair worker"""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+        repair_worker.resume()
+        return jsonify({'status': 'running'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/jobs', methods=['GET'])
+def repair_jobs_list():
+    """Get all jobs with config and last run info"""
+    try:
+        if repair_worker is None:
+            return jsonify({'jobs': []}), 200
+        jobs = repair_worker.get_all_job_info()
+        return jsonify({'jobs': jobs}), 200
+    except Exception as e:
+        logger.error(f"Error getting repair jobs: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/jobs/<job_id>/toggle', methods=['POST'])
+def repair_job_toggle(job_id):
+    """Enable/disable a specific job"""
     try:
         if repair_worker is None:
             return jsonify({'error': 'Repair worker not initialized'}), 400
 
-        repair_worker.resume()
-        logger.info("Repair worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
+        data = request.get_json(silent=True) or {}
+        enabled = data.get('enabled')
+
+        if enabled is None:
+            # Toggle — get current state and flip it
+            config = repair_worker.get_job_config(job_id)
+            enabled = not config.get('enabled', False)
+
+        repair_worker.set_job_enabled(job_id, enabled)
+        logger.info("Repair job %s %s via UI", job_id, "enabled" if enabled else "disabled")
+        return jsonify({'job_id': job_id, 'enabled': enabled}), 200
     except Exception as e:
-        logger.error(f"Error resuming repair worker: {e}")
+        logger.error(f"Error toggling repair job {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/jobs/<job_id>/settings', methods=['PUT'])
+def repair_job_settings(job_id):
+    """Update job interval and/or settings"""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        data = request.get_json(silent=True) or {}
+        interval_hours = data.get('interval_hours')
+        settings = data.get('settings')
+
+        repair_worker.set_job_settings(job_id, interval_hours=interval_hours, settings=settings)
+        logger.info("Repair job %s settings updated via UI", job_id)
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        logger.error(f"Error updating repair job settings {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/jobs/<job_id>/run', methods=['POST'])
+def repair_job_run(job_id):
+    """Trigger immediate run of a specific job"""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        repair_worker.run_job_now(job_id)
+        logger.info("Repair job %s triggered manually via UI", job_id)
+        return jsonify({'success': True, 'job_id': job_id}), 200
+    except Exception as e:
+        logger.error(f"Error running repair job {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/findings', methods=['GET'])
+def repair_findings_list():
+    """Get paginated findings with filters"""
+    try:
+        if repair_worker is None:
+            return jsonify({'items': [], 'total': 0, 'page': 0, 'limit': 50}), 200
+
+        job_id = request.args.get('job_id')
+        status = request.args.get('status')
+        severity = request.args.get('severity')
+        page = int(request.args.get('page', 0))
+        limit = int(request.args.get('limit', 50))
+
+        result = repair_worker.get_findings(
+            job_id=job_id, status=status, severity=severity,
+            page=page, limit=limit
+        )
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Error getting repair findings: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/findings/counts', methods=['GET'])
+def repair_findings_counts():
+    """Get findings counts by status"""
+    try:
+        if repair_worker is None:
+            return jsonify({'pending': 0, 'resolved': 0, 'dismissed': 0, 'total': 0}), 200
+
+        counts = repair_worker.get_findings_counts()
+        return jsonify(counts), 200
+    except Exception as e:
+        logger.error(f"Error getting findings counts: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/findings/<int:finding_id>/resolve', methods=['POST'])
+def repair_finding_resolve(finding_id):
+    """Resolve a finding with optional action"""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        data = request.get_json(silent=True) or {}
+        action = data.get('action')
+        success = repair_worker.resolve_finding(finding_id, action)
+        return jsonify({'success': success}), 200
+    except Exception as e:
+        logger.error(f"Error resolving finding {finding_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/findings/<int:finding_id>/dismiss', methods=['POST'])
+def repair_finding_dismiss(finding_id):
+    """Dismiss a finding"""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        success = repair_worker.dismiss_finding(finding_id)
+        return jsonify({'success': success}), 200
+    except Exception as e:
+        logger.error(f"Error dismissing finding {finding_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/findings/bulk', methods=['POST'])
+def repair_findings_bulk():
+    """Bulk resolve or dismiss findings"""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        data = request.get_json(silent=True) or {}
+        finding_ids = data.get('ids', [])
+        action = data.get('action', 'dismiss')
+
+        if not finding_ids:
+            return jsonify({'error': 'No finding IDs provided'}), 400
+
+        count = repair_worker.bulk_update_findings(finding_ids, action)
+        return jsonify({'success': True, 'updated': count}), 200
+    except Exception as e:
+        logger.error(f"Error bulk updating findings: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/history', methods=['GET'])
+def repair_history():
+    """Get job run history"""
+    try:
+        if repair_worker is None:
+            return jsonify({'runs': []}), 200
+
+        job_id = request.args.get('job_id')
+        limit = int(request.args.get('limit', 50))
+        runs = repair_worker.get_history(job_id=job_id, limit=limit)
+        return jsonify({'runs': runs}), 200
+    except Exception as e:
+        logger.error(f"Error getting repair history: {e}")
         return jsonify({'error': str(e)}), 500
 
 # ================================================================================================

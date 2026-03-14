@@ -1,13 +1,22 @@
+"""Library Maintenance Worker — multi-job background daemon.
+
+Rotates through registered repair jobs (track number repair, AcoustID scanner,
+duplicate detection, etc.) based on staleness-priority scheduling. Each job
+is independently configurable and can be enabled/disabled by the user.
+
+The worker is deactivated by default — the user must explicitly enable it.
+"""
+
 import json
 import os
-import re
 import threading
 import time
-from difflib import SequenceMatcher
-from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
+
+from core.repair_jobs import get_all_jobs
+from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
-from database.music_database import MusicDatabase
 
 logger = get_logger("repair_worker")
 
@@ -15,72 +24,71 @@ AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.
 
 
 class RepairWorker:
-    """Background worker for scanning and repairing library files.
+    """Multi-job background maintenance worker.
 
-    Currently supports:
-      - Track number repair: fixes embedded tracknumber tags and filename
-        prefixes using the album tracklist from Spotify/iTunes as the
-        authoritative source.
-
-    Designed to be extended with additional repair types over time.
+    Rotates through enabled repair jobs using staleness-priority scheduling.
+    Deactivated by default — user must enable via the management modal.
     """
 
-    def __init__(self, database: MusicDatabase, transfer_folder: str = None):
+    def __init__(self, database, transfer_folder: str = None):
         self.db = database
-
-        # Initial transfer folder (re-read from DB each scan cycle)
         self.transfer_folder = transfer_folder or './Transfer'
 
         # Worker state
         self.running = False
-        self.paused = True
+        self.enabled = False  # Master toggle (replaces 'paused')
         self.should_stop = False
         self.thread = None
 
-        # Current item being processed (for UI tooltip)
-        self.current_item = None
+        # Current job being executed
+        self._current_job_id = None
+        self._current_job_name = None
+        self._current_progress = {'scanned': 0, 'total': 0, 'percent': 0}
 
-        # Statistics
+        # Aggregate stats for the current scan cycle
         self.stats = {
             'scanned': 0,
             'repaired': 0,
             'skipped': 0,
             'errors': 0,
-            'pending': 0
+            'pending': 0,
         }
 
-        # How often to re-scan the full library (hours)
-        self.rescan_interval_hours = 24
+        # Job instances (instantiated once)
+        self._jobs: Dict[str, RepairJob] = {}
 
-        # Album tracks cache: album_id -> list of track dicts
-        self._album_tracks_cache: Dict[str, List[Dict]] = {}
-
-        # Title matching threshold
-        self.title_similarity_threshold = 0.80
-
-        # SpotifyClient (lazy-init to avoid circular imports)
-        self._spotify_client = None
-
-        # MusicBrainzClient (lazy-init)
-        self._mb_client = None
-
-        # AudioDBClient (lazy-init)
-        self._audiodb_client = None
-
-        # Per-batch folder queues: batch_id -> set of folder paths
+        # Per-batch folder queues (for post-download scanning)
         self._batch_folders: Dict[str, set] = {}
         self._batch_folders_lock = threading.Lock()
 
-        # Known placeholder album IDs that are not real API identifiers
-        self._placeholder_ids = {
-            'wishlist_album', 'explicit_album', 'explicit_artist',
-            'unknown', 'none', 'null', '',
-        }
+        # Forced job queue (for "Run Now" button — processed by main loop)
+        self._force_run_queue: List[str] = []
+        self._force_run_lock = threading.Lock()
+
+        # Config manager (set externally after init)
+        self._config_manager = None
+
+        # Lazy client accessors
+        self._spotify_client = None
+        self._itunes_client = None
+        self._mb_client = None
+        self._acoustid_client = None
+        self._metadata_cache = None
 
         logger.info("Repair worker initialized (transfer_folder=%s)", self.transfer_folder)
 
     # ------------------------------------------------------------------
-    # Lazy SpotifyClient accessor
+    # Config manager
+    # ------------------------------------------------------------------
+    def set_config_manager(self, config_manager):
+        """Set the config manager for persisting job settings."""
+        self._config_manager = config_manager
+        # Load master enabled state
+        if config_manager:
+            self.enabled = config_manager.get('repair.master_enabled', False)
+
+    # ------------------------------------------------------------------
+    # Lazy client accessors
     # ------------------------------------------------------------------
     @property
     def spotify_client(self):
@@ -92,9 +100,16 @@ class RepairWorker:
                 logger.error("Failed to initialize SpotifyClient: %s", e)
         return self._spotify_client
 
-    # ------------------------------------------------------------------
-    # Lazy client accessors
-    # ------------------------------------------------------------------
+    @property
+    def itunes_client(self):
+        if self._itunes_client is None:
+            try:
+                from core.itunes_client import iTunesClient
+                self._itunes_client = iTunesClient()
+            except Exception as e:
+                logger.error("Failed to initialize iTunesClient: %s", e)
+        return self._itunes_client
+
     @property
     def mb_client(self):
         if self._mb_client is None:
@@ -106,17 +121,113 @@ class RepairWorker:
         return self._mb_client
 
     @property
-    def audiodb_client(self):
-        if self._audiodb_client is None:
+    def acoustid_client(self):
+        if self._acoustid_client is None:
             try:
-                from core.audiodb_client import AudioDBClient
-                self._audiodb_client = AudioDBClient()
+                from core.acoustid_client import AcoustIDClient
+                self._acoustid_client = AcoustIDClient()
             except Exception as e:
-                logger.error("Failed to initialize AudioDBClient: %s", e)
-        return self._audiodb_client
+                logger.error("Failed to initialize AcoustIDClient: %s", e)
+        return self._acoustid_client
+
+    @property
+    def metadata_cache(self):
+        if self._metadata_cache is None:
+            try:
+                from core.metadata_cache import get_metadata_cache
+                self._metadata_cache = get_metadata_cache()
+            except Exception as e:
+                logger.error("Failed to get metadata cache: %s", e)
+        return self._metadata_cache
 
     # ------------------------------------------------------------------
-    # Lifecycle (identical to AudioDB worker)
+    # Job registry
+    # ------------------------------------------------------------------
+    def _ensure_jobs_loaded(self):
+        """Load job instances from the registry."""
+        if self._jobs:
+            return
+        registry = get_all_jobs()
+        for job_id, job_cls in registry.items():
+            try:
+                self._jobs[job_id] = job_cls()
+            except Exception as e:
+                logger.error("Failed to instantiate job %s: %s", job_id, e)
+
+    def get_job_config(self, job_id: str) -> dict:
+        """Get the full config for a specific job."""
+        self._ensure_jobs_loaded()
+        job = self._jobs.get(job_id)
+        if not job:
+            return {}
+
+        defaults = {
+            'enabled': job.default_enabled,
+            'interval_hours': job.default_interval_hours,
+            'settings': job.default_settings.copy(),
+        }
+
+        if self._config_manager:
+            cfg = self._config_manager.get(f'repair.jobs.{job_id}', {})
+            if isinstance(cfg, dict):
+                defaults['enabled'] = cfg.get('enabled', defaults['enabled'])
+                defaults['interval_hours'] = cfg.get('interval_hours', defaults['interval_hours'])
+                if 'settings' in cfg and isinstance(cfg['settings'], dict):
+                    defaults['settings'].update(cfg['settings'])
+
+        return defaults
+
+    def set_job_enabled(self, job_id: str, enabled: bool):
+        """Enable or disable a specific job."""
+        if self._config_manager:
+            self._config_manager.set(f'repair.jobs.{job_id}.enabled', enabled)
+
+    def set_job_settings(self, job_id: str, interval_hours: int = None, settings: dict = None):
+        """Update job interval and/or settings."""
+        if not self._config_manager:
+            return
+        if interval_hours is not None:
+            self._config_manager.set(f'repair.jobs.{job_id}.interval_hours', interval_hours)
+        if settings is not None:
+            current = self._config_manager.get(f'repair.jobs.{job_id}.settings', {})
+            if isinstance(current, dict):
+                current.update(settings)
+            else:
+                current = settings
+            self._config_manager.set(f'repair.jobs.{job_id}.settings', current)
+
+    def get_all_job_info(self) -> List[dict]:
+        """Get info for all jobs (for API response)."""
+        self._ensure_jobs_loaded()
+        jobs_info = []
+        for job_id, job in self._jobs.items():
+            config = self.get_job_config(job_id)
+            last_run = self._get_last_run(job_id)
+            next_run = None
+            if last_run and config['enabled']:
+                last_dt = datetime.fromisoformat(last_run['finished_at']) if last_run.get('finished_at') else None
+                if last_dt:
+                    next_dt = last_dt + timedelta(hours=config['interval_hours'])
+                    next_run = next_dt.isoformat()
+
+            jobs_info.append({
+                'job_id': job_id,
+                'display_name': job.display_name,
+                'description': job.description,
+                'icon': job.icon,
+                'auto_fix': job.auto_fix,
+                'enabled': config['enabled'],
+                'interval_hours': config['interval_hours'],
+                'settings': config['settings'],
+                'default_settings': job.default_settings.copy(),
+                'last_run': last_run,
+                'next_run': next_run,
+                'is_running': self._current_job_id == job_id,
+            })
+        return jobs_info
+
+    # ------------------------------------------------------------------
+    # Lifecycle
     # ------------------------------------------------------------------
     def start(self):
         if self.running:
@@ -138,36 +249,100 @@ class RepairWorker:
             self.thread.join(timeout=5)
         logger.info("Repair worker stopped")
 
+    def toggle(self) -> bool:
+        """Toggle master enabled state. Returns new state."""
+        self.enabled = not self.enabled
+        if self._config_manager:
+            self._config_manager.set('repair.master_enabled', self.enabled)
+        logger.info("Repair worker %s", "enabled" if self.enabled else "disabled")
+        return self.enabled
+
+    def set_enabled(self, enabled: bool):
+        """Set master enabled state."""
+        self.enabled = enabled
+        if self._config_manager:
+            self._config_manager.set('repair.master_enabled', enabled)
+
+    # Backward compatibility
     def pause(self):
-        if not self.running:
-            logger.warning("Repair worker not running, cannot pause")
-            return
-        self.paused = True
-        logger.info("Repair worker paused")
+        self.set_enabled(False)
 
     def resume(self):
-        if not self.running:
-            logger.warning("Repair worker not running, start it first")
-            return
-        self.paused = False
-        logger.info("Repair worker resumed")
+        self.set_enabled(True)
 
+    @property
+    def paused(self):
+        return not self.enabled
+
+    @paused.setter
+    def paused(self, value):
+        self.enabled = not value
+
+    # ------------------------------------------------------------------
+    # Current item (backward compat for WebSocket tooltip)
+    # ------------------------------------------------------------------
+    @property
+    def current_item(self):
+        if self._current_job_id:
+            return {
+                'type': 'job',
+                'name': self._current_job_name or self._current_job_id,
+                'job_id': self._current_job_id,
+            }
+        return None
+
+    @current_item.setter
+    def current_item(self, value):
+        # Backward compat — ignore direct sets
+        pass
+
+    # ------------------------------------------------------------------
+    # Stats
+    # ------------------------------------------------------------------
     def get_stats(self) -> Dict[str, Any]:
         is_actually_running = self.running and (self.thread is not None and self.thread.is_alive())
         is_idle = (
             is_actually_running
-            and not self.paused
-            and self.stats['pending'] == 0
-            and self.current_item is None
+            and self.enabled
+            and self._current_job_id is None
         )
-        return {
-            'enabled': True,
-            'running': is_actually_running and not self.paused,
-            'paused': self.paused,
+
+        # Get pending findings count
+        findings_pending = self._get_findings_count('pending')
+
+        result = {
+            'enabled': self.enabled,
+            'running': is_actually_running and self.enabled,
+            'paused': not self.enabled,  # backward compat
             'idle': is_idle,
             'current_item': self.current_item,
+            'current_job': None,
+            'findings_pending': findings_pending,
             'stats': self.stats.copy(),
-            'progress': self._get_progress()
+            'progress': self._get_progress(),
+        }
+
+        if self._current_job_id:
+            result['current_job'] = {
+                'job_id': self._current_job_id,
+                'display_name': self._current_job_name,
+                'progress': self._current_progress.copy(),
+            }
+
+        return result
+
+    def _get_progress(self) -> Dict[str, Any]:
+        total = self.stats['scanned'] + self.stats['pending']
+        percent = round(self.stats['scanned'] / total * 100) if total > 0 else 0
+        return {
+            'tracks': {
+                'total': total,
+                'checked': self.stats['scanned'],
+                'repaired': self.stats['repaired'],
+                'ok': self.stats['scanned'] - self.stats['repaired'] - self.stats['skipped'] - self.stats['errors'],
+                'skipped': self.stats['skipped'],
+                'percent': percent,
+            }
         }
 
     # ------------------------------------------------------------------
@@ -175,60 +350,589 @@ class RepairWorker:
     # ------------------------------------------------------------------
     def _run(self):
         logger.info("Repair worker thread started")
+        self._ensure_jobs_loaded()
 
         while not self.should_stop:
             try:
-                if self.paused:
-                    time.sleep(1)
+                # Check force-run queue even when disabled (user explicitly requested)
+                forced_job = None
+                with self._force_run_lock:
+                    if self._force_run_queue:
+                        forced_job = self._force_run_queue.pop(0)
+
+                if forced_job:
+                    self._run_job(forced_job)
+                    time.sleep(2)
                     continue
 
-                self.current_item = None
+                if not self.enabled:
+                    self._current_job_id = None
+                    self._current_job_name = None
+                    time.sleep(2)
+                    continue
 
-                # Reset stats for a new scan pass
-                self.stats = {
-                    'scanned': 0,
-                    'repaired': 0,
-                    'skipped': 0,
-                    'errors': 0,
-                    'pending': 0
-                }
-                self._album_tracks_cache.clear()
+                # Find the next job to run based on staleness
+                next_job = self._pick_next_job()
 
-                self._scan_library()
-
-                # Done scanning — go idle until next interval
-                self.current_item = None
-                self.stats['pending'] = 0
-                logger.info(
-                    "Repair scan complete. Scanned=%d Repaired=%d Skipped=%d Errors=%d",
-                    self.stats['scanned'], self.stats['repaired'],
-                    self.stats['skipped'], self.stats['errors']
-                )
-
-                # Sleep until next scan (check should_stop / paused periodically)
-                # Also re-scan immediately if transfer path changes
-                sleep_until = time.time() + self.rescan_interval_hours * 3600
-                last_path = self.transfer_folder
-                while time.time() < sleep_until and not self.should_stop:
-                    if self.paused:
-                        time.sleep(1)
-                        continue
-                    # Check if transfer path changed in settings
-                    current_path = self._resolve_path(self._get_transfer_path_from_db())
-                    if current_path != last_path:
-                        logger.info("Transfer path changed: %s -> %s — triggering rescan", last_path, current_path)
-                        self.transfer_folder = current_path
-                        break
+                if not next_job:
+                    # Nothing due — sleep and re-check
+                    self._current_job_id = None
+                    self._current_job_name = None
                     time.sleep(10)
+                    continue
+
+                # Run the selected job
+                self._run_job(next_job)
+
+                # Brief pause between jobs
+                time.sleep(5)
 
             except Exception as e:
                 logger.error("Error in repair worker loop: %s", e, exc_info=True)
+                self._current_job_id = None
+                self._current_job_name = None
                 time.sleep(30)
 
         logger.info("Repair worker thread finished")
 
+    def _pick_next_job(self) -> Optional[str]:
+        """Pick the next job to run based on staleness priority.
+
+        Returns job_id of the stalest job whose interval has elapsed,
+        or None if nothing is due.
+        """
+        now = datetime.now()
+        best_job_id = None
+        best_staleness = -1
+
+        for job_id, job in self._jobs.items():
+            config = self.get_job_config(job_id)
+            if not config['enabled']:
+                continue
+
+            interval_hours = config['interval_hours']
+            last_run = self._get_last_run(job_id)
+
+            if not last_run or not last_run.get('finished_at'):
+                # Never run — highest staleness
+                best_job_id = job_id
+                best_staleness = float('inf')
+                continue
+
+            try:
+                last_finished = datetime.fromisoformat(last_run['finished_at'])
+                elapsed_hours = (now - last_finished).total_seconds() / 3600
+
+                if elapsed_hours < interval_hours:
+                    continue  # Not due yet
+
+                staleness = elapsed_hours / interval_hours
+                if staleness > best_staleness:
+                    best_staleness = staleness
+                    best_job_id = job_id
+            except (ValueError, TypeError):
+                # Malformed timestamp — treat as never run
+                best_job_id = job_id
+                best_staleness = float('inf')
+
+        return best_job_id
+
+    def _run_job(self, job_id: str):
+        """Execute a single job and record the run."""
+        job = self._jobs.get(job_id)
+        if not job:
+            return
+
+        logger.info("Starting job: %s (%s)", job.display_name, job_id)
+
+        self._current_job_id = job_id
+        self._current_job_name = job.display_name
+        self._current_progress = {'scanned': 0, 'total': 0, 'percent': 0}
+
+        # Re-read transfer path
+        raw = self._get_transfer_path_from_db()
+        self.transfer_folder = self._resolve_path(raw)
+
+        # Record job start
+        run_id = self._record_job_start(job_id)
+
+        # Build context
+        context = JobContext(
+            db=self.db,
+            transfer_folder=self.transfer_folder,
+            config_manager=self._config_manager,
+            spotify_client=self.spotify_client,
+            itunes_client=self.itunes_client,
+            mb_client=self.mb_client,
+            acoustid_client=self.acoustid_client,
+            metadata_cache=self.metadata_cache,
+            create_finding=self._create_finding,
+            should_stop=lambda: self.should_stop,
+            is_paused=lambda: not self.enabled,
+            update_progress=self._update_progress,
+        )
+
+        start_time = time.time()
+        result = JobResult()
+
+        try:
+            result = job.scan(context)
+        except Exception as e:
+            logger.error("Job %s failed: %s", job_id, e, exc_info=True)
+            result.errors += 1
+
+        duration = time.time() - start_time
+
+        # Update aggregate stats
+        self.stats['scanned'] += result.scanned
+        self.stats['repaired'] += result.auto_fixed
+        self.stats['skipped'] += result.skipped
+        self.stats['errors'] += result.errors
+
+        # Record job completion
+        self._record_job_finish(run_id, job_id, result, duration)
+
+        logger.info(
+            "Job %s complete: scanned=%d fixed=%d findings=%d errors=%d (%.1fs)",
+            job_id, result.scanned, result.auto_fixed,
+            result.findings_created, result.errors, duration
+        )
+
+        self._current_job_id = None
+        self._current_job_name = None
+        self._current_progress = {'scanned': 0, 'total': 0, 'percent': 0}
+
+    def run_job_now(self, job_id: str):
+        """Queue a job for immediate execution by the main worker loop.
+
+        Uses a thread-safe queue instead of spawning a separate thread
+        to avoid race conditions with the main loop's _run_job().
+        """
+        self._ensure_jobs_loaded()
+        if job_id not in self._jobs:
+            logger.warning("Unknown job: %s", job_id)
+            return
+
+        with self._force_run_lock:
+            if job_id not in self._force_run_queue:
+                self._force_run_queue.append(job_id)
+                logger.info("Job %s queued for immediate run", job_id)
+
+    def _update_progress(self, scanned: int, total: int):
+        """Callback for jobs to report progress."""
+        percent = round(scanned / total * 100) if total > 0 else 0
+        self._current_progress = {
+            'scanned': scanned,
+            'total': total,
+            'percent': percent,
+        }
+
     # ------------------------------------------------------------------
-    # Library scanning
+    # Findings
+    # ------------------------------------------------------------------
+    def _create_finding(self, job_id: str, finding_type: str, severity: str,
+                        entity_type: str, entity_id: str, file_path: str,
+                        title: str, description: str, details: dict = None):
+        """Create a repair finding in the database."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+
+            # Dedup check: skip if same finding already pending
+            cursor.execute("""
+                SELECT id FROM repair_findings
+                WHERE job_id = ? AND finding_type = ? AND status = 'pending'
+                  AND ((entity_type = ? AND entity_id = ?) OR (file_path = ? AND file_path IS NOT NULL))
+                LIMIT 1
+            """, (job_id, finding_type, entity_type, entity_id, file_path))
+
+            if cursor.fetchone():
+                return  # Already exists
+
+            cursor.execute("""
+                INSERT INTO repair_findings
+                    (job_id, finding_type, severity, status, entity_type, entity_id,
+                     file_path, title, description, details_json)
+                VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+            """, (
+                job_id, finding_type, severity, entity_type, entity_id,
+                file_path, title, description,
+                json.dumps(details) if details else '{}'
+            ))
+            conn.commit()
+        except Exception as e:
+            logger.debug("Error creating finding: %s", e)
+        finally:
+            if conn:
+                conn.close()
+
+    def get_findings(self, job_id: str = None, status: str = None,
+                     severity: str = None, page: int = 0, limit: int = 50) -> dict:
+        """Get paginated findings with optional filters."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+
+            where_parts = []
+            params = []
+
+            if job_id:
+                where_parts.append("job_id = ?")
+                params.append(job_id)
+            if status:
+                where_parts.append("status = ?")
+                params.append(status)
+            if severity:
+                where_parts.append("severity = ?")
+                params.append(severity)
+
+            where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+
+            # Count total
+            cursor.execute(f"SELECT COUNT(*) FROM repair_findings {where}", params)
+            total = cursor.fetchone()[0]
+
+            # Fetch page
+            offset = page * limit
+            cursor.execute(f"""
+                SELECT id, job_id, finding_type, severity, status, entity_type,
+                       entity_id, file_path, title, description, details_json,
+                       user_action, resolved_at, created_at, updated_at
+                FROM repair_findings
+                {where}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            """, params + [limit, offset])
+
+            items = []
+            for row in cursor.fetchall():
+                items.append({
+                    'id': row[0],
+                    'job_id': row[1],
+                    'finding_type': row[2],
+                    'severity': row[3],
+                    'status': row[4],
+                    'entity_type': row[5],
+                    'entity_id': row[6],
+                    'file_path': row[7],
+                    'title': row[8],
+                    'description': row[9],
+                    'details': json.loads(row[10]) if row[10] else {},
+                    'user_action': row[11],
+                    'resolved_at': row[12],
+                    'created_at': row[13],
+                    'updated_at': row[14],
+                })
+
+            return {'items': items, 'total': total, 'page': page, 'limit': limit}
+
+        except Exception as e:
+            logger.error("Error fetching findings: %s", e, exc_info=True)
+            return {'items': [], 'total': 0, 'page': page, 'limit': limit}
+        finally:
+            if conn:
+                conn.close()
+
+    def resolve_finding(self, finding_id: int, action: str = None) -> bool:
+        """Resolve a finding with an optional action."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE repair_findings
+                SET status = 'resolved', user_action = ?, resolved_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (action, finding_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error resolving finding %s: %s", finding_id, e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def dismiss_finding(self, finding_id: int) -> bool:
+        """Dismiss a finding."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE repair_findings
+                SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (finding_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error dismissing finding %s: %s", finding_id, e)
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def bulk_update_findings(self, finding_ids: List[int], action: str) -> int:
+        """Bulk resolve or dismiss findings. Returns count updated."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            placeholders = ','.join(['?'] * len(finding_ids))
+
+            if action == 'dismiss':
+                cursor.execute(f"""
+                    UPDATE repair_findings
+                    SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id IN ({placeholders})
+                """, finding_ids)
+            else:
+                cursor.execute(f"""
+                    UPDATE repair_findings
+                    SET status = 'resolved', user_action = ?, resolved_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id IN ({placeholders})
+                """, [action] + finding_ids)
+
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error("Error bulk updating findings: %s", e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
+
+    def _get_findings_count(self, status: str = None) -> int:
+        """Get count of findings by status."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            if status:
+                cursor.execute("SELECT COUNT(*) FROM repair_findings WHERE status = ?", (status,))
+            else:
+                cursor.execute("SELECT COUNT(*) FROM repair_findings")
+            row = cursor.fetchone()
+            return row[0] if row else 0
+        except Exception:
+            return 0
+        finally:
+            if conn:
+                conn.close()
+
+    def get_findings_counts(self) -> dict:
+        """Get counts by status."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT status, COUNT(*) FROM repair_findings
+                GROUP BY status
+            """)
+            counts = {row[0]: row[1] for row in cursor.fetchall()}
+            return {
+                'pending': counts.get('pending', 0),
+                'resolved': counts.get('resolved', 0),
+                'dismissed': counts.get('dismissed', 0),
+                'auto_fixed': counts.get('auto_fixed', 0),
+                'total': sum(counts.values()),
+            }
+        except Exception:
+            return {'pending': 0, 'resolved': 0, 'dismissed': 0, 'auto_fixed': 0, 'total': 0}
+        finally:
+            if conn:
+                conn.close()
+
+    # ------------------------------------------------------------------
+    # Job run history
+    # ------------------------------------------------------------------
+    def _record_job_start(self, job_id: str) -> Optional[int]:
+        """Record a job run start. Returns run_id."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO repair_job_runs (job_id, started_at, status)
+                VALUES (?, CURRENT_TIMESTAMP, 'running')
+            """, (job_id,))
+            conn.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            logger.debug("Error recording job start: %s", e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def _record_job_finish(self, run_id: Optional[int], job_id: str,
+                           result: JobResult, duration: float):
+        """Record a job run completion."""
+        if not run_id:
+            return
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            status = 'completed'
+            cursor.execute("""
+                UPDATE repair_job_runs
+                SET finished_at = CURRENT_TIMESTAMP, duration_seconds = ?,
+                    items_scanned = ?, findings_created = ?, auto_fixed = ?,
+                    errors = ?, status = ?
+                WHERE id = ?
+            """, (duration, result.scanned, result.findings_created,
+                  result.auto_fixed, result.errors, status, run_id))
+            conn.commit()
+        except Exception as e:
+            logger.debug("Error recording job finish: %s", e)
+        finally:
+            if conn:
+                conn.close()
+
+    def _get_last_run(self, job_id: str) -> Optional[dict]:
+        """Get the most recent run for a job."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, started_at, finished_at, duration_seconds,
+                       items_scanned, findings_created, auto_fixed, errors, status
+                FROM repair_job_runs
+                WHERE job_id = ?
+                ORDER BY started_at DESC
+                LIMIT 1
+            """, (job_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {
+                'id': row[0],
+                'started_at': row[1],
+                'finished_at': row[2],
+                'duration_seconds': row[3],
+                'items_scanned': row[4],
+                'findings_created': row[5],
+                'auto_fixed': row[6],
+                'errors': row[7],
+                'status': row[8],
+            }
+        except Exception:
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def get_history(self, job_id: str = None, limit: int = 50) -> List[dict]:
+        """Get job run history."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+
+            if job_id:
+                cursor.execute("""
+                    SELECT id, job_id, started_at, finished_at, duration_seconds,
+                           items_scanned, findings_created, auto_fixed, errors, status
+                    FROM repair_job_runs
+                    WHERE job_id = ?
+                    ORDER BY started_at DESC
+                    LIMIT ?
+                """, (job_id, limit))
+            else:
+                cursor.execute("""
+                    SELECT id, job_id, started_at, finished_at, duration_seconds,
+                           items_scanned, findings_created, auto_fixed, errors, status
+                    FROM repair_job_runs
+                    ORDER BY started_at DESC
+                    LIMIT ?
+                """, (limit,))
+
+            runs = []
+            for row in cursor.fetchall():
+                # Get display name for this job
+                job = self._jobs.get(row[1])
+                display_name = job.display_name if job else row[1]
+                runs.append({
+                    'id': row[0],
+                    'job_id': row[1],
+                    'display_name': display_name,
+                    'started_at': row[2],
+                    'finished_at': row[3],
+                    'duration_seconds': row[4],
+                    'items_scanned': row[5],
+                    'findings_created': row[6],
+                    'auto_fixed': row[7],
+                    'errors': row[8],
+                    'status': row[9],
+                })
+            return runs
+        except Exception as e:
+            logger.error("Error fetching job history: %s", e, exc_info=True)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    # ------------------------------------------------------------------
+    # Batch scan support (post-download)
+    # ------------------------------------------------------------------
+    def register_folder(self, batch_id: str, folder_path: str):
+        """Register an album folder for repair scanning when its batch completes."""
+        if not folder_path:
+            return
+        with self._batch_folders_lock:
+            self._batch_folders.setdefault(batch_id, set()).add(folder_path)
+
+    def process_batch(self, batch_id: str):
+        """Scan all folders registered for a completed batch.
+
+        Runs the track number repair job on specific folders only.
+        """
+        with self._batch_folders_lock:
+            folders = self._batch_folders.pop(batch_id, set())
+
+        if not folders:
+            return
+
+        self._ensure_jobs_loaded()
+        tnr_job = self._jobs.get('track_number_repair')
+        if not tnr_job:
+            return
+
+        def _do_scan():
+            context = JobContext(
+                db=self.db,
+                transfer_folder=self.transfer_folder,
+                config_manager=self._config_manager,
+                spotify_client=self.spotify_client,
+                itunes_client=self.itunes_client,
+                mb_client=self.mb_client,
+                should_stop=lambda: self.should_stop,
+                is_paused=lambda: False,  # Batch scans don't respect pause
+            )
+
+            try:
+                logger.info("[Repair] Batch %s: scanning %d folders", batch_id, len(folders))
+                result = tnr_job.scan_folders(list(folders), context)
+                logger.info("[Repair] Batch %s complete: scanned=%d fixed=%d errors=%d",
+                            batch_id, result.scanned, result.auto_fixed, result.errors)
+            except Exception as e:
+                logger.error("[Repair] Batch %s failed: %s", batch_id, e, exc_info=True)
+
+        threading.Thread(target=_do_scan, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # Path utilities
     # ------------------------------------------------------------------
     @staticmethod
     def _resolve_path(path_str: str) -> str:
@@ -256,885 +960,3 @@ class RepairWorker:
             if conn:
                 conn.close()
         return './Transfer'
-
-    def _scan_library(self):
-        """Walk the transfer folder and process album folders."""
-        # Re-read transfer path from DB each scan so changes take effect without restart
-        raw = self._get_transfer_path_from_db()
-        self.transfer_folder = self._resolve_path(raw)
-        transfer = self.transfer_folder
-        if not os.path.isdir(transfer):
-            logger.warning("Transfer folder does not exist: %s", transfer)
-            return
-
-        # Collect album folders (directories containing audio files)
-        album_folders: Dict[str, List[str]] = {}
-
-        for root, _dirs, files in os.walk(transfer):
-            if self.should_stop:
-                return
-            for fname in files:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in AUDIO_EXTENSIONS:
-                    album_folders.setdefault(root, []).append(fname)
-
-        self.stats['pending'] = len(album_folders)
-        logger.info("Found %d album folders to scan", len(album_folders))
-
-        for folder_path, filenames in album_folders.items():
-            if self.should_stop:
-                return
-            if self.paused:
-                while self.paused and not self.should_stop:
-                    time.sleep(1)
-                if self.should_stop:
-                    return
-
-            folder_name = os.path.basename(folder_path)
-            self.current_item = {'type': 'album', 'name': folder_name}
-
-            try:
-                self._repair_album_track_numbers(folder_path, filenames)
-            except Exception as e:
-                logger.error("Error processing album folder %s: %s", folder_path, e, exc_info=True)
-                self.stats['errors'] += 1
-
-            self.stats['pending'] -= 1
-            time.sleep(1)  # Rate limit for API calls
-
-    # ------------------------------------------------------------------
-    # On-demand single-folder scan (called from post-processing)
-    # ------------------------------------------------------------------
-    def register_folder(self, batch_id: str, folder_path: str):
-        """Register an album folder for repair scanning when its batch completes.
-
-        Called during post-processing for each track. The actual scan is
-        deferred until process_batch() is called at batch completion.
-        """
-        if not folder_path:
-            return
-        with self._batch_folders_lock:
-            self._batch_folders.setdefault(batch_id, set()).add(folder_path)
-
-    def process_batch(self, batch_id: str):
-        """Scan all folders registered for a completed batch.
-
-        Called when a download modal/batch finishes all its tracks.
-        Runs in a background thread to avoid blocking the caller.
-        """
-        with self._batch_folders_lock:
-            folders = self._batch_folders.pop(batch_id, set())
-
-        if not folders:
-            return
-
-        def _do_scan():
-            for folder_path in folders:
-                try:
-                    if not os.path.isdir(folder_path):
-                        continue
-
-                    filenames = [
-                        f for f in os.listdir(folder_path)
-                        if os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS
-                    ]
-                    if not filenames:
-                        continue
-
-                    logger.info("[Repair] Batch %s scan: %s (%d files)",
-                                batch_id, os.path.basename(folder_path), len(filenames))
-                    self._repair_album_track_numbers(folder_path, filenames)
-                except Exception as e:
-                    logger.error("[Repair] Error scanning %s for batch %s: %s",
-                                 folder_path, batch_id, e, exc_info=True)
-
-        threading.Thread(target=_do_scan, daemon=True).start()
-
-    # ------------------------------------------------------------------
-    # Album-level track number repair
-    # ------------------------------------------------------------------
-    def _repair_album_track_numbers(self, folder_path: str, filenames: List[str]):
-        """Repair track numbers for all files in an album folder.
-
-        Targeting logic:
-          1. Read the track number tag from every file in the folder.
-          2. Count how many files share the same track number.
-          3. If 3+ files have the same track number, the album is flagged
-             as broken (the "all tracks = 01" bug pattern).
-             Threshold is 3 (not 2) because lossy-copy mode can legitimately
-             produce two files with the same track number in different qualities.
-          4. Only then do we spend an API call to get the correct tracklist
-             and repair each file.
-        """
-        from mutagen import File as MutagenFile
-
-        # --- Step 0: Anomaly detection — are track numbers broken? ---
-        track_num_counts: Dict[int, int] = {}  # track_number -> count of files with that number
-        file_track_data: List[Tuple[str, str, Optional[int]]] = []  # (path, filename, track_num)
-
-        for fname in filenames:
-            fpath = os.path.join(folder_path, fname)
-            try:
-                audio = MutagenFile(fpath)
-                if audio is None:
-                    file_track_data.append((fpath, fname, None))
-                    continue
-                track_num, _ = self._read_track_number_tag(audio)
-                file_track_data.append((fpath, fname, track_num))
-                if track_num is not None:
-                    track_num_counts[track_num] = track_num_counts.get(track_num, 0) + 1
-            except Exception:
-                file_track_data.append((fpath, fname, None))
-
-        # Check if any single track number appears on 3+ files
-        has_anomaly = any(count >= 3 for count in track_num_counts.values())
-
-        if not has_anomaly:
-            # Album looks fine — count as scanned, no repair needed
-            self.stats['scanned'] += len(filenames)
-            return
-
-        # Log which track number(s) are duplicated
-        duped = {num: cnt for num, cnt in track_num_counts.items() if cnt >= 3}
-        logger.info(
-            "Anomaly detected in %s — %d files share track number(s): %s",
-            os.path.basename(folder_path), sum(duped.values()), duped
-        )
-
-        # --- Step 1-2: Resolve album tracklist via cascading fallbacks ---
-        api_tracks = self._resolve_album_tracklist(file_track_data, folder_path)
-        if not api_tracks:
-            self.stats['skipped'] += len(filenames)
-            self.stats['scanned'] += len(filenames)
-            return
-
-        # --- Step 3-5: Process each file ---
-        for fpath, fname, _ in file_track_data:
-            if self.should_stop:
-                return
-
-            self.stats['scanned'] += 1
-
-            try:
-                self._repair_single_track(fpath, fname, api_tracks)
-            except Exception as e:
-                logger.error("Error repairing %s: %s", fpath, e, exc_info=True)
-                self.stats['errors'] += 1
-
-    def _repair_single_track(self, file_path: str, filename: str, api_tracks: List[Dict]):
-        """Check and repair a single track's track number."""
-        from mutagen import File as MutagenFile
-        from mutagen.id3 import ID3, TRCK
-        from mutagen.flac import FLAC
-        from mutagen.oggvorbis import OggVorbis
-        from mutagen.mp4 import MP4
-
-        # Rigid check: file must exist
-        if not os.path.isfile(file_path):
-            logger.debug("File missing: %s", file_path)
-            self.stats['skipped'] += 1
-            return
-
-        # Rigid check: must be audio
-        ext = os.path.splitext(filename)[1].lower()
-        if ext not in AUDIO_EXTENSIONS:
-            self.stats['skipped'] += 1
-            return
-
-        # Read current metadata
-        audio = MutagenFile(file_path)
-        if audio is None:
-            logger.debug("Mutagen cannot open: %s", file_path)
-            self.stats['skipped'] += 1
-            return
-
-        current_title = self._read_title_tag(audio)
-        current_track_num, current_total = self._read_track_number_tag(audio)
-        filename_track_num = self._extract_track_number_from_filename(filename)
-
-        if not current_title:
-            logger.debug("No title tag in %s — skipping", filename)
-            self.stats['skipped'] += 1
-            return
-
-        # Match against API tracklist
-        matched_track = self._match_title_to_api_track(current_title, api_tracks)
-        if not matched_track:
-            logger.debug("No API match for title '%s' in %s — skipping", current_title, filename)
-            self.stats['skipped'] += 1
-            return
-
-        correct_track_num = matched_track.get('track_number')
-        if correct_track_num is None:
-            logger.debug("API track has no track_number for '%s' — skipping", current_title)
-            self.stats['skipped'] += 1
-            return
-
-        # Compare
-        metadata_wrong = (current_track_num != correct_track_num)
-        filename_wrong = (filename_track_num is not None and filename_track_num != correct_track_num)
-
-        if not metadata_wrong and not filename_wrong:
-            # Everything correct
-            return
-
-        # Determine total_tracks for the tag
-        total_tracks = current_total or len(api_tracks)
-
-        logger.info(
-            "Repairing track: %s — correct=#%d, current_tag=#%s, current_filename=#%s",
-            filename, correct_track_num, current_track_num, filename_track_num
-        )
-
-        # Step 5a: Fix metadata tag
-        if metadata_wrong:
-            self._fix_track_number_tag(file_path, audio, correct_track_num, total_tracks)
-
-        # Step 5b: Fix filename
-        if filename_wrong:
-            new_path = self._fix_filename_track_number(file_path, filename, correct_track_num)
-            if new_path:
-                # Update DB file_path if tracked
-                self._update_db_file_path(file_path, new_path)
-
-        self.stats['repaired'] += 1
-
-    # ------------------------------------------------------------------
-    # Tag reading helpers
-    # ------------------------------------------------------------------
-    def _read_album_id_from_file(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:
-        """Read SPOTIFY_ALBUM_ID or ITUNES_ALBUM_ID from embedded tags.
-        Returns (album_id, source) where source is 'spotify' or 'itunes'."""
-        try:
-            from mutagen import File as MutagenFile
-            from mutagen.id3 import ID3
-            from mutagen.flac import FLAC
-            from mutagen.oggvorbis import OggVorbis
-            from mutagen.mp4 import MP4
-
-            audio = MutagenFile(file_path)
-            if audio is None:
-                return None, None
-
-            # MP3 (ID3) — TXXX frames
-            if hasattr(audio, 'tags') and audio.tags is not None:
-                if isinstance(audio.tags, ID3):
-                    for key in ['TXXX:SPOTIFY_ALBUM_ID', 'TXXX:spotify_album_id']:
-                        frame = audio.tags.getall(key)
-                        if frame and frame[0].text:
-                            return str(frame[0].text[0]), 'spotify'
-                    for key in ['TXXX:ITUNES_ALBUM_ID', 'TXXX:itunes_album_id']:
-                        frame = audio.tags.getall(key)
-                        if frame and frame[0].text:
-                            return str(frame[0].text[0]), 'itunes'
-
-                # FLAC / OggVorbis — VorbisComment (lowercase keys)
-                elif isinstance(audio, (FLAC, OggVorbis)):
-                    for key in ['spotify_album_id', 'SPOTIFY_ALBUM_ID']:
-                        val = audio.get(key)
-                        if val:
-                            return str(val[0]), 'spotify'
-                    for key in ['itunes_album_id', 'ITUNES_ALBUM_ID']:
-                        val = audio.get(key)
-                        if val:
-                            return str(val[0]), 'itunes'
-
-                # MP4/M4A — freeform tags
-                elif isinstance(audio, MP4):
-                    for key in ['----:com.apple.iTunes:SPOTIFY_ALBUM_ID',
-                                '----:com.apple.iTunes:spotify_album_id']:
-                        val = audio.tags.get(key)
-                        if val:
-                            raw = val[0]
-                            return raw.decode('utf-8') if isinstance(raw, bytes) else str(raw), 'spotify'
-                    for key in ['----:com.apple.iTunes:ITUNES_ALBUM_ID',
-                                '----:com.apple.iTunes:itunes_album_id']:
-                        val = audio.tags.get(key)
-                        if val:
-                            raw = val[0]
-                            return raw.decode('utf-8') if isinstance(raw, bytes) else str(raw), 'itunes'
-
-        except Exception as e:
-            logger.debug("Error reading album ID from %s: %s", file_path, e)
-
-        return None, None
-
-    def _is_valid_album_id(self, album_id: Optional[str]) -> bool:
-        """Check if an album ID is a real API identifier, not a placeholder."""
-        if not album_id:
-            return False
-        if album_id.strip().lower() in self._placeholder_ids:
-            return False
-        if len(album_id.strip()) < 5:
-            return False
-        return True
-
-    def _read_spotify_track_id_from_file(self, file_path: str) -> Optional[str]:
-        """Read SPOTIFY_TRACK_ID from embedded tags."""
-        try:
-            from mutagen import File as MutagenFile
-            from mutagen.id3 import ID3
-            from mutagen.flac import FLAC
-            from mutagen.oggvorbis import OggVorbis
-            from mutagen.mp4 import MP4
-
-            audio = MutagenFile(file_path)
-            if audio is None:
-                return None
-
-            if hasattr(audio, 'tags') and audio.tags is not None:
-                if isinstance(audio.tags, ID3):
-                    for key in ['TXXX:SPOTIFY_TRACK_ID', 'TXXX:spotify_track_id']:
-                        frame = audio.tags.getall(key)
-                        if frame and frame[0].text:
-                            return str(frame[0].text[0])
-
-                elif isinstance(audio, (FLAC, OggVorbis)):
-                    for key in ['spotify_track_id', 'SPOTIFY_TRACK_ID']:
-                        val = audio.get(key)
-                        if val:
-                            return str(val[0])
-
-                elif isinstance(audio, MP4):
-                    for key in ['----:com.apple.iTunes:SPOTIFY_TRACK_ID',
-                                '----:com.apple.iTunes:spotify_track_id']:
-                        val = audio.tags.get(key)
-                        if val:
-                            raw = val[0]
-                            return raw.decode('utf-8') if isinstance(raw, bytes) else str(raw)
-
-        except Exception as e:
-            logger.debug("Error reading Spotify track ID from %s: %s", file_path, e)
-        return None
-
-    def _read_musicbrainz_album_id_from_file(self, file_path: str) -> Optional[str]:
-        """Read MusicBrainz Album Id (release MBID) from embedded tags."""
-        try:
-            from mutagen import File as MutagenFile
-            from mutagen.id3 import ID3
-            from mutagen.flac import FLAC
-            from mutagen.oggvorbis import OggVorbis
-            from mutagen.mp4 import MP4
-
-            audio = MutagenFile(file_path)
-            if audio is None:
-                return None
-
-            if hasattr(audio, 'tags') and audio.tags is not None:
-                if isinstance(audio.tags, ID3):
-                    for key in ['TXXX:MusicBrainz Album Id', 'TXXX:MUSICBRAINZ_ALBUMID',
-                                'TXXX:musicbrainz_albumid']:
-                        frame = audio.tags.getall(key)
-                        if frame and frame[0].text:
-                            return str(frame[0].text[0])
-
-                elif isinstance(audio, (FLAC, OggVorbis)):
-                    for key in ['musicbrainz_albumid', 'MUSICBRAINZ_ALBUMID',
-                                'MusicBrainz Album Id']:
-                        val = audio.get(key)
-                        if val:
-                            return str(val[0])
-
-                elif isinstance(audio, MP4):
-                    for key in ['----:com.apple.iTunes:MusicBrainz Album Id',
-                                '----:com.apple.iTunes:MUSICBRAINZ_ALBUMID',
-                                '----:com.apple.music.albums:MUSICBRAINZ_ALBUMID']:
-                        val = audio.tags.get(key)
-                        if val:
-                            raw = val[0]
-                            return raw.decode('utf-8') if isinstance(raw, bytes) else str(raw)
-
-        except Exception as e:
-            logger.debug("Error reading MusicBrainz album ID from %s: %s", file_path, e)
-        return None
-
-    def _read_album_artist_from_file(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:
-        """Read album name and artist name from embedded tags.
-        Returns (album_name, artist_name)."""
-        try:
-            from mutagen import File as MutagenFile
-            from mutagen.id3 import ID3
-            from mutagen.flac import FLAC
-            from mutagen.oggvorbis import OggVorbis
-            from mutagen.mp4 import MP4
-
-            audio = MutagenFile(file_path)
-            if audio is None:
-                return None, None
-
-            album_name = None
-            artist_name = None
-
-            if hasattr(audio, 'tags') and audio.tags is not None:
-                if isinstance(audio.tags, ID3):
-                    frames = audio.tags.getall('TALB')
-                    if frames and frames[0].text:
-                        album_name = str(frames[0].text[0])
-                    # Prefer album artist (TPE2), fall back to track artist (TPE1)
-                    for tag in ['TPE2', 'TPE1']:
-                        frames = audio.tags.getall(tag)
-                        if frames and frames[0].text:
-                            artist_name = str(frames[0].text[0])
-                            break
-
-                elif isinstance(audio, (FLAC, OggVorbis)):
-                    val = audio.get('album')
-                    if val:
-                        album_name = str(val[0])
-                    for key in ['albumartist', 'artist']:
-                        val = audio.get(key)
-                        if val:
-                            artist_name = str(val[0])
-                            break
-
-                elif isinstance(audio, MP4):
-                    val = audio.tags.get('\xa9alb')
-                    if val:
-                        album_name = str(val[0])
-                    for key in ['aART', '\xa9ART']:
-                        val = audio.tags.get(key)
-                        if val:
-                            artist_name = str(val[0])
-                            break
-
-            return album_name, artist_name
-
-        except Exception as e:
-            logger.debug("Error reading album/artist from %s: %s", file_path, e)
-        return None, None
-
-    def _read_title_tag(self, audio) -> Optional[str]:
-        """Read the title tag from an already-opened Mutagen file."""
-        from mutagen.id3 import ID3
-        from mutagen.flac import FLAC
-        from mutagen.oggvorbis import OggVorbis
-        from mutagen.mp4 import MP4
-
-        try:
-            if hasattr(audio, 'tags') and audio.tags is not None:
-                if isinstance(audio.tags, ID3):
-                    frames = audio.tags.getall('TIT2')
-                    if frames and frames[0].text:
-                        return str(frames[0].text[0])
-                elif isinstance(audio, (FLAC, OggVorbis)):
-                    val = audio.get('title')
-                    if val:
-                        return str(val[0])
-                elif isinstance(audio, MP4):
-                    val = audio.tags.get('\xa9nam')
-                    if val:
-                        return str(val[0])
-        except Exception as e:
-            logger.debug("Error reading title tag: %s", e)
-        return None
-
-    def _read_track_number_tag(self, audio) -> Tuple[Optional[int], Optional[int]]:
-        """Read track number and total from tags. Returns (track_num, total)."""
-        from mutagen.id3 import ID3
-        from mutagen.flac import FLAC
-        from mutagen.oggvorbis import OggVorbis
-        from mutagen.mp4 import MP4
-
-        try:
-            if hasattr(audio, 'tags') and audio.tags is not None:
-                if isinstance(audio.tags, ID3):
-                    frames = audio.tags.getall('TRCK')
-                    if frames and frames[0].text:
-                        return self._parse_track_str(str(frames[0].text[0]))
-                elif isinstance(audio, (FLAC, OggVorbis)):
-                    val = audio.get('tracknumber')
-                    if val:
-                        return self._parse_track_str(str(val[0]))
-                elif isinstance(audio, MP4):
-                    val = audio.tags.get('trkn')
-                    if val and val[0]:
-                        t = val[0]
-                        return (int(t[0]), int(t[1]) if t[1] else None)
-        except Exception as e:
-            logger.debug("Error reading track number tag: %s", e)
-        return None, None
-
-    @staticmethod
-    def _parse_track_str(s: str) -> Tuple[Optional[int], Optional[int]]:
-        """Parse '5/12' or '5' into (track_num, total)."""
-        try:
-            if '/' in s:
-                parts = s.split('/')
-                return int(parts[0]), int(parts[1])
-            return int(s), None
-        except (ValueError, IndexError):
-            return None, None
-
-    @staticmethod
-    def _extract_track_number_from_filename(filename: str) -> Optional[int]:
-        """Extract leading track number from filename like '01 - Song.flac'."""
-        basename = os.path.splitext(filename)[0]
-        match = re.match(r'^(\d{1,3})', basename.strip())
-        if match:
-            return int(match.group(1))
-        return None
-
-    # ------------------------------------------------------------------
-    # API lookup
-    # ------------------------------------------------------------------
-    def _get_album_tracklist(self, album_id: str) -> Optional[List[Dict]]:
-        """Fetch album tracks from Spotify/iTunes API with caching."""
-        if album_id in self._album_tracks_cache:
-            return self._album_tracks_cache[album_id]
-
-        client = self.spotify_client
-        if not client:
-            logger.warning("No SpotifyClient available for album lookup")
-            return None
-
-        try:
-            result = client.get_album_tracks(album_id)
-            if not result or 'items' not in result:
-                logger.debug("No tracks returned for album %s", album_id)
-                self._album_tracks_cache[album_id] = None
-                return None
-
-            tracks = []
-            for item in result['items']:
-                tracks.append({
-                    'name': item.get('name', ''),
-                    'track_number': item.get('track_number'),
-                    'disc_number': item.get('disc_number', 1),
-                })
-
-            self._album_tracks_cache[album_id] = tracks
-            return tracks
-
-        except Exception as e:
-            logger.error("Error fetching album tracks for %s: %s", album_id, e)
-            return None
-
-    def _get_tracklist_from_musicbrainz(self, mbid: str) -> Optional[List[Dict]]:
-        """Fetch album tracklist from MusicBrainz by release MBID.
-        Returns list of dicts with {name, track_number, disc_number} matching
-        the Spotify tracklist format, or None on failure."""
-        cache_key = f"mb:{mbid}"
-        if cache_key in self._album_tracks_cache:
-            return self._album_tracks_cache[cache_key]
-
-        client = self.mb_client
-        if not client:
-            logger.warning("No MusicBrainzClient available for release lookup")
-            return None
-
-        try:
-            release = client.get_release(mbid, includes=['recordings'])
-            if not release or 'media' not in release:
-                logger.debug("No media returned for MusicBrainz release %s", mbid)
-                self._album_tracks_cache[cache_key] = None
-                return None
-
-            tracks = []
-            for medium in release['media']:
-                disc_num = medium.get('position', 1)
-                for track in medium.get('tracks', []):
-                    tracks.append({
-                        'name': track.get('title', ''),
-                        'track_number': track.get('position'),
-                        'disc_number': disc_num,
-                    })
-
-            if not tracks:
-                self._album_tracks_cache[cache_key] = None
-                return None
-
-            self._album_tracks_cache[cache_key] = tracks
-            return tracks
-
-        except Exception as e:
-            logger.error("Error fetching MusicBrainz release %s: %s", mbid, e)
-            return None
-
-    def _get_musicbrainz_id_via_audiodb(self, artist_name: str, album_name: str) -> Optional[str]:
-        """Search AudioDB for an album and extract its MusicBrainz release ID."""
-        client = self.audiodb_client
-        if not client:
-            return None
-
-        try:
-            result = client.search_album(artist_name, album_name)
-            if result:
-                mb_id = result.get('strMusicBrainzAlbumID')
-                if mb_id and mb_id.strip():
-                    logger.debug("AudioDB returned MusicBrainz ID %s for '%s - %s'",
-                                 mb_id, artist_name, album_name)
-                    return mb_id.strip()
-        except Exception as e:
-            logger.debug("AudioDB lookup failed for '%s - %s': %s", artist_name, album_name, e)
-        return None
-
-    def _resolve_album_tracklist(self, file_track_data: List[Tuple[str, str, Optional[int]]],
-                                 folder_path: str) -> Optional[List[Dict]]:
-        """Cascading resolution to find the correct album tracklist.
-
-        Tries in order:
-          1. SPOTIFY_ALBUM_ID from tags (skip if placeholder)
-          2. ITUNES_ALBUM_ID from tags
-          3. SPOTIFY_TRACK_ID → get_track_details() → real album ID (requires Spotify auth)
-          4. Search Spotify/iTunes by album name + artist
-          5. MusicBrainz Album Id from tags → MusicBrainz release lookup
-          6. AudioDB search → MusicBrainz album ID → MusicBrainz release
-        """
-        folder_name = os.path.basename(folder_path)
-
-        # --- Collect all available IDs from files in one pass ---
-        spotify_album_id = None
-        itunes_album_id = None
-        spotify_track_id = None
-        mb_album_id = None
-        album_name = None
-        artist_name = None
-
-        for fpath, fname, _ in file_track_data:
-            # Album IDs (split Spotify and iTunes)
-            if not spotify_album_id or not itunes_album_id:
-                aid, source = self._read_album_id_from_file(fpath)
-                if aid and source == 'spotify' and not spotify_album_id:
-                    spotify_album_id = aid
-                elif aid and source == 'itunes' and not itunes_album_id:
-                    itunes_album_id = aid
-
-            # Spotify track ID
-            if not spotify_track_id:
-                spotify_track_id = self._read_spotify_track_id_from_file(fpath)
-
-            # MusicBrainz album ID
-            if not mb_album_id:
-                mb_album_id = self._read_musicbrainz_album_id_from_file(fpath)
-
-            # Album name + artist
-            if not album_name:
-                album_name, artist_name = self._read_album_artist_from_file(fpath)
-
-            # Stop early if we have everything
-            if (spotify_album_id and itunes_album_id and spotify_track_id
-                    and mb_album_id and album_name):
-                break
-
-        # --- Fallback 1: Spotify album ID ---
-        if spotify_album_id and self._is_valid_album_id(spotify_album_id):
-            tracks = self._get_album_tracklist(spotify_album_id)
-            if tracks:
-                logger.info("[Repair] %s — resolved via Spotify album ID: %s", folder_name, spotify_album_id)
-                return tracks
-
-        # --- Fallback 2: iTunes album ID ---
-        if itunes_album_id and self._is_valid_album_id(itunes_album_id):
-            tracks = self._get_album_tracklist(itunes_album_id)
-            if tracks:
-                logger.info("[Repair] %s — resolved via iTunes album ID: %s", folder_name, itunes_album_id)
-                return tracks
-
-        # --- Fallback 3: Spotify track ID → discover album ID (requires Spotify auth) ---
-        client = self.spotify_client
-        if spotify_track_id and client and client.is_spotify_authenticated():
-            try:
-                track_details = client.get_track_details(spotify_track_id)
-                if track_details and track_details.get('album', {}).get('id'):
-                    real_album_id = track_details['album']['id']
-                    tracks = self._get_album_tracklist(real_album_id)
-                    if tracks:
-                        logger.info("[Repair] %s — resolved via Spotify track ID %s → album %s",
-                                    folder_name, spotify_track_id, real_album_id)
-                        return tracks
-            except Exception as e:
-                logger.debug("Spotify track lookup failed for %s: %s", spotify_track_id, e)
-
-        # --- Fallback 4: Search Spotify/iTunes by album name + artist ---
-        if album_name and client:
-            try:
-                query = f"{artist_name} {album_name}" if artist_name else album_name
-                results = client.search_albums(query, limit=5)
-                if results:
-                    # Pick the first result (best match from API)
-                    best = results[0]
-                    tracks = self._get_album_tracklist(best.id)
-                    if tracks:
-                        logger.info("[Repair] %s — resolved via album search: '%s' → %s",
-                                    folder_name, query, best.id)
-                        return tracks
-            except Exception as e:
-                logger.debug("Album search failed for '%s': %s", album_name, e)
-
-        # --- Fallback 5: MusicBrainz album ID from tags ---
-        if mb_album_id:
-            tracks = self._get_tracklist_from_musicbrainz(mb_album_id)
-            if tracks:
-                logger.info("[Repair] %s — resolved via MusicBrainz album ID: %s", folder_name, mb_album_id)
-                return tracks
-
-        # --- Fallback 6: AudioDB → MusicBrainz ---
-        if album_name and artist_name:
-            adb_mb_id = self._get_musicbrainz_id_via_audiodb(artist_name, album_name)
-            if adb_mb_id and adb_mb_id != mb_album_id:  # Don't retry same MBID
-                tracks = self._get_tracklist_from_musicbrainz(adb_mb_id)
-                if tracks:
-                    logger.info("[Repair] %s — resolved via AudioDB → MusicBrainz: %s",
-                                folder_name, adb_mb_id)
-                    return tracks
-
-        logger.warning("[Repair] %s — all tracklist resolution strategies exhausted", folder_name)
-        return None
-
-    # ------------------------------------------------------------------
-    # Title matching
-    # ------------------------------------------------------------------
-    def _match_title_to_api_track(self, file_title: str, api_tracks: List[Dict]) -> Optional[Dict]:
-        """Fuzzy-match a file title to an API track. Returns the best match or None."""
-        norm_file = self._normalize_title(file_title)
-        best_match = None
-        best_score = 0.0
-
-        for track in api_tracks:
-            api_name = track.get('name', '')
-            norm_api = self._normalize_title(api_name)
-            score = SequenceMatcher(None, norm_file, norm_api).ratio()
-            if score > best_score:
-                best_score = score
-                best_match = track
-
-        if best_score >= self.title_similarity_threshold:
-            return best_match
-        return None
-
-    @staticmethod
-    def _normalize_title(title: str) -> str:
-        """Normalize a title for comparison: lowercase, strip parentheticals, punctuation."""
-        t = title.lower()
-        t = re.sub(r'\(.*?\)', '', t)
-        t = re.sub(r'\[.*?\]', '', t)
-        t = re.sub(r'[^a-z0-9 ]', '', t)
-        return t.strip()
-
-    # ------------------------------------------------------------------
-    # Repair actions
-    # ------------------------------------------------------------------
-    def _fix_track_number_tag(self, file_path: str, audio, correct_num: int, total: int):
-        """Update ONLY the track number tag in the file. Touches nothing else."""
-        from mutagen import File as MutagenFile
-        from mutagen.id3 import ID3, TRCK
-        from mutagen.flac import FLAC
-        from mutagen.oggvorbis import OggVorbis
-        from mutagen.mp4 import MP4
-
-        try:
-            # Re-open file fresh to avoid stale state
-            audio = MutagenFile(file_path)
-            if audio is None:
-                logger.error("Cannot re-open file for tag fix: %s", file_path)
-                return
-
-            track_str = f"{correct_num}/{total}"
-
-            if isinstance(audio.tags, ID3):
-                # Remove existing TRCK, add new one
-                audio.tags.delall('TRCK')
-                audio.tags.add(TRCK(encoding=3, text=[track_str]))
-                audio.save(v1=0, v2_version=4)
-
-            elif isinstance(audio, (FLAC, OggVorbis)):
-                audio['tracknumber'] = [track_str]
-                if isinstance(audio, FLAC):
-                    audio.save(deleteid3=True)
-                else:
-                    audio.save()
-
-            elif isinstance(audio, MP4):
-                audio['trkn'] = [(correct_num, total)]
-                audio.save()
-
-            logger.info("Fixed track tag: %s → %s", os.path.basename(file_path), track_str)
-
-        except Exception as e:
-            logger.error("Error fixing track tag in %s: %s", file_path, e, exc_info=True)
-            self.stats['errors'] += 1
-
-    def _fix_filename_track_number(self, file_path: str, filename: str, correct_num: int) -> Optional[str]:
-        """Fix the track number prefix in a filename. Returns new path or None."""
-        try:
-            basename = os.path.splitext(filename)[0]
-            ext = os.path.splitext(filename)[1]
-
-            # Replace leading digits
-            new_basename = re.sub(r'^\d{1,3}', f'{correct_num:02d}', basename)
-            if new_basename == basename:
-                # No change needed (shouldn't happen if filename_wrong was True)
-                return None
-
-            new_filename = new_basename + ext
-            parent_dir = os.path.dirname(file_path)
-            new_path = os.path.join(parent_dir, new_filename)
-
-            # Rigid checks
-            if not os.path.isfile(file_path):
-                logger.error("Source file disappeared before rename: %s", file_path)
-                return None
-
-            if os.path.exists(new_path):
-                logger.warning("Target path already exists, skipping rename: %s", new_path)
-                self.stats['skipped'] += 1
-                return None
-
-            os.rename(file_path, new_path)
-            logger.info("Renamed: %s → %s", filename, new_filename)
-
-            # Rename associated .lrc file if it exists
-            lrc_path = os.path.join(parent_dir, basename + '.lrc')
-            if os.path.isfile(lrc_path):
-                new_lrc_path = os.path.join(parent_dir, new_basename + '.lrc')
-                if not os.path.exists(new_lrc_path):
-                    os.rename(lrc_path, new_lrc_path)
-                    logger.info("Renamed LRC: %s.lrc → %s.lrc", basename, new_basename)
-
-            return new_path
-
-        except Exception as e:
-            logger.error("Error renaming %s: %s", file_path, e, exc_info=True)
-            self.stats['errors'] += 1
-            return None
-
-    # ------------------------------------------------------------------
-    # DB helpers
-    # ------------------------------------------------------------------
-    def _update_db_file_path(self, old_path: str, new_path: str):
-        """Update file_path in tracks table if this track is tracked."""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE file_path = ?",
-                (new_path, old_path)
-            )
-            if cursor.rowcount > 0:
-                conn.commit()
-                logger.debug("Updated DB file_path: %s → %s", old_path, new_path)
-            else:
-                conn.commit()
-        except Exception as e:
-            logger.debug("Error updating DB file_path: %s", e)
-        finally:
-            if conn:
-                conn.close()
-
-    # ------------------------------------------------------------------
-    # Progress
-    # ------------------------------------------------------------------
-    def _get_progress(self) -> Dict[str, Any]:
-        total = self.stats['scanned'] + self.stats['pending']
-        percent = round(self.stats['scanned'] / total * 100) if total > 0 else 0
-        return {
-            'tracks': {
-                'total': total,
-                'checked': self.stats['scanned'],
-                'repaired': self.stats['repaired'],
-                'ok': self.stats['scanned'] - self.stats['repaired'] - self.stats['skipped'] - self.stats['errors'],
-                'skipped': self.stats['skipped'],
-                'percent': percent
-            }
-        }
