@@ -27925,10 +27925,13 @@ function createArtistCardHTML(artist) {
                     <span>${popularityText}</span>
                 </div>
                 <div class="artist-card-actions">
-                    <button class="watchlist-toggle-btn" data-artist-id="${artist.id}" data-artist-name="${escapeHtml(artist.name)}" onclick="toggleWatchlist(event, '${artist.id}', '${escapeForInlineJs(artist.name)}')">
-                        <span class="watchlist-icon">👁️</span>
-                        <span class="watchlist-text">Add to Watchlist</span>
-                    </button>
+                    <div class="watchlist-btn-group">
+                        <button class="watchlist-toggle-btn" data-artist-id="${artist.id}" data-artist-name="${escapeHtml(artist.name)}" onclick="toggleWatchlist(event, '${artist.id}', '${escapeForInlineJs(artist.name)}')">
+                            <span class="watchlist-icon">👁️</span>
+                            <span class="watchlist-text">Add to Watchlist</span>
+                        </button>
+                        <button class="watchlist-settings-btn hidden" data-artist-id="${artist.id}" data-artist-name="${escapeHtml(artist.name)}" onclick="event.stopPropagation(); openWatchlistArtistConfigModal('${artist.id}', '${escapeForInlineJs(artist.name)}')" title="Watchlist Settings">&#9881;</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -29079,6 +29082,10 @@ async function initializeArtistDetailWatchlistButton(artist) {
 
     console.log(`🔧 Initializing watchlist button for artist: ${artist.name} (${artist.id})`);
 
+    // Store artist info on the button for settings gear access
+    button.dataset.artistId = artist.id;
+    button.dataset.artistName = artist.name;
+
     // Reset button state completely
     button.disabled = false;
     button.classList.remove('watching');
@@ -29092,7 +29099,7 @@ async function initializeArtistDetailWatchlistButton(artist) {
     button.onclick = (event) => toggleArtistDetailWatchlist(event, artist.id, artist.name);
 
     // Check and update current status
-    await updateArtistDetailWatchlistButton(artist.id);
+    await updateArtistDetailWatchlistButton(artist.id, artist.name);
 }
 
 /**
@@ -29157,6 +29164,20 @@ async function toggleArtistDetailWatchlist(event, artistId, artistName) {
             console.log(`✅ Added ${artistName} to watchlist`);
         }
 
+        // Show/hide watchlist settings gear
+        const settingsBtn = document.getElementById('artist-detail-watchlist-settings-btn');
+        if (settingsBtn) {
+            if (!isWatching) {
+                // Just added to watchlist — show gear
+                settingsBtn.classList.remove('hidden');
+                settingsBtn.onclick = () => openWatchlistArtistConfigModal(artistId, artistName);
+            } else {
+                // Just removed from watchlist — hide gear
+                settingsBtn.classList.add('hidden');
+                settingsBtn.onclick = null;
+            }
+        }
+
         // Update dashboard watchlist count
         updateWatchlistButtonCount();
 
@@ -29181,12 +29202,15 @@ async function toggleArtistDetailWatchlist(event, artistId, artistName) {
 /**
  * Update artist detail watchlist button status
  */
-async function updateArtistDetailWatchlistButton(artistId) {
+async function updateArtistDetailWatchlistButton(artistId, artistName) {
     const button = document.getElementById('artist-detail-watchlist-btn');
     if (!button) {
         console.warn('⚠️ Artist detail watchlist button not found');
         return;
     }
+
+    // Use passed name or fall back to stored data attribute
+    const name = artistName || button.dataset.artistName || '';
 
     try {
         console.log(`🔍 Checking watchlist status for artist: ${artistId}`);
@@ -29206,6 +29230,18 @@ async function updateArtistDetailWatchlistButton(artistId) {
 
             // Ensure button is enabled
             button.disabled = false;
+
+            // Show/hide watchlist settings gear
+            const settingsBtn = document.getElementById('artist-detail-watchlist-settings-btn');
+            if (settingsBtn) {
+                if (data.is_watching) {
+                    settingsBtn.classList.remove('hidden');
+                    settingsBtn.onclick = () => openWatchlistArtistConfigModal(artistId, name);
+                } else {
+                    settingsBtn.classList.add('hidden');
+                    settingsBtn.onclick = null;
+                }
+            }
 
             if (data.is_watching) {
                 icon.textContent = '👁️';
@@ -31591,17 +31627,20 @@ async function toggleWatchlist(event, artistId, artistName) {
         }
 
         // Update button appearance
+        const gearBtn = button.parentElement?.querySelector('.watchlist-settings-btn');
         if (isWatching) {
             // Was watching, now removed
             icon.textContent = '👁️';
             text.textContent = 'Add to Watchlist';
             button.classList.remove('watching');
+            if (gearBtn) gearBtn.classList.add('hidden');
             console.log(`❌ Removed ${artistName} from watchlist`);
         } else {
             // Was not watching, now added
             icon.textContent = '👁️';
             text.textContent = 'Watching...';
             button.classList.add('watching');
+            if (gearBtn) gearBtn.classList.remove('hidden');
             console.log(`✅ Added ${artistName} to watchlist`);
         }
 
@@ -31679,14 +31718,17 @@ async function updateArtistCardWatchlistStatus() {
                 const icon = button.querySelector('.watchlist-icon');
                 const text = button.querySelector('.watchlist-text');
 
+                const gearBtn = button.parentElement?.querySelector('.watchlist-settings-btn');
                 if (data.results[artistId]) {
                     if (icon) icon.textContent = '👁️';
                     if (text) text.textContent = 'Watching...';
                     button.classList.add('watching');
+                    if (gearBtn) gearBtn.classList.remove('hidden');
                 } else {
                     if (icon) icon.textContent = '👁️';
                     if (text) text.textContent = 'Add to Watchlist';
                     button.classList.remove('watching');
+                    if (gearBtn) gearBtn.classList.add('hidden');
                 }
             }
         }
