@@ -17490,6 +17490,384 @@ async function deleteBackup(filename) {
 }
 
 // ============================================
+// == METADATA CACHE                         ==
+// ============================================
+
+async function loadMetadataCacheStats() {
+    try {
+        const response = await fetch('/api/metadata-cache/stats');
+        if (!response.ok) return;
+        const stats = await response.json();
+
+        const artistsEl = document.getElementById('mcache-stat-artists');
+        const albumsEl = document.getElementById('mcache-stat-albums');
+        const tracksEl = document.getElementById('mcache-stat-tracks');
+        const hitsEl = document.getElementById('mcache-stat-hits');
+
+        if (artistsEl) artistsEl.textContent = (stats.artists?.spotify || 0) + (stats.artists?.itunes || 0);
+        if (albumsEl) albumsEl.textContent = (stats.albums?.spotify || 0) + (stats.albums?.itunes || 0);
+        if (tracksEl) tracksEl.textContent = (stats.tracks?.spotify || 0) + (stats.tracks?.itunes || 0);
+        if (hitsEl) hitsEl.textContent = stats.total_hits || 0;
+    } catch (e) {
+        // Silently fail — cache may not be initialized yet
+    }
+}
+
+let _mcacheCurrentTab = 'artist';
+let _mcachePage = 0;
+let _mcacheSearchTimeout = null;
+const MCACHE_PAGE_SIZE = 48;
+
+function openMetadataCacheModal() {
+    const modal = document.getElementById('mcache-browse-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        _mcacheCurrentTab = 'artist';
+        _mcachePage = 0;
+        // Reset UI
+        document.querySelectorAll('.mcache-tab').forEach(t => t.classList.remove('active'));
+        document.querySelector('.mcache-tab[data-tab="artist"]')?.classList.add('active');
+        const searchInput = document.getElementById('mcache-search');
+        if (searchInput) searchInput.value = '';
+        const sourceFilter = document.getElementById('mcache-source-filter');
+        if (sourceFilter) sourceFilter.value = '';
+        const sortFilter = document.getElementById('mcache-sort-filter');
+        if (sortFilter) sortFilter.value = 'last_accessed_at';
+        loadMetadataCacheBrowseStats();
+        loadMetadataCacheBrowse();
+    }
+}
+
+function closeMetadataCacheModal() {
+    const modal = document.getElementById('mcache-browse-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function loadMetadataCacheBrowseStats() {
+    try {
+        const response = await fetch('/api/metadata-cache/stats');
+        if (!response.ok) return;
+        const stats = await response.json();
+
+        const el = (id, val) => {
+            const e = document.getElementById(id);
+            if (e) e.textContent = val;
+        };
+
+        const spotifyTotal = (stats.artists?.spotify || 0) + (stats.albums?.spotify || 0) + (stats.tracks?.spotify || 0);
+        const itunesTotal = (stats.artists?.itunes || 0) + (stats.albums?.itunes || 0) + (stats.tracks?.itunes || 0);
+        el('mcache-browse-spotify-count', spotifyTotal);
+        el('mcache-browse-itunes-count', itunesTotal);
+        el('mcache-browse-hits', stats.total_hits || 0);
+        el('mcache-browse-searches', stats.searches || 0);
+    } catch (e) { /* ignore */ }
+}
+
+function switchMetadataCacheTab(tab) {
+    _mcacheCurrentTab = tab;
+    _mcachePage = 0;
+    document.querySelectorAll('.mcache-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === tab);
+    });
+    loadMetadataCacheBrowse();
+}
+
+async function loadMetadataCacheBrowse() {
+    const grid = document.getElementById('mcache-grid');
+    if (!grid) return;
+
+    const source = document.getElementById('mcache-source-filter')?.value || '';
+    const search = document.getElementById('mcache-search')?.value || '';
+    const sort = document.getElementById('mcache-sort-filter')?.value || 'last_accessed_at';
+
+    const params = new URLSearchParams({
+        type: _mcacheCurrentTab,
+        sort: sort,
+        sort_dir: sort === 'name' ? 'asc' : 'desc',
+        offset: _mcachePage * MCACHE_PAGE_SIZE,
+        limit: MCACHE_PAGE_SIZE
+    });
+    if (source) params.set('source', source);
+    if (search) params.set('search', search);
+
+    grid.innerHTML = '<div class="mcache-empty"><div class="mcache-empty-icon">...</div><div class="mcache-empty-sub">Loading...</div></div>';
+
+    try {
+        const response = await fetch(`/api/metadata-cache/browse?${params}`);
+        if (!response.ok) throw new Error('Failed to load');
+        const data = await response.json();
+
+        if (!data.items || data.items.length === 0) {
+            grid.innerHTML = `
+                <div class="mcache-empty">
+                    <div class="mcache-empty-icon">📦</div>
+                    <div class="mcache-empty-title">No cached ${_mcacheCurrentTab}s yet</div>
+                    <div class="mcache-empty-sub">As you search and browse music in SoulSync, API responses will be cached here automatically.</div>
+                </div>`;
+            renderMetadataCachePagination(0, 0);
+            return;
+        }
+
+        renderMetadataCacheGrid(data.items, _mcacheCurrentTab);
+        renderMetadataCachePagination(data.total, data.offset);
+    } catch (e) {
+        grid.innerHTML = '<div class="mcache-empty"><div class="mcache-empty-sub">Failed to load cache data.</div></div>';
+    }
+}
+
+function renderMetadataCacheGrid(items, entityType) {
+    const grid = document.getElementById('mcache-grid');
+    if (!grid) return;
+
+    grid.innerHTML = items.map(item => {
+        const source = item.source || 'spotify';
+        const sourceBadge = `<span class="mcache-source-badge ${source}">${source}</span>`;
+        const cacheAge = formatCacheAge(item.last_accessed_at);
+        const hits = item.access_count || 1;
+
+        let imageHtml = '';
+        const isArtist = entityType === 'artist';
+        const shapeClass = isArtist ? ' artist' : '';
+
+        if (item.image_url) {
+            imageHtml = `<img class="mcache-card-image${shapeClass}" src="${item.image_url}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="mcache-card-image-placeholder${shapeClass}" style="display:none">${(item.name || '?')[0].toUpperCase()}</div>`;
+        } else {
+            imageHtml = `<div class="mcache-card-image-placeholder${shapeClass}">${(item.name || '?')[0].toUpperCase()}</div>`;
+        }
+
+        let subText = '';
+        let metaText = '';
+
+        if (entityType === 'artist') {
+            const genres = item.genres ? (typeof item.genres === 'string' ? JSON.parse(item.genres || '[]') : item.genres) : [];
+            subText = genres.length > 0 ? genres.slice(0, 2).join(', ') : '';
+            if (item.popularity) metaText = `Pop: ${item.popularity}`;
+        } else if (entityType === 'album') {
+            subText = item.artist_name || '';
+            const parts = [];
+            if (item.release_date) parts.push(item.release_date.substring(0, 4));
+            if (item.total_tracks) parts.push(`${item.total_tracks} tracks`);
+            if (item.album_type) parts.push(item.album_type);
+            metaText = parts.join(' · ');
+        } else if (entityType === 'track') {
+            subText = item.artist_name || '';
+            const parts = [];
+            if (item.album_name) parts.push(item.album_name);
+            if (item.duration_ms) parts.push(formatDuration(item.duration_ms));
+            metaText = parts.join(' · ');
+        }
+
+        return `
+            <div class="mcache-card" onclick="openMetadataCacheDetail('${source}', '${entityType}', '${item.entity_id}')">
+                <div class="mcache-card-top">
+                    ${imageHtml}
+                    <div class="mcache-card-info">
+                        <div class="mcache-card-name" title="${(item.name || '').replace(/"/g, '&quot;')}">${item.name || 'Unknown'}</div>
+                        ${subText ? `<div class="mcache-card-sub">${subText}</div>` : ''}
+                        ${metaText ? `<div class="mcache-card-meta">${metaText}</div>` : ''}
+                    </div>
+                </div>
+                <div class="mcache-card-bottom">
+                    ${sourceBadge}
+                    <span class="mcache-card-cache-info">${cacheAge} · ${hits}x</span>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+function renderMetadataCachePagination(total, offset) {
+    const container = document.getElementById('mcache-pagination');
+    if (!container) return;
+
+    const totalPages = Math.ceil(total / MCACHE_PAGE_SIZE);
+    const currentPage = Math.floor(offset / MCACHE_PAGE_SIZE);
+
+    if (totalPages <= 1) {
+        container.innerHTML = total > 0 ? `<span style="font-size:11px;color:rgba(255,255,255,0.3)">${total} result${total !== 1 ? 's' : ''}</span>` : '';
+        return;
+    }
+
+    let html = '';
+    html += `<button class="mcache-page-btn" ${currentPage === 0 ? 'disabled' : ''} onclick="_mcachePage=${currentPage - 1};loadMetadataCacheBrowse()">‹</button>`;
+
+    const maxVisible = 7;
+    let start = Math.max(0, currentPage - Math.floor(maxVisible / 2));
+    let end = Math.min(totalPages, start + maxVisible);
+    if (end - start < maxVisible) start = Math.max(0, end - maxVisible);
+
+    if (start > 0) {
+        html += `<button class="mcache-page-btn" onclick="_mcachePage=0;loadMetadataCacheBrowse()">1</button>`;
+        if (start > 1) html += `<span style="color:rgba(255,255,255,0.2);padding:0 4px">...</span>`;
+    }
+
+    for (let i = start; i < end; i++) {
+        html += `<button class="mcache-page-btn${i === currentPage ? ' active' : ''}" onclick="_mcachePage=${i};loadMetadataCacheBrowse()">${i + 1}</button>`;
+    }
+
+    if (end < totalPages) {
+        if (end < totalPages - 1) html += `<span style="color:rgba(255,255,255,0.2);padding:0 4px">...</span>`;
+        html += `<button class="mcache-page-btn" onclick="_mcachePage=${totalPages - 1};loadMetadataCacheBrowse()">${totalPages}</button>`;
+    }
+
+    html += `<button class="mcache-page-btn" ${currentPage >= totalPages - 1 ? 'disabled' : ''} onclick="_mcachePage=${currentPage + 1};loadMetadataCacheBrowse()">›</button>`;
+    html += `<span style="font-size:11px;color:rgba(255,255,255,0.25);margin-left:8px">${total} total</span>`;
+
+    container.innerHTML = html;
+}
+
+async function openMetadataCacheDetail(source, entityType, entityId) {
+    const modal = document.getElementById('mcache-detail-modal');
+    const body = document.getElementById('mcache-detail-body');
+    const title = document.getElementById('mcache-detail-title');
+    if (!modal || !body) return;
+
+    modal.style.display = 'flex';
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:rgba(255,255,255,0.4)">Loading...</div>';
+    if (title) title.textContent = 'Loading...';
+
+    try {
+        const response = await fetch(`/api/metadata-cache/entity/${source}/${entityType}/${entityId}`);
+        if (!response.ok) throw new Error('Not found');
+        const data = await response.json();
+
+        if (title) title.textContent = data.name || 'Unknown';
+
+        const isArtist = entityType === 'artist';
+        const shapeClass = isArtist ? ' artist' : '';
+        let imageHtml = '';
+        if (data.image_url) {
+            imageHtml = `<img class="mcache-detail-image${shapeClass}" src="${data.image_url}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="mcache-detail-image-placeholder${shapeClass}" style="display:none">${(data.name || '?')[0].toUpperCase()}</div>`;
+        } else {
+            imageHtml = `<div class="mcache-detail-image-placeholder${shapeClass}">${(data.name || '?')[0].toUpperCase()}</div>`;
+        }
+
+        const sourceBadge = `<span class="mcache-source-badge ${source}">${source}</span>`;
+        const typeBadge = `<span class="mcache-type-badge">${entityType}</span>`;
+
+        // Build structured fields table
+        let fieldsHtml = '<table class="mcache-detail-table">';
+        const addRow = (label, value) => {
+            if (value !== null && value !== undefined && value !== '') {
+                fieldsHtml += `<tr><td>${label}</td><td>${value}</td></tr>`;
+            }
+        };
+
+        addRow('Entity ID', data.entity_id);
+        addRow('Name', data.name);
+
+        if (entityType === 'artist') {
+            const genres = data.genres ? (typeof data.genres === 'string' ? JSON.parse(data.genres || '[]') : data.genres) : [];
+            if (genres.length) addRow('Genres', genres.join(', '));
+            if (data.popularity) addRow('Popularity', data.popularity);
+            if (data.followers) addRow('Followers', data.followers.toLocaleString());
+        } else if (entityType === 'album') {
+            addRow('Artist', data.artist_name);
+            addRow('Release Date', data.release_date);
+            addRow('Total Tracks', data.total_tracks);
+            addRow('Album Type', data.album_type);
+            addRow('Label', data.label);
+        } else if (entityType === 'track') {
+            addRow('Artist', data.artist_name);
+            addRow('Album', data.album_name);
+            if (data.duration_ms) addRow('Duration', formatDuration(data.duration_ms));
+            addRow('Track Number', data.track_number);
+            addRow('Disc Number', data.disc_number);
+            addRow('Explicit', data.explicit ? 'Yes' : 'No');
+            addRow('ISRC', data.isrc);
+            if (data.preview_url) addRow('Preview', `<a href="${data.preview_url}" target="_blank" style="color:var(--accent,#6d5dfc)">Listen</a>`);
+        }
+
+        fieldsHtml += '</table>';
+
+        // Cache metadata section
+        let cacheHtml = '<div class="mcache-detail-section-title">Cache Metadata</div>';
+        cacheHtml += '<table class="mcache-detail-table">';
+        if (data.created_at) cacheHtml += `<tr><td>Cached At</td><td>${new Date(data.created_at).toLocaleString()}</td></tr>`;
+        if (data.last_accessed_at) cacheHtml += `<tr><td>Last Accessed</td><td>${new Date(data.last_accessed_at).toLocaleString()}</td></tr>`;
+        if (data.access_count) cacheHtml += `<tr><td>Access Count</td><td>${data.access_count}</td></tr>`;
+        if (data.ttl_days) cacheHtml += `<tr><td>TTL</td><td>${data.ttl_days} days</td></tr>`;
+        cacheHtml += '</table>';
+
+        // Raw JSON section
+        let rawJsonHtml = '';
+        if (data.raw_json) {
+            const rawStr = typeof data.raw_json === 'string' ? data.raw_json : JSON.stringify(data.raw_json, null, 2);
+            const escapedJson = rawStr.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            rawJsonHtml = `
+                <div class="mcache-detail-section-title">Raw API Response</div>
+                <button class="mcache-raw-json-toggle" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.textContent=this.nextElementSibling.style.display==='none'?'Show Raw JSON':'Hide Raw JSON'">Show Raw JSON</button>
+                <pre class="mcache-raw-json" style="display:none">${escapedJson}</pre>`;
+        }
+
+        body.innerHTML = `
+            <div class="mcache-detail-hero">
+                ${imageHtml}
+                <div class="mcache-detail-hero-info">
+                    <div class="mcache-detail-hero-name">${data.name || 'Unknown'}</div>
+                    ${entityType !== 'artist' && data.artist_name ? `<div class="mcache-detail-hero-sub">${data.artist_name}</div>` : ''}
+                    <div class="mcache-detail-badges">
+                        ${sourceBadge}
+                        ${typeBadge}
+                    </div>
+                </div>
+            </div>
+            <div class="mcache-detail-section-title">Details</div>
+            ${fieldsHtml}
+            ${cacheHtml}
+            ${rawJsonHtml}`;
+    } catch (e) {
+        body.innerHTML = '<div style="text-align:center;padding:40px;color:rgba(255,255,255,0.4)">Failed to load entity details.</div>';
+    }
+}
+
+function closeMetadataCacheDetail() {
+    const modal = document.getElementById('mcache-detail-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function clearMetadataCache() {
+    if (!confirm('Clear all cached metadata? This will remove all cached API responses from Spotify and iTunes.')) return;
+
+    try {
+        const response = await fetch('/api/metadata-cache/clear', { method: 'DELETE' });
+        const data = await response.json();
+        if (data.success) {
+            showToast(`Cleared ${data.cleared} cached entries`, 'success');
+            loadMetadataCacheBrowseStats();
+            loadMetadataCacheBrowse();
+            loadMetadataCacheStats();
+        } else {
+            showToast('Failed to clear cache', 'error');
+        }
+    } catch (e) {
+        showToast('Error clearing cache', 'error');
+    }
+}
+
+function debouncedMetadataCacheSearch() {
+    if (_mcacheSearchTimeout) clearTimeout(_mcacheSearchTimeout);
+    _mcacheSearchTimeout = setTimeout(() => {
+        _mcachePage = 0;
+        loadMetadataCacheBrowse();
+    }, 400);
+}
+
+function formatCacheAge(timestamp) {
+    if (!timestamp) return '—';
+    const now = new Date();
+    const then = new Date(timestamp);
+    const diffMs = now - then;
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'now';
+    if (diffMin < 60) return `${diffMin}m`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h`;
+    const diffDays = Math.floor(diffHr / 24);
+    if (diffDays < 30) return `${diffDays}d`;
+    return `${Math.floor(diffDays / 30)}mo`;
+}
+
+// ============================================
 // == TOOL HELP MODAL                        ==
 // ============================================
 
@@ -18704,6 +19082,34 @@ const TOOL_HELP_CONTENT = {
                 <li><strong>DB Size:</strong> Current size of the live database</li>
             </ul>
         `
+    },
+    'metadata-cache': {
+        title: 'Metadata Cache',
+        content: `
+            <h4>What is this?</h4>
+            <p>The Metadata Cache stores every API response from Spotify and iTunes so SoulSync can reuse them instead of making duplicate API calls. This reduces rate limit pressure and speeds up lookups.</p>
+
+            <h4>How it works</h4>
+            <p>When SoulSync fetches artist, album, or track data from Spotify or iTunes, the response is cached locally. The next time the same data is needed, it's served from cache instantly — no API call required. Cached data is even served during Spotify rate limit bans.</p>
+
+            <h4>Browsing the Cache</h4>
+            <p>Click <strong>Browse Cache</strong> to explore all cached metadata. You can filter by entity type (artists, albums, tracks), search by name, filter by source (Spotify/iTunes), and sort by different fields. Click any card to see full details including the raw API response.</p>
+
+            <h4>Cache Management</h4>
+            <ul>
+                <li><strong>TTL:</strong> Entities expire after 30 days, search mappings after 7 days</li>
+                <li><strong>Eviction:</strong> Expired entries are automatically cleaned up</li>
+                <li><strong>Clear:</strong> You can clear the entire cache or filter by source/type</li>
+            </ul>
+
+            <h4>Stats Explained</h4>
+            <ul>
+                <li><strong>Artists:</strong> Total cached artist profiles</li>
+                <li><strong>Albums:</strong> Total cached album records</li>
+                <li><strong>Tracks:</strong> Total cached track records</li>
+                <li><strong>Hits:</strong> Total number of times cached data was served instead of making an API call</li>
+            </ul>
+        `
     }
 };
 
@@ -19425,6 +19831,9 @@ async function loadDashboardData() {
 
     // Initial load of discovery pool stats for the tool card
     loadDiscoveryPoolStats();
+
+    // Initial load of metadata cache stats
+    loadMetadataCacheStats();
 
     // Initial load of wishlist count
     await updateWishlistCount();

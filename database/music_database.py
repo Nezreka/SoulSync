@@ -352,6 +352,9 @@ class MusicDatabase:
             # Spotify library cache
             self._add_spotify_library_cache_table(cursor)
 
+            # Universal metadata cache (Spotify + iTunes API responses)
+            self._add_metadata_cache_tables(cursor)
+
             # Mirrored playlists — persistent backup of parsed playlists from any service
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS mirrored_playlists (
@@ -2295,6 +2298,84 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error creating spotify_library_cache table: {e}")
+
+    def _add_metadata_cache_tables(self, cursor):
+        """Create metadata_cache_entities and metadata_cache_searches tables for universal API response caching"""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'metadata_cache_v1' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+
+            logger.info("Creating metadata cache tables...")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS metadata_cache_entities (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source TEXT NOT NULL,
+                    entity_type TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    image_url TEXT,
+                    external_urls TEXT,
+                    genres TEXT,
+                    popularity INTEGER,
+                    followers INTEGER,
+                    artist_name TEXT,
+                    artist_id TEXT,
+                    release_date TEXT,
+                    total_tracks INTEGER,
+                    album_type TEXT,
+                    label TEXT,
+                    album_name TEXT,
+                    album_id TEXT,
+                    duration_ms INTEGER,
+                    track_number INTEGER,
+                    disc_number INTEGER,
+                    explicit INTEGER,
+                    isrc TEXT,
+                    preview_url TEXT,
+                    raw_json TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_accessed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    access_count INTEGER DEFAULT 1,
+                    ttl_days INTEGER DEFAULT 30,
+                    UNIQUE(source, entity_type, entity_id)
+                )
+            """)
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_lookup ON metadata_cache_entities (source, entity_type, entity_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_name ON metadata_cache_entities (entity_type, name COLLATE NOCASE)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_artist ON metadata_cache_entities (artist_name COLLATE NOCASE)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_accessed ON metadata_cache_entities (last_accessed_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_source ON metadata_cache_entities (source)")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS metadata_cache_searches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source TEXT NOT NULL,
+                    search_type TEXT NOT NULL,
+                    query_normalized TEXT NOT NULL,
+                    query_original TEXT NOT NULL,
+                    result_ids TEXT NOT NULL,
+                    result_count INTEGER NOT NULL,
+                    search_limit INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_accessed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    access_count INTEGER DEFAULT 1,
+                    ttl_days INTEGER DEFAULT 7,
+                    UNIQUE(source, search_type, query_normalized, search_limit)
+                )
+            """)
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mcs_lookup ON metadata_cache_searches (source, search_type, query_normalized)")
+
+            cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('metadata_cache_v1', '1')")
+
+            logger.info("Metadata cache tables created successfully")
+
+        except Exception as e:
+            logger.error(f"Error creating metadata cache tables: {e}")
 
     # ── Profile CRUD ──────────────────────────────────────────────────
 
