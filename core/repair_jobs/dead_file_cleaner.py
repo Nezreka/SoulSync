@@ -23,16 +23,18 @@ class DeadFileCleanerJob(RepairJob):
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
 
-        # Fetch all tracks with file paths from DB
+        # Fetch all tracks with file paths, joining to get artist/album names
         tracks = []
         conn = None
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, title, artist, album, file_path
-                FROM tracks
-                WHERE file_path IS NOT NULL AND file_path != ''
+                SELECT t.id, t.title, ar.name, al.title, t.file_path
+                FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                LEFT JOIN albums al ON al.id = t.album_id
+                WHERE t.file_path IS NOT NULL AND t.file_path != ''
             """)
             tracks = cursor.fetchall()
         except Exception as e:
@@ -53,7 +55,7 @@ class DeadFileCleanerJob(RepairJob):
             if i % 200 == 0 and context.wait_if_paused():
                 return result
 
-            track_id, title, artist, album, file_path = row
+            track_id, title, artist_name, album_title, file_path = row
             result.scanned += 1
 
             if not os.path.exists(file_path):
@@ -68,12 +70,12 @@ class DeadFileCleanerJob(RepairJob):
                             entity_id=str(track_id),
                             file_path=file_path,
                             title=f'Missing file: {title or "Unknown"}',
-                            description=f'Track "{title}" by {artist or "Unknown"} points to a file that no longer exists',
+                            description=f'Track "{title}" by {artist_name or "Unknown"} points to a file that no longer exists',
                             details={
                                 'track_id': track_id,
                                 'title': title,
-                                'artist': artist,
-                                'album': album,
+                                'artist': artist_name,
+                                'album': album_title,
                                 'original_path': file_path,
                             }
                         )

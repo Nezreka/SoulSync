@@ -32,18 +32,20 @@ class DuplicateDetectorJob(RepairJob):
         title_threshold = settings.get('title_similarity', 0.85)
         artist_threshold = settings.get('artist_similarity', 0.80)
 
-        # Fetch all tracks from DB
+        # Fetch all tracks with artist/album names via JOIN
         tracks = []
         conn = None
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, title, artist, album, file_path, format, bitrate,
-                       sample_rate, bit_depth, file_size, duration
-                FROM tracks
-                WHERE title IS NOT NULL AND title != ''
-                  AND file_path IS NOT NULL AND file_path != ''
+                SELECT t.id, t.title, ar.name, al.title, t.file_path,
+                       t.bitrate, t.duration
+                FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                LEFT JOIN albums al ON al.id = t.album_id
+                WHERE t.title IS NOT NULL AND t.title != ''
+                  AND t.file_path IS NOT NULL AND t.file_path != ''
             """)
             tracks = cursor.fetchall()
         except Exception as e:
@@ -62,31 +64,26 @@ class DuplicateDetectorJob(RepairJob):
             context.update_progress(0, total)
 
         # Group tracks by normalized key for fast comparison
-        # First pass: bucket by first 3 chars of normalized title for efficiency
+        # Bucket by first 4 chars of normalized title for efficiency
         buckets = defaultdict(list)
         for row in tracks:
-            track_id, title, artist, album, file_path, fmt, bitrate, sample_rate, bit_depth, file_size, duration = row
+            track_id, title, artist_name, album_title, file_path, bitrate, duration = row
             norm_title = _normalize(title)
-            # Bucket by first few chars to avoid O(n^2) full comparison
             bucket_key = norm_title[:4] if len(norm_title) >= 4 else norm_title
             buckets[bucket_key].append({
                 'id': track_id,
                 'title': title,
                 'norm_title': norm_title,
-                'artist': artist or '',
-                'norm_artist': _normalize(artist or ''),
-                'album': album,
+                'artist': artist_name or '',
+                'norm_artist': _normalize(artist_name or ''),
+                'album': album_title,
                 'file_path': file_path,
-                'format': fmt,
                 'bitrate': bitrate,
-                'sample_rate': sample_rate,
-                'bit_depth': bit_depth,
-                'file_size': file_size,
                 'duration': duration,
             })
 
-        # Second pass: find duplicates within each bucket
-        found_groups = set()  # Track IDs already in a group (frozenset)
+        # Find duplicates within each bucket
+        found_groups = set()  # Track IDs already in a group
         processed = 0
 
         for bucket_key, bucket_tracks in buckets.items():
@@ -124,9 +121,8 @@ class DuplicateDetectorJob(RepairJob):
 
                 if len(group) >= 2:
                     # Found a duplicate group
-                    group_ids = frozenset(t['id'] for t in group)
-                    for tid in group_ids:
-                        found_groups.add(tid)
+                    for t in group:
+                        found_groups.add(t['id'])
 
                     if context.create_finding:
                         try:
@@ -149,11 +145,7 @@ class DuplicateDetectorJob(RepairJob):
                                         'artist': t['artist'],
                                         'album': t['album'],
                                         'file_path': t['file_path'],
-                                        'format': t['format'],
                                         'bitrate': t['bitrate'],
-                                        'sample_rate': t['sample_rate'],
-                                        'bit_depth': t['bit_depth'],
-                                        'file_size': t['file_size'],
                                         'duration': t['duration'],
                                     } for t in group],
                                     'count': len(group),

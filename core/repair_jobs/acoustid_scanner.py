@@ -161,7 +161,7 @@ class AcoustIDScannerJob(RepairJob):
                     finding_type='acoustid_no_match',
                     severity='info',
                     entity_type='track',
-                    entity_id=str(expected.get('track_id', '')),
+                    entity_id=str(expected.get('track_id') or ''),
                     file_path=fpath,
                     title=f'No AcoustID match: {fname}',
                     description='File could not be identified by AcoustID fingerprint',
@@ -207,7 +207,7 @@ class AcoustIDScannerJob(RepairJob):
                 finding_type='acoustid_mismatch',
                 severity=severity,
                 entity_type='track',
-                entity_id=str(expected.get('track_id', '')),
+                entity_id=str(expected.get('track_id') or ''),
                 file_path=fpath,
                 title=f'Possible wrong download: {fname}',
                 description=(
@@ -235,17 +235,18 @@ class AcoustIDScannerJob(RepairJob):
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, title, artist, file_path
-                FROM tracks
-                WHERE file_path IS NOT NULL AND file_path != ''
-                  AND title IS NOT NULL AND title != ''
+                SELECT t.id, t.title, ar.name, t.file_path
+                FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                WHERE t.file_path IS NOT NULL AND t.file_path != ''
+                  AND t.title IS NOT NULL AND t.title != ''
             """)
             for row in cursor.fetchall():
-                track_id, title, artist, file_path = row
+                track_id, title, artist_name, file_path = row
                 tracks[os.path.normpath(file_path)] = {
                     'track_id': track_id,
                     'title': title or '',
-                    'artist': artist or '',
+                    'artist': artist_name or '',
                 }
         except Exception as e:
             logger.error("Error loading tracks from DB: %s", e)

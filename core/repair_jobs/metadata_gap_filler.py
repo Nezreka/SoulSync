@@ -1,4 +1,4 @@
-"""Metadata Gap Filler Job — fills missing track metadata from APIs."""
+"""Metadata Gap Filler Job — finds tracks missing key metadata and locates it from APIs."""
 
 import time
 
@@ -13,58 +13,52 @@ logger = get_logger("repair_job.metadata_gap")
 class MetadataGapFillerJob(RepairJob):
     job_id = 'metadata_gap_filler'
     display_name = 'Metadata Gap Filler'
-    description = 'Fills missing genre, year, ISRC, and MusicBrainz IDs'
+    description = 'Finds tracks missing ISRC or MusicBrainz IDs and locates them'
     icon = 'repair-icon-metadata'
     default_enabled = False
     default_interval_hours = 72
     default_settings = {
-        'fill_genre': True,
-        'fill_year': True,
         'fill_isrc': True,
         'fill_musicbrainz_id': True,
-        'write_to_file': False,
     }
-    auto_fix = True
+    auto_fix = False
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
 
         settings = self._get_settings(context)
-        fill_genre = settings.get('fill_genre', True)
-        fill_year = settings.get('fill_year', True)
         fill_isrc = settings.get('fill_isrc', True)
         fill_mb_id = settings.get('fill_musicbrainz_id', True)
 
-        # Build WHERE clauses for missing fields
+        # Build WHERE clauses for missing fields (only columns that exist on tracks)
         conditions = []
-        if fill_genre:
-            conditions.append("(genre IS NULL OR genre = '')")
-        if fill_year:
-            conditions.append("(year IS NULL OR year = '' OR year = '0')")
         if fill_isrc:
-            conditions.append("(isrc IS NULL OR isrc = '')")
+            conditions.append("(t.isrc IS NULL OR t.isrc = '')")
         if fill_mb_id:
-            conditions.append("(musicbrainz_id IS NULL OR musicbrainz_id = '')")
+            conditions.append("(t.musicbrainz_recording_id IS NULL OR t.musicbrainz_recording_id = '')")
 
         if not conditions:
             return result
 
         where = " OR ".join(conditions)
 
-        # Fetch tracks with gaps, prioritizing those with spotify_id
+        # Fetch tracks with gaps, prioritizing those with spotify_track_id
         tracks = []
         conn = None
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute(f"""
-                SELECT id, title, artist, album, spotify_id, isrc, genre, year, musicbrainz_id
-                FROM tracks
-                WHERE title IS NOT NULL AND title != ''
+                SELECT t.id, t.title, ar.name, al.title, t.spotify_track_id,
+                       t.isrc, t.musicbrainz_recording_id
+                FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                LEFT JOIN albums al ON al.id = t.album_id
+                WHERE t.title IS NOT NULL AND t.title != ''
                   AND ({where})
                 ORDER BY
-                    CASE WHEN spotify_id IS NOT NULL AND spotify_id != '' THEN 0 ELSE 1 END,
-                    id
+                    CASE WHEN t.spotify_track_id IS NOT NULL AND t.spotify_track_id != '' THEN 0 ELSE 1 END,
+                    t.id
                 LIMIT 500
             """)
             tracks = cursor.fetchall()
@@ -88,73 +82,68 @@ class MetadataGapFillerJob(RepairJob):
             if i % 20 == 0 and context.wait_if_paused():
                 return result
 
-            track_id, title, artist, album, spotify_id, isrc, genre, year, mb_id = row
+            track_id, title, artist_name, album_title, spotify_track_id, isrc, mb_id = row
             result.scanned += 1
-            updates = {}
+            found_fields = {}
 
-            # Try Spotify enrichment first (most reliable)
-            if spotify_id and context.spotify_client:
+            # Try Spotify enrichment first (most reliable for ISRC)
+            if spotify_track_id and context.spotify_client:
                 try:
-                    track_data = context.spotify_client.get_track_details(spotify_id)
+                    track_data = context.spotify_client.get_track_details(spotify_track_id)
                     if track_data:
                         if fill_isrc and not isrc:
                             ext_ids = track_data.get('external_ids', {})
                             if ext_ids.get('isrc'):
-                                updates['isrc'] = ext_ids['isrc']
-
-                        if fill_year and not year:
-                            album_data = track_data.get('album', {})
-                            rd = album_data.get('release_date', '')
-                            if rd and len(rd) >= 4:
-                                updates['year'] = rd[:4]
-
-                    # Get album for genre (genres are on artists in Spotify)
-                    if fill_genre and not genre:
-                        artists = track_data.get('artists', []) if track_data else []
-                        if artists:
-                            artist_data = context.spotify_client.get_artist(artists[0].get('id', ''))
-                            if artist_data and artist_data.get('genres'):
-                                updates['genre'] = ', '.join(artist_data['genres'][:3])
-
+                                found_fields['isrc'] = ext_ids['isrc']
                 except Exception as e:
                     logger.debug("Spotify enrichment failed for track %s: %s", track_id, e)
 
-            # Try MusicBrainz for MB ID
+            # Try MusicBrainz for MB recording ID
             if fill_mb_id and not mb_id and context.mb_client:
                 try:
-                    search_query = f'"{title}" AND artist:"{artist}"' if artist else f'"{title}"'
-                    mb_results = context.mb_client.search_recordings(search_query, limit=1)
-                    if mb_results:
-                        recordings = mb_results.get('recording-list', [])
-                        if recordings:
-                            updates['musicbrainz_id'] = recordings[0].get('id', '')
+                    recordings = context.mb_client.search_recording(
+                        title, artist_name=artist_name, limit=1
+                    )
+                    if recordings:
+                        found_fields['musicbrainz_recording_id'] = recordings[0].get('id', '')
                 except Exception as e:
                     logger.debug("MusicBrainz lookup failed for track %s: %s", track_id, e)
 
-            # Apply updates
-            if updates:
-                try:
-                    conn2 = context.db._get_connection()
-                    cursor2 = conn2.cursor()
-                    set_parts = [f"{k} = ?" for k in updates.keys()]
-                    values = list(updates.values()) + [track_id]
-                    cursor2.execute(
-                        f"UPDATE tracks SET {', '.join(set_parts)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        values
-                    )
-                    conn2.commit()
-                    conn2.close()
-                    result.auto_fixed += 1
-                    logger.debug("Filled %d metadata fields for track '%s' (id=%s)",
-                                 len(updates), title, track_id)
-                except Exception as e:
-                    logger.debug("Error updating metadata for track %s: %s", track_id, e)
-                    result.errors += 1
+            # Create finding for user to review instead of auto-writing
+            if found_fields:
+                if context.create_finding:
+                    try:
+                        field_names = ', '.join(found_fields.keys())
+                        context.create_finding(
+                            job_id=self.job_id,
+                            finding_type='metadata_gap',
+                            severity='info',
+                            entity_type='track',
+                            entity_id=str(track_id),
+                            file_path=None,
+                            title=f'Missing metadata: {title or "Unknown"}',
+                            description=(
+                                f'Track "{title}" by {artist_name or "Unknown"} is missing: {field_names}. '
+                                f'Found values from API lookup.'
+                            ),
+                            details={
+                                'track_id': track_id,
+                                'title': title,
+                                'artist': artist_name,
+                                'album': album_title,
+                                'spotify_track_id': spotify_track_id,
+                                'found_fields': found_fields,
+                            }
+                        )
+                        result.findings_created += 1
+                    except Exception as e:
+                        logger.debug("Error creating metadata gap finding for track %s: %s", track_id, e)
+                        result.errors += 1
             else:
                 result.skipped += 1
 
             # Rate limit API calls
-            if spotify_id:
+            if spotify_track_id:
                 time.sleep(0.5)
 
             if context.update_progress and (i + 1) % 10 == 0:
@@ -163,8 +152,8 @@ class MetadataGapFillerJob(RepairJob):
         if context.update_progress:
             context.update_progress(total, total)
 
-        logger.info("Metadata gap fill: %d tracks checked, %d enriched, %d skipped",
-                     result.scanned, result.auto_fixed, result.skipped)
+        logger.info("Metadata gap scan: %d tracks checked, %d gaps found, %d skipped",
+                     result.scanned, result.findings_created, result.skipped)
         return result
 
     def _get_settings(self, context: JobContext) -> dict:
@@ -183,10 +172,8 @@ class MetadataGapFillerJob(RepairJob):
             cursor.execute("""
                 SELECT COUNT(*) FROM tracks
                 WHERE title IS NOT NULL AND title != ''
-                  AND ((genre IS NULL OR genre = '')
-                    OR (year IS NULL OR year = '' OR year = '0')
-                    OR (isrc IS NULL OR isrc = '')
-                    OR (musicbrainz_id IS NULL OR musicbrainz_id = ''))
+                  AND ((isrc IS NULL OR isrc = '')
+                    OR (musicbrainz_recording_id IS NULL OR musicbrainz_recording_id = ''))
             """)
             row = cursor.fetchone()
             return min(row[0], 500) if row else 0

@@ -177,7 +177,7 @@ class TrackNumberRepairJob(RepairJob):
         return result
 
     # ------------------------------------------------------------------
-    # Tracklist resolution (6-level fallback cascade)
+    # Tracklist resolution (7-level fallback cascade)
     # ------------------------------------------------------------------
     def _resolve_album_tracklist(self, file_track_data: List[Tuple[str, str, Optional[int]]],
                                  folder_path: str, context: JobContext,
@@ -188,7 +188,23 @@ class TrackNumberRepairJob(RepairJob):
         cache = scan_state['album_tracks_cache']
         folder_name = os.path.basename(folder_path)
 
-        # Collect all available IDs from files in one pass
+        # Fallback 0: Check DB first — if these files are tracked and their album
+        # has a spotify_album_id, use that directly without reading file tags
+        db_album_id, db_spotify_album_id, db_itunes_album_id = _lookup_album_ids_from_db(
+            file_track_data, context
+        )
+        if db_spotify_album_id and _is_valid_album_id(db_spotify_album_id):
+            tracks = _get_album_tracklist(db_spotify_album_id, context, cache)
+            if tracks:
+                logger.info("[Repair] %s — resolved via DB spotify_album_id: %s", folder_name, db_spotify_album_id)
+                return tracks
+        if db_itunes_album_id and _is_valid_album_id(db_itunes_album_id):
+            tracks = _get_album_tracklist(db_itunes_album_id, context, cache)
+            if tracks:
+                logger.info("[Repair] %s — resolved via DB itunes_album_id: %s", folder_name, db_itunes_album_id)
+                return tracks
+
+        # Collect available IDs from file tags (fallback when DB has no IDs)
         spotify_album_id = None
         itunes_album_id = None
         spotify_track_id = None
@@ -216,7 +232,7 @@ class TrackNumberRepairJob(RepairJob):
             if spotify_album_id and itunes_album_id and spotify_track_id and mb_album_id and album_name:
                 break
 
-        # Fallback 1: Spotify album ID
+        # Fallback 1: Spotify album ID from file tags
         if spotify_album_id and _is_valid_album_id(spotify_album_id):
             tracks = _get_album_tracklist(spotify_album_id, context, cache)
             if tracks:
@@ -714,6 +730,44 @@ def _update_db_file_path(db, old_path: str, new_path: str):
     finally:
         if conn:
             conn.close()
+
+
+def _lookup_album_ids_from_db(file_track_data: List[Tuple[str, str, Any]],
+                              context: JobContext) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Look up album IDs from the database using file paths.
+
+    Checks if any of the files in this folder are tracked in the DB, and if so,
+    returns the album's (album_id, spotify_album_id, itunes_album_id).
+    This avoids expensive file tag reads and API calls when the DB already knows.
+    """
+    if not context.db:
+        return None, None, None
+
+    conn = None
+    try:
+        conn = context.db._get_connection()
+        cursor = conn.cursor()
+
+        # Try each file path until we find one tracked in the DB
+        for fpath, _, _ in file_track_data:
+            cursor.execute("""
+                SELECT t.album_id, al.spotify_album_id, al.itunes_album_id
+                FROM tracks t
+                JOIN albums al ON al.id = t.album_id
+                WHERE t.file_path = ?
+                LIMIT 1
+            """, (fpath,))
+            row = cursor.fetchone()
+            if row:
+                return row[0], row[1], row[2]
+
+    except Exception as e:
+        logger.debug("Error looking up album IDs from DB: %s", e)
+    finally:
+        if conn:
+            conn.close()
+
+    return None, None, None
 
 
 def _repair_single_track(file_path: str, filename: str, api_tracks: List[Dict],
