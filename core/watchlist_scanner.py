@@ -792,16 +792,33 @@ class WatchlistScanner:
             time.sleep(0.3)  # 300ms breathing room
 
             # Determine cutoff date for filtering
-            cutoff_timestamp = last_scan_timestamp
+            lookback_period = self._get_lookback_period_setting()
 
-            # If no last scan timestamp, use lookback period setting
-            if cutoff_timestamp is None:
-                lookback_period = self._get_lookback_period_setting()
-                if lookback_period != 'all':
-                    # Convert period to days and create cutoff date (use UTC)
-                    days = int(lookback_period)
-                    cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=days)
-                    logger.info(f"Using lookback period: {lookback_period} days (cutoff: {cutoff_timestamp})")
+            # If lookback is 'all', always return everything regardless of scan timestamp
+            if lookback_period == 'all':
+                cutoff_timestamp = None
+            elif last_scan_timestamp is not None:
+                cutoff_timestamp = last_scan_timestamp
+
+                # Check if a lookback period change requires a one-time wider window
+                rescan_cutoff = self._get_rescan_cutoff()
+                if rescan_cutoff == 'all':
+                    logger.info(f"Lookback period changed to 'all' — returning full discography")
+                    cutoff_timestamp = None
+                elif rescan_cutoff is not None:
+                    scan_ts = cutoff_timestamp
+                    if scan_ts.tzinfo is None:
+                        scan_ts = scan_ts.replace(tzinfo=timezone.utc)
+                    if rescan_cutoff.tzinfo is None:
+                        rescan_cutoff = rescan_cutoff.replace(tzinfo=timezone.utc)
+                    if rescan_cutoff < scan_ts:
+                        logger.info(f"Lookback period change detected — expanding cutoff from {cutoff_timestamp} to {rescan_cutoff}")
+                        cutoff_timestamp = rescan_cutoff
+            else:
+                # No scan timestamp — use lookback period
+                days = int(lookback_period)
+                cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=days)
+                logger.info(f"Using lookback period: {lookback_period} days (cutoff: {cutoff_timestamp})")
 
             # Filter by release date if we have a cutoff timestamp
             if cutoff_timestamp:
@@ -997,6 +1014,45 @@ class WatchlistScanner:
         except Exception as e:
             logger.warning(f"Error getting lookback period setting, defaulting to 30 days: {e}")
             return '30'
+
+    def _get_rescan_cutoff(self):
+        """
+        Check if a lookback period change requires a one-time wider scan window.
+
+        When the lookback period is expanded, a 'watchlist_rescan_cutoff' metadata key
+        is set with the new cutoff date. This method returns that cutoff so the scanner
+        can use the wider window for artists scanned before the change. After a full
+        scan cycle, the key is cleared by _clear_rescan_cutoff().
+
+        Returns:
+            datetime cutoff if a rescan is pending with a specific date,
+            'all' string if lookback was set to entire discography,
+            None if no rescan is pending
+        """
+        try:
+            with self.database._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT value FROM metadata WHERE key = 'watchlist_rescan_cutoff'")
+                row = cursor.fetchone()
+                if row is not None:
+                    val = row['value']
+                    if val == '':
+                        return 'all'  # Lookback set to 'all' — scan everything
+                    return datetime.fromisoformat(val)
+        except Exception as e:
+            logger.debug(f"Error reading rescan cutoff: {e}")
+        return None
+
+    def _clear_rescan_cutoff(self):
+        """Clear the one-time rescan cutoff after a full scan cycle completes."""
+        try:
+            with self.database._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM metadata WHERE key = 'watchlist_rescan_cutoff'")
+                conn.commit()
+                logger.info("Cleared watchlist rescan cutoff flag")
+        except Exception as e:
+            logger.debug(f"Error clearing rescan cutoff: {e}")
 
     def is_album_after_timestamp(self, album, timestamp: datetime) -> bool:
         """Check if album was released after the given timestamp"""

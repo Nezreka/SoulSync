@@ -17367,14 +17367,25 @@ def set_discovery_lookback_period():
                 VALUES ('discovery_lookback_period', ?, CURRENT_TIMESTAMP)
             """, (period,))
 
-            # When expanding the lookback window (especially to "entire disco"),
-            # reset scan timestamps so the next scan re-discovers older releases
-            # that were filtered out under the previous narrower setting
-            cursor.execute("UPDATE watchlist_artists SET last_scan_timestamp = NULL")
-            reset_count = cursor.rowcount
+            # Set a one-time rescan cutoff so the next scan cycle uses the new
+            # lookback window for artists that were already scanned under the old setting.
+            # This avoids wiping last_scan_timestamp (which is needed for UI display).
+            if period == 'all':
+                # 'all' means no cutoff — store empty to signal "scan everything"
+                rescan_value = ''
+            else:
+                from datetime import datetime, timedelta, timezone
+                cutoff = datetime.now(timezone.utc) - timedelta(days=int(period))
+                rescan_value = cutoff.isoformat()
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value, updated_at)
+                VALUES ('watchlist_rescan_cutoff', ?, CURRENT_TIMESTAMP)
+            """, (rescan_value,))
+
             conn.commit()
 
-        print(f"✅ Discovery lookback period set to: {period}, reset scan timestamps on {reset_count} artists")
+        print(f"✅ Discovery lookback period set to: {period}")
         return jsonify({"success": True, "period": period})
 
     except Exception as e:
@@ -28821,6 +28832,12 @@ def start_watchlist_scan():
                 # Resume enrichment workers if we paused them
                 _resume_enrichment_workers(_ew_state, 'watchlist scan')
 
+                # Clear one-time rescan cutoff after full scan cycle
+                try:
+                    scanner._clear_rescan_cutoff()
+                except Exception:
+                    pass
+
                 # Always reset flag when scan completes (success or error)
                 with watchlist_timer_lock:
                     watchlist_auto_scanning = False
@@ -29808,6 +29825,12 @@ def _process_watchlist_scan_automatically(automation_id=None):
     finally:
         # Resume enrichment workers if we paused them
         _resume_enrichment_workers(_ew_state, 'auto-watchlist scan')
+
+        # Clear one-time rescan cutoff after full scan cycle
+        try:
+            scanner._clear_rescan_cutoff()
+        except Exception:
+            pass
 
         # Always reset flag
         with watchlist_timer_lock:
