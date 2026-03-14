@@ -5,6 +5,7 @@ import threading
 from functools import wraps
 from dataclasses import dataclass
 from utils.logging_config import get_logger
+from core.metadata_cache import get_metadata_cache
 
 logger = get_logger("itunes_client")
 
@@ -351,9 +352,22 @@ class iTunesClient:
     @rate_limited
     def search_tracks(self, query: str, limit: int = 20) -> List[Track]:
         """Search for tracks using iTunes API"""
+        # Check search cache
+        cache = get_metadata_cache()
+        cached_results = cache.get_search_results('itunes', 'track', query, limit)
+        if cached_results is not None:
+            tracks = []
+            for raw in cached_results:
+                try:
+                    tracks.append(Track.from_itunes_track(raw))
+                except Exception:
+                    pass
+            if tracks:
+                return tracks
+
         results = self._search(query, 'song', limit)
         tracks = []
-        
+
         # Collect artist IDs for batch lookup
         artist_ids = set()
         for track_data in results:
@@ -361,19 +375,28 @@ class iTunesClient:
                 artist_id = str(track_data.get('artistId', ''))
                 if artist_id:
                     artist_ids.add(artist_id)
-        
+
         # Batch lookup artist clean names
         clean_artist_map = {}
         if artist_ids:
             clean_artist_map = self._get_clean_artist_names(list(artist_ids))
 
+        raw_items = []
         for track_data in results:
             if track_data.get('wrapperType') == 'track' and track_data.get('kind') == 'song':
                 artist_id = str(track_data.get('artistId', ''))
                 clean_artist = clean_artist_map.get(artist_id)
                 track = Track.from_itunes_track(track_data, clean_artist_name=clean_artist)
                 tracks.append(track)
-        
+                raw_items.append(track_data)
+
+        # Cache individual tracks + search mapping
+        entries = [(str(td.get('trackId', '')), td) for td in raw_items if td.get('trackId')]
+        if entries:
+            cache.store_entities_bulk('itunes', 'track', entries)
+            cache.store_search_results('itunes', 'track', query, limit,
+                                       [str(td.get('trackId', '')) for td in raw_items if td.get('trackId')])
+
         return tracks
     
     def _get_clean_artist_names(self, artist_ids: List[str]) -> Dict[str, str]:
@@ -409,8 +432,43 @@ class iTunesClient:
     
     def get_track_details(self, track_id: str) -> Optional[Dict[str, Any]]:
         """Get detailed track information including album data and track number"""
+        # Check cache for raw track data
+        cache = get_metadata_cache()
+        cached = cache.get_entity('itunes', 'track', str(track_id))
+        if cached:
+            # Reconstruct enhanced_data from cached raw track_data
+            # Try to get clean artist name from artist cache (avoids API call)
+            clean_artist_name = cached.get('artistName', 'Unknown Artist')
+            artist_id = str(cached.get('artistId', ''))
+            if artist_id:
+                cached_artist = cache.get_entity('itunes', 'artist', artist_id)
+                if cached_artist:
+                    clean_artist_name = cached_artist.get('artistName', clean_artist_name)
+                # If no cached artist, use the track's artistName as-is (no API call)
+
+            return {
+                'id': str(cached.get('trackId', '')),
+                'name': cached.get('trackName', ''),
+                'track_number': cached.get('trackNumber', 0),
+                'disc_number': cached.get('discNumber', 1),
+                'duration_ms': cached.get('trackTimeMillis', 0),
+                'explicit': cached.get('trackExplicitness') == 'explicit',
+                'artists': [clean_artist_name],
+                'primary_artist': clean_artist_name,
+                'album': {
+                    'id': str(cached.get('collectionId', '')),
+                    'name': _clean_itunes_album_name(cached.get('collectionName', '')),
+                    'total_tracks': cached.get('trackCount', 0),
+                    'release_date': cached.get('releaseDate', ''),
+                    'album_type': 'album',
+                    'artists': [clean_artist_name]
+                },
+                'is_album_track': cached.get('trackCount', 0) > 1,
+                'raw_data': cached
+            }
+
         results = self._lookup(id=track_id)
-        
+
         for track_data in results:
             if track_data.get('wrapperType') == 'track':
                 # Enhance with additional useful metadata
@@ -444,6 +502,8 @@ class iTunesClient:
                     'is_album_track': track_data.get('trackCount', 0) > 1,
                     'raw_data': track_data
                 }
+                # Cache the raw track data
+                cache.store_entity('itunes', 'track', str(track_id), track_data)
                 return enhanced_data
         
         return None
@@ -464,6 +524,19 @@ class iTunesClient:
 
         Filters out clean versions when explicit versions are available.
         """
+        # Check search cache
+        cache = get_metadata_cache()
+        cached_results = cache.get_search_results('itunes', 'album', query, limit)
+        if cached_results is not None:
+            albums = []
+            for raw in cached_results:
+                try:
+                    albums.append(Album.from_itunes_album(raw))
+                except Exception:
+                    pass
+            if albums:
+                return albums
+
         results = self._search(query, 'album', limit * 2)  # Fetch more to account for filtering
         albums = []
         seen_albums = {}  # Track albums by normalized name to prefer explicit versions
@@ -489,12 +562,25 @@ class iTunesClient:
             else:
                 seen_albums[key] = {'data': album_data, 'is_explicit': is_explicit}
 
-        # Convert to Album objects
+        # Convert to Album objects + collect raw items for caching
+        raw_items = []
         for item in seen_albums.values():
             album = Album.from_itunes_album(item['data'])
             albums.append(album)
+            raw_items.append(item['data'])
 
-        return albums[:limit]
+        result = albums[:limit]
+
+        # Cache individual albums + search mapping
+        entries = [(str(ad.get('collectionId', '')), ad) for ad in raw_items if ad.get('collectionId')]
+        if entries:
+            cache.store_entities_bulk('itunes', 'album', entries)
+            # Only cache IDs for the albums we're actually returning
+            result_ids = [str(ad.get('collectionId', '')) for ad in raw_items[:limit] if ad.get('collectionId')]
+            if result_ids:
+                cache.store_search_results('itunes', 'album', query, limit, result_ids)
+
+        return result
     
     def get_album(self, album_id: str, include_tracks: bool = True) -> Optional[Dict[str, Any]]:
         """Get album information with tracks - normalized to Spotify format.
@@ -503,6 +589,54 @@ class iTunesClient:
             album_id: iTunes album/collection ID
             include_tracks: If True, also fetches and includes tracks (default True for Spotify compatibility)
         """
+        # Check cache for raw album data
+        cache = get_metadata_cache()
+        cached = cache.get_entity('itunes', 'album', str(album_id))
+        if cached:
+            # Reconstruct Spotify-compatible format from cached raw iTunes data
+            image_url = None
+            if cached.get('artworkUrl100'):
+                image_url = cached['artworkUrl100'].replace('100x100bb', '600x600bb')
+
+            images = []
+            if image_url:
+                images = [
+                    {'url': image_url, 'height': 600, 'width': 600},
+                    {'url': cached['artworkUrl100'].replace('100x100bb', '300x300bb'), 'height': 300, 'width': 300},
+                    {'url': cached['artworkUrl100'], 'height': 100, 'width': 100}
+                ]
+
+            track_count = cached.get('trackCount', 0)
+            if track_count <= 3:
+                album_type = 'single'
+            elif track_count <= 6:
+                album_type = 'ep'
+            else:
+                album_type = 'album'
+
+            album_result = {
+                'id': str(cached.get('collectionId', '')),
+                'name': _clean_itunes_album_name(cached.get('collectionName', '')),
+                'images': images,
+                'artists': [{'name': cached.get('artistName', 'Unknown Artist'), 'id': str(cached.get('artistId', ''))}],
+                'release_date': cached.get('releaseDate', '')[:10] if cached.get('releaseDate') else '',
+                'total_tracks': track_count,
+                'album_type': album_type,
+                'external_urls': {'itunes': cached.get('collectionViewUrl', '')},
+                'uri': f"itunes:album:{cached.get('collectionId', '')}",
+                '_source': 'itunes',
+                '_raw_data': cached
+            }
+
+            if include_tracks:
+                tracks_data = self.get_album_tracks(album_id)
+                if tracks_data and 'items' in tracks_data:
+                    album_result['tracks'] = tracks_data
+                else:
+                    album_result['tracks'] = {'items': [], 'total': 0}
+
+            return album_result
+
         results = self._lookup(id=album_id)
 
         for album_data in results:
@@ -544,6 +678,9 @@ class iTunesClient:
                     '_raw_data': album_data
                 }
 
+                # Cache the raw album data
+                cache.store_entity('itunes', 'album', str(album_id), album_data)
+
                 # Include tracks to match Spotify's get_album format
                 if include_tracks:
                     tracks_data = self.get_album_tracks(album_id)
@@ -558,6 +695,12 @@ class iTunesClient:
     
     def get_album_tracks(self, album_id: str) -> Optional[Dict[str, Any]]:
         """Get album tracks - normalized to Spotify format"""
+        # Check cache for album tracks listing
+        cache = get_metadata_cache()
+        cached = cache.get_entity('itunes', 'album', f"{album_id}_tracks")
+        if cached:
+            return cached
+
         results = self._lookup(id=album_id, entity='song')
 
         if not results:
@@ -629,12 +772,25 @@ class iTunesClient:
 
         logger.info(f"Retrieved {len(tracks)} tracks for album {album_id}")
 
-        return {
+        result = {
             'items': tracks,
             'total': len(tracks),
             'limit': len(tracks),
             'next': None
         }
+
+        # Cache the album tracks listing
+        cache.store_entity('itunes', 'album', f"{album_id}_tracks", result)
+
+        # Also cache individual tracks from the raw results
+        track_entries = []
+        for item in results:
+            if item.get('wrapperType') == 'track' and item.get('kind') == 'song' and item.get('trackId'):
+                track_entries.append((str(item['trackId']), item))
+        if track_entries:
+            cache.store_entities_bulk('itunes', 'track', track_entries)
+
+        return result
     
     # ==================== Artist Methods ====================
     
@@ -663,13 +819,35 @@ class iTunesClient:
         Note: Artist images are not fetched during search to keep it fast.
         Images are fetched when viewing artist details (get_artist method).
         """
+        # Check search cache
+        cache = get_metadata_cache()
+        cached_results = cache.get_search_results('itunes', 'artist', query, limit)
+        if cached_results is not None:
+            artists = []
+            for raw in cached_results:
+                try:
+                    artists.append(Artist.from_itunes_artist(raw))
+                except Exception:
+                    pass
+            if artists:
+                return artists
+
         results = self._search(query, 'musicArtist', limit)
         artists = []
+        raw_items = []
 
         for artist_data in results:
             if artist_data.get('wrapperType') == 'artist':
                 artist = Artist.from_itunes_artist(artist_data)
                 artists.append(artist)
+                raw_items.append(artist_data)
+
+        # Cache individual artists + search mapping
+        entries = [(str(ad.get('artistId', '')), ad) for ad in raw_items if ad.get('artistId')]
+        if entries:
+            cache.store_entities_bulk('itunes', 'artist', entries)
+            cache.store_search_results('itunes', 'artist', query, limit,
+                                       [str(ad.get('artistId', '')) for ad in raw_items if ad.get('artistId')])
 
         return artists
     
@@ -683,6 +861,37 @@ class iTunesClient:
         Returns:
             Dictionary with artist data matching Spotify's format
         """
+        # Check cache — stores raw iTunes data, reconstruct Spotify-compatible format
+        cache = get_metadata_cache()
+        cached = cache.get_entity('itunes', 'artist', str(artist_id))
+        if cached and cached.get('wrapperType') == 'artist':
+            # Reconstruct Spotify-compatible format from cached raw iTunes data
+            # Don't call _get_artist_image_from_albums here — avoid API call on cache hit
+            # The image_url was already extracted during initial caching
+            images = []
+            artwork_url = cached.get('artworkUrl100')
+            if artwork_url:
+                images = [
+                    {'url': artwork_url.replace('100x100bb', '600x600bb'), 'height': 600, 'width': 600},
+                    {'url': artwork_url.replace('100x100bb', '300x300bb'), 'height': 300, 'width': 300},
+                    {'url': artwork_url, 'height': 100, 'width': 100}
+                ]
+            genres = []
+            if cached.get('primaryGenreName'):
+                genres = [cached['primaryGenreName']]
+            return {
+                'id': str(cached.get('artistId', '')),
+                'name': cached.get('artistName', ''),
+                'images': images,
+                'genres': genres,
+                'popularity': 0,
+                'followers': {'total': 0},
+                'external_urls': {'itunes': cached.get('artistViewUrl', '')},
+                'uri': f"itunes:artist:{cached.get('artistId', '')}",
+                '_source': 'itunes',
+                '_raw_data': cached
+            }
+
         results = self._lookup(id=artist_id)
 
         for artist_data in results:
@@ -698,6 +907,8 @@ class iTunesClient:
                     if album_art:
                         # Convert back to base URL format for building array
                         artwork_url = album_art.replace('600x600bb', '100x100bb')
+                        # Store discovered artwork in raw data so cache hits will have it
+                        artist_data['artworkUrl100'] = artwork_url
 
                 if artwork_url:
                     images = [
@@ -711,7 +922,7 @@ class iTunesClient:
                 if artist_data.get('primaryGenreName'):
                     genres = [artist_data['primaryGenreName']]
 
-                return {
+                result = {
                     'id': str(artist_data.get('artistId', '')),
                     'name': artist_data.get('artistName', ''),
                     'images': images,
@@ -723,6 +934,9 @@ class iTunesClient:
                     '_source': 'itunes',
                     '_raw_data': artist_data
                 }
+                # Cache the processed result (raw_data inside has original iTunes format)
+                cache.store_entity('itunes', 'artist', str(artist_id), artist_data)
+                return result
 
         return None
     
@@ -817,6 +1031,15 @@ class iTunesClient:
 
         # Extract albums from dict
         albums = [item['album'] for item in seen_albums.values()]
+
+        # Cache individual albums opportunistically
+        album_entries = []
+        for album_data in results:
+            if album_data.get('wrapperType') == 'collection' and album_data.get('collectionId'):
+                album_entries.append((str(album_data['collectionId']), album_data))
+        if album_entries:
+            cache = get_metadata_cache()
+            cache.store_entities_bulk('itunes', 'album', album_entries)
 
         logger.info(f"Retrieved {len(albums)} unique albums for artist {artist_id} (filtered from {len(results)} results)")
         return albums[:limit]

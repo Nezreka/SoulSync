@@ -67,6 +67,7 @@ from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
 from core.web_scan_manager import WebScanManager
 from core.lyrics_client import lyrics_client
+from core.metadata_cache import get_metadata_cache
 from database.music_database import get_database, MusicDatabase
 from services.sync_service import PlaylistSyncService
 
@@ -18348,6 +18349,88 @@ def download_backup_endpoint(filename):
             return jsonify({"success": False, "error": "Backup not found"}), 404
         return send_file(backup_path, as_attachment=True, download_name=filename)
     except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ===============================
+# == METADATA CACHE API        ==
+# ===============================
+
+@app.route('/api/metadata-cache/stats', methods=['GET'])
+def metadata_cache_stats():
+    """Get metadata cache statistics."""
+    try:
+        cache = get_metadata_cache()
+        stats = cache.get_stats()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Error getting metadata cache stats: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/metadata-cache/browse', methods=['GET'])
+def metadata_cache_browse():
+    """Browse cached metadata entities with filtering, search, sorting, and pagination."""
+    try:
+        cache = get_metadata_cache()
+        entity_type = request.args.get('type', 'artist')
+        source = request.args.get('source')
+        search = request.args.get('search')
+        sort = request.args.get('sort', 'last_accessed_at')
+        sort_dir = request.args.get('sort_dir', 'desc')
+        offset = int(request.args.get('offset', 0))
+        limit = int(request.args.get('limit', 48))
+
+        result = cache.browse(
+            entity_type=entity_type,
+            source=source if source else None,
+            search=search if search else None,
+            sort=sort,
+            sort_dir=sort_dir,
+            offset=offset,
+            limit=limit
+        )
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error browsing metadata cache: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/metadata-cache/entity/<source>/<entity_type>/<entity_id>', methods=['GET'])
+def metadata_cache_entity_detail(source, entity_type, entity_id):
+    """Get detailed view of a single cached entity."""
+    try:
+        cache = get_metadata_cache()
+        detail = cache.get_entity_detail(source, entity_type, entity_id)
+        if detail is None:
+            return jsonify({"error": "Entity not found"}), 404
+        return jsonify(detail)
+    except Exception as e:
+        logger.error(f"Error getting metadata cache entity: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/metadata-cache/clear', methods=['DELETE'])
+def metadata_cache_clear():
+    """Clear cached metadata. Optional query params: source, type."""
+    try:
+        cache = get_metadata_cache()
+        source = request.args.get('source')
+        entity_type = request.args.get('type')
+        cleared = cache.clear(
+            source=source if source else None,
+            entity_type=entity_type if entity_type else None
+        )
+        return jsonify({"success": True, "cleared": cleared})
+    except Exception as e:
+        logger.error(f"Error clearing metadata cache: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/metadata-cache/evict', methods=['POST'])
+def metadata_cache_evict():
+    """Evict expired entries from the metadata cache."""
+    try:
+        cache = get_metadata_cache()
+        evicted = cache.evict_expired()
+        return jsonify({"success": True, "evicted": evicted})
+    except Exception as e:
+        logger.error(f"Error evicting metadata cache: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================

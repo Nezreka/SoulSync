@@ -7,6 +7,7 @@ from functools import wraps
 from dataclasses import dataclass
 from utils.logging_config import get_logger
 from config.settings import config_manager
+from core.metadata_cache import get_metadata_cache
 
 logger = get_logger("spotify_client")
 
@@ -920,14 +921,38 @@ class SpotifyClient:
     @rate_limited
     def search_tracks(self, query: str, limit: int = 10) -> List[Track]:
         """Search for tracks - falls back to iTunes if Spotify not authenticated"""
-        if self.is_spotify_authenticated():
+        cache = get_metadata_cache()
+        use_spotify = self.is_spotify_authenticated()
+        source = 'spotify' if use_spotify else 'itunes'
+
+        # Check search cache
+        cached_results = cache.get_search_results(source, 'track', query, min(limit, 10))
+        if cached_results is not None:
+            tracks = []
+            for raw in cached_results:
+                try:
+                    tracks.append(Track.from_spotify_track(raw) if source == 'spotify' else Track.from_itunes_track(raw))
+                except Exception:
+                    pass
+            if tracks:
+                return tracks
+
+        if use_spotify:
             try:
                 results = self.sp.search(q=query, type='track', limit=min(limit, 10))
                 tracks = []
+                raw_items = results['tracks']['items']
 
-                for track_data in results['tracks']['items']:
+                for track_data in raw_items:
                     track = Track.from_spotify_track(track_data)
                     tracks.append(track)
+
+                # Cache individual tracks + search mapping
+                entries = [(td.get('id'), td) for td in raw_items if td.get('id')]
+                if entries:
+                    cache.store_entities_bulk('spotify', 'track', entries)
+                    cache.store_search_results('spotify', 'track', query, min(limit, 10),
+                                               [td.get('id') for td in raw_items if td.get('id')])
 
                 return tracks
 
@@ -942,15 +967,41 @@ class SpotifyClient:
     @rate_limited
     def search_artists(self, query: str, limit: int = 10) -> List[Artist]:
         """Search for artists - falls back to iTunes if Spotify not authenticated"""
-        if self.is_spotify_authenticated():
+        cache = get_metadata_cache()
+        use_spotify = self.is_spotify_authenticated()
+        source = 'spotify' if use_spotify else 'itunes'
+
+        # Check search cache
+        cached_results = cache.get_search_results(source, 'artist', query, min(limit, 10))
+        if cached_results is not None:
+            artists = []
+            for raw in cached_results:
+                try:
+                    artists.append(Artist.from_spotify_artist(raw) if source == 'spotify' else Artist.from_itunes_artist(raw))
+                except Exception:
+                    pass
+            if artists:
+                query_lower = query.lower().strip()
+                artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
+                return artists
+
+        if use_spotify:
             try:
                 search_query = f'artist:{query}' if len(query.strip()) <= 4 else query
                 results = self.sp.search(q=search_query, type='artist', limit=min(limit, 10))
                 artists = []
+                raw_items = results['artists']['items']
 
-                for artist_data in results['artists']['items']:
+                for artist_data in raw_items:
                     artist = Artist.from_spotify_artist(artist_data)
                     artists.append(artist)
+
+                # Cache individual artists + search mapping
+                entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
+                if entries:
+                    cache.store_entities_bulk('spotify', 'artist', entries)
+                    cache.store_search_results('spotify', 'artist', query, min(limit, 10),
+                                               [ad.get('id') for ad in raw_items if ad.get('id')])
 
                 # Re-rank: boost exact name matches to the top
                 query_lower = query.lower().strip()
@@ -972,14 +1023,38 @@ class SpotifyClient:
     @rate_limited
     def search_albums(self, query: str, limit: int = 10) -> List[Album]:
         """Search for albums - falls back to iTunes if Spotify not authenticated"""
-        if self.is_spotify_authenticated():
+        cache = get_metadata_cache()
+        use_spotify = self.is_spotify_authenticated()
+        source = 'spotify' if use_spotify else 'itunes'
+
+        # Check search cache
+        cached_results = cache.get_search_results(source, 'album', query, min(limit, 10))
+        if cached_results is not None:
+            albums = []
+            for raw in cached_results:
+                try:
+                    albums.append(Album.from_spotify_album(raw) if source == 'spotify' else Album.from_itunes_album(raw))
+                except Exception:
+                    pass
+            if albums:
+                return albums
+
+        if use_spotify:
             try:
                 results = self.sp.search(q=query, type='album', limit=min(limit, 10))
                 albums = []
+                raw_items = results['albums']['items']
 
-                for album_data in results['albums']['items']:
+                for album_data in raw_items:
                     album = Album.from_spotify_album(album_data)
                     albums.append(album)
+
+                # Cache individual albums + search mapping
+                entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
+                if entries:
+                    cache.store_entities_bulk('spotify', 'album', entries)
+                    cache.store_search_results('spotify', 'album', query, min(limit, 10),
+                                               [ad.get('id') for ad in raw_items if ad.get('id')])
 
                 return albums
 
@@ -994,33 +1069,25 @@ class SpotifyClient:
     @rate_limited
     def get_track_details(self, track_id: str) -> Optional[Dict[str, Any]]:
         """Get detailed track information - falls back to iTunes if Spotify not authenticated"""
+        # Check cache — we store raw track_data, reconstruct enhanced on hit
+        cache = get_metadata_cache()
+        source = 'itunes' if self._is_itunes_id(track_id) else 'spotify'
+        cached = cache.get_entity(source, 'track', track_id)
+        if cached:
+            if source == 'spotify':
+                return self._build_enhanced_track(cached)
+            # iTunes cache hit — delegate to iTunesClient which reconstructs enhanced format
+            return self._itunes.get_track_details(track_id)
+
         if self.is_spotify_authenticated():
             try:
                 track_data = self.sp.track(track_id)
 
                 # Enhance with additional useful metadata for our purposes
                 if track_data:
-                    enhanced_data = {
-                        'id': track_data['id'],
-                        'name': track_data['name'],
-                        'track_number': track_data['track_number'],
-                        'disc_number': track_data['disc_number'],
-                        'duration_ms': track_data['duration_ms'],
-                        'explicit': track_data['explicit'],
-                        'artists': [artist['name'] for artist in track_data['artists']],
-                        'primary_artist': track_data['artists'][0]['name'] if track_data['artists'] else None,
-                        'album': {
-                            'id': track_data['album']['id'],
-                            'name': track_data['album']['name'],
-                            'total_tracks': track_data['album']['total_tracks'],
-                            'release_date': track_data['album']['release_date'],
-                            'album_type': track_data['album']['album_type'],
-                            'artists': [artist['name'] for artist in track_data['album']['artists']]
-                        },
-                        'is_album_track': track_data['album']['total_tracks'] > 1,
-                        'raw_data': track_data  # Keep original for fallback
-                    }
-                    return enhanced_data
+                    # Cache the raw Spotify response
+                    cache.store_entity('spotify', 'track', track_id, track_data)
+                    return self._build_enhanced_track(track_data)
                 return track_data
 
             except Exception as e:
@@ -1030,20 +1097,55 @@ class SpotifyClient:
         # iTunes fallback - only if ID is numeric (iTunes format)
         if self._is_itunes_id(track_id):
             logger.debug(f"Using iTunes fallback for track details: {track_id}")
-            return self._itunes.get_track_details(track_id)
+            result = self._itunes.get_track_details(track_id)
+            return result
         else:
             logger.debug(f"Cannot use iTunes fallback for Spotify track ID: {track_id}")
             return None
+
+    @staticmethod
+    def _build_enhanced_track(track_data: dict) -> dict:
+        """Build enhanced track dict from raw Spotify track data."""
+        return {
+            'id': track_data['id'],
+            'name': track_data['name'],
+            'track_number': track_data['track_number'],
+            'disc_number': track_data['disc_number'],
+            'duration_ms': track_data['duration_ms'],
+            'explicit': track_data['explicit'],
+            'artists': [artist['name'] for artist in track_data['artists']],
+            'primary_artist': track_data['artists'][0]['name'] if track_data['artists'] else None,
+            'album': {
+                'id': track_data['album']['id'],
+                'name': track_data['album']['name'],
+                'total_tracks': track_data['album']['total_tracks'],
+                'release_date': track_data['album']['release_date'],
+                'album_type': track_data['album']['album_type'],
+                'artists': [artist['name'] for artist in track_data['album']['artists']]
+            },
+            'is_album_track': track_data['album']['total_tracks'] > 1,
+            'raw_data': track_data
+        }
     
     @rate_limited
     def get_track_features(self, track_id: str) -> Optional[Dict[str, Any]]:
+        # Check cache — use entity_id with '_features' suffix
+        cache = get_metadata_cache()
+        cache_key = f"{track_id}_features"
+        cached = cache.get_entity('spotify', 'track', cache_key)
+        if cached:
+            return cached
+
         if not self.is_spotify_authenticated():
             return None
-        
+
         try:
             features = self.sp.audio_features(track_id)
-            return features[0] if features else None
-            
+            result = features[0] if features else None
+            if result:
+                cache.store_entity('spotify', 'track', cache_key, result)
+            return result
+
         except Exception as e:
             logger.error(f"Error fetching track features: {e}")
             return None
@@ -1051,9 +1153,21 @@ class SpotifyClient:
     @rate_limited
     def get_album(self, album_id: str) -> Optional[Dict[str, Any]]:
         """Get album information - falls back to iTunes if Spotify not authenticated"""
+        # Check cache first
+        cache = get_metadata_cache()
+        source = 'itunes' if self._is_itunes_id(album_id) else 'spotify'
+        cached = cache.get_entity(source, 'album', album_id)
+        if cached:
+            if source == 'spotify':
+                return cached  # Spotify raw format is the expected format
+            # iTunes cache hit — delegate to iTunesClient which reconstructs Spotify-compatible format
+            return self._itunes.get_album(album_id)
+
         if self.is_spotify_authenticated():
             try:
                 album_data = self.sp.album(album_id)
+                if album_data:
+                    cache.store_entity('spotify', 'album', album_id, album_data)
                 return album_data
 
             except Exception as e:
@@ -1064,7 +1178,8 @@ class SpotifyClient:
         # iTunes fallback - only if ID is numeric (iTunes format)
         if self._is_itunes_id(album_id):
             logger.debug(f"Using iTunes fallback for album: {album_id}")
-            return self._itunes.get_album(album_id)
+            result = self._itunes.get_album(album_id)
+            return result
         else:
             logger.debug(f"Cannot use iTunes fallback for Spotify album ID: {album_id}")
             return None
@@ -1072,6 +1187,14 @@ class SpotifyClient:
     @rate_limited
     def get_album_tracks(self, album_id: str) -> Optional[Dict[str, Any]]:
         """Get album tracks - falls back to iTunes if Spotify not authenticated"""
+        # Cache key uses album_id with '_tracks' suffix to differentiate from album metadata
+        cache = get_metadata_cache()
+        source = 'itunes' if self._is_itunes_id(album_id) else 'spotify'
+        cache_key = f"{album_id}_tracks"
+        cached = cache.get_entity(source, 'album', cache_key)
+        if cached:
+            return cached
+
         if self.is_spotify_authenticated():
             try:
                 # Get first page of tracks
@@ -1098,6 +1221,18 @@ class SpotifyClient:
                 result['next'] = None  # No more pages
                 result['limit'] = len(all_tracks)  # Update to reflect all tracks fetched
 
+                # Cache the aggregated result
+                cache.store_entity('spotify', 'album', cache_key, result)
+
+                # Also cache individual tracks opportunistically
+                track_entries = []
+                for track in all_tracks:
+                    tid = track.get('id')
+                    if tid:
+                        track_entries.append((tid, track))
+                if track_entries:
+                    cache.store_entities_bulk('spotify', 'track', track_entries)
+
                 return result
 
             except Exception as e:
@@ -1107,7 +1242,8 @@ class SpotifyClient:
         # iTunes fallback - only if ID is numeric (iTunes format)
         if self._is_itunes_id(album_id):
             logger.debug(f"Using iTunes fallback for album tracks: {album_id}")
-            return self._itunes.get_album_tracks(album_id)
+            result = self._itunes.get_album_tracks(album_id)
+            return result
         else:
             logger.debug(f"Cannot use iTunes fallback for Spotify album ID: {album_id}")
             return None
@@ -1118,17 +1254,26 @@ class SpotifyClient:
         if self.is_spotify_authenticated():
             try:
                 albums = []
+                raw_items = []
                 results = self.sp.artist_albums(artist_id, album_type=album_type, limit=min(limit, 10))
 
                 while results:
                     for album_data in results['items']:
                         album = Album.from_spotify_album(album_data)
                         albums.append(album)
+                        raw_items.append(album_data)
 
                     # Get next batch if available
                     results = self.sp.next(results) if results['next'] else None
 
                 logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}")
+
+                # Cache individual albums opportunistically
+                cache = get_metadata_cache()
+                entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
+                if entries:
+                    cache.store_entities_bulk('spotify', 'album', entries)
+
                 return albums
 
             except Exception as e:
@@ -1165,9 +1310,22 @@ class SpotifyClient:
         Returns:
             Dictionary with artist data including images, genres, popularity
         """
+        # Check cache first (works even during rate limit bans)
+        cache = get_metadata_cache()
+        source = 'itunes' if self._is_itunes_id(artist_id) else 'spotify'
+        cached = cache.get_entity(source, 'artist', artist_id)
+        if cached:
+            if source == 'spotify':
+                return cached  # Spotify raw format is the expected format
+            # iTunes cache hit — delegate to iTunesClient which reconstructs Spotify-compatible format
+            return self._itunes.get_artist(artist_id)
+
         if self.is_spotify_authenticated():
             try:
-                return self.sp.artist(artist_id)
+                result = self.sp.artist(artist_id)
+                if result:
+                    cache.store_entity('spotify', 'artist', artist_id, result)
+                return result
             except Exception as e:
                 _detect_and_set_rate_limit(e, 'get_artist')
                 logger.error(f"Error fetching artist via Spotify: {e}")
@@ -1176,7 +1334,34 @@ class SpotifyClient:
         # iTunes fallback - only if ID is numeric (iTunes format)
         if self._is_itunes_id(artist_id):
             logger.debug(f"Using iTunes fallback for artist: {artist_id}")
-            return self._itunes.get_artist(artist_id)
+            result = self._itunes.get_artist(artist_id)
+            return result
         else:
             logger.debug(f"Cannot use iTunes fallback for Spotify artist ID: {artist_id}")
             return None
+
+    @rate_limited
+    def get_artists_batch(self, artist_ids: List[str]) -> Dict[str, Dict]:
+        """Get multiple artists, using cache where possible, batch API for misses.
+        Returns dict keyed by artist_id → artist data dict."""
+        if not artist_ids:
+            return {}
+
+        cache = get_metadata_cache()
+        found, missing = cache.get_entities_batch('spotify', 'artist', artist_ids)
+
+        if missing and self.is_spotify_authenticated():
+            try:
+                # Spotify batch endpoint accepts up to 50 IDs
+                for i in range(0, len(missing), 50):
+                    chunk = missing[i:i + 50]
+                    batch_result = self.sp.artists(chunk)
+                    for artist_data in (batch_result or {}).get('artists', []):
+                        if artist_data and artist_data.get('id'):
+                            aid = artist_data['id']
+                            cache.store_entity('spotify', 'artist', aid, artist_data)
+                            found[aid] = artist_data
+            except Exception as e:
+                logger.error(f"Error in batch artist fetch: {e}")
+
+        return found

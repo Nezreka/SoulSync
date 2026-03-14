@@ -902,6 +902,37 @@
                                 </div>
                                 <div id="backup-list-container" class="backup-list-container"></div>
                             </div>
+
+                            <!-- Metadata Cache Tool Card -->
+                            <div class="tool-card" id="metadata-cache-card">
+                                <div class="tool-card-header">
+                                    <h4 class="tool-card-title">Metadata Cache</h4>
+                                    <button class="tool-help-button" data-tool="metadata-cache"
+                                        title="Learn more about this tool">?</button>
+                                </div>
+                                <p class="tool-card-info">Cached API responses from Spotify &amp; iTunes</p>
+                                <div class="tool-card-stats">
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Artists:</span>
+                                        <span class="stat-item-value" id="mcache-stat-artists">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Albums:</span>
+                                        <span class="stat-item-value" id="mcache-stat-albums">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Tracks:</span>
+                                        <span class="stat-item-value" id="mcache-stat-tracks">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-item-label">Hits:</span>
+                                        <span class="stat-item-value" id="mcache-stat-hits">0</span>
+                                    </div>
+                                </div>
+                                <div class="tool-card-controls">
+                                    <button id="mcache-browse-button" onclick="openMetadataCacheModal()">Browse Cache</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -5416,6 +5447,74 @@
             </div>
             <div class="tool-help-modal-body" id="tool-help-modal-body">
                 <!-- Content will be dynamically inserted -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Metadata Cache Browse Modal -->
+    <div class="mcache-modal-overlay" id="mcache-browse-modal" style="display:none;">
+        <div class="mcache-modal">
+            <div class="mcache-modal-header">
+                <h3 class="mcache-modal-title">Metadata Cache Browser</h3>
+                <div class="mcache-modal-header-actions">
+                    <button class="mcache-btn-clear" onclick="clearMetadataCache()" title="Clear all cached data">Clear</button>
+                    <button class="mcache-modal-close" onclick="closeMetadataCacheModal()">&times;</button>
+                </div>
+            </div>
+            <div class="mcache-stats-bar" id="mcache-stats-bar">
+                <div class="mcache-stat-pill">
+                    <span class="mcache-stat-pill-label">Spotify</span>
+                    <span class="mcache-stat-pill-value" id="mcache-browse-spotify-count">0</span>
+                </div>
+                <div class="mcache-stat-pill">
+                    <span class="mcache-stat-pill-label">iTunes</span>
+                    <span class="mcache-stat-pill-value" id="mcache-browse-itunes-count">0</span>
+                </div>
+                <div class="mcache-stat-pill">
+                    <span class="mcache-stat-pill-label">Total Hits</span>
+                    <span class="mcache-stat-pill-value" id="mcache-browse-hits">0</span>
+                </div>
+                <div class="mcache-stat-pill">
+                    <span class="mcache-stat-pill-label">Searches</span>
+                    <span class="mcache-stat-pill-value" id="mcache-browse-searches">0</span>
+                </div>
+            </div>
+            <div class="mcache-tabs">
+                <button class="mcache-tab active" data-tab="artist" onclick="switchMetadataCacheTab('artist')">Artists</button>
+                <button class="mcache-tab" data-tab="album" onclick="switchMetadataCacheTab('album')">Albums</button>
+                <button class="mcache-tab" data-tab="track" onclick="switchMetadataCacheTab('track')">Tracks</button>
+            </div>
+            <div class="mcache-filters">
+                <input type="text" class="mcache-search-input" id="mcache-search" placeholder="Search cached metadata..." oninput="debouncedMetadataCacheSearch()">
+                <select class="mcache-source-filter" id="mcache-source-filter" onchange="loadMetadataCacheBrowse()">
+                    <option value="">All Sources</option>
+                    <option value="spotify">Spotify</option>
+                    <option value="itunes">iTunes</option>
+                </select>
+                <select class="mcache-sort-filter" id="mcache-sort-filter" onchange="loadMetadataCacheBrowse()">
+                    <option value="last_accessed_at">Recently Accessed</option>
+                    <option value="updated_at">Recently Updated</option>
+                    <option value="created_at">Recently Added</option>
+                    <option value="access_count">Most Accessed</option>
+                    <option value="name">Name (A-Z)</option>
+                </select>
+            </div>
+            <div class="mcache-grid" id="mcache-grid">
+                <!-- Cards populated by JS -->
+            </div>
+            <div class="mcache-pagination" id="mcache-pagination"></div>
+        </div>
+    </div>
+
+    <!-- Metadata Cache Detail Modal (overlays browse modal) -->
+    <div class="mcache-detail-overlay" id="mcache-detail-modal" style="display:none;">
+        <div class="mcache-detail-modal">
+            <div class="mcache-detail-header">
+                <h3 class="mcache-detail-title" id="mcache-detail-title">Entity Detail</h3>
+                <button class="mcache-modal-close" onclick="closeMetadataCacheDetail()">&times;</button>
+            </div>
+            <div class="mcache-detail-body" id="mcache-detail-body">
+                <!-- Detail content populated by JS -->
             </div>
         </div>
     </div>
