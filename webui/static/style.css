@@ -6573,8 +6573,8 @@ body {
 
 .sync-content-area {
     display: grid;
-    grid-template-columns: 2.5fr 0.75fr;
-    /* More space for main panel, smaller sidebar */
+    grid-template-columns: 1fr;
+    /* Sidebar hidden by default, shown when sync starts */
     gap: 25px;
     /* min-height: calc(90vh - 200px);  Minimum height, but allow expansion */
     height: 95%;
@@ -6612,6 +6612,7 @@ body {
 
 .sync-sidebar {
     overflow: hidden;
+    display: none;
 }
 
 /* Tab System */
