@@ -2210,9 +2210,31 @@ function initializeDocsPage() {
                     text += '(no log lines)\n';
                 }
 
-                await navigator.clipboard.writeText(text);
-                debugBtn.innerHTML = '&#x2705; Copied!';
-                debugBtn.classList.add('copied');
+                // Copy to clipboard — navigator.clipboard requires HTTPS/localhost,
+                // so fall back to execCommand for Docker/LAN HTTP access
+                let copied = false;
+                if (navigator.clipboard && window.isSecureContext) {
+                    try {
+                        await navigator.clipboard.writeText(text);
+                        copied = true;
+                    } catch (_) {}
+                }
+                if (!copied) {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try { copied = document.execCommand('copy'); } catch (_) {}
+                    document.body.removeChild(ta);
+                }
+                if (copied) {
+                    debugBtn.innerHTML = '&#x2705; Copied!';
+                    debugBtn.classList.add('copied');
+                } else {
+                    debugBtn.innerHTML = '&#x274C; Copy failed — open console (F12) to see output';
+                    console.log(text);
+                }
                 setTimeout(() => {
                     debugBtn.innerHTML = '&#x1F4CB; Copy Debug Info';
                     debugBtn.classList.remove('copied');
