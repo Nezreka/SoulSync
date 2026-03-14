@@ -770,6 +770,91 @@ class SpotifyClient:
             logger.error(f"Error fetching saved tracks: {e}")
             return []
 
+    @rate_limited
+    def get_saved_albums(self, since_timestamp=None) -> list:
+        """Fetch user's saved albums from Spotify library.
+
+        Args:
+            since_timestamp: Optional ISO timestamp string. If provided, stops fetching
+                           when reaching albums saved before this time (incremental sync).
+
+        Returns:
+            List of dicts with album metadata ready for DB upsert.
+        """
+        if not self.is_spotify_authenticated():
+            logger.error("Not authenticated with Spotify")
+            return []
+
+        albums = []
+
+        try:
+            limit = 50  # Maximum allowed by Spotify API
+            offset = 0
+            total_fetched = 0
+
+            while True:
+                results = self.sp.current_user_saved_albums(limit=limit, offset=offset)
+
+                if not results or 'items' not in results:
+                    break
+
+                batch_count = 0
+                stop_fetching = False
+
+                for item in results['items']:
+                    album_data = item.get('album')
+                    added_at = item.get('added_at', '')
+
+                    if not album_data or not album_data.get('id'):
+                        continue
+
+                    # Incremental sync: stop when we hit albums saved before last sync
+                    if since_timestamp and added_at and added_at < since_timestamp:
+                        stop_fetching = True
+                        break
+
+                    # Extract primary artist
+                    artists = album_data.get('artists', [])
+                    artist_name = artists[0]['name'] if artists else 'Unknown Artist'
+                    artist_id = artists[0].get('id', '') if artists else ''
+
+                    # Get best image
+                    images = album_data.get('images', [])
+                    image_url = images[0]['url'] if images else None
+
+                    albums.append({
+                        'spotify_album_id': album_data['id'],
+                        'album_name': album_data.get('name', ''),
+                        'artist_name': artist_name,
+                        'artist_id': artist_id,
+                        'release_date': album_data.get('release_date', ''),
+                        'total_tracks': album_data.get('total_tracks', 0),
+                        'album_type': album_data.get('album_type', 'album'),
+                        'image_url': image_url,
+                        'date_saved': added_at,
+                    })
+                    batch_count += 1
+
+                total_fetched += batch_count
+                logger.info(f"Retrieved {batch_count} saved albums in batch (offset {offset}), total: {total_fetched}")
+
+                if stop_fetching:
+                    logger.info(f"Incremental sync: reached albums saved before {since_timestamp}, stopping")
+                    break
+
+                # Check if we've fetched all saved albums
+                if len(results['items']) < limit or not results.get('next'):
+                    break
+
+                offset += limit
+
+            logger.info(f"Retrieved {len(albums)} total saved albums from Spotify library")
+            return albums
+
+        except Exception as e:
+            logger.error(f"Error fetching saved albums: {e}")
+            return []
+
     def _get_playlist_items_page(self, playlist_id: str, limit: int = 100, offset: int = 0) -> dict:
         """Fetch playlist items using the /items endpoint (Feb 2026 Spotify API migration).
 

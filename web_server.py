@@ -28874,6 +28874,15 @@ def start_watchlist_scan():
                     import traceback
                     traceback.print_exc()
 
+                # Sync Spotify library cache
+                print("📚 Syncing Spotify library cache...")
+                watchlist_scan_state['current_phase'] = 'syncing_spotify_library'
+                try:
+                    scanner.sync_spotify_library_cache(profile_id=scan_profile_id)
+                    print("✅ Spotify library cache sync complete")
+                except Exception as lib_error:
+                    print(f"⚠️ Error syncing Spotify library: {lib_error}")
+
             except Exception as e:
                 print(f"Error during watchlist scan: {e}")
                 watchlist_scan_state['status'] = 'error'
@@ -29866,6 +29875,19 @@ def _process_watchlist_scan_automatically(automation_id=None):
                 _update_automation_progress(automation_id,
                                              log_line=f'Seasonal error: {seasonal_error}', log_type='error')
 
+            # Sync Spotify library cache
+            print("📚 Syncing Spotify library cache...")
+            try:
+                for p in all_profiles:
+                    scanner.sync_spotify_library_cache(profile_id=p['id'])
+                print("✅ Spotify library cache sync complete")
+                _update_automation_progress(automation_id,
+                                             log_line='Spotify library cache synced', log_type='info')
+            except Exception as lib_error:
+                print(f"⚠️ Error syncing Spotify library: {lib_error}")
+                _update_automation_progress(automation_id,
+                                             log_line=f'Library cache error: {lib_error}', log_type='error')
+
             # Add activity for watchlist scan completion
             if total_added_to_wishlist > 0:
                 add_activity_item("👁️", "Watchlist Scan Complete", f"{total_added_to_wishlist} new tracks added to wishlist", "Now")
@@ -30267,6 +30289,110 @@ def enrich_similar_artists():
 
     except Exception as e:
         print(f"Error enriching similar artists: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/spotify-library', methods=['GET'])
+def get_spotify_library():
+    """Get cached Spotify library albums with ownership status"""
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+
+        offset = request.args.get('offset', 0, type=int)
+        limit = request.args.get('limit', 48, type=int)
+        search = request.args.get('search', '', type=str)
+        status_filter = request.args.get('status', 'all', type=str)
+        sort = request.args.get('sort', 'date_saved', type=str)
+        sort_dir = request.args.get('sort_dir', 'desc', type=str)
+
+        # Fetch all matching albums (ownership requires post-query computation)
+        all_albums, total = database.get_spotify_library_albums(
+            offset=0, limit=10000,
+            search=search, sort=sort, sort_dir=sort_dir, profile_id=profile_id
+        )
+
+        if not all_albums:
+            return jsonify({
+                "success": True, "albums": [], "total": 0,
+                "offset": offset, "limit": limit,
+                "stats": {"total": 0, "owned": 0, "missing": 0}
+            })
+
+        # Cross-reference with local library for ownership status
+        library_spotify_ids = database.get_library_spotify_album_ids(profile_id)
+        library_album_names = database.get_library_album_names()
+
+        owned_count = 0
+        for album in all_albums:
+            # Check by Spotify album ID first, then fuzzy match by name
+            if album['spotify_album_id'] in library_spotify_ids:
+                album['in_library'] = True
+            elif (album['artist_name'].lower(), album['album_name'].lower()) in library_album_names:
+                album['in_library'] = True
+            else:
+                album['in_library'] = False
+
+            if album['in_library']:
+                owned_count += 1
+
+        # Apply status filter then paginate
+        if status_filter == 'missing':
+            filtered = [a for a in all_albums if not a['in_library']]
+        elif status_filter == 'owned':
+            filtered = [a for a in all_albums if a['in_library']]
+        else:
+            filtered = all_albums
+
+        filtered_total = len(filtered)
+        albums = filtered[offset:offset + limit]
+
+        stats = {
+            'total': total,
+            'owned': owned_count,
+            'missing': total - owned_count,
+        }
+
+        return jsonify({
+            "success": True,
+            "albums": albums,
+            "total": filtered_total,
+            "offset": offset,
+            "limit": limit,
+            "stats": stats,
+        })
+
+    except Exception as e:
+        print(f"Error getting Spotify library: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/spotify-library/refresh', methods=['POST'])
+def refresh_spotify_library():
+    """Manually trigger a re-sync of the Spotify library cache"""
+    try:
+        def _run_sync():
+            try:
+                from core.watchlist_scanner import get_watchlist_scanner
+                scanner = get_watchlist_scanner()
+                if scanner:
+                    # Force full sync by clearing last_sync timestamp
+                    database = get_database()
+                    database.set_metadata('spotify_library_last_sync', '')
+                    database.set_metadata('spotify_library_last_full_sync', '')
+                    scanner.sync_spotify_library_cache(profile_id=get_current_profile_id())
+                    print("✅ Manual Spotify library refresh complete")
+            except Exception as e:
+                print(f"Error in manual Spotify library refresh: {e}")
+
+        import threading
+        thread = threading.Thread(target=_run_sync, daemon=True)
+        thread.start()
+
+        return jsonify({"success": True, "message": "Spotify library refresh started"})
+
+    except Exception as e:
+        print(f"Error starting Spotify library refresh: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
