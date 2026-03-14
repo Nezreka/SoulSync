@@ -156,6 +156,11 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
                     <span class="nav-text">Settings</span>
                 </button>
+                <button class="nav-button" data-page="issues">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></span>
+                    <span class="nav-text">Issues</span>
+                    <span class="issues-nav-badge hidden" id="issues-nav-badge">0</span>
+                </button>
                 <button class="nav-button" data-page="help">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
                     <span class="nav-text">Help & Docs</span>
@@ -4561,6 +4566,85 @@
             </div>
         </div>
     </div>
+
+            <!-- Issues Page -->
+            <div class="page" id="issues-page">
+                <div class="issues-container">
+                    <div class="issues-header">
+                        <div class="issues-header-left">
+                            <h2 class="issues-title">Issues</h2>
+                            <p class="issues-subtitle" id="issues-subtitle">Track and resolve library problems</p>
+                        </div>
+                        <div class="issues-header-right">
+                            <div class="issues-filters" id="issues-filters">
+                                <select id="issues-filter-status" class="issues-filter-select" onchange="loadIssuesPage()">
+                                    <option value="">All Status</option>
+                                    <option value="open" selected>Open</option>
+                                    <option value="in_progress">In Progress</option>
+                                    <option value="resolved">Resolved</option>
+                                    <option value="dismissed">Dismissed</option>
+                                </select>
+                                <select id="issues-filter-category" class="issues-filter-select" onchange="loadIssuesPage()">
+                                    <option value="">All Categories</option>
+                                    <optgroup label="Track Issues">
+                                        <option value="wrong_track">Wrong Track</option>
+                                        <option value="wrong_artist">Wrong Artist</option>
+                                        <option value="wrong_album">Wrong Album</option>
+                                        <option value="audio_quality">Audio Quality</option>
+                                    </optgroup>
+                                    <optgroup label="Album Issues">
+                                        <option value="wrong_cover">Wrong Cover Art</option>
+                                        <option value="duplicate_tracks">Duplicate Tracks</option>
+                                        <option value="missing_tracks">Missing Tracks</option>
+                                        <option value="incomplete_album">Incomplete Album</option>
+                                    </optgroup>
+                                    <optgroup label="Both">
+                                        <option value="wrong_metadata">Wrong Metadata</option>
+                                        <option value="other">Other</option>
+                                    </optgroup>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="issues-stats" id="issues-stats"></div>
+                    <div class="issues-list" id="issues-list">
+                        <div class="issues-empty">Loading issues...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Report Issue Modal -->
+            <div class="modal-overlay hidden" id="report-issue-overlay">
+                <div class="enhanced-bulk-modal report-issue-modal">
+                    <div class="enhanced-bulk-modal-header">
+                        <h3 id="report-issue-title">Report an Issue</h3>
+                        <button class="enhanced-bulk-modal-close" onclick="closeReportIssueModal()">&times;</button>
+                    </div>
+                    <div class="enhanced-bulk-modal-body" id="report-issue-body">
+                        <!-- Populated dynamically -->
+                    </div>
+                    <div class="enhanced-bulk-modal-footer">
+                        <button class="enhanced-bulk-btn secondary" onclick="closeReportIssueModal()">Cancel</button>
+                        <button class="enhanced-bulk-btn primary" id="report-issue-submit-btn" onclick="submitIssue()">Submit Issue</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Issue Detail Modal (Admin) -->
+            <div class="modal-overlay hidden" id="issue-detail-overlay">
+                <div class="enhanced-bulk-modal issue-detail-modal">
+                    <div class="enhanced-bulk-modal-header">
+                        <h3 id="issue-detail-title">Issue Details</h3>
+                        <button class="enhanced-bulk-modal-close" onclick="closeIssueDetailModal()">&times;</button>
+                    </div>
+                    <div class="enhanced-bulk-modal-body" id="issue-detail-body">
+                        <!-- Populated dynamically -->
+                    </div>
+                    <div class="enhanced-bulk-modal-footer" id="issue-detail-footer">
+                        <button class="enhanced-bulk-btn secondary" onclick="closeIssueDetailModal()">Close</button>
+                    </div>
+                </div>
+            </div>
 
             <!-- Help & Docs Page -->
             <div class="page" id="help-page">

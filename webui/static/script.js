@@ -781,7 +781,7 @@ function getProfileHomePage() {
 function isPageAllowed(pageId) {
     if (!currentProfile) return true;
     if (currentProfile.id === 1) return true;
-    if (pageId === 'help') return true;
+    if (pageId === 'help' || pageId === 'issues') return true;
     if (pageId === 'artist-detail') {
         // artist-detail requires library access
         const ap = currentProfile.allowed_pages;
@@ -1077,7 +1077,7 @@ function updateProfileIndicator() {
         if (page === 'settings') {
             // Settings always gated by is_admin
             btn.style.display = currentProfile.is_admin ? '' : 'none';
-        } else if (page === 'help') {
+        } else if (page === 'help' || page === 'issues') {
             btn.style.display = ''; // Always visible
         } else if (currentProfile.id === 1) {
             btn.style.display = ''; // Root admin sees all
@@ -1674,6 +1674,9 @@ function initApp() {
     // Start always-on download polling (batched, minimal overhead)
     startGlobalDownloadPolling();
 
+    // Load issues badge count
+    loadIssuesBadge();
+
     // Load initial data
     loadInitialData();
 
@@ -1949,6 +1952,9 @@ async function loadPageData(pageId) {
                 break;
             case 'automations':
                 await loadAutomations();
+                break;
+            case 'issues':
+                await loadIssuesPage();
                 break;
             case 'help':
                 initializeDocsPage();
@@ -11545,7 +11551,7 @@ async function startMissingTracksProcess(playlistId) {
 
         // If this is an artist album download, use album name and include full context
         // Match 'artist_album_', 'enhanced_search_album_', 'enhanced_search_track_', 'discover_album_', and 'seasonal_album_' prefixes
-        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('enhanced_search_track_') || playlistId.startsWith('discover_album_') || playlistId.startsWith('seasonal_album_')) {
+        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('enhanced_search_track_') || playlistId.startsWith('discover_album_') || playlistId.startsWith('seasonal_album_') || playlistId.startsWith('issue_download_')) {
             requestBody.playlist_name = process.album?.name || process.playlist.name;
             requestBody.is_album_download = true;
             requestBody.album_context = process.album;   // Full Spotify album object
@@ -34127,15 +34133,11 @@ function navigateToArtistDetail(artistId, artistName) {
     artistDetailPageState.enhancedTrackSort = {};
     artistDetailPageState.enhancedView = false;
 
-    // Reset enhanced view toggle to standard (hide for non-admin)
+    // Reset enhanced view toggle to standard
     const toggleBtns = document.querySelectorAll('.enhanced-view-toggle-btn');
-    const isAdminUser = currentProfile && currentProfile.is_admin;
     toggleBtns.forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-view') === 'standard');
     });
-    // Hide the View toggle filter group entirely for non-admin
-    const viewFilterGroup = toggleBtns[0] && toggleBtns[0].closest('.filter-group');
-    if (viewFilterGroup) viewFilterGroup.style.display = isAdminUser ? '' : 'none';
     const enhancedContainer = document.getElementById('enhanced-view-container');
     if (enhancedContainer) enhancedContainer.classList.add('hidden');
     const standardSections = document.querySelector('.discography-sections');
@@ -35260,9 +35262,11 @@ function applyDiscographyFilters() {
 
 // ==================== Enhanced Library Management View ====================
 
+function isEnhancedAdmin() {
+    return currentProfile && currentProfile.is_admin;
+}
+
 function toggleEnhancedView(enabled) {
-    // Enhanced view is admin-only (management tool with inline editing)
-    if (enabled && currentProfile && !currentProfile.is_admin) return;
 
     const standardSections = document.querySelector('.discography-sections');
     const enhancedContainer = document.getElementById('enhanced-view-container');
@@ -35475,62 +35479,64 @@ function renderArtistMetaPanel(artist) {
     headerLeft.appendChild(headerInfo);
     header.appendChild(headerLeft);
 
-    // Right side: edit toggle
+    // Right side: admin actions
     const headerRight = document.createElement('div');
     headerRight.className = 'enhanced-artist-meta-actions';
-    const editToggle = document.createElement('button');
-    editToggle.className = 'enhanced-meta-edit-toggle';
-    editToggle.textContent = 'Edit Metadata';
-    editToggle.onclick = () => {
-        const form = document.getElementById('enhanced-artist-meta-form');
-        if (form) {
-            const isVisible = !form.classList.contains('hidden');
-            form.classList.toggle('hidden');
-            editToggle.textContent = isVisible ? 'Edit Metadata' : 'Hide Editor';
-            editToggle.classList.toggle('active', !isVisible);
-        }
-    };
-    headerRight.appendChild(editToggle);
 
-    // Enrich dropdown button
-    const enrichWrap = document.createElement('div');
-    enrichWrap.className = 'enhanced-enrich-wrap';
-    const enrichBtn = document.createElement('button');
-    enrichBtn.className = 'enhanced-enrich-btn';
-    enrichBtn.textContent = 'Enrich ▾';
-    enrichBtn.onclick = (e) => {
-        e.stopPropagation();
-        enrichMenu.classList.toggle('visible');
-    };
-    enrichWrap.appendChild(enrichBtn);
-
-    const enrichMenu = document.createElement('div');
-    enrichMenu.className = 'enhanced-enrich-menu';
-    const services = [
-
-        { id: 'spotify', label: 'Spotify', icon: '🟢' },
-        { id: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
-        { id: 'deezer', label: 'Deezer', icon: '🟣' },
-        { id: 'audiodb', label: 'AudioDB', icon: '🔵' },
-        { id: 'itunes', label: 'iTunes', icon: '🔴' },
-        { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
-        { id: 'genius', label: 'Genius', icon: '🟡' },
-        { id: 'tidal', label: 'Tidal', icon: '⬛' },
-        { id: 'qobuz', label: 'Qobuz', icon: '🔷' },
-    ];
-    services.forEach(svc => {
-        const item = document.createElement('div');
-        item.className = 'enhanced-enrich-menu-item';
-        item.textContent = `${svc.icon} ${svc.label}`;
-        item.onclick = (e) => {
-            e.stopPropagation();
-            enrichMenu.classList.remove('visible');
-            runEnrichment('artist', artist.id, svc.id, artist.name, '', artist.id);
+    if (isEnhancedAdmin()) {
+        const editToggle = document.createElement('button');
+        editToggle.className = 'enhanced-meta-edit-toggle';
+        editToggle.textContent = 'Edit Metadata';
+        editToggle.onclick = () => {
+            const form = document.getElementById('enhanced-artist-meta-form');
+            if (form) {
+                const isVisible = !form.classList.contains('hidden');
+                form.classList.toggle('hidden');
+                editToggle.textContent = isVisible ? 'Edit Metadata' : 'Hide Editor';
+                editToggle.classList.toggle('active', !isVisible);
+            }
         };
-        enrichMenu.appendChild(item);
-    });
-    enrichWrap.appendChild(enrichMenu);
-    headerRight.appendChild(enrichWrap);
+        headerRight.appendChild(editToggle);
+
+        // Enrich dropdown button
+        const enrichWrap = document.createElement('div');
+        enrichWrap.className = 'enhanced-enrich-wrap';
+        const enrichBtn = document.createElement('button');
+        enrichBtn.className = 'enhanced-enrich-btn';
+        enrichBtn.textContent = 'Enrich ▾';
+        enrichBtn.onclick = (e) => {
+            e.stopPropagation();
+            enrichMenu.classList.toggle('visible');
+        };
+        enrichWrap.appendChild(enrichBtn);
+
+        const enrichMenu = document.createElement('div');
+        enrichMenu.className = 'enhanced-enrich-menu';
+        const services = [
+            { id: 'spotify', label: 'Spotify', icon: '🟢' },
+            { id: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
+            { id: 'deezer', label: 'Deezer', icon: '🟣' },
+            { id: 'audiodb', label: 'AudioDB', icon: '🔵' },
+            { id: 'itunes', label: 'iTunes', icon: '🔴' },
+            { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
+            { id: 'genius', label: 'Genius', icon: '🟡' },
+            { id: 'tidal', label: 'Tidal', icon: '⬛' },
+            { id: 'qobuz', label: 'Qobuz', icon: '🔷' },
+        ];
+        services.forEach(svc => {
+            const item = document.createElement('div');
+            item.className = 'enhanced-enrich-menu-item';
+            item.textContent = `${svc.icon} ${svc.label}`;
+            item.onclick = (e) => {
+                e.stopPropagation();
+                enrichMenu.classList.remove('visible');
+                runEnrichment('artist', artist.id, svc.id, artist.name, '', artist.id);
+            };
+            enrichMenu.appendChild(item);
+        });
+        enrichWrap.appendChild(enrichMenu);
+        headerRight.appendChild(enrichWrap);
+    }
 
     header.appendChild(headerRight);
 
@@ -35923,63 +35929,74 @@ function renderExpandedAlbumHeader(album) {
     });
     info.appendChild(statusRow);
 
-    // Enrich button for album
+    // Action buttons row
     const enrichRow = document.createElement('div');
     enrichRow.className = 'enhanced-expanded-actions';
-    const albumEnrichWrap = document.createElement('div');
-    albumEnrichWrap.className = 'enhanced-enrich-wrap';
-    const albumEnrichBtn = document.createElement('button');
-    albumEnrichBtn.className = 'enhanced-enrich-btn small';
-    albumEnrichBtn.textContent = 'Enrich Album ▾';
-    albumEnrichBtn.onclick = (e) => { e.stopPropagation(); albumEnrichMenu.classList.toggle('visible'); };
-    albumEnrichWrap.appendChild(albumEnrichBtn);
-    const albumEnrichMenu = document.createElement('div');
-    albumEnrichMenu.className = 'enhanced-enrich-menu';
-    [
 
-        { id: 'spotify', label: 'Spotify', icon: '🟢' },
-        { id: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
-        { id: 'deezer', label: 'Deezer', icon: '🟣' },
-        { id: 'audiodb', label: 'AudioDB', icon: '🔵' },
-        { id: 'itunes', label: 'iTunes', icon: '🔴' },
-        { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
-    ].forEach(svc => {
-        const item = document.createElement('div');
-        item.className = 'enhanced-enrich-menu-item';
-        item.textContent = `${svc.icon} ${svc.label}`;
-        item.onclick = (e) => {
-            e.stopPropagation();
-            albumEnrichMenu.classList.remove('visible');
-            const aId = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : '';
-            runEnrichment('album', album.id, svc.id, album.title || '', artistName, aId);
-        };
-        albumEnrichMenu.appendChild(item);
-    });
-    albumEnrichWrap.appendChild(albumEnrichMenu);
-    enrichRow.appendChild(albumEnrichWrap);
+    if (isEnhancedAdmin()) {
+        const albumEnrichWrap = document.createElement('div');
+        albumEnrichWrap.className = 'enhanced-enrich-wrap';
+        const albumEnrichBtn = document.createElement('button');
+        albumEnrichBtn.className = 'enhanced-enrich-btn small';
+        albumEnrichBtn.textContent = 'Enrich Album ▾';
+        albumEnrichBtn.onclick = (e) => { e.stopPropagation(); albumEnrichMenu.classList.toggle('visible'); };
+        albumEnrichWrap.appendChild(albumEnrichBtn);
+        const albumEnrichMenu = document.createElement('div');
+        albumEnrichMenu.className = 'enhanced-enrich-menu';
+        [
+            { id: 'spotify', label: 'Spotify', icon: '🟢' },
+            { id: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
+            { id: 'deezer', label: 'Deezer', icon: '🟣' },
+            { id: 'audiodb', label: 'AudioDB', icon: '🔵' },
+            { id: 'itunes', label: 'iTunes', icon: '🔴' },
+            { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
+        ].forEach(svc => {
+            const item = document.createElement('div');
+            item.className = 'enhanced-enrich-menu-item';
+            item.textContent = `${svc.icon} ${svc.label}`;
+            item.onclick = (e) => {
+                e.stopPropagation();
+                albumEnrichMenu.classList.remove('visible');
+                const aId = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : '';
+                runEnrichment('album', album.id, svc.id, album.title || '', artistName, aId);
+            };
+            albumEnrichMenu.appendChild(item);
+        });
+        albumEnrichWrap.appendChild(albumEnrichMenu);
+        enrichRow.appendChild(albumEnrichWrap);
 
-    // Write Tags button for entire album
-    const writeTagsBtn = document.createElement('button');
-    writeTagsBtn.className = 'enhanced-write-tags-album-btn';
-    writeTagsBtn.innerHTML = '&#9998; Write All Tags';
-    writeTagsBtn.title = 'Write DB metadata to file tags for all tracks in this album';
-    writeTagsBtn.onclick = (e) => { e.stopPropagation(); writeAlbumTags(album.id); };
-    enrichRow.appendChild(writeTagsBtn);
+        const writeTagsBtn = document.createElement('button');
+        writeTagsBtn.className = 'enhanced-write-tags-album-btn';
+        writeTagsBtn.innerHTML = '&#9998; Write All Tags';
+        writeTagsBtn.title = 'Write DB metadata to file tags for all tracks in this album';
+        writeTagsBtn.onclick = (e) => { e.stopPropagation(); writeAlbumTags(album.id); };
+        enrichRow.appendChild(writeTagsBtn);
 
-    // Reorganize button
-    const reorganizeBtn = document.createElement('button');
-    reorganizeBtn.className = 'enhanced-reorganize-album-btn';
-    reorganizeBtn.innerHTML = '&#128193; Reorganize';
-    reorganizeBtn.title = 'Reorganize album files using a custom path template';
-    reorganizeBtn.onclick = (e) => { e.stopPropagation(); showReorganizeModal(album.id); };
-    enrichRow.appendChild(reorganizeBtn);
+        const reorganizeBtn = document.createElement('button');
+        reorganizeBtn.className = 'enhanced-reorganize-album-btn';
+        reorganizeBtn.innerHTML = '&#128193; Reorganize';
+        reorganizeBtn.title = 'Reorganize album files using a custom path template';
+        reorganizeBtn.onclick = (e) => { e.stopPropagation(); showReorganizeModal(album.id); };
+        enrichRow.appendChild(reorganizeBtn);
 
-    // Delete album button
-    const deleteAlbumBtn = document.createElement('button');
-    deleteAlbumBtn.className = 'enhanced-delete-album-btn';
-    deleteAlbumBtn.textContent = 'Delete Album';
-    deleteAlbumBtn.onclick = (e) => { e.stopPropagation(); deleteLibraryAlbum(album.id); };
-    enrichRow.appendChild(deleteAlbumBtn);
+        const deleteAlbumBtn = document.createElement('button');
+        deleteAlbumBtn.className = 'enhanced-delete-album-btn';
+        deleteAlbumBtn.textContent = 'Delete Album';
+        deleteAlbumBtn.onclick = (e) => { e.stopPropagation(); deleteLibraryAlbum(album.id); };
+        enrichRow.appendChild(deleteAlbumBtn);
+    }
+
+    // Report Issue button (available to all users)
+    const reportBtn = document.createElement('button');
+    reportBtn.className = 'enhanced-report-issue-btn';
+    reportBtn.innerHTML = '&#9873; Report Issue';
+    reportBtn.title = 'Report a problem with this album';
+    reportBtn.onclick = (e) => {
+        e.stopPropagation();
+        const aName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+        showReportIssueModal('album', album.id, album.title || '', aName);
+    };
+    enrichRow.appendChild(reportBtn);
 
     info.appendChild(enrichRow);
 
@@ -36003,6 +36020,7 @@ function renderAlbumMetaRow(album) {
         { key: 'explicit', label: 'Explicit', value: album.explicit ? '1' : '0' },
     ];
 
+    const admin = isEnhancedAdmin();
     fields.forEach(f => {
         const fieldDiv = document.createElement('div');
         fieldDiv.className = 'enhanced-album-meta-field';
@@ -36010,30 +36028,38 @@ function renderAlbumMetaRow(album) {
         label.className = 'enhanced-album-meta-label';
         label.textContent = f.label;
         fieldDiv.appendChild(label);
-        const input = document.createElement('input');
-        input.className = 'enhanced-album-meta-input';
-        input.type = f.type || 'text';
-        input.dataset.albumId = album.id;
-        input.dataset.field = f.key;
-        input.value = String(f.value);
-        input.addEventListener('click', e => e.stopPropagation());
-        fieldDiv.appendChild(input);
+        if (admin) {
+            const input = document.createElement('input');
+            input.className = 'enhanced-album-meta-input';
+            input.type = f.type || 'text';
+            input.dataset.albumId = album.id;
+            input.dataset.field = f.key;
+            input.value = String(f.value);
+            input.addEventListener('click', e => e.stopPropagation());
+            fieldDiv.appendChild(input);
+        } else {
+            const span = document.createElement('span');
+            span.className = 'enhanced-album-meta-value';
+            span.textContent = String(f.value) || '—';
+            fieldDiv.appendChild(span);
+        }
         row.appendChild(fieldDiv);
     });
 
-    // Save button
-    const saveDiv = document.createElement('div');
-    saveDiv.className = 'enhanced-album-meta-field';
-    const spacer = document.createElement('label');
-    spacer.className = 'enhanced-album-meta-label';
-    spacer.innerHTML = '&nbsp;';
-    saveDiv.appendChild(spacer);
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'enhanced-album-save-btn';
-    saveBtn.textContent = 'Save Album';
-    saveBtn.onclick = (e) => { e.stopPropagation(); saveAlbumMetadata(album.id); };
-    saveDiv.appendChild(saveBtn);
-    row.appendChild(saveDiv);
+    if (admin) {
+        const saveDiv = document.createElement('div');
+        saveDiv.className = 'enhanced-album-meta-field';
+        const spacer = document.createElement('label');
+        spacer.className = 'enhanced-album-meta-label';
+        spacer.innerHTML = '&nbsp;';
+        saveDiv.appendChild(spacer);
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'enhanced-album-save-btn';
+        saveBtn.textContent = 'Save Album';
+        saveBtn.onclick = (e) => { e.stopPropagation(); saveAlbumMetadata(album.id); };
+        saveDiv.appendChild(saveBtn);
+        row.appendChild(saveDiv);
+    }
 
     return row;
 }
@@ -36056,16 +36082,24 @@ function renderTrackTable(album) {
     const table = document.createElement('table');
     table.className = 'enhanced-track-table';
 
+    const admin = isEnhancedAdmin();
+    // Clear stale selections for non-admin to prevent ghost state
+    if (!admin) {
+        artistDetailPageState.selectedTracks.clear();
+    }
+
     // Header
     const thead = document.createElement('thead');
     const headRow = document.createElement('tr');
-    const selectAllTh = document.createElement('th');
-    const selectAllCb = document.createElement('input');
-    selectAllCb.type = 'checkbox';
-    selectAllCb.className = 'enhanced-track-checkbox';
-    selectAllCb.onchange = function() { toggleSelectAllTracks(album.id, this.checked); };
-    selectAllTh.appendChild(selectAllCb);
-    headRow.appendChild(selectAllTh);
+    if (admin) {
+        const selectAllTh = document.createElement('th');
+        const selectAllCb = document.createElement('input');
+        selectAllCb.type = 'checkbox';
+        selectAllCb.className = 'enhanced-track-checkbox';
+        selectAllCb.onchange = function() { toggleSelectAllTracks(album.id, this.checked); };
+        selectAllTh.appendChild(selectAllCb);
+        headRow.appendChild(selectAllTh);
+    }
 
     const columns = [
         { label: '', cls: 'col-play' },
@@ -36079,8 +36113,12 @@ function renderTrackTable(album) {
         { label: 'File', cls: 'col-path' },
         { label: 'Match', cls: 'col-match' },
         { label: '', cls: 'col-queue' },
-        { label: '', cls: 'col-writetag' },
-        { label: '', cls: 'col-delete' },
+        ...(admin ? [
+            { label: '', cls: 'col-writetag' },
+            { label: '', cls: 'col-delete' },
+        ] : [
+            { label: '', cls: 'col-report' },
+        ]),
     ];
     columns.forEach(col => {
         const th = document.createElement('th');
@@ -36125,15 +36163,17 @@ function renderTrackTable(album) {
         tr.dataset.trackId = track.id;
         if (artistDetailPageState.selectedTracks.has(String(track.id))) tr.classList.add('selected');
 
-        // Checkbox
-        const cbTd = document.createElement('td');
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.className = 'enhanced-track-checkbox';
-        cb.checked = artistDetailPageState.selectedTracks.has(String(track.id));
-        cb.onchange = () => toggleTrackSelection(String(track.id));
-        cbTd.appendChild(cb);
-        tr.appendChild(cbTd);
+        // Checkbox (admin only)
+        if (admin) {
+            const cbTd = document.createElement('td');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'enhanced-track-checkbox';
+            cb.checked = artistDetailPageState.selectedTracks.has(String(track.id));
+            cb.onchange = () => toggleTrackSelection(String(track.id));
+            cbTd.appendChild(cb);
+            tr.appendChild(cbTd);
+        }
 
         // Play button
         const playTd = document.createElement('td');
@@ -36155,11 +36195,13 @@ function renderTrackTable(album) {
         playTd.appendChild(playBtn);
         tr.appendChild(playTd);
 
-        // Track number (editable)
+        // Track number (editable for admin)
         const numTd = document.createElement('td');
-        numTd.className = 'col-num editable';
+        numTd.className = 'col-num' + (admin ? ' editable' : '');
         numTd.textContent = track.track_number || '-';
-        numTd.onclick = (e) => { e.stopPropagation(); startInlineEdit(numTd, 'track', track.id, 'track_number', track.track_number || ''); };
+        if (admin) {
+            numTd.onclick = (e) => { e.stopPropagation(); startInlineEdit(numTd, 'track', track.id, 'track_number', track.track_number || ''); };
+        }
         tr.appendChild(numTd);
 
         // Disc number
@@ -36168,11 +36210,13 @@ function renderTrackTable(album) {
         discTd.textContent = track.disc_number || '-';
         tr.appendChild(discTd);
 
-        // Title (editable)
+        // Title (editable for admin)
         const titleTd = document.createElement('td');
-        titleTd.className = 'col-title editable';
+        titleTd.className = 'col-title' + (admin ? ' editable' : '');
         titleTd.textContent = track.title || 'Unknown';
-        titleTd.onclick = (e) => { e.stopPropagation(); startInlineEdit(titleTd, 'track', track.id, 'title', track.title || ''); };
+        if (admin) {
+            titleTd.onclick = (e) => { e.stopPropagation(); startInlineEdit(titleTd, 'track', track.id, 'title', track.title || ''); };
+        }
         tr.appendChild(titleTd);
 
         // Duration
@@ -36202,11 +36246,13 @@ function renderTrackTable(album) {
         brTd.appendChild(brSpan);
         tr.appendChild(brTd);
 
-        // BPM (editable)
+        // BPM (editable for admin)
         const bpmTd = document.createElement('td');
-        bpmTd.className = 'col-bpm editable';
+        bpmTd.className = 'col-bpm' + (admin ? ' editable' : '');
         bpmTd.textContent = track.bpm || '-';
-        bpmTd.onclick = (e) => { e.stopPropagation(); startInlineEdit(bpmTd, 'track', track.id, 'bpm', track.bpm || ''); };
+        if (admin) {
+            bpmTd.onclick = (e) => { e.stopPropagation(); startInlineEdit(bpmTd, 'track', track.id, 'bpm', track.bpm || ''); };
+        }
         tr.appendChild(bpmTd);
 
         // File path (last column)
@@ -36239,10 +36285,12 @@ function renderTrackTable(album) {
             chip.className = 'enhanced-track-match-chip' + (hasId ? ' matched' : ' not-found');
             chip.textContent = s.label;
             chip.title = hasId ? `${s.svc}: ${track[s.col]}` : `${s.svc}: no match`;
-            chip.onclick = (e) => {
-                e.stopPropagation();
-                openManualMatchModal('track', track.id, s.svc, track.title || '', aId);
-            };
+            if (admin) {
+                chip.onclick = (e) => {
+                    e.stopPropagation();
+                    openManualMatchModal('track', track.id, s.svc, track.title || '', aId);
+                };
+            }
             matchCell.appendChild(chip);
         });
         matchTd.appendChild(matchCell);
@@ -36282,29 +36330,46 @@ function renderTrackTable(album) {
         }
         tr.appendChild(queueTd);
 
-        // Write Tags button
-        const tagTd = document.createElement('td');
-        tagTd.className = 'col-writetag';
-        if (track.file_path) {
-            const tagBtn = document.createElement('button');
-            tagBtn.className = 'enhanced-write-tag-btn';
-            tagBtn.innerHTML = '&#9998;';
-            tagBtn.title = 'Write tags to file';
-            tagBtn.onclick = (e) => { e.stopPropagation(); showTagPreview(track.id); };
-            tagTd.appendChild(tagBtn);
-        }
-        tr.appendChild(tagTd);
+        if (admin) {
+            // Write Tags button (admin only)
+            const tagTd = document.createElement('td');
+            tagTd.className = 'col-writetag';
+            if (track.file_path) {
+                const tagBtn = document.createElement('button');
+                tagBtn.className = 'enhanced-write-tag-btn';
+                tagBtn.innerHTML = '&#9998;';
+                tagBtn.title = 'Write tags to file';
+                tagBtn.onclick = (e) => { e.stopPropagation(); showTagPreview(track.id); };
+                tagTd.appendChild(tagBtn);
+            }
+            tr.appendChild(tagTd);
 
-        // Delete button
-        const delTd = document.createElement('td');
-        delTd.className = 'col-delete';
-        const delBtn = document.createElement('button');
-        delBtn.className = 'enhanced-delete-btn';
-        delBtn.innerHTML = '&#10005;';
-        delBtn.title = 'Delete track from library';
-        delBtn.onclick = (e) => { e.stopPropagation(); deleteLibraryTrack(track.id, album.id); };
-        delTd.appendChild(delBtn);
-        tr.appendChild(delTd);
+            // Delete button (admin only)
+            const delTd = document.createElement('td');
+            delTd.className = 'col-delete';
+            const delBtn = document.createElement('button');
+            delBtn.className = 'enhanced-delete-btn';
+            delBtn.innerHTML = '&#10005;';
+            delBtn.title = 'Delete track from library';
+            delBtn.onclick = (e) => { e.stopPropagation(); deleteLibraryTrack(track.id, album.id); };
+            delTd.appendChild(delBtn);
+            tr.appendChild(delTd);
+        } else {
+            // Report Issue button per track (non-admin)
+            const reportTd = document.createElement('td');
+            reportTd.className = 'col-report';
+            const reportBtn = document.createElement('button');
+            reportBtn.className = 'enhanced-track-report-btn';
+            reportBtn.innerHTML = '&#9873;';
+            reportBtn.title = 'Report issue with this track';
+            reportBtn.onclick = (e) => {
+                e.stopPropagation();
+                const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+                showReportIssueModal('track', track.id, track.title || 'Unknown', artistName, album.title || '');
+            };
+            reportTd.appendChild(reportBtn);
+            tr.appendChild(reportTd);
+        }
 
         tbody.appendChild(tr);
     });
@@ -36616,6 +36681,10 @@ function updateBulkBar() {
     const bar = document.getElementById('enhanced-bulk-bar');
     const count = document.getElementById('enhanced-bulk-count');
     if (!bar || !count) return;
+    if (!isEnhancedAdmin()) {
+        bar.classList.remove('visible');
+        return;
+    }
     const n = artistDetailPageState.selectedTracks.size;
     count.textContent = n;
     bar.classList.toggle('visible', n > 0);
@@ -51738,6 +51807,933 @@ function _autoInsertVar(textareaId, variable) {
     el.selectionStart = el.selectionEnd = start + variable.length;
     el.focus();
 }
+
+// ===== ISSUES PAGE =====
+
+const ISSUE_CATEGORIES = {
+    wrong_track: { label: 'Wrong Track', icon: '&#10060;', description: 'This file plays a completely different song than expected', applies: ['track'] },
+    wrong_metadata: { label: 'Wrong Metadata', icon: '&#9998;', description: 'Title, artist, year, or other tags are incorrect', applies: ['track', 'album'] },
+    wrong_cover: { label: 'Wrong Cover Art', icon: '&#128247;', description: 'The album artwork is wrong or missing', applies: ['album'] },
+    wrong_artist: { label: 'Wrong Artist', icon: '&#128100;', description: 'This track is filed under the wrong artist', applies: ['track'] },
+    duplicate_tracks: { label: 'Duplicate Tracks', icon: '&#128257;', description: 'The same track appears more than once in this album', applies: ['album'] },
+    missing_tracks: { label: 'Missing Tracks', icon: '&#10067;', description: 'Tracks that should be here are missing from this album', applies: ['album'] },
+    audio_quality: { label: 'Audio Quality', icon: '&#127925;', description: 'Audio has quality issues — clipping, low bitrate, silence, etc.', applies: ['track'] },
+    wrong_album: { label: 'Wrong Album', icon: '&#128191;', description: 'This track belongs to a different album', applies: ['track'] },
+    incomplete_album: { label: 'Incomplete Album', icon: '&#9888;', description: 'Album is partially downloaded — some tracks present, others not', applies: ['album'] },
+    other: { label: 'Other', icon: '&#128172;', description: 'Any other issue not listed above', applies: ['track', 'album'] },
+};
+
+const ISSUE_STATUS_META = {
+    open: { label: 'Open', cls: 'issue-status-open' },
+    in_progress: { label: 'In Progress', cls: 'issue-status-progress' },
+    resolved: { label: 'Resolved', cls: 'issue-status-resolved' },
+    dismissed: { label: 'Dismissed', cls: 'issue-status-dismissed' },
+};
+
+let _issuesPageState = { loaded: false };
+
+function _issueHeaders(extra) {
+    const h = { 'X-Profile-Id': String(currentProfile ? currentProfile.id : 1) };
+    if (extra) Object.assign(h, extra);
+    return h;
+}
+
+async function loadIssuesPage() {
+    const admin = isEnhancedAdmin();
+    const subtitle = document.getElementById('issues-subtitle');
+    if (subtitle) {
+        subtitle.textContent = admin ? 'Manage and resolve reported library problems' : 'Track and resolve library problems';
+    }
+    await Promise.all([loadIssuesList(), loadIssuesCounts()]);
+}
+
+async function loadIssuesCounts() {
+    try {
+        const resp = await fetch('/api/issues/counts', { headers: _issueHeaders() });
+        const data = await resp.json();
+        if (!data.success) return;
+        const counts = data.counts;
+        const statsEl = document.getElementById('issues-stats');
+        if (!statsEl) return;
+        const total = (counts.open || 0) + (counts.in_progress || 0) + (counts.resolved || 0) + (counts.dismissed || 0);
+        statsEl.innerHTML = `
+            <div class="issues-stat-card issues-stat-open">
+                <div class="issues-stat-number">${counts.open || 0}</div>
+                <div class="issues-stat-label">Open</div>
+            </div>
+            <div class="issues-stat-card issues-stat-progress">
+                <div class="issues-stat-number">${counts.in_progress || 0}</div>
+                <div class="issues-stat-label">In Progress</div>
+            </div>
+            <div class="issues-stat-card issues-stat-resolved">
+                <div class="issues-stat-number">${counts.resolved || 0}</div>
+                <div class="issues-stat-label">Resolved</div>
+            </div>
+            <div class="issues-stat-card issues-stat-dismissed">
+                <div class="issues-stat-number">${counts.dismissed || 0}</div>
+                <div class="issues-stat-label">Dismissed</div>
+            </div>
+            <div class="issues-stat-card issues-stat-total">
+                <div class="issues-stat-number">${total}</div>
+                <div class="issues-stat-label">Total</div>
+            </div>
+        `;
+        // Update nav badge
+        const badge = document.getElementById('issues-nav-badge');
+        if (badge) {
+            const openCount = counts.open || 0;
+            badge.textContent = openCount;
+            badge.classList.toggle('hidden', openCount === 0);
+        }
+    } catch (e) {
+        console.error('Failed to load issue counts:', e);
+    }
+}
+
+async function loadIssuesList() {
+    const listEl = document.getElementById('issues-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="issues-loading"><div class="issues-spinner"></div>Loading issues...</div>';
+
+    const statusFilter = document.getElementById('issues-filter-status')?.value || '';
+    const categoryFilter = document.getElementById('issues-filter-category')?.value || '';
+
+    let url = '/api/issues?';
+    if (statusFilter) url += `status=${encodeURIComponent(statusFilter)}&`;
+    if (categoryFilter) url += `category=${encodeURIComponent(categoryFilter)}&`;
+
+    try {
+        const profileId = currentProfile ? currentProfile.id : 1;
+        const resp = await fetch(url, { headers: { 'X-Profile-Id': String(profileId) } });
+        const data = await resp.json();
+        if (!data.success || !data.issues || data.issues.length === 0) {
+            listEl.innerHTML = `
+                <div class="issues-empty">
+                    <div class="issues-empty-icon">&#128269;</div>
+                    <div class="issues-empty-title">No issues found</div>
+                    <div class="issues-empty-text">${statusFilter || categoryFilter ? 'Try adjusting your filters' : 'No issues have been reported yet'}</div>
+                </div>
+            `;
+            return;
+        }
+        listEl.innerHTML = '';
+        data.issues.forEach(issue => {
+            listEl.appendChild(renderIssueCard(issue));
+        });
+    } catch (e) {
+        console.error('Failed to load issues:', e);
+        listEl.innerHTML = '<div class="issues-empty"><div class="issues-empty-title">Failed to load issues</div></div>';
+    }
+}
+
+function renderIssueCard(issue) {
+    const card = document.createElement('div');
+    card.className = 'issue-card';
+    card.dataset.issueId = issue.id;
+    card.onclick = () => showIssueDetailModal(issue.id);
+
+    const catMeta = ISSUE_CATEGORIES[issue.category] || ISSUE_CATEGORIES.other;
+    const statusMeta = ISSUE_STATUS_META[issue.status] || ISSUE_STATUS_META.open;
+    const admin = isEnhancedAdmin();
+
+    let snapshot = {};
+    try { snapshot = typeof issue.snapshot_data === 'string' ? JSON.parse(issue.snapshot_data || '{}') : (issue.snapshot_data || {}); } catch (e) {}
+
+    const entityLabel = issue.entity_type === 'track' ? 'Track' : (issue.entity_type === 'album' ? 'Album' : 'Artist');
+    const entityName = snapshot.title || snapshot.name || `${entityLabel} #${issue.entity_id}`;
+    const artistName = snapshot.artist_name || '';
+    const albumName = snapshot.album_title || '';
+    const thumbUrl = snapshot.thumb_url || snapshot.album_thumb || '';
+
+    const createdDate = issue.created_at ? new Date(issue.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+    const createdTime = issue.created_at ? new Date(issue.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
+
+    // Priority indicator
+    const priorityCls = issue.priority === 'high' ? 'issue-priority-high' : (issue.priority === 'low' ? 'issue-priority-low' : 'issue-priority-normal');
+
+    let thumbHtml = '';
+    if (thumbUrl) {
+        thumbHtml = `<img class="issue-card-thumb" src="${_escAttr(thumbUrl)}" alt="" onerror="this.style.display='none'">`;
+    } else {
+        thumbHtml = `<div class="issue-card-thumb-placeholder">${catMeta.icon}</div>`;
+    }
+
+    let metaLine = '';
+    if (issue.entity_type === 'track') {
+        metaLine = [artistName, albumName].filter(Boolean).map(s => _esc(s)).join(' &mdash; ');
+    } else if (issue.entity_type === 'album') {
+        metaLine = artistName ? _esc(artistName) : '';
+    }
+
+    let profileBadge = '';
+    if (admin && issue.reporter_name) {
+        profileBadge = `<span class="issue-card-profile">by ${_esc(issue.reporter_name)}</span>`;
+    }
+
+    let adminResponseIndicator = '';
+    if (issue.admin_response) {
+        adminResponseIndicator = '<span class="issue-card-responded" title="Admin has responded">&#128172;</span>';
+    }
+
+    card.innerHTML = `
+        <div class="issue-card-left">
+            ${thumbHtml}
+        </div>
+        <div class="issue-card-center">
+            <div class="issue-card-title-row">
+                <span class="issue-card-category-icon" title="${_escAttr(catMeta.label)}">${catMeta.icon}</span>
+                <span class="issue-card-title">${_esc(issue.title)}</span>
+                ${adminResponseIndicator}
+            </div>
+            <div class="issue-card-entity">
+                <span class="issue-card-entity-type">${_esc(entityLabel)}</span>
+                <span class="issue-card-entity-name">${_esc(entityName)}</span>
+                ${metaLine ? `<span class="issue-card-meta-line">${metaLine}</span>` : ''}
+            </div>
+            ${issue.description ? `<div class="issue-card-description">${_esc(issue.description)}</div>` : ''}
+            <div class="issue-card-footer">
+                <span class="issue-card-date">${_esc(createdDate)} ${_esc(createdTime)}</span>
+                ${profileBadge}
+            </div>
+        </div>
+        <div class="issue-card-right">
+            <span class="issue-status-badge ${statusMeta.cls}">${_esc(statusMeta.label)}</span>
+            <span class="issue-priority-dot ${priorityCls}" title="${_esc(issue.priority)} priority"></span>
+        </div>
+    `;
+    return card;
+}
+
+// --- Report Issue Modal ---
+
+let _reportIssueState = {};
+
+function showReportIssueModal(entityType, entityId, entityName, artistName, albumTitle) {
+    _reportIssueState = { entityType, entityId, entityName, artistName, albumTitle: albumTitle || '' };
+    const overlay = document.getElementById('report-issue-overlay');
+    const titleEl = document.getElementById('report-issue-title');
+    const body = document.getElementById('report-issue-body');
+    if (!overlay || !body) return;
+
+    const entityLabel = entityType === 'track' ? 'Track' : (entityType === 'album' ? 'Album' : 'Artist');
+    titleEl.textContent = `Report Issue — ${entityLabel}`;
+
+    body.innerHTML = `
+        <div class="report-issue-entity-info">
+            <div class="report-issue-entity-name">${_esc(entityName)}</div>
+            ${artistName ? `<div class="report-issue-entity-artist">${_esc(artistName)}${albumTitle ? ' &mdash; ' + _esc(albumTitle) : ''}</div>` : ''}
+        </div>
+        <div class="report-issue-section">
+            <label class="report-issue-label">What's the problem?</label>
+            <div class="report-issue-category-grid" id="report-issue-categories">
+                ${Object.entries(ISSUE_CATEGORIES)
+                    .filter(([, cat]) => !cat.applies || cat.applies.includes(entityType))
+                    .map(([key, cat]) => `
+                    <div class="report-issue-category-card" data-category="${_escAttr(key)}" onclick="selectIssueCategory(this, '${_escAttr(key)}')">
+                        <div class="report-issue-category-icon">${cat.icon}</div>
+                        <div class="report-issue-category-label">${_esc(cat.label)}</div>
+                        <div class="report-issue-category-desc">${_esc(cat.description)}</div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+        <div class="report-issue-section" id="report-issue-details-section" style="display:none">
+            <label class="report-issue-label">Title</label>
+            <input type="text" class="report-issue-input" id="report-issue-input-title" placeholder="Brief summary of the issue..." maxlength="200" oninput="event.target._userEdited = true">
+            <label class="report-issue-label" style="margin-top:12px">Details <span class="report-issue-optional">(optional)</span></label>
+            <textarea class="report-issue-textarea" id="report-issue-input-desc" placeholder="Provide more details about what's wrong — what you expected vs what you see..." rows="4" maxlength="2000"></textarea>
+            <label class="report-issue-label" style="margin-top:12px">Priority</label>
+            <div class="report-issue-priority-row">
+                <button class="report-issue-priority-btn" data-priority="low" onclick="selectIssuePriority(this, 'low')">Low</button>
+                <button class="report-issue-priority-btn selected" data-priority="normal" onclick="selectIssuePriority(this, 'normal')">Normal</button>
+                <button class="report-issue-priority-btn" data-priority="high" onclick="selectIssuePriority(this, 'high')">High</button>
+            </div>
+        </div>
+    `;
+
+    _reportIssueState.selectedCategory = null;
+    _reportIssueState.selectedPriority = 'normal';
+    const submitBtn = document.getElementById('report-issue-submit-btn');
+    if (submitBtn) submitBtn.disabled = true;
+
+    overlay.classList.remove('hidden');
+}
+
+function selectIssueCategory(el, category) {
+    document.querySelectorAll('.report-issue-category-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    _reportIssueState.selectedCategory = category;
+
+    const detailsSection = document.getElementById('report-issue-details-section');
+    if (detailsSection) detailsSection.style.display = '';
+
+    // Auto-generate title based on category
+    const titleInput = document.getElementById('report-issue-input-title');
+    const catMeta = ISSUE_CATEGORIES[category];
+    if (titleInput && !titleInput._userEdited) {
+        const entityName = _reportIssueState.entityName || '';
+        titleInput.value = `${catMeta.label}: ${entityName}`;
+    }
+
+    const submitBtn = document.getElementById('report-issue-submit-btn');
+    if (submitBtn) submitBtn.disabled = false;
+}
+
+function selectIssuePriority(el, priority) {
+    document.querySelectorAll('.report-issue-priority-btn').forEach(b => b.classList.remove('selected'));
+    el.classList.add('selected');
+    _reportIssueState.selectedPriority = priority;
+}
+
+function closeReportIssueModal() {
+    const overlay = document.getElementById('report-issue-overlay');
+    if (overlay) overlay.classList.add('hidden');
+    _reportIssueState = {};
+}
+
+async function submitIssue() {
+    if (_reportIssueState._submitting) return;
+    const category = _reportIssueState.selectedCategory;
+    if (!category) {
+        showToast('Please select an issue category', 'error');
+        return;
+    }
+
+    const titleInput = document.getElementById('report-issue-input-title');
+    const descInput = document.getElementById('report-issue-input-desc');
+    const title = (titleInput?.value || '').trim();
+    const description = (descInput?.value || '').trim();
+
+    if (!title) {
+        showToast('Please provide a title for the issue', 'error');
+        return;
+    }
+
+    _reportIssueState._submitting = true;
+    const submitBtn = document.getElementById('report-issue-submit-btn');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Submitting...';
+    }
+
+    try {
+        const resp = await fetch('/api/issues', {
+            method: 'POST',
+            headers: _issueHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+                profile_id: currentProfile ? currentProfile.id : 1,
+                entity_type: _reportIssueState.entityType,
+                entity_id: String(_reportIssueState.entityId),
+                category: category,
+                title: title,
+                description: description,
+                priority: _reportIssueState.selectedPriority || 'normal',
+            }),
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('Issue reported successfully', 'success');
+            closeReportIssueModal();
+            // Refresh issues page if visible
+            const issuesPage = document.getElementById('issues-page');
+            if (issuesPage && issuesPage.classList.contains('active')) {
+                loadIssuesPage();
+            }
+            // Update badge
+            loadIssuesBadge();
+        } else {
+            showToast(data.error || 'Failed to submit issue', 'error');
+        }
+    } catch (e) {
+        console.error('Failed to submit issue:', e);
+        showToast('Failed to submit issue', 'error');
+    } finally {
+        _reportIssueState._submitting = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit Issue';
+        }
+    }
+}
+
+// --- Issue Detail Modal ---
+
+async function showIssueDetailModal(issueId) {
+    const overlay = document.getElementById('issue-detail-overlay');
+    const body = document.getElementById('issue-detail-body');
+    const footer = document.getElementById('issue-detail-footer');
+    const titleEl = document.getElementById('issue-detail-title');
+    if (!overlay || !body) return;
+
+    body.innerHTML = '<div class="issues-loading"><div class="issues-spinner"></div>Loading...</div>';
+    footer.innerHTML = '<button class="enhanced-bulk-btn secondary" onclick="closeIssueDetailModal()">Close</button>';
+    overlay.classList.remove('hidden');
+
+    try {
+        const resp = await fetch(`/api/issues/${issueId}`, { headers: _issueHeaders() });
+        const data = await resp.json();
+        if (!data.success || !data.issue) {
+            body.innerHTML = '<div class="issues-empty"><div class="issues-empty-title">Issue not found</div></div>';
+            return;
+        }
+        renderIssueDetail(data.issue, body, footer, titleEl);
+    } catch (e) {
+        console.error('Failed to load issue:', e);
+        body.innerHTML = '<div class="issues-empty"><div class="issues-empty-title">Failed to load issue</div></div>';
+    }
+}
+
+function renderIssueDetail(issue, body, footer, titleEl) {
+    const admin = isEnhancedAdmin();
+    const catMeta = ISSUE_CATEGORIES[issue.category] || ISSUE_CATEGORIES.other;
+    const statusMeta = ISSUE_STATUS_META[issue.status] || ISSUE_STATUS_META.open;
+
+    let snapshot = {};
+    try { snapshot = typeof issue.snapshot_data === 'string' ? JSON.parse(issue.snapshot_data || '{}') : (issue.snapshot_data || {}); } catch (e) {}
+
+    const entityLabel = issue.entity_type === 'track' ? 'Track' : (issue.entity_type === 'album' ? 'Album' : 'Artist');
+    const entityName = snapshot.title || snapshot.name || `${entityLabel} #${issue.entity_id}`;
+    const artistName = snapshot.artist_name || (issue.entity_type === 'artist' ? snapshot.name : '') || '';
+    const albumTitle = issue.entity_type === 'album' ? (snapshot.title || '') : (snapshot.album_title || '');
+    const artistId = issue.entity_type === 'artist' ? snapshot.id : snapshot.artist_id;
+
+    // Resolve image URLs — album art and artist photo
+    let artistThumb = '';
+    let albumThumb = '';
+    if (issue.entity_type === 'album') {
+        albumThumb = snapshot.thumb_url || '';
+        artistThumb = snapshot.artist_thumb || '';
+    } else if (issue.entity_type === 'track') {
+        albumThumb = snapshot.album_thumb || '';
+        artistThumb = snapshot.artist_thumb || '';
+    } else {
+        // Artist issue
+        artistThumb = snapshot.thumb_url || '';
+    }
+
+    // Determine the album-level Spotify ID for download/wishlist actions
+    const spotifyAlbumId = snapshot.spotify_album_id || '';
+
+    console.log('Issue detail snapshot:', { entityType: issue.entity_type, albumThumb, artistThumb, spotifyAlbumId, snapshotKeys: Object.keys(snapshot) });
+
+    const createdDate = issue.created_at ? new Date(issue.created_at).toLocaleString() : 'Unknown';
+    const resolvedDate = issue.resolved_at ? new Date(issue.resolved_at).toLocaleString() : '';
+
+    titleEl.textContent = `Issue #${issue.id}`;
+
+    // --- Build external links chips ---
+    function _extLinks(snap) {
+        const links = [];
+        if (snap.spotify_artist_id) links.push({ svc: 'Spotify', type: 'Artist', url: `https://open.spotify.com/artist/${snap.spotify_artist_id}`, cls: 'ext-spotify' });
+        if (snap.spotify_album_id) links.push({ svc: 'Spotify', type: 'Album', url: `https://open.spotify.com/album/${snap.spotify_album_id}`, cls: 'ext-spotify' });
+        if (snap.spotify_track_id) links.push({ svc: 'Spotify', type: 'Track', url: `https://open.spotify.com/track/${snap.spotify_track_id}`, cls: 'ext-spotify' });
+        if (snap.artist_musicbrainz_id) links.push({ svc: 'MusicBrainz', type: 'Artist', url: `https://musicbrainz.org/artist/${snap.artist_musicbrainz_id}`, cls: 'ext-mb' });
+        if (snap.musicbrainz_release_id) links.push({ svc: 'MusicBrainz', type: 'Release', url: `https://musicbrainz.org/release/${snap.musicbrainz_release_id}`, cls: 'ext-mb' });
+        if (snap.musicbrainz_recording_id) links.push({ svc: 'MusicBrainz', type: 'Recording', url: `https://musicbrainz.org/recording/${snap.musicbrainz_recording_id}`, cls: 'ext-mb' });
+        if (snap.artist_deezer_id) links.push({ svc: 'Deezer', type: 'Artist', url: `https://www.deezer.com/artist/${snap.artist_deezer_id}`, cls: 'ext-deezer' });
+        if (snap.album_deezer_id) links.push({ svc: 'Deezer', type: 'Album', url: `https://www.deezer.com/album/${snap.album_deezer_id}`, cls: 'ext-deezer' });
+        if (snap.track_deezer_id) links.push({ svc: 'Deezer', type: 'Track', url: `https://www.deezer.com/track/${snap.track_deezer_id}`, cls: 'ext-deezer' });
+        if (snap.artist_tidal_id) links.push({ svc: 'Tidal', type: 'Artist', url: `https://listen.tidal.com/artist/${snap.artist_tidal_id}`, cls: 'ext-tidal' });
+        if (snap.album_tidal_id) links.push({ svc: 'Tidal', type: 'Album', url: `https://listen.tidal.com/album/${snap.album_tidal_id}`, cls: 'ext-tidal' });
+        if (snap.artist_qobuz_id) links.push({ svc: 'Qobuz', type: 'Artist', cls: 'ext-qobuz', id: snap.artist_qobuz_id });
+        if (snap.album_qobuz_id) links.push({ svc: 'Qobuz', type: 'Album', cls: 'ext-qobuz', id: snap.album_qobuz_id });
+        return links;
+    }
+
+    const extLinks = _extLinks(snapshot);
+    let extLinksHtml = '';
+    if (extLinks.length > 0) {
+        const chips = extLinks.map(l => {
+            if (l.url) {
+                return `<a class="issue-ext-chip ${l.cls}" href="${_escAttr(l.url)}" target="_blank" rel="noopener" title="${_escAttr(l.svc + ' ' + l.type)}">${_esc(l.svc)} <span class="issue-ext-chip-type">${_esc(l.type)}</span></a>`;
+            }
+            return `<span class="issue-ext-chip ${l.cls}" title="${_escAttr(l.svc + ' ' + l.type + ': ' + l.id)}">${_esc(l.svc)} <span class="issue-ext-chip-type">${_esc(l.type)}</span></span>`;
+        }).join('');
+        extLinksHtml = `<div class="issue-ext-chips" style="margin-top:8px">${chips}</div>`;
+    }
+
+    // --- Build enhanced-library-style album/track widget ---
+    // Determine which album data to show (for album issues it's the entity, for track issues it's the parent)
+    const showAlbumWidget = (issue.entity_type === 'album' || issue.entity_type === 'track');
+    const albumName = issue.entity_type === 'album' ? (snapshot.title || '') : (snapshot.album_title || '');
+    const albumYear = snapshot.year || '';
+    const albumLabel = snapshot.label || '';
+    const albumType = snapshot.record_type || '';
+    const albumTrackCount = issue.entity_type === 'album' ? (snapshot.track_count || '') : (snapshot.album_track_count || '');
+    const albumGenres = snapshot.genres || [];
+
+    // --- Build the hero section (artist photo + album art + info) ---
+    let heroHtml = '';
+    if (showAlbumWidget) {
+        // Genre tags
+        let genreTagsHtml = '';
+        if (Array.isArray(albumGenres) && albumGenres.length > 0) {
+            genreTagsHtml = `<div class="issue-hero-genres">${albumGenres.slice(0, 5).map(g => `<span class="issue-hero-genre-tag">${_esc(g)}</span>`).join('')}</div>`;
+        }
+
+        // Album meta line
+        const albumMetaParts = [];
+        if (albumYear) albumMetaParts.push(String(albumYear));
+        if (albumType) albumMetaParts.push(albumType.charAt(0).toUpperCase() + albumType.slice(1));
+        if (albumTrackCount) albumMetaParts.push(albumTrackCount + ' tracks');
+        if (albumLabel) albumMetaParts.push(albumLabel);
+
+        // For track issues, show the track title under the album
+        const trackNameLine = issue.entity_type === 'track' && entityName
+            ? `<div class="issue-hero-track-name">&#9835; ${_esc(entityName)}</div>` : '';
+
+        heroHtml = `
+            <div class="issue-hero">
+                <div class="issue-hero-art-group">
+                    ${artistThumb ? `<img class="issue-hero-artist-thumb" src="${_escAttr(artistThumb)}" alt="" onerror="this.style.display='none'">` : ''}
+                    ${albumThumb ? `<img class="issue-hero-album-art" src="${_escAttr(albumThumb)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">` : ''}
+                    <div class="issue-hero-album-placeholder" style="${albumThumb ? 'display:none' : ''}">${catMeta.icon}</div>
+                </div>
+                <div class="issue-hero-info">
+                    ${artistName ? `<div class="issue-hero-artist">${_esc(artistName)}</div>` : ''}
+                    <div class="issue-hero-album">${_esc(albumName)}</div>
+                    ${trackNameLine}
+                    ${albumMetaParts.length > 0 ? `<div class="issue-hero-meta">${_esc(albumMetaParts.join(' \u00B7 '))}</div>` : ''}
+                    ${genreTagsHtml}
+                    ${extLinksHtml}
+                </div>
+            </div>
+        `;
+    } else {
+        // Artist-level issue — simpler hero
+        heroHtml = `
+            <div class="issue-hero">
+                <div class="issue-hero-art-group">
+                    ${artistThumb ? `<img class="issue-hero-album-art" src="${_escAttr(artistThumb)}" alt="" onerror="this.style.display='none'">` : `<div class="issue-hero-album-placeholder">${catMeta.icon}</div>`}
+                </div>
+                <div class="issue-hero-info">
+                    <div class="issue-hero-album">${_esc(entityName)}</div>
+                    ${extLinksHtml}
+                </div>
+            </div>
+        `;
+    }
+
+    // --- Issue info bar ---
+    let issueInfoHtml = `
+        <div class="issue-detail-info-bar">
+            <div class="issue-detail-info-left">
+                <span class="issue-status-badge ${statusMeta.cls}">${_esc(statusMeta.label)}</span>
+                <span class="issue-priority-dot issue-priority-${_escAttr(issue.priority || 'normal')}" title="${_esc((issue.priority || 'normal'))} priority"></span>
+                <span class="issue-detail-category">${catMeta.icon} ${_esc(catMeta.label)}</span>
+            </div>
+            <div class="issue-detail-info-right">
+                <span class="issue-detail-date">Reported ${_esc(createdDate)}</span>
+                ${issue.reporter_name && admin ? `<span class="issue-detail-profile">by ${_esc(issue.reporter_name)}</span>` : ''}
+                ${resolvedDate ? `<span class="issue-detail-date">Resolved ${_esc(resolvedDate)}</span>` : ''}
+            </div>
+        </div>
+    `;
+
+    // --- Issue description ---
+    let descriptionHtml = `
+        <div class="issue-detail-section">
+            <div class="issue-detail-section-title">Issue</div>
+            <div class="issue-detail-title-text">${_esc(issue.title)}</div>
+            ${issue.description ? `<div class="issue-detail-description">${_esc(issue.description)}</div>` : '<div class="issue-detail-no-desc">No additional details provided</div>'}
+        </div>
+    `;
+
+    // --- Action buttons (Download Album / Add to Wishlist) for admin ---
+    let actionButtonsHtml = '';
+    if (admin && (issue.entity_type === 'album' || issue.entity_type === 'track')) {
+        actionButtonsHtml = `
+            <div class="issue-action-buttons">
+                <button class="issue-action-btn issue-action-download" id="issue-action-download" title="Download this album">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Download Album
+                </button>
+                <button class="issue-action-btn issue-action-wishlist" id="issue-action-wishlist" title="Add all tracks to wishlist">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+                    Add to Wishlist
+                </button>
+            </div>
+        `;
+    }
+
+    // --- Metadata grid for track-level issues ---
+    let metaGridHtml = '';
+    if (issue.entity_type === 'track') {
+        const metaItems = [];
+        if (snapshot.track_number) metaItems.push({ icon: '#', label: 'Track', value: String(snapshot.track_number) });
+        if (snapshot.duration) metaItems.push({ icon: '&#9719;', label: 'Duration', value: typeof snapshot.duration === 'number' ? formatDurationMs(snapshot.duration) : String(snapshot.duration) });
+        if (snapshot.format) metaItems.push({ icon: '&#128190;', label: 'Format', value: snapshot.format });
+        if (snapshot.bitrate) metaItems.push({ icon: '&#127926;', label: 'Bitrate', value: snapshot.bitrate + ' kbps' });
+        if (snapshot.bpm) metaItems.push({ icon: '&#9835;', label: 'BPM', value: String(snapshot.bpm) });
+        if (snapshot.quality) metaItems.push({ icon: '&#9733;', label: 'Quality', value: snapshot.quality });
+        if (metaItems.length > 0) {
+            metaGridHtml = `
+                <div class="issue-detail-section">
+                    <div class="issue-detail-section-title">Track Details</div>
+                    <div class="issue-detail-meta-grid">
+                        ${metaItems.map(m => `
+                            <div class="issue-meta-item">
+                                <span class="issue-meta-icon">${m.icon}</span>
+                                <span class="issue-meta-label">${_esc(m.label)}</span>
+                                <span class="issue-meta-value">${_esc(m.value)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    // --- File path display for tracks ---
+    let filePathHtml = '';
+    if (snapshot.file_path) {
+        filePathHtml = `
+            <div class="issue-detail-section">
+                <div class="issue-detail-section-title">File Path</div>
+                <div class="issue-detail-filepath">${_esc(snapshot.file_path)}</div>
+            </div>
+        `;
+    }
+
+    // --- Enhanced-library-style track listing ---
+    let trackListHtml = '';
+    if (snapshot.tracks && Array.isArray(snapshot.tracks) && snapshot.tracks.length > 0) {
+        let lastDisc = null;
+        let rows = '';
+        const hasMultiDisc = snapshot.tracks.some(tr => (tr.disc_number || 1) > 1);
+        snapshot.tracks.forEach(t => {
+            const disc = t.disc_number || 1;
+            if (hasMultiDisc && disc !== lastDisc) {
+                rows += `<div class="issue-detail-tracklist-disc">Disc ${disc}</div>`;
+                lastDisc = disc;
+            }
+            const fmt = t.format || (t.file_path ? t.file_path.split('.').pop().toUpperCase() : '');
+            const fmtLower = fmt.toLowerCase();
+            const fmtClass = fmtLower === 'flac' ? 'flac' : (fmtLower === 'mp3' ? 'mp3' : 'other');
+            const br = t.bitrate ? parseInt(t.bitrate) : 0;
+            const brClass = br >= 320 || fmtLower === 'flac' ? 'high' : (br >= 192 ? 'medium' : 'low');
+            const durStr = t.duration && typeof t.duration === 'number' ? formatDurationMs(t.duration) : '';
+
+            rows += `
+                <div class="issue-detail-tracklist-row">
+                    <span class="issue-detail-tracklist-num">${_esc(String(t.track_number || '-'))}</span>
+                    <span class="issue-detail-tracklist-title">${_esc(t.title || 'Unknown')}</span>
+                    ${durStr ? `<span class="issue-detail-tracklist-dur">${durStr}</span>` : ''}
+                    <span class="issue-detail-tracklist-meta">
+                        ${fmt ? `<span class="enhanced-format-badge ${fmtClass}">${_esc(fmt)}</span>` : ''}
+                        ${br ? `<span class="enhanced-bitrate ${brClass}">${br}k</span>` : ''}
+                    </span>
+                </div>
+            `;
+        });
+        trackListHtml = `
+            <div class="issue-detail-section">
+                <div class="issue-detail-section-title">Track Listing <span class="issue-detail-section-count">${snapshot.tracks.length} tracks</span></div>
+                <div class="issue-detail-tracklist">${rows}</div>
+            </div>
+        `;
+    }
+
+    // --- Admin response section ---
+    let adminResponseHtml = '';
+    if (admin) {
+        adminResponseHtml = `
+            <div class="issue-detail-section">
+                <div class="issue-detail-section-title">Admin Response</div>
+                <textarea class="issue-detail-response-textarea" id="issue-detail-response-input" placeholder="Write a response to the reporter..." rows="3">${_esc(issue.admin_response || '')}</textarea>
+            </div>
+        `;
+    } else if (issue.admin_response) {
+        adminResponseHtml = `
+            <div class="issue-detail-section">
+                <div class="issue-detail-section-title">Admin Response</div>
+                <div class="issue-detail-admin-response">${_esc(issue.admin_response)}</div>
+            </div>
+        `;
+    }
+
+    body.innerHTML = `
+        ${heroHtml}
+        ${issueInfoHtml}
+        ${actionButtonsHtml}
+        ${descriptionHtml}
+        ${metaGridHtml}
+        ${filePathHtml}
+        ${trackListHtml}
+        ${adminResponseHtml}
+    `;
+
+    // --- Footer with status action buttons ---
+    const safeId = parseInt(issue.id, 10);
+    let footerHtml = '<button class="enhanced-bulk-btn secondary" onclick="closeIssueDetailModal()">Close</button>';
+
+    if (admin) {
+        if (issue.status === 'open' || issue.status === 'in_progress') {
+            if (issue.status === 'open') {
+                footerHtml += `<button class="enhanced-bulk-btn issue-btn-progress" onclick="updateIssueStatus(${safeId}, 'in_progress')">Mark In Progress</button>`;
+            }
+            footerHtml += `<button class="enhanced-bulk-btn issue-btn-resolve" onclick="updateIssueStatus(${safeId}, 'resolved')">Resolve</button>`;
+            footerHtml += `<button class="enhanced-bulk-btn issue-btn-dismiss" onclick="updateIssueStatus(${safeId}, 'dismissed')">Dismiss</button>`;
+        } else {
+            footerHtml += `<button class="enhanced-bulk-btn issue-btn-reopen" onclick="updateIssueStatus(${safeId}, 'open')">Reopen</button>`;
+        }
+        footerHtml += `<button class="enhanced-bulk-btn issue-btn-delete" onclick="deleteIssue(${safeId})">Delete</button>`;
+    } else {
+        if (issue.status === 'open') {
+            footerHtml += `<button class="enhanced-bulk-btn issue-btn-delete" onclick="deleteIssue(${safeId})">Withdraw</button>`;
+        }
+    }
+
+    footer.innerHTML = footerHtml;
+
+    // --- Attach action button handlers ---
+    const dlBtn = document.getElementById('issue-action-download');
+    if (dlBtn) {
+        dlBtn.onclick = () => issueDownloadAlbum(spotifyAlbumId, artistName, albumName);
+    }
+    const wlBtn = document.getElementById('issue-action-wishlist');
+    if (wlBtn) {
+        wlBtn.onclick = () => issueAddToWishlist(spotifyAlbumId, artistName, albumName);
+    }
+}
+
+// --- Issue Action: Download Album ---
+async function issueDownloadAlbum(spotifyAlbumId, artistName, albumName) {
+    const btn = document.getElementById('issue-action-download');
+    if (!spotifyAlbumId && (!artistName || !albumName)) {
+        showToast('No album ID or artist/album info available for download', 'warning');
+        return;
+    }
+    try {
+        if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
+
+        let response;
+        if (spotifyAlbumId) {
+            const albumParams = new URLSearchParams({ name: albumName || '', artist: artistName || '' });
+            response = await fetch(`/api/spotify/album/${encodeURIComponent(spotifyAlbumId)}?${albumParams}`);
+        } else {
+            // No Spotify album ID — search for the album by name
+            const query = `${artistName} ${albumName}`;
+            const searchResp = await fetch('/api/enhanced-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query })
+            });
+            if (!searchResp.ok) throw new Error('Album search failed');
+            const searchData = await searchResp.json();
+            const foundAlbum = searchData.spotify_albums?.[0];
+            if (!foundAlbum || !foundAlbum.id) {
+                showToast(`Could not find "${albumName}" by ${artistName}`, 'warning');
+                return;
+            }
+            const albumParams = new URLSearchParams({ name: foundAlbum.name || albumName, artist: foundAlbum.artist || artistName });
+            response = await fetch(`/api/spotify/album/${encodeURIComponent(foundAlbum.id)}?${albumParams}`);
+        }
+
+        if (!response.ok) {
+            if (response.status === 401) throw new Error('Spotify not authenticated');
+            throw new Error(`Failed to load album: ${response.status}`);
+        }
+
+        const albumData = await response.json();
+        if (!albumData || !albumData.tracks || albumData.tracks.length === 0) {
+            showToast(`No tracks available for "${albumName}"`, 'warning');
+            return;
+        }
+
+        // Close the issue modal first
+        closeIssueDetailModal();
+
+        const resolvedAlbumId = albumData.id || spotifyAlbumId || Date.now();
+        const virtualPlaylistId = `issue_download_${resolvedAlbumId}`;
+
+        // Enrich tracks with album metadata
+        const enrichedTracks = albumData.tracks.map(track => ({
+            ...track,
+            album: {
+                name: albumData.name,
+                id: albumData.id,
+                album_type: albumData.album_type || 'album',
+                images: albumData.images || [],
+                release_date: albumData.release_date,
+                total_tracks: albumData.total_tracks
+            }
+        }));
+
+        const playlistName = `[${artistName}] ${albumData.name}`;
+        const artistObject = { id: null, name: artistName };
+        const fullAlbumObject = {
+            name: albumData.name,
+            id: albumData.id,
+            album_type: albumData.album_type || 'album',
+            images: albumData.images || [],
+            release_date: albumData.release_date,
+            total_tracks: albumData.total_tracks,
+            artists: albumData.artists || [{ name: artistName }]
+        };
+
+        await openDownloadMissingModalForArtistAlbum(
+            virtualPlaylistId, playlistName, enrichedTracks, fullAlbumObject, artistObject, true
+        );
+
+    } catch (error) {
+        console.error('Issue download error:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download Album'; }
+    }
+}
+
+// --- Issue Action: Add to Wishlist ---
+async function issueAddToWishlist(spotifyAlbumId, artistName, albumName) {
+    const btn = document.getElementById('issue-action-wishlist');
+    if (!spotifyAlbumId && (!artistName || !albumName)) {
+        showToast('No album ID or artist/album info available', 'warning');
+        return;
+    }
+    try {
+        if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
+
+        let response;
+        if (spotifyAlbumId) {
+            const albumParams = new URLSearchParams({ name: albumName || '', artist: artistName || '' });
+            response = await fetch(`/api/spotify/album/${encodeURIComponent(spotifyAlbumId)}?${albumParams}`);
+        } else {
+            // No Spotify album ID — search for the album by name
+            const query = `${artistName} ${albumName}`;
+            const searchResp = await fetch('/api/enhanced-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query })
+            });
+            if (!searchResp.ok) throw new Error('Album search failed');
+            const searchData = await searchResp.json();
+            const foundAlbum = searchData.spotify_albums?.[0];
+            if (!foundAlbum || !foundAlbum.id) {
+                showToast(`Could not find "${albumName}" by ${artistName}`, 'warning');
+                return;
+            }
+            const albumParams = new URLSearchParams({ name: foundAlbum.name || albumName, artist: foundAlbum.artist || artistName });
+            response = await fetch(`/api/spotify/album/${encodeURIComponent(foundAlbum.id)}?${albumParams}`);
+        }
+
+        if (!response.ok) throw new Error(`Failed to load album: ${response.status}`);
+
+        const albumData = await response.json();
+        if (!albumData || !albumData.tracks || albumData.tracks.length === 0) {
+            showToast(`No tracks available for "${albumName}"`, 'warning');
+            return;
+        }
+
+        // Close issue modal and open wishlist modal
+        closeIssueDetailModal();
+
+        const albumArtists = albumData.artists || [{ name: artistName }];
+        const album = {
+            name: albumData.name,
+            id: albumData.id,
+            album_type: albumData.album_type || 'album',
+            images: albumData.images || [],
+            release_date: albumData.release_date,
+            total_tracks: albumData.total_tracks,
+            artists: albumArtists
+        };
+        const artist = { id: null, name: artistName };
+
+        // Enrich tracks with album metadata — use album artist for wishlist grouping
+        // (Spotify returns per-track artists which can differ on compilations/soundtracks)
+        const tracks = albumData.tracks.map(t => ({
+            ...t,
+            artists: albumArtists,
+            album: album
+        }));
+
+        await openAddToWishlistModal(album, artist, tracks, albumData.album_type || 'album');
+
+    } catch (error) {
+        console.error('Issue wishlist error:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg> Add to Wishlist'; }
+    }
+}
+
+async function updateIssueStatus(issueId, newStatus) {
+    const payload = { status: newStatus };
+
+    // Include admin response if present
+    const responseInput = document.getElementById('issue-detail-response-input');
+    if (responseInput) {
+        payload.admin_response = responseInput.value.trim();
+    }
+
+    try {
+        const resp = await fetch(`/api/issues/${issueId}`, {
+            method: 'PUT',
+            headers: _issueHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast(`Issue ${newStatus === 'resolved' ? 'resolved' : newStatus === 'dismissed' ? 'dismissed' : newStatus === 'in_progress' ? 'marked in progress' : 'reopened'}`, 'success');
+            closeIssueDetailModal();
+            // Refresh if on issues page
+            const issuesPage = document.getElementById('issues-page');
+            if (issuesPage && issuesPage.classList.contains('active')) {
+                loadIssuesPage();
+            }
+            loadIssuesBadge();
+        } else {
+            showToast(data.error || 'Failed to update issue', 'error');
+        }
+    } catch (e) {
+        console.error('Failed to update issue:', e);
+        showToast('Failed to update issue', 'error');
+    }
+}
+
+async function deleteIssue(issueId) {
+    if (!confirm('Are you sure you want to delete this issue?')) return;
+    try {
+        const resp = await fetch(`/api/issues/${issueId}`, { method: 'DELETE', headers: _issueHeaders() });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('Issue deleted', 'success');
+            closeIssueDetailModal();
+            const issuesPage = document.getElementById('issues-page');
+            if (issuesPage && issuesPage.classList.contains('active')) {
+                loadIssuesPage();
+            }
+            loadIssuesBadge();
+        } else {
+            showToast(data.error || 'Failed to delete issue', 'error');
+        }
+    } catch (e) {
+        console.error('Failed to delete issue:', e);
+        showToast('Failed to delete issue', 'error');
+    }
+}
+
+function closeIssueDetailModal() {
+    const overlay = document.getElementById('issue-detail-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+async function loadIssuesBadge() {
+    try {
+        const resp = await fetch('/api/issues/counts', { headers: _issueHeaders() });
+        const data = await resp.json();
+        if (!data.success) return;
+        const badge = document.getElementById('issues-nav-badge');
+        if (badge) {
+            const openCount = data.counts.open || 0;
+            badge.textContent = openCount;
+            badge.classList.toggle('hidden', openCount === 0);
+        }
+    } catch (e) {}
+}
+
+// ===== END ISSUES PAGE =====
 
 // --- Helpers ---
 
