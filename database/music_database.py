@@ -349,6 +349,9 @@ class MusicDatabase:
             self._add_profile_support_v4(cursor)
             self._add_profile_settings(cursor)
 
+            # Spotify library cache
+            self._add_spotify_library_cache_table(cursor)
+
             # Mirrored playlists — persistent backup of parsed playlists from any service
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS mirrored_playlists (
@@ -2255,6 +2258,43 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error in profile settings migration: {e}")
+
+    def _add_spotify_library_cache_table(self, cursor):
+        """Create spotify_library_cache table for caching user's saved Spotify albums"""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'spotify_library_cache_v1' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+
+            logger.info("Creating spotify_library_cache table...")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS spotify_library_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    spotify_album_id TEXT NOT NULL,
+                    album_name TEXT NOT NULL,
+                    artist_name TEXT NOT NULL,
+                    artist_id TEXT,
+                    release_date TEXT,
+                    total_tracks INTEGER DEFAULT 0,
+                    album_type TEXT DEFAULT 'album',
+                    image_url TEXT,
+                    date_saved TEXT,
+                    cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    profile_id INTEGER DEFAULT 1,
+                    UNIQUE(spotify_album_id, profile_id)
+                )
+            """)
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_spotify_library_album_id ON spotify_library_cache (spotify_album_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_spotify_library_profile ON spotify_library_cache (profile_id)")
+
+            cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('spotify_library_cache_v1', '1')")
+
+            logger.info("spotify_library_cache table created successfully")
+
+        except Exception as e:
+            logger.error(f"Error creating spotify_library_cache table: {e}")
 
     # ── Profile CRUD ──────────────────────────────────────────────────
 
@@ -5132,6 +5172,154 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting watchlist artists: {e}")
             return []
+
+    # ── Spotify Library Cache ──────────────────────────────────────────
+
+    def upsert_spotify_library_albums(self, albums: list, profile_id: int = 1):
+        """Bulk upsert saved Spotify albums into cache table"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                for album in albums:
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO spotify_library_cache
+                        (spotify_album_id, album_name, artist_name, artist_id,
+                         release_date, total_tracks, album_type, image_url,
+                         date_saved, cached_at, profile_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+                    """, (
+                        album['spotify_album_id'],
+                        album['album_name'],
+                        album['artist_name'],
+                        album.get('artist_id'),
+                        album.get('release_date'),
+                        album.get('total_tracks', 0),
+                        album.get('album_type', 'album'),
+                        album.get('image_url'),
+                        album.get('date_saved'),
+                        profile_id,
+                    ))
+                conn.commit()
+                logger.info(f"Upserted {len(albums)} albums into spotify_library_cache")
+        except Exception as e:
+            logger.error(f"Error upserting spotify library albums: {e}")
+
+    def get_spotify_library_albums(self, offset=0, limit=50, search='', sort='date_saved',
+                                    sort_dir='desc', profile_id=1):
+        """Get cached Spotify library albums with pagination, search, and sorting.
+        Returns (albums_list, total_count)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                where_clauses = ['profile_id = ?']
+                params = [profile_id]
+
+                if search:
+                    where_clauses.append('(album_name LIKE ? OR artist_name LIKE ?)')
+                    params.extend([f'%{search}%', f'%{search}%'])
+
+                where_sql = ' AND '.join(where_clauses)
+
+                # Count total
+                cursor.execute(f"SELECT COUNT(*) as count FROM spotify_library_cache WHERE {where_sql}", params)
+                total = cursor.fetchone()['count']
+
+                # Validate sort column
+                valid_sorts = {'date_saved', 'artist_name', 'album_name', 'release_date'}
+                if sort not in valid_sorts:
+                    sort = 'date_saved'
+                sort_direction = 'ASC' if sort_dir == 'asc' else 'DESC'
+
+                cursor.execute(f"""
+                    SELECT * FROM spotify_library_cache
+                    WHERE {where_sql}
+                    ORDER BY {sort} {sort_direction}
+                    LIMIT ? OFFSET ?
+                """, params + [limit, offset])
+
+                albums = []
+                for row in cursor.fetchall():
+                    albums.append({
+                        'id': row['id'],
+                        'spotify_album_id': row['spotify_album_id'],
+                        'album_name': row['album_name'],
+                        'artist_name': row['artist_name'],
+                        'artist_id': row['artist_id'],
+                        'release_date': row['release_date'],
+                        'total_tracks': row['total_tracks'],
+                        'album_type': row['album_type'],
+                        'image_url': row['image_url'],
+                        'date_saved': row['date_saved'],
+                    })
+
+                return albums, total
+
+        except Exception as e:
+            logger.error(f"Error getting spotify library albums: {e}")
+            return [], 0
+
+    def get_spotify_library_album_ids(self, profile_id=1):
+        """Get all cached spotify album IDs as a set"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT spotify_album_id FROM spotify_library_cache WHERE profile_id = ?", (profile_id,))
+                return {row['spotify_album_id'] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Error getting spotify library album IDs: {e}")
+            return set()
+
+    def remove_spotify_library_albums_not_in(self, keep_ids: set, profile_id=1):
+        """Remove cached albums that are no longer in the user's Spotify library"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if not keep_ids:
+                    cursor.execute("DELETE FROM spotify_library_cache WHERE profile_id = ?", (profile_id,))
+                else:
+                    placeholders = ','.join('?' * len(keep_ids))
+                    cursor.execute(f"""
+                        DELETE FROM spotify_library_cache
+                        WHERE profile_id = ? AND spotify_album_id NOT IN ({placeholders})
+                    """, [profile_id] + list(keep_ids))
+                removed = cursor.rowcount
+                conn.commit()
+                if removed > 0:
+                    logger.info(f"Removed {removed} un-saved albums from spotify_library_cache")
+                return removed
+        except Exception as e:
+            logger.error(f"Error removing spotify library albums: {e}")
+            return 0
+
+    def get_library_spotify_album_ids(self, profile_id=1):
+        """Get all spotify_album_id values from the local music library albums table"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT DISTINCT spotify_album_id FROM albums
+                    WHERE spotify_album_id IS NOT NULL AND spotify_album_id != ''
+                """)
+                return {row['spotify_album_id'] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Error getting library spotify album IDs: {e}")
+            return set()
+
+    def get_library_album_names(self):
+        """Get normalized (artist, album) pairs from library for fuzzy ownership matching"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT LOWER(a.title) as album, LOWER(ar.name) as artist
+                    FROM albums a
+                    JOIN artists ar ON a.artist_id = ar.id
+                """)
+                return {(row['artist'], row['album']) for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Error getting library album names: {e}")
+            return set()
 
     def get_watchlist_count(self, profile_id: int = 1) -> int:
         """Get the number of artists in the watchlist for the given profile"""

@@ -607,6 +607,12 @@ class WatchlistScanner:
             logger.info("Updating seasonal content...")
             self._populate_seasonal_content()
 
+            # Sync Spotify library cache (runs after main scan)
+            try:
+                self.sync_spotify_library_cache()
+            except Exception as lib_err:
+                logger.warning(f"Error syncing Spotify library cache: {lib_err}")
+
             return scan_results
             
         except Exception as e:
@@ -2741,6 +2747,66 @@ class WatchlistScanner:
             logger.error(f"Error curating discovery playlists: {e}")
             import traceback
             traceback.print_exc()
+
+    def sync_spotify_library_cache(self, profile_id=1):
+        """Sync user's saved Spotify albums into the local cache.
+
+        Runs after the main watchlist scan. First sync fetches all saved albums;
+        subsequent syncs are incremental (only fetch newly saved albums).
+        Every 7 days, does a full re-sync to detect un-saved albums.
+        """
+        if not self.spotify_client or not self.spotify_client.is_spotify_authenticated():
+            logger.debug("Spotify not authenticated, skipping library cache sync")
+            return
+
+        logger.info("📚 Syncing Spotify library cache...")
+
+        try:
+            last_sync = self.database.get_metadata('spotify_library_last_sync')
+            last_full_sync = self.database.get_metadata('spotify_library_last_full_sync')
+
+            # Determine if we need a full sync (first time or every 7 days)
+            do_full_sync = False
+            if not last_sync:
+                do_full_sync = True
+                logger.info("First-time Spotify library sync — fetching all saved albums")
+            elif not last_full_sync:
+                # last_sync exists but last_full_sync doesn't — first run with this code
+                do_full_sync = True
+                logger.info("Full re-sync triggered (no full sync recorded)")
+            else:
+                try:
+                    last_full_dt = datetime.fromisoformat(last_full_sync)
+                    if datetime.now() - last_full_dt > timedelta(days=7):
+                        do_full_sync = True
+                        logger.info("Full re-sync triggered (>7 days since last full sync)")
+                except (ValueError, TypeError):
+                    do_full_sync = True
+
+            # Fetch albums from Spotify
+            since_timestamp = None if do_full_sync else last_sync
+            albums = self.spotify_client.get_saved_albums(since_timestamp=since_timestamp)
+
+            if not albums and not do_full_sync:
+                logger.info("No new saved albums since last sync")
+                return
+
+            if albums:
+                self.database.upsert_spotify_library_albums(albums, profile_id=profile_id)
+
+            # On full sync, remove albums that are no longer saved
+            if do_full_sync and albums:
+                fetched_ids = {a['spotify_album_id'] for a in albums}
+                self.database.remove_spotify_library_albums_not_in(fetched_ids, profile_id=profile_id)
+                self.database.set_metadata('spotify_library_last_full_sync', datetime.now().isoformat())
+
+            # Update last sync timestamp
+            self.database.set_metadata('spotify_library_last_sync', datetime.now().isoformat())
+
+            logger.info(f"✅ Spotify library cache sync complete — {len(albums)} albums processed")
+
+        except Exception as e:
+            logger.error(f"Error syncing Spotify library cache: {e}")
 
     def _populate_seasonal_content(self):
         """

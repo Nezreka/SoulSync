@@ -9757,10 +9757,11 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
             virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
                 virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
                     virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
-                        virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
-                            virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
-                                virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
-                                    'YouTube';
+                        virtualPlaylistId.startsWith('spotify_library_') ? 'SoulSync' :
+                            virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
+                                virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
+                                    virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
+                                        'YouTube';
 
     // Store metadata for discover download sidebar (will be added when Begin Analysis is clicked)
     if (source === 'SoulSync' || virtualPlaylistId.startsWith('discover_lb_') || virtualPlaylistId.startsWith('listenbrainz_')) {
@@ -9782,7 +9783,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     }
 
     // CRITICAL FIX: Use album context for discover_album playlists
-    const isDiscoverAlbum = virtualPlaylistId.startsWith('discover_album_') || virtualPlaylistId.startsWith('seasonal_album_');
+    const isDiscoverAlbum = virtualPlaylistId.startsWith('discover_album_') || virtualPlaylistId.startsWith('seasonal_album_') || virtualPlaylistId.startsWith('spotify_library_');
     const heroContext = isDiscoverAlbum && album && artist ? {
         type: 'album',
         artist: {
@@ -9885,10 +9886,10 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                             <input type="checkbox" id="force-download-all-${virtualPlaylistId}">
                             <span>Force Download All</span>
                         </label>
-                        <label class="force-download-toggle">
+                        ${isDiscoverAlbum ? '' : `<label class="force-download-toggle">
                             <input type="checkbox" id="playlist-folder-mode-${virtualPlaylistId}">
                             <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
-                        </label>
+                        </label>`}
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
@@ -11551,7 +11552,7 @@ async function startMissingTracksProcess(playlistId) {
 
         // If this is an artist album download, use album name and include full context
         // Match 'artist_album_', 'enhanced_search_album_', 'enhanced_search_track_', 'discover_album_', and 'seasonal_album_' prefixes
-        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('enhanced_search_track_') || playlistId.startsWith('discover_album_') || playlistId.startsWith('seasonal_album_') || playlistId.startsWith('issue_download_')) {
+        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('enhanced_search_track_') || playlistId.startsWith('discover_album_') || playlistId.startsWith('seasonal_album_') || playlistId.startsWith('spotify_library_') || playlistId.startsWith('issue_download_')) {
             requestBody.playlist_name = process.album?.name || process.playlist.name;
             requestBody.is_album_download = true;
             requestBody.album_context = process.album;   // Full Spotify album object
@@ -21078,10 +21079,11 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
             virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
                 virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
                     virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
-                        virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
-                            virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
-                                virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
-                                    'YouTube';
+                        virtualPlaylistId.startsWith('spotify_library_') ? 'SoulSync' :
+                            virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
+                                virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
+                                    virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
+                                        'YouTube';
 
     const heroContext = {
         type: 'playlist',
@@ -31846,7 +31848,7 @@ async function showWatchlistModal() {
 
                 <div class="playlist-modal-body">
                     <div class="watchlist-actions" style="margin-bottom: 16px; display: flex; gap: 12px; align-items: center; padding: 12px 32px; flex-wrap: wrap;">
-                        <button class="playlist-modal-btn playlist-modal-btn-primary watchlist-btn-scan"
+                        <button class="playlist-modal-btn playlist-modal-btn-primary watchlist-btn-scan ${scanStatus === 'scanning' ? 'btn-processing' : ''}"
                                 id="scan-watchlist-btn"
                                 onclick="startWatchlistScan()"
                                 ${scanStatus === 'scanning' ? 'disabled' : ''}>
@@ -32849,6 +32851,7 @@ async function startWatchlistScan() {
         const button = document.getElementById('scan-watchlist-btn');
         button.disabled = true;
         button.textContent = 'Starting scan...';
+        button.classList.add('btn-processing');
 
         const response = await fetch('/api/watchlist/scan', {
             method: 'POST',
@@ -32876,6 +32879,7 @@ async function startWatchlistScan() {
         const button = document.getElementById('scan-watchlist-btn');
         button.disabled = false;
         button.textContent = 'Scan for New Releases';
+        button.classList.remove('btn-processing');
         alert(`Error starting scan: ${error.message}`);
     }
 }
@@ -32946,6 +32950,7 @@ function handleWatchlistScanData(data) {
         if (button) {
             button.disabled = false;
             button.textContent = 'Scan for New Releases';
+            button.classList.remove('btn-processing');
         }
 
         // Hide live activity
@@ -32995,6 +33000,7 @@ function handleWatchlistScanData(data) {
         if (button) {
             button.disabled = false;
             button.textContent = 'Scan for New Releases';
+            button.classList.remove('btn-processing');
         }
 
         // Hide live activity
@@ -33039,6 +33045,7 @@ async function updateSimilarArtists() {
 
         button.disabled = true;
         button.textContent = 'Updating...';
+        button.classList.add('btn-processing');
         if (scanButton) scanButton.disabled = true;
 
         const response = await fetch('/api/watchlist/update-similar-artists', {
@@ -33063,6 +33070,7 @@ async function updateSimilarArtists() {
 
         button.disabled = false;
         button.textContent = 'Update Similar Artists';
+        button.classList.remove('btn-processing');
         if (scanButton) scanButton.disabled = false;
 
         showToast(`Error: ${error.message}`, 'error');
@@ -33085,6 +33093,7 @@ async function pollSimilarArtistsUpdate() {
                 if (button) {
                     button.disabled = false;
                     button.textContent = 'Update Similar Artists';
+                    button.classList.remove('btn-processing');
                 }
                 if (scanButton) scanButton.disabled = false;
 
@@ -33095,6 +33104,7 @@ async function pollSimilarArtistsUpdate() {
                 if (button) {
                     button.disabled = false;
                     button.textContent = 'Update Similar Artists';
+                    button.classList.remove('btn-processing');
                 }
                 if (scanButton) scanButton.disabled = false;
 
@@ -33121,6 +33131,7 @@ async function pollSimilarArtistsUpdate() {
         if (button) {
             button.disabled = false;
             button.textContent = 'Update Similar Artists';
+            button.classList.remove('btn-processing');
         }
         if (scanButton) scanButton.disabled = false;
     }
@@ -42410,6 +42421,7 @@ async function loadDiscoverPage() {
     // Load all sections
     await Promise.all([
         loadDiscoverHero(),
+        loadSpotifyLibrarySection(),
         loadDiscoverRecentReleases(),
         loadSeasonalContent(),  // Seasonal discovery
         loadPersonalizedRecentlyAdded(),  // NEW: Recently added from library
@@ -43274,6 +43286,342 @@ async function loadDiscoverRecentReleases() {
         if (carousel) {
             carousel.innerHTML = '<div class="discover-empty"><p>Failed to load recent releases</p></div>';
         }
+    }
+}
+
+// ===============================
+// SPOTIFY LIBRARY SECTION
+// ===============================
+
+let spotifyLibraryAlbums = [];
+let spotifyLibraryPage = 0;
+let spotifyLibraryTotal = 0;
+const SPOTIFY_LIBRARY_PAGE_SIZE = 48;
+let _spotifyLibrarySearchTimeout = null;
+
+function debouncedSpotifyLibrarySearch() {
+    clearTimeout(_spotifyLibrarySearchTimeout);
+    _spotifyLibrarySearchTimeout = setTimeout(() => {
+        spotifyLibraryPage = 0;
+        loadSpotifyLibraryAlbums();
+    }, 400);
+}
+
+async function loadSpotifyLibrarySection() {
+    try {
+        const section = document.getElementById('spotify-library-section');
+        if (!section) return;
+
+        const response = await fetch(`/api/discover/spotify-library?offset=0&limit=${SPOTIFY_LIBRARY_PAGE_SIZE}`);
+        if (!response.ok) throw new Error('Failed to fetch');
+
+        const data = await response.json();
+        if (!data.success || !data.albums || data.albums.length === 0) {
+            section.style.display = 'none';
+            return;
+        }
+
+        section.style.display = '';
+        spotifyLibraryAlbums = data.albums;
+        spotifyLibraryTotal = data.total;
+        spotifyLibraryPage = 0;
+
+        // Update subtitle with stats
+        const subtitle = document.getElementById('spotify-library-subtitle');
+        if (subtitle && data.stats) {
+            const s = data.stats;
+            subtitle.textContent = `${s.total} albums \u00B7 ${s.owned} owned \u00B7 ${s.missing} missing`;
+        }
+
+        // Show download missing button if there are missing albums
+        const dlBtn = document.getElementById('spotify-library-download-missing-btn');
+        if (dlBtn && data.stats && data.stats.missing > 0) {
+            dlBtn.style.display = '';
+        }
+
+        // Show filters
+        const filters = document.getElementById('spotify-library-filters');
+        if (filters) filters.style.display = '';
+
+        renderSpotifyLibraryGrid(data.albums);
+        renderSpotifyLibraryPagination(data.total, 0);
+
+    } catch (error) {
+        console.error('Error loading Spotify library section:', error);
+        const section = document.getElementById('spotify-library-section');
+        if (section) section.style.display = 'none';
+    }
+}
+
+async function loadSpotifyLibraryAlbums() {
+    const grid = document.getElementById('spotify-library-grid');
+    if (!grid) return;
+
+    grid.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Loading...</p></div>';
+
+    try {
+        const search = (document.getElementById('spotify-library-search')?.value || '').trim();
+        const status = document.getElementById('spotify-library-status-filter')?.value || 'all';
+        const sort = document.getElementById('spotify-library-sort')?.value || 'date_saved';
+        const offset = spotifyLibraryPage * SPOTIFY_LIBRARY_PAGE_SIZE;
+
+        const params = new URLSearchParams({
+            offset, limit: SPOTIFY_LIBRARY_PAGE_SIZE, sort, sort_dir: 'desc', status
+        });
+        if (search) params.set('search', search);
+
+        const response = await fetch(`/api/discover/spotify-library?${params}`);
+        const data = await response.json();
+
+        if (!data.success) throw new Error(data.error);
+
+        spotifyLibraryAlbums = data.albums;
+        spotifyLibraryTotal = data.total;
+
+        // Update subtitle
+        const subtitle = document.getElementById('spotify-library-subtitle');
+        if (subtitle && data.stats) {
+            const s = data.stats;
+            subtitle.textContent = `${s.total} albums \u00B7 ${s.owned} owned \u00B7 ${s.missing} missing`;
+        }
+
+        renderSpotifyLibraryGrid(data.albums);
+        renderSpotifyLibraryPagination(data.total, offset);
+
+    } catch (error) {
+        console.error('Error loading Spotify library albums:', error);
+        grid.innerHTML = '<div class="spotify-library-empty"><p>Failed to load albums</p></div>';
+    }
+}
+
+function renderSpotifyLibraryGrid(albums) {
+    const grid = document.getElementById('spotify-library-grid');
+    if (!grid) return;
+
+    if (!albums || albums.length === 0) {
+        grid.innerHTML = '<div class="spotify-library-empty"><p>No albums found</p></div>';
+        return;
+    }
+
+    let html = '';
+    albums.forEach((album, index) => {
+        const coverUrl = album.image_url || '/static/placeholder-album.png';
+        const year = album.release_date ? album.release_date.substring(0, 4) : '';
+        const badgeClass = album.in_library ? 'owned' : 'missing';
+        const badgeIcon = album.in_library ? '\u2713' : '\u2193';
+        const trackInfo = album.total_tracks ? `${album.total_tracks} tracks` : '';
+        const meta = [year, trackInfo].filter(Boolean).join(' \u00B7 ');
+
+        html += `
+            <div class="spotify-library-card" onclick="openSpotifyLibraryAlbumDownload(${index})" title="${album.album_name} — ${album.artist_name}">
+                <div class="spotify-library-card-img">
+                    <img src="${coverUrl}" alt="${album.album_name}" loading="lazy">
+                    <div class="spotify-library-card-badge ${badgeClass}">${badgeIcon}</div>
+                </div>
+                <div class="spotify-library-card-info">
+                    <p class="spotify-library-card-title">${album.album_name}</p>
+                    <p class="spotify-library-card-artist">${album.artist_name}</p>
+                    <p class="spotify-library-card-meta">${meta}</p>
+                </div>
+            </div>
+        `;
+    });
+
+    grid.innerHTML = html;
+}
+
+function renderSpotifyLibraryPagination(total, offset) {
+    const container = document.getElementById('spotify-library-pagination');
+    if (!container) return;
+
+    if (total <= SPOTIFY_LIBRARY_PAGE_SIZE) {
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = '';
+    const totalPages = Math.ceil(total / SPOTIFY_LIBRARY_PAGE_SIZE);
+    const currentPage = Math.floor(offset / SPOTIFY_LIBRARY_PAGE_SIZE) + 1;
+    const showEnd = Math.min(offset + SPOTIFY_LIBRARY_PAGE_SIZE, total);
+
+    container.innerHTML = `
+        <button class="spotify-library-page-btn" onclick="spotifyLibraryPrevPage()" ${currentPage <= 1 ? 'disabled' : ''}>&larr; Previous</button>
+        <span class="spotify-library-page-info">${offset + 1}\u2013${showEnd} of ${total}</span>
+        <button class="spotify-library-page-btn" onclick="spotifyLibraryNextPage()" ${currentPage >= totalPages ? 'disabled' : ''}>Next &rarr;</button>
+    `;
+}
+
+function spotifyLibraryPrevPage() {
+    if (spotifyLibraryPage > 0) {
+        spotifyLibraryPage--;
+        loadSpotifyLibraryAlbums();
+    }
+}
+
+function spotifyLibraryNextPage() {
+    const totalPages = Math.ceil(spotifyLibraryTotal / SPOTIFY_LIBRARY_PAGE_SIZE);
+    if (spotifyLibraryPage < totalPages - 1) {
+        spotifyLibraryPage++;
+        loadSpotifyLibraryAlbums();
+    }
+}
+
+async function openSpotifyLibraryAlbumDownload(index) {
+    const album = spotifyLibraryAlbums[index];
+    if (!album) {
+        showToast('Album data not found', 'error');
+        return;
+    }
+
+    console.log(`\u{1F4E5} Opening download modal for Spotify library album: ${album.album_name}`);
+    showLoadingOverlay(`Loading tracks for ${album.album_name}...`);
+
+    try {
+        const _params = new URLSearchParams({ name: album.album_name || '', artist: album.artist_name || '' });
+        const response = await fetch(`/api/discover/album/spotify/${album.spotify_album_id}?${_params}`);
+        if (!response.ok) throw new Error('Failed to fetch album tracks');
+
+        const albumData = await response.json();
+        if (!albumData.tracks || albumData.tracks.length === 0) {
+            throw new Error('No tracks found in album');
+        }
+
+        const spotifyTracks = albumData.tracks.map(track => {
+            let artists = track.artists || albumData.artists || [{ name: album.artist_name }];
+            if (Array.isArray(artists)) {
+                artists = artists.map(a => a.name || a);
+            }
+            return {
+                id: track.id,
+                name: track.name,
+                artists: artists,
+                album: {
+                    id: albumData.id,
+                    name: albumData.name,
+                    album_type: albumData.album_type || 'album',
+                    total_tracks: albumData.total_tracks || 0,
+                    release_date: albumData.release_date || '',
+                    images: albumData.images || []
+                },
+                duration_ms: track.duration_ms || 0,
+                track_number: track.track_number || 0
+            };
+        });
+
+        const virtualPlaylistId = `spotify_library_${album.spotify_album_id}`;
+        const artistContext = {
+            id: album.artist_id,
+            name: album.artist_name,
+            source: 'spotify'
+        };
+        const albumContext = {
+            id: albumData.id,
+            name: albumData.name,
+            album_type: albumData.album_type || 'album',
+            total_tracks: albumData.total_tracks || 0,
+            release_date: albumData.release_date || '',
+            images: albumData.images || []
+        };
+
+        await openDownloadMissingModalForYouTube(virtualPlaylistId, albumData.name, spotifyTracks, artistContext, albumContext);
+        hideLoadingOverlay();
+
+    } catch (error) {
+        console.error('Error opening Spotify library album download:', error);
+        showToast(`Failed to load album: ${error.message}`, 'error');
+        hideLoadingOverlay();
+    }
+}
+
+async function refreshSpotifyLibraryCache() {
+    try {
+        showToast('Refreshing Spotify library...', 'info');
+        const response = await fetch('/api/discover/spotify-library/refresh', { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            showToast('Spotify library refresh started — will update shortly', 'success');
+            // Reload after a delay to let the sync run
+            setTimeout(() => loadSpotifyLibrarySection(), 10000);
+        } else {
+            showToast(`Error: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+async function downloadMissingSpotifyLibraryAlbums() {
+    // Fetch all missing albums (no pagination limit)
+    try {
+        const response = await fetch('/api/discover/spotify-library?status=missing&limit=500&offset=0');
+        const data = await response.json();
+        if (!data.success || !data.albums || data.albums.length === 0) {
+            showToast('No missing albums to download', 'info');
+            return;
+        }
+
+        const missing = data.albums.filter(a => !a.in_library);
+        if (missing.length === 0) {
+            showToast('All albums are already in your library!', 'success');
+            return;
+        }
+
+        if (!confirm(`Download ${missing.length} missing album${missing.length > 1 ? 's' : ''} from your Spotify library?`)) {
+            return;
+        }
+
+        showToast(`Starting download for ${missing.length} albums...`, 'info');
+
+        // Download one at a time to avoid overwhelming the system
+        for (let i = 0; i < missing.length; i++) {
+            const album = missing[i];
+            try {
+                showToast(`Queuing ${i + 1}/${missing.length}: ${album.album_name}`, 'info');
+
+                const _params = new URLSearchParams({ name: album.album_name || '', artist: album.artist_name || '' });
+                const response = await fetch(`/api/discover/album/spotify/${album.spotify_album_id}?${_params}`);
+                if (!response.ok) continue;
+
+                const albumData = await response.json();
+                if (!albumData.tracks || albumData.tracks.length === 0) continue;
+
+                const spotifyTracks = albumData.tracks.map(track => {
+                    let artists = track.artists || albumData.artists || [{ name: album.artist_name }];
+                    if (Array.isArray(artists)) artists = artists.map(a => a.name || a);
+                    return {
+                        id: track.id,
+                        name: track.name,
+                        artists: artists,
+                        album: {
+                            id: albumData.id,
+                            name: albumData.name,
+                            album_type: albumData.album_type || 'album',
+                            total_tracks: albumData.total_tracks || 0,
+                            release_date: albumData.release_date || '',
+                            images: albumData.images || []
+                        },
+                        duration_ms: track.duration_ms || 0,
+                        track_number: track.track_number || 0
+                    };
+                });
+
+                const virtualPlaylistId = `spotify_library_${album.spotify_album_id}`;
+                await openDownloadMissingModalForYouTube(virtualPlaylistId, albumData.name, spotifyTracks, {
+                    id: album.artist_id, name: album.artist_name, source: 'spotify'
+                }, {
+                    id: albumData.id, name: albumData.name, album_type: albumData.album_type || 'album',
+                    total_tracks: albumData.total_tracks || 0, release_date: albumData.release_date || '',
+                    images: albumData.images || []
+                });
+
+            } catch (err) {
+                console.error(`Error downloading album ${album.album_name}:`, err);
+            }
+        }
+
+    } catch (error) {
+        console.error('Error downloading missing Spotify library albums:', error);
+        showToast(`Error: ${error.message}`, 'error');
     }
 }
 
