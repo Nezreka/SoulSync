@@ -478,7 +478,40 @@ class WatchlistScanner:
             logger.warning(f"No valid client/ID for {watchlist_artist.artist_name}")
             return None
 
-        return self._get_artist_discography_with_client(client, artist_id, last_scan_timestamp)
+        albums = self._get_artist_discography_with_client(client, artist_id, last_scan_timestamp)
+
+        # If primary provider returned nothing, try the other provider as fallback
+        if not albums:
+            fallback_id = None
+            fallback_client = None
+
+            if provider == 'spotify':
+                fallback_client = self.metadata_service.itunes
+                fallback_id = watchlist_artist.itunes_artist_id
+                # If no iTunes ID stored, search by name and cache it
+                if not fallback_id:
+                    try:
+                        search_results = fallback_client.search_artists(watchlist_artist.artist_name, limit=1)
+                        if search_results:
+                            fallback_id = search_results[0].id
+                            logger.info(f"Resolved iTunes ID {fallback_id} for {watchlist_artist.artist_name}")
+                            self.database.update_watchlist_artist_itunes_id(
+                                watchlist_artist.spotify_artist_id or str(watchlist_artist.id),
+                                fallback_id
+                            )
+                            watchlist_artist.itunes_artist_id = fallback_id
+                    except Exception as e:
+                        logger.debug(f"Could not resolve iTunes ID for {watchlist_artist.artist_name}: {e}")
+
+            elif provider == 'itunes':
+                fallback_client = self.metadata_service.spotify
+                fallback_id = watchlist_artist.spotify_artist_id
+
+            if fallback_client and fallback_id:
+                logger.info(f"{provider.capitalize()} returned no albums for {watchlist_artist.artist_name}, falling back to {'iTunes' if provider == 'spotify' else 'Spotify'}")
+                albums = self._get_artist_discography_with_client(fallback_client, fallback_id, last_scan_timestamp)
+
+        return albums
 
     def scan_all_watchlist_artists(self) -> List[ScanResult]:
         """
