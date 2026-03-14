@@ -841,8 +841,9 @@ class WatchlistScanner:
             return
         
         logger.info(f"🔄 Backfilling {len(artists_to_match)} artists with {provider} IDs...")
-        
+
         matched_count = 0
+        unmatched_names = []
         for artist in artists_to_match:
             try:
                 if provider == 'spotify':
@@ -852,7 +853,9 @@ class WatchlistScanner:
                         artist.spotify_artist_id = new_id  # Update in memory
                         matched_count += 1
                         logger.info(f"✅ Matched '{artist.artist_name}' to Spotify: {new_id}")
-                
+                    else:
+                        unmatched_names.append(artist.artist_name)
+
                 elif provider == 'itunes':
                     new_id = self._match_to_itunes(artist.artist_name)
                     if new_id:
@@ -860,42 +863,114 @@ class WatchlistScanner:
                         artist.itunes_artist_id = new_id  # Update in memory
                         matched_count += 1
                         logger.info(f"✅ Matched '{artist.artist_name}' to iTunes: {new_id}")
-                
+                    else:
+                        unmatched_names.append(artist.artist_name)
+
                 # Small delay to avoid API rate limits
                 time.sleep(0.3)
-                
+
             except Exception as e:
                 logger.warning(f"Could not match '{artist.artist_name}' to {provider}: {e}")
+                unmatched_names.append(artist.artist_name)
                 continue
-        
+
         logger.info(f"✅ Backfilled {matched_count}/{len(artists_to_match)} artists with {provider} IDs")
+        if unmatched_names:
+            logger.warning(f"⚠️ Could not confidently match {len(unmatched_names)} artists: {', '.join(unmatched_names[:10])}"
+                          f"{'...' if len(unmatched_names) > 10 else ''} — use Watchlist Settings to link manually")
+
+    @staticmethod
+    def _normalize_artist_name(name: str) -> str:
+        """Normalize artist name for comparison."""
+        if not name:
+            return ""
+        s = name.lower().strip()
+        # Remove "the " prefix
+        s = re.sub(r'^the\s+', '', s)
+        # Remove non-alphanumeric except spaces
+        s = re.sub(r'[^\w\s]', '', s)
+        # Collapse whitespace
+        s = re.sub(r'\s+', ' ', s).strip()
+        return s
+
+    @staticmethod
+    def _artist_name_similarity(name_a: str, name_b: str) -> float:
+        """Calculate similarity between two artist names (0.0-1.0)."""
+        from difflib import SequenceMatcher
+        na = WatchlistScanner._normalize_artist_name(name_a)
+        nb = WatchlistScanner._normalize_artist_name(name_b)
+        if not na or not nb:
+            return 0.0
+        if na == nb:
+            return 1.0
+        return SequenceMatcher(None, na, nb).ratio()
+
+    def _best_artist_match(self, results, artist_name: str) -> Optional[str]:
+        """Pick the best matching artist from search results using name similarity.
+
+        Returns the artist ID only if we're confident it's the right match.
+        """
+        if not results:
+            return None
+
+        # Exact normalized match gets immediate acceptance
+        for r in results:
+            if self._normalize_artist_name(r.name) == self._normalize_artist_name(artist_name):
+                logger.info(f"  Exact match: '{r.name}' (id={r.id})")
+                return r.id
+
+        # Score all results by name similarity + popularity bonus
+        candidates = []
+        for r in results:
+            sim = self._artist_name_similarity(artist_name, r.name)
+            # Small popularity bonus (max 0.05) to break ties between similar names
+            pop_bonus = (getattr(r, 'popularity', 0) / 100) * 0.05
+            score = sim + pop_bonus
+            candidates.append((r, sim, score))
+            logger.debug(f"  Candidate: '{r.name}' sim={sim:.2f} pop={getattr(r, 'popularity', 0)} score={score:.3f}")
+
+        # Sort by score descending
+        candidates.sort(key=lambda x: x[2], reverse=True)
+        best, best_sim, best_score = candidates[0]
+
+        # Require high similarity to accept (0.85 threshold)
+        if best_sim >= 0.85:
+            logger.info(f"  Best match: '{best.name}' (sim={best_sim:.2f}, id={best.id})")
+            return best.id
+
+        # Between 0.70-0.85: accept only if it's clearly better than runner-up
+        if best_sim >= 0.70 and len(candidates) > 1:
+            runner_up_sim = candidates[1][1]
+            if best_sim - runner_up_sim >= 0.15:
+                logger.info(f"  Best match (clear winner): '{best.name}' (sim={best_sim:.2f}, id={best.id})")
+                return best.id
+
+        logger.warning(f"  No confident match for '{artist_name}' — best was '{best.name}' (sim={best_sim:.2f})")
+        return None
 
     def _match_to_spotify(self, artist_name: str) -> Optional[str]:
-        """Match artist name to Spotify ID"""
+        """Match artist name to Spotify ID using fuzzy name comparison."""
         try:
-            # Use metadata service if available, fallback to spotify_client
             if hasattr(self, '_metadata_service') and self._metadata_service:
-                results = self._metadata_service.spotify.search_artists(artist_name, limit=1)
+                results = self._metadata_service.spotify.search_artists(artist_name, limit=5)
             else:
-                results = self.spotify_client.search_artists(artist_name, limit=1)
-            
-            if results:
-                return results[0].id
+                results = self.spotify_client.search_artists(artist_name, limit=5)
+
+            return self._best_artist_match(results, artist_name)
         except Exception as e:
             logger.warning(f"Could not match {artist_name} to Spotify: {e}")
         return None
-    
+
     def _match_to_itunes(self, artist_name: str) -> Optional[str]:
-        """Match artist name to iTunes ID"""
+        """Match artist name to iTunes ID using fuzzy name comparison."""
         try:
-            # Use metadata service's iTunes client
             if hasattr(self, '_metadata_service') and self._metadata_service:
-                results = self._metadata_service.itunes.search_artists(artist_name, limit=1)
-                if results:
-                    return results[0].id
+                results = self._metadata_service.itunes.search_artists(artist_name, limit=5)
             else:
-                # iTunes client not available without metadata service
                 logger.warning(f"Cannot match to iTunes - MetadataService not available")
+                return None
+
+            return self._best_artist_match(results, artist_name)
         except Exception as e:
             logger.warning(f"Could not match {artist_name} to iTunes: {e}")
         return None
