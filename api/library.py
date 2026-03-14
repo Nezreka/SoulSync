@@ -260,7 +260,7 @@ def register_routes(bp):
 
         Query params:
             type: 'artist', 'album', or 'track' (required)
-            provider: 'spotify', 'musicbrainz', 'itunes', 'deezer', 'audiodb' (required)
+            provider: 'spotify', 'musicbrainz', 'itunes', 'deezer', 'audiodb', 'tidal', 'qobuz', 'genius' (required)
             id: the external ID value (required)
         """
         entity_type = request.args.get("type")
@@ -276,8 +276,12 @@ def register_routes(bp):
         if not table:
             return api_error("BAD_REQUEST", "type must be 'artist', 'album', or 'track'.", 400)
 
-        if provider not in ("spotify", "musicbrainz", "itunes", "deezer", "audiodb"):
-            return api_error("BAD_REQUEST", "provider must be spotify, musicbrainz, itunes, deezer, or audiodb.", 400)
+        # genius only exists on artists and tracks, not albums
+        valid_providers = ("spotify", "musicbrainz", "itunes", "deezer", "audiodb", "tidal", "qobuz", "genius")
+        if provider not in valid_providers:
+            return api_error("BAD_REQUEST", f"provider must be one of: {', '.join(valid_providers)}.", 400)
+        if provider == "genius" and entity_type == "album":
+            return api_error("BAD_REQUEST", "Genius IDs are not available for albums. Use artist or track.", 400)
 
         try:
             db = get_database()

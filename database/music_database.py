@@ -7141,7 +7141,8 @@ class MusicDatabase:
 
         Args:
             table: 'artists', 'albums', or 'tracks'
-            provider: 'spotify', 'musicbrainz', 'itunes', 'deezer', 'audiodb'
+            provider: 'spotify', 'musicbrainz', 'itunes', 'deezer', 'audiodb',
+                      'tidal', 'qobuz', 'genius' (genius: artists/tracks only)
         """
         column_map = {
             "artists": {
@@ -7150,6 +7151,9 @@ class MusicDatabase:
                 "itunes": "itunes_artist_id",
                 "deezer": "deezer_id",
                 "audiodb": "audiodb_id",
+                "tidal": "tidal_id",
+                "qobuz": "qobuz_id",
+                "genius": "genius_id",
             },
             "albums": {
                 "spotify": "spotify_album_id",
@@ -7157,6 +7161,8 @@ class MusicDatabase:
                 "itunes": "itunes_album_id",
                 "deezer": "deezer_id",
                 "audiodb": "audiodb_id",
+                "tidal": "tidal_id",
+                "qobuz": "qobuz_id",
             },
             "tracks": {
                 "spotify": "spotify_track_id",
@@ -7164,6 +7170,9 @@ class MusicDatabase:
                 "itunes": "itunes_track_id",
                 "deezer": "deezer_id",
                 "audiodb": "audiodb_id",
+                "tidal": "tidal_id",
+                "qobuz": "qobuz_id",
+                "genius": "genius_id",
             },
         }
         if table not in column_map or provider not in column_map[table]:
