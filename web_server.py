@@ -29050,7 +29050,10 @@ def watchlist_artist_config(artist_id):
                 "success": True,
                 "config": config,
                 "artist": artist_info,
-                "recent_releases": releases
+                "recent_releases": releases,
+                "spotify_artist_id": spotify_id,
+                "itunes_artist_id": itunes_id,
+                "watchlist_name": result[7],  # Original stored watchlist artist name
             })
 
         else:  # POST
@@ -29108,6 +29111,74 @@ def watchlist_artist_config(artist_id):
 
     except Exception as e:
         print(f"Error in watchlist artist config: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/watchlist/artist/<artist_id>/link-provider', methods=['POST'])
+def watchlist_artist_link_provider(artist_id):
+    """Manually link a watchlist artist to a different Spotify/iTunes artist."""
+    try:
+        from database.music_database import get_database
+        database = get_database()
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+
+        new_provider_id = data.get('provider_id', '').strip()
+        provider = data.get('provider', '').strip()  # 'spotify' or 'itunes'
+
+        if not new_provider_id or provider not in ('spotify', 'itunes'):
+            return jsonify({"success": False, "error": "Missing provider or provider_id"}), 400
+
+        conn = sqlite3.connect(str(database.database_path))
+        cursor = conn.cursor()
+
+        # Find the watchlist artist row
+        cursor.execute("""
+            SELECT id, artist_name, spotify_artist_id, itunes_artist_id
+            FROM watchlist_artists
+            WHERE spotify_artist_id = ? OR itunes_artist_id = ?
+        """, (artist_id, artist_id))
+        row = cursor.fetchone()
+
+        if not row:
+            conn.close()
+            return jsonify({"success": False, "error": "Artist not found in watchlist"}), 404
+
+        watchlist_row_id = row[0]
+        artist_name = row[1]
+
+        # Check for duplicate — another watchlist artist already has this provider ID
+        col = 'spotify_artist_id' if provider == 'spotify' else 'itunes_artist_id'
+        cursor.execute(f"SELECT id, artist_name FROM watchlist_artists WHERE {col} = ? AND id != ?",
+                       (new_provider_id, watchlist_row_id))
+        duplicate = cursor.fetchone()
+        if duplicate:
+            conn.close()
+            return jsonify({"success": False, "error": f"Another watchlist artist ('{duplicate[1]}') already has this {provider} ID"}), 409
+
+        if provider == 'spotify':
+            cursor.execute("UPDATE watchlist_artists SET spotify_artist_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                           (new_provider_id, watchlist_row_id))
+        else:
+            cursor.execute("UPDATE watchlist_artists SET itunes_artist_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                           (new_provider_id, watchlist_row_id))
+
+        conn.commit()
+        conn.close()
+
+        print(f"✅ Manually linked watchlist artist '{artist_name}' to {provider} ID: {new_provider_id}")
+
+        return jsonify({
+            "success": True,
+            "message": f"Linked to {provider} artist successfully",
+            "new_provider_id": new_provider_id
+        })
+
+    except Exception as e:
+        print(f"Error linking watchlist artist provider: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
