@@ -4311,6 +4311,11 @@ body {
 }
 
 /* Confirm Dialog Modal */
+/* Confirm dialog must sit above all other modals (playlist, download, etc.) */
+#confirm-modal-overlay {
+    z-index: 11000;
+}
+
 .confirm-modal {
     background: linear-gradient(135deg, #1a1a1a 0%, #121212 100%);
     border-radius: 20px;
@@ -15384,6 +15389,73 @@ body {
     opacity: 0.6;
     cursor: not-allowed;
     transform: none;
+}
+
+/* Artist Detail Watchlist Button Group (with settings gear) */
+.artist-detail-watchlist-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.artist-detail-watchlist-settings-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    font-size: 18px;
+    color: #aaa;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    outline: none;
+}
+
+.artist-detail-watchlist-settings-btn:hover {
+    background: rgba(255, 193, 7, 0.15);
+    color: #ffc107;
+    border-color: rgba(255, 193, 7, 0.3);
+    transform: translateY(-1px);
+}
+
+/* Artist Card Watchlist Button Group (artists/discover page) */
+.watchlist-btn-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.watchlist-btn-group .watchlist-toggle-btn {
+    flex: 1;
+}
+
+.watchlist-settings-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    font-size: 16px;
+    color: #aaa;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    outline: none;
+    flex-shrink: 0;
+}
+
+.watchlist-settings-btn:hover {
+    background: rgba(255, 193, 7, 0.15);
+    color: #ffc107;
+    border-color: rgba(255, 193, 7, 0.3);
+    transform: translateY(-1px);
 }
 
 /* Library Artist Watchlist Button */
