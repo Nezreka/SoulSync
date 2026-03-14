@@ -9829,6 +9829,371 @@ def get_write_tags_batch_status():
         return jsonify(state)
 
 
+# ── Reorganize Album Files endpoint ──
+
+_reorganize_state = {
+    'status': 'idle',
+    'total': 0,
+    'processed': 0,
+    'moved': 0,
+    'skipped': 0,
+    'failed': 0,
+    'current_track': '',
+    'errors': [],
+}
+_reorganize_lock = threading.Lock()
+
+
+@app.route('/api/library/album/<album_id>/reorganize/preview', methods=['POST'])
+def reorganize_album_preview(album_id):
+    """Preview file reorganization for an album — returns current vs proposed paths without moving anything."""
+    try:
+        database = get_database()
+        data = request.get_json() or {}
+        template = data.get('template', '').strip()
+        if not template:
+            return jsonify({"success": False, "error": "Template is required"}), 400
+
+        conn = database._get_connection()
+        cursor = conn.cursor()
+
+        # Get album + artist info
+        cursor.execute("""
+            SELECT al.*, a.name as artist_name
+            FROM albums al
+            JOIN artists a ON al.artist_id = a.id
+            WHERE al.id = ?
+        """, (str(album_id),))
+        album_row = cursor.fetchone()
+        if not album_row:
+            return jsonify({"success": False, "error": "Album not found"}), 404
+        album_data = dict(album_row)
+
+        # Get all tracks for this album
+        cursor.execute("""
+            SELECT t.*, a.name as artist_name
+            FROM tracks t
+            JOIN artists a ON t.artist_id = a.id
+            WHERE t.album_id = ?
+            ORDER BY t.track_number
+        """, (str(album_id),))
+        tracks = [dict(r) for r in cursor.fetchall()]
+
+        if not tracks:
+            return jsonify({"success": False, "error": "No tracks found for this album"}), 404
+
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+
+        preview_items = []
+        for track in tracks:
+            file_path = track.get('file_path')
+            resolved = _resolve_library_file_path(file_path) if file_path else None
+
+            # Read disc_number from file tags if available
+            disc_number = 1
+            if resolved:
+                try:
+                    from core.tag_writer import read_file_tags
+                    file_tags = read_file_tags(resolved)
+                    disc_number = file_tags.get('disc_number') or 1
+                except Exception:
+                    pass
+
+            # Get file extension from current path
+            file_ext = os.path.splitext(resolved or file_path or '.mp3')[1]
+
+            # Detect quality using the same format as the download pipeline
+            quality = _get_audio_quality_string(resolved) if resolved else ''
+
+            # Build context for template
+            year_val = album_data.get('year') or ''
+            context = {
+                'artist': track.get('artist_name') or 'Unknown Artist',
+                'albumartist': album_data.get('artist_name') or track.get('artist_name') or 'Unknown Artist',
+                'album': album_data.get('title') or 'Unknown Album',
+                'title': track.get('title') or 'Unknown Track',
+                'track_number': track.get('track_number') or 1,
+                'disc_number': disc_number,
+                'year': year_val,
+                'quality': quality,
+            }
+
+            # Build new path using the template
+            folder_path, filename = _get_file_path_from_template_raw(template, context)
+            new_relative = os.path.join(folder_path, f"{filename}{file_ext}") if folder_path else f"{filename}{file_ext}"
+            new_full = os.path.join(transfer_dir, new_relative)
+
+            # Current path relative to transfer dir for display
+            current_display = file_path or 'No file'
+            if resolved and transfer_dir and resolved.startswith(transfer_dir):
+                current_display = resolved[len(transfer_dir):].lstrip(os.sep).lstrip('/')
+
+            same = resolved and os.path.normpath(resolved) == os.path.normpath(new_full)
+
+            preview_items.append({
+                'track_id': track['id'],
+                'title': track.get('title', ''),
+                'track_number': track.get('track_number', 0),
+                'current_path': current_display,
+                'new_path': new_relative,
+                'new_full_normalized': os.path.normpath(new_full) if resolved else None,
+                'file_exists': resolved is not None,
+                'unchanged': same,
+                'collision': False,
+            })
+
+        # Detect collisions: multiple tracks mapping to the same destination
+        seen_paths = {}
+        for item in preview_items:
+            norm = item.get('new_full_normalized')
+            if not norm or not item['file_exists'] or item['unchanged']:
+                continue
+            if norm in seen_paths:
+                item['collision'] = True
+                # Also mark the first one that claimed this path
+                seen_paths[norm]['collision'] = True
+            else:
+                seen_paths[norm] = item
+
+        # Remove internal field from response
+        for item in preview_items:
+            item.pop('new_full_normalized', None)
+
+        return jsonify({
+            "success": True,
+            "album": album_data.get('title', ''),
+            "artist": album_data.get('artist_name', ''),
+            "tracks": preview_items,
+            "transfer_dir": transfer_dir,
+        })
+
+    except Exception as e:
+        logger.error(f"Reorganize preview error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/album/<album_id>/reorganize', methods=['POST'])
+def reorganize_album_files(album_id):
+    """Move album files to new paths based on the provided template."""
+    try:
+        data = request.get_json() or {}
+        template = data.get('template', '').strip()
+        if not template:
+            return jsonify({"success": False, "error": "Template is required"}), 400
+
+        # Atomic check-and-set to prevent concurrent reorganizations
+        with _reorganize_lock:
+            if _reorganize_state['status'] == 'running':
+                return jsonify({"success": False, "error": "A reorganization is already in progress"}), 409
+            _reorganize_state['status'] = 'running'
+
+        database = get_database()
+        conn = database._get_connection()
+        cursor = conn.cursor()
+
+        # Get album + artist info
+        cursor.execute("""
+            SELECT al.*, a.name as artist_name
+            FROM albums al
+            JOIN artists a ON al.artist_id = a.id
+            WHERE al.id = ?
+        """, (str(album_id),))
+        album_row = cursor.fetchone()
+        if not album_row:
+            with _reorganize_lock:
+                _reorganize_state['status'] = 'idle'
+            return jsonify({"success": False, "error": "Album not found"}), 404
+        album_data = dict(album_row)
+
+        # Get all tracks
+        cursor.execute("""
+            SELECT t.*, a.name as artist_name
+            FROM tracks t
+            JOIN artists a ON t.artist_id = a.id
+            WHERE t.album_id = ?
+            ORDER BY t.track_number
+        """, (str(album_id),))
+        tracks = [dict(r) for r in cursor.fetchall()]
+
+        if not tracks:
+            with _reorganize_lock:
+                _reorganize_state['status'] = 'idle'
+            return jsonify({"success": False, "error": "No tracks found"}), 404
+
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+
+        # Initialize state (already set to 'running' above)
+        with _reorganize_lock:
+            _reorganize_state.update({
+                'total': len(tracks),
+                'processed': 0,
+                'moved': 0,
+                'skipped': 0,
+                'failed': 0,
+                'current_track': '',
+                'errors': [],
+            })
+
+        def _run_reorganize():
+            bg_conn = None
+            try:
+                # Single DB connection for the background thread
+                bg_db = get_database()
+                bg_conn = bg_db._get_connection()
+
+                # Pre-compute all destination paths to detect collisions
+                dest_paths = {}  # normalized_new_path -> track_id
+                for track in tracks:
+                    file_path = track.get('file_path')
+                    resolved = _resolve_library_file_path(file_path) if file_path else None
+                    if not resolved:
+                        continue
+
+                    disc_number = 1
+                    try:
+                        from core.tag_writer import read_file_tags
+                        file_tags = read_file_tags(resolved)
+                        disc_number = file_tags.get('disc_number') or 1
+                    except Exception:
+                        pass
+
+                    file_ext = os.path.splitext(resolved)[1]
+                    quality = _get_audio_quality_string(resolved)
+
+                    year_val = album_data.get('year') or ''
+                    context = {
+                        'artist': track.get('artist_name') or 'Unknown Artist',
+                        'albumartist': album_data.get('artist_name') or track.get('artist_name') or 'Unknown Artist',
+                        'album': album_data.get('title') or 'Unknown Album',
+                        'title': track.get('title') or 'Unknown Track',
+                        'track_number': track.get('track_number') or 1,
+                        'disc_number': disc_number,
+                        'year': year_val,
+                        'quality': quality,
+                    }
+
+                    folder_path, filename = _get_file_path_from_template_raw(template, context)
+                    new_relative = os.path.join(folder_path, f"{filename}{file_ext}") if folder_path else f"{filename}{file_ext}"
+                    new_full = os.path.join(transfer_dir, new_relative)
+                    norm_new = os.path.normpath(new_full)
+
+                    # Check for collision: two tracks mapping to same destination
+                    if norm_new in dest_paths and dest_paths[norm_new] != str(track['id']):
+                        # Mark as collision so the move pass skips it
+                        track['_collision'] = True
+                        with _reorganize_lock:
+                            _reorganize_state['failed'] += 1
+                            _reorganize_state['processed'] += 1
+                            _reorganize_state['errors'].append({
+                                'track_id': track['id'],
+                                'title': track.get('title', 'Unknown'),
+                                'error': f"Path collision with another track — add $track or $disc to template"
+                            })
+                        continue
+
+                    dest_paths[norm_new] = str(track['id'])
+
+                    # Store computed info on the track dict for the move pass
+                    track['_resolved'] = resolved
+                    track['_new_full'] = new_full
+                    track['_disc_number'] = disc_number
+
+                # Now do the actual moves
+                for track in tracks:
+                    resolved = track.get('_resolved')
+                    new_full = track.get('_new_full')
+                    track_title = track.get('title', 'Unknown')
+
+                    with _reorganize_lock:
+                        _reorganize_state['current_track'] = track_title
+
+                    # Skip tracks already handled (collision or file not found)
+                    if track.get('_collision'):
+                        continue
+
+                    if not resolved or not new_full:
+                        # File not found — only count if not already handled in pre-computation
+                        if '_resolved' not in track:
+                            with _reorganize_lock:
+                                _reorganize_state['skipped'] += 1
+                                _reorganize_state['processed'] += 1
+                                _reorganize_state['errors'].append({
+                                    'track_id': track['id'],
+                                    'title': track_title,
+                                    'error': 'File not found on disk'
+                                })
+                        continue
+
+                    # Skip if already at target
+                    if os.path.normpath(resolved) == os.path.normpath(new_full):
+                        with _reorganize_lock:
+                            _reorganize_state['skipped'] += 1
+                            _reorganize_state['processed'] += 1
+                        continue
+
+                    try:
+                        # Move file
+                        _safe_move_file(resolved, new_full)
+
+                        # Update DB file_path
+                        bg_cursor = bg_conn.cursor()
+                        bg_cursor.execute(
+                            "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                            (new_full, str(track['id']))
+                        )
+                        bg_conn.commit()
+
+                        # Clean up empty directories left behind
+                        _cleanup_empty_directories(transfer_dir, resolved)
+
+                        with _reorganize_lock:
+                            _reorganize_state['moved'] += 1
+                            _reorganize_state['processed'] += 1
+
+                    except Exception as move_err:
+                        logger.error(f"Reorganize move error for {track_title}: {move_err}")
+                        with _reorganize_lock:
+                            _reorganize_state['failed'] += 1
+                            _reorganize_state['processed'] += 1
+                            _reorganize_state['errors'].append({
+                                'track_id': track['id'],
+                                'title': track_title,
+                                'error': str(move_err)
+                            })
+
+            except Exception as e:
+                logger.error(f"Reorganize background error: {e}")
+            finally:
+                if bg_conn:
+                    try:
+                        bg_conn.close()
+                    except Exception:
+                        pass
+                with _reorganize_lock:
+                    _reorganize_state['status'] = 'done'
+                    _reorganize_state['current_track'] = ''
+
+        thread = threading.Thread(target=_run_reorganize, daemon=True, name="ReorganizeAlbum")
+        thread.start()
+
+        return jsonify({"success": True, "message": "Reorganization started", "total": len(tracks)})
+
+    except Exception as e:
+        logger.error(f"Reorganize error: {e}")
+        with _reorganize_lock:
+            _reorganize_state['status'] = 'idle'
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/album/reorganize/status', methods=['GET'])
+def get_reorganize_status():
+    """Poll the status of a running reorganization."""
+    with _reorganize_lock:
+        state = dict(_reorganize_state)
+        state['errors'] = list(_reorganize_state['errors'])
+        return jsonify(state)
+
+
 def _sync_tracks_to_server(track_rows, server_type):
     """Sync metadata for tracks to the active media server after writing file tags.
 
@@ -12663,6 +13028,67 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             os.makedirs(single_dir, exist_ok=True)
             new_filename = f"{final_track_name_sanitized}{file_ext}"
             return os.path.join(single_dir, new_filename), True
+
+def _get_file_path_from_template_raw(template: str, context: dict) -> tuple:
+    """
+    Build file path using a user-provided template string directly.
+    Unlike _get_file_path_from_template, this bypasses config lookup and the
+    file_organization.enabled check — used by the reorganize feature where the
+    user supplies the template explicitly.
+
+    Args:
+        template: Template string like "$artist/$album/$track - $title"
+        context: Dict with all track/album metadata
+
+    Returns:
+        (folder_path, filename_base) tuple — no file extension included
+    """
+    import re
+    full_path = _apply_path_template(template, context)
+
+    quality_value = context.get('quality', '')
+    disc_value = f"{context.get('disc_number', 1):02d}"
+
+    path_parts = full_path.split('/')
+
+    if len(path_parts) > 1:
+        folder_parts = path_parts[:-1]
+        filename_base = path_parts[-1]
+
+        cleaned_folders = []
+        for part in folder_parts:
+            part = part.replace('$quality', '')
+            part = part.replace('$disc', '')
+            part = re.sub(r'\s*\[\s*\]', '', part)
+            part = re.sub(r'\s*\(\s*\)', '', part)
+            part = re.sub(r'\s*\{\s*\}', '', part)
+            part = re.sub(r'\s*-\s*$', '', part)
+            part = re.sub(r'^\s*-\s*', '', part)
+            part = re.sub(r'\s+', ' ', part).strip()
+            if part:
+                cleaned_folders.append(part)
+
+        filename_base = filename_base.replace('$quality', quality_value)
+        filename_base = filename_base.replace('$disc', disc_value)
+        filename_base = re.sub(r'\s*\[\s*\]', '', filename_base)
+        filename_base = re.sub(r'\s*\(\s*\)', '', filename_base)
+        filename_base = re.sub(r'\s*\{\s*\}', '', filename_base)
+        filename_base = re.sub(r'\s*-\s*$', '', filename_base)
+        filename_base = re.sub(r'\s+', ' ', filename_base).strip()
+
+        sanitized_folders = [_sanitize_filename(part) for part in cleaned_folders]
+        folder_path = os.path.join(*sanitized_folders) if sanitized_folders else ''
+        return folder_path, _sanitize_filename(filename_base)
+    else:
+        full_path = full_path.replace('$quality', quality_value)
+        full_path = full_path.replace('$disc', disc_value)
+        full_path = re.sub(r'\s*\[\s*\]', '', full_path)
+        full_path = re.sub(r'\s*\(\s*\)', '', full_path)
+        full_path = re.sub(r'\s*\{\s*\}', '', full_path)
+        full_path = re.sub(r'\s*-\s*$', '', full_path)
+        full_path = re.sub(r'\s+', ' ', full_path).strip()
+        return '', _sanitize_filename(full_path)
+
 
 def _get_audio_quality_string(file_path):
     """
