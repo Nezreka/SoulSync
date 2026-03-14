@@ -1049,10 +1049,10 @@ class SpotifyClient:
                     album = Album.from_spotify_album(album_data)
                     albums.append(album)
 
-                # Cache individual albums + search mapping
+                # Cache individual albums + search mapping (skip if full data already cached)
                 entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
                 if entries:
-                    cache.store_entities_bulk('spotify', 'album', entries)
+                    cache.store_entities_bulk('spotify', 'album', entries, skip_if_exists=True)
                     cache.store_search_results('spotify', 'album', query, min(limit, 10),
                                                [ad.get('id') for ad in raw_items if ad.get('id')])
 
@@ -1234,14 +1234,14 @@ class SpotifyClient:
                 # Cache the aggregated result
                 cache.store_entity('spotify', 'album', cache_key, result)
 
-                # Also cache individual tracks opportunistically
+                # Also cache individual tracks opportunistically (skip if full data already cached)
                 track_entries = []
                 for track in all_tracks:
                     tid = track.get('id')
                     if tid:
                         track_entries.append((tid, track))
                 if track_entries:
-                    cache.store_entities_bulk('spotify', 'track', track_entries)
+                    cache.store_entities_bulk('spotify', 'track', track_entries, skip_if_exists=True)
 
                 return result
 
@@ -1278,11 +1278,11 @@ class SpotifyClient:
 
                 logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}")
 
-                # Cache individual albums opportunistically
+                # Cache individual albums opportunistically (skip if full data already cached)
                 cache = get_metadata_cache()
                 entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
                 if entries:
-                    cache.store_entities_bulk('spotify', 'album', entries)
+                    cache.store_entities_bulk('spotify', 'album', entries, skip_if_exists=True)
 
                 return albums
 
