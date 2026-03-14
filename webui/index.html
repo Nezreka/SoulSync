@@ -506,9 +506,10 @@
                             </div>
                             <!-- Library Repair Worker Status Icon -->
                             <div class="repair-button-container">
-                                <button class="repair-button" id="repair-button" title="Library Repair Worker">
+                                <button class="repair-button" id="repair-button" title="Library Maintenance">
                                     <img src="/static/whisoul.png" alt="Repair" class="repair-logo">
                                     <div class="repair-spinner"></div>
+                                    <span class="repair-badge" id="repair-findings-badge" style="display:none">0</span>
                                 </button>
                                 <!-- Repair Worker Tooltip -->
                                 <div class="repair-tooltip" id="repair-tooltip">
@@ -5515,6 +5516,73 @@
             </div>
             <div class="mcache-detail-body" id="mcache-detail-body">
                 <!-- Detail content populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Library Maintenance Modal -->
+    <div class="repair-modal-overlay" id="repair-modal" style="display:none;" onclick="if(event.target===this)closeRepairModal()">
+        <div class="repair-modal">
+            <div class="repair-modal-header">
+                <h2 class="repair-modal-title">Library Maintenance</h2>
+                <div class="repair-modal-header-actions">
+                    <label class="repair-master-toggle">
+                        <input type="checkbox" id="repair-master-toggle" onchange="toggleRepairMaster()">
+                        <span class="repair-toggle-slider"></span>
+                        <span class="repair-toggle-label" id="repair-master-label">Disabled</span>
+                    </label>
+                    <button class="repair-modal-close" onclick="closeRepairModal()">&times;</button>
+                </div>
+            </div>
+
+            <div class="repair-tabs">
+                <button class="repair-tab active" data-tab="jobs" onclick="switchRepairTab('jobs')">Jobs</button>
+                <button class="repair-tab" data-tab="findings" onclick="switchRepairTab('findings')">
+                    Findings <span class="repair-tab-badge" id="repair-findings-tab-badge" style="display:none">0</span>
+                </button>
+                <button class="repair-tab" data-tab="history" onclick="switchRepairTab('history')">History</button>
+            </div>
+
+            <div class="repair-tab-content" id="repair-tab-jobs">
+                <div class="repair-jobs-list" id="repair-jobs-list">
+                    <div class="repair-loading">Loading jobs...</div>
+                </div>
+            </div>
+
+            <div class="repair-tab-content" id="repair-tab-findings" style="display:none;">
+                <div class="repair-findings-header">
+                    <div class="repair-findings-filters">
+                        <select id="repair-findings-job-filter" onchange="loadRepairFindings()">
+                            <option value="">All Jobs</option>
+                        </select>
+                        <select id="repair-findings-severity-filter" onchange="loadRepairFindings()">
+                            <option value="">All Severity</option>
+                            <option value="info">Info</option>
+                            <option value="warning">Warning</option>
+                            <option value="critical">Critical</option>
+                        </select>
+                        <select id="repair-findings-status-filter" onchange="loadRepairFindings()">
+                            <option value="pending">Pending</option>
+                            <option value="">All Status</option>
+                            <option value="resolved">Resolved</option>
+                            <option value="dismissed">Dismissed</option>
+                        </select>
+                    </div>
+                    <div class="repair-findings-bulk" id="repair-findings-bulk" style="display:none;">
+                        <button class="repair-bulk-btn" onclick="bulkRepairAction('dismiss')">Dismiss Selected</button>
+                        <button class="repair-bulk-btn" onclick="bulkRepairAction('resolve')">Resolve Selected</button>
+                    </div>
+                </div>
+                <div class="repair-findings-list" id="repair-findings-list">
+                    <div class="repair-loading">Loading findings...</div>
+                </div>
+                <div class="repair-findings-pagination" id="repair-findings-pagination"></div>
+            </div>
+
+            <div class="repair-tab-content" id="repair-tab-history" style="display:none;">
+                <div class="repair-history-list" id="repair-history-list">
+                    <div class="repair-loading">Loading history...</div>
+                </div>
             </div>
         </div>
     </div>

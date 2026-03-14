@@ -1,0 +1,881 @@
+"""Track Number Repair Job — fixes embedded track number tags and filename prefixes.
+
+Detects albums where 3+ files share the same track number (the "all tracks = 01"
+bug pattern), then uses cascading API lookups (Spotify → iTunes → MusicBrainz →
+AudioDB) to resolve the correct tracklist and repair each file.
+"""
+
+import os
+import re
+from difflib import SequenceMatcher
+from typing import Any, Dict, List, Optional, Tuple
+
+from core.repair_jobs import register_job
+from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from utils.logging_config import get_logger
+
+logger = get_logger("repair_job.track_number")
+
+AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
+
+# Placeholder album IDs that are not real API identifiers
+_PLACEHOLDER_IDS = {
+    'wishlist_album', 'explicit_album', 'explicit_artist',
+    'unknown', 'none', 'null', '',
+}
+
+
+@register_job
+class TrackNumberRepairJob(RepairJob):
+    job_id = 'track_number_repair'
+    display_name = 'Track Number Repair'
+    description = 'Fixes mismatched track numbers using API lookups'
+    icon = 'repair-icon-tracknumber'
+    default_enabled = True
+    default_interval_hours = 24
+    default_settings = {
+        'anomaly_threshold': 3,
+        'title_similarity': 0.80,
+    }
+    auto_fix = True
+
+    def scan(self, context: JobContext) -> JobResult:
+        result = JobResult()
+        settings = self._get_settings(context)
+        anomaly_threshold = settings.get('anomaly_threshold', 3)
+        title_similarity = settings.get('title_similarity', 0.80)
+
+        # Thread-local state to avoid race conditions with concurrent scan_folders()
+        scan_state = {
+            'album_tracks_cache': {},
+            'title_similarity': title_similarity,
+        }
+
+        transfer = context.transfer_folder
+        if not os.path.isdir(transfer):
+            logger.warning("Transfer folder does not exist: %s", transfer)
+            return result
+
+        # Collect album folders (directories containing audio files)
+        album_folders: Dict[str, List[str]] = {}
+        for root, _dirs, files in os.walk(transfer):
+            if context.check_stop():
+                return result
+            for fname in files:
+                ext = os.path.splitext(fname)[1].lower()
+                if ext in AUDIO_EXTENSIONS:
+                    album_folders.setdefault(root, []).append(fname)
+
+        total = sum(len(fnames) for fnames in album_folders.values())
+        if context.update_progress:
+            context.update_progress(0, total)
+
+        for folder_path, filenames in album_folders.items():
+            if context.check_stop():
+                return result
+            if context.wait_if_paused():
+                return result
+
+            try:
+                folder_result = self._repair_album(
+                    folder_path, filenames, anomaly_threshold, context, scan_state
+                )
+                result.scanned += folder_result.scanned
+                result.auto_fixed += folder_result.auto_fixed
+                result.skipped += folder_result.skipped
+                result.errors += folder_result.errors
+            except Exception as e:
+                logger.error("Error processing album folder %s: %s", folder_path, e, exc_info=True)
+                result.errors += 1
+
+            if context.update_progress:
+                context.update_progress(result.scanned, total)
+
+        return result
+
+    def estimate_scope(self, context: JobContext) -> int:
+        transfer = context.transfer_folder
+        if not os.path.isdir(transfer):
+            return 0
+        count = 0
+        for _root, _dirs, files in os.walk(transfer):
+            for fname in files:
+                if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
+                    count += 1
+        return count
+
+    def _get_settings(self, context: JobContext) -> dict:
+        """Read job settings from config, falling back to defaults."""
+        if not context.config_manager:
+            return self.default_settings.copy()
+        cfg = context.config_manager.get(f'repair.jobs.{self.job_id}.settings', {})
+        merged = self.default_settings.copy()
+        merged.update(cfg)
+        return merged
+
+    # ------------------------------------------------------------------
+    # Album-level repair
+    # ------------------------------------------------------------------
+    def _repair_album(self, folder_path: str, filenames: List[str],
+                      anomaly_threshold: int, context: JobContext,
+                      scan_state: dict = None) -> JobResult:
+        from mutagen import File as MutagenFile
+
+        if scan_state is None:
+            scan_state = {'album_tracks_cache': {}, 'title_similarity': 0.80}
+
+        result = JobResult()
+
+        # Step 0: Anomaly detection
+        track_num_counts: Dict[int, int] = {}
+        file_track_data: List[Tuple[str, str, Optional[int]]] = []
+
+        for fname in filenames:
+            fpath = os.path.join(folder_path, fname)
+            try:
+                audio = MutagenFile(fpath)
+                if audio is None:
+                    file_track_data.append((fpath, fname, None))
+                    continue
+                track_num, _ = _read_track_number_tag(audio)
+                file_track_data.append((fpath, fname, track_num))
+                if track_num is not None:
+                    track_num_counts[track_num] = track_num_counts.get(track_num, 0) + 1
+            except Exception:
+                file_track_data.append((fpath, fname, None))
+
+        has_anomaly = any(count >= anomaly_threshold for count in track_num_counts.values())
+        if not has_anomaly:
+            result.scanned += len(filenames)
+            return result
+
+        duped = {num: cnt for num, cnt in track_num_counts.items() if cnt >= anomaly_threshold}
+        logger.info("Anomaly detected in %s — %d files share track number(s): %s",
+                     os.path.basename(folder_path), sum(duped.values()), duped)
+
+        # Resolve album tracklist via cascading fallbacks
+        api_tracks = self._resolve_album_tracklist(file_track_data, folder_path, context, scan_state)
+        if not api_tracks:
+            result.skipped += len(filenames)
+            result.scanned += len(filenames)
+            return result
+
+        # Process each file
+        title_sim = scan_state.get('title_similarity', 0.80)
+        for fpath, fname, _ in file_track_data:
+            if context.check_stop():
+                return result
+
+            result.scanned += 1
+            try:
+                if _repair_single_track(fpath, fname, api_tracks, len(api_tracks), title_sim, context):
+                    result.auto_fixed += 1
+            except Exception as e:
+                logger.error("Error repairing %s: %s", fpath, e, exc_info=True)
+                result.errors += 1
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Tracklist resolution (6-level fallback cascade)
+    # ------------------------------------------------------------------
+    def _resolve_album_tracklist(self, file_track_data: List[Tuple[str, str, Optional[int]]],
+                                 folder_path: str, context: JobContext,
+                                 scan_state: dict = None) -> Optional[List[Dict]]:
+        if scan_state is None:
+            scan_state = {'album_tracks_cache': {}, 'title_similarity': 0.80}
+
+        cache = scan_state['album_tracks_cache']
+        folder_name = os.path.basename(folder_path)
+
+        # Collect all available IDs from files in one pass
+        spotify_album_id = None
+        itunes_album_id = None
+        spotify_track_id = None
+        mb_album_id = None
+        album_name = None
+        artist_name = None
+
+        for fpath, fname, _ in file_track_data:
+            if not spotify_album_id or not itunes_album_id:
+                aid, source = _read_album_id_from_file(fpath)
+                if aid and source == 'spotify' and not spotify_album_id:
+                    spotify_album_id = aid
+                elif aid and source == 'itunes' and not itunes_album_id:
+                    itunes_album_id = aid
+
+            if not spotify_track_id:
+                spotify_track_id = _read_spotify_track_id_from_file(fpath)
+
+            if not mb_album_id:
+                mb_album_id = _read_musicbrainz_album_id_from_file(fpath)
+
+            if not album_name:
+                album_name, artist_name = _read_album_artist_from_file(fpath)
+
+            if spotify_album_id and itunes_album_id and spotify_track_id and mb_album_id and album_name:
+                break
+
+        # Fallback 1: Spotify album ID
+        if spotify_album_id and _is_valid_album_id(spotify_album_id):
+            tracks = _get_album_tracklist(spotify_album_id, context, cache)
+            if tracks:
+                logger.info("[Repair] %s — resolved via Spotify album ID: %s", folder_name, spotify_album_id)
+                return tracks
+
+        # Fallback 2: iTunes album ID
+        if itunes_album_id and _is_valid_album_id(itunes_album_id):
+            tracks = _get_album_tracklist(itunes_album_id, context, cache)
+            if tracks:
+                logger.info("[Repair] %s — resolved via iTunes album ID: %s", folder_name, itunes_album_id)
+                return tracks
+
+        # Fallback 3: Spotify track ID → discover album ID
+        client = context.spotify_client
+        if spotify_track_id and client and client.is_spotify_authenticated():
+            try:
+                track_details = client.get_track_details(spotify_track_id)
+                if track_details and track_details.get('album', {}).get('id'):
+                    real_album_id = track_details['album']['id']
+                    tracks = _get_album_tracklist(real_album_id, context, cache)
+                    if tracks:
+                        logger.info("[Repair] %s — resolved via Spotify track ID %s → album %s",
+                                    folder_name, spotify_track_id, real_album_id)
+                        return tracks
+            except Exception as e:
+                logger.debug("Spotify track lookup failed for %s: %s", spotify_track_id, e)
+
+        # Fallback 4: Search Spotify/iTunes by album name + artist
+        if album_name and client:
+            try:
+                query = f"{artist_name} {album_name}" if artist_name else album_name
+                results = client.search_albums(query, limit=5)
+                if results:
+                    best = results[0]
+                    tracks = _get_album_tracklist(best.id, context, cache)
+                    if tracks:
+                        logger.info("[Repair] %s — resolved via album search: '%s' → %s",
+                                    folder_name, query, best.id)
+                        return tracks
+            except Exception as e:
+                logger.debug("Album search failed for '%s': %s", album_name, e)
+
+        # Fallback 5: MusicBrainz album ID from tags
+        if mb_album_id:
+            tracks = _get_tracklist_from_musicbrainz(mb_album_id, context, cache)
+            if tracks:
+                logger.info("[Repair] %s — resolved via MusicBrainz album ID: %s", folder_name, mb_album_id)
+                return tracks
+
+        # Fallback 6: AudioDB → MusicBrainz
+        if album_name and artist_name:
+            adb_mb_id = _get_musicbrainz_id_via_audiodb(artist_name, album_name, context)
+            if adb_mb_id and adb_mb_id != mb_album_id:
+                tracks = _get_tracklist_from_musicbrainz(adb_mb_id, context, cache)
+                if tracks:
+                    logger.info("[Repair] %s — resolved via AudioDB → MusicBrainz: %s",
+                                folder_name, adb_mb_id)
+                    return tracks
+
+        logger.warning("[Repair] %s — all tracklist resolution strategies exhausted", folder_name)
+        return None
+
+    # ------------------------------------------------------------------
+    # Batch scan support (called by RepairWorker.process_batch)
+    # ------------------------------------------------------------------
+    def scan_folders(self, folders: List[str], context: JobContext) -> JobResult:
+        """Scan specific folders only (for batch post-download repair)."""
+        result = JobResult()
+        settings = self._get_settings(context)
+        anomaly_threshold = settings.get('anomaly_threshold', 3)
+
+        # Thread-local state (not on self — avoids race with concurrent scan())
+        scan_state = {
+            'album_tracks_cache': {},
+            'title_similarity': settings.get('title_similarity', 0.80),
+        }
+
+        for folder_path in folders:
+            if context.check_stop():
+                break
+            if not os.path.isdir(folder_path):
+                continue
+            filenames = [
+                f for f in os.listdir(folder_path)
+                if os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS
+            ]
+            if not filenames:
+                continue
+
+            try:
+                folder_result = self._repair_album(folder_path, filenames, anomaly_threshold, context, scan_state)
+                result.scanned += folder_result.scanned
+                result.auto_fixed += folder_result.auto_fixed
+                result.skipped += folder_result.skipped
+                result.errors += folder_result.errors
+            except Exception as e:
+                logger.error("[Repair] Error scanning %s: %s", folder_path, e, exc_info=True)
+                result.errors += 1
+
+        return result
+
+
+# ======================================================================
+# Module-level helper functions (extracted from old RepairWorker methods)
+# ======================================================================
+
+def _read_track_number_tag(audio) -> Tuple[Optional[int], Optional[int]]:
+    """Read track number and total from tags. Returns (track_num, total)."""
+    from mutagen.id3 import ID3
+    from mutagen.flac import FLAC
+    from mutagen.oggvorbis import OggVorbis
+    from mutagen.mp4 import MP4
+
+    try:
+        if hasattr(audio, 'tags') and audio.tags is not None:
+            if isinstance(audio.tags, ID3):
+                frames = audio.tags.getall('TRCK')
+                if frames and frames[0].text:
+                    return _parse_track_str(str(frames[0].text[0]))
+            elif isinstance(audio, (FLAC, OggVorbis)):
+                val = audio.get('tracknumber')
+                if val:
+                    return _parse_track_str(str(val[0]))
+            elif isinstance(audio, MP4):
+                val = audio.tags.get('trkn')
+                if val and val[0]:
+                    t = val[0]
+                    return (int(t[0]), int(t[1]) if t[1] else None)
+    except Exception as e:
+        logger.debug("Error reading track number tag: %s", e)
+    return None, None
+
+
+def _parse_track_str(s: str) -> Tuple[Optional[int], Optional[int]]:
+    """Parse '5/12' or '5' into (track_num, total)."""
+    try:
+        if '/' in s:
+            parts = s.split('/')
+            return int(parts[0]), int(parts[1])
+        return int(s), None
+    except (ValueError, IndexError):
+        return None, None
+
+
+def _read_title_tag(audio) -> Optional[str]:
+    """Read the title tag from an already-opened Mutagen file."""
+    from mutagen.id3 import ID3
+    from mutagen.flac import FLAC
+    from mutagen.oggvorbis import OggVorbis
+    from mutagen.mp4 import MP4
+
+    try:
+        if hasattr(audio, 'tags') and audio.tags is not None:
+            if isinstance(audio.tags, ID3):
+                frames = audio.tags.getall('TIT2')
+                if frames and frames[0].text:
+                    return str(frames[0].text[0])
+            elif isinstance(audio, (FLAC, OggVorbis)):
+                val = audio.get('title')
+                if val:
+                    return str(val[0])
+            elif isinstance(audio, MP4):
+                val = audio.tags.get('\xa9nam')
+                if val:
+                    return str(val[0])
+    except Exception as e:
+        logger.debug("Error reading title tag: %s", e)
+    return None
+
+
+def _extract_track_number_from_filename(filename: str) -> Optional[int]:
+    """Extract leading track number from filename like '01 - Song.flac'."""
+    basename = os.path.splitext(filename)[0]
+    match = re.match(r'^(\d{1,3})', basename.strip())
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _read_album_id_from_file(file_path: str) -> Tuple[Optional[str], Optional[str]]:
+    """Read SPOTIFY_ALBUM_ID or ITUNES_ALBUM_ID from embedded tags.
+    Returns (album_id, source) where source is 'spotify' or 'itunes'."""
+    try:
+        from mutagen import File as MutagenFile
+        from mutagen.id3 import ID3
+        from mutagen.flac import FLAC
+        from mutagen.oggvorbis import OggVorbis
+        from mutagen.mp4 import MP4
+
+        audio = MutagenFile(file_path)
+        if audio is None:
+            return None, None
+
+        if hasattr(audio, 'tags') and audio.tags is not None:
+            if isinstance(audio.tags, ID3):
+                for key in ['TXXX:SPOTIFY_ALBUM_ID', 'TXXX:spotify_album_id']:
+                    frame = audio.tags.getall(key)
+                    if frame and frame[0].text:
+                        return str(frame[0].text[0]), 'spotify'
+                for key in ['TXXX:ITUNES_ALBUM_ID', 'TXXX:itunes_album_id']:
+                    frame = audio.tags.getall(key)
+                    if frame and frame[0].text:
+                        return str(frame[0].text[0]), 'itunes'
+
+            elif isinstance(audio, (FLAC, OggVorbis)):
+                for key in ['spotify_album_id', 'SPOTIFY_ALBUM_ID']:
+                    val = audio.get(key)
+                    if val:
+                        return str(val[0]), 'spotify'
+                for key in ['itunes_album_id', 'ITUNES_ALBUM_ID']:
+                    val = audio.get(key)
+                    if val:
+                        return str(val[0]), 'itunes'
+
+            elif isinstance(audio, MP4):
+                for key in ['----:com.apple.iTunes:SPOTIFY_ALBUM_ID',
+                            '----:com.apple.iTunes:spotify_album_id']:
+                    val = audio.tags.get(key)
+                    if val:
+                        raw = val[0]
+                        return raw.decode('utf-8') if isinstance(raw, bytes) else str(raw), 'spotify'
+                for key in ['----:com.apple.iTunes:ITUNES_ALBUM_ID',
+                            '----:com.apple.iTunes:itunes_album_id']:
+                    val = audio.tags.get(key)
+                    if val:
+                        raw = val[0]
+                        return raw.decode('utf-8') if isinstance(raw, bytes) else str(raw), 'itunes'
+
+    except Exception as e:
+        logger.debug("Error reading album ID from %s: %s", file_path, e)
+    return None, None
+
+
+def _is_valid_album_id(album_id: Optional[str]) -> bool:
+    """Check if an album ID is a real API identifier, not a placeholder."""
+    if not album_id:
+        return False
+    if album_id.strip().lower() in _PLACEHOLDER_IDS:
+        return False
+    if len(album_id.strip()) < 5:
+        return False
+    return True
+
+
+def _read_spotify_track_id_from_file(file_path: str) -> Optional[str]:
+    """Read SPOTIFY_TRACK_ID from embedded tags."""
+    try:
+        from mutagen import File as MutagenFile
+        from mutagen.id3 import ID3
+        from mutagen.flac import FLAC
+        from mutagen.oggvorbis import OggVorbis
+        from mutagen.mp4 import MP4
+
+        audio = MutagenFile(file_path)
+        if audio is None:
+            return None
+
+        if hasattr(audio, 'tags') and audio.tags is not None:
+            if isinstance(audio.tags, ID3):
+                for key in ['TXXX:SPOTIFY_TRACK_ID', 'TXXX:spotify_track_id']:
+                    frame = audio.tags.getall(key)
+                    if frame and frame[0].text:
+                        return str(frame[0].text[0])
+            elif isinstance(audio, (FLAC, OggVorbis)):
+                for key in ['spotify_track_id', 'SPOTIFY_TRACK_ID']:
+                    val = audio.get(key)
+                    if val:
+                        return str(val[0])
+            elif isinstance(audio, MP4):
+                for key in ['----:com.apple.iTunes:SPOTIFY_TRACK_ID',
+                            '----:com.apple.iTunes:spotify_track_id']:
+                    val = audio.tags.get(key)
+                    if val:
+                        raw = val[0]
+                        return raw.decode('utf-8') if isinstance(raw, bytes) else str(raw)
+
+    except Exception as e:
+        logger.debug("Error reading Spotify track ID from %s: %s", file_path, e)
+    return None
+
+
+def _read_musicbrainz_album_id_from_file(file_path: str) -> Optional[str]:
+    """Read MusicBrainz Album Id (release MBID) from embedded tags."""
+    try:
+        from mutagen import File as MutagenFile
+        from mutagen.id3 import ID3
+        from mutagen.flac import FLAC
+        from mutagen.oggvorbis import OggVorbis
+        from mutagen.mp4 import MP4
+
+        audio = MutagenFile(file_path)
+        if audio is None:
+            return None
+
+        if hasattr(audio, 'tags') and audio.tags is not None:
+            if isinstance(audio.tags, ID3):
+                for key in ['TXXX:MusicBrainz Album Id', 'TXXX:MUSICBRAINZ_ALBUMID',
+                            'TXXX:musicbrainz_albumid']:
+                    frame = audio.tags.getall(key)
+                    if frame and frame[0].text:
+                        return str(frame[0].text[0])
+            elif isinstance(audio, (FLAC, OggVorbis)):
+                for key in ['musicbrainz_albumid', 'MUSICBRAINZ_ALBUMID',
+                            'MusicBrainz Album Id']:
+                    val = audio.get(key)
+                    if val:
+                        return str(val[0])
+            elif isinstance(audio, MP4):
+                for key in ['----:com.apple.iTunes:MusicBrainz Album Id',
+                            '----:com.apple.iTunes:MUSICBRAINZ_ALBUMID',
+                            '----:com.apple.music.albums:MUSICBRAINZ_ALBUMID']:
+                    val = audio.tags.get(key)
+                    if val:
+                        raw = val[0]
+                        return raw.decode('utf-8') if isinstance(raw, bytes) else str(raw)
+
+    except Exception as e:
+        logger.debug("Error reading MusicBrainz album ID from %s: %s", file_path, e)
+    return None
+
+
+def _read_album_artist_from_file(file_path: str) -> Tuple[Optional[str], Optional[str]]:
+    """Read album name and artist name from embedded tags.
+    Returns (album_name, artist_name)."""
+    try:
+        from mutagen import File as MutagenFile
+        from mutagen.id3 import ID3
+        from mutagen.flac import FLAC
+        from mutagen.oggvorbis import OggVorbis
+        from mutagen.mp4 import MP4
+
+        audio = MutagenFile(file_path)
+        if audio is None:
+            return None, None
+
+        album_name = None
+        artist_name = None
+
+        if hasattr(audio, 'tags') and audio.tags is not None:
+            if isinstance(audio.tags, ID3):
+                frames = audio.tags.getall('TALB')
+                if frames and frames[0].text:
+                    album_name = str(frames[0].text[0])
+                for tag in ['TPE2', 'TPE1']:
+                    frames = audio.tags.getall(tag)
+                    if frames and frames[0].text:
+                        artist_name = str(frames[0].text[0])
+                        break
+            elif isinstance(audio, (FLAC, OggVorbis)):
+                val = audio.get('album')
+                if val:
+                    album_name = str(val[0])
+                for key in ['albumartist', 'artist']:
+                    val = audio.get(key)
+                    if val:
+                        artist_name = str(val[0])
+                        break
+            elif isinstance(audio, MP4):
+                val = audio.tags.get('\xa9alb')
+                if val:
+                    album_name = str(val[0])
+                for key in ['aART', '\xa9ART']:
+                    val = audio.tags.get(key)
+                    if val:
+                        artist_name = str(val[0])
+                        break
+
+        return album_name, artist_name
+    except Exception as e:
+        logger.debug("Error reading album/artist from %s: %s", file_path, e)
+    return None, None
+
+
+def _match_title_to_api_track(file_title: str, api_tracks: List[Dict],
+                               threshold: float) -> Optional[Dict]:
+    """Fuzzy-match a file title to an API track."""
+    norm_file = _normalize_title(file_title)
+    best_match = None
+    best_score = 0.0
+
+    for track in api_tracks:
+        api_name = track.get('name', '')
+        norm_api = _normalize_title(api_name)
+        score = SequenceMatcher(None, norm_file, norm_api).ratio()
+        if score > best_score:
+            best_score = score
+            best_match = track
+
+    if best_score >= threshold:
+        return best_match
+    return None
+
+
+def _normalize_title(title: str) -> str:
+    """Normalize a title for comparison."""
+    t = title.lower()
+    t = re.sub(r'\(.*?\)', '', t)
+    t = re.sub(r'\[.*?\]', '', t)
+    t = re.sub(r'[^a-z0-9 ]', '', t)
+    return t.strip()
+
+
+def _fix_track_number_tag(file_path: str, correct_num: int, total: int):
+    """Update ONLY the track number tag in the file."""
+    from mutagen import File as MutagenFile
+    from mutagen.id3 import TRCK, ID3
+    from mutagen.flac import FLAC
+    from mutagen.oggvorbis import OggVorbis
+    from mutagen.mp4 import MP4
+
+    try:
+        audio = MutagenFile(file_path)
+        if audio is None:
+            logger.error("Cannot re-open file for tag fix: %s", file_path)
+            return
+
+        track_str = f"{correct_num}/{total}"
+
+        if isinstance(audio.tags, ID3):
+            audio.tags.delall('TRCK')
+            audio.tags.add(TRCK(encoding=3, text=[track_str]))
+            audio.save(v1=0, v2_version=4)
+        elif isinstance(audio, (FLAC, OggVorbis)):
+            audio['tracknumber'] = [track_str]
+            if isinstance(audio, FLAC):
+                audio.save(deleteid3=True)
+            else:
+                audio.save()
+        elif isinstance(audio, MP4):
+            audio['trkn'] = [(correct_num, total)]
+            audio.save()
+
+        logger.info("Fixed track tag: %s → %s", os.path.basename(file_path), track_str)
+    except Exception as e:
+        logger.error("Error fixing track tag in %s: %s", file_path, e, exc_info=True)
+
+
+def _fix_filename_track_number(file_path: str, filename: str, correct_num: int) -> Optional[str]:
+    """Fix the track number prefix in a filename. Returns new path or None."""
+    try:
+        basename = os.path.splitext(filename)[0]
+        ext = os.path.splitext(filename)[1]
+
+        new_basename = re.sub(r'^\d{1,3}', f'{correct_num:02d}', basename)
+        if new_basename == basename:
+            return None
+
+        new_filename = new_basename + ext
+        parent_dir = os.path.dirname(file_path)
+        new_path = os.path.join(parent_dir, new_filename)
+
+        if not os.path.isfile(file_path):
+            logger.error("Source file disappeared before rename: %s", file_path)
+            return None
+
+        if os.path.exists(new_path):
+            logger.warning("Target path already exists, skipping rename: %s", new_path)
+            return None
+
+        os.rename(file_path, new_path)
+        logger.info("Renamed: %s → %s", filename, new_filename)
+
+        # Rename associated .lrc file if it exists
+        lrc_path = os.path.join(parent_dir, basename + '.lrc')
+        if os.path.isfile(lrc_path):
+            new_lrc_path = os.path.join(parent_dir, new_basename + '.lrc')
+            if not os.path.exists(new_lrc_path):
+                os.rename(lrc_path, new_lrc_path)
+                logger.info("Renamed LRC: %s.lrc → %s.lrc", basename, new_basename)
+
+        return new_path
+    except Exception as e:
+        logger.error("Error renaming %s: %s", file_path, e, exc_info=True)
+        return None
+
+
+def _update_db_file_path(db, old_path: str, new_path: str):
+    """Update file_path in tracks table if this track is tracked."""
+    conn = None
+    try:
+        conn = db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE file_path = ?",
+            (new_path, old_path)
+        )
+        if cursor.rowcount > 0:
+            conn.commit()
+            logger.debug("Updated DB file_path: %s → %s", old_path, new_path)
+        else:
+            conn.commit()
+    except Exception as e:
+        logger.debug("Error updating DB file_path: %s", e)
+    finally:
+        if conn:
+            conn.close()
+
+
+def _repair_single_track(file_path: str, filename: str, api_tracks: List[Dict],
+                         total_tracks: int, title_similarity: float,
+                         context: JobContext) -> bool:
+    """Match a single file to the API tracklist and fix its track number tag + filename.
+
+    Returns True if the track was actually repaired.
+    """
+    from mutagen import File as MutagenFile
+
+    audio = MutagenFile(file_path)
+    if audio is None:
+        return False
+
+    # Try to match via embedded title tag first
+    file_title = _read_title_tag(audio)
+    matched_track = None
+
+    if file_title:
+        matched_track = _match_title_to_api_track(file_title, api_tracks, title_similarity)
+
+    # Fallback: match via filename (without track number prefix and extension)
+    if not matched_track:
+        basename = os.path.splitext(filename)[0]
+        # Strip leading track number prefix like "01 - " or "01. "
+        clean_name = re.sub(r'^\d{1,3}[\s.\-_]*', '', basename).strip()
+        if clean_name:
+            matched_track = _match_title_to_api_track(clean_name, api_tracks, title_similarity)
+
+    if not matched_track:
+        return False
+
+    correct_num = matched_track.get('track_number')
+    if correct_num is None:
+        return False
+
+    # Check if track number already correct
+    current_num, current_total = _read_track_number_tag(audio)
+    if current_num == correct_num and current_total == total_tracks:
+        return False  # Already correct
+
+    # Fix the track number tag
+    _fix_track_number_tag(file_path, correct_num, total_tracks)
+
+    # Fix filename prefix if it starts with a track number
+    new_path = _fix_filename_track_number(file_path, filename, correct_num)
+    if new_path and context.db:
+        _update_db_file_path(context.db, file_path, new_path)
+
+    return True
+
+
+def _get_album_tracklist(album_id: str, context: JobContext,
+                         cache: dict) -> Optional[List[Dict]]:
+    """Fetch an album tracklist from Spotify or iTunes, with per-scan caching.
+
+    Returns a list of dicts with at least 'name' and 'track_number' keys,
+    or None if lookup fails.
+    """
+    if album_id in cache:
+        return cache[album_id]
+
+    result = None
+
+    # Try Spotify first
+    client = context.spotify_client
+    if client and client.is_spotify_authenticated():
+        try:
+            data = client.get_album_tracks(album_id)
+            if data and 'items' in data and data['items']:
+                result = [
+                    {
+                        'name': item.get('name', ''),
+                        'track_number': item.get('track_number'),
+                        'disc_number': item.get('disc_number', 1),
+                    }
+                    for item in data['items']
+                ]
+        except Exception as e:
+            logger.debug("Spotify get_album_tracks failed for %s: %s", album_id, e)
+
+    # Fallback to iTunes
+    if not result and context.itunes_client:
+        try:
+            data = context.itunes_client.get_album_tracks(album_id)
+            if data and 'items' in data and data['items']:
+                result = [
+                    {
+                        'name': item.get('name', ''),
+                        'track_number': item.get('track_number'),
+                        'disc_number': item.get('disc_number', 1),
+                    }
+                    for item in data['items']
+                ]
+        except Exception as e:
+            logger.debug("iTunes get_album_tracks failed for %s: %s", album_id, e)
+
+    cache[album_id] = result
+    return result
+
+
+def _get_tracklist_from_musicbrainz(mbid: str, context: JobContext,
+                                     cache: dict) -> Optional[List[Dict]]:
+    """Fetch an album tracklist from MusicBrainz release data.
+
+    Returns a list of dicts with 'name' and 'track_number' keys,
+    or None if lookup fails.
+    """
+    cache_key = f"mb_{mbid}"
+    if cache_key in cache:
+        return cache[cache_key]
+
+    result = None
+    mb = context.mb_client
+
+    if mb:
+        try:
+            release = mb.get_release(mbid, includes=['recordings'])
+            if release and 'media' in release:
+                tracks = []
+                for medium in release['media']:
+                    medium_tracks = medium.get('tracks') or medium.get('track-list', [])
+                    for track in medium_tracks:
+                        name = track.get('title', '')
+                        # MusicBrainz uses 'position' for track number within the medium
+                        position = track.get('position') or track.get('number')
+                        try:
+                            position = int(position)
+                        except (TypeError, ValueError):
+                            position = None
+                        tracks.append({
+                            'name': name,
+                            'track_number': position,
+                            'disc_number': medium.get('position', 1),
+                        })
+                if tracks:
+                    result = tracks
+        except Exception as e:
+            logger.debug("MusicBrainz get_release failed for %s: %s", mbid, e)
+
+    cache[cache_key] = result
+    return result
+
+
+def _get_musicbrainz_id_via_audiodb(artist_name: str, album_name: str,
+                                     context: JobContext) -> Optional[str]:
+    """Search AudioDB for an album and extract its MusicBrainz release ID."""
+    try:
+        from core.audiodb_client import AudioDBClient
+        client = AudioDBClient()
+    except Exception:
+        return None
+
+    try:
+        result = client.search_album(artist_name, album_name)
+        if result:
+            mb_id = result.get('strMusicBrainzAlbumID')
+            if mb_id and mb_id.strip():
+                logger.debug("AudioDB returned MusicBrainz ID %s for '%s - %s'",
+                             mb_id, artist_name, album_name)
+                return mb_id.strip()
+    except Exception as e:
+        logger.debug("AudioDB lookup failed for '%s - %s': %s", artist_name, album_name, e)
+    return None

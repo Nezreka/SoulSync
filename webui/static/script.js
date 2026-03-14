@@ -49280,32 +49280,430 @@ function updateRepairStatusFromData(data) {
         const tracks = data.progress.tracks || {};
         tooltipProgress.textContent = `Checked: ${tracks.checked || 0} / ${tracks.total || 0} (${tracks.percent || 0}%) | Repaired: ${tracks.repaired || 0}`;
     }
+
+    // Update findings badge
+    const badge = document.getElementById('repair-findings-badge');
+    const findingsPending = data.findings_pending || 0;
+    if (badge) {
+        badge.textContent = findingsPending;
+        badge.style.display = findingsPending > 0 ? '' : 'none';
+    }
+    const tabBadge = document.getElementById('repair-findings-tab-badge');
+    if (tabBadge) {
+        tabBadge.textContent = findingsPending;
+        tabBadge.style.display = findingsPending > 0 ? '' : 'none';
+    }
+
+    // Update master toggle in modal if open
+    const masterToggle = document.getElementById('repair-master-toggle');
+    const masterLabel = document.getElementById('repair-master-label');
+    if (masterToggle) masterToggle.checked = data.enabled || false;
+    if (masterLabel) masterLabel.textContent = data.enabled ? 'Enabled' : 'Disabled';
+
+    // Update button state
+    if (!data.enabled) {
+        button.classList.add('paused');
+        button.classList.remove('active', 'complete');
+    }
 }
 
+// ── Repair Modal State ──
+let _repairCurrentTab = 'jobs';
+let _repairFindingsPage = 0;
+let _repairSelectedFindings = new Set();
+const REPAIR_FINDINGS_PAGE_SIZE = 30;
+
 /**
- * Toggle repair worker pause/resume
+ * Open the Library Maintenance modal
  */
-async function toggleRepairWorker() {
+function openRepairModal() {
+    const modal = document.getElementById('repair-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    _repairCurrentTab = 'jobs';
+    switchRepairTab('jobs');
+    // Load master toggle state
+    updateRepairStatus();
+}
+
+function closeRepairModal() {
+    const modal = document.getElementById('repair-modal');
+    if (!modal) return;
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+async function toggleRepairMaster() {
     try {
-        const button = document.getElementById('repair-button');
-        if (!button) return;
+        const response = await fetch('/api/repair/toggle', { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to toggle');
+        const data = await response.json();
+        const label = document.getElementById('repair-master-label');
+        const toggle = document.getElementById('repair-master-toggle');
+        if (label) label.textContent = data.enabled ? 'Enabled' : 'Disabled';
+        if (toggle) toggle.checked = data.enabled;
+        await updateRepairStatus();
+    } catch (error) {
+        console.error('Error toggling repair master:', error);
+        showToast('Error toggling maintenance worker', 'error');
+    }
+}
 
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/repair/pause' : '/api/repair/resume';
+function switchRepairTab(tab) {
+    _repairCurrentTab = tab;
+    document.querySelectorAll('.repair-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === tab);
+    });
+    document.querySelectorAll('.repair-tab-content').forEach(c => {
+        c.style.display = 'none';
+    });
+    const content = document.getElementById(`repair-tab-${tab}`);
+    if (content) content.style.display = '';
 
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) {
-            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} repair worker`);
+    if (tab === 'jobs') loadRepairJobs();
+    else if (tab === 'findings') loadRepairFindings();
+    else if (tab === 'history') loadRepairHistory();
+}
+
+async function loadRepairJobs() {
+    const container = document.getElementById('repair-jobs-list');
+    if (!container) return;
+
+    try {
+        const response = await fetch('/api/repair/jobs');
+        if (!response.ok) throw new Error('Failed to fetch jobs');
+        const data = await response.json();
+        const jobs = data.jobs || [];
+
+        if (jobs.length === 0) {
+            container.innerHTML = '<div class="repair-empty">No jobs available</div>';
+            return;
         }
 
-        // Immediately update UI
-        await updateRepairStatus();
+        // Populate findings job filter dropdown
+        const jobFilter = document.getElementById('repair-findings-job-filter');
+        if (jobFilter && jobFilter.options.length <= 1) {
+            jobs.forEach(job => {
+                const opt = document.createElement('option');
+                opt.value = job.job_id;
+                opt.textContent = job.display_name;
+                jobFilter.appendChild(opt);
+            });
+        }
 
-        console.log(`Repair worker ${isRunning ? 'paused' : 'resumed'}`);
+        container.innerHTML = jobs.map(job => {
+            const lastRunText = job.last_run ? formatCacheAge(job.last_run.finished_at) : 'Never';
+            const nextRunText = job.next_run ? formatCacheAge(job.next_run) : (job.enabled ? 'Pending' : '-');
+            const statusClass = job.is_running ? 'running' : (job.enabled ? 'idle' : 'disabled');
+            const statusText = job.is_running ? 'Running' : (job.enabled ? 'Idle' : 'Disabled');
+            const lastStats = job.last_run ? `Scanned: ${(job.last_run.items_scanned || 0).toLocaleString()}` : '';
+
+            // Build settings HTML
+            let settingsHtml = '';
+            if (job.settings && Object.keys(job.settings).length > 0) {
+                const settingsRows = Object.entries(job.settings).map(([key, val]) => {
+                    const label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    const inputType = typeof val === 'boolean' ? 'checkbox' :
+                                     typeof val === 'number' ? 'number' : 'text';
+                    const inputVal = inputType === 'checkbox' ?
+                        (val ? ' checked' : '') :
+                        ` value="${val}"`;
+                    return `<div class="repair-setting-row">
+                        <label>${label}</label>
+                        <input type="${inputType}" class="repair-setting-input"
+                               data-job="${job.job_id}" data-key="${key}"${inputVal}
+                               ${inputType === 'number' ? 'step="0.01" min="0"' : ''}>
+                    </div>`;
+                }).join('');
+
+                settingsHtml = `
+                    <div class="repair-job-settings" id="repair-settings-${job.job_id}" style="display:none;">
+                        <div class="repair-setting-row">
+                            <label>Interval (hours)</label>
+                            <input type="number" class="repair-setting-input"
+                                   data-job="${job.job_id}" data-key="_interval_hours"
+                                   value="${job.interval_hours}" min="1" step="1">
+                        </div>
+                        ${settingsRows}
+                        <button class="repair-save-settings-btn" onclick="saveRepairJobSettings('${job.job_id}')">Save Settings</button>
+                    </div>`;
+            }
+
+            return `<div class="repair-job-card ${statusClass}">
+                <div class="repair-job-main">
+                    <div class="repair-job-info">
+                        <div class="repair-job-title">
+                            <span class="repair-job-name">${job.display_name}</span>
+                            <span class="repair-job-status-pill ${statusClass}">${statusText}</span>
+                            ${job.auto_fix ? '<span class="repair-job-autofix-pill">Auto-fix</span>' : ''}
+                        </div>
+                        <div class="repair-job-desc">${job.description}</div>
+                        <div class="repair-job-meta">
+                            Last: ${lastRunText} &middot; Next: ${nextRunText}
+                            ${lastStats ? ' &middot; ' + lastStats : ''}
+                        </div>
+                    </div>
+                    <div class="repair-job-actions">
+                        <label class="repair-job-toggle">
+                            <input type="checkbox" ${job.enabled ? 'checked' : ''}
+                                   onchange="toggleRepairJob('${job.job_id}', this.checked)">
+                            <span class="repair-toggle-slider small"></span>
+                        </label>
+                        <button class="repair-run-btn" onclick="runRepairJobNow('${job.job_id}')"
+                                title="Run now">&#9654;</button>
+                        ${Object.keys(job.settings || {}).length > 0 ?
+                            `<button class="repair-settings-btn" onclick="expandRepairJobSettings('${job.job_id}')"
+                                     title="Settings">&#9881;</button>` : ''}
+                    </div>
+                </div>
+                ${settingsHtml}
+            </div>`;
+        }).join('');
 
     } catch (error) {
-        console.error('Error toggling repair worker:', error);
-        showToast(`Error: ${error.message}`, 'error');
+        console.error('Error loading repair jobs:', error);
+        container.innerHTML = '<div class="repair-empty">Error loading jobs</div>';
+    }
+}
+
+async function toggleRepairJob(jobId, enabled) {
+    try {
+        await fetch(`/api/repair/jobs/${jobId}/toggle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+    } catch (error) {
+        console.error('Error toggling job:', error);
+        showToast('Error toggling job', 'error');
+    }
+}
+
+function expandRepairJobSettings(jobId) {
+    const el = document.getElementById(`repair-settings-${jobId}`);
+    if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+async function saveRepairJobSettings(jobId) {
+    try {
+        const inputs = document.querySelectorAll(`.repair-setting-input[data-job="${jobId}"]`);
+        let intervalHours = null;
+        const settings = {};
+
+        inputs.forEach(input => {
+            const key = input.dataset.key;
+            if (key === '_interval_hours') {
+                intervalHours = parseInt(input.value) || 24;
+            } else {
+                if (input.type === 'checkbox') settings[key] = input.checked;
+                else if (input.type === 'number') settings[key] = parseFloat(input.value);
+                else settings[key] = input.value;
+            }
+        });
+
+        await fetch(`/api/repair/jobs/${jobId}/settings`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ interval_hours: intervalHours, settings })
+        });
+
+        showToast('Settings saved', 'success');
+    } catch (error) {
+        console.error('Error saving job settings:', error);
+        showToast('Error saving settings', 'error');
+    }
+}
+
+async function runRepairJobNow(jobId) {
+    try {
+        await fetch(`/api/repair/jobs/${jobId}/run`, { method: 'POST' });
+        showToast('Job started', 'success');
+        setTimeout(() => loadRepairJobs(), 1000);
+    } catch (error) {
+        console.error('Error running job:', error);
+        showToast('Error starting job', 'error');
+    }
+}
+
+async function loadRepairFindings() {
+    const container = document.getElementById('repair-findings-list');
+    if (!container) return;
+
+    const jobFilter = document.getElementById('repair-findings-job-filter');
+    const severityFilter = document.getElementById('repair-findings-severity-filter');
+    const statusFilter = document.getElementById('repair-findings-status-filter');
+
+    const params = new URLSearchParams();
+    if (jobFilter && jobFilter.value) params.set('job_id', jobFilter.value);
+    if (severityFilter && severityFilter.value) params.set('severity', severityFilter.value);
+    if (statusFilter && statusFilter.value) params.set('status', statusFilter.value);
+    params.set('page', _repairFindingsPage);
+    params.set('limit', REPAIR_FINDINGS_PAGE_SIZE);
+
+    try {
+        const response = await fetch(`/api/repair/findings?${params}`);
+        if (!response.ok) throw new Error('Failed to fetch findings');
+        const data = await response.json();
+        const items = data.items || [];
+
+        _repairSelectedFindings.clear();
+        const bulkBar = document.getElementById('repair-findings-bulk');
+        if (bulkBar) bulkBar.style.display = 'none';
+
+        if (items.length === 0) {
+            container.innerHTML = '<div class="repair-empty">No findings match your filters</div>';
+            document.getElementById('repair-findings-pagination').innerHTML = '';
+            return;
+        }
+
+        const severityIcons = { info: 'ℹ️', warning: '⚠️', critical: '🔴' };
+
+        container.innerHTML = items.map(f => {
+            const icon = severityIcons[f.severity] || 'ℹ️';
+            const age = formatCacheAge(f.created_at);
+            const statusBadge = f.status !== 'pending' ?
+                `<span class="repair-finding-status-badge ${f.status}">${f.status}</span>` : '';
+
+            return `<div class="repair-finding-card ${f.severity}" data-id="${f.id}">
+                <div class="repair-finding-select">
+                    <input type="checkbox" onchange="toggleFindingSelect(${f.id}, this.checked)">
+                </div>
+                <div class="repair-finding-content">
+                    <div class="repair-finding-title">
+                        <span class="repair-finding-icon">${icon}</span>
+                        ${f.title}
+                        ${statusBadge}
+                    </div>
+                    <div class="repair-finding-desc">${f.description || ''}</div>
+                    <div class="repair-finding-meta">
+                        ${f.job_id.replace(/_/g, ' ')} &middot; ${f.entity_type || 'file'} &middot; ${age}
+                    </div>
+                </div>
+                <div class="repair-finding-actions">
+                    ${f.status === 'pending' ? `
+                        <button class="repair-finding-btn resolve" onclick="resolveRepairFinding(${f.id})" title="Resolve">&#10003;</button>
+                        <button class="repair-finding-btn dismiss" onclick="dismissRepairFinding(${f.id})" title="Dismiss">&times;</button>
+                    ` : ''}
+                </div>
+            </div>`;
+        }).join('');
+
+        // Pagination
+        renderRepairFindingsPagination(data.total, data.page);
+
+    } catch (error) {
+        console.error('Error loading findings:', error);
+        container.innerHTML = '<div class="repair-empty">Error loading findings</div>';
+    }
+}
+
+function toggleFindingSelect(id, checked) {
+    if (checked) _repairSelectedFindings.add(id);
+    else _repairSelectedFindings.delete(id);
+
+    const bulkBar = document.getElementById('repair-findings-bulk');
+    if (bulkBar) bulkBar.style.display = _repairSelectedFindings.size > 0 ? '' : 'none';
+}
+
+function renderRepairFindingsPagination(total, currentPage) {
+    const container = document.getElementById('repair-findings-pagination');
+    if (!container) return;
+
+    const totalPages = Math.ceil(total / REPAIR_FINDINGS_PAGE_SIZE);
+    if (totalPages <= 1) { container.innerHTML = ''; return; }
+
+    let html = '';
+    if (currentPage > 0) {
+        html += `<button class="repair-page-btn" onclick="_repairFindingsPage=${currentPage - 1};loadRepairFindings()">&larr;</button>`;
+    }
+    for (let i = 0; i < totalPages && i < 10; i++) {
+        html += `<button class="repair-page-btn ${i === currentPage ? 'active' : ''}"
+                         onclick="_repairFindingsPage=${i};loadRepairFindings()">${i + 1}</button>`;
+    }
+    if (currentPage < totalPages - 1) {
+        html += `<button class="repair-page-btn" onclick="_repairFindingsPage=${currentPage + 1};loadRepairFindings()">&rarr;</button>`;
+    }
+    container.innerHTML = html;
+}
+
+async function resolveRepairFinding(id) {
+    try {
+        await fetch(`/api/repair/findings/${id}/resolve`, { method: 'POST' });
+        loadRepairFindings();
+        updateRepairStatus();
+    } catch (error) {
+        console.error('Error resolving finding:', error);
+    }
+}
+
+async function dismissRepairFinding(id) {
+    try {
+        await fetch(`/api/repair/findings/${id}/dismiss`, { method: 'POST' });
+        loadRepairFindings();
+        updateRepairStatus();
+    } catch (error) {
+        console.error('Error dismissing finding:', error);
+    }
+}
+
+async function bulkRepairAction(action) {
+    if (_repairSelectedFindings.size === 0) return;
+    try {
+        await fetch('/api/repair/findings/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: Array.from(_repairSelectedFindings), action })
+        });
+        showToast(`${_repairSelectedFindings.size} findings ${action === 'dismiss' ? 'dismissed' : 'resolved'}`, 'success');
+        _repairSelectedFindings.clear();
+        loadRepairFindings();
+        updateRepairStatus();
+    } catch (error) {
+        console.error('Error bulk updating findings:', error);
+        showToast('Error updating findings', 'error');
+    }
+}
+
+async function loadRepairHistory() {
+    const container = document.getElementById('repair-history-list');
+    if (!container) return;
+
+    try {
+        const response = await fetch('/api/repair/history?limit=50');
+        if (!response.ok) throw new Error('Failed to fetch history');
+        const data = await response.json();
+        const runs = data.runs || [];
+
+        if (runs.length === 0) {
+            container.innerHTML = '<div class="repair-empty">No job history yet</div>';
+            return;
+        }
+
+        container.innerHTML = runs.map(run => {
+            const duration = run.duration_seconds ? `${run.duration_seconds.toFixed(1)}s` : '-';
+            const age = formatCacheAge(run.started_at);
+            const statusClass = run.status === 'completed' ? 'success' :
+                                run.status === 'failed' ? 'error' : 'running';
+
+            return `<div class="repair-history-entry">
+                <div class="repair-history-job">
+                    <span class="repair-history-name">${run.display_name || run.job_id}</span>
+                    <span class="repair-history-status ${statusClass}">${run.status}</span>
+                </div>
+                <div class="repair-history-meta">
+                    ${age} &middot; ${duration} &middot;
+                    Scanned: ${(run.items_scanned || 0).toLocaleString()} &middot;
+                    Fixed: ${run.auto_fixed || 0} &middot;
+                    Findings: ${run.findings_created || 0}
+                    ${run.errors ? ` &middot; Errors: ${run.errors}` : ''}
+                </div>
+            </div>`;
+        }).join('');
+
+    } catch (error) {
+        console.error('Error loading repair history:', error);
+        container.innerHTML = '<div class="repair-empty">Error loading history</div>';
     }
 }
 
@@ -49314,17 +49712,17 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         const button = document.getElementById('repair-button');
         if (button) {
-            button.addEventListener('click', toggleRepairWorker);
+            button.addEventListener('click', openRepairModal);
             updateRepairStatus();
-            setInterval(updateRepairStatus, 2000);
+            setInterval(updateRepairStatus, 5000);
         }
     });
 } else {
     const button = document.getElementById('repair-button');
     if (button) {
-        button.addEventListener('click', toggleRepairWorker);
+        button.addEventListener('click', openRepairModal);
         updateRepairStatus();
-        setInterval(updateRepairStatus, 2000);
+        setInterval(updateRepairStatus, 5000);
     }
 }
 
