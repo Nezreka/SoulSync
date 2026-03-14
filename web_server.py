@@ -30063,8 +30063,9 @@ def get_discover_hero():
         itunes_client = iTunesClient()
 
         # Get top similar artists (excluding watchlist, cycled by last_featured)
+        # Fetch more than needed since strict source filtering may drop many
         pid = get_current_profile_id()
-        similar_artists = database.get_top_similar_artists(limit=50, profile_id=pid)
+        similar_artists = database.get_top_similar_artists(limit=200, profile_id=pid)
 
         # FALLBACK: If no similar artists exist, use watchlist artists for Hero section
         if not similar_artists:
@@ -30111,9 +30112,6 @@ def get_discover_hero():
             if active_source == 'spotify' and artist.similar_artist_spotify_id:
                 valid_artists.append(artist)
             elif active_source == 'itunes' and artist.similar_artist_itunes_id:
-                valid_artists.append(artist)
-            # If we have both IDs, include regardless of source
-            elif artist.similar_artist_spotify_id and artist.similar_artist_itunes_id:
                 valid_artists.append(artist)
 
         # FALLBACK: If no valid artists for iTunes, try to resolve iTunes IDs on-the-fly
@@ -30228,21 +30226,18 @@ def get_discover_similar_artists():
         if not similar_artists:
             return jsonify({"success": True, "artists": [], "source": active_source, "count": 0})
 
-        # Filter to artists with valid ID for active source
+        # Filter to artists with valid ID for active source (strict — no cross-source)
         result_artists = []
         for artist in similar_artists:
-            has_spotify = bool(artist.similar_artist_spotify_id)
-            has_itunes = bool(artist.similar_artist_itunes_id)
-
-            if active_source == 'spotify' and not has_spotify and not has_itunes:
+            if active_source == 'spotify' and not artist.similar_artist_spotify_id:
                 continue
-            if active_source == 'itunes' and not has_itunes and not has_spotify:
+            if active_source == 'itunes' and not artist.similar_artist_itunes_id:
                 continue
 
             if active_source == 'spotify':
-                artist_id = artist.similar_artist_spotify_id or artist.similar_artist_itunes_id
+                artist_id = artist.similar_artist_spotify_id
             else:
-                artist_id = artist.similar_artist_itunes_id or artist.similar_artist_spotify_id
+                artist_id = artist.similar_artist_itunes_id
 
             artist_data = {
                 "artist_id": artist_id,
