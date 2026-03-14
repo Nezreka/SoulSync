@@ -1858,6 +1858,7 @@ class MusicDatabase:
                 cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='wishlist_tracks'")
                 create_sql = cursor.fetchone()
                 if create_sql and 'UNIQUE(profile_id' not in create_sql[0]:
+                    cursor.execute("DROP TABLE IF EXISTS wishlist_tracks_new")
                     cursor.execute("""
                         CREATE TABLE wishlist_tracks_new (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1896,6 +1897,7 @@ class MusicDatabase:
                 cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='bubble_snapshots'")
                 create_sql = cursor.fetchone()
                 if create_sql and 'profile_id' in [c[1] for c in (cursor.execute("PRAGMA table_info(bubble_snapshots)").fetchall())]:
+                    cursor.execute("DROP TABLE IF EXISTS bubble_snapshots_new")
                     cursor.execute("""
                         CREATE TABLE bubble_snapshots_new (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1923,6 +1925,7 @@ class MusicDatabase:
                 cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='discovery_curated_playlists'")
                 create_sql = cursor.fetchone()
                 if create_sql and 'UNIQUE(profile_id' not in create_sql[0]:
+                    cursor.execute("DROP TABLE IF EXISTS discovery_curated_playlists_new")
                     cursor.execute("""
                         CREATE TABLE discovery_curated_playlists_new (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1989,6 +1992,7 @@ class MusicDatabase:
                     cursor.execute("PRAGMA table_info(discovery_pool)")
                     old_cols = [c[1] for c in cursor.fetchall()]
 
+                    cursor.execute("DROP TABLE IF EXISTS discovery_pool_new")
                     cursor.execute("""
                         CREATE TABLE discovery_pool_new (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2039,6 +2043,7 @@ class MusicDatabase:
                     cursor.execute("PRAGMA table_info(discovery_recent_albums)")
                     old_cols = [c[1] for c in cursor.fetchall()]
 
+                    cursor.execute("DROP TABLE IF EXISTS discovery_recent_albums_new")
                     cursor.execute("""
                         CREATE TABLE discovery_recent_albums_new (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2080,6 +2085,7 @@ class MusicDatabase:
                     cursor.execute("PRAGMA table_info(recent_releases)")
                     old_cols = [c[1] for c in cursor.fetchall()]
 
+                    cursor.execute("DROP TABLE IF EXISTS recent_releases_new")
                     cursor.execute("""
                         CREATE TABLE recent_releases_new (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2150,6 +2156,7 @@ class MusicDatabase:
                     cursor.execute("PRAGMA table_info(similar_artists)")
                     old_cols = [c[1] for c in cursor.fetchall()]
 
+                    cursor.execute("DROP TABLE IF EXISTS similar_artists_new")
                     cursor.execute("""
                         CREATE TABLE similar_artists_new (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2186,6 +2193,7 @@ class MusicDatabase:
                 cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='discovery_pool_metadata'")
                 create_sql = cursor.fetchone()
                 if create_sql and 'profile_id' not in create_sql[0]:
+                    cursor.execute("DROP TABLE IF EXISTS discovery_pool_metadata_new")
                     cursor.execute("""
                         CREATE TABLE discovery_pool_metadata_new (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
