@@ -2641,6 +2641,23 @@
                 </div>
             </div>
 
+            <!-- Reorganize Album Modal -->
+            <div class="modal-overlay hidden" id="reorganize-overlay">
+                <div class="enhanced-bulk-modal reorganize-modal">
+                    <div class="enhanced-bulk-modal-header">
+                        <h3 id="reorganize-modal-title">Reorganize Album</h3>
+                        <button class="enhanced-bulk-modal-close" onclick="closeReorganizeModal()">&times;</button>
+                    </div>
+                    <div class="enhanced-bulk-modal-body" id="reorganize-modal-body">
+                        <!-- Populated dynamically -->
+                    </div>
+                    <div class="enhanced-bulk-modal-footer" id="reorganize-modal-footer">
+                        <button class="enhanced-bulk-btn secondary" onclick="closeReorganizeModal()">Cancel</button>
+                        <button class="enhanced-bulk-btn primary" id="reorganize-apply-btn" onclick="executeReorganize()" disabled>Apply</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Discover Page -->
             <div class="page" id="discover-page">
                 <div class="discover-container">

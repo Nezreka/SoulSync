@@ -35966,6 +35966,14 @@ function renderExpandedAlbumHeader(album) {
     writeTagsBtn.onclick = (e) => { e.stopPropagation(); writeAlbumTags(album.id); };
     enrichRow.appendChild(writeTagsBtn);
 
+    // Reorganize button
+    const reorganizeBtn = document.createElement('button');
+    reorganizeBtn.className = 'enhanced-reorganize-album-btn';
+    reorganizeBtn.innerHTML = '&#128193; Reorganize';
+    reorganizeBtn.title = 'Reorganize album files using a custom path template';
+    reorganizeBtn.onclick = (e) => { e.stopPropagation(); showReorganizeModal(album.id); };
+    enrichRow.appendChild(reorganizeBtn);
+
     // Delete album button
     const deleteAlbumBtn = document.createElement('button');
     deleteAlbumBtn.className = 'enhanced-delete-album-btn';
@@ -37497,6 +37505,255 @@ function _pollBatchWriteTagsStatus() {
     }
 
     _batchWriteTagsPollTimer = setTimeout(poll, 800);
+}
+
+// ── Reorganize Album Files ──
+
+let _reorganizeAlbumId = null;
+let _reorganizePollTimer = null;
+
+async function showReorganizeModal(albumId) {
+    _reorganizeAlbumId = albumId;
+    const overlay = document.getElementById('reorganize-overlay');
+    const body = document.getElementById('reorganize-modal-body');
+    const title = document.getElementById('reorganize-modal-title');
+    const applyBtn = document.getElementById('reorganize-apply-btn');
+    if (!overlay || !body) return;
+
+    // Find album data from enhanced view state
+    let albumData = null;
+    let artistName = '';
+    if (artistDetailPageState.enhancedData) {
+        artistName = artistDetailPageState.enhancedData.artist.name || '';
+        const allAlbums = artistDetailPageState.enhancedData.albums || [];
+        albumData = allAlbums.find(a => String(a.id) === String(albumId));
+    }
+
+    title.textContent = `Reorganize: ${albumData ? albumData.title : 'Album'}`;
+    if (applyBtn) applyBtn.disabled = true;
+
+    // Build modal content
+    const variables = [
+        { var: '$artist', desc: 'Track artist', example: artistName || 'Artist' },
+        { var: '$albumartist', desc: 'Album artist', example: artistName || 'Album Artist' },
+        { var: '$artistletter', desc: 'First letter of artist', example: (artistName || 'A')[0].toUpperCase() },
+        { var: '$album', desc: 'Album title', example: albumData ? albumData.title : 'Album' },
+        { var: '$title', desc: 'Track title', example: 'Track Name' },
+        { var: '$track', desc: 'Track number (zero-padded)', example: '01' },
+        { var: '$disc', desc: 'Disc number (filename only)', example: '01' },
+        { var: '$year', desc: 'Release year', example: albumData && albumData.year ? String(albumData.year) : '2024' },
+        { var: '$quality', desc: 'Audio quality (filename only)', example: 'FLAC 16bit/44kHz' },
+    ];
+
+    let html = '<div class="reorganize-content">';
+
+    // Template input
+    html += '<div class="reorganize-template-section">';
+    html += '<label class="reorganize-label">Path Template</label>';
+    html += '<div class="reorganize-template-hint">Use <code>/</code> to separate folders. The last segment becomes the filename.</div>';
+    html += '<input type="text" id="reorganize-template-input" class="reorganize-template-input" ';
+    html += 'value="$albumartist/$albumartist - $album/$track - $title" ';
+    html += 'placeholder="$albumartist/$album/$track - $title" spellcheck="false">';
+    html += '</div>';
+
+    // Variables reference
+    html += '<div class="reorganize-variables">';
+    html += '<label class="reorganize-label">Available Variables</label>';
+    html += '<div class="reorganize-var-grid">';
+    variables.forEach(v => {
+        html += `<div class="reorganize-var-chip" onclick="insertReorganizeVar('${v.var}')" title="${escapeHtml(v.desc)} — e.g. ${escapeHtml(v.example)}">`;
+        html += `<code>${v.var}</code><span class="reorganize-var-desc">${v.desc}</span>`;
+        html += '</div>';
+    });
+    html += '</div></div>';
+
+    // Preview area
+    html += '<div class="reorganize-preview-section">';
+    html += '<div class="reorganize-preview-header">';
+    html += '<label class="reorganize-label">Preview</label>';
+    html += '<button class="reorganize-preview-btn" onclick="loadReorganizePreview()">Generate Preview</button>';
+    html += '</div>';
+    html += '<div id="reorganize-preview-body" class="reorganize-preview-body">';
+    html += '<div class="reorganize-preview-hint">Click "Generate Preview" to see how files will be reorganized.</div>';
+    html += '</div></div>';
+
+    html += '</div>';
+    body.innerHTML = html;
+    overlay.classList.remove('hidden');
+
+    // Wire up live preview on enter key
+    setTimeout(() => {
+        const input = document.getElementById('reorganize-template-input');
+        if (input) {
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    loadReorganizePreview();
+                }
+            });
+            input.focus();
+        }
+    }, 50);
+}
+
+function insertReorganizeVar(varName) {
+    const input = document.getElementById('reorganize-template-input');
+    if (!input) return;
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const val = input.value;
+    input.value = val.substring(0, start) + varName + val.substring(end);
+    input.focus();
+    const newPos = start + varName.length;
+    input.setSelectionRange(newPos, newPos);
+}
+
+function closeReorganizeModal() {
+    const overlay = document.getElementById('reorganize-overlay');
+    if (overlay) overlay.classList.add('hidden');
+    _reorganizeAlbumId = null;
+}
+
+async function loadReorganizePreview() {
+    const template = document.getElementById('reorganize-template-input')?.value?.trim();
+    const previewBody = document.getElementById('reorganize-preview-body');
+    const applyBtn = document.getElementById('reorganize-apply-btn');
+    if (!template || !previewBody || !_reorganizeAlbumId) return;
+
+    if (applyBtn) applyBtn.disabled = true;
+    previewBody.innerHTML = '<div class="reorganize-preview-loading">Loading preview...</div>';
+
+    try {
+        const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize/preview`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ template })
+        });
+        const result = await response.json();
+        if (!result.success) {
+            previewBody.innerHTML = `<div class="reorganize-preview-error">${escapeHtml(result.error || 'Preview failed')}</div>`;
+            return;
+        }
+
+        const tracks = result.tracks || [];
+        if (tracks.length === 0) {
+            previewBody.innerHTML = '<div class="reorganize-preview-hint">No tracks found.</div>';
+            return;
+        }
+
+        let hasChanges = false;
+        let hasCollisions = false;
+        let html = '<table class="reorganize-preview-table"><thead><tr>';
+        html += '<th>#</th><th>Title</th><th>Current Path</th><th></th><th>New Path</th>';
+        html += '</tr></thead><tbody>';
+
+        tracks.forEach(t => {
+            const unchanged = t.unchanged;
+            const noFile = !t.file_exists;
+            const collision = t.collision;
+            if (!unchanged && t.file_exists) hasChanges = true;
+            if (collision) hasCollisions = true;
+
+            const rowClass = collision ? 'reorganize-row-collision' : noFile ? 'reorganize-row-missing' : unchanged ? 'reorganize-row-unchanged' : 'reorganize-row-changed';
+            html += `<tr class="${rowClass}">`;
+            html += `<td>${t.track_number || ''}</td>`;
+            html += `<td>${escapeHtml(t.title)}</td>`;
+            html += `<td class="reorganize-path">${noFile ? '<em>File not found</em>' : escapeHtml(t.current_path)}</td>`;
+            html += `<td class="reorganize-arrow">${collision ? '!!' : unchanged ? '=' : noFile ? '' : '→'}</td>`;
+            html += `<td class="reorganize-path">${noFile ? '' : escapeHtml(t.new_path)}${collision ? ' <em>(collision)</em>' : ''}</td>`;
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+
+        const changedCount = tracks.filter(t => !t.unchanged && t.file_exists && !t.collision).length;
+        const skippedCount = tracks.filter(t => t.unchanged).length;
+        const missingCount = tracks.filter(t => !t.file_exists).length;
+        const collisionCount = tracks.filter(t => t.collision).length;
+
+        let summary = `<div class="reorganize-preview-summary">`;
+        if (changedCount > 0) summary += `<span class="reorganize-stat changed">${changedCount} will move</span>`;
+        if (skippedCount > 0) summary += `<span class="reorganize-stat unchanged">${skippedCount} unchanged</span>`;
+        if (missingCount > 0) summary += `<span class="reorganize-stat missing">${missingCount} missing</span>`;
+        if (collisionCount > 0) summary += `<span class="reorganize-stat collision">${collisionCount} collision${collisionCount !== 1 ? 's' : ''} — add $track or $disc to fix</span>`;
+        summary += '</div>';
+
+        previewBody.innerHTML = summary + html;
+
+        // Block apply if collisions exist
+        if (applyBtn) applyBtn.disabled = !hasChanges || hasCollisions;
+
+    } catch (error) {
+        previewBody.innerHTML = `<div class="reorganize-preview-error">Error: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+async function executeReorganize() {
+    const template = document.getElementById('reorganize-template-input')?.value?.trim();
+    if (!template || !_reorganizeAlbumId) return;
+
+    const applyBtn = document.getElementById('reorganize-apply-btn');
+    if (applyBtn) {
+        applyBtn.disabled = true;
+        applyBtn.textContent = 'Reorganizing...';
+    }
+
+    try {
+        const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ template })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error);
+
+        closeReorganizeModal();
+        showToast(`Reorganizing ${result.total} tracks...`, 'info');
+        _pollReorganizeStatus();
+
+    } catch (error) {
+        showToast(`Reorganize failed: ${error.message}`, 'error');
+        if (applyBtn) {
+            applyBtn.disabled = false;
+            applyBtn.textContent = 'Apply';
+        }
+    }
+}
+
+function _pollReorganizeStatus() {
+    if (_reorganizePollTimer) clearTimeout(_reorganizePollTimer);
+
+    async function poll() {
+        try {
+            const response = await fetch('/api/library/album/reorganize/status');
+            const state = await response.json();
+
+            if (state.status === 'running') {
+                const pct = state.total > 0 ? Math.round(state.processed / state.total * 100) : 0;
+                showToast(`Reorganizing: ${state.processed}/${state.total} (${pct}%) — ${state.current_track}`, 'info');
+                _reorganizePollTimer = setTimeout(poll, 800);
+            } else if (state.status === 'done') {
+                let msg = `Reorganized: ${state.moved} moved`;
+                if (state.skipped > 0) msg += `, ${state.skipped} skipped`;
+                if (state.failed > 0) msg += `, ${state.failed} failed`;
+                if (state.failed > 0 && state.errors && state.errors.length > 0) {
+                    msg += ` (${state.errors[0].error})`;
+                }
+                showToast(msg, state.failed > 0 ? 'warning' : 'success');
+                _reorganizePollTimer = null;
+
+                // Refresh the enhanced view to show updated paths
+                if (artistDetailPageState.currentArtistId && artistDetailPageState.enhancedView) {
+                    loadEnhancedViewData(artistDetailPageState.currentArtistId);
+                }
+            }
+        } catch (error) {
+            console.error('Poll reorganize status failed:', error);
+            _reorganizePollTimer = null;
+        }
+    }
+
+    _reorganizePollTimer = setTimeout(poll, 600);
 }
 
 async function playLibraryTrack(track, albumTitle, artistName) {
