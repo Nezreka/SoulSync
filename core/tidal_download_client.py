@@ -439,133 +439,141 @@ class TidalDownloadClient:
             quality_info = QUALITY_MAP.get(quality_key, QUALITY_MAP['lossless'])
 
             # Try quality fallback chain: hires → lossless → high → low
+            # The entire download+validation is inside the loop so that garbage
+            # files (stubs, empty HiRes responses) trigger a retry at the next tier.
             quality_chain = ['hires', 'lossless', 'high', 'low']
             start_idx = quality_chain.index(quality_key) if quality_key in quality_chain else 1
             chain = quality_chain[start_idx:]
 
-            stream = None
-            actual_quality = None
+            MIN_AUDIO_SIZE = 100 * 1024  # 100KB
+
             for q_key in chain:
                 q_info = QUALITY_MAP[q_key]
+
+                # --- Step 1: Get stream ---
                 try:
-                    # Set session quality before requesting stream
                     self.session.audio_quality = q_info['tidal_quality']
                     stream = track.get_stream()
-                    if stream and stream.manifest_mime_type:
-                        actual_quality = q_info
-                        logger.info(f"Got Tidal stream at quality: {q_key}")
-                        break
+                    if not stream or not stream.manifest_mime_type:
+                        logger.warning(f"Quality {q_key} returned no stream, trying next")
+                        continue
+                    logger.info(f"Got Tidal stream at quality: {q_key}")
                 except Exception as e:
                     logger.warning(f"Quality {q_key} unavailable: {e}")
                     continue
 
-            if not stream:
-                logger.error("No Tidal stream available at any quality")
-                return None
+                # --- Step 2: Parse manifest ---
+                manifest = stream.get_stream_manifest()
+                urls = manifest.get_urls()
+                if not urls:
+                    logger.warning(f"No download URLs for quality {q_key}, trying next")
+                    continue
 
-            # Parse manifest to get download URL
-            manifest = stream.get_stream_manifest()
-            urls = manifest.get_urls()
-            if not urls:
-                logger.error("No download URLs in Tidal stream manifest")
-                return None
+                download_url = urls[0]
 
-            download_url = urls[0]
+                # Determine file extension from manifest
+                codec = manifest.get_codecs()
+                if codec and 'flac' in codec.lower():
+                    extension = 'flac'
+                elif codec and ('mp4a' in codec.lower() or 'aac' in codec.lower()):
+                    extension = 'm4a'
+                elif codec and 'alac' in codec.lower():
+                    extension = 'm4a'
+                else:
+                    extension = q_info.get('extension', 'flac')
 
-            # Determine file extension from manifest
-            codec = manifest.get_codecs()
-            if codec and 'flac' in codec.lower():
-                extension = 'flac'
-            elif codec and ('mp4a' in codec.lower() or 'aac' in codec.lower()):
-                extension = 'm4a'
-            elif codec and 'alac' in codec.lower():
-                extension = 'm4a'
-            else:
-                # Default based on quality
-                extension = actual_quality.get('extension', 'flac') if actual_quality else 'flac'
+                # Build output filename
+                safe_name = re.sub(r'[<>:"/\\|?*]', '_', display_name)
+                out_filename = f"{safe_name}.{extension}"
+                out_path = self.download_path / out_filename
 
-            # Build output filename: "Artist - Title.ext"
-            safe_name = re.sub(r'[<>:"/\\|?*]', '_', display_name)
-            out_filename = f"{safe_name}.{extension}"
-            out_path = self.download_path / out_filename
+                # Check for shutdown before downloading
+                if self.shutdown_check and self.shutdown_check():
+                    logger.info("Server shutting down, aborting Tidal download")
+                    return None
 
-            # Check for shutdown before downloading
-            if self.shutdown_check and self.shutdown_check():
-                logger.info("Server shutting down, aborting Tidal download")
-                return None
+                # --- Step 3: Download ---
+                try:
+                    logger.info(f"Downloading from Tidal ({q_key}): {out_filename}")
+                    response = http_requests.get(download_url, stream=True, timeout=120)
+                    response.raise_for_status()
 
-            # Download with progress tracking
-            logger.info(f"Downloading from Tidal: {out_filename}")
-            response = http_requests.get(download_url, stream=True, timeout=120)
-            response.raise_for_status()
-
-            total_size = int(response.headers.get('content-length', 0))
-            downloaded = 0
-            chunk_size = 64 * 1024  # 64KB chunks
-
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['size'] = total_size
-
-            with open(out_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    if not chunk:
-                        continue
-
-                    # Check for shutdown
-                    if self.shutdown_check and self.shutdown_check():
-                        logger.info("Server shutting down, aborting Tidal download mid-stream")
-                        f.close()
-                        out_path.unlink(missing_ok=True)
-                        return None
-
-                    f.write(chunk)
-                    downloaded += len(chunk)
-
-                    # Update progress
-                    if total_size > 0:
-                        progress = (downloaded / total_size) * 100
-                    else:
-                        progress = 0
+                    total_size = int(response.headers.get('content-length', 0))
+                    downloaded = 0
+                    chunk_size = 64 * 1024  # 64KB chunks
 
                     with self._download_lock:
                         if download_id in self.active_downloads:
-                            self.active_downloads[download_id]['transferred'] = downloaded
-                            self.active_downloads[download_id]['progress'] = round(progress, 1)
+                            self.active_downloads[download_id]['size'] = total_size
 
-            # Validate download produced a real audio file (not a stub/preview)
-            # A valid audio file should be at least 100KB — anything less is likely
-            # a DRM stub, preview clip, or empty response from Tidal.
-            MIN_AUDIO_SIZE = 100 * 1024  # 100KB
-            if downloaded < MIN_AUDIO_SIZE:
-                logger.error(
-                    f"Tidal download too small ({downloaded} bytes) — likely a stub or "
-                    f"preview. Expected audio file for '{display_name}'. Deleting."
-                )
-                out_path.unlink(missing_ok=True)
-                return None
+                    with open(out_path, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=chunk_size):
+                            if not chunk:
+                                continue
 
-            # HiRes FLAC in MP4 container: extract raw FLAC with FFmpeg if available
-            if extension == 'flac' and self._is_mp4_container(out_path):
-                extracted = self._extract_flac_from_mp4(out_path)
-                if extracted:
-                    out_path = Path(extracted)
-                else:
-                    # FFmpeg extraction failed — the MP4 container is not playable as-is.
-                    # Delete it rather than leaving an unplayable file.
-                    logger.error(f"Cannot extract FLAC from MP4 container and file is not playable — deleting {out_path.name}")
+                            if self.shutdown_check and self.shutdown_check():
+                                logger.info("Server shutting down, aborting Tidal download mid-stream")
+                                f.close()
+                                out_path.unlink(missing_ok=True)
+                                return None
+
+                            f.write(chunk)
+                            downloaded += len(chunk)
+
+                            if total_size > 0:
+                                progress = (downloaded / total_size) * 100
+                            else:
+                                progress = 0
+
+                            with self._download_lock:
+                                if download_id in self.active_downloads:
+                                    self.active_downloads[download_id]['transferred'] = downloaded
+                                    self.active_downloads[download_id]['progress'] = round(progress, 1)
+
+                except Exception as dl_err:
+                    logger.warning(f"Download failed at quality {q_key}: {dl_err}")
                     out_path.unlink(missing_ok=True)
-                    return None
+                    continue
 
-            # Final size check after any extraction
-            final_size = out_path.stat().st_size if out_path.exists() else 0
-            if final_size < MIN_AUDIO_SIZE:
-                logger.error(f"Final file too small after processing ({final_size} bytes) — deleting {out_path.name}")
-                out_path.unlink(missing_ok=True)
-                return None
+                # --- Step 4: Validate ---
+                if downloaded < MIN_AUDIO_SIZE:
+                    logger.warning(
+                        f"Tidal download too small at {q_key} ({downloaded} bytes) — "
+                        f"likely a stub/preview for '{display_name}'. Trying next quality."
+                    )
+                    out_path.unlink(missing_ok=True)
+                    continue
 
-            logger.info(f"Tidal download complete: {out_path} ({final_size / (1024*1024):.1f} MB)")
-            return str(out_path)
+                # HiRes FLAC in MP4 container: extract raw FLAC with FFmpeg
+                if extension == 'flac' and self._is_mp4_container(out_path):
+                    extracted = self._extract_flac_from_mp4(out_path)
+                    if extracted:
+                        out_path = Path(extracted)
+                    else:
+                        logger.warning(
+                            f"Cannot extract FLAC from MP4 container at {q_key} — "
+                            f"deleting and trying next quality"
+                        )
+                        out_path.unlink(missing_ok=True)
+                        continue
+
+                # Final size check after any extraction
+                final_size = out_path.stat().st_size if out_path.exists() else 0
+                if final_size < MIN_AUDIO_SIZE:
+                    logger.warning(
+                        f"Final file too small after processing at {q_key} "
+                        f"({final_size} bytes) — trying next quality"
+                    )
+                    out_path.unlink(missing_ok=True)
+                    continue
+
+                # Success — file is valid
+                logger.info(f"Tidal download complete ({q_key}): {out_path} ({final_size / (1024*1024):.1f} MB)")
+                return str(out_path)
+
+            # All quality tiers exhausted
+            logger.error(f"No Tidal quality tier produced a valid download for '{display_name}'")
+            return None
 
         except Exception as e:
             logger.error(f"Tidal download failed: {e}")
