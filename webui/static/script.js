@@ -4427,8 +4427,8 @@ function validateFileOrganizationTemplates() {
 
     // Valid variables for each template type
     const validVars = {
-        album: ['$artist', '$albumartist', '$artistletter', '$album', '$title', '$track', '$disc', '$year', '$quality'],
-        single: ['$artist', '$albumartist', '$artistletter', '$album', '$title', '$year', '$quality'],
+        album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$disc', '$year', '$quality'],
+        single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$year', '$quality'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality']
     };
 
@@ -38321,6 +38321,7 @@ async function showReorganizeModal(albumId) {
         { var: '$albumartist', desc: 'Album artist', example: artistName || 'Album Artist' },
         { var: '$artistletter', desc: 'First letter of artist', example: (artistName || 'A')[0].toUpperCase() },
         { var: '$album', desc: 'Album title', example: albumData ? albumData.title : 'Album' },
+        { var: '$albumtype', desc: 'Album/EP/Single', example: 'Album' },
         { var: '$title', desc: 'Track title', example: 'Track Name' },
         { var: '$track', desc: 'Track number (zero-padded)', example: '01' },
         { var: '$disc', desc: 'Disc number (filename only)', example: '01' },
