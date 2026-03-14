@@ -558,6 +558,9 @@ class SequentialSyncManager {
         this.updateUI();
         updateRefreshButtonState(); // Refresh button state after completion
         showToast(`Sequential sync completed for ${completedCount} playlists in ${duration}s`, 'success');
+
+        // Hide sidebar after completion
+        hideSyncSidebar();
     }
 
     cancel() {
@@ -575,6 +578,9 @@ class SequentialSyncManager {
         this.updateUI();
         updateRefreshButtonState(); // Refresh button state after cancellation
         showToast('Sequential sync cancelled', 'info');
+
+        // Hide sidebar after cancellation
+        hideSyncSidebar();
     }
 
     updateUI() {
@@ -13064,6 +13070,25 @@ function stopSyncPolling(playlistId) {
     updateRefreshButtonState();
 }
 
+// Sync sidebar visibility helpers
+function showSyncSidebar() {
+    const sidebar = document.querySelector('.sync-sidebar');
+    const contentArea = document.querySelector('.sync-content-area');
+    if (sidebar && contentArea && window.innerWidth > 1300) {
+        sidebar.style.display = '';
+        contentArea.style.gridTemplateColumns = '2.5fr 0.75fr';
+    }
+}
+
+function hideSyncSidebar() {
+    const sidebar = document.querySelector('.sync-sidebar');
+    const contentArea = document.querySelector('.sync-content-area');
+    if (sidebar && contentArea) {
+        sidebar.style.display = 'none';
+        contentArea.style.gridTemplateColumns = '1fr';
+    }
+}
+
 // Sequential Sync Functions
 function startSequentialSync() {
     // Initialize manager if needed
@@ -13095,6 +13120,9 @@ function startSequentialSync() {
     });
 
     console.log(`🚀 Starting sequential sync for ${orderedPlaylistIds.length} playlists`);
+
+    // Show sidebar for sync progress
+    showSyncSidebar();
 
     // Start sequential sync
     sequentialSyncManager.start(orderedPlaylistIds);
@@ -22601,13 +22629,9 @@ function initializeSyncPage() {
             // Show/hide sidebar based on active tab (skip on mobile where sidebar is always hidden)
             if (syncSidebar && syncContentArea) {
                 const isMobile = window.innerWidth <= 1300;
-                if (tabId === 'spotify' && !isMobile) {
-                    syncSidebar.style.display = '';
-                    syncContentArea.style.gridTemplateColumns = '2.5fr 0.75fr';
-                } else {
-                    syncSidebar.style.display = 'none';
-                    syncContentArea.style.gridTemplateColumns = '1fr';
-                }
+                // Sidebar always hidden by default — shown only when sync is active
+                syncSidebar.style.display = 'none';
+                syncContentArea.style.gridTemplateColumns = '1fr';
             }
 
             // Auto-load mirrored playlists on first tab activation
