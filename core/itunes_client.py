@@ -403,31 +403,48 @@ class iTunesClient:
         """
         Perform a batched lookup of artist IDs to get clean artist names.
         Returns a map of {artist_id: clean_artist_name}
+        Checks cache first to avoid unnecessary API calls.
         """
         if not artist_ids:
             return {}
-            
+
         clean_names = {}
+        uncached_ids = []
+
+        # Check cache first
+        cache = get_metadata_cache()
+        for aid in artist_ids:
+            cached = cache.get_entity('itunes', 'artist', aid)
+            if cached and cached.get('artistName'):
+                clean_names[aid] = cached['artistName']
+            else:
+                uncached_ids.append(aid)
+
+        if not uncached_ids:
+            return clean_names
+
         # iTunes lookup allows comma-separated IDs, but keep batch size reasonable (e.g. 50)
         batch_size = 50
-        
-        for i in range(0, len(artist_ids), batch_size):
-            batch = artist_ids[i:i+batch_size]
+
+        for i in range(0, len(uncached_ids), batch_size):
+            batch = uncached_ids[i:i+batch_size]
             ids_str = ",".join(batch)
-            
+
             try:
                 # Lookup is fast/unlimited compared to search
                 results = self._lookup(id=ids_str)
-                
+
                 for item in results:
                     if item.get('wrapperType') == 'artist':
                         a_id = str(item.get('artistId', ''))
                         a_name = item.get('artistName', '')
                         if a_id and a_name:
                             clean_names[a_id] = a_name
+                            # Populate artist cache from lookup results
+                            cache.store_entity('itunes', 'artist', a_id, item)
             except Exception as e:
                 logger.warning(f"Failed batch artist lookup: {e}")
-                
+
         return clean_names
     
     def get_track_details(self, track_id: str) -> Optional[Dict[str, Any]]:
@@ -571,10 +588,10 @@ class iTunesClient:
 
         result = albums[:limit]
 
-        # Cache individual albums + search mapping
+        # Cache individual albums + search mapping (skip if full data already cached)
         entries = [(str(ad.get('collectionId', '')), ad) for ad in raw_items if ad.get('collectionId')]
         if entries:
-            cache.store_entities_bulk('itunes', 'album', entries)
+            cache.store_entities_bulk('itunes', 'album', entries, skip_if_exists=True)
             # Only cache IDs for the albums we're actually returning
             result_ids = [str(ad.get('collectionId', '')) for ad in raw_items[:limit] if ad.get('collectionId')]
             if result_ids:
@@ -782,13 +799,13 @@ class iTunesClient:
         # Cache the album tracks listing
         cache.store_entity('itunes', 'album', f"{album_id}_tracks", result)
 
-        # Also cache individual tracks from the raw results
+        # Also cache individual tracks from the raw results (skip if full data already cached)
         track_entries = []
         for item in results:
             if item.get('wrapperType') == 'track' and item.get('kind') == 'song' and item.get('trackId'):
                 track_entries.append((str(item['trackId']), item))
         if track_entries:
-            cache.store_entities_bulk('itunes', 'track', track_entries)
+            cache.store_entities_bulk('itunes', 'track', track_entries, skip_if_exists=True)
 
         return result
     
@@ -1032,14 +1049,14 @@ class iTunesClient:
         # Extract albums from dict
         albums = [item['album'] for item in seen_albums.values()]
 
-        # Cache individual albums opportunistically
+        # Cache individual albums opportunistically (skip if full data already cached)
         album_entries = []
         for album_data in results:
             if album_data.get('wrapperType') == 'collection' and album_data.get('collectionId'):
                 album_entries.append((str(album_data['collectionId']), album_data))
         if album_entries:
             cache = get_metadata_cache()
-            cache.store_entities_bulk('itunes', 'album', album_entries)
+            cache.store_entities_bulk('itunes', 'album', album_entries, skip_if_exists=True)
 
         logger.info(f"Retrieved {len(albums)} unique albums for artist {artist_id} (filtered from {len(results)} results)")
         return albums[:limit]

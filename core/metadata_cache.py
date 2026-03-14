@@ -46,24 +46,36 @@ class MetadataCache:
         try:
             db = self._get_db()
             conn = db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, raw_json FROM metadata_cache_entities
-                WHERE source = ? AND entity_type = ? AND entity_id = ?
-            """, (source, entity_type, entity_id))
-            row = cursor.fetchone()
-            if row:
-                # Touch: update access stats
+            try:
+                cursor = conn.cursor()
                 cursor.execute("""
-                    UPDATE metadata_cache_entities
-                    SET last_accessed_at = CURRENT_TIMESTAMP, access_count = access_count + 1
-                    WHERE id = ?
-                """, (row['id'],))
-                conn.commit()
+                    SELECT id, raw_json, updated_at, ttl_days FROM metadata_cache_entities
+                    WHERE source = ? AND entity_type = ? AND entity_id = ?
+                """, (source, entity_type, entity_id))
+                row = cursor.fetchone()
+                if row:
+                    # Inline TTL check — don't serve stale data
+                    try:
+                        updated = datetime.fromisoformat(row['updated_at'])
+                        age_days = (datetime.now() - updated).days
+                        if age_days > (row['ttl_days'] or 30):
+                            cursor.execute("DELETE FROM metadata_cache_entities WHERE id = ?", (row['id'],))
+                            conn.commit()
+                            return None
+                    except (ValueError, TypeError):
+                        pass
+
+                    # Touch: update access stats
+                    cursor.execute("""
+                        UPDATE metadata_cache_entities
+                        SET last_accessed_at = CURRENT_TIMESTAMP, access_count = access_count + 1
+                        WHERE id = ?
+                    """, (row['id'],))
+                    conn.commit()
+                    return json.loads(row['raw_json'])
+                return None
+            finally:
                 conn.close()
-                return json.loads(row['raw_json'])
-            conn.close()
-            return None
         except Exception as e:
             logger.debug(f"Cache lookup error ({source}/{entity_type}/{entity_id}): {e}")
             return None
@@ -77,76 +89,22 @@ class MetadataCache:
             raw_json = json.dumps(raw_data, default=str)
             db = self._get_db()
             conn = db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO metadata_cache_entities
-                (source, entity_type, entity_id, name, image_url, external_urls,
-                 genres, popularity, followers,
-                 artist_name, artist_id, release_date, total_tracks, album_type, label,
-                 album_name, album_id, duration_ms, track_number, disc_number, explicit, isrc, preview_url,
-                 raw_json, updated_at, last_accessed_at, access_count)
-                VALUES (?, ?, ?, ?, ?, ?,
-                        ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
-                        COALESCE((SELECT access_count FROM metadata_cache_entities
-                                  WHERE source = ? AND entity_type = ? AND entity_id = ?), 0) + 1)
-            """, (
-                source, entity_type, entity_id,
-                fields.get('name', ''),
-                fields.get('image_url'),
-                fields.get('external_urls'),
-                fields.get('genres'),
-                fields.get('popularity'),
-                fields.get('followers'),
-                fields.get('artist_name'),
-                fields.get('artist_id'),
-                fields.get('release_date'),
-                fields.get('total_tracks'),
-                fields.get('album_type'),
-                fields.get('label'),
-                fields.get('album_name'),
-                fields.get('album_id'),
-                fields.get('duration_ms'),
-                fields.get('track_number'),
-                fields.get('disc_number'),
-                fields.get('explicit'),
-                fields.get('isrc'),
-                fields.get('preview_url'),
-                raw_json,
-                source, entity_type, entity_id,
-            ))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            logger.debug(f"Cache store error ({source}/{entity_type}/{entity_id}): {e}")
-
-    def store_entities_bulk(self, source: str, entity_type: str, items: List[Tuple[str, dict]]) -> None:
-        """Store multiple entities at once. items = [(entity_id, raw_data), ...]"""
-        if not items:
-            return
-        try:
-            db = self._get_db()
-            conn = db._get_connection()
-            cursor = conn.cursor()
-            for entity_id, raw_data in items:
-                if not entity_id or not raw_data:
-                    continue
-                fields = self._extract_fields(source, entity_type, raw_data)
-                raw_json = json.dumps(raw_data, default=str)
+            try:
+                cursor = conn.cursor()
                 cursor.execute("""
                     INSERT OR REPLACE INTO metadata_cache_entities
                     (source, entity_type, entity_id, name, image_url, external_urls,
                      genres, popularity, followers,
                      artist_name, artist_id, release_date, total_tracks, album_type, label,
                      album_name, album_id, duration_ms, track_number, disc_number, explicit, isrc, preview_url,
-                     raw_json, updated_at, last_accessed_at)
+                     raw_json, updated_at, last_accessed_at, access_count)
                     VALUES (?, ?, ?, ?, ?, ?,
                             ?, ?, ?,
                             ?, ?, ?, ?, ?, ?,
                             ?, ?, ?, ?, ?, ?, ?, ?,
-                            ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                            COALESCE((SELECT access_count FROM metadata_cache_entities
+                                      WHERE source = ? AND entity_type = ? AND entity_id = ?), 0) + 1)
                 """, (
                     source, entity_type, entity_id,
                     fields.get('name', ''),
@@ -170,9 +128,86 @@ class MetadataCache:
                     fields.get('isrc'),
                     fields.get('preview_url'),
                     raw_json,
+                    source, entity_type, entity_id,
                 ))
-            conn.commit()
-            conn.close()
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"Cache store error ({source}/{entity_type}/{entity_id}): {e}")
+
+    def store_entities_bulk(self, source: str, entity_type: str, items: List[Tuple[str, dict]],
+                            skip_if_exists: bool = False) -> None:
+        """Store multiple entities at once. items = [(entity_id, raw_data), ...]
+
+        Args:
+            skip_if_exists: If True, don't overwrite existing entries. Use this for
+                opportunistic caching of simplified data (e.g. from list endpoints)
+                to avoid replacing richer data from detail endpoints.
+        """
+        if not items:
+            return
+        try:
+            db = self._get_db()
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+                for entity_id, raw_data in items:
+                    if not entity_id or not raw_data:
+                        continue
+
+                    if skip_if_exists:
+                        cursor.execute("""
+                            SELECT 1 FROM metadata_cache_entities
+                            WHERE source = ? AND entity_type = ? AND entity_id = ?
+                        """, (source, entity_type, entity_id))
+                        if cursor.fetchone():
+                            continue
+
+                    fields = self._extract_fields(source, entity_type, raw_data)
+                    raw_json = json.dumps(raw_data, default=str)
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO metadata_cache_entities
+                        (source, entity_type, entity_id, name, image_url, external_urls,
+                         genres, popularity, followers,
+                         artist_name, artist_id, release_date, total_tracks, album_type, label,
+                         album_name, album_id, duration_ms, track_number, disc_number, explicit, isrc, preview_url,
+                         raw_json, updated_at, last_accessed_at, access_count)
+                        VALUES (?, ?, ?, ?, ?, ?,
+                                ?, ?, ?,
+                                ?, ?, ?, ?, ?, ?,
+                                ?, ?, ?, ?, ?, ?, ?, ?,
+                                ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                                COALESCE((SELECT access_count FROM metadata_cache_entities
+                                          WHERE source = ? AND entity_type = ? AND entity_id = ?), 0) + 1)
+                    """, (
+                        source, entity_type, entity_id,
+                        fields.get('name', ''),
+                        fields.get('image_url'),
+                        fields.get('external_urls'),
+                        fields.get('genres'),
+                        fields.get('popularity'),
+                        fields.get('followers'),
+                        fields.get('artist_name'),
+                        fields.get('artist_id'),
+                        fields.get('release_date'),
+                        fields.get('total_tracks'),
+                        fields.get('album_type'),
+                        fields.get('label'),
+                        fields.get('album_name'),
+                        fields.get('album_id'),
+                        fields.get('duration_ms'),
+                        fields.get('track_number'),
+                        fields.get('disc_number'),
+                        fields.get('explicit'),
+                        fields.get('isrc'),
+                        fields.get('preview_url'),
+                        raw_json,
+                        source, entity_type, entity_id,
+                    ))
+                conn.commit()
+            finally:
+                conn.close()
         except Exception as e:
             logger.debug(f"Cache bulk store error ({source}/{entity_type}): {e}")
 
@@ -186,29 +221,31 @@ class MetadataCache:
         try:
             db = self._get_db()
             conn = db._get_connection()
-            cursor = conn.cursor()
-            # Batch query in chunks of 500 to avoid SQLite variable limit
-            for i in range(0, len(entity_ids), 500):
-                chunk = entity_ids[i:i + 500]
-                placeholders = ','.join('?' * len(chunk))
-                cursor.execute(f"""
-                    SELECT entity_id, raw_json FROM metadata_cache_entities
-                    WHERE source = ? AND entity_type = ? AND entity_id IN ({placeholders})
-                """, [source, entity_type] + chunk)
-                for row in cursor.fetchall():
-                    found[row['entity_id']] = json.loads(row['raw_json'])
-                # Touch all found entries
-                if found:
-                    found_in_chunk = [eid for eid in chunk if eid in found]
-                    if found_in_chunk:
-                        ph2 = ','.join('?' * len(found_in_chunk))
-                        cursor.execute(f"""
-                            UPDATE metadata_cache_entities
-                            SET last_accessed_at = CURRENT_TIMESTAMP, access_count = access_count + 1
-                            WHERE source = ? AND entity_type = ? AND entity_id IN ({ph2})
-                        """, [source, entity_type] + found_in_chunk)
-            conn.commit()
-            conn.close()
+            try:
+                cursor = conn.cursor()
+                # Batch query in chunks of 500 to avoid SQLite variable limit
+                for i in range(0, len(entity_ids), 500):
+                    chunk = entity_ids[i:i + 500]
+                    placeholders = ','.join('?' * len(chunk))
+                    cursor.execute(f"""
+                        SELECT entity_id, raw_json FROM metadata_cache_entities
+                        WHERE source = ? AND entity_type = ? AND entity_id IN ({placeholders})
+                    """, [source, entity_type] + chunk)
+                    for row in cursor.fetchall():
+                        found[row['entity_id']] = json.loads(row['raw_json'])
+                    # Touch all found entries
+                    if found:
+                        found_in_chunk = [eid for eid in chunk if eid in found]
+                        if found_in_chunk:
+                            ph2 = ','.join('?' * len(found_in_chunk))
+                            cursor.execute(f"""
+                                UPDATE metadata_cache_entities
+                                SET last_accessed_at = CURRENT_TIMESTAMP, access_count = access_count + 1
+                                WHERE source = ? AND entity_type = ? AND entity_id IN ({ph2})
+                            """, [source, entity_type] + found_in_chunk)
+                conn.commit()
+            finally:
+                conn.close()
             missing = [eid for eid in entity_ids if eid not in found]
         except Exception as e:
             logger.debug(f"Cache batch lookup error: {e}")
@@ -226,58 +263,57 @@ class MetadataCache:
         try:
             db = self._get_db()
             conn = db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, result_ids, created_at FROM metadata_cache_searches
-                WHERE source = ? AND search_type = ? AND query_normalized = ? AND search_limit = ?
-            """, (source, search_type, normalized, limit))
-            row = cursor.fetchone()
-            if not row:
-                conn.close()
-                return None
-
-            # Check TTL (7 days for searches)
             try:
-                created = datetime.fromisoformat(row['created_at'])
-                age_days = (datetime.now() - created).days
-                if age_days > 7:
-                    # Expired — delete and return miss
-                    cursor.execute("DELETE FROM metadata_cache_searches WHERE id = ?", (row['id'],))
-                    conn.commit()
-                    conn.close()
-                    return None
-            except (ValueError, TypeError):
-                pass
-
-            # Touch search entry
-            cursor.execute("""
-                UPDATE metadata_cache_searches
-                SET last_accessed_at = CURRENT_TIMESTAMP, access_count = access_count + 1
-                WHERE id = ?
-            """, (row['id'],))
-            conn.commit()
-
-            # Resolve entity IDs to full data
-            result_ids = json.loads(row['result_ids'])
-            if not result_ids:
-                conn.close()
-                return []
-
-            results = []
-            for eid in result_ids:
+                cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT raw_json FROM metadata_cache_entities
-                    WHERE source = ? AND entity_type = ? AND entity_id = ?
-                """, (source, search_type, eid))
-                erow = cursor.fetchone()
-                if erow:
-                    results.append(json.loads(erow['raw_json']))
-            conn.close()
+                    SELECT id, result_ids, created_at FROM metadata_cache_searches
+                    WHERE source = ? AND search_type = ? AND query_normalized = ? AND search_limit = ?
+                """, (source, search_type, normalized, limit))
+                row = cursor.fetchone()
+                if not row:
+                    return None
 
-            # Only return if we found all (or most) entries — partial results are unreliable
-            if len(results) >= len(result_ids) * 0.8:
-                return results
-            return None
+                # Check TTL (7 days for searches)
+                try:
+                    created = datetime.fromisoformat(row['created_at'])
+                    age_days = (datetime.now() - created).days
+                    if age_days > 7:
+                        # Expired — delete and return miss
+                        cursor.execute("DELETE FROM metadata_cache_searches WHERE id = ?", (row['id'],))
+                        conn.commit()
+                        return None
+                except (ValueError, TypeError):
+                    pass
+
+                # Touch search entry
+                cursor.execute("""
+                    UPDATE metadata_cache_searches
+                    SET last_accessed_at = CURRENT_TIMESTAMP, access_count = access_count + 1
+                    WHERE id = ?
+                """, (row['id'],))
+                conn.commit()
+
+                # Resolve entity IDs to full data
+                result_ids = json.loads(row['result_ids'])
+                if not result_ids:
+                    return []
+
+                results = []
+                for eid in result_ids:
+                    cursor.execute("""
+                        SELECT raw_json FROM metadata_cache_entities
+                        WHERE source = ? AND entity_type = ? AND entity_id = ?
+                    """, (source, search_type, eid))
+                    erow = cursor.fetchone()
+                    if erow:
+                        results.append(json.loads(erow['raw_json']))
+
+                # Only return if we found all (or most) entries — partial results are unreliable
+                if len(results) >= len(result_ids) * 0.8:
+                    return results
+                return None
+            finally:
+                conn.close()
         except Exception as e:
             logger.debug(f"Search cache lookup error ({source}/{search_type}/{query}): {e}")
             return None
@@ -291,18 +327,20 @@ class MetadataCache:
         try:
             db = self._get_db()
             conn = db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO metadata_cache_searches
-                (source, search_type, query_normalized, query_original, result_ids,
-                 result_count, search_limit, last_accessed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """, (
-                source, search_type, normalized, query.strip(),
-                json.dumps(entity_ids), len(entity_ids), limit,
-            ))
-            conn.commit()
-            conn.close()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO metadata_cache_searches
+                    (source, search_type, query_normalized, query_original, result_ids,
+                     result_count, search_limit, last_accessed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (
+                    source, search_type, normalized, query.strip(),
+                    json.dumps(entity_ids), len(entity_ids), limit,
+                ))
+                conn.commit()
+            finally:
+                conn.close()
         except Exception as e:
             logger.debug(f"Search cache store error ({source}/{search_type}/{query}): {e}")
 
@@ -315,63 +353,65 @@ class MetadataCache:
         try:
             db = self._get_db()
             conn = db._get_connection()
-            cursor = conn.cursor()
+            try:
+                cursor = conn.cursor()
 
-            where_clauses = ['entity_type = ?']
-            params = [entity_type]
+                where_clauses = ['entity_type = ?']
+                params = [entity_type]
 
-            # Exclude pseudo-entities like album_id_tracks and track_id_features
-            where_clauses.append(r"entity_id NOT LIKE '%\_tracks' ESCAPE '\'")
-            where_clauses.append(r"entity_id NOT LIKE '%\_features' ESCAPE '\'")
+                # Exclude pseudo-entities like album_id_tracks and track_id_features
+                where_clauses.append(r"entity_id NOT LIKE '%\_tracks' ESCAPE '\'")
+                where_clauses.append(r"entity_id NOT LIKE '%\_features' ESCAPE '\'")
 
-            if source:
-                where_clauses.append('source = ?')
-                params.append(source)
+                if source:
+                    where_clauses.append('source = ?')
+                    params.append(source)
 
-            if search:
-                search_term = f'%{search}%'
-                where_clauses.append('(name LIKE ? OR artist_name LIKE ? OR album_name LIKE ?)')
-                params.extend([search_term, search_term, search_term])
+                if search:
+                    search_term = f'%{search}%'
+                    where_clauses.append('(name LIKE ? OR artist_name LIKE ? OR album_name LIKE ?)')
+                    params.extend([search_term, search_term, search_term])
 
-            where_sql = ' AND '.join(where_clauses)
+                where_sql = ' AND '.join(where_clauses)
 
-            # Count total
-            cursor.execute(f"SELECT COUNT(*) as cnt FROM metadata_cache_entities WHERE {where_sql}", params)
-            total = cursor.fetchone()['cnt']
+                # Count total
+                cursor.execute(f"SELECT COUNT(*) as cnt FROM metadata_cache_entities WHERE {where_sql}", params)
+                total = cursor.fetchone()['cnt']
 
-            # Validate sort column
-            valid_sorts = {'last_accessed_at', 'created_at', 'access_count', 'name', 'popularity', 'updated_at'}
-            if sort not in valid_sorts:
-                sort = 'last_accessed_at'
-            direction = 'ASC' if sort_dir == 'asc' else 'DESC'
+                # Validate sort column
+                valid_sorts = {'last_accessed_at', 'created_at', 'access_count', 'name', 'popularity', 'updated_at'}
+                if sort not in valid_sorts:
+                    sort = 'last_accessed_at'
+                direction = 'ASC' if sort_dir == 'asc' else 'DESC'
 
-            cursor.execute(f"""
-                SELECT id, source, entity_type, entity_id, name, image_url,
-                       genres, popularity, followers,
-                       artist_name, artist_id, release_date, total_tracks, album_type, label,
-                       album_name, album_id, duration_ms, track_number, disc_number, explicit,
-                       isrc, preview_url, external_urls,
-                       created_at, updated_at, last_accessed_at, access_count
-                FROM metadata_cache_entities
-                WHERE {where_sql}
-                ORDER BY {sort} {direction}
-                LIMIT ? OFFSET ?
-            """, params + [limit, offset])
+                cursor.execute(f"""
+                    SELECT id, source, entity_type, entity_id, name, image_url,
+                           genres, popularity, followers,
+                           artist_name, artist_id, release_date, total_tracks, album_type, label,
+                           album_name, album_id, duration_ms, track_number, disc_number, explicit,
+                           isrc, preview_url, external_urls,
+                           created_at, updated_at, last_accessed_at, access_count
+                    FROM metadata_cache_entities
+                    WHERE {where_sql}
+                    ORDER BY {sort} {direction}
+                    LIMIT ? OFFSET ?
+                """, params + [limit, offset])
 
-            items = []
-            for row in cursor.fetchall():
-                item = dict(row)
-                # Parse JSON fields for the UI
-                for json_field in ('genres', 'external_urls'):
-                    if item.get(json_field):
-                        try:
-                            item[json_field] = json.loads(item[json_field])
-                        except (json.JSONDecodeError, TypeError):
-                            pass
-                items.append(item)
+                items = []
+                for row in cursor.fetchall():
+                    item = dict(row)
+                    # Parse JSON fields for the UI
+                    for json_field in ('genres', 'external_urls'):
+                        if item.get(json_field):
+                            try:
+                                item[json_field] = json.loads(item[json_field])
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                    items.append(item)
 
-            conn.close()
-            return {'items': items, 'total': total, 'offset': offset, 'limit': limit}
+                return {'items': items, 'total': total, 'offset': offset, 'limit': limit}
+            finally:
+                conn.close()
         except Exception as e:
             logger.error(f"Cache browse error: {e}")
             return {'items': [], 'total': 0, 'offset': offset, 'limit': limit}
@@ -381,34 +421,35 @@ class MetadataCache:
         try:
             db = self._get_db()
             conn = db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM metadata_cache_entities
-                WHERE source = ? AND entity_type = ? AND entity_id = ?
-            """, (source, entity_type, entity_id))
-            row = cursor.fetchone()
-            if not row:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM metadata_cache_entities
+                    WHERE source = ? AND entity_type = ? AND entity_id = ?
+                """, (source, entity_type, entity_id))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+
+                # Touch
+                cursor.execute("""
+                    UPDATE metadata_cache_entities
+                    SET last_accessed_at = CURRENT_TIMESTAMP, access_count = access_count + 1
+                    WHERE id = ?
+                """, (row['id'],))
+                conn.commit()
+
+                item = dict(row)
+                # Parse JSON fields
+                for json_field in ('genres', 'external_urls', 'raw_json'):
+                    if item.get(json_field):
+                        try:
+                            item[json_field] = json.loads(item[json_field])
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                return item
+            finally:
                 conn.close()
-                return None
-
-            # Touch
-            cursor.execute("""
-                UPDATE metadata_cache_entities
-                SET last_accessed_at = CURRENT_TIMESTAMP, access_count = access_count + 1
-                WHERE id = ?
-            """, (row['id'],))
-            conn.commit()
-
-            item = dict(row)
-            # Parse JSON fields
-            for json_field in ('genres', 'external_urls', 'raw_json'):
-                if item.get(json_field):
-                    try:
-                        item[json_field] = json.loads(item[json_field])
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-            conn.close()
-            return item
         except Exception as e:
             logger.error(f"Cache detail error: {e}")
             return None
@@ -420,49 +461,51 @@ class MetadataCache:
         try:
             db = self._get_db()
             conn = db._get_connection()
-            cursor = conn.cursor()
+            try:
+                cursor = conn.cursor()
 
-            stats = {
-                'artists': {'spotify': 0, 'itunes': 0},
-                'albums': {'spotify': 0, 'itunes': 0},
-                'tracks': {'spotify': 0, 'itunes': 0},
-                'searches': 0,
-                'total_entries': 0,
-                'total_hits': 0,
-                'oldest': None,
-                'newest': None,
-            }
+                stats = {
+                    'artists': {'spotify': 0, 'itunes': 0},
+                    'albums': {'spotify': 0, 'itunes': 0},
+                    'tracks': {'spotify': 0, 'itunes': 0},
+                    'searches': 0,
+                    'total_entries': 0,
+                    'total_hits': 0,
+                    'oldest': None,
+                    'newest': None,
+                }
 
-            # Count by type and source (exclude pseudo-entities like _tracks, _features)
-            cursor.execute(r"""
-                SELECT entity_type, source, COUNT(*) as cnt, SUM(access_count) as hits
-                FROM metadata_cache_entities
-                WHERE entity_id NOT LIKE '%\_tracks' ESCAPE '\'
-                  AND entity_id NOT LIKE '%\_features' ESCAPE '\'
-                GROUP BY entity_type, source
-            """)
-            type_key_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-            for row in cursor.fetchall():
-                et = type_key_map.get(row['entity_type'])
-                src = row['source']
-                if et and et in stats and src in stats[et]:
-                    stats[et][src] = row['cnt']
-                stats['total_entries'] += row['cnt']
-                stats['total_hits'] += (row['hits'] or 0)
+                # Count by type and source (exclude pseudo-entities like _tracks, _features)
+                cursor.execute(r"""
+                    SELECT entity_type, source, COUNT(*) as cnt, SUM(access_count) as hits
+                    FROM metadata_cache_entities
+                    WHERE entity_id NOT LIKE '%\_tracks' ESCAPE '\'
+                      AND entity_id NOT LIKE '%\_features' ESCAPE '\'
+                    GROUP BY entity_type, source
+                """)
+                type_key_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
+                for row in cursor.fetchall():
+                    et = type_key_map.get(row['entity_type'])
+                    src = row['source']
+                    if et and et in stats and src in stats[et]:
+                        stats[et][src] = row['cnt']
+                    stats['total_entries'] += row['cnt']
+                    stats['total_hits'] += (row['hits'] or 0)
 
-            # Search count
-            cursor.execute("SELECT COUNT(*) as cnt FROM metadata_cache_searches")
-            stats['searches'] = cursor.fetchone()['cnt']
+                # Search count
+                cursor.execute("SELECT COUNT(*) as cnt FROM metadata_cache_searches")
+                stats['searches'] = cursor.fetchone()['cnt']
 
-            # Oldest and newest
-            cursor.execute("SELECT MIN(created_at) as oldest, MAX(created_at) as newest FROM metadata_cache_entities")
-            row = cursor.fetchone()
-            if row:
-                stats['oldest'] = row['oldest']
-                stats['newest'] = row['newest']
+                # Oldest and newest
+                cursor.execute("SELECT MIN(created_at) as oldest, MAX(created_at) as newest FROM metadata_cache_entities")
+                row = cursor.fetchone()
+                if row:
+                    stats['oldest'] = row['oldest']
+                    stats['newest'] = row['newest']
 
-            conn.close()
-            return stats
+                return stats
+            finally:
+                conn.close()
         except Exception as e:
             logger.error(f"Cache stats error: {e}")
             return {
@@ -480,28 +523,30 @@ class MetadataCache:
         try:
             db = self._get_db()
             conn = db._get_connection()
-            cursor = conn.cursor()
+            try:
+                cursor = conn.cursor()
 
-            # Entities
-            cursor.execute("""
-                DELETE FROM metadata_cache_entities
-                WHERE julianday('now') - julianday(updated_at) > ttl_days
-            """)
-            entity_count = cursor.rowcount
+                # Entities
+                cursor.execute("""
+                    DELETE FROM metadata_cache_entities
+                    WHERE julianday('now') - julianday(updated_at) > ttl_days
+                """)
+                entity_count = cursor.rowcount
 
-            # Searches
-            cursor.execute("""
-                DELETE FROM metadata_cache_searches
-                WHERE julianday('now') - julianday(created_at) > ttl_days
-            """)
-            search_count = cursor.rowcount
+                # Searches
+                cursor.execute("""
+                    DELETE FROM metadata_cache_searches
+                    WHERE julianday('now') - julianday(created_at) > ttl_days
+                """)
+                search_count = cursor.rowcount
 
-            conn.commit()
-            conn.close()
-            total = entity_count + search_count
-            if total > 0:
-                logger.info(f"Evicted {total} expired cache entries ({entity_count} entities, {search_count} searches)")
-            return total
+                conn.commit()
+                total = entity_count + search_count
+                if total > 0:
+                    logger.info(f"Evicted {total} expired cache entries ({entity_count} entities, {search_count} searches)")
+                return total
+            finally:
+                conn.close()
         except Exception as e:
             logger.error(f"Cache eviction error: {e}")
             return 0
@@ -511,46 +556,48 @@ class MetadataCache:
         try:
             db = self._get_db()
             conn = db._get_connection()
-            cursor = conn.cursor()
+            try:
+                cursor = conn.cursor()
 
-            # Clear entities
-            where_parts = []
-            params = []
-            if source:
-                where_parts.append('source = ?')
-                params.append(source)
-            if entity_type:
-                where_parts.append('entity_type = ?')
-                params.append(entity_type)
+                # Clear entities
+                where_parts = []
+                params = []
+                if source:
+                    where_parts.append('source = ?')
+                    params.append(source)
+                if entity_type:
+                    where_parts.append('entity_type = ?')
+                    params.append(entity_type)
 
-            if where_parts:
-                where_sql = ' AND '.join(where_parts)
-                cursor.execute(f"DELETE FROM metadata_cache_entities WHERE {where_sql}", params)
-            else:
-                cursor.execute("DELETE FROM metadata_cache_entities")
-            entity_count = cursor.rowcount
+                if where_parts:
+                    where_sql = ' AND '.join(where_parts)
+                    cursor.execute(f"DELETE FROM metadata_cache_entities WHERE {where_sql}", params)
+                else:
+                    cursor.execute("DELETE FROM metadata_cache_entities")
+                entity_count = cursor.rowcount
 
-            # Clear searches (match source and entity_type → search_type)
-            search_where = []
-            search_params = []
-            if source:
-                search_where.append('source = ?')
-                search_params.append(source)
-            if entity_type:
-                search_where.append('search_type = ?')
-                search_params.append(entity_type)
+                # Clear searches (match source and entity_type → search_type)
+                search_where = []
+                search_params = []
+                if source:
+                    search_where.append('source = ?')
+                    search_params.append(source)
+                if entity_type:
+                    search_where.append('search_type = ?')
+                    search_params.append(entity_type)
 
-            if search_where:
-                cursor.execute(f"DELETE FROM metadata_cache_searches WHERE {' AND '.join(search_where)}", search_params)
-            else:
-                cursor.execute("DELETE FROM metadata_cache_searches")
-            search_count = cursor.rowcount
+                if search_where:
+                    cursor.execute(f"DELETE FROM metadata_cache_searches WHERE {' AND '.join(search_where)}", search_params)
+                else:
+                    cursor.execute("DELETE FROM metadata_cache_searches")
+                search_count = cursor.rowcount
 
-            conn.commit()
-            conn.close()
-            total = entity_count + search_count
-            logger.info(f"Cleared {total} cache entries (source={source}, type={entity_type})")
-            return total
+                conn.commit()
+                total = entity_count + search_count
+                logger.info(f"Cleared {total} cache entries (source={source}, type={entity_type})")
+                return total
+            finally:
+                conn.close()
         except Exception as e:
             logger.error(f"Cache clear error: {e}")
             return 0
