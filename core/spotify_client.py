@@ -1096,6 +1096,7 @@ class SpotifyClient:
                 return track_data
 
             except Exception as e:
+                _detect_and_set_rate_limit(e, 'get_track_details')
                 logger.error(f"Error fetching track details via Spotify: {e}")
                 # Fall through to iTunes fallback
 
@@ -1246,6 +1247,7 @@ class SpotifyClient:
                 return result
 
             except Exception as e:
+                _detect_and_set_rate_limit(e, 'get_album_tracks')
                 logger.error(f"Error fetching album tracks via Spotify: {e}")
                 # Fall through to iTunes fallback
 
@@ -1287,6 +1289,7 @@ class SpotifyClient:
                 return albums
 
             except Exception as e:
+                _detect_and_set_rate_limit(e, 'get_artist_albums')
                 logger.error(f"Error fetching artist albums via Spotify: {e}")
                 # Fall through to iTunes fallback
 
