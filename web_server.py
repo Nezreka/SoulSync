@@ -13220,13 +13220,44 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
     original_search = context.get("original_search_result", {})
     playlist_folder_mode = track_info.get("_playlist_folder_mode", False)
 
-    # Extract year from spotify_album for template use (safe for all modes)
+    # Extract year and album_type from spotify_album for template use (safe for all modes)
     year = ''  # Empty string instead of 'Unknown' to avoid "Unknown albumName"
     spotify_album = context.get("spotify_album", {})
     if spotify_album and spotify_album.get('release_date'):
         release_date = spotify_album['release_date']
         if release_date and len(release_date) >= 4:
             year = release_date[:4]
+
+    # Album type for $albumtype template variable (Album, EP, Single, Compilation)
+    raw_album_type = ''
+    if spotify_album:
+        raw_album_type = spotify_album.get('album_type', '') or ''
+    total_tracks = (spotify_album.get('total_tracks', 0) or 0) if spotify_album else 0
+
+    if raw_album_type.lower() == 'compilation':
+        album_type_display = 'Compilation'
+    elif raw_album_type.lower() == 'album':
+        album_type_display = 'Album'
+    elif raw_album_type.lower() in ('single', 'ep'):
+        # Spotify labels both singles and EPs as 'single' — use track count to distinguish
+        if total_tracks <= 3:
+            album_type_display = 'Single'
+        elif total_tracks <= 6:
+            album_type_display = 'EP'
+        else:
+            album_type_display = 'Album'
+    elif not raw_album_type:
+        # No album_type from API (e.g. iTunes source) — infer from track count
+        if total_tracks <= 0:
+            album_type_display = 'Album'  # Unknown, safe default
+        elif total_tracks <= 3:
+            album_type_display = 'Single'
+        elif total_tracks <= 6:
+            album_type_display = 'EP'
+        else:
+            album_type_display = 'Album'
+    else:
+        album_type_display = raw_album_type.capitalize() or 'Album'
 
     # Determine which template type to use
     if playlist_folder_mode:
@@ -13243,7 +13274,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'track_number': 1,
             'disc_number': 1,
             'year': year,
-            'quality': context.get('_audio_quality', '')
+            'quality': context.get('_audio_quality', ''),
+            'albumtype': album_type_display,
         }
 
         folder_path, filename_base = _get_file_path_from_template(template_context, 'playlist_path')
@@ -13286,7 +13318,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'track_number': track_number,
             'disc_number': disc_number,
             'year': year,
-            'quality': context.get('_audio_quality', '')
+            'quality': context.get('_audio_quality', ''),
+            'albumtype': album_type_display,
         }
         spotify_album = context.get('spotify_album', {})
         total_discs = spotify_album.get('total_discs', 1) if spotify_album else 1
@@ -13339,7 +13372,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'track_number': 1,
             'disc_number': 1,
             'year': year,
-            'quality': context.get('_audio_quality', '')
+            'quality': context.get('_audio_quality', ''),
+            'albumtype': album_type_display,
         }
 
         folder_path, filename_base = _get_file_path_from_template(template_context, 'single_path')
@@ -13576,6 +13610,7 @@ def _apply_path_template(template: str, context: dict) -> str:
 
     # Longest variables first
     result = result.replace('$albumartist', clean_context.get('albumartist', clean_context.get('artist', 'Unknown Artist')))
+    result = result.replace('$albumtype', clean_context.get('albumtype', 'Album'))
     result = result.replace('$playlist', clean_context.get('playlist_name', ''))
 
     # Medium length variables
@@ -21247,7 +21282,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
             else:
                 # Fallback to generic context for playlists/wishlists
                 spotify_artist_context = {'id': 'from_sync_modal', 'name': track.artists[0] if track.artists else 'Unknown', 'genres': []}
-                spotify_album_context = {'id': 'from_sync_modal', 'name': track.album, 'release_date': '', 'image_url': None}
+                spotify_album_context = {'id': 'from_sync_modal', 'name': track.album, 'release_date': '', 'image_url': None, 'album_type': 'album'}
 
             download_payload = candidate.__dict__
 
@@ -37524,7 +37559,8 @@ def import_singles_process():
                                 'name': sp_album_info.get('name', ''),
                                 'release_date': sp_album_info.get('release_date', ''),
                                 'total_tracks': sp_album_info.get('total_tracks', 1),
-                                'image_url': (sp_album_info.get('images', [{}])[0].get('url') if sp_album_info.get('images') else '')
+                                'image_url': (sp_album_info.get('images', [{}])[0].get('url') if sp_album_info.get('images') else ''),
+                                'album_type': sp_album_info.get('album_type', 'album'),
                             }
                             album_artists = sp_album_info.get('artists', [])
                             if album_artists:
@@ -37566,7 +37602,8 @@ def import_singles_process():
                                     'name': sp_album.get('name', ''),
                                     'release_date': sp_album.get('release_date', ''),
                                     'total_tracks': sp_album.get('total_tracks', 1),
-                                    'image_url': (sp_album.get('images', [{}])[0].get('url') if sp_album.get('images') else '')
+                                    'image_url': (sp_album.get('images', [{}])[0].get('url') if sp_album.get('images') else ''),
+                                    'album_type': sp_album.get('album_type', 'album'),
                                 }
                                 # Get artist genres
                                 sp_artists = sp_album.get('artists', [])
@@ -37599,7 +37636,8 @@ def import_singles_process():
                                 'name': t.album if hasattr(t, 'album') else '',
                                 'release_date': '',
                                 'total_tracks': 1,
-                                'image_url': t.image_url if hasattr(t, 'image_url') else ''
+                                'image_url': t.image_url if hasattr(t, 'image_url') else '',
+                                'album_type': t.album_type if hasattr(t, 'album_type') else 'album',
                             }
                 except Exception as sp_err:
                     logger.warning(f"Spotify lookup failed for '{title}': {sp_err}")
@@ -37608,7 +37646,7 @@ def import_singles_process():
             if not spotify_artist_data:
                 spotify_artist_data = {'name': artist or 'Unknown Artist', 'id': '', 'genres': []}
             if not spotify_album_data:
-                spotify_album_data = {'id': '', 'name': '', 'release_date': '', 'total_tracks': 1, 'image_url': ''}
+                spotify_album_data = {'id': '', 'name': '', 'release_date': '', 'total_tracks': 1, 'image_url': '', 'album_type': 'album'}
             if not spotify_track_data:
                 spotify_track_data = {
                     'name': title, 'id': '', 'track_number': 1, 'disc_number': 1,
