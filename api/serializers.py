@@ -86,18 +86,40 @@ def serialize_artist(obj, fields: Optional[Set[str]] = None) -> dict:
         "itunes_artist_id": d.get("itunes_artist_id"),
         "audiodb_id": d.get("audiodb_id"),
         "deezer_id": d.get("deezer_id"),
+        "tidal_id": d.get("tidal_id"),
+        "qobuz_id": d.get("qobuz_id"),
+        "genius_id": d.get("genius_id"),
         # Match statuses
         "musicbrainz_match_status": d.get("musicbrainz_match_status"),
         "spotify_match_status": d.get("spotify_match_status"),
         "itunes_match_status": d.get("itunes_match_status"),
         "audiodb_match_status": d.get("audiodb_match_status"),
         "deezer_match_status": d.get("deezer_match_status"),
+        "lastfm_match_status": d.get("lastfm_match_status"),
+        "genius_match_status": d.get("genius_match_status"),
+        "tidal_match_status": d.get("tidal_match_status"),
+        "qobuz_match_status": d.get("qobuz_match_status"),
         # Last attempted timestamps
         "musicbrainz_last_attempted": _isoformat(d.get("musicbrainz_last_attempted")),
         "spotify_last_attempted": _isoformat(d.get("spotify_last_attempted")),
         "itunes_last_attempted": _isoformat(d.get("itunes_last_attempted")),
         "audiodb_last_attempted": _isoformat(d.get("audiodb_last_attempted")),
         "deezer_last_attempted": _isoformat(d.get("deezer_last_attempted")),
+        "lastfm_last_attempted": _isoformat(d.get("lastfm_last_attempted")),
+        "genius_last_attempted": _isoformat(d.get("genius_last_attempted")),
+        "tidal_last_attempted": _isoformat(d.get("tidal_last_attempted")),
+        "qobuz_last_attempted": _isoformat(d.get("qobuz_last_attempted")),
+        # Last.fm metadata
+        "lastfm_listeners": d.get("lastfm_listeners"),
+        "lastfm_playcount": d.get("lastfm_playcount"),
+        "lastfm_tags": d.get("lastfm_tags"),
+        "lastfm_similar": d.get("lastfm_similar"),
+        "lastfm_bio": d.get("lastfm_bio"),
+        "lastfm_url": d.get("lastfm_url"),
+        # Genius metadata
+        "genius_description": d.get("genius_description"),
+        "genius_alt_names": d.get("genius_alt_names"),
+        "genius_url": d.get("genius_url"),
     }
     # Preserve extra keys from enriched queries (album_count, track_count, is_watched)
     for extra_key in ("album_count", "track_count", "is_watched", "image_url"):
@@ -126,24 +148,40 @@ def serialize_album(obj, fields: Optional[Set[str]] = None) -> dict:
         "server_source": d.get("server_source"),
         "created_at": _isoformat(d.get("created_at")),
         "updated_at": _isoformat(d.get("updated_at")),
+        "upc": d.get("upc"),
+        "copyright": d.get("copyright"),
         # External IDs
         "musicbrainz_release_id": d.get("musicbrainz_release_id"),
         "spotify_album_id": d.get("spotify_album_id"),
         "itunes_album_id": d.get("itunes_album_id"),
         "audiodb_id": d.get("audiodb_id"),
         "deezer_id": d.get("deezer_id"),
+        "tidal_id": d.get("tidal_id"),
+        "qobuz_id": d.get("qobuz_id"),
         # Match statuses
         "musicbrainz_match_status": d.get("musicbrainz_match_status"),
         "spotify_match_status": d.get("spotify_match_status"),
         "itunes_match_status": d.get("itunes_match_status"),
         "audiodb_match_status": d.get("audiodb_match_status"),
         "deezer_match_status": d.get("deezer_match_status"),
+        "lastfm_match_status": d.get("lastfm_match_status"),
+        "tidal_match_status": d.get("tidal_match_status"),
+        "qobuz_match_status": d.get("qobuz_match_status"),
         # Last attempted timestamps
         "musicbrainz_last_attempted": _isoformat(d.get("musicbrainz_last_attempted")),
         "spotify_last_attempted": _isoformat(d.get("spotify_last_attempted")),
         "itunes_last_attempted": _isoformat(d.get("itunes_last_attempted")),
         "audiodb_last_attempted": _isoformat(d.get("audiodb_last_attempted")),
         "deezer_last_attempted": _isoformat(d.get("deezer_last_attempted")),
+        "lastfm_last_attempted": _isoformat(d.get("lastfm_last_attempted")),
+        "tidal_last_attempted": _isoformat(d.get("tidal_last_attempted")),
+        "qobuz_last_attempted": _isoformat(d.get("qobuz_last_attempted")),
+        # Last.fm metadata
+        "lastfm_listeners": d.get("lastfm_listeners"),
+        "lastfm_playcount": d.get("lastfm_playcount"),
+        "lastfm_tags": d.get("lastfm_tags"),
+        "lastfm_wiki": d.get("lastfm_wiki"),
+        "lastfm_url": d.get("lastfm_url"),
     }
     return filter_fields(result, fields)
 
@@ -169,24 +207,46 @@ def serialize_track(obj, fields: Optional[Set[str]] = None) -> dict:
         "server_source": d.get("server_source"),
         "created_at": _isoformat(d.get("created_at")),
         "updated_at": _isoformat(d.get("updated_at")),
+        "isrc": d.get("isrc"),
+        "copyright": d.get("copyright"),
         # External IDs
         "musicbrainz_recording_id": d.get("musicbrainz_recording_id"),
         "spotify_track_id": d.get("spotify_track_id"),
         "itunes_track_id": d.get("itunes_track_id"),
         "audiodb_id": d.get("audiodb_id"),
         "deezer_id": d.get("deezer_id"),
+        "tidal_id": d.get("tidal_id"),
+        "qobuz_id": d.get("qobuz_id"),
+        "genius_id": d.get("genius_id"),
         # Match statuses
         "musicbrainz_match_status": d.get("musicbrainz_match_status"),
         "spotify_match_status": d.get("spotify_match_status"),
         "itunes_match_status": d.get("itunes_match_status"),
         "audiodb_match_status": d.get("audiodb_match_status"),
         "deezer_match_status": d.get("deezer_match_status"),
+        "lastfm_match_status": d.get("lastfm_match_status"),
+        "genius_match_status": d.get("genius_match_status"),
+        "tidal_match_status": d.get("tidal_match_status"),
+        "qobuz_match_status": d.get("qobuz_match_status"),
         # Last attempted timestamps
         "musicbrainz_last_attempted": _isoformat(d.get("musicbrainz_last_attempted")),
         "spotify_last_attempted": _isoformat(d.get("spotify_last_attempted")),
         "itunes_last_attempted": _isoformat(d.get("itunes_last_attempted")),
         "audiodb_last_attempted": _isoformat(d.get("audiodb_last_attempted")),
         "deezer_last_attempted": _isoformat(d.get("deezer_last_attempted")),
+        "lastfm_last_attempted": _isoformat(d.get("lastfm_last_attempted")),
+        "genius_last_attempted": _isoformat(d.get("genius_last_attempted")),
+        "tidal_last_attempted": _isoformat(d.get("tidal_last_attempted")),
+        "qobuz_last_attempted": _isoformat(d.get("qobuz_last_attempted")),
+        # Last.fm metadata
+        "lastfm_listeners": d.get("lastfm_listeners"),
+        "lastfm_playcount": d.get("lastfm_playcount"),
+        "lastfm_tags": d.get("lastfm_tags"),
+        "lastfm_url": d.get("lastfm_url"),
+        # Genius metadata
+        "genius_lyrics": d.get("genius_lyrics"),
+        "genius_description": d.get("genius_description"),
+        "genius_url": d.get("genius_url"),
     }
     # Preserve extra keys from joined queries (artist_name, album_title)
     for extra_key in ("artist_name", "album_title"):

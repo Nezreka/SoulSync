@@ -1356,343 +1356,716 @@ const DOCS_SECTIONS = [
         icon: '/static/settings.jpg',
         children: [
             { id: 'api-auth', title: 'Authentication' },
-            { id: 'api-system', title: 'System & Status' },
+            { id: 'api-system', title: 'System' },
+            { id: 'api-library', title: 'Library' },
             { id: 'api-search', title: 'Search' },
             { id: 'api-downloads', title: 'Downloads' },
-            { id: 'api-library', title: 'Library' },
-            { id: 'api-library-edit', title: 'Library Editing' },
             { id: 'api-playlists', title: 'Playlists' },
-            { id: 'api-watchlist', title: 'Watchlist & Wishlist' },
-            { id: 'api-automations', title: 'Automations' },
-            { id: 'api-import', title: 'Import' },
-            { id: 'api-settings', title: 'Settings' },
-            { id: 'api-enrichment', title: 'Enrichment Workers' },
+            { id: 'api-watchlist', title: 'Watchlist' },
+            { id: 'api-wishlist', title: 'Wishlist' },
+            { id: 'api-discover', title: 'Discover' },
             { id: 'api-profiles', title: 'Profiles' },
+            { id: 'api-settings', title: 'Settings & Keys' },
+            { id: 'api-retag', title: 'Retag' },
+            { id: 'api-cache', title: 'Cache' },
+            { id: 'api-listenbrainz', title: 'ListenBrainz' },
             { id: 'api-websocket', title: 'WebSocket Events' }
         ],
-        content: () => `
-            <div class="docs-subsection" id="api-auth">
-                <h3 class="docs-subsection-title">Authentication</h3>
-                <p class="docs-text">Generate API keys in <strong>Settings &rarr; API Keys</strong>. Use them via header or query parameter:</p>
-                <ul class="docs-list">
-                    <li>Header: <code>Authorization: Bearer sk_xxxxx</code></li>
-                    <li>Query: <code>?api_key=sk_xxxxx</code></li>
-                </ul>
-                <p class="docs-text">Keys use a <code>sk_</code> prefix. The raw key is shown once at creation; only a SHA-256 hash is stored.</p>
-                <div class="docs-code-label">Example: cURL with API key</div>
-                <div class="docs-code-block">curl -H "Authorization: Bearer sk_abc123..." http://localhost:5000/api/system/status</div>
-            </div>
-            <div class="docs-subsection" id="api-system">
-                <h3 class="docs-subsection-title">System & Status</h3>
-                <p class="docs-text">Endpoints for checking system health, service connectivity, and library statistics.</p>
-                <table class="docs-table">
-                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td>GET</td><td><code>/api/system/status</code></td><td>Uptime, version, and service connectivity</td></tr>
-                        <tr><td>GET</td><td><code>/api/system/stats</code></td><td>Library counts (artists, albums, tracks) and total size</td></tr>
-                        <tr><td>GET</td><td><code>/api/system/activity</code></td><td>Recent activity feed entries</td></tr>
-                        <tr><td>GET</td><td><code>/api/debug-info</code></td><td>Full debug snapshot: services, paths, workers, recent logs</td></tr>
-                        <tr><td>GET</td><td><code>/api/version</code></td><td>Current version and update availability</td></tr>
-                    </tbody>
-                </table>
-                <div class="docs-code-label">Response: GET /api/system/stats</div>
-                <div class="docs-code-block">{
-  "artists": 342,
-  "albums": 1205,
-  "tracks": 14832,
-  "total_size": "128.4 GB",
-  "database_size": "45.2 MB"
-}</div>
-            </div>
-            <div class="docs-subsection" id="api-search">
-                <h3 class="docs-subsection-title">Search</h3>
-                <p class="docs-text">Search for music across metadata sources and Soulseek.</p>
-                <table class="docs-table">
-                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td>POST</td><td><code>/api/enhanced-search</code></td><td>Search Spotify/iTunes for artists, albums, and tracks</td></tr>
-                        <tr><td>POST</td><td><code>/api/search</code></td><td>Search Soulseek directly for files</td></tr>
-                        <tr><td>POST</td><td><code>/api/spotify/search_tracks</code></td><td>Search Spotify for tracks by query</td></tr>
-                        <tr><td>POST</td><td><code>/api/itunes/search_tracks</code></td><td>Search iTunes/Apple Music for tracks</td></tr>
-                    </tbody>
-                </table>
-                <div class="docs-code-label">Request: POST /api/enhanced-search</div>
-                <div class="docs-code-block">Content-Type: application/json
+        content: () => {
+            // --- API Endpoint definitions ---
+            const E = (method, path, desc, params, bodyFields, example) => ({ method, path, desc, params, bodyFields, example });
+            const P = (name, type, req, desc, def) => ({ name, type, required: req, desc, default: def });
 
-{
-  "query": "Radiohead OK Computer",
-  "type": "album"
-}</div>
-            </div>
-            <div class="docs-subsection" id="api-downloads">
-                <h3 class="docs-subsection-title">Downloads</h3>
-                <p class="docs-text">Start, monitor, and manage music downloads.</p>
-                <table class="docs-table">
-                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td>POST</td><td><code>/api/download</code></td><td>Start downloading a track</td></tr>
-                        <tr><td>GET</td><td><code>/api/downloads/status</code></td><td>Current download queue and progress</td></tr>
-                        <tr><td>POST</td><td><code>/api/download/cancel</code></td><td>Cancel an active download</td></tr>
-                        <tr><td>POST</td><td><code>/api/download/album</code></td><td>Start downloading an entire album</td></tr>
-                        <tr><td>GET</td><td><code>/api/downloads/history</code></td><td>Completed and failed download history</td></tr>
-                    </tbody>
-                </table>
-                <div class="docs-code-label">Request: POST /api/download</div>
-                <div class="docs-code-block">Content-Type: application/json
+            const apiGroups = [
+                {
+                    id: 'api-system', title: 'System', desc: 'Server status, activity feed, and combined statistics.',
+                    endpoints: [
+                        E('GET', '/system/status', 'Server uptime and service connectivity', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "uptime": "4h 32m 10s",\n    "uptime_seconds": 16330,\n    "services": {\n      "spotify": true,\n      "soulseek": true,\n      "hydrabase": false\n    }\n  }\n}'
+                        }),
+                        E('GET', '/system/stats', 'Combined library and download statistics', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "library": { "artists": 342, "albums": 1205, "tracks": 14832 },\n    "database": { "size_mb": 45.2, "last_update": "2026-03-13T08:00:00Z" },\n    "downloads": { "active": 3 }\n  }\n}'
+                        }),
+                        E('GET', '/system/activity', 'Recent activity feed', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "activities": [\n      { "timestamp": "2026-03-13T10:30:00Z", "type": "download", "message": "Downloaded: Radiohead - Karma Police" }\n    ]\n  }\n}'
+                        })
+                    ]
+                },
+                {
+                    id: 'api-library', title: 'Library', desc: 'Browse artists, albums, tracks, genres, and library statistics. Most endpoints support <code>?fields=</code> for field selection and pagination via <code>?page=</code> and <code>?limit=</code>.',
+                    endpoints: [
+                        E('GET', '/library/artists', 'List library artists with search, letter filter, and pagination', [
+                            P('search', 'string', false, 'Substring filter on artist name', '""'),
+                            P('letter', 'string', false, 'Filter by first letter, or "all"', '"all"'),
+                            P('watchlist', 'string', false, 'Filter by watchlist status', '"all"'),
+                            P('page', 'int', false, 'Page number', '1'),
+                            P('limit', 'int', false, 'Results per page (max 200)', '50'),
+                            P('fields', 'string', false, 'Comma-separated field names to include', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "artists": [\n      {\n        "id": 1,\n        "name": "Radiohead",\n        "thumb_url": "https://...",\n        "banner_url": "https://...",\n        "genres": ["alternative rock", "art rock"],\n        "summary": "English rock band...",\n        "style": "Alternative/Indie", "mood": "Melancholy",\n        "label": "XL Recordings",\n        "musicbrainz_id": "a74b1b7f-...",\n        "spotify_artist_id": "4Z8W4fKeB5YxbusRsdQVPb",\n        "itunes_artist_id": "657515",\n        "deezer_id": "399", "tidal_id": "3746724",\n        "qobuz_id": "61592", "genius_id": "604",\n        "lastfm_listeners": 5832451,\n        "lastfm_playcount": 328456789,\n        "genius_url": "https://genius.com/artists/Radiohead",\n        "album_count": 9, "track_count": 101,\n        "...": "all 50+ fields included"\n      }\n    ]\n  },\n  "pagination": {\n    "page": 1, "limit": 50, "total": 342, "total_pages": 7,\n    "has_next": true, "has_prev": false\n  }\n}'
+                        }),
+                        E('GET', '/library/artists/{artist_id}', 'Get a single artist with all metadata and album list', [
+                            P('fields', 'string', false, 'Comma-separated fields', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "artist": {\n      "id": 1, "name": "Radiohead",\n      "thumb_url": "https://...", "banner_url": "https://...",\n      "genres": ["alternative rock", "art rock"],\n      "summary": "English rock band formed in 1985...",\n      "style": "Alternative/Indie", "mood": "Melancholy",\n      "label": "XL Recordings",\n      "server_source": "plex",\n      "created_at": "2026-01-15T10:00:00Z",\n      "updated_at": "2026-03-13T08:00:00Z",\n      "musicbrainz_id": "a74b1b7f-71a3-4b73-8c51-5c1f3a71c9e8",\n      "spotify_artist_id": "4Z8W4fKeB5YxbusRsdQVPb",\n      "itunes_artist_id": "657515",\n      "audiodb_id": "111239",\n      "deezer_id": "399",\n      "tidal_id": "3746724",\n      "qobuz_id": "61592",\n      "genius_id": "604",\n      "musicbrainz_match_status": "matched",\n      "spotify_match_status": "matched",\n      "itunes_match_status": "matched",\n      "audiodb_match_status": "matched",\n      "deezer_match_status": "matched",\n      "lastfm_match_status": "matched",\n      "genius_match_status": "matched",\n      "tidal_match_status": "matched",\n      "qobuz_match_status": "matched",\n      "musicbrainz_last_attempted": "2026-03-10T08:00:00Z",\n      "spotify_last_attempted": "2026-03-10T08:00:00Z",\n      "itunes_last_attempted": "2026-03-10T08:00:00Z",\n      "audiodb_last_attempted": "2026-03-10T08:00:00Z",\n      "deezer_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_last_attempted": "2026-03-10T08:00:00Z",\n      "genius_last_attempted": "2026-03-10T08:00:00Z",\n      "tidal_last_attempted": "2026-03-10T08:00:00Z",\n      "qobuz_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_listeners": 5832451,\n      "lastfm_playcount": 328456789,\n      "lastfm_tags": "alternative, rock, experimental",\n      "lastfm_similar": "Thom Yorke, Atoms for Peace, Portishead",\n      "lastfm_bio": "Radiohead are an English rock band...",\n      "lastfm_url": "https://www.last.fm/music/Radiohead",\n      "genius_description": "Radiohead is an English rock band...",\n      "genius_alt_names": "On a Friday",\n      "genius_url": "https://genius.com/artists/Radiohead",\n      "album_count": 9, "track_count": 101\n    },\n    "albums": [\n      { "id": 10, "title": "OK Computer", "year": 1997, "track_count": 12, "record_type": "album" }\n    ]\n  }\n}'
+                        }),
+                        E('GET', '/library/artists/{artist_id}/albums', 'List albums for an artist', [
+                            P('fields', 'string', false, 'Comma-separated fields', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "albums": [\n      {\n        "id": 10, "artist_id": 1, "title": "OK Computer", "year": 1997,\n        "thumb_url": "https://...", "track_count": 12, "duration": 3214000,\n        "genres": ["alternative rock"],\n        "style": "Art Rock", "mood": "Atmospheric",\n        "label": "Parlophone", "record_type": "album", "explicit": false,\n        "upc": "0724385522529", "copyright": "1997 Parlophone Records",\n        "spotify_album_id": "6dVIqQ8qmQ5GBnJ9shOYGE",\n        "tidal_id": "17914997", "qobuz_id": "0724385522529",\n        "lastfm_listeners": 1543000, "lastfm_playcount": 89234567,\n        "...": "all 45+ fields included"\n      }\n    ]\n  }\n}'
+                        }),
+                        E('GET', '/library/albums', 'List or search albums with pagination', [
+                            P('search', 'string', false, 'Substring filter on album title', '""'),
+                            P('artist_id', 'int', false, 'Filter by artist ID'),
+                            P('year', 'int', false, 'Filter by release year'),
+                            P('page', 'int', false, 'Page number', '1'),
+                            P('limit', 'int', false, 'Results per page (max 200)', '50'),
+                            P('fields', 'string', false, 'Comma-separated fields', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": { "albums": [ { "id": 10, "title": "OK Computer", "year": 1997, "artist_id": 1 } ] },\n  "pagination": { "page": 1, "limit": 50, "total": 1205, "total_pages": 25, "has_next": true, "has_prev": false }\n}'
+                        }),
+                        E('GET', '/library/albums/{album_id}', 'Get a single album with metadata and embedded tracks', [
+                            P('fields', 'string', false, 'Comma-separated fields', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "album": {\n      "id": 10, "artist_id": 1, "title": "OK Computer", "year": 1997,\n      "thumb_url": "https://...",\n      "genres": ["alternative rock"],\n      "track_count": 12, "duration": 3214000,\n      "style": "Art Rock", "mood": "Atmospheric",\n      "label": "Parlophone", "explicit": false, "record_type": "album",\n      "server_source": "plex",\n      "created_at": "2026-01-15T10:00:00Z",\n      "updated_at": "2026-03-13T08:00:00Z",\n      "upc": "0724385522529", "copyright": "1997 Parlophone Records",\n      "musicbrainz_release_id": "b1a9c0e7-...",\n      "spotify_album_id": "6dVIqQ8qmQ5GBnJ9shOYGE",\n      "itunes_album_id": "1097861387",\n      "audiodb_id": "2115888",\n      "deezer_id": "6575789",\n      "tidal_id": "17914997",\n      "qobuz_id": "0724385522529",\n      "musicbrainz_match_status": "matched",\n      "spotify_match_status": "matched",\n      "itunes_match_status": "matched",\n      "audiodb_match_status": "matched",\n      "deezer_match_status": "matched",\n      "lastfm_match_status": "matched",\n      "tidal_match_status": "matched",\n      "qobuz_match_status": "matched",\n      "musicbrainz_last_attempted": "2026-03-10T08:00:00Z",\n      "spotify_last_attempted": "2026-03-10T08:00:00Z",\n      "itunes_last_attempted": "2026-03-10T08:00:00Z",\n      "audiodb_last_attempted": "2026-03-10T08:00:00Z",\n      "deezer_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_last_attempted": "2026-03-10T08:00:00Z",\n      "tidal_last_attempted": "2026-03-10T08:00:00Z",\n      "qobuz_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_listeners": 1543000,\n      "lastfm_playcount": 89234567,\n      "lastfm_tags": "alternative, 90s, rock",\n      "lastfm_wiki": "OK Computer is the third studio album...",\n      "lastfm_url": "https://www.last.fm/music/Radiohead/OK+Computer"\n    },\n    "tracks": [\n      { "id": 100, "title": "Airbag", "track_number": 1, "duration": 284000, "bitrate": 1411 }\n    ]\n  }\n}'
+                        }),
+                        E('GET', '/library/albums/{album_id}/tracks', 'List tracks in an album', [
+                            P('fields', 'string', false, 'Comma-separated fields', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "tracks": [\n      {\n        "id": 100, "album_id": 10, "artist_id": 1, "title": "Airbag",\n        "track_number": 1, "duration": 284000,\n        "file_path": "/music/Radiohead/OK Computer/01 Airbag.flac",\n        "bitrate": 1411, "bpm": 120.5, "explicit": false,\n        "isrc": "GBAYE9700106",\n        "spotify_track_id": "6anwyDGQmsg45JKiVKpKGA",\n        "tidal_id": "17914998", "genius_id": "1342",\n        "lastfm_listeners": 892000, "lastfm_playcount": 4567890,\n        "genius_url": "https://genius.com/Radiohead-airbag-lyrics",\n        "...": "all 55+ fields included"\n      }\n    ]\n  }\n}'
+                        }),
+                        E('GET', '/library/tracks/{track_id}', 'Get a single track with all metadata', [
+                            P('fields', 'string', false, 'Comma-separated fields', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "track": {\n      "id": 100, "album_id": 10, "artist_id": 1, "title": "Airbag",\n      "track_number": 1, "duration": 284000,\n      "file_path": "/music/Radiohead/OK Computer/01 Airbag.flac",\n      "bitrate": 1411, "bpm": 120.5, "explicit": false,\n      "style": "Art Rock", "mood": "Atmospheric",\n      "repair_status": null, "repair_last_checked": null,\n      "server_source": "plex",\n      "created_at": "2026-01-15T10:00:00Z",\n      "updated_at": "2026-03-13T08:00:00Z",\n      "isrc": "GBAYE9700106", "copyright": "1997 Parlophone Records",\n      "musicbrainz_recording_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",\n      "spotify_track_id": "6anwyDGQmsg45JKiVKpKGA",\n      "itunes_track_id": "1097861700",\n      "audiodb_id": null,\n      "deezer_id": "72420132",\n      "tidal_id": "17914998",\n      "qobuz_id": "24517824",\n      "genius_id": "1342",\n      "musicbrainz_match_status": "matched",\n      "spotify_match_status": "matched",\n      "itunes_match_status": "matched",\n      "audiodb_match_status": "not_found",\n      "deezer_match_status": "matched",\n      "lastfm_match_status": "matched",\n      "genius_match_status": "matched",\n      "tidal_match_status": "matched",\n      "qobuz_match_status": "matched",\n      "musicbrainz_last_attempted": "2026-03-10T08:00:00Z",\n      "spotify_last_attempted": "2026-03-10T08:00:00Z",\n      "itunes_last_attempted": "2026-03-10T08:00:00Z",\n      "audiodb_last_attempted": "2026-03-10T08:00:00Z",\n      "deezer_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_last_attempted": "2026-03-10T08:00:00Z",\n      "genius_last_attempted": "2026-03-10T08:00:00Z",\n      "tidal_last_attempted": "2026-03-10T08:00:00Z",\n      "qobuz_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_listeners": 892000,\n      "lastfm_playcount": 4567890,\n      "lastfm_tags": "alternative rock, radiohead",\n      "lastfm_url": "https://www.last.fm/music/Radiohead/_/Airbag",\n      "genius_lyrics": "In the next world war, in a jackknifed juggernaut...",\n      "genius_description": "The opening track of OK Computer...",\n      "genius_url": "https://genius.com/Radiohead-airbag-lyrics"\n    }\n  }\n}'
+                        }),
+                        E('GET', '/library/tracks', 'Search tracks by title and/or artist', [
+                            P('title', 'string', false, 'Track title to search (at least one of title/artist required)', '""'),
+                            P('artist', 'string', false, 'Artist name to search', '""'),
+                            P('limit', 'int', false, 'Max results (max 200)', '50'),
+                            P('fields', 'string', false, 'Comma-separated fields', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "tracks": [\n      { "id": 100, "title": "Airbag", "artist_name": "Radiohead", "album_title": "OK Computer" }\n    ]\n  }\n}'
+                        }),
+                        E('GET', '/library/genres', 'List all genres with occurrence counts', [
+                            P('source', 'string', false, '"artists" or "albums"', '"artists"')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "genres": [ { "name": "alternative rock", "count": 45 }, { "name": "electronic", "count": 38 } ],\n    "source": "artists"\n  }\n}'
+                        }),
+                        E('GET', '/library/recently-added', 'Get recently added content', [
+                            P('type', 'string', false, '"albums", "artists", or "tracks"', '"albums"'),
+                            P('limit', 'int', false, 'Max items (max 200)', '50'),
+                            P('fields', 'string', false, 'Comma-separated fields', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "items": [ { "id": 10, "title": "OK Computer", "year": 1997, "created_at": "2026-03-12T10:00:00Z" } ],\n    "type": "albums"\n  }\n}'
+                        }),
+                        E('GET', '/library/lookup', 'Look up a library entity by external provider ID', [
+                            P('type', 'string', true, '"artist", "album", or "track"'),
+                            P('provider', 'string', true, '"spotify", "musicbrainz", "itunes", "deezer", "audiodb", "tidal", "qobuz", or "genius"'),
+                            P('id', 'string', true, 'The external ID value'),
+                            P('fields', 'string', false, 'Comma-separated fields', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "artist": { "id": 1, "name": "Radiohead", "spotify_artist_id": "4Z8W4fKeB5YxbusRsdQVPb" }\n  }\n}'
+                        }),
+                        E('GET', '/library/stats', 'Get library statistics', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "artists": 342,\n    "albums": 1205,\n    "tracks": 14832,\n    "database_size_mb": 45.2,\n    "last_update": "2026-03-13T08:00:00Z"\n  }\n}'
+                        })
+                    ]
+                },
+                {
+                    id: 'api-search', title: 'Search', desc: 'Search external music sources (Spotify, iTunes, Hydrabase). All search endpoints use POST with a JSON body.',
+                    endpoints: [
+                        E('POST', '/search/tracks', 'Search for tracks across music sources', [], [
+                            P('query', 'string', true, 'Search query'),
+                            P('source', 'string', false, '"spotify", "itunes", or "auto"', '"auto"'),
+                            P('limit', 'int', false, 'Max results (1-50)', '20')
+                        ], {
+                            request: '{\n  "query": "Karma Police",\n  "source": "auto",\n  "limit": 10\n}',
+                            response: '{\n  "success": true,\n  "data": {\n    "tracks": [\n      {\n        "id": "3SVAN3BRByDmHOhKyIDxfC",\n        "name": "Karma Police",\n        "artists": ["Radiohead"],\n        "album": "OK Computer",\n        "duration_ms": 264066,\n        "popularity": 78,\n        "image_url": "https://...",\n        "release_date": "1997-05-28"\n      }\n    ],\n    "source": "spotify"\n  }\n}'
+                        }),
+                        E('POST', '/search/albums', 'Search for albums', [], [
+                            P('query', 'string', true, 'Search query'),
+                            P('limit', 'int', false, 'Max results (1-50)', '20')
+                        ], {
+                            request: '{\n  "query": "OK Computer",\n  "limit": 5\n}',
+                            response: '{\n  "success": true,\n  "data": {\n    "albums": [\n      {\n        "id": "6dVIqQ8qmQ5GBnJ9shOYGE",\n        "name": "OK Computer",\n        "artists": ["Radiohead"],\n        "release_date": "1997-05-28",\n        "total_tracks": 12,\n        "album_type": "album",\n        "image_url": "https://..."\n      }\n    ],\n    "source": "spotify"\n  }\n}'
+                        }),
+                        E('POST', '/search/artists', 'Search for artists', [], [
+                            P('query', 'string', true, 'Search query'),
+                            P('limit', 'int', false, 'Max results (1-50)', '20')
+                        ], {
+                            request: '{\n  "query": "Radiohead",\n  "limit": 5\n}',
+                            response: '{\n  "success": true,\n  "data": {\n    "artists": [\n      {\n        "id": "4Z8W4fKeB5YxbusRsdQVPb",\n        "name": "Radiohead",\n        "popularity": 79,\n        "genres": ["alternative rock", "art rock"],\n        "followers": 8500000,\n        "image_url": "https://..."\n      }\n    ],\n    "source": "spotify"\n  }\n}'
+                        })
+                    ]
+                },
+                {
+                    id: 'api-downloads', title: 'Downloads', desc: 'List active downloads, cancel individual or all downloads.',
+                    endpoints: [
+                        E('GET', '/downloads', 'List active and recent download tasks', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "downloads": [\n      {\n        "id": "abc123",\n        "status": "downloading",\n        "track_name": "Karma Police",\n        "artist_name": "Radiohead",\n        "album_name": "OK Computer",\n        "username": "slsk_user42",\n        "progress": 67,\n        "size": 34500000,\n        "batch_id": null,\n        "error": null\n      }\n    ]\n  }\n}'
+                        }),
+                        E('POST', '/downloads/{download_id}/cancel', 'Cancel a specific download', [], [
+                            P('username', 'string', true, 'Soulseek username for the transfer')
+                        ], {
+                            request: '{\n  "username": "slsk_user42"\n}',
+                            response: '{\n  "success": true,\n  "data": { "message": "Download cancelled." }\n}'
+                        }),
+                        E('POST', '/downloads/cancel-all', 'Cancel all active downloads and clear completed', [], null, {
+                            response: '{\n  "success": true,\n  "data": { "message": "All downloads cancelled and cleared." }\n}'
+                        })
+                    ]
+                },
+                {
+                    id: 'api-playlists', title: 'Playlists', desc: 'List and inspect playlists from Spotify or Tidal, and trigger playlist sync.',
+                    endpoints: [
+                        E('GET', '/playlists', 'List user playlists from Spotify or Tidal', [
+                            P('source', 'string', false, '"spotify" or "tidal"', '"spotify"')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "playlists": [\n      {\n        "id": "37i9dQZF1DXcBWIGoYBM5M",\n        "name": "Today\'s Top Hits",\n        "owner": "spotify",\n        "track_count": 50,\n        "image_url": "https://..."\n      }\n    ],\n    "source": "spotify"\n  }\n}'
+                        }),
+                        E('GET', '/playlists/{playlist_id}', 'Get playlist details with tracks', [
+                            P('source', 'string', false, 'Only "spotify" is supported', '"spotify"')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "playlist": {\n      "id": "37i9dQZF1DXcBWIGoYBM5M",\n      "name": "Today\'s Top Hits",\n      "owner": "spotify",\n      "total_tracks": 50,\n      "tracks": [\n        {\n          "id": "3SVAN3BRByDmHOhKyIDxfC",\n          "name": "Karma Police",\n          "artists": ["Radiohead"],\n          "album": "OK Computer",\n          "duration_ms": 264066,\n          "image_url": "https://..."\n        }\n      ]\n    },\n    "source": "spotify"\n  }\n}'
+                        }),
+                        E('POST', '/playlists/{playlist_id}/sync', 'Trigger playlist sync and download', [], [
+                            P('playlist_name', 'string', true, 'Name of the playlist'),
+                            P('tracks', 'array', true, 'Array of track objects to sync')
+                        ], {
+                            request: '{\n  "playlist_name": "My Playlist",\n  "tracks": [\n    { "id": "3SVAN3...", "name": "Karma Police", "artists": [{ "name": "Radiohead" }] }\n  ]\n}',
+                            response: '{\n  "success": true,\n  "data": { "message": "Playlist sync started.", "playlist_id": "37i9dQZF1DXcBWIGoYBM5M" }\n}'
+                        })
+                    ]
+                },
+                {
+                    id: 'api-watchlist', title: 'Watchlist', desc: 'View, add, remove watched artists and trigger new release scans. Profile-scoped via <code>X-Profile-Id</code> header.',
+                    endpoints: [
+                        E('GET', '/watchlist', 'List all watchlist artists for the current profile', [
+                            P('fields', 'string', false, 'Comma-separated fields', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "artists": [\n      {\n        "id": 1,\n        "artist_name": "Radiohead",\n        "spotify_artist_id": "4Z8W4fKeB5YxbusRsdQVPb",\n        "image_url": "https://...",\n        "date_added": "2026-01-15T10:00:00Z",\n        "include_albums": true,\n        "include_eps": true,\n        "include_singles": true,\n        "include_live": false,\n        "include_remixes": false,\n        "profile_id": 1\n      }\n    ]\n  }\n}'
+                        }),
+                        E('POST', '/watchlist', 'Add an artist to the watchlist', [], [
+                            P('artist_id', 'string', true, 'Spotify or iTunes artist ID'),
+                            P('artist_name', 'string', true, 'Artist display name')
+                        ], {
+                            request: '{\n  "artist_id": "4Z8W4fKeB5YxbusRsdQVPb",\n  "artist_name": "Radiohead"\n}',
+                            response: '{\n  "success": true,\n  "data": { "message": "Added Radiohead to watchlist." }\n}'
+                        }),
+                        E('DELETE', '/watchlist/{artist_id}', 'Remove an artist from the watchlist', [], null, {
+                            response: '{\n  "success": true,\n  "data": { "message": "Artist removed from watchlist." }\n}'
+                        }),
+                        E('PATCH', '/watchlist/{artist_id}', 'Update content type filters for a watchlist artist', [], [
+                            P('include_albums', 'bool', false, 'Include albums'),
+                            P('include_eps', 'bool', false, 'Include EPs'),
+                            P('include_singles', 'bool', false, 'Include singles'),
+                            P('include_live', 'bool', false, 'Include live recordings'),
+                            P('include_remixes', 'bool', false, 'Include remixes'),
+                            P('include_acoustic', 'bool', false, 'Include acoustic versions'),
+                            P('include_compilations', 'bool', false, 'Include compilations')
+                        ], {
+                            request: '{\n  "include_live": true,\n  "include_remixes": false\n}',
+                            response: '{\n  "success": true,\n  "data": {\n    "message": "Watchlist filters updated.",\n    "updated": { "include_live": true, "include_remixes": false }\n  }\n}'
+                        }),
+                        E('POST', '/watchlist/scan', 'Trigger a watchlist scan for new releases', [], null, {
+                            response: '{\n  "success": true,\n  "data": { "message": "Watchlist scan started." }\n}'
+                        })
+                    ]
+                },
+                {
+                    id: 'api-wishlist', title: 'Wishlist', desc: 'View, add, remove wishlist tracks and trigger download processing. Profile-scoped.',
+                    endpoints: [
+                        E('GET', '/wishlist', 'List wishlist tracks with optional category filter', [
+                            P('category', 'string', false, '"singles" or "albums"', 'all'),
+                            P('page', 'int', false, 'Page number', '1'),
+                            P('limit', 'int', false, 'Results per page (max 200)', '50'),
+                            P('fields', 'string', false, 'Comma-separated fields', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "tracks": [\n      {\n        "id": 1,\n        "spotify_track_id": "3SVAN3BRByDmHOhKyIDxfC",\n        "track_name": "Karma Police",\n        "artist_name": "Radiohead",\n        "album_name": "OK Computer",\n        "failure_reason": "No suitable source found",\n        "retry_count": 2,\n        "last_attempted": "2026-03-12T10:00:00Z",\n        "date_added": "2026-03-10T08:00:00Z",\n        "source_type": "playlist_sync"\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 50, "total": 12, "total_pages": 1, "has_next": false, "has_prev": false }\n}'
+                        }),
+                        E('POST', '/wishlist', 'Add a track to the wishlist', [], [
+                            P('spotify_track_data', 'object', true, 'Full Spotify track data object'),
+                            P('failure_reason', 'string', false, 'Reason for adding', '"Added via API"'),
+                            P('source_type', 'string', false, 'Source identifier', '"api"')
+                        ], {
+                            request: '{\n  "spotify_track_data": {\n    "id": "3SVAN3BRByDmHOhKyIDxfC",\n    "name": "Karma Police",\n    "artists": [{ "name": "Radiohead" }],\n    "album": { "name": "OK Computer", "album_type": "album" }\n  },\n  "source_type": "api"\n}',
+                            response: '{\n  "success": true,\n  "data": { "message": "Track added to wishlist." }\n}'
+                        }),
+                        E('DELETE', '/wishlist/{track_id}', 'Remove a track by Spotify track ID', [], null, {
+                            response: '{\n  "success": true,\n  "data": { "message": "Track removed from wishlist." }\n}'
+                        }),
+                        E('POST', '/wishlist/process', 'Trigger wishlist download processing', [], null, {
+                            response: '{\n  "success": true,\n  "data": { "message": "Wishlist processing started." }\n}'
+                        })
+                    ]
+                },
+                {
+                    id: 'api-discover', title: 'Discover', desc: 'Browse the discovery pool, similar artists, recent releases, and bubble snapshots. Profile-scoped.',
+                    endpoints: [
+                        E('GET', '/discover/pool', 'List discovery pool tracks with optional filters', [
+                            P('new_releases_only', 'string', false, '"true" to filter new releases only', 'false'),
+                            P('source', 'string', false, '"spotify" or "itunes"', 'all'),
+                            P('page', 'int', false, 'Page number', '1'),
+                            P('limit', 'int', false, 'Max tracks (max 500)', '100'),
+                            P('fields', 'string', false, 'Comma-separated fields', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "tracks": [\n      {\n        "id": 1,\n        "spotify_track_id": "3SVAN3...",\n        "track_name": "Karma Police",\n        "artist_name": "Radiohead",\n        "album_name": "OK Computer",\n        "album_cover_url": "https://...",\n        "duration_ms": 264066,\n        "popularity": 78,\n        "is_new_release": false,\n        "source": "spotify"\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 100, "total": 850, "total_pages": 9, "has_next": true, "has_prev": false }\n}'
+                        }),
+                        E('GET', '/discover/similar-artists', 'List top similar artists from the watchlist', [
+                            P('limit', 'int', false, 'Max artists (max 200)', '50'),
+                            P('fields', 'string', false, 'Comma-separated fields', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "artists": [\n      {\n        "id": 1,\n        "similar_artist_name": "Thom Yorke",\n        "similar_artist_spotify_id": "2x9SpqnPi8rlE9pjHBwN5z",\n        "similarity_rank": 1,\n        "occurrence_count": 5\n      }\n    ]\n  }\n}'
+                        }),
+                        E('GET', '/discover/recent-releases', 'List recent releases from watched artists', [
+                            P('limit', 'int', false, 'Max releases (max 200)', '50'),
+                            P('fields', 'string', false, 'Comma-separated fields', 'all')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "releases": [\n      {\n        "id": 1,\n        "album_name": "A Moon Shaped Pool",\n        "album_spotify_id": "2ix8vWvvSp2Yo7rKMiWpkg",\n        "release_date": "2016-05-08",\n        "album_cover_url": "https://...",\n        "track_count": 11,\n        "source": "spotify"\n      }\n    ]\n  }\n}'
+                        }),
+                        E('GET', '/discover/pool/metadata', 'Get discovery pool metadata', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "last_populated": "2026-03-12T10:00:00Z",\n    "track_count": 850,\n    "updated_at": "2026-03-12T10:00:00Z"\n  }\n}'
+                        }),
+                        E('GET', '/discover/bubbles', 'List all bubble snapshots for the current profile', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "snapshots": {\n      "artist_bubbles": { "snapshot_data": [...], "updated_at": "..." },\n      "search_bubbles": null,\n      "discover_downloads": null\n    }\n  }\n}'
+                        }),
+                        E('GET', '/discover/bubbles/{snapshot_type}', 'Get a specific bubble snapshot (artist_bubbles, search_bubbles, discover_downloads)', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "snapshot": { "snapshot_data": [...], "updated_at": "2026-03-12T10:00:00Z" }\n  }\n}'
+                        })
+                    ]
+                },
+                {
+                    id: 'api-profiles', title: 'Profiles', desc: 'Manage multi-profile support. Create, update, delete profiles with PIN protection and page access control.',
+                    endpoints: [
+                        E('GET', '/profiles', 'List all profiles', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "profiles": [\n      {\n        "id": 1,\n        "name": "Admin",\n        "is_admin": 1,\n        "avatar_color": "#6366f1",\n        "avatar_url": null,\n        "created_at": "2026-01-01T00:00:00Z"\n      }\n    ]\n  }\n}'
+                        }),
+                        E('GET', '/profiles/{profile_id}', 'Get a single profile by ID', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "profile": {\n      "id": 1, "name": "Admin", "is_admin": 1,\n      "avatar_color": "#6366f1", "avatar_url": null\n    }\n  }\n}'
+                        }),
+                        E('POST', '/profiles', 'Create a new profile', [], [
+                            P('name', 'string', true, 'Profile display name'),
+                            P('avatar_color', 'string', false, 'Hex color for avatar', '"#6366f1"'),
+                            P('avatar_url', 'string', false, 'Custom avatar image URL'),
+                            P('is_admin', 'bool', false, 'Admin privileges', 'false'),
+                            P('pin', 'string', false, 'PIN for profile protection')
+                        ], {
+                            request: '{\n  "name": "Family Room",\n  "is_admin": false,\n  "avatar_color": "#22c55e",\n  "pin": "1234"\n}',
+                            response: '{\n  "success": true,\n  "data": {\n    "profile": {\n      "id": 3, "name": "Family Room", "is_admin": 0,\n      "avatar_color": "#22c55e"\n    }\n  }\n}'
+                        }),
+                        E('PUT', '/profiles/{profile_id}', 'Update a profile', [], [
+                            P('name', 'string', false, 'New display name'),
+                            P('avatar_color', 'string', false, 'Hex color'),
+                            P('avatar_url', 'string', false, 'Avatar image URL'),
+                            P('is_admin', 'bool', false, 'Admin privileges'),
+                            P('pin', 'string', false, 'New PIN (empty string clears PIN)')
+                        ], {
+                            request: '{\n  "name": "Kids Room",\n  "avatar_color": "#f59e0b"\n}',
+                            response: '{\n  "success": true,\n  "data": {\n    "profile": { "id": 3, "name": "Kids Room", "avatar_color": "#f59e0b" }\n  }\n}'
+                        }),
+                        E('DELETE', '/profiles/{profile_id}', 'Delete a profile (cannot delete profile 1)', [], null, {
+                            response: '{\n  "success": true,\n  "data": { "message": "Profile 3 deleted." }\n}'
+                        })
+                    ]
+                },
+                {
+                    id: 'api-settings', title: 'Settings & API Keys', desc: 'Read and update application settings. Manage API keys. Sensitive values are always redacted in GET responses.',
+                    endpoints: [
+                        E('GET', '/settings', 'Get current settings (sensitive values redacted)', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "settings": {\n      "spotify": {\n        "client_id": "***REDACTED***",\n        "country": "US"\n      },\n      "download_path": "/music",\n      "download_source": "hybrid",\n      "ui_appearance": {\n        "accent_preset": "green",\n        "particles_enabled": true\n      }\n    }\n  }\n}'
+                        }),
+                        E('PATCH', '/settings', 'Update settings (partial, dot-notation keys accepted)', [], [
+                            P('{key}', 'any', true, 'One or more key-value pairs. The "api_keys" key is blocked.')
+                        ], {
+                            request: '{\n  "spotify.country": "GB",\n  "download_path": "/new/music/path"\n}',
+                            response: '{\n  "success": true,\n  "data": {\n    "message": "Settings updated.",\n    "updated_keys": ["spotify.country", "download_path"]\n  }\n}'
+                        }),
+                        E('GET', '/api-keys', 'List all API keys (prefix and label only, never the full key)', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "keys": [\n      {\n        "id": "a1b2c3d4-...",\n        "label": "My Bot",\n        "key_prefix": "sk_AbCdEfGh",\n        "created_at": "2026-03-01T10:00:00Z",\n        "last_used_at": "2026-03-13T09:15:00Z"\n      }\n    ]\n  }\n}'
+                        }),
+                        E('POST', '/api-keys', 'Generate a new API key (raw key returned once)', [], [
+                            P('label', 'string', false, 'Descriptive label for the key', '""')
+                        ], {
+                            request: '{\n  "label": "Home Assistant"\n}',
+                            response: '{\n  "success": true,\n  "data": {\n    "key": "sk_AbCdEfGhIjKlMnOpQrStUvWxYz123456789...",\n    "id": "a1b2c3d4-...",\n    "label": "Home Assistant",\n    "key_prefix": "sk_AbCdEfGh",\n    "created_at": "2026-03-13T10:00:00Z"\n  }\n}'
+                        }),
+                        E('DELETE', '/api-keys/{key_id}', 'Revoke an API key by its UUID', [], null, {
+                            response: '{\n  "success": true,\n  "data": { "message": "API key revoked." }\n}'
+                        }),
+                        E('POST', '/api-keys/bootstrap', 'Generate the first API key when none exist (NO AUTH REQUIRED)', [], [
+                            P('label', 'string', false, 'Label for the key', '"Default"')
+                        ], {
+                            request: '{\n  "label": "My First Key"\n}',
+                            response: '{\n  "success": true,\n  "data": {\n    "key": "sk_...",\n    "id": "...",\n    "label": "My First Key",\n    "key_prefix": "sk_...",\n    "created_at": "2026-03-13T10:00:00Z"\n  }\n}'
+                        })
+                    ]
+                },
+                {
+                    id: 'api-retag', title: 'Retag', desc: 'View and manage the pending metadata correction queue.',
+                    endpoints: [
+                        E('GET', '/retag/groups', 'List all retag groups with track counts', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "groups": [\n      {\n        "id": 1,\n        "original_artist": "Radiohed",\n        "corrected_artist": "Radiohead",\n        "track_count": 5,\n        "created_at": "2026-03-12T10:00:00Z"\n      }\n    ]\n  }\n}'
+                        }),
+                        E('GET', '/retag/groups/{group_id}', 'Get a retag group with its tracks', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "group": { "id": 1, "original_artist": "Radiohed", "corrected_artist": "Radiohead" },\n    "tracks": [\n      { "id": 100, "title": "Airbag", "file_path": "/music/..." }\n    ]\n  }\n}'
+                        }),
+                        E('DELETE', '/retag/groups/{group_id}', 'Delete a retag group and its tracks', [], null, {
+                            response: '{\n  "success": true,\n  "data": { "message": "Retag group 1 deleted." }\n}'
+                        }),
+                        E('DELETE', '/retag/groups', 'Delete all retag groups and tracks', [], null, {
+                            response: '{\n  "success": true,\n  "data": { "message": "Cleared 5 retag groups." }\n}'
+                        }),
+                        E('GET', '/retag/stats', 'Get retag queue statistics', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "total_groups": 5,\n    "total_tracks": 23,\n    "pending": 18,\n    "completed": 5\n  }\n}'
+                        })
+                    ]
+                },
+                {
+                    id: 'api-cache', title: 'Cache', desc: 'Browse MusicBrainz and discovery match caches for debugging and inspection.',
+                    endpoints: [
+                        E('GET', '/cache/musicbrainz', 'List cached MusicBrainz lookups', [
+                            P('entity_type', 'string', false, '"artist", "album", or "track"'),
+                            P('search', 'string', false, 'Filter by entity name'),
+                            P('page', 'int', false, 'Page number', '1'),
+                            P('limit', 'int', false, 'Results per page (max 200)', '50')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "entries": [\n      {\n        "entity_type": "artist",\n        "entity_name": "Radiohead",\n        "musicbrainz_id": "a74b1b7f-...",\n        "last_updated": "2026-03-12T10:00:00Z",\n        "metadata_json": { "type": "Group", "country": "GB" }\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 50, "total": 342, "total_pages": 7, "has_next": true, "has_prev": false }\n}'
+                        }),
+                        E('GET', '/cache/musicbrainz/stats', 'Get MusicBrainz cache statistics', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "total": 1024,\n    "matched": 890,\n    "unmatched": 134,\n    "by_type": { "artist": 342, "album": 450, "track": 232 }\n  }\n}'
+                        }),
+                        E('GET', '/cache/discovery-matches', 'List cached discovery provider matches', [
+                            P('provider', 'string', false, '"spotify", "itunes", etc.'),
+                            P('search', 'string', false, 'Filter by title or artist'),
+                            P('page', 'int', false, 'Page number', '1'),
+                            P('limit', 'int', false, 'Results per page (max 200)', '50')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "entries": [\n      {\n        "provider": "spotify",\n        "original_title": "Karma Police",\n        "original_artist": "Radiohead",\n        "matched_data_json": { "id": "3SVAN3...", "confidence": 0.95 },\n        "use_count": 3,\n        "last_used_at": "2026-03-12T10:00:00Z"\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 50, "total": 5000, "total_pages": 100, "has_next": true, "has_prev": false }\n}'
+                        }),
+                        E('GET', '/cache/discovery-matches/stats', 'Get discovery match cache statistics', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "total": 5000,\n    "total_uses": 18500,\n    "avg_confidence": 0.872,\n    "by_provider": { "spotify": 3200, "itunes": 1800 }\n  }\n}'
+                        })
+                    ]
+                },
+                {
+                    id: 'api-listenbrainz', title: 'ListenBrainz', desc: 'Browse cached ListenBrainz playlists and their tracks.',
+                    endpoints: [
+                        E('GET', '/listenbrainz/playlists', 'List cached ListenBrainz playlists', [
+                            P('type', 'string', false, 'Filter by playlist_type (e.g. "weekly-jams")'),
+                            P('page', 'int', false, 'Page number', '1'),
+                            P('limit', 'int', false, 'Results per page (max 200)', '50')
+                        ], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "playlists": [\n      {\n        "id": 1,\n        "playlist_mbid": "a1b2c3d4-...",\n        "title": "Weekly Jams for user",\n        "playlist_type": "weekly-jams",\n        "track_count": 50,\n        "created_at": "2026-03-10T00:00:00Z"\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 50, "total": 12, "total_pages": 1, "has_next": false, "has_prev": false }\n}'
+                        }),
+                        E('GET', '/listenbrainz/playlists/{playlist_id}', 'Get a ListenBrainz playlist with tracks (ID or MBID)', [], null, {
+                            response: '{\n  "success": true,\n  "data": {\n    "playlist": {\n      "id": 1,\n      "playlist_mbid": "a1b2c3d4-...",\n      "title": "Weekly Jams for user",\n      "playlist_type": "weekly-jams"\n    },\n    "tracks": [\n      {\n        "id": 1,\n        "position": 0,\n        "recording_mbid": "e1f2g3h4-...",\n        "title": "Karma Police",\n        "artist": "Radiohead"\n      }\n    ]\n  }\n}'
+                        })
+                    ]
+                }
+            ];
 
-{
-  "artist": "Radiohead",
-  "album": "OK Computer",
-  "title": "Karma Police",
-  "spotify_id": "3SVAN3BRByDmHOhKyIDxfC"
-}</div>
-                <div class="docs-code-label">Response</div>
-                <div class="docs-code-block">{
-  "success": true,
-  "task_id": "abc123",
-  "message": "Download started"
-}</div>
-            </div>
-            <div class="docs-subsection" id="api-library">
-                <h3 class="docs-subsection-title">Library</h3>
-                <p class="docs-text">Browse and query your music library.</p>
-                <table class="docs-table">
-                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td>GET</td><td><code>/api/library/artists</code></td><td>Paginated artist list with search and filters</td></tr>
-                        <tr><td>GET</td><td><code>/api/artist-detail/{id}</code></td><td>Full artist info, discography, and match status</td></tr>
-                        <tr><td>GET</td><td><code>/api/library/artist/{id}/enhanced</code></td><td>Enhanced view: full tracks, tags, file paths</td></tr>
-                        <tr><td>GET</td><td><code>/api/library/album/{id}/tracks</code></td><td>Track list for an album</td></tr>
-                        <tr><td>POST</td><td><code>/api/database/update</code></td><td>Trigger library database refresh</td></tr>
-                    </tbody>
-                </table>
-                <div class="docs-code-label">Response: GET /api/library/artists?page=1&per_page=20</div>
-                <div class="docs-code-block">{
-  "artists": [
-    {
-      "id": 1,
-      "name": "Radiohead",
-      "album_count": 9,
-      "track_count": 101,
-      "image_url": "https://..."
-    }
-  ],
-  "total": 342,
-  "page": 1,
-  "per_page": 20
-}</div>
-            </div>
-            <div class="docs-subsection" id="api-library-edit">
-                <h3 class="docs-subsection-title">Library Editing</h3>
-                <p class="docs-text">Edit metadata and write tags to files via the Enhanced Library Manager.</p>
-                <table class="docs-table">
-                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td>PUT</td><td><code>/api/library/artist/{id}</code></td><td>Update artist fields (name, genres, label, etc.)</td></tr>
-                        <tr><td>PUT</td><td><code>/api/library/album/{id}</code></td><td>Update album fields</td></tr>
-                        <tr><td>PUT</td><td><code>/api/library/track/{id}</code></td><td>Update track fields (title, track_number, bpm)</td></tr>
-                        <tr><td>POST</td><td><code>/api/library/tracks/batch</code></td><td>Batch update multiple tracks at once</td></tr>
-                        <tr><td>GET</td><td><code>/api/library/track/{id}/tag-preview</code></td><td>Preview tag diff (current file tags vs database)</td></tr>
-                        <tr><td>POST</td><td><code>/api/library/track/{id}/write-tags</code></td><td>Write database metadata to audio file tags</td></tr>
-                        <tr><td>POST</td><td><code>/api/library/tracks/write-tags-batch</code></td><td>Batch write tags to multiple files</td></tr>
-                    </tbody>
-                </table>
-                <div class="docs-code-label">Request: PUT /api/library/track/42</div>
-                <div class="docs-code-block">Content-Type: application/json
+            // --- Build endpoint HTML ---
+            function methodClass(m) { return m.toLowerCase(); }
 
-{
-  "title": "Karma Police",
-  "track_number": 6,
-  "bpm": 75
-}</div>
-            </div>
-            <div class="docs-subsection" id="api-playlists">
-                <h3 class="docs-subsection-title">Playlists</h3>
-                <p class="docs-text">Import, sync, and manage mirrored playlists from external sources.</p>
-                <table class="docs-table">
-                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td>GET</td><td><code>/api/playlists/spotify</code></td><td>List Spotify playlists</td></tr>
-                        <tr><td>POST</td><td><code>/api/playlists/parse</code></td><td>Parse a YouTube/Tidal playlist URL</td></tr>
-                        <tr><td>GET</td><td><code>/api/playlists/mirrored</code></td><td>List all mirrored playlists</td></tr>
-                        <tr><td>POST</td><td><code>/api/playlists/{id}/sync</code></td><td>Sync playlist tracks to wishlist</td></tr>
-                        <tr><td>POST</td><td><code>/api/playlists/{id}/discover</code></td><td>Discover official metadata for playlist tracks</td></tr>
-                    </tbody>
-                </table>
-                <div class="docs-code-label">Request: POST /api/playlists/parse</div>
-                <div class="docs-code-block">Content-Type: application/json
+            function buildParamsTable(params) {
+                if (!params || !params.length) return '';
+                let html = '<div class="api-detail-label">Parameters</div>';
+                html += '<table class="api-params-table"><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>';
+                params.forEach(p => {
+                    const req = p.required ? '<span class="api-param-required">required</span>' : '<span class="api-param-optional">optional</span>';
+                    const def = p.default !== undefined ? ' <span style="color:rgba(255,255,255,0.25)">(default: ' + p.default + ')</span>' : '';
+                    html += '<tr><td>' + p.name + '</td><td>' + p.type + '</td><td>' + req + '</td><td>' + p.desc + def + '</td></tr>';
+                });
+                html += '</tbody></table>';
+                return html;
+            }
 
-{
-  "url": "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
-}</div>
-            </div>
-            <div class="docs-subsection" id="api-watchlist">
-                <h3 class="docs-subsection-title">Watchlist & Wishlist</h3>
-                <p class="docs-text">Manage watched artists and the download wishlist queue.</p>
-                <table class="docs-table">
-                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td>GET</td><td><code>/api/watchlist</code></td><td>List all watched artists</td></tr>
-                        <tr><td>POST</td><td><code>/api/watchlist/add</code></td><td>Add an artist to the watchlist</td></tr>
-                        <tr><td>DELETE</td><td><code>/api/watchlist/{id}</code></td><td>Remove artist from watchlist</td></tr>
-                        <tr><td>GET</td><td><code>/api/wishlist</code></td><td>List all wishlist items with status</td></tr>
-                        <tr><td>POST</td><td><code>/api/wishlist/process</code></td><td>Trigger wishlist processing</td></tr>
-                    </tbody>
-                </table>
-                <div class="docs-code-label">Request: POST /api/watchlist/add</div>
-                <div class="docs-code-block">Content-Type: application/json
+            function buildBodyTable(fields) {
+                if (!fields || !fields.length) return '';
+                let html = '<div class="api-detail-label">Request Body (JSON)</div>';
+                html += '<table class="api-params-table"><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>';
+                fields.forEach(p => {
+                    const req = p.required ? '<span class="api-param-required">required</span>' : '<span class="api-param-optional">optional</span>';
+                    const def = p.default !== undefined ? ' <span style="color:rgba(255,255,255,0.25)">(default: ' + p.default + ')</span>' : '';
+                    html += '<tr><td>' + p.name + '</td><td>' + p.type + '</td><td>' + req + '</td><td>' + p.desc + def + '</td></tr>';
+                });
+                html += '</tbody></table>';
+                return html;
+            }
 
-{
-  "artist_name": "Radiohead",
-  "spotify_id": "4Z8W4fKeB5YxbusRsdQVPb"
-}</div>
-            </div>
-            <div class="docs-subsection" id="api-automations">
-                <h3 class="docs-subsection-title">Automations</h3>
-                <p class="docs-text">Create, manage, and trigger automations.</p>
-                <table class="docs-table">
-                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td>GET</td><td><code>/api/automations</code></td><td>List all automations with status</td></tr>
-                        <tr><td>POST</td><td><code>/api/automations</code></td><td>Create a new automation</td></tr>
-                        <tr><td>PUT</td><td><code>/api/automations/{id}</code></td><td>Update an automation</td></tr>
-                        <tr><td>POST</td><td><code>/api/automations/{id}/run</code></td><td>Run an automation immediately</td></tr>
-                        <tr><td>DELETE</td><td><code>/api/automations/{id}</code></td><td>Delete a custom automation</td></tr>
-                    </tbody>
-                </table>
-                <div class="docs-code-label">Response: GET /api/automations</div>
-                <div class="docs-code-block">[
-  {
-    "id": 1,
-    "name": "Auto-Process Wishlist",
-    "trigger_type": "schedule",
-    "action_type": "process_wishlist",
-    "enabled": true,
-    "last_run": "2026-03-12T10:30:00Z",
-    "run_count": 142,
-    "is_system": true
-  }
-]</div>
-            </div>
-            <div class="docs-subsection" id="api-import">
-                <h3 class="docs-subsection-title">Import</h3>
-                <p class="docs-text">Manage the staging folder and import music files.</p>
-                <table class="docs-table">
-                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td>GET</td><td><code>/api/import/staging</code></td><td>List files and folders in the staging directory</td></tr>
-                        <tr><td>POST</td><td><code>/api/import/match</code></td><td>Auto-match staged files to album tracks</td></tr>
-                        <tr><td>POST</td><td><code>/api/import/confirm</code></td><td>Confirm and execute an import</td></tr>
-                        <tr><td>POST</td><td><code>/api/import/search/albums</code></td><td>Search for album matches for staged files</td></tr>
-                    </tbody>
-                </table>
-                <div class="docs-code-label">Response: GET /api/import/staging</div>
-                <div class="docs-code-block">{
-  "folders": [
-    {
-      "name": "Radiohead - OK Computer",
-      "files": 12,
-      "size": "485 MB"
-    }
-  ],
-  "singles": 3,
-  "total_size": "512 MB"
-}</div>
-            </div>
-            <div class="docs-subsection" id="api-settings">
-                <h3 class="docs-subsection-title">Settings</h3>
-                <p class="docs-text">Read and update application settings. Admin-only endpoints.</p>
-                <table class="docs-table">
-                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td>GET</td><td><code>/api/settings</code></td><td>Get all current settings</td></tr>
-                        <tr><td>POST</td><td><code>/api/settings</code></td><td>Update settings (partial update supported)</td></tr>
-                        <tr><td>POST</td><td><code>/api/database/backup</code></td><td>Create a database backup</td></tr>
-                        <tr><td>GET</td><td><code>/api/database/backups</code></td><td>List available backups</td></tr>
-                        <tr><td>POST</td><td><code>/api/database/restore</code></td><td>Restore from a backup</td></tr>
-                    </tbody>
-                </table>
-                <div class="docs-code-label">Response: POST /api/database/backup</div>
-                <div class="docs-code-block">{
-  "success": true,
-  "filename": "backup_2026-03-12_103000.db",
-  "size": "45.2 MB"
-}</div>
-            </div>
-            <div class="docs-subsection" id="api-enrichment">
-                <h3 class="docs-subsection-title">Enrichment Workers</h3>
-                <p class="docs-text">Monitor and control the background metadata enrichment workers.</p>
-                <table class="docs-table">
-                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td>GET</td><td><code>/api/enrichment/status</code></td><td>Status of all enrichment workers</td></tr>
-                        <tr><td>POST</td><td><code>/api/enrichment/pause</code></td><td>Pause a specific worker</td></tr>
-                        <tr><td>POST</td><td><code>/api/enrichment/resume</code></td><td>Resume a paused worker</td></tr>
-                        <tr><td>POST</td><td><code>/api/enrichment/reset</code></td><td>Reset worker progress and re-scan all items</td></tr>
-                    </tbody>
-                </table>
-                <div class="docs-code-label">Response: GET /api/enrichment/status</div>
-                <div class="docs-code-block">{
-  "workers": {
-    "spotify": { "status": "running", "matched": 142, "total": 342, "current": "Radiohead" },
-    "musicbrainz": { "status": "paused", "matched": 98, "total": 342 },
-    "lastfm": { "status": "running", "matched": 320, "total": 342 }
-  }
-}</div>
-            </div>
-            <div class="docs-subsection" id="api-profiles">
-                <h3 class="docs-subsection-title">Profiles</h3>
-                <p class="docs-text">Manage multi-profile support. Admin-only for create/edit/delete.</p>
-                <table class="docs-table">
-                    <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td>GET</td><td><code>/api/profiles</code></td><td>List all profiles</td></tr>
-                        <tr><td>POST</td><td><code>/api/profiles</code></td><td>Create a new profile</td></tr>
-                        <tr><td>PUT</td><td><code>/api/profiles/{id}</code></td><td>Update a profile (name, avatar, permissions)</td></tr>
-                        <tr><td>DELETE</td><td><code>/api/profiles/{id}</code></td><td>Delete a profile (admin only, cannot delete profile 1)</td></tr>
-                        <tr><td>POST</td><td><code>/api/profiles/switch</code></td><td>Switch active profile (PIN required if set)</td></tr>
-                    </tbody>
-                </table>
-                <div class="docs-code-label">Request: POST /api/profiles</div>
-                <div class="docs-code-block">Content-Type: application/json
+            function buildExample(ex) {
+                if (!ex) return '';
+                let html = '';
+                if (ex.request) {
+                    html += '<div class="api-detail-label">Example Request Body</div>';
+                    html += '<div class="api-example-json">' + escHtml(ex.request) + '</div>';
+                }
+                if (ex.response) {
+                    html += '<div class="api-detail-label">Example Response</div>';
+                    html += '<div class="api-example-json">' + escHtml(ex.response) + '</div>';
+                }
+                return html;
+            }
 
-{
-  "name": "Family Room",
-  "is_admin": false,
-  "pin": "1234",
-  "allowed_pages": ["search", "discover", "library", "sync"],
-  "can_download": true
-}</div>
-            </div>
-            <div class="docs-subsection" id="api-websocket">
-                <h3 class="docs-subsection-title">WebSocket Events</h3>
-                <p class="docs-text">SoulSync uses <strong>Socket.IO</strong> for real-time communication. The frontend connects automatically and receives live updates without polling. Connect to the same host/port as the web UI.</p>
-                <table class="docs-table">
-                    <thead><tr><th>Event</th><th>Description</th></tr></thead>
-                    <tbody>
-                        <tr><td><code>download_progress</code></td><td>Per-track download progress (speed, ETA, percentage)</td></tr>
-                        <tr><td><code>download_complete</code></td><td>Track finished downloading and post-processing</td></tr>
-                        <tr><td><code>batch_progress</code></td><td>Album/playlist batch download status</td></tr>
-                        <tr><td><code>worker_status</code></td><td>Enrichment worker status (Spotify, MusicBrainz, Deezer, Tidal, Qobuz, etc.)</td></tr>
-                        <tr><td><code>scan_progress</code></td><td>Library scan, quality scan, or duplicate scan progress</td></tr>
-                        <tr><td><code>system_status</code></td><td>Service connectivity changes (Spotify rate limit, slskd disconnect)</td></tr>
-                        <tr><td><code>activity</code></td><td>System activity feed entries</td></tr>
-                        <tr><td><code>wishlist_update</code></td><td>Wishlist item added, status changed, or removed</td></tr>
-                        <tr><td><code>automation_run</code></td><td>Automation started, completed, or failed</td></tr>
-                    </tbody>
-                </table>
-                <p class="docs-text">All UI elements that show live progress (download bars, worker icons, scan counters) are driven by these WebSocket events. External clients can connect using any Socket.IO-compatible library and listen for these same events.</p>
-                <div class="docs-code-label">Example: Socket.IO client (JavaScript)</div>
-                <div class="docs-code-block">const socket = io('http://localhost:5000');
-socket.on('download_progress', (data) => {
-  console.log(data.title, data.percent + '%');
-});
-socket.on('activity', (data) => {
-  console.log(data.timestamp, data.message);
-});</div>
-                <p class="docs-text">The full API has 200+ endpoints covering library, downloads, playlists, automations, profiles, settings, and more. Use a reverse proxy (Nginx, Caddy, Traefik) for external access with HTTPS.</p>
-            </div>
-        `
+            function escHtml(s) {
+                return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            }
+
+            function buildTryIt(ep, idx) {
+                const hasPathParam = ep.path.includes('{');
+                const pathParams = [];
+                const pathMatch = ep.path.match(/\{([^}]+)\}/g);
+                if (pathMatch) pathMatch.forEach(m => pathParams.push(m.replace(/[{}]/g, '')));
+
+                let html = '<div class="api-detail-label">Try It</div>';
+
+                // Path param inputs
+                if (pathParams.length) {
+                    html += '<div class="api-try-params">';
+                    pathParams.forEach(pp => {
+                        html += '<div class="api-try-param"><label>' + pp + '</label><input type="text" id="api-try-path-' + idx + '-' + pp + '" placeholder="' + pp + '"></div>';
+                    });
+                    html += '</div>';
+                }
+
+                // Query param inputs for GET endpoints
+                if (ep.params && ep.params.length && (ep.method === 'GET')) {
+                    html += '<div class="api-try-params">';
+                    ep.params.forEach(p => {
+                        if (p.name === 'fields') return; // skip fields param in try-it
+                        html += '<div class="api-try-param"><label>' + p.name + '</label><input type="text" id="api-try-q-' + idx + '-' + p.name + '" placeholder="' + (p.default || '') + '"></div>';
+                    });
+                    html += '</div>';
+                }
+
+                html += '<div class="api-try-bar">';
+                // Body textarea for POST/PUT/PATCH/DELETE with body
+                if (ep.bodyFields && ep.bodyFields.length) {
+                    const defaultBody = ep.example && ep.example.request ? ep.example.request : '{}';
+                    html += '<textarea class="api-try-body" id="api-try-body-' + idx + '">' + escHtml(defaultBody) + '</textarea>';
+                }
+                html += '<button class="api-try-btn" onclick="window._apiTryIt(' + idx + ')" id="api-try-btn-' + idx + '">&#9654; Send</button>';
+                html += '</div>';
+
+                html += '<div id="api-try-result-' + idx + '"></div>';
+                return html;
+            }
+
+            // Build all sections
+            let sectionsHTML = '';
+
+            // Auth section (not a group)
+            sectionsHTML += '<div class="docs-subsection" id="api-auth">';
+            sectionsHTML += '<h3 class="docs-subsection-title">Authentication</h3>';
+            sectionsHTML += '<p class="docs-text">All API v1 endpoints require an API key (except <code>POST /api-keys/bootstrap</code>). Generate keys in <strong>Settings &rarr; API Keys</strong> or via the bootstrap endpoint.</p>';
+            sectionsHTML += '<div class="api-detail-label">Two authentication methods</div>';
+            sectionsHTML += '<table class="api-params-table"><thead><tr><th>Method</th><th>Format</th><th>Example</th></tr></thead><tbody>';
+            sectionsHTML += '<tr><td>Header</td><td>Authorization: Bearer {key}</td><td><code>Authorization: Bearer sk_AbCd...</code></td></tr>';
+            sectionsHTML += '<tr><td>Query</td><td>?api_key={key}</td><td><code>/api/v1/system/status?api_key=sk_AbCd...</code></td></tr>';
+            sectionsHTML += '</tbody></table>';
+            sectionsHTML += '<div class="api-note">Keys use the <code>sk_</code> prefix. The raw key is shown exactly once at creation time. Only a SHA-256 hash is stored server-side. Rate limit: 60 requests per minute per IP.</div>';
+            sectionsHTML += '<div class="api-detail-label">Base URL</div>';
+            sectionsHTML += '<p class="docs-text">All endpoints are prefixed with <code class="api-base-url">/api/v1</code></p>';
+            sectionsHTML += '<div class="api-detail-label">Response Envelope</div>';
+            sectionsHTML += '<p class="docs-text">Every response follows this structure:</p>';
+            sectionsHTML += '<div class="api-example-json">{\n  "success": true | false,\n  "data": { ... } | null,\n  "error": { "code": "ERROR_CODE", "message": "..." } | null,\n  "pagination": { "page": 1, "limit": 50, "total": 342, "total_pages": 7, "has_next": true, "has_prev": false } | null\n}</div>';
+            sectionsHTML += '<div class="api-detail-label">Error Codes</div>';
+            sectionsHTML += '<table class="api-params-table"><thead><tr><th>Status</th><th>Code</th><th>Meaning</th></tr></thead><tbody>';
+            sectionsHTML += '<tr><td>400</td><td>BAD_REQUEST</td><td>Missing or invalid parameters</td></tr>';
+            sectionsHTML += '<tr><td>401</td><td>AUTH_REQUIRED</td><td>No API key provided</td></tr>';
+            sectionsHTML += '<tr><td>403</td><td>INVALID_KEY / FORBIDDEN</td><td>Invalid key or insufficient permissions</td></tr>';
+            sectionsHTML += '<tr><td>404</td><td>NOT_FOUND</td><td>Resource not found</td></tr>';
+            sectionsHTML += '<tr><td>409</td><td>CONFLICT</td><td>Resource already exists or action in progress</td></tr>';
+            sectionsHTML += '<tr><td>429</td><td>RATE_LIMITED</td><td>Too many requests</td></tr>';
+            sectionsHTML += '<tr><td>500</td><td>*_ERROR</td><td>Internal server error</td></tr>';
+            sectionsHTML += '</tbody></table>';
+            sectionsHTML += '<div class="api-detail-label">cURL Example</div>';
+            sectionsHTML += '<div class="api-example-json">curl -H "Authorization: Bearer sk_abc123..." \\\n     http://localhost:5000/api/v1/system/status</div>';
+            sectionsHTML += '</div>';
+
+            // API key input bar
+            sectionsHTML += '<div class="api-key-bar">';
+            sectionsHTML += '<label>API Key</label>';
+            sectionsHTML += '<input type="password" id="api-tester-key" placeholder="sk_..." autocomplete="off">';
+            sectionsHTML += '<span class="api-key-status" id="api-key-status">Enter key to test endpoints</span>';
+            sectionsHTML += '</div>';
+
+            // Endpoint groups
+            let globalIdx = 0;
+            const endpointRegistry = [];
+
+            apiGroups.forEach(group => {
+                sectionsHTML += '<div class="docs-subsection" id="' + group.id + '">';
+                sectionsHTML += '<h3 class="docs-subsection-title">' + group.title + '</h3>';
+                sectionsHTML += '<p class="docs-text">' + group.desc + '</p>';
+
+                group.endpoints.forEach(ep => {
+                    const idx = globalIdx++;
+                    endpointRegistry.push(ep);
+
+                    sectionsHTML += '<div class="api-endpoint" id="api-ep-' + idx + '">';
+                    sectionsHTML += '<div class="api-endpoint-header" onclick="this.parentElement.classList.toggle(\'expanded\')">';
+                    sectionsHTML += '<span class="api-method ' + methodClass(ep.method) + '">' + ep.method + '</span>';
+                    sectionsHTML += '<span class="api-endpoint-path">' + ep.path + '</span>';
+                    sectionsHTML += '<span class="api-endpoint-desc">' + ep.desc + '</span>';
+                    sectionsHTML += '<span class="api-endpoint-arrow">&#x25B6;</span>';
+                    sectionsHTML += '</div>';
+                    sectionsHTML += '<div class="api-endpoint-body">';
+                    sectionsHTML += '<p class="docs-text" style="margin-top:10px">' + ep.desc + '</p>';
+                    sectionsHTML += buildParamsTable(ep.params);
+                    sectionsHTML += buildBodyTable(ep.bodyFields);
+                    sectionsHTML += buildExample(ep.example);
+                    sectionsHTML += buildTryIt(ep, idx);
+                    sectionsHTML += '</div></div>';
+                });
+
+                sectionsHTML += '</div>';
+            });
+
+            // WebSocket section
+            sectionsHTML += '<div class="docs-subsection" id="api-websocket">';
+            sectionsHTML += '<h3 class="docs-subsection-title">WebSocket Events</h3>';
+            sectionsHTML += '<p class="docs-text">SoulSync uses <strong>Socket.IO</strong> for real-time updates. Connect to the same host/port as the web UI. No API key required for WebSocket connections.</p>';
+            sectionsHTML += '<table class="docs-table"><thead><tr><th>Event</th><th>Description</th><th>Key Fields</th></tr></thead><tbody>';
+            sectionsHTML += '<tr><td><code>download_progress</code></td><td>Per-track download progress</td><td>title, percent, speed, eta</td></tr>';
+            sectionsHTML += '<tr><td><code>download_complete</code></td><td>Track finished downloading</td><td>title, artist, album, file_path</td></tr>';
+            sectionsHTML += '<tr><td><code>batch_progress</code></td><td>Album/playlist batch status</td><td>batch_id, completed, total, current_track</td></tr>';
+            sectionsHTML += '<tr><td><code>worker_status</code></td><td>Enrichment worker updates</td><td>worker, status, matched, total, current</td></tr>';
+            sectionsHTML += '<tr><td><code>scan_progress</code></td><td>Library/quality/duplicate scan</td><td>type, progress, total, current</td></tr>';
+            sectionsHTML += '<tr><td><code>system_status</code></td><td>Service connectivity changes</td><td>service, connected, rate_limited</td></tr>';
+            sectionsHTML += '<tr><td><code>activity</code></td><td>Activity feed entries</td><td>timestamp, type, message</td></tr>';
+            sectionsHTML += '<tr><td><code>wishlist_update</code></td><td>Wishlist item changes</td><td>action, track_id, track_name</td></tr>';
+            sectionsHTML += '<tr><td><code>automation_run</code></td><td>Automation execution events</td><td>automation_id, status, result</td></tr>';
+            sectionsHTML += '</tbody></table>';
+            sectionsHTML += '<div class="api-detail-label">JavaScript Example</div>';
+            sectionsHTML += '<div class="api-example-json">import { io } from "socket.io-client";\n\nconst socket = io("http://localhost:5000");\n\nsocket.on("download_progress", (data) =&gt; {\n  console.log(`${data.title}: ${data.percent}%`);\n});\n\nsocket.on("worker_status", (data) =&gt; {\n  console.log(`${data.worker}: ${data.status} (${data.matched}/${data.total})`);\n});\n\nsocket.on("activity", (data) =&gt; {\n  console.log(`[${data.timestamp}] ${data.message}`);\n});</div>';
+            sectionsHTML += '</div>';
+
+            // Wire up API key status indicator
+            setTimeout(() => {
+                const keyInput = document.getElementById('api-tester-key');
+                const keyStatus = document.getElementById('api-key-status');
+                if (keyInput && keyStatus) {
+                    keyInput.addEventListener('input', () => {
+                        const val = keyInput.value.trim();
+                        if (!val) {
+                            keyStatus.textContent = 'Enter key to test endpoints';
+                            keyStatus.classList.remove('connected');
+                        } else if (val.startsWith('sk_')) {
+                            keyStatus.textContent = 'Key set \u2713';
+                            keyStatus.classList.add('connected');
+                        } else {
+                            keyStatus.textContent = 'Key should start with sk_';
+                            keyStatus.classList.remove('connected');
+                        }
+                    });
+                }
+            }, 0);
+
+            // Register the try-it handler on window
+            window._apiEndpointRegistry = endpointRegistry;
+            window._apiTryIt = async function(idx) {
+                const ep = endpointRegistry[idx];
+                const btn = document.getElementById('api-try-btn-' + idx);
+                const resultDiv = document.getElementById('api-try-result-' + idx);
+                const apiKey = document.getElementById('api-tester-key')?.value?.trim();
+
+                if (!apiKey) {
+                    resultDiv.innerHTML = '<div class="api-response-panel"><div class="api-response-header"><span style="color:#f14668">Enter your API key above first</span></div></div>';
+                    return;
+                }
+
+                // Build path
+                let path = ep.path;
+                const pathMatch = path.match(/\{([^}]+)\}/g);
+                if (pathMatch) {
+                    for (const m of pathMatch) {
+                        const paramName = m.replace(/[{}]/g, '');
+                        const input = document.getElementById('api-try-path-' + idx + '-' + paramName);
+                        const val = input?.value?.trim();
+                        if (!val) {
+                            resultDiv.innerHTML = '<div class="api-response-panel"><div class="api-response-header"><span style="color:#f14668">Fill in path parameter: ' + paramName + '</span></div></div>';
+                            return;
+                        }
+                        path = path.replace(m, encodeURIComponent(val));
+                    }
+                }
+
+                // Build query string for GET
+                let qs = '';
+                if (ep.method === 'GET' && ep.params) {
+                    const parts = [];
+                    ep.params.forEach(p => {
+                        if (p.name === 'fields') return;
+                        const input = document.getElementById('api-try-q-' + idx + '-' + p.name);
+                        const val = input?.value?.trim();
+                        if (val) parts.push(encodeURIComponent(p.name) + '=' + encodeURIComponent(val));
+                    });
+                    if (parts.length) qs = '?' + parts.join('&');
+                }
+
+                const url = '/api/v1' + path + qs;
+                const fetchOpts = {
+                    method: ep.method === 'PATCH' ? 'PATCH' : ep.method,
+                    headers: { 'Authorization': 'Bearer ' + apiKey }
+                };
+
+                // Body
+                if (ep.bodyFields && ep.bodyFields.length) {
+                    const bodyEl = document.getElementById('api-try-body-' + idx);
+                    if (bodyEl) {
+                        fetchOpts.headers['Content-Type'] = 'application/json';
+                        fetchOpts.body = bodyEl.value;
+                    }
+                }
+
+                btn.classList.add('loading');
+                btn.innerHTML = '&#9203; Sending...';
+                resultDiv.innerHTML = '';
+
+                const startTime = performance.now();
+                try {
+                    const resp = await fetch(url, fetchOpts);
+                    const elapsed = Math.round(performance.now() - startTime);
+                    let bodyText;
+                    try { bodyText = await resp.text(); } catch(e) { bodyText = '(empty response)'; }
+
+                    let formatted = bodyText;
+                    try {
+                        const parsed = JSON.parse(bodyText);
+                        formatted = JSON.stringify(parsed, null, 2);
+                    } catch(e) {}
+
+                    const statusClass = resp.status < 300 ? 's2xx' : resp.status < 500 ? 's4xx' : 's5xx';
+                    resultDiv.innerHTML = '<div class="api-response-panel">' +
+                        '<div class="api-response-header">' +
+                        '<span class="api-response-status ' + statusClass + '">' + resp.status + ' ' + resp.statusText + '</span>' +
+                        '<span class="api-response-time">' + elapsed + 'ms</span>' +
+                        '</div>' +
+                        '<div class="api-response-body">' + syntaxHighlight(escHtml2(formatted)) + '</div>' +
+                        '</div>';
+                } catch(err) {
+                    resultDiv.innerHTML = '<div class="api-response-panel"><div class="api-response-header"><span class="api-response-status s5xx">Network Error</span></div><div class="api-response-body">' + escHtml2(err.message) + '</div></div>';
+                }
+                btn.classList.remove('loading');
+                btn.innerHTML = '&#9654; Send';
+            };
+
+            function escHtml2(s) {
+                return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            }
+
+            function syntaxHighlight(json) {
+                return json.replace(/"([^"]+)":/g, '<span class="json-key">"$1"</span>:')
+                           .replace(/: "((?:[^"\\]|\\.)*)"/g, ': <span class="json-string">"$1"</span>')
+                           .replace(/: (-?\d+\.?\d*)/g, ': <span class="json-number">$1</span>')
+                           .replace(/: (true|false)/g, ': <span class="json-bool">$1</span>')
+                           .replace(/: (null)/g, ': <span class="json-null">$1</span>');
+            }
+
+            return sectionsHTML;
+        }
     }
 ];
 
