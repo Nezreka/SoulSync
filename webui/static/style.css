@@ -13136,6 +13136,40 @@ body {
     opacity: 0.5;
 }
 
+.config-exclude-terms-container {
+    padding: 4px 0;
+}
+
+.config-exclude-terms-input {
+    width: 100%;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    color: #fff;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s ease, background 0.2s ease;
+    box-sizing: border-box;
+}
+
+.config-exclude-terms-input:focus {
+    border-color: rgba(var(--accent-rgb), 0.5);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.config-exclude-terms-input::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.config-exclude-terms-hint {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.35);
+    line-height: 1.4;
+}
+
 .watchlist-artist-config-footer {
     padding: 20px 28px;
     border-top: 1px solid rgba(255, 255, 255, 0.08);

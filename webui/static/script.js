@@ -32302,6 +32302,7 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
         document.getElementById('config-include-remixes').checked = config.include_remixes || false;
         document.getElementById('config-include-acoustic').checked = config.include_acoustic || false;
         document.getElementById('config-include-compilations').checked = config.include_compilations || false;
+        document.getElementById('config-include-instrumentals').checked = config.include_instrumentals || false;
 
         // Show global override notice if active
         const existingNotice = document.querySelector('.global-override-notice');
@@ -32561,6 +32562,8 @@ async function openWatchlistGlobalSettingsModal() {
         document.getElementById('global-include-remixes').checked = config.include_remixes;
         document.getElementById('global-include-acoustic').checked = config.include_acoustic;
         document.getElementById('global-include-compilations').checked = config.include_compilations;
+        document.getElementById('global-include-instrumentals').checked = config.include_instrumentals;
+        document.getElementById('global-exclude-terms').value = config.exclude_terms || '';
 
         // Sync "Include Everything" checkbox
         syncGlobalIncludeAllCheckbox();
@@ -32621,7 +32624,7 @@ function toggleGlobalIncludeAll() {
     const checked = document.getElementById('global-include-all').checked;
     ['global-include-albums', 'global-include-eps', 'global-include-singles',
      'global-include-live', 'global-include-remixes', 'global-include-acoustic',
-     'global-include-compilations'].forEach(id => {
+     'global-include-compilations', 'global-include-instrumentals'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.checked = checked;
     });
@@ -32633,7 +32636,7 @@ function toggleGlobalIncludeAll() {
 function syncGlobalIncludeAllCheckbox() {
     const allIds = ['global-include-albums', 'global-include-eps', 'global-include-singles',
         'global-include-live', 'global-include-remixes', 'global-include-acoustic',
-        'global-include-compilations'];
+        'global-include-compilations', 'global-include-instrumentals'];
     const allChecked = allIds.every(id => {
         const el = document.getElementById(id);
         return el && el.checked;
@@ -32655,6 +32658,8 @@ async function saveWatchlistGlobalConfig() {
         const includeRemixes = document.getElementById('global-include-remixes').checked;
         const includeAcoustic = document.getElementById('global-include-acoustic').checked;
         const includeCompilations = document.getElementById('global-include-compilations').checked;
+        const includeInstrumentals = document.getElementById('global-include-instrumentals').checked;
+        const excludeTerms = (document.getElementById('global-exclude-terms').value || '').trim();
 
         if (globalOverrideEnabled && !includeAlbums && !includeEps && !includeSingles) {
             showToast('Please select at least one release type', 'error');
@@ -32679,6 +32684,8 @@ async function saveWatchlistGlobalConfig() {
                 include_remixes: includeRemixes,
                 include_acoustic: includeAcoustic,
                 include_compilations: includeCompilations,
+                include_instrumentals: includeInstrumentals,
+                exclude_terms: excludeTerms,
             })
         });
 
@@ -32722,6 +32729,7 @@ async function saveWatchlistArtistConfig(artistId) {
         const includeRemixes = document.getElementById('config-include-remixes').checked;
         const includeAcoustic = document.getElementById('config-include-acoustic').checked;
         const includeCompilations = document.getElementById('config-include-compilations').checked;
+        const includeInstrumentals = document.getElementById('config-include-instrumentals').checked;
 
         // Validate at least one release type is selected
         if (!includeAlbums && !includeEps && !includeSingles) {
@@ -32747,7 +32755,8 @@ async function saveWatchlistArtistConfig(artistId) {
                 include_live: includeLive,
                 include_remixes: includeRemixes,
                 include_acoustic: includeAcoustic,
-                include_compilations: includeCompilations
+                include_compilations: includeCompilations,
+                include_instrumentals: includeInstrumentals,
             })
         });
 

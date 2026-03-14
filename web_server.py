@@ -29012,7 +29012,7 @@ def watchlist_artist_config(artist_id):
                 SELECT include_albums, include_eps, include_singles,
                        include_live, include_remixes, include_acoustic, include_compilations,
                        artist_name, image_url, spotify_artist_id, itunes_artist_id,
-                       last_scan_timestamp, date_added
+                       last_scan_timestamp, date_added, include_instrumentals
                 FROM watchlist_artists
                 WHERE spotify_artist_id = ? OR itunes_artist_id = ?
             """, (artist_id, artist_id))
@@ -29110,6 +29110,7 @@ def watchlist_artist_config(artist_id):
                 'include_remixes': bool(result[4]),
                 'include_acoustic': bool(result[5]),
                 'include_compilations': bool(result[6]),
+                'include_instrumentals': bool(result[13]) if result[13] is not None else False,
                 'last_scan_timestamp': result[11],
                 'date_added': result[12],
             }
@@ -29136,6 +29137,7 @@ def watchlist_artist_config(artist_id):
             include_remixes = data.get('include_remixes', False)
             include_acoustic = data.get('include_acoustic', False)
             include_compilations = data.get('include_compilations', False)
+            include_instrumentals = data.get('include_instrumentals', False)
 
             # Validate at least one release type is selected
             if not (include_albums or include_eps or include_singles):
@@ -29148,10 +29150,12 @@ def watchlist_artist_config(artist_id):
                 UPDATE watchlist_artists
                 SET include_albums = ?, include_eps = ?, include_singles = ?,
                     include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
+                    include_instrumentals = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE spotify_artist_id = ? OR itunes_artist_id = ?
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
+                  int(include_instrumentals),
                   artist_id, artist_id))
             conn.commit()
 
@@ -29161,7 +29165,7 @@ def watchlist_artist_config(artist_id):
 
             conn.close()
 
-            print(f"✅ Updated watchlist config for artist {artist_id}: albums={include_albums}, eps={include_eps}, singles={include_singles}, live={include_live}, remixes={include_remixes}, acoustic={include_acoustic}, compilations={include_compilations}")
+            print(f"✅ Updated watchlist config for artist {artist_id}: albums={include_albums}, eps={include_eps}, singles={include_singles}, live={include_live}, remixes={include_remixes}, acoustic={include_acoustic}, compilations={include_compilations}, instrumentals={include_instrumentals}")
 
             return jsonify({
                 "success": True,
@@ -29173,7 +29177,8 @@ def watchlist_artist_config(artist_id):
                     'include_live': include_live,
                     'include_remixes': include_remixes,
                     'include_acoustic': include_acoustic,
-                    'include_compilations': include_compilations
+                    'include_compilations': include_compilations,
+                    'include_instrumentals': include_instrumentals,
                 }
             })
 
@@ -29265,6 +29270,8 @@ def watchlist_global_config():
                 'include_remixes': config_manager.get('watchlist.global_include_remixes', False),
                 'include_acoustic': config_manager.get('watchlist.global_include_acoustic', False),
                 'include_compilations': config_manager.get('watchlist.global_include_compilations', False),
+                'include_instrumentals': config_manager.get('watchlist.global_include_instrumentals', False),
+                'exclude_terms': config_manager.get('watchlist.exclude_terms', ''),
             }
             return jsonify({"success": True, "config": config})
 
@@ -29281,6 +29288,8 @@ def watchlist_global_config():
             include_remixes = data.get('include_remixes', False)
             include_acoustic = data.get('include_acoustic', False)
             include_compilations = data.get('include_compilations', False)
+            include_instrumentals = data.get('include_instrumentals', False)
+            exclude_terms = data.get('exclude_terms', '')
 
             # When override is enabled, validate at least one release type
             if global_override_enabled and not (include_albums or include_eps or include_singles):
@@ -29294,11 +29303,14 @@ def watchlist_global_config():
             config_manager.set('watchlist.global_include_remixes', include_remixes)
             config_manager.set('watchlist.global_include_acoustic', include_acoustic)
             config_manager.set('watchlist.global_include_compilations', include_compilations)
+            config_manager.set('watchlist.global_include_instrumentals', include_instrumentals)
+            config_manager.set('watchlist.exclude_terms', exclude_terms)
 
             print(f"✅ Updated global watchlist config: override={global_override_enabled}, "
                   f"albums={include_albums}, eps={include_eps}, singles={include_singles}, "
                   f"live={include_live}, remixes={include_remixes}, acoustic={include_acoustic}, "
-                  f"compilations={include_compilations}")
+                  f"compilations={include_compilations}, instrumentals={include_instrumentals}, "
+                  f"exclude_terms='{exclude_terms}'")
 
             return jsonify({
                 "success": True,
@@ -29312,6 +29324,8 @@ def watchlist_global_config():
                     'include_remixes': include_remixes,
                     'include_acoustic': include_acoustic,
                     'include_compilations': include_compilations,
+                    'include_instrumentals': include_instrumentals,
+                    'exclude_terms': exclude_terms,
                 }
             })
 
@@ -29333,9 +29347,11 @@ def _apply_watchlist_global_overrides(watchlist_artists):
     g_remixes = config_manager.get('watchlist.global_include_remixes', False)
     g_acoustic = config_manager.get('watchlist.global_include_acoustic', False)
     g_compilations = config_manager.get('watchlist.global_include_compilations', False)
+    g_instrumentals = config_manager.get('watchlist.global_include_instrumentals', False)
     print(f"🌐 [Watchlist] Global override is ACTIVE — applying to {len(watchlist_artists)} artists "
           f"(albums={g_albums}, eps={g_eps}, singles={g_singles}, live={g_live}, "
-          f"remixes={g_remixes}, acoustic={g_acoustic}, compilations={g_compilations})")
+          f"remixes={g_remixes}, acoustic={g_acoustic}, compilations={g_compilations}, "
+          f"instrumentals={g_instrumentals})")
     for artist in watchlist_artists:
         artist.include_albums = g_albums
         artist.include_eps = g_eps
@@ -29344,6 +29360,7 @@ def _apply_watchlist_global_overrides(watchlist_artists):
         artist.include_remixes = g_remixes
         artist.include_acoustic = g_acoustic
         artist.include_compilations = g_compilations
+        artist.include_instrumentals = g_instrumentals
 
 def _update_similar_artists_worker():
     """Background worker to update similar artists for all watchlist artists"""

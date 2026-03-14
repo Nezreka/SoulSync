@@ -5073,6 +5073,18 @@
                                     </div>
                                 </div>
                             </label>
+
+                            <label class="config-option">
+                                <input type="checkbox" id="config-include-instrumentals">
+                                <div class="config-option-content">
+                                    <div class="config-option-icon">🎹</div>
+                                    <div class="config-option-text">
+                                        <span class="config-option-title">Include Instrumentals</span>
+                                        <span class="config-option-description">Check to include instrumental, karaoke,
+                                            and backing track versions</span>
+                                    </div>
+                                </div>
+                            </label>
                         </div>
                     </div>
 
@@ -5227,6 +5239,17 @@
                                         </div>
                                     </div>
                                 </label>
+
+                                <label class="config-option">
+                                    <input type="checkbox" id="global-include-instrumentals">
+                                    <div class="config-option-content">
+                                        <div class="config-option-icon">🎹</div>
+                                        <div class="config-option-text">
+                                            <span class="config-option-title">Include Instrumentals</span>
+                                            <span class="config-option-description">Instrumental, karaoke, and backing track versions</span>
+                                        </div>
+                                    </div>
+                                </label>
                             </div>
                         </div>
 
@@ -5239,10 +5262,21 @@
                                     <div class="config-option-text">
                                         <span class="config-option-title">Include Everything</span>
                                         <span class="config-option-description">Enable all release types AND content filters
-                                            (live, remixes, acoustic, compilations)</span>
+                                            (live, remixes, acoustic, compilations, instrumentals)</span>
                                     </div>
                                 </div>
                             </label>
+                        </div>
+                    </div>
+
+                    <!-- Custom Exclusion Terms (always visible, independent of global override) -->
+                    <div class="config-section">
+                        <h3 class="config-section-title">Custom Exclusion Terms</h3>
+                        <p class="config-section-subtitle">Comma-separated terms — tracks or albums matching any term will be skipped during scans</p>
+                        <div class="config-exclude-terms-container">
+                            <input type="text" id="global-exclude-terms" class="config-exclude-terms-input"
+                                placeholder="e.g. commentary, interlude, skit, demo, a cappella">
+                            <p class="config-exclude-terms-hint">Applied globally to all watchlist scans regardless of override setting. Case-insensitive substring matching.</p>
                         </div>
                     </div>
                 </div>
