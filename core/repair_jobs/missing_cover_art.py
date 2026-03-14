@@ -1,4 +1,4 @@
-"""Missing Cover Art Filler Job — finds albums without artwork and fills from APIs."""
+"""Missing Cover Art Filler Job — finds albums without artwork and locates art from APIs."""
 
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
@@ -11,15 +11,14 @@ logger = get_logger("repair_job.cover_art")
 class MissingCoverArtJob(RepairJob):
     job_id = 'missing_cover_art'
     display_name = 'Cover Art Filler'
-    description = 'Finds albums missing artwork and fills from Spotify/iTunes'
+    description = 'Finds albums missing artwork and locates art from Spotify/iTunes'
     icon = 'repair-icon-coverart'
     default_enabled = True
     default_interval_hours = 48
     default_settings = {
         'prefer_source': 'spotify',
-        'embed_in_file': False,
     }
-    auto_fix = True
+    auto_fix = False
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -34,10 +33,11 @@ class MissingCoverArtJob(RepairJob):
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, title, artist, spotify_id, artwork_url
-                FROM albums
-                WHERE (artwork_url IS NULL OR artwork_url = '')
-                  AND title IS NOT NULL AND title != ''
+                SELECT al.id, al.title, ar.name, al.spotify_album_id, al.thumb_url
+                FROM albums al
+                LEFT JOIN artists ar ON ar.id = al.artist_id
+                WHERE (al.thumb_url IS NULL OR al.thumb_url = '')
+                  AND al.title IS NOT NULL AND al.title != ''
             """)
             albums = cursor.fetchall()
         except Exception as e:
@@ -60,37 +60,46 @@ class MissingCoverArtJob(RepairJob):
             if i % 10 == 0 and context.wait_if_paused():
                 return result
 
-            album_id, title, artist, spotify_id, _ = row
+            album_id, title, artist_name, spotify_album_id, _ = row
             result.scanned += 1
 
             artwork_url = None
 
-            # Try Spotify first (or iTunes first based on preference)
+            # Try to find artwork URL from APIs
             if prefer_source == 'spotify':
-                artwork_url = self._try_spotify(spotify_id, title, artist, context)
+                artwork_url = self._try_spotify(spotify_album_id, title, artist_name, context)
                 if not artwork_url:
-                    artwork_url = self._try_itunes(title, artist, context)
+                    artwork_url = self._try_itunes(title, artist_name, context)
             else:
-                artwork_url = self._try_itunes(title, artist, context)
+                artwork_url = self._try_itunes(title, artist_name, context)
                 if not artwork_url:
-                    artwork_url = self._try_spotify(spotify_id, title, artist, context)
+                    artwork_url = self._try_spotify(spotify_album_id, title, artist_name, context)
 
             if artwork_url:
-                # Update DB
-                try:
-                    conn2 = context.db._get_connection()
-                    cursor2 = conn2.cursor()
-                    cursor2.execute(
-                        "UPDATE albums SET artwork_url = ? WHERE id = ?",
-                        (artwork_url, album_id)
-                    )
-                    conn2.commit()
-                    conn2.close()
-                    result.auto_fixed += 1
-                    logger.debug("Filled artwork for album '%s': %s", title, artwork_url[:80])
-                except Exception as e:
-                    logger.debug("Error updating artwork for album %s: %s", album_id, e)
-                    result.errors += 1
+                # Create finding for user to approve
+                if context.create_finding:
+                    try:
+                        context.create_finding(
+                            job_id=self.job_id,
+                            finding_type='missing_cover_art',
+                            severity='info',
+                            entity_type='album',
+                            entity_id=str(album_id),
+                            file_path=None,
+                            title=f'Missing artwork: {title or "Unknown"}',
+                            description=f'Album "{title}" by {artist_name or "Unknown"} has no cover art. Found artwork from API.',
+                            details={
+                                'album_id': album_id,
+                                'album_title': title,
+                                'artist': artist_name,
+                                'found_artwork_url': artwork_url,
+                                'spotify_album_id': spotify_album_id,
+                            }
+                        )
+                        result.findings_created += 1
+                    except Exception as e:
+                        logger.debug("Error creating cover art finding for album %s: %s", album_id, e)
+                        result.errors += 1
             else:
                 result.skipped += 1
 
@@ -100,11 +109,11 @@ class MissingCoverArtJob(RepairJob):
         if context.update_progress:
             context.update_progress(total, total)
 
-        logger.info("Cover art fill: %d albums checked, %d filled, %d skipped",
-                     result.scanned, result.auto_fixed, result.skipped)
+        logger.info("Cover art scan: %d albums checked, %d found art, %d skipped",
+                     result.scanned, result.findings_created, result.skipped)
         return result
 
-    def _try_spotify(self, spotify_id, title, artist, context):
+    def _try_spotify(self, spotify_album_id, title, artist_name, context):
         """Try to get album art from Spotify."""
         client = context.spotify_client
         if not client:
@@ -112,8 +121,8 @@ class MissingCoverArtJob(RepairJob):
 
         try:
             # If we have a Spotify album ID, fetch directly
-            if spotify_id and client.is_spotify_authenticated():
-                album_data = client.get_album(spotify_id)
+            if spotify_album_id and client.is_spotify_authenticated():
+                album_data = client.get_album(spotify_album_id)
                 if album_data:
                     images = album_data.get('images', [])
                     if images:
@@ -121,7 +130,7 @@ class MissingCoverArtJob(RepairJob):
 
             # Search by name
             if title and client.is_spotify_authenticated():
-                query = f"{artist} {title}" if artist else title
+                query = f"{artist_name} {title}" if artist_name else title
                 results = client.search_albums(query, limit=1)
                 if results and hasattr(results[0], 'image_url') and results[0].image_url:
                     return results[0].image_url
@@ -129,14 +138,14 @@ class MissingCoverArtJob(RepairJob):
             logger.debug("Spotify art lookup failed for '%s': %s", title, e)
         return None
 
-    def _try_itunes(self, title, artist, context):
+    def _try_itunes(self, title, artist_name, context):
         """Try to get album art from iTunes."""
         client = context.itunes_client
         if not client:
             return None
 
         try:
-            query = f"{artist} {title}" if artist else title
+            query = f"{artist_name} {title}" if artist_name else title
             results = client.search_albums(query, limit=1)
             if results and hasattr(results[0], 'image_url') and results[0].image_url:
                 return results[0].image_url
@@ -159,7 +168,7 @@ class MissingCoverArtJob(RepairJob):
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT COUNT(*) FROM albums
-                WHERE (artwork_url IS NULL OR artwork_url = '')
+                WHERE (thumb_url IS NULL OR thumb_url = '')
                   AND title IS NOT NULL AND title != ''
             """)
             row = cursor.fetchone()

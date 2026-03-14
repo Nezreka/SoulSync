@@ -26,20 +26,21 @@ class AlbumCompletenessJob(RepairJob):
         settings = self._get_settings(context)
         min_tracks = settings.get('min_tracks_for_check', 3)
 
-        # Fetch albums with spotify_id that have enough tracks to check
+        # Fetch albums with spotify_album_id that have enough tracks to check
         albums = []
         conn = None
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT a.id, a.title, a.artist, a.spotify_id, a.total_tracks,
-                       COUNT(t.id) as track_count
-                FROM albums a
-                LEFT JOIN tracks t ON t.album_id = a.id
-                WHERE a.spotify_id IS NOT NULL AND a.spotify_id != ''
-                GROUP BY a.id
-                HAVING track_count >= ?
+                SELECT al.id, al.title, ar.name, al.spotify_album_id, al.track_count,
+                       COUNT(t.id) as actual_count
+                FROM albums al
+                LEFT JOIN artists ar ON ar.id = al.artist_id
+                LEFT JOIN tracks t ON t.album_id = al.id
+                WHERE al.spotify_album_id IS NOT NULL AND al.spotify_album_id != ''
+                GROUP BY al.id
+                HAVING actual_count >= ?
             """, (min_tracks,))
             albums = cursor.fetchall()
         except Exception as e:
@@ -62,31 +63,31 @@ class AlbumCompletenessJob(RepairJob):
             if i % 10 == 0 and context.wait_if_paused():
                 return result
 
-            album_id, title, artist, spotify_id, total_tracks, track_count = row
+            album_id, title, artist_name, spotify_album_id, db_track_count, actual_count = row
             result.scanned += 1
 
-            # If we don't know total_tracks, try to get it from API
-            expected_total = total_tracks
-            missing_tracks = []
+            # If we don't know the expected track count, try to get it from API
+            expected_total = db_track_count
 
             if not expected_total and context.spotify_client:
                 try:
-                    album_data = context.spotify_client.get_album(spotify_id)
+                    album_data = context.spotify_client.get_album(spotify_album_id)
                     if album_data:
                         expected_total = album_data.get('total_tracks', 0)
                 except Exception:
                     pass
 
-            if not expected_total or track_count >= expected_total:
+            if not expected_total or actual_count >= expected_total:
                 result.skipped += 1
                 if context.update_progress and (i + 1) % 5 == 0:
                     context.update_progress(i + 1, total)
                 continue
 
             # Album is incomplete — try to find which tracks are missing
+            missing_tracks = []
             if context.spotify_client:
                 try:
-                    api_tracks = context.spotify_client.get_album_tracks(spotify_id)
+                    api_tracks = context.spotify_client.get_album_tracks(spotify_album_id)
                     if api_tracks and 'items' in api_tracks:
                         # Get track numbers we already have
                         owned_numbers = set()
@@ -109,7 +110,7 @@ class AlbumCompletenessJob(RepairJob):
                                     'disc_number': item.get('disc_number', 1),
                                 })
                 except Exception as e:
-                    logger.debug("Error getting album tracks for %s: %s", spotify_id, e)
+                    logger.debug("Error getting album tracks for %s: %s", spotify_album_id, e)
 
             if context.create_finding:
                 try:
@@ -120,18 +121,18 @@ class AlbumCompletenessJob(RepairJob):
                         entity_type='album',
                         entity_id=str(album_id),
                         file_path=None,
-                        title=f'Incomplete: {title or "Unknown"} ({track_count}/{expected_total})',
+                        title=f'Incomplete: {title or "Unknown"} ({actual_count}/{expected_total})',
                         description=(
-                            f'Album "{title}" by {artist or "Unknown"} has {track_count} of '
+                            f'Album "{title}" by {artist_name or "Unknown"} has {actual_count} of '
                             f'{expected_total} tracks'
                         ),
                         details={
                             'album_id': album_id,
                             'album_title': title,
-                            'artist': artist,
-                            'spotify_id': spotify_id,
+                            'artist': artist_name,
+                            'spotify_album_id': spotify_album_id,
                             'expected_tracks': expected_total,
-                            'actual_tracks': track_count,
+                            'actual_tracks': actual_count,
                             'missing_tracks': missing_tracks,
                         }
                     )
@@ -165,7 +166,7 @@ class AlbumCompletenessJob(RepairJob):
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT COUNT(*) FROM albums
-                WHERE spotify_id IS NOT NULL AND spotify_id != ''
+                WHERE spotify_album_id IS NOT NULL AND spotify_album_id != ''
             """)
             row = cursor.fetchone()
             return row[0] if row else 0
