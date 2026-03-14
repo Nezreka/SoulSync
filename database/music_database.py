@@ -429,6 +429,32 @@ class MusicDatabase:
             self._add_automation_system_column(cursor)
             self._add_automation_then_actions_column(cursor)
 
+            # Library issues — user-reported problems with tracks/albums/artists
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS library_issues (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    entity_type TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    snapshot_data TEXT DEFAULT '{}',
+                    status TEXT NOT NULL DEFAULT 'open',
+                    priority TEXT NOT NULL DEFAULT 'normal',
+                    admin_response TEXT,
+                    resolved_by INTEGER,
+                    resolved_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (profile_id) REFERENCES profiles (id) ON DELETE CASCADE
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_library_issues_profile ON library_issues (profile_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_library_issues_status ON library_issues (status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_library_issues_entity ON library_issues (entity_type, entity_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_library_issues_created ON library_issues (created_at)")
+
             conn.commit()
             logger.info("Database initialized successfully")
             
@@ -7831,6 +7857,174 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting radio tracks for track {track_id}: {e}")
             return {'success': False, 'error': str(e)}
+
+    # ── Library Issues CRUD ──
+
+    def create_issue(self, profile_id: int, entity_type: str, entity_id: str,
+                     category: str, title: str, description: str = '',
+                     snapshot_data: Dict = None, priority: str = 'normal') -> Dict[str, Any]:
+        """Create a new library issue report."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO library_issues
+                    (profile_id, entity_type, entity_id, category, title, description,
+                     snapshot_data, priority)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (profile_id, entity_type, entity_id, category, title, description,
+                      json.dumps(snapshot_data or {}), priority))
+                conn.commit()
+                return {'success': True, 'id': cursor.lastrowid}
+        except Exception as e:
+            logger.error(f"Error creating issue: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def get_issues(self, profile_id: int = None, status: str = None,
+                   category: str = None, entity_type: str = None,
+                   limit: int = 100, offset: int = 0,
+                   is_admin: bool = False) -> Dict[str, Any]:
+        """Get issues with optional filters. Non-admin only sees own issues."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                conditions = []
+                params = []
+
+                if not is_admin and profile_id:
+                    conditions.append("i.profile_id = ?")
+                    params.append(profile_id)
+                if status:
+                    conditions.append("i.status = ?")
+                    params.append(status)
+                if category:
+                    conditions.append("i.category = ?")
+                    params.append(category)
+                if entity_type:
+                    conditions.append("i.entity_type = ?")
+                    params.append(entity_type)
+
+                where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+                # Count total
+                cursor.execute(f"SELECT COUNT(*) FROM library_issues i {where}", params)
+                total = cursor.fetchone()[0]
+
+                # Fetch issues with reporter profile info
+                cursor.execute(f"""
+                    SELECT i.*, p.name as reporter_name, p.avatar_color as reporter_color,
+                           p.avatar_url as reporter_avatar
+                    FROM library_issues i
+                    LEFT JOIN profiles p ON i.profile_id = p.id
+                    {where}
+                    ORDER BY
+                        CASE i.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
+                        CASE i.priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
+                        i.created_at DESC
+                    LIMIT ? OFFSET ?
+                """, params + [limit, offset])
+
+                issues = []
+                for row in cursor.fetchall():
+                    issue = dict(row)
+                    try:
+                        issue['snapshot_data'] = json.loads(issue.get('snapshot_data', '{}'))
+                    except (json.JSONDecodeError, TypeError):
+                        issue['snapshot_data'] = {}
+                    issues.append(issue)
+
+                return {'success': True, 'issues': issues, 'total': total}
+        except Exception as e:
+            logger.error(f"Error getting issues: {e}")
+            return {'success': False, 'error': str(e), 'issues': [], 'total': 0}
+
+    def get_issue(self, issue_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single issue by ID with reporter info."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT i.*, p.name as reporter_name, p.avatar_color as reporter_color,
+                           p.avatar_url as reporter_avatar
+                    FROM library_issues i
+                    LEFT JOIN profiles p ON i.profile_id = p.id
+                    WHERE i.id = ?
+                """, (issue_id,))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                issue = dict(row)
+                try:
+                    issue['snapshot_data'] = json.loads(issue.get('snapshot_data', '{}'))
+                except (json.JSONDecodeError, TypeError):
+                    issue['snapshot_data'] = {}
+                return issue
+        except Exception as e:
+            logger.error(f"Error getting issue {issue_id}: {e}")
+            return None
+
+    def update_issue(self, issue_id: int, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Update an issue (admin response, status change, etc.)."""
+        allowed_fields = {'status', 'priority', 'admin_response', 'resolved_by', 'resolved_at',
+                          'title', 'description', 'category'}
+        valid = {k: v for k, v in updates.items() if k in allowed_fields}
+        if not valid:
+            return {'success': False, 'error': 'No valid fields to update'}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                set_clause = ', '.join(f'{k} = ?' for k in valid)
+                values = list(valid.values()) + [issue_id]
+                cursor.execute(
+                    f"UPDATE library_issues SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    values
+                )
+                conn.commit()
+                if cursor.rowcount == 0:
+                    return {'success': False, 'error': 'Issue not found'}
+                return {'success': True}
+        except Exception as e:
+            logger.error(f"Error updating issue {issue_id}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def delete_issue(self, issue_id: int) -> Dict[str, Any]:
+        """Delete an issue (admin only)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM library_issues WHERE id = ?", (issue_id,))
+                conn.commit()
+                if cursor.rowcount == 0:
+                    return {'success': False, 'error': 'Issue not found'}
+                return {'success': True}
+        except Exception as e:
+            logger.error(f"Error deleting issue {issue_id}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def get_issue_counts(self, is_admin: bool = False, profile_id: int = None) -> Dict[str, int]:
+        """Get issue counts by status for badge display."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                profile_filter = ""
+                params = []
+                if not is_admin and profile_id:
+                    profile_filter = "WHERE profile_id = ?"
+                    params = [profile_id]
+                cursor.execute(f"""
+                    SELECT status, COUNT(*) as count
+                    FROM library_issues
+                    {profile_filter}
+                    GROUP BY status
+                """, params)
+                counts = {'open': 0, 'in_progress': 0, 'resolved': 0, 'dismissed': 0, 'total': 0}
+                for row in cursor.fetchall():
+                    counts[row['status']] = row['count']
+                    counts['total'] += row['count']
+                return counts
+        except Exception as e:
+            logger.error(f"Error getting issue counts: {e}")
+            return {'open': 0, 'in_progress': 0, 'resolved': 0, 'dismissed': 0, 'total': 0}
 
 # Thread-safe singleton pattern for database access
 _database_instances: Dict[int, MusicDatabase] = {}  # Thread ID -> Database instance
