@@ -1075,9 +1075,14 @@ class SpotifyClient:
         cached = cache.get_entity(source, 'track', track_id)
         if cached:
             if source == 'spotify':
-                return self._build_enhanced_track(cached)
-            # iTunes cache hit — delegate to iTunesClient which reconstructs enhanced format
-            return self._itunes.get_track_details(track_id)
+                # Validate cache has full track data (not simplified from get_album_tracks)
+                if 'album' in cached:
+                    return self._build_enhanced_track(cached)
+                # Simplified track cached by get_album_tracks — treat as cache miss
+                logger.debug(f"Cache hit for track {track_id} lacks album data, fetching full data")
+            else:
+                # iTunes cache hit — delegate to iTunesClient which reconstructs enhanced format
+                return self._itunes.get_track_details(track_id)
 
         if self.is_spotify_authenticated():
             try:
@@ -1159,9 +1164,14 @@ class SpotifyClient:
         cached = cache.get_entity(source, 'album', album_id)
         if cached:
             if source == 'spotify':
-                return cached  # Spotify raw format is the expected format
-            # iTunes cache hit — delegate to iTunesClient which reconstructs Spotify-compatible format
-            return self._itunes.get_album(album_id)
+                # Validate cache has full album data (not simplified from artist_albums)
+                if 'tracks' in cached:
+                    return cached
+                # Simplified album cached by get_artist_albums — treat as cache miss
+                logger.debug(f"Cache hit for album {album_id} lacks tracks, fetching full data")
+            else:
+                # iTunes cache hit — delegate to iTunesClient which reconstructs Spotify-compatible format
+                return self._itunes.get_album(album_id)
 
         if self.is_spotify_authenticated():
             try:

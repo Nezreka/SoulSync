@@ -518,7 +518,7 @@ class AutomationEngine:
 
     # --- Schedule Execution (timer-based) ---
 
-    def run_automation(self, automation_id, skip_delay=False):
+    def run_automation(self, automation_id, skip_delay=False, profile_id=None):
         """Execute: check guard → run action → send notification → update stats → reschedule."""
         if not self._running:
             return
@@ -553,6 +553,8 @@ class AutomationEngine:
         # Inject automation identity for progress tracking
         action_config['_automation_id'] = automation_id
         action_config['_automation_name'] = auto.get('name', '')
+        if profile_id is not None:
+            action_config['_profile_id'] = profile_id
 
         # Action delay (skipped for manual run_now)
         delay_minutes = action_config.get('delay', 0)
@@ -657,16 +659,21 @@ class AutomationEngine:
         if self._running:
             self.schedule_automation(automation_id)
 
-    def run_now(self, automation_id):
+    def run_now(self, automation_id, profile_id=None):
         """Manual trigger — run immediately in a background thread.
-        Always uses run_automation (skips condition checks and action delay)."""
+        Always uses run_automation (skips condition checks and action delay).
+
+        Args:
+            automation_id: ID of automation to run
+            profile_id: If provided, scopes the run to this profile (manual trigger from UI)
+        """
         auto = self.db.get_automation(automation_id)
         if not auto:
             return False
 
         thread = threading.Thread(
             target=self.run_automation,
-            args=(automation_id, True),
+            args=(automation_id, True, profile_id),
             daemon=True,
             name=f'automation-run-{automation_id}'
         )

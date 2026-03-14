@@ -366,7 +366,10 @@ def _register_automation_handlers():
     def _auto_scan_watchlist(config):
         try:
             pre_state_id = id(watchlist_scan_state)
-            _process_watchlist_scan_automatically(automation_id=config.get('_automation_id'))
+            _process_watchlist_scan_automatically(
+                automation_id=config.get('_automation_id'),
+                profile_id=config.get('_profile_id')
+            )
             # Only report stats if a fresh scan actually ran (state dict was reassigned)
             if id(watchlist_scan_state) != pre_state_id:
                 summary = watchlist_scan_state.get('summary', {})
@@ -4752,7 +4755,7 @@ def run_automation_endpoint(automation_id):
     try:
         if not automation_engine:
             return jsonify({"error": "Automation engine not available"}), 500
-        success = automation_engine.run_now(automation_id)
+        success = automation_engine.run_now(automation_id, profile_id=get_current_profile_id())
         if not success:
             return jsonify({"error": "Automation not found"}), 404
         return jsonify({"success": True})
@@ -28788,6 +28791,7 @@ def start_watchlist_scan():
                                 # Get album tracks using provider-aware method
                                 album_data = scanner.metadata_service.get_album(album.id)
                                 if not album_data or 'tracks' not in album_data:
+                                    logger.debug(f"Skipping album {album.name} (id={album.id}): no track data returned")
                                     continue
 
                                 tracks = album_data['tracks']['items']
@@ -29565,11 +29569,18 @@ watchlist_scan_state = {
     'error': None
 }
 
-def _process_watchlist_scan_automatically(automation_id=None):
-    """Main automatic scanning logic that runs in background thread."""
+def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
+    """Main automatic scanning logic that runs in background thread.
+
+    Args:
+        automation_id: ID of the automation triggering this scan
+        profile_id: If provided, only scan this profile's watchlist (manual trigger).
+                    If None, scan all profiles (scheduled automation).
+    """
     global watchlist_auto_scanning, watchlist_auto_scanning_timestamp, watchlist_scan_state
 
-    print("🤖 [Auto-Watchlist] Timer triggered - starting automatic watchlist scan...")
+    scope_label = f"profile {profile_id}" if profile_id else "all profiles"
+    print(f"🤖 [Auto-Watchlist] Timer triggered - starting automatic watchlist scan ({scope_label})...")
 
     _ew_state = {}
 
@@ -29597,12 +29608,19 @@ def _process_watchlist_scan_automatically(automation_id=None):
             from core.watchlist_scanner import get_watchlist_scanner
             from database.music_database import get_database
 
-            # Check if we have artists to scan across all profiles
             database = get_database()
-            # Auto-scan covers all profiles
-            all_profiles = database.get_all_profiles()
-            watchlist_count = sum(database.get_watchlist_count(profile_id=p['id']) for p in all_profiles)
-            print(f"🔍 [Auto-Watchlist] Watchlist count check: {watchlist_count} artists found across {len(all_profiles)} profiles")
+
+            # Determine which profiles to scan
+            if profile_id:
+                # Manual trigger — scan only the triggering profile
+                scan_profiles = [{'id': profile_id}]
+            else:
+                # Scheduled automation — scan all profiles
+                scan_profiles = database.get_all_profiles()
+
+            watchlist_count = sum(database.get_watchlist_count(profile_id=p['id']) for p in scan_profiles)
+            profile_label = f"profile {profile_id}" if profile_id else f"{len(scan_profiles)} profiles"
+            print(f"🔍 [Auto-Watchlist] Watchlist count check: {watchlist_count} artists found ({profile_label})")
 
             if watchlist_count == 0:
                 print("ℹ️ [Auto-Watchlist] No artists in watchlist for auto-scanning.")
@@ -29620,13 +29638,14 @@ def _process_watchlist_scan_automatically(automation_id=None):
 
             print(f"👁️ [Auto-Watchlist] Found {watchlist_count} artists in watchlist, starting automatic scan...")
             _update_automation_progress(automation_id, progress=5, phase='Loading watchlist',
-                                         log_line=f'{watchlist_count} artists across {len(all_profiles)} profiles', log_type='info')
+                                         log_line=f'{watchlist_count} artists ({profile_label})', log_type='info')
 
-            # Get list of artists to scan (all profiles combined for auto-scan)
+            # Get list of artists to scan
             watchlist_artists = []
-            for p in all_profiles:
+            for p in scan_profiles:
                 watchlist_artists.extend(database.get_watchlist_artists(profile_id=p['id']))
             scanner = get_watchlist_scanner(spotify_client)
+            all_profiles = scan_profiles  # Used later for discovery pool population
 
             # Apply global overrides if enabled
             _apply_watchlist_global_overrides(watchlist_artists)
@@ -29745,6 +29764,7 @@ def _process_watchlist_scan_automatically(automation_id=None):
                             # Get album tracks using provider-aware method
                             album_data = scanner.metadata_service.get_album(album.id)
                             if not album_data or 'tracks' not in album_data:
+                                logger.debug(f"Skipping album {album.name} (id={album.id}): no track data returned")
                                 continue
 
                             tracks = album_data['tracks']['items']
@@ -29839,6 +29859,23 @@ def _process_watchlist_scan_automatically(automation_id=None):
                                 })
                         except Exception:
                             pass
+
+                    # Fetch similar artists for discovery feature (per-profile)
+                    try:
+                        watchlist_scan_state['current_phase'] = 'fetching_similar_artists'
+                        source_artist_id = artist.spotify_artist_id or artist.itunes_artist_id or str(artist.id)
+                        artist_profile_id = getattr(artist, 'profile_id', 1)
+
+                        spotify_authenticated = spotify_client and spotify_client.is_spotify_authenticated()
+                        if database.has_fresh_similar_artists(source_artist_id, days_threshold=30, require_spotify=spotify_authenticated, profile_id=artist_profile_id):
+                            print(f"  Similar artists for {artist.artist_name} are cached and fresh (profile {artist_profile_id})")
+                            scanner._backfill_similar_artists_itunes_ids(source_artist_id, profile_id=artist_profile_id)
+                        else:
+                            print(f"  Fetching similar artists for {artist.artist_name} (profile {artist_profile_id})...")
+                            scanner.update_similar_artists(artist, profile_id=artist_profile_id)
+                            print(f"  Similar artists updated for {artist.artist_name}")
+                    except Exception as similar_error:
+                        print(f"  ⚠️ Failed to update similar artists for {artist.artist_name}: {similar_error}")
 
                     # Delay between artists
                     if i < len(watchlist_artists) - 1:
