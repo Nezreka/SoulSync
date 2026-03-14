@@ -2247,15 +2247,31 @@ function initializeDocsPage() {
         suppressScrollSpy._timer = setTimeout(() => { _scrollSpySuppressed = false; }, 800);
     }
 
-    // Helper: get element offset relative to a scrollable ancestor
-    function getOffsetRelativeTo(el, ancestor) {
-        let offset = 0;
-        let current = el;
-        while (current && current !== ancestor) {
-            offset += current.offsetTop;
-            current = current.offsetParent;
+    // Scroll a target element into view within the docs-content container.
+    // Uses manual offsetTop calculation instead of scrollIntoView to avoid
+    // misalignment caused by lazy-loaded images that haven't reserved height yet.
+    // Does an initial scroll, then a correction after images near the target load.
+    function scrollDocTarget(target) {
+        if (!target || !docsContent) return;
+        suppressScrollSpy();
+
+        function calcOffset(el) {
+            let offset = 0;
+            let current = el;
+            while (current && current !== docsContent) {
+                offset += current.offsetTop;
+                current = current.offsetParent;
+            }
+            return offset;
         }
-        return offset;
+
+        // Initial scroll
+        docsContent.scrollTop = calcOffset(target);
+
+        // Correction pass after lazy images near the target have had time to load
+        // and shift layout. Two passes cover most reflow scenarios.
+        setTimeout(() => { docsContent.scrollTop = calcOffset(target); }, 150);
+        setTimeout(() => { docsContent.scrollTop = calcOffset(target); }, 500);
     }
 
     // Section title click → expand/collapse children + scroll
@@ -2275,10 +2291,9 @@ function initializeDocsPage() {
                 if (children) children.classList.add('expanded');
             }
 
-            // Scroll to section (suppress scroll spy so it doesn't fight)
-            suppressScrollSpy();
+            // Scroll to section
             const target = document.getElementById('docs-' + sectionId);
-            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            scrollDocTarget(target);
         });
     });
 
@@ -2290,9 +2305,8 @@ function initializeDocsPage() {
             child.classList.add('active');
 
             // Keep parent section expanded
-            suppressScrollSpy();
             const target = document.getElementById(child.dataset.target);
-            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            scrollDocTarget(target);
         });
     });
 
@@ -2386,11 +2400,23 @@ function initializeDocsPage() {
 function navigateToDocsSection(sectionId) {
     // Switch to help page
     if (typeof navigateToPage === 'function') navigateToPage('help');
-    // Wait for docs to initialize
+    // Wait for docs to initialize, then use manual scroll with correction passes
     setTimeout(() => {
         const target = document.getElementById(sectionId);
-        if (target) {
-            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const docsContent = document.getElementById('docs-content');
+        if (target && docsContent) {
+            function calcOffset(el) {
+                let offset = 0;
+                let current = el;
+                while (current && current !== docsContent) {
+                    offset += current.offsetTop;
+                    current = current.offsetParent;
+                }
+                return offset;
+            }
+            docsContent.scrollTop = calcOffset(target);
+            setTimeout(() => { docsContent.scrollTop = calcOffset(target); }, 150);
+            setTimeout(() => { docsContent.scrollTop = calcOffset(target); }, 500);
         }
     }, 300);
 }

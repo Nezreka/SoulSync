@@ -35863,6 +35863,7 @@ tr.tag-diff-same {
 /* Main content */
 .docs-content {
     flex: 1;
+    position: relative;
     overflow-y: auto;
     padding: 40px 48px;
     scroll-behavior: smooth;
@@ -36108,6 +36109,8 @@ tr.tag-diff-same {
 .docs-screenshot {
     width: 100%;
     max-width: 800px;
+    aspect-ratio: 16 / 9;
+    object-fit: contain;
     border-radius: 10px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
