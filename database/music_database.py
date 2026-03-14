@@ -94,6 +94,7 @@ class WatchlistArtist:
     include_remixes: bool = False
     include_acoustic: bool = False
     include_compilations: bool = False
+    include_instrumentals: bool = False
     profile_id: int = 1
 
 @dataclass
@@ -1047,7 +1048,8 @@ class MusicDatabase:
                 'include_live': ('INTEGER', '0'),          # 0 = False (exclude live versions by default)
                 'include_remixes': ('INTEGER', '0'),        # 0 = False (exclude remixes by default)
                 'include_acoustic': ('INTEGER', '0'),       # 0 = False (exclude acoustic by default)
-                'include_compilations': ('INTEGER', '0')    # 0 = False (exclude compilations by default)
+                'include_compilations': ('INTEGER', '0'),   # 0 = False (exclude compilations by default)
+                'include_instrumentals': ('INTEGER', '0')   # 0 = False (exclude instrumentals by default)
             }
 
             for column_name, (column_type, default_value) in columns_to_add.items():
@@ -5069,7 +5071,8 @@ class MusicDatabase:
                 base_columns = ['id', 'spotify_artist_id', 'artist_name', 'date_added',
                                'last_scan_timestamp', 'created_at', 'updated_at']
                 optional_columns = ['image_url', 'itunes_artist_id', 'include_albums', 'include_eps', 'include_singles',
-                                   'include_live', 'include_remixes', 'include_acoustic', 'include_compilations']
+                                   'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
+                                   'include_instrumentals']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
@@ -5101,6 +5104,7 @@ class MusicDatabase:
                     include_remixes = bool(row['include_remixes']) if 'include_remixes' in existing_columns else False
                     include_acoustic = bool(row['include_acoustic']) if 'include_acoustic' in existing_columns else False
                     include_compilations = bool(row['include_compilations']) if 'include_compilations' in existing_columns else False
+                    include_instrumentals = bool(row['include_instrumentals']) if 'include_instrumentals' in existing_columns else False
 
                     watchlist_artists.append(WatchlistArtist(
                         id=row['id'],
@@ -5119,6 +5123,7 @@ class MusicDatabase:
                         include_remixes=include_remixes,
                         include_acoustic=include_acoustic,
                         include_compilations=include_compilations,
+                        include_instrumentals=include_instrumentals,
                         profile_id=profile_id
                     ))
 

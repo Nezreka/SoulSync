@@ -234,6 +234,63 @@ def is_acoustic_version(track_name: str, album_name: str = "") -> bool:
 
     return False
 
+def is_instrumental_version(track_name: str, album_name: str = "") -> bool:
+    """
+    Detect if a track is an instrumental version.
+
+    Args:
+        track_name: Track name to check
+        album_name: Album name to check (optional)
+
+    Returns:
+        True if this is an instrumental version, False otherwise
+    """
+    if not track_name:
+        return False
+
+    text_to_check = f"{track_name} {album_name}".lower()
+
+    instrumental_patterns = [
+        r'\binstrumental\b',            # Instrumental, Instrumental Version
+        r'\binst\.\b',                  # Inst. (abbreviation)
+        r'\bkaraoke\b',                 # Karaoke version
+        r'\bbacking track\b',           # Backing Track
+    ]
+
+    for pattern in instrumental_patterns:
+        if re.search(pattern, text_to_check, re.IGNORECASE):
+            return True
+
+    return False
+
+
+def matches_custom_exclude_terms(track_name: str, album_name: str, exclude_terms: list) -> str:
+    """
+    Check if a track or album name contains any user-defined exclusion terms.
+
+    Args:
+        track_name: Track name to check
+        album_name: Album name to check
+        exclude_terms: List of terms to exclude (case-insensitive)
+
+    Returns:
+        The matched term if found, empty string if no match
+    """
+    if not exclude_terms:
+        return ""
+
+    text_to_check = f"{track_name} {album_name}".lower()
+
+    for term in exclude_terms:
+        term = term.strip().lower()
+        if not term:
+            continue
+        if term in text_to_check:
+            return term
+
+    return ""
+
+
 def is_compilation_album(album_name: str) -> bool:
     """
     Detect if an album is a compilation/greatest hits album.
@@ -1161,6 +1218,7 @@ class WatchlistScanner:
             include_remixes = getattr(watchlist_artist, 'include_remixes', False)
             include_acoustic = getattr(watchlist_artist, 'include_acoustic', False)
             include_compilations = getattr(watchlist_artist, 'include_compilations', False)
+            include_instrumentals = getattr(watchlist_artist, 'include_instrumentals', False)
 
             # Check compilation albums (album-level filter)
             if not include_compilations:
@@ -1183,6 +1241,25 @@ class WatchlistScanner:
                 if is_acoustic_version(track_name, album_name):
                     logger.debug(f"Skipping acoustic version: {track_name}")
                     return False
+
+            # Check instrumental versions
+            if not include_instrumentals:
+                if is_instrumental_version(track_name, album_name):
+                    logger.debug(f"Skipping instrumental version: {track_name}")
+                    return False
+
+            # Check custom exclusion terms
+            try:
+                from config.settings import config_manager as _cfg
+                exclude_terms_str = _cfg.get('watchlist.exclude_terms', '')
+                if exclude_terms_str:
+                    exclude_terms = [t.strip() for t in exclude_terms_str.split(',') if t.strip()]
+                    matched_term = matches_custom_exclude_terms(track_name, album_name, exclude_terms)
+                    if matched_term:
+                        logger.debug(f"Skipping track '{track_name}' — matched custom exclusion term: '{matched_term}'")
+                        return False
+            except Exception as e:
+                logger.warning(f"Error checking custom exclusion terms: {e}")
 
             # Track passes all filters
             return True
