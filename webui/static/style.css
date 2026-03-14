@@ -12151,13 +12151,26 @@ body {
 .wishlist-batch-bar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 10px 20px;
+    gap: 12px;
+    padding: 8px 20px;
     margin: 0 32px 12px;
-    background: rgba(255, 59, 48, 0.1);
-    border: 1px solid rgba(255, 59, 48, 0.25);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 10px;
-    animation: batchBarSlideIn 0.2s ease-out;
+}
+
+.watchlist-select-all-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    user-select: none;
+}
+
+.watchlist-select-all-label input[type="checkbox"] {
+    cursor: pointer;
 }
 
 @keyframes batchBarSlideIn {

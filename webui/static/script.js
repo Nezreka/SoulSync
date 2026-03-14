@@ -32320,12 +32320,17 @@ async function showWatchlistModal() {
                                oninput="filterWatchlistArtists()">
                     </div>
 
-                    <!-- Batch action bar (hidden until selection) -->
-                    <div class="watchlist-batch-bar" id="watchlist-batch-bar" style="display: none;">
-                        <span class="watchlist-batch-count" id="watchlist-batch-count">0 selected</span>
+                    <!-- Batch action bar -->
+                    <div class="watchlist-batch-bar" id="watchlist-batch-bar">
+                        <label class="watchlist-select-all-label" onclick="event.stopPropagation();">
+                            <input type="checkbox" id="watchlist-select-all-cb" onchange="toggleWatchlistSelectAll(this.checked)">
+                            <span>Select All</span>
+                        </label>
+                        <span class="watchlist-batch-count" id="watchlist-batch-count"></span>
                         <button class="playlist-modal-btn playlist-modal-btn-secondary watchlist-batch-remove-btn"
                                 id="watchlist-batch-remove-btn"
-                                onclick="batchRemoveFromWatchlist()">
+                                onclick="batchRemoveFromWatchlist()"
+                                style="display: none;">
                             Remove Selected
                         </button>
                     </div>
@@ -33622,15 +33627,38 @@ function getVisibleCheckedWatchlist() {
  */
 function updateWatchlistBatchBar() {
     const checked = getVisibleCheckedWatchlist();
-    const bar = document.getElementById('watchlist-batch-bar');
     const countEl = document.getElementById('watchlist-batch-count');
+    const removeBtn = document.getElementById('watchlist-batch-remove-btn');
+    const selectAllCb = document.getElementById('watchlist-select-all-cb');
 
     if (checked.length > 0) {
-        bar.style.display = 'flex';
         countEl.textContent = `${checked.length} selected`;
+        removeBtn.style.display = '';
     } else {
-        bar.style.display = 'none';
+        countEl.textContent = '';
+        removeBtn.style.display = 'none';
     }
+
+    // Update select-all checkbox state
+    if (selectAllCb) {
+        const visible = Array.from(document.querySelectorAll('.watchlist-select-cb')).filter(cb => {
+            const card = cb.closest('.watchlist-artist-card');
+            return card && card.style.display !== 'none';
+        });
+        selectAllCb.checked = visible.length > 0 && checked.length === visible.length;
+        selectAllCb.indeterminate = checked.length > 0 && checked.length < visible.length;
+    }
+}
+
+function toggleWatchlistSelectAll(checked) {
+    const checkboxes = document.querySelectorAll('.watchlist-select-cb');
+    checkboxes.forEach(cb => {
+        const card = cb.closest('.watchlist-artist-card');
+        if (card && card.style.display !== 'none') {
+            cb.checked = checked;
+        }
+    });
+    updateWatchlistBatchBar();
 }
 
 /**
