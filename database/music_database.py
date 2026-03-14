@@ -261,7 +261,7 @@ class MusicDatabase:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS watchlist_artists (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    spotify_artist_id TEXT UNIQUE NOT NULL,
+                    spotify_artist_id TEXT UNIQUE,
                     artist_name TEXT NOT NULL,
                     date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_scan_timestamp TIMESTAMP,
@@ -1121,7 +1121,10 @@ class MusicDatabase:
             
             if result and 'spotify_artist_id TEXT UNIQUE NOT NULL' in result[0]:
                 logger.info("Migrating watchlist_artists table to make spotify_artist_id nullable...")
-                
+
+                # Drop leftover temp table from any previous failed migration
+                cursor.execute("DROP TABLE IF EXISTS watchlist_artists_new")
+
                 # Create new table with nullable spotify_artist_id
                 cursor.execute("""
                     CREATE TABLE watchlist_artists_new (
@@ -1804,6 +1807,9 @@ class MusicDatabase:
                     cursor.execute("PRAGMA table_info(watchlist_artists)")
                     cols_info = cursor.fetchall()
                     col_names = [c[1] for c in cols_info]
+
+                    # Drop leftover temp table from any previous failed migration
+                    cursor.execute("DROP TABLE IF EXISTS watchlist_artists_new")
 
                     cursor.execute("""
                         CREATE TABLE watchlist_artists_new (
