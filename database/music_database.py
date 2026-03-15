@@ -1111,16 +1111,21 @@ class MusicDatabase:
         """
         Make spotify_artist_id nullable in watchlist_artists table.
         This allows adding iTunes-only artists without Spotify IDs.
-        
+
         Since SQLite doesn't support modifying column constraints directly,
         we need to recreate the table if the constraint needs to be changed.
         """
         try:
-            # Check if spotify_artist_id is currently NOT NULL
-            cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='watchlist_artists'")
-            result = cursor.fetchone()
-            
-            if result and 'spotify_artist_id TEXT UNIQUE NOT NULL' in result[0]:
+            # Check if spotify_artist_id is currently NOT NULL using PRAGMA
+            # (more reliable than string-matching the CREATE TABLE SQL)
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = {col[1]: col for col in cursor.fetchall()}
+            spotify_col = columns.get('spotify_artist_id')
+
+            # notnull flag is index 3 in PRAGMA table_info
+            has_not_null = spotify_col and spotify_col[3] == 1
+
+            if has_not_null:
                 logger.info("Migrating watchlist_artists table to make spotify_artist_id nullable...")
 
                 # Drop leftover temp table from any previous failed migration
@@ -1148,11 +1153,17 @@ class MusicDatabase:
                     )
                 """)
                 
-                # Copy data from old table
-                cursor.execute("""
-                    INSERT INTO watchlist_artists_new 
-                    SELECT * FROM watchlist_artists
-                """)
+                # Copy data from old table (only columns that exist in both)
+                cursor.execute("PRAGMA table_info(watchlist_artists)")
+                old_cols = [col[1] for col in cursor.fetchall()]
+                new_cols = ['id', 'spotify_artist_id', 'artist_name', 'date_added',
+                            'last_scan_timestamp', 'created_at', 'updated_at', 'image_url',
+                            'include_albums', 'include_eps', 'include_singles', 'include_live',
+                            'include_remixes', 'include_acoustic', 'include_compilations',
+                            'itunes_artist_id']
+                shared_cols = [c for c in new_cols if c in old_cols]
+                cols_str = ', '.join(shared_cols)
+                cursor.execute(f"INSERT INTO watchlist_artists_new ({cols_str}) SELECT {cols_str} FROM watchlist_artists")
                 
                 # Drop old table
                 cursor.execute("DROP TABLE watchlist_artists")
