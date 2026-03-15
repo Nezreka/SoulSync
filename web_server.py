@@ -37451,6 +37451,63 @@ try:
     transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
     repair_worker = RepairWorker(database=repair_db, transfer_folder=transfer_path)
     repair_worker.set_config_manager(config_manager)
+
+    # --- Repair Job Progress Tracking (live progress like automation cards) ---
+    repair_job_progress_states = {}   # job_id (str) -> state dict
+    repair_job_progress_lock = threading.Lock()
+
+    def _repair_job_start(job_id, display_name):
+        with repair_job_progress_lock:
+            repair_job_progress_states[job_id] = {
+                'status': 'running',
+                'display_name': display_name,
+                'progress': 0, 'phase': 'Starting...', 'current_item': '',
+                'processed': 0, 'total': 0,
+                'log': [{'type': 'info', 'text': f'Starting {display_name}'}],
+                'started_at': datetime.now(timezone.utc).isoformat(),
+                'finished_at': None,
+            }
+
+    def _repair_job_progress(job_id, **kwargs):
+        with repair_job_progress_lock:
+            state = repair_job_progress_states.get(job_id)
+            if not state:
+                return
+            for k, v in kwargs.items():
+                if k == 'log_line':
+                    state['log'].append({'type': kwargs.get('log_type', 'info'), 'text': v})
+                    if len(state['log']) > 50:
+                        state['log'] = state['log'][-50:]
+                elif k == 'scanned':
+                    state['processed'] = v
+                    if state.get('total', 0) > 0:
+                        state['progress'] = round(v / state['total'] * 100)
+                elif k == 'total':
+                    state['total'] = v
+                    if state.get('processed', 0) > 0 and v > 0:
+                        state['progress'] = round(state['processed'] / v * 100)
+                elif k != 'log_type':
+                    state[k] = v
+
+    def _repair_job_finish(job_id, status, result):
+        with repair_job_progress_lock:
+            state = repair_job_progress_states.get(job_id)
+            if not state:
+                return
+            state['status'] = status
+            state['progress'] = 100
+            state['finished_at'] = datetime.now(timezone.utc).isoformat()
+            summary = f'Done: {result.scanned} scanned, {result.auto_fixed} fixed, {result.findings_created} findings, {result.errors} errors'
+            state['log'].append({'type': 'success' if status == 'finished' else 'error', 'text': summary})
+            try:
+                socketio.emit('repair:progress', {job_id: dict(state)})
+            except Exception:
+                pass
+
+    repair_worker.register_progress_callbacks(_repair_job_start, _repair_job_progress, _repair_job_finish)
+    # Store refs for WebSocket push loop
+    repair_worker._progress_lock_ref = repair_job_progress_lock
+    repair_worker._progress_states_ref = repair_job_progress_states
     repair_worker.start()
     print("✅ Repair worker initialized and started")
 except Exception as e:
@@ -37679,6 +37736,27 @@ def repair_history():
         return jsonify({'runs': runs}), 200
     except Exception as e:
         logger.error(f"Error getting repair history: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/progress', methods=['GET'])
+def repair_job_progress():
+    """Get current repair job progress states (for initial page load)"""
+    try:
+        if repair_worker is None:
+            return jsonify({}), 200
+        lock = getattr(repair_worker, '_progress_lock_ref', None)
+        states = getattr(repair_worker, '_progress_states_ref', None)
+        if lock is None or states is None:
+            return jsonify({}), 200
+        with lock:
+            result = {}
+            for jid, state in states.items():
+                cp = dict(state)
+                cp['log'] = list(state['log'])
+                result[jid] = cp
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Error getting repair progress: {e}")
         return jsonify({'error': str(e)}), 500
 
 # ================================================================================================
@@ -38999,6 +39077,46 @@ def _emit_automation_progress_loop():
         except Exception as e:
             logger.debug(f"Error emitting automation progress: {e}")
 
+def _emit_repair_progress_loop():
+    """Push repair:progress events every 1 second for running repair jobs."""
+    while True:
+        socketio.sleep(1)
+        try:
+            if repair_worker is None:
+                continue
+            # Access the progress states set up during repair worker init
+            lock = getattr(repair_worker, '_progress_lock_ref', None)
+            states = getattr(repair_worker, '_progress_states_ref', None)
+            if lock is None or states is None:
+                continue
+            with lock:
+                active = {}
+                stale = []
+                now = datetime.now()
+                for jid, state in states.items():
+                    if state['status'] == 'running':
+                        cp = dict(state)
+                        cp['log'] = list(state['log'])
+                        active[jid] = cp
+                    elif state['status'] in ('finished', 'error') and state.get('finished_at'):
+                        try:
+                            finished_time = datetime.fromisoformat(state['finished_at'])
+                            if (now - finished_time).total_seconds() > 60:
+                                stale.append(jid)
+                        except (ValueError, TypeError):
+                            stale.append(jid)
+                        # Still include recently finished states so frontend sees final state
+                        if jid not in stale:
+                            cp = dict(state)
+                            cp['log'] = list(state['log'])
+                            active[jid] = cp
+                for jid in stale:
+                    del states[jid]
+            if active:
+                socketio.emit('repair:progress', active)
+        except Exception as e:
+            logger.debug(f"Error emitting repair progress: {e}")
+
 # ================================================================================================
 # END WEBSOCKET HANDLERS
 # ================================================================================================
@@ -39087,6 +39205,8 @@ if __name__ == '__main__':
     socketio.start_background_task(_emit_scan_status_loop)
     # Phase 6: Automation progress
     socketio.start_background_task(_emit_automation_progress_loop)
-    print("✅ WebSocket emitters started (Phase 1-6: global/dashboard/enrichment/tools/sync/automations)")
+    # Phase 7: Repair job progress
+    socketio.start_background_task(_emit_repair_progress_loop)
+    print("✅ WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair)")
 
     socketio.run(app, host='0.0.0.0', port=8008, debug=False, allow_unsafe_werkzeug=True)

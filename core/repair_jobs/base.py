@@ -35,6 +35,7 @@ class JobContext:
     should_stop: Optional[Callable[[], bool]] = None
     is_paused: Optional[Callable[[], bool]] = None
     update_progress: Optional[Callable[[int, int], None]] = None
+    report_progress: Optional[Callable] = None  # Rich progress: (phase, log_line, log_type, scanned, total)
 
     def check_stop(self) -> bool:
         """Return True if the worker should stop."""
