@@ -12543,6 +12543,13 @@ def _sanitize_filename(filename: str) -> str:
     import re
     sanitized = re.sub(r'[<>:"/\\|?*]', '_', filename)
     sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+    # Windows forbids trailing dots/spaces on files and folders.
+    # Artists like "Fred again.." would create mangled 8.3 short names.
+    sanitized = sanitized.rstrip('. ') or '_'
+    # Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+    # can't be used as file or folder names even with extensions.
+    if re.match(r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)', sanitized, re.IGNORECASE):
+        sanitized = '_' + sanitized
     return sanitized[:200]
 
 def _sanitize_context_values(context: dict) -> dict:

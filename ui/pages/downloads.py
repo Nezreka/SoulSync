@@ -7751,6 +7751,11 @@ class DownloadsPage(QWidget):
         sanitized = re.sub(r'[<>:"/\\|?*]', '_', filename)
         # Remove multiple spaces and trim
         sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+        # Windows forbids trailing dots/spaces on files and folders
+        sanitized = sanitized.rstrip('. ') or '_'
+        # Windows reserved device names
+        if re.match(r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)', sanitized, re.IGNORECASE):
+            sanitized = '_' + sanitized
         # Limit length to avoid filesystem issues
         return sanitized[:200] if len(sanitized) > 200 else sanitized
     
