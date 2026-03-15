@@ -2328,6 +2328,17 @@ class MusicDatabase:
                 cursor.execute("DROP TABLE listenbrainz_playlists")
                 cursor.execute("ALTER TABLE listenbrainz_playlists_new RENAME TO listenbrainz_playlists")
 
+                # Clean up playlists that lost their tracks during table recreation
+                # (track playlist_id foreign keys may reference stale IDs).
+                # This forces a fresh re-fetch from ListenBrainz on next page load.
+                cursor.execute("""
+                    DELETE FROM listenbrainz_playlists
+                    WHERE id NOT IN (SELECT DISTINCT playlist_id FROM listenbrainz_tracks)
+                """)
+                cleaned = cursor.rowcount
+                if cleaned:
+                    logger.info(f"Cleaned up {cleaned} stale playlists (will re-fetch from ListenBrainz)")
+
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lb_playlists_profile ON listenbrainz_playlists (profile_id)")
 
             cursor.execute("""
