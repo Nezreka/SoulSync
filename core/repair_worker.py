@@ -23,6 +23,31 @@ logger = get_logger("repair_worker")
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 
+def _resolve_file_path(file_path, transfer_folder, download_folder=None):
+    """Resolve a stored DB path to an actual file on disk.
+
+    Tries the raw path first, then progressively shorter suffixes against
+    configured directories.  Handles cross-environment path mismatches
+    (e.g. Docker paths vs native Windows paths).
+    """
+    if not file_path:
+        return None
+    if os.path.exists(file_path):
+        return file_path
+
+    path_parts = file_path.replace('\\', '/').split('/')
+
+    for base_dir in [transfer_folder, download_folder]:
+        if not base_dir or not os.path.isdir(base_dir):
+            continue
+        for i in range(1, len(path_parts)):
+            candidate = os.path.join(base_dir, *path_parts[i:])
+            if os.path.exists(candidate):
+                return candidate
+
+    return None
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -772,12 +797,21 @@ class RepairWorker:
         if not file_path:
             return {'success': False, 'error': 'No file path associated with this finding'}
         try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                # Clean up empty parent directories
-                parent = os.path.dirname(file_path)
+            # Resolve path in case of cross-environment mismatch
+            download_folder = None
+            if self._config_manager:
+                download_folder = self._config_manager.get('soulseek.download_path', '')
+            resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder) or file_path
+
+            if os.path.exists(resolved):
+                os.remove(resolved)
+                # Clean up empty parent directories (never remove transfer folder itself)
+                transfer_norm = os.path.normpath(self.transfer_folder)
+                parent = os.path.dirname(resolved)
                 for _ in range(3):  # Up to 3 levels (track/album/artist)
-                    if parent and os.path.isdir(parent) and not os.listdir(parent):
+                    if (parent and os.path.isdir(parent)
+                            and os.path.normpath(parent) != transfer_norm
+                            and not os.listdir(parent)):
                         os.rmdir(parent)
                         parent = os.path.dirname(parent)
                     else:
@@ -900,6 +934,13 @@ class RepairWorker:
         if not remove_ids:
             return {'success': False, 'error': 'No duplicates to remove'}
 
+        # Collect file paths before deleting DB entries
+        remove_paths = []
+        for t in tracks:
+            tid = t.get('track_id') or t.get('id')
+            if tid and str(tid) != str(best_id) and t.get('file_path'):
+                remove_paths.append(t['file_path'])
+
         conn = None
         try:
             conn = self.db._get_connection()
@@ -908,11 +949,39 @@ class RepairWorker:
             cursor.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", remove_ids)
             conn.commit()
             removed = cursor.rowcount
-            return {'success': True, 'action': 'removed_duplicates',
-                    'message': f'Kept best quality copy, removed {removed} duplicate(s)'}
         finally:
             if conn:
                 conn.close()
+
+        # Delete duplicate files from disk (resolve paths for cross-environment compat)
+        download_folder = None
+        if self._config_manager:
+            download_folder = self._config_manager.get('soulseek.download_path', '')
+        transfer_norm = os.path.normpath(self.transfer_folder)
+        files_deleted = 0
+        for fpath in remove_paths:
+            try:
+                resolved = _resolve_file_path(fpath, self.transfer_folder, download_folder)
+                if resolved and os.path.exists(resolved):
+                    os.remove(resolved)
+                    files_deleted += 1
+                    # Clean up empty parent directories (never remove transfer folder itself)
+                    parent = os.path.dirname(resolved)
+                    for _ in range(3):
+                        if (parent and os.path.isdir(parent)
+                                and os.path.normpath(parent) != transfer_norm
+                                and not os.listdir(parent)):
+                            os.rmdir(parent)
+                            parent = os.path.dirname(parent)
+                        else:
+                            break
+            except OSError:
+                pass  # Best effort — DB entry already removed
+
+        msg = f'Kept best quality copy, removed {removed} duplicate(s)'
+        if files_deleted:
+            msg += f' and {files_deleted} file(s) from disk'
+        return {'success': True, 'action': 'removed_duplicates', 'message': msg}
 
     def dismiss_finding(self, finding_id: int) -> bool:
         """Dismiss a finding."""
