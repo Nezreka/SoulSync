@@ -42,7 +42,8 @@ class MissingCoverArtJob(RepairJob):
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT al.id, al.title, ar.name, al.spotify_album_id, al.thumb_url
+                SELECT al.id, al.title, ar.name, al.spotify_album_id, al.thumb_url,
+                       ar.thumb_url
                 FROM albums al
                 LEFT JOIN artists ar ON ar.id = al.artist_id
                 WHERE (al.thumb_url IS NULL OR al.thumb_url = '')
@@ -63,14 +64,25 @@ class MissingCoverArtJob(RepairJob):
 
         logger.info("Found %d albums missing cover art", total)
 
+        if context.report_progress:
+            context.report_progress(phase=f'Searching artwork for {total} albums...', total=total)
+
         for i, row in enumerate(albums):
             if context.check_stop():
                 return result
             if i % 10 == 0 and context.wait_if_paused():
                 return result
 
-            album_id, title, artist_name, spotify_album_id, _ = row
+            album_id, title, artist_name, spotify_album_id, _, artist_thumb = row
             result.scanned += 1
+
+            if context.report_progress:
+                context.report_progress(
+                    scanned=i + 1, total=total,
+                    phase=f'Searching {i + 1} / {total}',
+                    log_line=f'Searching: {title or "Unknown"} — {artist_name or "Unknown"}',
+                    log_type='info'
+                )
 
             artwork_url = None
 
@@ -85,6 +97,11 @@ class MissingCoverArtJob(RepairJob):
                     artwork_url = self._try_spotify(spotify_album_id, title, artist_name, context)
 
             if artwork_url:
+                if context.report_progress:
+                    context.report_progress(
+                        log_line=f'Found art: {title or "Unknown"}',
+                        log_type='success'
+                    )
                 # Create finding for user to approve
                 if context.create_finding:
                     try:
@@ -103,6 +120,7 @@ class MissingCoverArtJob(RepairJob):
                                 'artist': artist_name,
                                 'found_artwork_url': artwork_url,
                                 'spotify_album_id': spotify_album_id,
+                                'artist_thumb_url': artist_thumb or None,
                             }
                         )
                         result.findings_created += 1

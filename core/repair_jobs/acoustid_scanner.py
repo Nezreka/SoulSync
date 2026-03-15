@@ -103,6 +103,9 @@ class AcoustIDScannerJob(RepairJob):
         # Build a lookup of known tracks from DB for comparison
         db_tracks = self._load_db_tracks(context)
 
+        if context.report_progress:
+            context.report_progress(phase=f'Fingerprinting {total} files...', total=total)
+
         batch_count = 0
         for i, fpath in enumerate(audio_files):
             if context.check_stop():
@@ -116,13 +119,22 @@ class AcoustIDScannerJob(RepairJob):
             result.scanned += 1
             batch_count += 1
 
+            fname = os.path.basename(fpath)
+            if context.report_progress:
+                context.report_progress(
+                    scanned=i + 1, total=total,
+                    phase=f'Fingerprinting {i + 1} / {total}',
+                    log_line=f'Scanning: {fname}',
+                    log_type='info'
+                )
+
             try:
                 self._scan_file(
                     fpath, acoustid_client, db_tracks, context, result,
                     fp_threshold, title_threshold, artist_threshold
                 )
             except Exception as e:
-                logger.debug("Error scanning %s: %s", os.path.basename(fpath), e)
+                logger.debug("Error scanning %s: %s", fname, e)
                 result.errors += 1
 
             # Rate limit: pause between batches
@@ -167,6 +179,11 @@ class AcoustIDScannerJob(RepairJob):
 
         if not fp_result or not fp_result.get('recordings'):
             # No match — could be a very rare/new track
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f'No match: {fname}',
+                    log_type='skip'
+                )
             if context.create_finding:
                 context.create_finding(
                     job_id=self.job_id,
@@ -180,6 +197,8 @@ class AcoustIDScannerJob(RepairJob):
                     details={
                         'expected_title': expected['title'],
                         'expected_artist': expected['artist'],
+                        'album_thumb_url': expected.get('album_thumb_url'),
+                        'artist_thumb_url': expected.get('artist_thumb_url'),
                     }
                 )
                 result.findings_created += 1
@@ -212,6 +231,11 @@ class AcoustIDScannerJob(RepairJob):
             return
 
         # Mismatch detected
+        if context.report_progress:
+            context.report_progress(
+                log_line=f'Mismatch: {fname} — expected "{expected["title"]}", got "{aid_title}"',
+                log_type='error'
+            )
         if context.create_finding:
             severity = 'warning' if best_score >= 0.90 else 'info'
             context.create_finding(
@@ -235,6 +259,8 @@ class AcoustIDScannerJob(RepairJob):
                     'fingerprint_score': round(best_score, 3),
                     'title_similarity': round(title_sim, 3),
                     'artist_similarity': round(artist_sim, 3),
+                    'album_thumb_url': expected.get('album_thumb_url'),
+                    'artist_thumb_url': expected.get('artist_thumb_url'),
                 }
             )
             result.findings_created += 1
@@ -247,18 +273,22 @@ class AcoustIDScannerJob(RepairJob):
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT t.id, t.title, ar.name, t.file_path
+                SELECT t.id, t.title, ar.name, t.file_path,
+                       al.thumb_url, ar.thumb_url
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
+                LEFT JOIN albums al ON al.id = t.album_id
                 WHERE t.file_path IS NOT NULL AND t.file_path != ''
                   AND t.title IS NOT NULL AND t.title != ''
             """)
             for row in cursor.fetchall():
-                track_id, title, artist_name, file_path = row
+                track_id, title, artist_name, file_path, album_thumb, artist_thumb = row
                 tracks[os.path.normpath(file_path)] = {
                     'track_id': track_id,
                     'title': title or '',
                     'artist': artist_name or '',
+                    'album_thumb_url': album_thumb or None,
+                    'artist_thumb_url': artist_thumb or None,
                 }
         except Exception as e:
             logger.error("Error loading tracks from DB: %s", e)

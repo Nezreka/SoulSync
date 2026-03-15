@@ -44,7 +44,7 @@ class AlbumCompletenessJob(RepairJob):
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT al.id, al.title, ar.name, al.spotify_album_id, al.track_count,
-                       COUNT(t.id) as actual_count
+                       COUNT(t.id) as actual_count, al.thumb_url, ar.thumb_url
                 FROM albums al
                 LEFT JOIN artists ar ON ar.id = al.artist_id
                 LEFT JOIN tracks t ON t.album_id = al.id
@@ -67,14 +67,25 @@ class AlbumCompletenessJob(RepairJob):
 
         logger.info("Checking completeness of %d albums", total)
 
+        if context.report_progress:
+            context.report_progress(phase=f'Checking {total} albums...', total=total)
+
         for i, row in enumerate(albums):
             if context.check_stop():
                 return result
             if i % 10 == 0 and context.wait_if_paused():
                 return result
 
-            album_id, title, artist_name, spotify_album_id, db_track_count, actual_count = row
+            album_id, title, artist_name, spotify_album_id, db_track_count, actual_count, album_thumb, artist_thumb = row
             result.scanned += 1
+
+            if context.report_progress:
+                context.report_progress(
+                    scanned=i + 1, total=total,
+                    phase=f'Checking {i + 1} / {total}',
+                    log_line=f'Album: {title or "Unknown"} — {artist_name or "Unknown"}',
+                    log_type='info'
+                )
 
             # If we don't know the expected track count, try to get it from API
             expected_total = db_track_count
@@ -122,6 +133,11 @@ class AlbumCompletenessJob(RepairJob):
                 except Exception as e:
                     logger.debug("Error getting album tracks for %s: %s", spotify_album_id, e)
 
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f'Incomplete: {title or "Unknown"} ({actual_count}/{expected_total})',
+                    log_type='skip'
+                )
             if context.create_finding:
                 try:
                     context.create_finding(
@@ -144,6 +160,8 @@ class AlbumCompletenessJob(RepairJob):
                             'expected_tracks': expected_total,
                             'actual_tracks': actual_count,
                             'missing_tracks': missing_tracks,
+                            'album_thumb_url': album_thumb or None,
+                            'artist_thumb_url': artist_thumb or None,
                         }
                     )
                     result.findings_created += 1

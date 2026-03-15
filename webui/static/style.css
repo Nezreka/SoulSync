@@ -40643,6 +40643,46 @@ tr.tag-diff-same {
     letter-spacing: 0.04em;
 }
 
+/* Finding media thumbnails (album art + artist image) */
+.repair-finding-media {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.repair-finding-media-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.repair-finding-media-img {
+    width: 56px;
+    height: 56px;
+    border-radius: 8px;
+    object-fit: cover;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.repair-finding-media-img.artist {
+    border-radius: 50%;
+}
+.repair-finding-media-label {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.45);
+    text-align: center;
+    max-width: 72px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+
 /* Artwork preview (for missing cover art) */
 .repair-artwork-preview {
     margin-top: 8px;

@@ -72,6 +72,9 @@ class FakeLosslessDetectorJob(RepairJob):
 
         logger.info("Scanning %d lossless files for fakes", total)
 
+        if context.report_progress:
+            context.report_progress(phase=f'Analyzing {total} lossless files...', total=total)
+
         for i, fpath in enumerate(lossless_files):
             if context.check_stop():
                 return result
@@ -79,6 +82,15 @@ class FakeLosslessDetectorJob(RepairJob):
                 return result
 
             result.scanned += 1
+            fname = os.path.basename(fpath)
+
+            if context.report_progress and i % 5 == 0:
+                context.report_progress(
+                    scanned=i + 1, total=total,
+                    phase=f'Analyzing {i + 1} / {total}',
+                    log_line=f'Analyzing: {fname}',
+                    log_type='info'
+                )
 
             try:
                 analysis = _analyze_file(fpath)
@@ -92,6 +104,11 @@ class FakeLosslessDetectorJob(RepairJob):
 
                 if detected_cutoff is not None and detected_cutoff < cutoff_khz:
                     # Likely fake lossless
+                    if context.report_progress:
+                        context.report_progress(
+                            log_line=f'Fake: {fname} — cutoff at {detected_cutoff:.1f} kHz',
+                            log_type='error'
+                        )
                     if context.create_finding:
                         context.create_finding(
                             job_id=self.job_id,

@@ -50,7 +50,7 @@ class DuplicateDetectorJob(RepairJob):
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT t.id, t.title, ar.name, al.title, t.file_path,
-                       t.bitrate, t.duration
+                       t.bitrate, t.duration, al.thumb_url, ar.thumb_url
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -77,7 +77,7 @@ class DuplicateDetectorJob(RepairJob):
         # Bucket by first 4 chars of normalized title for efficiency
         buckets = defaultdict(list)
         for row in tracks:
-            track_id, title, artist_name, album_title, file_path, bitrate, duration = row
+            track_id, title, artist_name, album_title, file_path, bitrate, duration, album_thumb, artist_thumb = row
             norm_title = _normalize(title)
             bucket_key = norm_title[:4] if len(norm_title) >= 4 else norm_title
             buckets[bucket_key].append({
@@ -90,11 +90,16 @@ class DuplicateDetectorJob(RepairJob):
                 'file_path': file_path,
                 'bitrate': bitrate,
                 'duration': duration,
+                'album_thumb_url': album_thumb or None,
+                'artist_thumb_url': artist_thumb or None,
             })
 
         # Find duplicates within each bucket
         found_groups = set()  # Track IDs already in a group
         processed = 0
+
+        if context.report_progress:
+            context.report_progress(phase=f'Comparing {total} tracks...', total=total)
 
         for bucket_key, bucket_tracks in buckets.items():
             if context.check_stop():
@@ -106,6 +111,14 @@ class DuplicateDetectorJob(RepairJob):
 
                 processed += 1
                 result.scanned += 1
+
+                if context.report_progress and processed % 100 == 0:
+                    context.report_progress(
+                        scanned=processed, total=total,
+                        phase=f'Comparing {processed} / {total}',
+                        log_line=f'Checking: {t1["title"]} — {t1["artist"]}',
+                        log_type='info'
+                    )
 
                 if t1['id'] in found_groups:
                     continue
@@ -134,6 +147,12 @@ class DuplicateDetectorJob(RepairJob):
                     for t in group:
                         found_groups.add(t['id'])
 
+                    if context.report_progress:
+                        context.report_progress(
+                            log_line=f'Duplicate: {t1["title"]} — {len(group)} copies',
+                            log_type='skip'
+                        )
+
                     if context.create_finding:
                         try:
                             # Sort group by quality (highest bitrate first)
@@ -159,6 +178,8 @@ class DuplicateDetectorJob(RepairJob):
                                         'duration': t['duration'],
                                     } for t in group],
                                     'count': len(group),
+                                    'album_thumb_url': group[0].get('album_thumb_url'),
+                                    'artist_thumb_url': group[0].get('artist_thumb_url'),
                                 }
                             )
                             result.findings_created += 1
