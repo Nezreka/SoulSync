@@ -698,6 +698,222 @@ class RepairWorker:
             if conn:
                 conn.close()
 
+    def fix_finding(self, finding_id: int) -> dict:
+        """Execute the appropriate fix action for a finding, then mark it resolved."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, job_id, finding_type, entity_type, entity_id,
+                       file_path, details_json
+                FROM repair_findings WHERE id = ? AND status = 'pending'
+            """, (finding_id,))
+            row = cursor.fetchone()
+            if not row:
+                return {'success': False, 'error': 'Finding not found or already resolved'}
+
+            fid, job_id, finding_type, entity_type, entity_id, file_path, details_json = row
+            details = json.loads(details_json) if details_json else {}
+            conn.close()
+            conn = None
+
+            # Dispatch fix by finding type
+            result = self._execute_fix(finding_type, entity_type, entity_id, file_path, details)
+
+            if result.get('success'):
+                self.resolve_finding(finding_id, action=result.get('action', 'auto_fix'))
+
+            return result
+
+        except Exception as e:
+            logger.error("Error fixing finding %s: %s", finding_id, e, exc_info=True)
+            return {'success': False, 'error': str(e)}
+        finally:
+            if conn:
+                conn.close()
+
+    def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
+                     file_path: str, details: dict) -> dict:
+        """Route a fix to the correct handler based on finding_type."""
+        handlers = {
+            'dead_file': self._fix_dead_file,
+            'orphan_file': self._fix_orphan_file,
+            'track_number_mismatch': self._fix_track_number,
+            'missing_cover_art': self._fix_missing_cover_art,
+            'metadata_gap': self._fix_metadata_gap,
+            'duplicate_tracks': self._fix_duplicates,
+        }
+        handler = handlers.get(finding_type)
+        if not handler:
+            return {'success': False, 'error': f'No fix available for finding type: {finding_type}'}
+        return handler(entity_type, entity_id, file_path, details)
+
+    def _fix_dead_file(self, entity_type, entity_id, file_path, details):
+        """Remove the dead track entry from the database."""
+        if not entity_id:
+            return {'success': False, 'error': 'No track ID associated with this finding'}
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
+            conn.commit()
+            if cursor.rowcount > 0:
+                return {'success': True, 'action': 'removed_db_entry',
+                        'message': 'Removed dead track entry from database'}
+            return {'success': False, 'error': 'Track not found in database'}
+        finally:
+            if conn:
+                conn.close()
+
+    def _fix_orphan_file(self, entity_type, entity_id, file_path, details):
+        """Delete the orphan file from disk."""
+        if not file_path:
+            return {'success': False, 'error': 'No file path associated with this finding'}
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                # Clean up empty parent directories
+                parent = os.path.dirname(file_path)
+                for _ in range(3):  # Up to 3 levels (track/album/artist)
+                    if parent and os.path.isdir(parent) and not os.listdir(parent):
+                        os.rmdir(parent)
+                        parent = os.path.dirname(parent)
+                    else:
+                        break
+                return {'success': True, 'action': 'deleted_file',
+                        'message': 'Deleted orphan file from disk'}
+            return {'success': True, 'action': 'already_gone',
+                    'message': 'File was already removed'}
+        except OSError as e:
+            return {'success': False, 'error': f'Failed to delete file: {e}'}
+
+    def _fix_track_number(self, entity_type, entity_id, file_path, details):
+        """Update track number in the database to the correct value."""
+        correct_num = details.get('correct_track_num')
+        if correct_num is None:
+            return {'success': False, 'error': 'No correct track number in finding details'}
+        if not entity_id:
+            return {'success': False, 'error': 'No track ID associated with this finding'}
+        result = self.db.update_track_fields(int(entity_id), {'track_number': int(correct_num)})
+        if result.get('success'):
+            return {'success': True, 'action': 'fixed_track_number',
+                    'message': f'Updated track number to {correct_num}'}
+        return {'success': False, 'error': result.get('error', 'Failed to update track number')}
+
+    def _fix_missing_cover_art(self, entity_type, entity_id, file_path, details):
+        """Update album thumbnail URL from the found artwork."""
+        artwork_url = details.get('found_artwork_url')
+        if not artwork_url:
+            return {'success': False, 'error': 'No artwork URL found in finding details'}
+        album_id = details.get('album_id') or entity_id
+        if not album_id:
+            return {'success': False, 'error': 'No album ID associated with this finding'}
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE albums SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                           (artwork_url, album_id))
+            conn.commit()
+            if cursor.rowcount > 0:
+                return {'success': True, 'action': 'applied_cover_art',
+                        'message': 'Applied cover art to album'}
+            return {'success': False, 'error': 'Album not found in database'}
+        finally:
+            if conn:
+                conn.close()
+
+    def _fix_metadata_gap(self, entity_type, entity_id, file_path, details):
+        """Apply found metadata fields to the track."""
+        found_fields = details.get('found_fields')
+        if not found_fields or not isinstance(found_fields, dict):
+            return {'success': False, 'error': 'No metadata fields found in finding details'}
+        if not entity_id:
+            return {'success': False, 'error': 'No track ID associated with this finding'}
+
+        # Map found_fields to DB-updatable fields
+        field_map = {
+            'bpm': 'bpm', 'tempo': 'bpm',
+            'explicit': 'explicit',
+            'style': 'style', 'mood': 'mood',
+        }
+        updates = {}
+        for key, value in found_fields.items():
+            db_field = field_map.get(key.lower())
+            if db_field:
+                updates[db_field] = value
+
+        # Handle non-whitelisted fields via direct SQL
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            direct_fields = {}
+            for key, value in found_fields.items():
+                lk = key.lower()
+                if lk in ('isrc', 'spotify_track_id', 'musicbrainz_recording_id'):
+                    direct_fields[lk] = value
+
+            if direct_fields:
+                set_parts = [f"{k} = ?" for k in direct_fields]
+                vals = list(direct_fields.values()) + [entity_id]
+                cursor.execute(
+                    f"UPDATE tracks SET {', '.join(set_parts)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    vals
+                )
+                conn.commit()
+
+            if updates:
+                conn.close()
+                conn = None
+                self.db.update_track_fields(int(entity_id), updates)
+
+            applied = list(updates.keys()) + list(direct_fields.keys())
+            if applied:
+                return {'success': True, 'action': 'applied_metadata',
+                        'message': f'Applied metadata: {", ".join(applied)}'}
+            return {'success': False, 'error': 'No applicable metadata fields to update'}
+        finally:
+            if conn:
+                conn.close()
+
+    def _fix_duplicates(self, entity_type, entity_id, file_path, details):
+        """Keep the best quality duplicate and remove the rest from the database."""
+        tracks = details.get('tracks', [])
+        if len(tracks) < 2:
+            return {'success': False, 'error': 'Not enough duplicate info to determine best copy'}
+
+        # Pick best: highest bitrate, then longest duration
+        best = max(tracks, key=lambda t: (t.get('bitrate', 0) or 0, t.get('duration', 0) or 0))
+        best_id = best.get('track_id') or best.get('id')
+        if not best_id:
+            return {'success': False, 'error': 'Could not determine best track ID'}
+
+        remove_ids = []
+        for t in tracks:
+            tid = t.get('track_id') or t.get('id')
+            if tid and str(tid) != str(best_id):
+                remove_ids.append(tid)
+
+        if not remove_ids:
+            return {'success': False, 'error': 'No duplicates to remove'}
+
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            placeholders = ','.join(['?'] * len(remove_ids))
+            cursor.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", remove_ids)
+            conn.commit()
+            removed = cursor.rowcount
+            return {'success': True, 'action': 'removed_duplicates',
+                    'message': f'Kept best quality copy, removed {removed} duplicate(s)'}
+        finally:
+            if conn:
+                conn.close()
+
     def dismiss_finding(self, finding_id: int) -> bool:
         """Dismiss a finding."""
         conn = None

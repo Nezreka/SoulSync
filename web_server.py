@@ -37675,6 +37675,19 @@ def repair_findings_counts():
         logger.error(f"Error getting findings counts: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/repair/findings/<int:finding_id>/fix', methods=['POST'])
+def repair_finding_fix(finding_id):
+    """Execute the actual fix action for a finding"""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        result = repair_worker.fix_finding(finding_id)
+        return jsonify(result), 200 if result.get('success') else 400
+    except Exception as e:
+        logger.error(f"Error fixing finding {finding_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/repair/findings/<int:finding_id>/resolve', methods=['POST'])
 def repair_finding_resolve(finding_id):
     """Resolve a finding with optional action"""

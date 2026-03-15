@@ -50425,6 +50425,16 @@ async function loadRepairFindings() {
             missing_cover_art: 'Missing Art', track_number_mismatch: 'Track Number'
         };
 
+        // Finding types that have an automated fix action
+        const fixableTypes = {
+            dead_file: 'Remove Entry',
+            orphan_file: 'Delete File',
+            track_number_mismatch: 'Fix',
+            missing_cover_art: 'Apply Art',
+            metadata_gap: 'Apply',
+            duplicate_tracks: 'Keep Best',
+        };
+
         container.innerHTML = items.map(f => {
             const icon = severityIcons[f.severity] || 'ℹ️';
             const age = formatCacheAge(f.created_at);
@@ -50433,6 +50443,7 @@ async function loadRepairFindings() {
             const typeLabel = typeLabels[f.finding_type] || f.finding_type.replace(/_/g, ' ');
             const d = f.details || {};
             const filePath = f.file_path || d.original_path || d.file_path || '';
+            const fixLabel = fixableTypes[f.finding_type];
 
             return `<div class="repair-finding-card ${f.severity}" data-id="${f.id}">
                 <div class="repair-finding-main" onclick="toggleFindingDetail(${f.id})">
@@ -50459,7 +50470,7 @@ async function loadRepairFindings() {
                     </div>
                     <div class="repair-finding-actions" onclick="event.stopPropagation()">
                         ${f.status === 'pending' ? `
-                            <button class="repair-finding-btn resolve" onclick="resolveRepairFinding(${f.id})" title="Resolve">&#10003;</button>
+                            ${fixLabel ? `<button class="repair-finding-btn fix" onclick="fixRepairFinding(${f.id})" title="${fixLabel}">${_escFinding(fixLabel)}</button>` : ''}
                             <button class="repair-finding-btn dismiss" onclick="dismissRepairFinding(${f.id})" title="Dismiss">&times;</button>
                         ` : ''}
                         <button class="repair-finding-expand-btn" data-finding="${f.id}" title="Details">&#9660;</button>
@@ -50689,6 +50700,34 @@ function renderRepairFindingsPagination(total, currentPage) {
     container.innerHTML = html;
 }
 
+async function fixRepairFinding(id) {
+    const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
+    const fixBtn = card ? card.querySelector('.repair-finding-btn.fix') : null;
+    if (fixBtn) {
+        fixBtn.disabled = true;
+        fixBtn.textContent = '...';
+    }
+    try {
+        const response = await fetch(`/api/repair/findings/${id}/fix`, { method: 'POST' });
+        const result = await response.json();
+        if (result.success) {
+            showToast(result.message || 'Fixed successfully', 'success');
+        } else {
+            showToast(result.error || 'Fix failed', 'error');
+        }
+        loadRepairFindingsDashboard();
+        loadRepairFindings();
+        updateRepairStatus();
+    } catch (error) {
+        console.error('Error fixing finding:', error);
+        showToast('Error applying fix', 'error');
+        if (fixBtn) {
+            fixBtn.disabled = false;
+            fixBtn.textContent = 'Fix';
+        }
+    }
+}
+
 async function resolveRepairFinding(id) {
     try {
         await fetch(`/api/repair/findings/${id}/resolve`, { method: 'POST' });
@@ -50728,6 +50767,30 @@ async function bulkRepairAction(action) {
         console.error('Error bulk updating findings:', error);
         showToast('Error updating findings', 'error');
     }
+}
+
+async function bulkFixFindings() {
+    if (_repairSelectedFindings.size === 0) return;
+    const ids = Array.from(_repairSelectedFindings);
+    let fixed = 0, failed = 0;
+    showToast(`Fixing ${ids.length} findings...`, 'info');
+
+    for (const id of ids) {
+        try {
+            const response = await fetch(`/api/repair/findings/${id}/fix`, { method: 'POST' });
+            const result = await response.json();
+            if (result.success) fixed++;
+            else failed++;
+        } catch {
+            failed++;
+        }
+    }
+
+    _repairSelectedFindings.clear();
+    showToast(`Fixed ${fixed}${failed ? `, ${failed} failed` : ''}`, fixed > 0 ? 'success' : 'error');
+    loadRepairFindingsDashboard();
+    loadRepairFindings();
+    updateRepairStatus();
 }
 
 async function loadRepairHistory() {
