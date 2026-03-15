@@ -16,6 +16,16 @@ class DuplicateDetectorJob(RepairJob):
     job_id = 'duplicate_detector'
     display_name = 'Duplicate Detector'
     description = 'Finds potential duplicate tracks in your library'
+    help_text = (
+        'Groups tracks by similar title and artist name using fuzzy matching, then flags '
+        'groups where multiple copies exist. This helps you find accidental duplicates '
+        'from re-downloads, compilation albums, or similar-titled tracks.\n\n'
+        'Each duplicate group is reported as a finding with details about every copy '
+        '(file path, format, bitrate) so you can decide which to keep.\n\n'
+        'Settings:\n'
+        '- Title Similarity: How closely titles must match to be considered duplicates (0.0 - 1.0)\n'
+        '- Artist Similarity: How closely artist names must match (0.0 - 1.0)'
+    )
     icon = 'repair-icon-duplicate'
     default_enabled = False
     default_interval_hours = 168

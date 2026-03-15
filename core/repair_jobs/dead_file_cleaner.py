@@ -14,6 +14,14 @@ class DeadFileCleanerJob(RepairJob):
     job_id = 'dead_file_cleaner'
     display_name = 'Dead File Cleaner'
     description = 'Finds database entries pointing to missing files'
+    help_text = (
+        'Checks every track in your database to verify the actual audio file still exists '
+        'on disk. If a file has been moved, renamed, or deleted outside of SoulSync, the '
+        'database entry becomes a "dead" reference.\n\n'
+        'Each dead reference is reported as a finding. You can then resolve it by re-downloading '
+        'the track or dismiss it to clean up the database entry.\n\n'
+        'This job only scans and reports — it never deletes database entries automatically.'
+    )
     icon = 'repair-icon-deadfile'
     default_enabled = True
     default_interval_hours = 24

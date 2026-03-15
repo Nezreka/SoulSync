@@ -30,6 +30,17 @@ class TrackNumberRepairJob(RepairJob):
     job_id = 'track_number_repair'
     display_name = 'Track Number Repair'
     description = 'Detects mismatched track numbers using API lookups (dry run by default)'
+    help_text = (
+        'Scans album folders and compares each file\'s track number against the correct '
+        'tracklist from Spotify or iTunes. If a file\'s embedded track number doesn\'t match '
+        'the API data, the job creates a finding showing what needs to change.\n\n'
+        'In dry run mode (default), no files are modified — you review each proposed change '
+        'in the Findings tab and decide what to approve. Disable dry run in settings to let '
+        'the job automatically rename and re-number files.\n\n'
+        'Settings:\n'
+        '- Title Similarity: How closely a filename must match the API track title (0.0 - 1.0)\n'
+        '- Dry Run: When enabled, only reports issues without modifying files'
+    )
     icon = 'repair-icon-tracknumber'
     default_enabled = True
     default_interval_hours = 24

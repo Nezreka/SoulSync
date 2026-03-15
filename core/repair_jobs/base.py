@@ -58,6 +58,7 @@ class RepairJob(ABC):
     job_id: str = ''
     display_name: str = ''
     description: str = ''
+    help_text: str = ''  # Extended explanation shown in the info modal
     icon: str = ''
     default_enabled: bool = False
     default_interval_hours: int = 24

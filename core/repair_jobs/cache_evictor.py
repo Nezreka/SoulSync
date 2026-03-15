@@ -12,6 +12,13 @@ class CacheEvictorJob(RepairJob):
     job_id = 'cache_evictor'
     display_name = 'Cache Evictor'
     description = 'Removes expired metadata cache entries'
+    help_text = (
+        'Automatically cleans up stale metadata cache entries from the database. '
+        'SoulSync caches search results, album metadata, and cover art URLs to avoid '
+        'hitting API rate limits. Over time these entries expire and take up space.\n\n'
+        'This is the only fully automatic job — it runs silently and removes expired '
+        'entries without creating findings. Safe to leave enabled at all times.'
+    )
     icon = 'repair-icon-cache'
     default_enabled = True
     default_interval_hours = 6

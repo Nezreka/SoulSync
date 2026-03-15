@@ -12,6 +12,16 @@ class AlbumCompletenessJob(RepairJob):
     job_id = 'album_completeness'
     display_name = 'Album Completeness'
     description = 'Checks if all tracks from albums are present'
+    help_text = (
+        'Compares the number of tracks you have for each album against the expected total '
+        'from the Spotify tracklist. Albums where tracks are missing get flagged as findings '
+        'with details about which tracks are absent.\n\n'
+        'Useful for catching partial downloads or albums where some tracks failed to download. '
+        'You can use the Download Missing feature from the album page to fill gaps.\n\n'
+        'Settings:\n'
+        '- Min Tracks For Check: Only check albums with at least this many expected tracks '
+        '(skips singles and EPs)'
+    )
     icon = 'repair-icon-completeness'
     default_enabled = False
     default_interval_hours = 168

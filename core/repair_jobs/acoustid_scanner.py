@@ -20,6 +20,18 @@ class AcoustIDScannerJob(RepairJob):
     job_id = 'acoustid_scanner'
     display_name = 'AcoustID Scanner'
     description = 'Fingerprints tracks to detect wrong downloads'
+    help_text = (
+        'Generates audio fingerprints using the AcoustID/Chromaprint service and compares '
+        'the identified recording against what you expected to download. This catches cases '
+        'where the wrong song was served — even if the filename looks correct.\n\n'
+        'The job processes tracks in batches and saves a checkpoint so it can resume where '
+        'it left off across runs. Requires an AcoustID API key (set in Settings).\n\n'
+        'Settings:\n'
+        '- Fingerprint Threshold: Minimum AcoustID match confidence (0.0 - 1.0)\n'
+        '- Title Similarity: How closely the identified title must match your expected title\n'
+        '- Artist Similarity: How closely the identified artist must match\n'
+        '- Batch Size: Number of tracks to process per scan run'
+    )
     icon = 'repair-icon-acoustid'
     default_enabled = False
     default_interval_hours = 168

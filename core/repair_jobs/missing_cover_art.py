@@ -12,6 +12,15 @@ class MissingCoverArtJob(RepairJob):
     job_id = 'missing_cover_art'
     display_name = 'Cover Art Filler'
     description = 'Finds albums missing artwork and locates art from Spotify/iTunes'
+    help_text = (
+        'Scans your library for albums that have no cover art stored in the database. '
+        'For each missing cover, it searches Spotify and iTunes APIs using the album name '
+        'and artist to find matching artwork.\n\n'
+        'When artwork is found, a finding is created with the image URL so you can review '
+        'and apply it. The job does not download or embed artwork automatically.\n\n'
+        'Settings:\n'
+        '- Prefer Source: Which API to try first for artwork (spotify or itunes)'
+    )
     icon = 'repair-icon-coverart'
     default_enabled = True
     default_interval_hours = 48
