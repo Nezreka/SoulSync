@@ -4827,9 +4827,19 @@ async function loadSettingsData() {
         // Populate Database settings
         document.getElementById('max-workers').value = settings.database?.max_workers || '5';
 
-        // Populate Metadata Enhancement settings
+        // Populate Post-Processing settings
         document.getElementById('metadata-enabled').checked = settings.metadata_enhancement?.enabled !== false;
         document.getElementById('embed-album-art').checked = settings.metadata_enhancement?.embed_album_art !== false;
+        document.getElementById('cover-art-download').checked = settings.metadata_enhancement?.cover_art_download !== false;
+        document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
+        document.getElementById('embed-musicbrainz').checked = settings.musicbrainz?.embed_tags !== false;
+        document.getElementById('embed-deezer').checked = settings.deezer?.embed_tags !== false;
+        document.getElementById('embed-audiodb').checked = settings.audiodb?.embed_tags !== false;
+        document.getElementById('embed-tidal').checked = settings.tidal?.embed_tags !== false;
+        document.getElementById('embed-qobuz').checked = settings.qobuz?.embed_tags !== false;
+        document.getElementById('embed-lastfm').checked = settings.lastfm?.embed_tags !== false;
+        document.getElementById('embed-genius').checked = settings.genius?.embed_tags !== false;
+        document.getElementById('post-processing-options').style.display = settings.metadata_enhancement?.enabled !== false ? 'block' : 'none';
 
         // Populate File Organization settings
         document.getElementById('file-organization-enabled').checked = settings.file_organization?.enabled !== false;
@@ -5571,7 +5581,8 @@ async function saveSettings(quiet = false) {
         tidal: {
             client_id: document.getElementById('tidal-client-id').value,
             client_secret: document.getElementById('tidal-client-secret').value,
-            redirect_uri: document.getElementById('tidal-redirect-uri').value
+            redirect_uri: document.getElementById('tidal-redirect-uri').value,
+            embed_tags: document.getElementById('embed-tidal').checked
         },
         plex: {
             base_url: document.getElementById('plex-url').value,
@@ -5604,10 +5615,12 @@ async function saveSettings(quiet = false) {
             enabled: document.getElementById('acoustid-enabled').checked
         },
         lastfm: {
-            api_key: document.getElementById('lastfm-api-key').value
+            api_key: document.getElementById('lastfm-api-key').value,
+            embed_tags: document.getElementById('embed-lastfm').checked
         },
         genius: {
-            access_token: document.getElementById('genius-access-token').value
+            access_token: document.getElementById('genius-access-token').value,
+            embed_tags: document.getElementById('embed-genius').checked
         },
         itunes: {
             country: document.getElementById('itunes-country').value || 'US'
@@ -5621,14 +5634,26 @@ async function saveSettings(quiet = false) {
             quality: document.getElementById('tidal-download-quality').value || 'lossless'
         },
         qobuz: {
-            quality: document.getElementById('qobuz-quality').value || 'lossless'
+            quality: document.getElementById('qobuz-quality').value || 'lossless',
+            embed_tags: document.getElementById('embed-qobuz').checked
         },
         database: {
             max_workers: parseInt(document.getElementById('max-workers').value)
         },
         metadata_enhancement: {
             enabled: document.getElementById('metadata-enabled').checked,
-            embed_album_art: document.getElementById('embed-album-art').checked
+            embed_album_art: document.getElementById('embed-album-art').checked,
+            cover_art_download: document.getElementById('cover-art-download').checked,
+            lrclib_enabled: document.getElementById('lrclib-enabled').checked
+        },
+        musicbrainz: {
+            embed_tags: document.getElementById('embed-musicbrainz').checked
+        },
+        deezer: {
+            embed_tags: document.getElementById('embed-deezer').checked
+        },
+        audiodb: {
+            embed_tags: document.getElementById('embed-audiodb').checked
         },
         file_organization: {
             enabled: document.getElementById('file-organization-enabled').checked,
