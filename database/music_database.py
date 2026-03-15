@@ -1128,31 +1128,60 @@ class MusicDatabase:
             if has_not_null:
                 logger.info("Migrating watchlist_artists table to make spotify_artist_id nullable...")
 
+                # Check if old table already has profile_id (from profile migration)
+                old_has_profile = 'profile_id' in columns
+
                 # Drop leftover temp table from any previous failed migration
                 cursor.execute("DROP TABLE IF EXISTS watchlist_artists_new")
 
                 # Create new table with nullable spotify_artist_id
-                cursor.execute("""
-                    CREATE TABLE watchlist_artists_new (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        spotify_artist_id TEXT UNIQUE,
-                        artist_name TEXT NOT NULL,
-                        date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        last_scan_timestamp TIMESTAMP,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        image_url TEXT,
-                        include_albums INTEGER DEFAULT 1,
-                        include_eps INTEGER DEFAULT 1,
-                        include_singles INTEGER DEFAULT 1,
-                        include_live INTEGER DEFAULT 0,
-                        include_remixes INTEGER DEFAULT 0,
-                        include_acoustic INTEGER DEFAULT 0,
-                        include_compilations INTEGER DEFAULT 0,
-                        itunes_artist_id TEXT
-                    )
-                """)
-                
+                # Include profile_id + composite UNIQUE if old table had profile support
+                if old_has_profile:
+                    cursor.execute("""
+                        CREATE TABLE watchlist_artists_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            spotify_artist_id TEXT,
+                            artist_name TEXT NOT NULL,
+                            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            last_scan_timestamp TIMESTAMP,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            image_url TEXT,
+                            include_albums INTEGER DEFAULT 1,
+                            include_eps INTEGER DEFAULT 1,
+                            include_singles INTEGER DEFAULT 1,
+                            include_live INTEGER DEFAULT 0,
+                            include_remixes INTEGER DEFAULT 0,
+                            include_acoustic INTEGER DEFAULT 0,
+                            include_compilations INTEGER DEFAULT 0,
+                            itunes_artist_id TEXT,
+                            profile_id INTEGER DEFAULT 1,
+                            UNIQUE(profile_id, spotify_artist_id),
+                            UNIQUE(profile_id, itunes_artist_id)
+                        )
+                    """)
+                else:
+                    cursor.execute("""
+                        CREATE TABLE watchlist_artists_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            spotify_artist_id TEXT UNIQUE,
+                            artist_name TEXT NOT NULL,
+                            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            last_scan_timestamp TIMESTAMP,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            image_url TEXT,
+                            include_albums INTEGER DEFAULT 1,
+                            include_eps INTEGER DEFAULT 1,
+                            include_singles INTEGER DEFAULT 1,
+                            include_live INTEGER DEFAULT 0,
+                            include_remixes INTEGER DEFAULT 0,
+                            include_acoustic INTEGER DEFAULT 0,
+                            include_compilations INTEGER DEFAULT 0,
+                            itunes_artist_id TEXT
+                        )
+                    """)
+
                 # Copy data from old table (only columns that exist in both)
                 cursor.execute("PRAGMA table_info(watchlist_artists)")
                 old_cols = [col[1] for col in cursor.fetchall()]
@@ -1160,19 +1189,21 @@ class MusicDatabase:
                             'last_scan_timestamp', 'created_at', 'updated_at', 'image_url',
                             'include_albums', 'include_eps', 'include_singles', 'include_live',
                             'include_remixes', 'include_acoustic', 'include_compilations',
-                            'itunes_artist_id']
+                            'itunes_artist_id', 'profile_id']
                 shared_cols = [c for c in new_cols if c in old_cols]
                 cols_str = ', '.join(shared_cols)
                 cursor.execute(f"INSERT INTO watchlist_artists_new ({cols_str}) SELECT {cols_str} FROM watchlist_artists")
-                
+
                 # Drop old table
                 cursor.execute("DROP TABLE watchlist_artists")
-                
+
                 # Rename new table
                 cursor.execute("ALTER TABLE watchlist_artists_new RENAME TO watchlist_artists")
-                
+
                 # Recreate indexes
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_spotify_id ON watchlist_artists (spotify_artist_id)")
+                if old_has_profile:
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_profile ON watchlist_artists (profile_id)")
                 
                 logger.info("Successfully migrated watchlist_artists table - spotify_artist_id is now nullable")
             else:
@@ -1767,8 +1798,27 @@ class MusicDatabase:
         try:
             # Check if migration already applied
             cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_migration_v1' LIMIT 1")
-            if cursor.fetchone():
-                return  # Already migrated
+            already_migrated = cursor.fetchone() is not None
+
+            # Even if already migrated, ensure profile_id columns exist on all tables
+            # (another migration may have rebuilt a table without profile_id)
+            tables_needing_profile_id = [
+                'watchlist_artists', 'wishlist_tracks', 'similar_artists',
+                'discovery_pool', 'discovery_recent_albums', 'discovery_curated_playlists',
+                'bubble_snapshots', 'recent_releases'
+            ]
+            for table in tables_needing_profile_id:
+                try:
+                    cursor.execute(f"PRAGMA table_info({table})")
+                    columns = [col[1] for col in cursor.fetchall()]
+                    if 'profile_id' not in columns:
+                        cursor.execute(f"ALTER TABLE {table} ADD COLUMN profile_id INTEGER DEFAULT 1")
+                        logger.info(f"Repaired missing profile_id column on {table}")
+                except Exception:
+                    pass
+
+            if already_migrated:
+                return  # Rest of migration already done
 
             logger.info("Adding multi-profile support...")
 
@@ -1791,22 +1841,7 @@ class MusicDatabase:
                 VALUES (1, 'Admin', 1)
             """)
 
-            # 3. Add profile_id column to per-profile tables
-            tables_needing_profile_id = [
-                'watchlist_artists', 'wishlist_tracks', 'similar_artists',
-                'discovery_pool', 'discovery_recent_albums', 'discovery_curated_playlists',
-                'bubble_snapshots', 'recent_releases'
-            ]
-
-            for table in tables_needing_profile_id:
-                try:
-                    cursor.execute(f"PRAGMA table_info({table})")
-                    columns = [col[1] for col in cursor.fetchall()]
-                    if 'profile_id' not in columns:
-                        cursor.execute(f"ALTER TABLE {table} ADD COLUMN profile_id INTEGER DEFAULT 1")
-                        logger.info(f"Added profile_id column to {table}")
-                except Exception as e:
-                    logger.warning(f"Could not add profile_id to {table}: {e}")
+            # 3. profile_id columns already ensured above (before early-return guard)
 
             # 4. Rebuild watchlist_artists to change UNIQUE constraint
             #    Old: UNIQUE(spotify_artist_id)
