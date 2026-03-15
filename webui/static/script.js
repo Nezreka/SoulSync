@@ -50438,8 +50438,17 @@ async function loadRepairFindings() {
         container.innerHTML = items.map(f => {
             const icon = severityIcons[f.severity] || 'ℹ️';
             const age = formatCacheAge(f.created_at);
-            const statusBadge = f.status !== 'pending' ?
-                `<span class="repair-finding-status-badge ${f.status}">${f.status}</span>` : '';
+            const actionLabels = {
+                removed_db_entry: 'Entry Removed', deleted_file: 'File Deleted',
+                already_gone: 'Already Gone', fixed_track_number: 'Track # Fixed',
+                applied_cover_art: 'Art Applied', applied_metadata: 'Metadata Applied',
+                removed_duplicates: 'Duplicates Removed',
+            };
+            let statusBadge = '';
+            if (f.status !== 'pending') {
+                const actionText = actionLabels[f.user_action] || f.status;
+                statusBadge = `<span class="repair-finding-status-badge ${f.status}">${actionText}</span>`;
+            }
             const typeLabel = typeLabels[f.finding_type] || f.finding_type.replace(/_/g, ' ');
             const d = f.details || {};
             const filePath = f.file_path || d.original_path || d.file_path || '';
@@ -50555,41 +50564,76 @@ function _renderFindingDetail(f) {
             if (f.file_path) rows.push(['File', f.file_path, 'path']);
             return _gridRows(rows);
 
-        case 'fake_lossless':
+        case 'fake_lossless': {
+            const cutoff = d.detected_cutoff_khz || 0;
+            const expectedMin = d.expected_min_khz || 0;
+            const nyquist = d.nyquist_khz || (d.sample_rate ? d.sample_rate / 2000 : 22.05);
+            let flHtml = '';
+            if (cutoff && expectedMin) {
+                const cutoffPct = Math.min(100, Math.round((cutoff / nyquist) * 100));
+                const expectedPct = Math.min(100, Math.round((expectedMin / nyquist) * 100));
+                flHtml += `<div class="repair-spectrum-bar">
+                    <div class="repair-spectrum-label">Spectral Analysis</div>
+                    <div class="repair-spectrum-track">
+                        <div class="repair-spectrum-detected" style="width:${cutoffPct}%"></div>
+                        <div class="repair-spectrum-expected" style="left:${expectedPct}%"></div>
+                    </div>
+                    <div class="repair-spectrum-legend">
+                        <span class="repair-spectrum-legend-detected">${cutoff} kHz detected</span>
+                        <span class="repair-spectrum-legend-expected">${expectedMin} kHz expected min</span>
+                    </div>
+                </div>`;
+            }
             if (d.format) rows.push(['Format', d.format.toUpperCase()]);
-            rows.push(['Spectral Cutoff', `${d.detected_cutoff_khz || '?'} kHz`]);
-            rows.push(['Expected Min', `${d.expected_min_khz || '?'} kHz`]);
             if (d.sample_rate) rows.push(['Sample Rate', `${d.sample_rate} Hz`]);
-            if (d.nyquist_khz) rows.push(['Nyquist', `${d.nyquist_khz} kHz`]);
             if (d.bit_depth) rows.push(['Bit Depth', `${d.bit_depth}-bit`]);
             if (d.bitrate) rows.push(['Bitrate', `${d.bitrate} kbps`]);
             if (d.file_size) rows.push(['File Size', _formatFileSize(d.file_size)]);
             if (f.file_path) rows.push(['File', f.file_path, 'path']);
-            return _gridRows(rows);
+            return flHtml + _gridRows(rows);
+        }
 
         case 'duplicate_tracks':
             if (!d.tracks || !d.tracks.length) return _gridRows([['Count', d.count || '?']]);
-            return `<div class="repair-detail-sublist">${d.tracks.map((t, i) => `
-                <div class="repair-detail-subitem">
-                    <strong>Copy ${i + 1}: ${_escFinding(t.title)} by ${_escFinding(t.artist)}</strong>
-                    <span>Album: ${_escFinding(t.album || 'Unknown')}</span>
-                    ${t.bitrate ? `<span>Bitrate: ${t.bitrate} kbps${t.duration ? ` &middot; Duration: ${Math.round(t.duration)}s` : ''}</span>` : ''}
+            // Determine best copy (same logic as backend: highest bitrate, then duration)
+            const bestDup = d.tracks.reduce((best, t) => {
+                const bBr = best.bitrate || 0, tBr = t.bitrate || 0;
+                const bDur = best.duration || 0, tDur = t.duration || 0;
+                return (tBr > bBr || (tBr === bBr && tDur > bDur)) ? t : best;
+            }, d.tracks[0]);
+            return `<div class="repair-detail-sublist">${d.tracks.map((t, i) => {
+                const isBest = t.id === bestDup.id;
+                return `<div class="repair-detail-subitem ${isBest ? 'best' : 'removable'}">
+                    <strong>
+                        ${isBest ? '<span class="repair-keep-badge">KEEP</span>' : '<span class="repair-remove-badge">REMOVE</span>'}
+                        ${_escFinding(t.title)} by ${_escFinding(t.artist)}
+                    </strong>
+                    <span>Album: ${_escFinding(t.album || 'Unknown')}${t.bitrate ? ` &middot; ${t.bitrate} kbps` : ''}${t.duration ? ` &middot; ${Math.round(t.duration)}s` : ''}</span>
                     ${t.file_path ? `<span class="mono">${_escFinding(t.file_path)}</span>` : ''}
-                </div>`).join('')}</div>`;
+                </div>`;
+            }).join('')}</div>`;
 
         case 'incomplete_album':
             if (d.artist) rows.push(['Artist', d.artist]);
             if (d.album_title) rows.push(['Album', d.album_title]);
-            rows.push(['Tracks Found', `${d.actual_tracks || '?'} of ${d.expected_tracks || '?'}`]);
             if (d.spotify_album_id) rows.push(['Spotify ID', d.spotify_album_id]);
+            let incHtml = _gridRows(rows);
+            const actual = d.actual_tracks || 0, expected = d.expected_tracks || 0;
+            if (expected > 0) {
+                const pct = Math.round((actual / expected) * 100);
+                incHtml += `<div class="repair-completion-bar">
+                    <div class="repair-completion-label">${actual} of ${expected} tracks (${pct}%)</div>
+                    <div class="repair-completion-track"><div class="repair-completion-fill" style="width:${pct}%"></div></div>
+                </div>`;
+            }
             if (d.missing_tracks && d.missing_tracks.length) {
-                return _gridRows(rows) + `<div class="repair-detail-sublist">${d.missing_tracks.map(t => `
+                incHtml += `<div class="repair-detail-sublist">${d.missing_tracks.map(t => `
                     <div class="repair-detail-subitem">
                         <strong>#${t.track_number || '?'} ${_escFinding(t.name || t.title || 'Unknown')}</strong>
                         ${t.duration_ms ? `<span>Duration: ${Math.round(t.duration_ms / 1000)}s</span>` : ''}
                     </div>`).join('')}</div>`;
             }
-            return _gridRows(rows);
+            return incHtml;
 
         case 'path_mismatch':
             if (d.from) rows.push(['Current Path', d.from, 'path']);
@@ -50612,8 +50656,15 @@ function _renderFindingDetail(f) {
             if (d.artist) rows.push(['Artist', d.artist]);
             if (d.album_title) rows.push(['Album', d.album_title]);
             if (d.spotify_album_id) rows.push(['Spotify ID', d.spotify_album_id]);
-            if (d.found_artwork_url) rows.push(['Artwork URL', d.found_artwork_url, 'success']);
-            return _gridRows(rows);
+            let artHtml = _gridRows(rows);
+            if (d.found_artwork_url) {
+                artHtml += `<div class="repair-artwork-preview">
+                    <img src="${_escFinding(d.found_artwork_url)}" alt="Album artwork"
+                         onerror="this.parentElement.innerHTML='<span>Image failed to load</span>'" />
+                    <span class="repair-artwork-label">Found artwork</span>
+                </div>`;
+            }
+            return artHtml;
 
         case 'track_number_mismatch':
             if (d.matched_title) rows.push(['Matched To', d.matched_title]);
