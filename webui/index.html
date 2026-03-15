@@ -5612,7 +5612,13 @@
     <div class="repair-modal-overlay" id="repair-modal" style="display:none;" onclick="if(event.target===this)closeRepairModal()">
         <div class="repair-modal">
             <div class="repair-modal-header">
-                <h2 class="repair-modal-title">Library Maintenance</h2>
+                <div class="repair-modal-header-left">
+                    <img src="/static/whisoul.png" alt="" class="repair-modal-logo" />
+                    <div class="repair-modal-header-text">
+                        <h2 class="repair-modal-title">Library Maintenance</h2>
+                        <p class="repair-modal-subtitle">Scan, detect, and fix issues in your music library</p>
+                    </div>
+                </div>
                 <div class="repair-modal-header-actions">
                     <label class="repair-master-toggle">
                         <input type="checkbox" id="repair-master-toggle" onchange="toggleRepairMaster()">

@@ -50754,7 +50754,9 @@ function renderRepairFindingsPagination(total, currentPage) {
 async function fixRepairFinding(id) {
     const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
     const fixBtn = card ? card.querySelector('.repair-finding-btn.fix') : null;
+    let originalText = '';
     if (fixBtn) {
+        originalText = fixBtn.textContent;
         fixBtn.disabled = true;
         fixBtn.textContent = '...';
     }
@@ -50774,7 +50776,7 @@ async function fixRepairFinding(id) {
         showToast('Error applying fix', 'error');
         if (fixBtn) {
             fixBtn.disabled = false;
-            fixBtn.textContent = 'Fix';
+            fixBtn.textContent = originalText;
         }
     }
 }
