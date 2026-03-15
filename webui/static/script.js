@@ -10692,14 +10692,13 @@ async function selectWishlistCategory(category) {
 
                 const tracksListHTML = albumData.tracks.map(track => `
                     <div class="wishlist-album-track wishlist-track-item">
-                        <label class="wishlist-checkbox-wrapper" onclick="event.stopPropagation();">
+                        <label class="wishlist-checkbox-wrapper">
                             <input type="checkbox" class="wishlist-select-cb"
-                                   data-track-id="${track.spotifyTrackId}"
-                                   onchange="updateWishlistBatchBar()">
+                                   data-track-id="${track.spotifyTrackId}">
                             <span class="wishlist-checkbox-custom"></span>
                         </label>
                         <span class="wishlist-album-track-name">${track.name}</span>
-                        <button class="wishlist-delete-btn wishlist-delete-btn-small" onclick="removeTrackFromWishlist('${track.spotifyTrackId}', event)" title="Remove from wishlist">
+                        <button class="wishlist-delete-btn wishlist-delete-btn-small" data-track-id="${track.spotifyTrackId}" title="Remove from wishlist">
                             🗑️
                         </button>
                     </div>
@@ -10713,11 +10712,10 @@ async function selectWishlistCategory(category) {
 
                 albumsHTML += `
                     <div class="wishlist-album-card">
-                        <div class="wishlist-album-header" onclick="toggleAlbumTracks('${albumId}')">
-                            <label class="wishlist-checkbox-wrapper" onclick="event.stopPropagation();">
+                        <div class="wishlist-album-header" data-album-id="${albumId}">
+                            <label class="wishlist-checkbox-wrapper">
                                 <input type="checkbox" class="wishlist-album-select-all-cb"
-                                       data-album-id="${albumId}"
-                                       onchange="toggleWishlistAlbumSelection('${albumId}', this.checked)">
+                                       data-album-id="${albumId}">
                                 <span class="wishlist-checkbox-custom"></span>
                             </label>
                             <div class="wishlist-album-image" style="${albumImageStyle}">${albumImageContent}</div>
@@ -10726,7 +10724,7 @@ async function selectWishlistCategory(category) {
                                 <div class="wishlist-album-artist">${albumData.artistName}</div>
                                 <div class="wishlist-album-track-count">${albumData.tracks.length} track${albumData.tracks.length !== 1 ? 's' : ''}</div>
                             </div>
-                            <button class="wishlist-delete-btn wishlist-delete-album-btn" onclick="removeAlbumFromWishlist('${albumId}', event)" title="Remove all tracks from album">
+                            <button class="wishlist-delete-btn wishlist-delete-album-btn" data-album-id="${albumId}" title="Remove all tracks from album">
                                 🗑️
                             </button>
                             <div class="wishlist-album-expand-icon" id="expand-icon-${albumId}">▼</div>
@@ -10740,6 +10738,7 @@ async function selectWishlistCategory(category) {
             albumsHTML += '</div>';
 
             tracksList.innerHTML = albumsHTML;
+            _attachWishlistDelegation(tracksList);
 
         } else {
             // For Singles, show list with album images
@@ -10781,10 +10780,9 @@ async function selectWishlistCategory(category) {
 
                 tracksHTML += `
                     <div class="playlist-track-item-with-image wishlist-track-item">
-                        <label class="wishlist-checkbox-wrapper" onclick="event.stopPropagation();">
+                        <label class="wishlist-checkbox-wrapper">
                             <input type="checkbox" class="wishlist-select-cb"
-                                   data-track-id="${spotifyTrackId}"
-                                   onchange="updateWishlistBatchBar()">
+                                   data-track-id="${spotifyTrackId}">
                             <span class="wishlist-checkbox-custom"></span>
                         </label>
                         <div class="playlist-track-image" style="background-image: url('${albumImage}')"></div>
@@ -10792,7 +10790,7 @@ async function selectWishlistCategory(category) {
                             <div class="playlist-track-name">${trackName}</div>
                             <div class="playlist-track-artist">${artistName} • ${albumName}</div>
                         </div>
-                        <button class="wishlist-delete-btn" onclick="removeTrackFromWishlist('${spotifyTrackId}', event)" title="Remove from wishlist">
+                        <button class="wishlist-delete-btn" data-track-id="${spotifyTrackId}" title="Remove from wishlist">
                             🗑️
                         </button>
                     </div>
@@ -10800,12 +10798,56 @@ async function selectWishlistCategory(category) {
             });
 
             tracksList.innerHTML = tracksHTML;
+            _attachWishlistDelegation(tracksList);
         }
 
     } catch (error) {
         console.error('Error loading category tracks:', error);
         showToast(`Failed to load tracks: ${error.message}`, 'error');
     }
+}
+
+function _attachWishlistDelegation(container) {
+    // Single click handler for all wishlist album/track interactions
+    container.addEventListener('click', (e) => {
+        const target = e.target;
+
+        // Skip checkbox wrapper clicks — handled by change listener
+        if (target.closest('.wishlist-checkbox-wrapper')) return;
+
+        // Album header click (expand/collapse)
+        const header = target.closest('.wishlist-album-header');
+        if (header && !target.closest('.wishlist-delete-album-btn')) {
+            toggleAlbumTracks(header.dataset.albumId);
+            return;
+        }
+
+        // Album delete button
+        const albumDelBtn = target.closest('.wishlist-delete-album-btn');
+        if (albumDelBtn) {
+            e.stopPropagation();
+            removeAlbumFromWishlist(albumDelBtn.dataset.albumId, e);
+            return;
+        }
+
+        // Track delete button
+        const trackDelBtn = target.closest('.wishlist-delete-btn');
+        if (trackDelBtn && trackDelBtn.dataset.trackId) {
+            e.stopPropagation();
+            removeTrackFromWishlist(trackDelBtn.dataset.trackId, e);
+            return;
+        }
+    });
+
+    // Separate change handler for checkboxes (more reliable than click for inputs)
+    container.addEventListener('change', (e) => {
+        const target = e.target;
+        if (target.classList.contains('wishlist-album-select-all-cb')) {
+            toggleWishlistAlbumSelection(target.dataset.albumId, target.checked);
+        } else if (target.classList.contains('wishlist-select-cb')) {
+            updateWishlistBatchBar();
+        }
+    });
 }
 
 function backToCategories() {
@@ -19282,9 +19324,9 @@ function renderRetagGroups(groups, container) {
             const defaultQuery = (artist + ' ' + (group.album_name || '')).trim();
 
             html += `<div class="retag-group-card" data-group-id="${group.id}">
-                <div class="retag-group-header" onclick="toggleRetagGroup(${group.id})">
-                    <label class="retag-group-checkbox" onclick="event.stopPropagation();">
-                        <input type="checkbox" class="retag-select-cb" data-group-id="${group.id}" onchange="updateRetagBatchBar()">
+                <div class="retag-group-header" data-group-id="${group.id}" data-default-query="${escapeHtml(defaultQuery).replace(/"/g, '&quot;')}">
+                    <label class="retag-group-checkbox">
+                        <input type="checkbox" class="retag-select-cb" data-group-id="${group.id}">
                         <span class="retag-checkbox-custom"></span>
                     </label>
                     ${imgHtml}
@@ -19292,9 +19334,9 @@ function renderRetagGroups(groups, container) {
                         <span class="retag-group-album">${escapeHtml(group.album_name || 'Unknown')}</span>
                         <span class="retag-group-meta">${typeLabel}${releaseDate ? ' \u00b7 ' + releaseDate : ''} \u00b7 ${trackCount} track${trackCount !== 1 ? 's' : ''}</span>
                     </div>
-                    <button class="retag-group-btn" onclick="event.stopPropagation(); openRetagSearch(${group.id}, '${escapeHtml(defaultQuery).replace(/'/g, "\\'")}')" title="Re-tag with different album">Retag</button>
+                    <button class="retag-group-btn" data-group-id="${group.id}" title="Re-tag with different album">Retag</button>
                     <div class="retag-group-delete-area" id="retag-delete-area-${group.id}">
-                        <button class="retag-group-delete-btn" onclick="event.stopPropagation(); showRetagDeleteConfirm(${group.id})" title="Remove from list">&times;</button>
+                        <button class="retag-group-delete-btn" data-group-id="${group.id}" title="Remove from list">&times;</button>
                     </div>
                 </div>
                 <div class="retag-group-tracks" id="retag-tracks-${group.id}" style="display:none;">
@@ -19307,6 +19349,66 @@ function renderRetagGroups(groups, container) {
     });
 
     container.innerHTML = html;
+    _attachRetagDelegation(container);
+}
+
+function _attachRetagDelegation(container) {
+    // Single click handler for all retag group interactions
+    container.addEventListener('click', (e) => {
+        const target = e.target;
+
+        // Skip checkbox wrapper clicks — handled by change listener
+        if (target.closest('.retag-group-checkbox')) return;
+
+        // Retag button
+        const retagBtn = target.closest('.retag-group-btn');
+        if (retagBtn) {
+            e.stopPropagation();
+            const groupId = parseInt(retagBtn.dataset.groupId);
+            const header = retagBtn.closest('.retag-group-header');
+            const defaultQuery = header ? header.dataset.defaultQuery || '' : '';
+            openRetagSearch(groupId, defaultQuery);
+            return;
+        }
+
+        // Delete confirm buttons (dynamically injected)
+        const confirmYes = target.closest('.retag-confirm-yes');
+        if (confirmYes) {
+            e.stopPropagation();
+            const card = confirmYes.closest('.retag-group-card');
+            if (card) executeRetagGroupDelete(parseInt(card.dataset.groupId));
+            return;
+        }
+        const confirmNo = target.closest('.retag-confirm-no');
+        if (confirmNo) {
+            e.stopPropagation();
+            const card = confirmNo.closest('.retag-group-card');
+            if (card) cancelRetagDeleteConfirm(parseInt(card.dataset.groupId));
+            return;
+        }
+
+        // Delete button
+        const delBtn = target.closest('.retag-group-delete-btn');
+        if (delBtn) {
+            e.stopPropagation();
+            showRetagDeleteConfirm(parseInt(delBtn.dataset.groupId));
+            return;
+        }
+
+        // Group header click (expand/collapse)
+        const header = target.closest('.retag-group-header');
+        if (header) {
+            toggleRetagGroup(parseInt(header.dataset.groupId));
+            return;
+        }
+    });
+
+    // Separate change handler for checkboxes
+    container.addEventListener('change', (e) => {
+        if (e.target.classList.contains('retag-select-cb')) {
+            updateRetagBatchBar();
+        }
+    });
 }
 
 async function toggleRetagGroup(groupId) {
@@ -19581,15 +19683,15 @@ function showRetagDeleteConfirm(groupId) {
     if (!area) return;
     area.innerHTML = `<div class="retag-confirm-inline">
         <span>Remove?</span>
-        <button class="retag-confirm-yes" onclick="event.stopPropagation(); executeRetagGroupDelete(${groupId})">Yes</button>
-        <button class="retag-confirm-no" onclick="event.stopPropagation(); cancelRetagDeleteConfirm(${groupId})">No</button>
+        <button class="retag-confirm-yes">Yes</button>
+        <button class="retag-confirm-no">No</button>
     </div>`;
 }
 
 function cancelRetagDeleteConfirm(groupId) {
     const area = document.getElementById(`retag-delete-area-${groupId}`);
     if (!area) return;
-    area.innerHTML = `<button class="retag-group-delete-btn" onclick="event.stopPropagation(); showRetagDeleteConfirm(${groupId})" title="Remove from list">&times;</button>`;
+    area.innerHTML = `<button class="retag-group-delete-btn" data-group-id="${groupId}" title="Remove from list">&times;</button>`;
 }
 
 async function executeRetagGroupDelete(groupId) {
