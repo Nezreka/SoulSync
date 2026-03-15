@@ -40371,3 +40371,113 @@ tr.tag-diff-same {
         align-self: flex-end;
     }
 }
+
+/* ── Repair Job Live Progress Panel ── */
+.repair-job-card.running {
+    border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.35);
+    box-shadow: 0 0 12px rgba(var(--accent-rgb, 99, 102, 241), 0.1);
+}
+
+@keyframes repair-card-pulse {
+    0%, 100% { box-shadow: 0 0 8px rgba(var(--accent-rgb, 99, 102, 241), 0.08); }
+    50% { box-shadow: 0 0 16px rgba(var(--accent-rgb, 99, 102, 241), 0.18); }
+}
+
+.repair-job-card.running {
+    animation: repair-card-pulse 2s ease-in-out infinite;
+}
+
+.repair-job-status-pill.finished {
+    background: rgba(34, 197, 94, 0.12);
+    color: #22c55e;
+}
+
+.repair-job-status-pill.error {
+    background: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+}
+
+.repair-job-icon {
+    display: flex;
+    align-items: center;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.repair-job-progress {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease, padding 0.3s ease;
+    padding: 0 16px;
+}
+
+.repair-job-progress.visible {
+    max-height: 300px;
+    padding: 10px 16px 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.repair-progress-phase {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.55);
+    margin-bottom: 6px;
+    font-weight: 500;
+}
+
+.repair-progress-bar-wrap {
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.repair-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, rgb(var(--accent-rgb, 99, 102, 241)), rgb(var(--accent-light-rgb, 129, 140, 248)));
+    transition: width 0.5s ease;
+    border-radius: 2px;
+}
+
+.repair-job-progress.finished .repair-progress-bar {
+    background: #4ade80;
+}
+
+.repair-job-progress.error .repair-progress-bar {
+    background: #ef4444;
+}
+
+.repair-progress-log {
+    max-height: 160px;
+    overflow-y: auto;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 10px;
+    line-height: 1.5;
+}
+
+.repair-progress-log::-webkit-scrollbar {
+    width: 4px;
+}
+
+.repair-progress-log::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+}
+
+.repair-log-line {
+    padding: 1px 0;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.repair-log-line.success {
+    color: #4ade80;
+}
+
+.repair-log-line.error {
+    color: #f87171;
+}
+
+.repair-log-line.skip {
+    color: rgba(255, 255, 255, 0.25);
+}

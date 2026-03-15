@@ -29,13 +29,14 @@ _PLACEHOLDER_IDS = {
 class TrackNumberRepairJob(RepairJob):
     job_id = 'track_number_repair'
     display_name = 'Track Number Repair'
-    description = 'Fixes mismatched track numbers using API lookups'
+    description = 'Detects mismatched track numbers using API lookups (dry run by default)'
     icon = 'repair-icon-tracknumber'
     default_enabled = True
     default_interval_hours = 24
     default_settings = {
         'anomaly_threshold': 3,
         'title_similarity': 0.80,
+        'dry_run': True,
     }
     auto_fix = True
 
@@ -44,11 +45,13 @@ class TrackNumberRepairJob(RepairJob):
         settings = self._get_settings(context)
         anomaly_threshold = settings.get('anomaly_threshold', 3)
         title_similarity = settings.get('title_similarity', 0.80)
+        dry_run = settings.get('dry_run', True)
 
         # Thread-local state to avoid race conditions with concurrent scan_folders()
         scan_state = {
             'album_tracks_cache': {},
             'title_similarity': title_similarity,
+            'dry_run': dry_run,
         }
 
         transfer = context.transfer_folder
@@ -162,14 +165,32 @@ class TrackNumberRepairJob(RepairJob):
 
         # Process each file
         title_sim = scan_state.get('title_similarity', 0.80)
+        dry_run = scan_state.get('dry_run', True)
         for fpath, fname, _ in file_track_data:
             if context.check_stop():
                 return result
 
             result.scanned += 1
             try:
-                if _repair_single_track(fpath, fname, api_tracks, len(api_tracks), title_sim, context):
-                    result.auto_fixed += 1
+                if dry_run:
+                    finding = _check_single_track(fpath, fname, api_tracks, len(api_tracks), title_sim)
+                    if finding:
+                        if context.create_finding:
+                            context.create_finding(
+                                job_id=self.job_id,
+                                finding_type='track_number_mismatch',
+                                severity='warning',
+                                entity_type='file',
+                                entity_id=None,
+                                file_path=fpath,
+                                title=f'Track number fix: {os.path.basename(fpath)}',
+                                description=finding['description'],
+                                details=finding['details']
+                            )
+                            result.findings_created += 1
+                else:
+                    if _repair_single_track(fpath, fname, api_tracks, len(api_tracks), title_sim, context):
+                        result.auto_fixed += 1
             except Exception as e:
                 logger.error("Error repairing %s: %s", fpath, e, exc_info=True)
                 result.errors += 1
@@ -309,6 +330,7 @@ class TrackNumberRepairJob(RepairJob):
         scan_state = {
             'album_tracks_cache': {},
             'title_similarity': settings.get('title_similarity', 0.80),
+            'dry_run': settings.get('dry_run', True),
         }
 
         for folder_path in folders:
@@ -768,6 +790,65 @@ def _lookup_album_ids_from_db(file_track_data: List[Tuple[str, str, Any]],
             conn.close()
 
     return None, None, None
+
+
+def _check_single_track(file_path: str, filename: str, api_tracks: List[Dict],
+                        total_tracks: int, title_similarity: float) -> Optional[Dict]:
+    """Check if a track needs repair and return finding info (dry run mode).
+
+    Returns a dict with 'description' and 'details' if repair is needed, else None.
+    """
+    from mutagen import File as MutagenFile
+
+    audio = MutagenFile(file_path)
+    if audio is None:
+        return None
+
+    file_title = _read_title_tag(audio)
+    matched_track = None
+
+    if file_title:
+        matched_track = _match_title_to_api_track(file_title, api_tracks, title_similarity)
+
+    if not matched_track:
+        basename = os.path.splitext(filename)[0]
+        clean_name = re.sub(r'^\d{1,3}[\s.\-_]*', '', basename).strip()
+        if clean_name:
+            matched_track = _match_title_to_api_track(clean_name, api_tracks, title_similarity)
+
+    if not matched_track:
+        return None
+
+    correct_num = matched_track.get('track_number')
+    if correct_num is None:
+        return None
+
+    current_num, current_total = _read_track_number_tag(audio)
+    if current_num == correct_num and current_total == total_tracks:
+        return None  # Already correct
+
+    changes = []
+    if current_num != correct_num:
+        changes.append(f'Track number: {current_num} -> {correct_num}')
+    if current_total != total_tracks:
+        changes.append(f'Total tracks: {current_total} -> {total_tracks}')
+
+    # Check if filename would change
+    basename_noext = os.path.splitext(filename)[0]
+    new_basename = re.sub(r'^\d{1,3}', f'{correct_num:02d}', basename_noext)
+    if new_basename != basename_noext:
+        changes.append(f'Filename: {filename} -> {new_basename}{os.path.splitext(filename)[1]}')
+
+    return {
+        'description': f'Matched to: "{matched_track.get("name", "?")}"\n' + '\n'.join(changes),
+        'details': {
+            'current_track_num': current_num,
+            'correct_track_num': correct_num,
+            'matched_title': matched_track.get('name', ''),
+            'file_title': file_title or filename,
+            'changes': changes,
+        }
+    }
 
 
 def _repair_single_track(file_path: str, filename: str, api_tracks: List[Dict],

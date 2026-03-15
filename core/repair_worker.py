@@ -68,6 +68,11 @@ class RepairWorker:
         # Config manager (set externally after init)
         self._config_manager = None
 
+        # Rich progress callbacks (set by web_server.py)
+        self._on_job_start = None    # (job_id, display_name) -> None
+        self._on_job_progress = None # (job_id, **kwargs) -> None
+        self._on_job_finish = None   # (job_id, status, result) -> None
+
         # Lazy client accessors
         self._spotify_client = None
         self._itunes_client = None
@@ -80,12 +85,24 @@ class RepairWorker:
     # ------------------------------------------------------------------
     # Config manager
     # ------------------------------------------------------------------
+    def register_progress_callbacks(self, on_start, on_progress, on_finish):
+        """Register callbacks for rich per-job progress reporting.
+
+        Args:
+            on_start: (job_id, display_name) called when a job begins
+            on_progress: (job_id, **kwargs) called for incremental updates
+            on_finish: (job_id, status, result) called when a job ends
+        """
+        self._on_job_start = on_start
+        self._on_job_progress = on_progress
+        self._on_job_finish = on_finish
+
     def set_config_manager(self, config_manager):
         """Set the config manager for persisting job settings."""
         self._config_manager = config_manager
         # Load master enabled state
         if config_manager:
-            self.enabled = config_manager.get('repair.master_enabled', False)
+            self.enabled = config_manager.get('repair.master_enabled', True)
 
     # ------------------------------------------------------------------
     # Lazy client accessors
@@ -453,8 +470,23 @@ class RepairWorker:
         raw = self._get_transfer_path_from_db()
         self.transfer_folder = self._resolve_path(raw)
 
+        # Notify rich progress system
+        if self._on_job_start:
+            try:
+                self._on_job_start(job_id, job.display_name)
+            except Exception:
+                pass
+
         # Record job start
         run_id = self._record_job_start(job_id)
+
+        # Build report_progress callback for this job
+        def _report_progress(**kwargs):
+            if self._on_job_progress:
+                try:
+                    self._on_job_progress(job_id, **kwargs)
+                except Exception:
+                    pass
 
         # Build context
         context = JobContext(
@@ -470,6 +502,7 @@ class RepairWorker:
             should_stop=lambda: self.should_stop,
             is_paused=lambda: not self.enabled,
             update_progress=self._update_progress,
+            report_progress=_report_progress,
         )
 
         start_time = time.time()
@@ -491,6 +524,14 @@ class RepairWorker:
 
         # Record job completion
         self._record_job_finish(run_id, job_id, result, duration)
+
+        # Notify rich progress system of completion
+        if self._on_job_finish:
+            try:
+                status = 'error' if result.errors > 0 and result.auto_fixed == 0 else 'finished'
+                self._on_job_finish(job_id, status, result)
+            except Exception:
+                pass
 
         logger.info(
             "Job %s complete: scanned=%d fixed=%d findings=%d errors=%d (%.1fs)",

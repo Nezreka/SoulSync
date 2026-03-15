@@ -257,6 +257,7 @@ function initializeWebSocket() {
     socket.on('enrichment:qobuz-enrichment', (data) => updateQobuzEnrichmentStatusFromData(data));
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
+    socket.on('repair:progress', (data) => updateRepairJobProgressFromData(data));
 
     // Phase 4 event listeners (tool progress)
     socket.on('tool:stream', (data) => updateStreamStatusFromData(data));
@@ -49860,7 +49861,7 @@ const REPAIR_FINDINGS_PAGE_SIZE = 30;
 /**
  * Open the Library Maintenance modal
  */
-function openRepairModal() {
+async function openRepairModal() {
     const modal = document.getElementById('repair-modal');
     if (!modal) return;
     modal.style.display = 'flex';
@@ -49869,6 +49870,17 @@ function openRepairModal() {
     switchRepairTab('jobs');
     // Load master toggle state
     updateRepairStatus();
+    // Load any active job progress
+    try {
+        const resp = await fetch('/api/repair/progress');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (Object.keys(data).length > 0) {
+                // Brief delay so job cards are rendered first
+                setTimeout(() => updateRepairJobProgressFromData(data), 300);
+            }
+        }
+    } catch (e) { /* ignore */ }
 }
 
 function closeRepairModal() {
@@ -49974,10 +49986,11 @@ async function loadRepairJobs() {
                     </div>`;
             }
 
-            return `<div class="repair-job-card ${statusClass}">
+            return `<div class="repair-job-card ${statusClass}" data-job-id="${job.job_id}">
                 <div class="repair-job-main">
                     <div class="repair-job-info">
                         <div class="repair-job-title">
+                            <span class="repair-job-icon"><span class="${job.icon || 'repair-icon-default'}"></span></span>
                             <span class="repair-job-name">${job.display_name}</span>
                             <span class="repair-job-status-pill ${statusClass}">${statusText}</span>
                             ${job.auto_fix ? '<span class="repair-job-autofix-pill">Auto-fix</span>' : ''}
@@ -50067,6 +50080,94 @@ async function runRepairJobNow(jobId) {
     } catch (error) {
         console.error('Error running job:', error);
         showToast('Error starting job', 'error');
+    }
+}
+
+// ── Repair Job Live Progress ──
+const _repairProgressLogCounts = {};
+const _repairProgressHideTimers = {};
+
+function updateRepairJobProgressFromData(data) {
+    for (const [jobId, state] of Object.entries(data)) {
+        const card = document.querySelector(`.repair-job-card[data-job-id="${jobId}"]`);
+        if (!card) continue;
+
+        // Update status pill
+        const pill = card.querySelector('.repair-job-status-pill');
+        if (pill) {
+            pill.className = 'repair-job-status-pill ' + state.status;
+            if (state.status === 'running') pill.textContent = 'Running';
+            else if (state.status === 'finished') pill.textContent = 'Complete';
+            else if (state.status === 'error') pill.textContent = 'Error';
+        }
+
+        // Add/update card running class
+        card.classList.toggle('running', state.status === 'running');
+
+        // Create or find progress panel
+        let panel = card.querySelector('.repair-job-progress');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.className = 'repair-job-progress';
+            panel.innerHTML = `
+                <div class="repair-progress-phase"></div>
+                <div class="repair-progress-bar-wrap">
+                    <div class="repair-progress-bar" style="width:0%"></div>
+                </div>
+                <div class="repair-progress-log"></div>
+            `;
+            card.appendChild(panel);
+        }
+
+        // Show panel
+        panel.classList.add('visible');
+        panel.classList.toggle('finished', state.status === 'finished');
+        panel.classList.toggle('error', state.status === 'error');
+
+        // Update phase
+        const phaseEl = panel.querySelector('.repair-progress-phase');
+        if (phaseEl && state.phase) phaseEl.textContent = state.phase;
+
+        // Update progress bar
+        const bar = panel.querySelector('.repair-progress-bar');
+        if (bar) bar.style.width = (state.progress || 0) + '%';
+
+        // Update log
+        const logEl = panel.querySelector('.repair-progress-log');
+        if (logEl && state.log) {
+            const prevCount = _repairProgressLogCounts[jobId] || 0;
+            if (state.log.length > prevCount) {
+                const newLines = state.log.slice(prevCount);
+                for (const line of newLines) {
+                    const div = document.createElement('div');
+                    div.className = 'repair-log-line ' + (line.type || 'info');
+                    div.textContent = line.text;
+                    logEl.appendChild(div);
+                }
+                logEl.scrollTop = logEl.scrollHeight;
+            }
+            _repairProgressLogCounts[jobId] = state.log.length;
+        }
+
+        // Auto-hide panel after completion
+        if (state.status === 'finished' || state.status === 'error') {
+            if (!_repairProgressHideTimers[jobId]) {
+                _repairProgressHideTimers[jobId] = setTimeout(() => {
+                    panel.classList.remove('visible');
+                    card.classList.remove('running');
+                    delete _repairProgressHideTimers[jobId];
+                    delete _repairProgressLogCounts[jobId];
+                    // Reload to get updated stats
+                    loadRepairJobs();
+                }, 30000);
+            }
+        } else {
+            // Clear any existing hide timer if job restarts
+            if (_repairProgressHideTimers[jobId]) {
+                clearTimeout(_repairProgressHideTimers[jobId]);
+                delete _repairProgressHideTimers[jobId];
+            }
+        }
     }
 }
 
