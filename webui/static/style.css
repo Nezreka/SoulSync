@@ -40580,6 +40580,124 @@ tr.tag-diff-same {
     color: rgba(255, 255, 255, 0.35);
 }
 
+/* Duplicate keep/remove badges */
+.repair-detail-subitem.best {
+    border-color: rgba(34, 197, 94, 0.2);
+    background: rgba(34, 197, 94, 0.04);
+}
+.repair-detail-subitem.removable {
+    opacity: 0.65;
+}
+.repair-keep-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    margin-right: 4px;
+    letter-spacing: 0.04em;
+}
+.repair-remove-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+    margin-right: 4px;
+    letter-spacing: 0.04em;
+}
+
+/* Artwork preview (for missing cover art) */
+.repair-artwork-preview {
+    margin-top: 8px;
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+}
+.repair-artwork-preview img {
+    width: 80px;
+    height: 80px;
+    border-radius: 6px;
+    object-fit: cover;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.repair-artwork-label {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+/* Completion bar (for incomplete albums) */
+.repair-completion-bar {
+    margin: 8px 0 4px;
+}
+.repair-completion-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-bottom: 4px;
+}
+.repair-completion-track {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.repair-completion-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #f59e0b, #f97316);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+/* Spectrum bar (for fake lossless) */
+.repair-spectrum-bar {
+    margin-bottom: 10px;
+}
+.repair-spectrum-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-bottom: 4px;
+}
+.repair-spectrum-track {
+    position: relative;
+    height: 10px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 5px;
+    overflow: visible;
+}
+.repair-spectrum-detected {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: linear-gradient(90deg, #ef4444, #f97316);
+    border-radius: 5px;
+    opacity: 0.7;
+}
+.repair-spectrum-expected {
+    position: absolute;
+    top: -2px;
+    width: 2px;
+    height: 14px;
+    background: #22c55e;
+    border-radius: 1px;
+}
+.repair-spectrum-legend {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 4px;
+    font-size: 10px;
+}
+.repair-spectrum-legend-detected {
+    color: #f97316;
+}
+.repair-spectrum-legend-expected {
+    color: #22c55e;
+}
+
 /* Score bars (for AcoustID) */
 .repair-score-bar {
     display: flex;
