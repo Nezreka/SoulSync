@@ -33994,9 +33994,9 @@ textarea.enhanced-meta-field-input {
 
 /* Expandable Tracks Panel */
 .enhanced-tracks-panel {
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.3s ease-out;
     background: rgba(0,0,0,0.2);
     border: 1px solid rgba(var(--accent-rgb), 0.12);
     border-top: none;
@@ -34004,10 +34004,14 @@ textarea.enhanced-meta-field-input {
     margin-bottom: 4px;
 }
 .enhanced-tracks-panel.visible {
-    max-height: 2000px;
-    transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    grid-template-rows: 1fr;
 }
 .enhanced-tracks-panel-inner {
+    overflow: hidden;
+    padding: 0 16px;
+    transition: padding 0.3s ease-out;
+}
+.enhanced-tracks-panel.visible > .enhanced-tracks-panel-inner {
     padding: 16px;
 }
 
@@ -34073,6 +34077,7 @@ textarea.enhanced-meta-field-input {
     width: 100%;
     border-collapse: collapse;
     table-layout: fixed;
+    contain: layout style;
 }
 .enhanced-track-table th {
     background: rgba(255,255,255,0.06);
