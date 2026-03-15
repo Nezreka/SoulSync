@@ -49811,11 +49811,17 @@ function updateRepairStatusFromData(data) {
 
     if (tooltipCurrent) {
         if (data.idle) {
-            tooltipCurrent.textContent = 'All items processed';
+            tooltipCurrent.textContent = 'All jobs complete — waiting for next schedule';
+        } else if (data.current_job && data.current_job.display_name) {
+            const jobName = data.current_job.display_name;
+            const jobProgress = data.progress && data.progress.current_job;
+            if (jobProgress && jobProgress.total > 0) {
+                tooltipCurrent.textContent = `${jobName}: ${jobProgress.scanned} / ${jobProgress.total} (${jobProgress.percent}%)`;
+            } else {
+                tooltipCurrent.textContent = `Running: ${jobName}`;
+            }
         } else if (data.current_item && data.current_item.name) {
-            const type = data.current_item.type || 'item';
-            const name = data.current_item.name;
-            tooltipCurrent.textContent = `${type.charAt(0).toUpperCase() + type.slice(1)}: "${name}"`;
+            tooltipCurrent.textContent = `Running: ${data.current_item.name}`;
         } else {
             tooltipCurrent.textContent = 'No active repairs';
         }
@@ -49823,7 +49829,12 @@ function updateRepairStatusFromData(data) {
 
     if (tooltipProgress && data.progress) {
         const tracks = data.progress.tracks || {};
-        tooltipProgress.textContent = `Checked: ${tracks.checked || 0} / ${tracks.total || 0} (${tracks.percent || 0}%) | Repaired: ${tracks.repaired || 0}`;
+        const parts = [];
+        if (tracks.total > 0) parts.push(`Checked: ${tracks.checked || 0} / ${tracks.total || 0}`);
+        if (tracks.repaired > 0) parts.push(`Repaired: ${tracks.repaired}`);
+        const pending = data.findings_pending || 0;
+        if (pending > 0) parts.push(`Findings: ${pending}`);
+        tooltipProgress.textContent = parts.length ? parts.join(' · ') : 'No items processed yet';
     }
 
     // Update findings badge
@@ -50524,9 +50535,35 @@ function _formatFileSize(bytes) {
     return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
+function _renderFindingMedia(d) {
+    const albumUrl = d.album_thumb_url;
+    const artistUrl = d.artist_thumb_url;
+    if (!albumUrl && !artistUrl) return '';
+    let html = '<div class="repair-finding-media">';
+    if (albumUrl) {
+        const albumLabel = d.album_title || 'Album';
+        html += `<div class="repair-finding-media-card">
+            <img class="repair-finding-media-img" src="${_escFinding(albumUrl)}" alt="Album art"
+                 onerror="this.parentElement.style.display='none'" />
+            <span class="repair-finding-media-label">${_escFinding(albumLabel)}</span>
+        </div>`;
+    }
+    if (artistUrl) {
+        const artistLabel = d.artist_name || d.artist || 'Artist';
+        html += `<div class="repair-finding-media-card">
+            <img class="repair-finding-media-img artist" src="${_escFinding(artistUrl)}" alt="Artist"
+                 onerror="this.parentElement.style.display='none'" />
+            <span class="repair-finding-media-label">${_escFinding(artistLabel)}</span>
+        </div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
 function _renderFindingDetail(f) {
     const d = f.details || {};
     const rows = [];
+    const media = _renderFindingMedia(d);
 
     switch (f.finding_type) {
         case 'dead_file':
@@ -50535,7 +50572,7 @@ function _renderFindingDetail(f) {
             if (d.title) rows.push(['Title', d.title]);
             if (d.track_id) rows.push(['Track ID', d.track_id]);
             if (d.original_path) rows.push(['Original Path', d.original_path, 'path']);
-            return _gridRows(rows);
+            return media + _gridRows(rows);
 
         case 'orphan_file':
             if (d.folder) rows.push(['Folder', d.folder, 'path']);
@@ -50545,8 +50582,8 @@ function _renderFindingDetail(f) {
             if (f.file_path) rows.push(['Full Path', f.file_path, 'path']);
             return _gridRows(rows);
 
-        case 'acoustid_mismatch':
-            let html = '<div style="margin-bottom:8px">';
+        case 'acoustid_mismatch': {
+            let html = media + '<div style="margin-bottom:8px">';
             html += _renderScoreBar(d.fingerprint_score, 'Fingerprint');
             html += _renderScoreBar(d.title_similarity, 'Title Match');
             html += _renderScoreBar(d.artist_similarity, 'Artist Match');
@@ -50557,12 +50594,13 @@ function _renderFindingDetail(f) {
             rows.push(['AcoustID Artist', d.acoustid_artist || '-', 'highlight']);
             if (f.file_path) rows.push(['File', f.file_path, 'path']);
             return html + _gridRows(rows);
+        }
 
         case 'acoustid_no_match':
             if (d.expected_title) rows.push(['Expected Title', d.expected_title]);
             if (d.expected_artist) rows.push(['Expected Artist', d.expected_artist]);
             if (f.file_path) rows.push(['File', f.file_path, 'path']);
-            return _gridRows(rows);
+            return media + _gridRows(rows);
 
         case 'fake_lossless': {
             const cutoff = d.detected_cutoff_khz || 0;
@@ -50601,7 +50639,7 @@ function _renderFindingDetail(f) {
                 const bDur = best.duration || 0, tDur = t.duration || 0;
                 return (tBr > bBr || (tBr === bBr && tDur > bDur)) ? t : best;
             }, d.tracks[0]);
-            return `<div class="repair-detail-sublist">${d.tracks.map((t, i) => {
+            return media + `<div class="repair-detail-sublist">${d.tracks.map((t, i) => {
                 const isBest = t.id === bestDup.id;
                 return `<div class="repair-detail-subitem ${isBest ? 'best' : 'removable'}">
                     <strong>
@@ -50617,7 +50655,7 @@ function _renderFindingDetail(f) {
             if (d.artist) rows.push(['Artist', d.artist]);
             if (d.album_title) rows.push(['Album', d.album_title]);
             if (d.spotify_album_id) rows.push(['Spotify ID', d.spotify_album_id]);
-            let incHtml = _gridRows(rows);
+            let incHtml = media + _gridRows(rows);
             const actual = d.actual_tracks || 0, expected = d.expected_tracks || 0;
             if (expected > 0) {
                 const pct = Math.round((actual / expected) * 100);
@@ -50650,29 +50688,50 @@ function _renderFindingDetail(f) {
                     rows.push([`Found: ${k}`, String(v), 'success']);
                 });
             }
-            return _gridRows(rows);
+            return media + _gridRows(rows);
 
         case 'missing_cover_art':
             if (d.artist) rows.push(['Artist', d.artist]);
             if (d.album_title) rows.push(['Album', d.album_title]);
             if (d.spotify_album_id) rows.push(['Spotify ID', d.spotify_album_id]);
-            let artHtml = _gridRows(rows);
-            if (d.found_artwork_url) {
-                artHtml += `<div class="repair-artwork-preview">
-                    <img src="${_escFinding(d.found_artwork_url)}" alt="Album artwork"
-                         onerror="this.parentElement.innerHTML='<span>Image failed to load</span>'" />
-                    <span class="repair-artwork-label">Found artwork</span>
-                </div>`;
+            let artHtml = '';
+            // Show artist image + found artwork side by side
+            if (d.artist_thumb_url || d.found_artwork_url) {
+                artHtml += '<div class="repair-finding-media">';
+                if (d.artist_thumb_url) {
+                    artHtml += `<div class="repair-finding-media-card">
+                        <img class="repair-finding-media-img artist" src="${_escFinding(d.artist_thumb_url)}" alt="Artist"
+                             onerror="this.parentElement.style.display='none'" />
+                        <span class="repair-finding-media-label">${_escFinding(d.artist || 'Artist')}</span>
+                    </div>`;
+                }
+                if (d.found_artwork_url) {
+                    artHtml += `<div class="repair-finding-media-card">
+                        <img class="repair-finding-media-img" src="${_escFinding(d.found_artwork_url)}" alt="Found artwork"
+                             onerror="this.parentElement.style.display='none'" />
+                        <span class="repair-finding-media-label">Found Artwork</span>
+                    </div>`;
+                }
+                artHtml += '</div>';
             }
+            artHtml += _gridRows(rows);
             return artHtml;
 
         case 'track_number_mismatch':
+            if (d.album_title) rows.push(['Album', d.album_title]);
+            if (d.artist_name) rows.push(['Artist', d.artist_name]);
             if (d.matched_title) rows.push(['Matched To', d.matched_title]);
             if (d.file_title) rows.push(['File Title', d.file_title]);
             if (d.current_track_num !== undefined) rows.push(['Current Track #', String(d.current_track_num)]);
             if (d.correct_track_num !== undefined) rows.push(['Correct Track #', String(d.correct_track_num), 'success']);
             if (f.file_path) rows.push(['File', f.file_path, 'path']);
-            let tnHtml = _gridRows(rows);
+            let tnHtml = media;
+            if (d.match_score) {
+                tnHtml += '<div style="margin-bottom:8px">';
+                tnHtml += _renderScoreBar(d.match_score, 'Title Match');
+                tnHtml += '</div>';
+            }
+            tnHtml += _gridRows(rows);
             if (d.changes && d.changes.length) {
                 tnHtml += `<div class="repair-detail-sublist">${d.changes.map(c => `
                     <div class="repair-detail-subitem"><strong>${_escFinding(c)}</strong></div>`).join('')}</div>`;
@@ -50682,12 +50741,12 @@ function _renderFindingDetail(f) {
         default:
             // Generic: render all detail keys
             Object.entries(d).forEach(([k, v]) => {
-                if (typeof v !== 'object') {
+                if (typeof v !== 'object' && !k.endsWith('_thumb_url')) {
                     rows.push([k.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), String(v)]);
                 }
             });
             if (f.file_path) rows.push(['File', f.file_path, 'path']);
-            return rows.length ? _gridRows(rows) : '<span style="color:rgba(255,255,255,0.3);font-size:12px;">No additional details available</span>';
+            return (media || '') + (rows.length ? _gridRows(rows) : '<span style="color:rgba(255,255,255,0.3);font-size:12px;">No additional details available</span>');
     }
 }
 

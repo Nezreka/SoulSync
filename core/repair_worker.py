@@ -366,11 +366,19 @@ class RepairWorker:
         }
 
         if self._current_job_id:
+            job_progress = self._current_progress.copy()
             result['current_job'] = {
                 'job_id': self._current_job_id,
                 'display_name': self._current_job_name,
-                'progress': self._current_progress.copy(),
+                'progress': job_progress,
             }
+            # Include per-job progress in the overall progress for tooltip display
+            if job_progress.get('total', 0) > 0:
+                result['progress']['current_job'] = {
+                    'scanned': job_progress.get('scanned', 0),
+                    'total': job_progress.get('total', 0),
+                    'percent': job_progress.get('percent', 0),
+                }
 
         return result
 

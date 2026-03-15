@@ -83,12 +83,26 @@ class TrackNumberRepairJob(RepairJob):
         total = sum(len(fnames) for fnames in album_folders.values())
         if context.update_progress:
             context.update_progress(0, total)
+        if context.report_progress:
+            context.report_progress(
+                phase=f'Scanning {len(album_folders)} album folders ({total} files)...',
+                total=total
+            )
 
         for folder_path, filenames in album_folders.items():
             if context.check_stop():
                 return result
             if context.wait_if_paused():
                 return result
+
+            folder_name = os.path.basename(folder_path)
+            if context.report_progress:
+                context.report_progress(
+                    scanned=result.scanned, total=total,
+                    phase=f'Checking {result.scanned} / {total}',
+                    log_line=f'Album: {folder_name} ({len(filenames)} tracks)',
+                    log_type='info'
+                )
 
             try:
                 folder_result = self._repair_album(
@@ -98,6 +112,12 @@ class TrackNumberRepairJob(RepairJob):
                 result.auto_fixed += folder_result.auto_fixed
                 result.skipped += folder_result.skipped
                 result.errors += folder_result.errors
+                result.findings_created += folder_result.findings_created
+                if folder_result.findings_created > 0 and context.report_progress:
+                    context.report_progress(
+                        log_line=f'Found {folder_result.findings_created} issues in {folder_name}',
+                        log_type='skip'
+                    )
             except Exception as e:
                 logger.error("Error processing album folder %s: %s", folder_path, e, exc_info=True)
                 result.errors += 1
@@ -177,6 +197,10 @@ class TrackNumberRepairJob(RepairJob):
         # Process each file
         title_sim = scan_state.get('title_similarity', 0.80)
         dry_run = scan_state.get('dry_run', True)
+
+        # Look up album/artist art once per album folder for enriched findings
+        art_info = _lookup_album_artist_art(file_track_data, context) if dry_run else {}
+
         for fpath, fname, _ in file_track_data:
             if context.check_stop():
                 return result
@@ -187,6 +211,16 @@ class TrackNumberRepairJob(RepairJob):
                     finding = _check_single_track(fpath, fname, api_tracks, len(api_tracks), title_sim)
                     if finding:
                         if context.create_finding:
+                            details = finding['details']
+                            # Enrich with album/artist art and names
+                            if art_info.get('album_thumb_url'):
+                                details['album_thumb_url'] = art_info['album_thumb_url']
+                            if art_info.get('artist_thumb_url'):
+                                details['artist_thumb_url'] = art_info['artist_thumb_url']
+                            if art_info.get('album_title'):
+                                details['album_title'] = art_info['album_title']
+                            if art_info.get('artist_name'):
+                                details['artist_name'] = art_info['artist_name']
                             context.create_finding(
                                 job_id=self.job_id,
                                 finding_type='track_number_mismatch',
@@ -196,7 +230,7 @@ class TrackNumberRepairJob(RepairJob):
                                 file_path=fpath,
                                 title=f'Track number fix: {os.path.basename(fpath)}',
                                 description=finding['description'],
-                                details=finding['details']
+                                details=details
                             )
                             result.findings_created += 1
                 else:
@@ -641,8 +675,8 @@ def _read_album_artist_from_file(file_path: str) -> Tuple[Optional[str], Optiona
 
 
 def _match_title_to_api_track(file_title: str, api_tracks: List[Dict],
-                               threshold: float) -> Optional[Dict]:
-    """Fuzzy-match a file title to an API track."""
+                               threshold: float) -> Tuple[Optional[Dict], float]:
+    """Fuzzy-match a file title to an API track. Returns (track, score)."""
     norm_file = _normalize_title(file_title)
     best_match = None
     best_score = 0.0
@@ -656,8 +690,8 @@ def _match_title_to_api_track(file_title: str, api_tracks: List[Dict],
             best_match = track
 
     if best_score >= threshold:
-        return best_match
-    return None
+        return best_match, best_score
+    return None, best_score
 
 
 def _normalize_title(title: str) -> str:
@@ -803,6 +837,74 @@ def _lookup_album_ids_from_db(file_track_data: List[Tuple[str, str, Any]],
     return None, None, None
 
 
+def _lookup_album_artist_art(file_track_data: List[Tuple[str, str, Any]],
+                             context: JobContext) -> Dict[str, Optional[str]]:
+    """Look up album/artist thumb URLs and names from DB for enriched finding details.
+
+    Uses suffix-based matching since DB paths may differ from local paths
+    (e.g., /mnt/musicBackup/... vs H:\\Music\\...).
+    """
+    result = {'album_thumb_url': None, 'artist_thumb_url': None,
+              'album_title': None, 'artist_name': None}
+    if not context.db:
+        return result
+
+    conn = None
+    try:
+        conn = context.db._get_connection()
+        cursor = conn.cursor()
+
+        # First try exact path match (fast)
+        for fpath, _, _ in file_track_data:
+            cursor.execute("""
+                SELECT al.thumb_url, ar.thumb_url, al.title, ar.name
+                FROM tracks t
+                LEFT JOIN albums al ON al.id = t.album_id
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                WHERE t.file_path = ?
+                LIMIT 1
+            """, (fpath,))
+            row = cursor.fetchone()
+            if row:
+                result['album_thumb_url'] = row[0] or None
+                result['artist_thumb_url'] = row[1] or None
+                result['album_title'] = row[2] or None
+                result['artist_name'] = row[3] or None
+                return result
+
+        # Fallback: suffix-based matching (handles cross-environment path mismatches)
+        # Build suffix from the first file path (artist/album/filename)
+        if file_track_data:
+            fpath = file_track_data[0][0]
+            parts = fpath.replace('\\', '/').split('/')
+            # Try matching on last 2 components (album/filename) — most specific without artist
+            if len(parts) >= 2:
+                suffix = '/'.join(parts[-2:])
+                # Use LIKE with the suffix for cross-platform matching
+                cursor.execute("""
+                    SELECT al.thumb_url, ar.thumb_url, al.title, ar.name
+                    FROM tracks t
+                    LEFT JOIN albums al ON al.id = t.album_id
+                    LEFT JOIN artists ar ON ar.id = t.artist_id
+                    WHERE t.file_path LIKE ?
+                    LIMIT 1
+                """, (f'%{suffix}',))
+                row = cursor.fetchone()
+                if row:
+                    result['album_thumb_url'] = row[0] or None
+                    result['artist_thumb_url'] = row[1] or None
+                    result['album_title'] = row[2] or None
+                    result['artist_name'] = row[3] or None
+
+    except Exception as e:
+        logger.debug("Error looking up album/artist art from DB: %s", e)
+    finally:
+        if conn:
+            conn.close()
+
+    return result
+
+
 def _check_single_track(file_path: str, filename: str, api_tracks: List[Dict],
                         total_tracks: int, title_similarity: float) -> Optional[Dict]:
     """Check if a track needs repair and return finding info (dry run mode).
@@ -817,15 +919,16 @@ def _check_single_track(file_path: str, filename: str, api_tracks: List[Dict],
 
     file_title = _read_title_tag(audio)
     matched_track = None
+    match_score = 0.0
 
     if file_title:
-        matched_track = _match_title_to_api_track(file_title, api_tracks, title_similarity)
+        matched_track, match_score = _match_title_to_api_track(file_title, api_tracks, title_similarity)
 
     if not matched_track:
         basename = os.path.splitext(filename)[0]
         clean_name = re.sub(r'^\d{1,3}[\s.\-_]*', '', basename).strip()
         if clean_name:
-            matched_track = _match_title_to_api_track(clean_name, api_tracks, title_similarity)
+            matched_track, match_score = _match_title_to_api_track(clean_name, api_tracks, title_similarity)
 
     if not matched_track:
         return None
@@ -858,6 +961,7 @@ def _check_single_track(file_path: str, filename: str, api_tracks: List[Dict],
             'matched_title': matched_track.get('name', ''),
             'file_title': file_title or filename,
             'changes': changes,
+            'match_score': round(match_score, 3),
         }
     }
 
@@ -880,7 +984,7 @@ def _repair_single_track(file_path: str, filename: str, api_tracks: List[Dict],
     matched_track = None
 
     if file_title:
-        matched_track = _match_title_to_api_track(file_title, api_tracks, title_similarity)
+        matched_track, _ = _match_title_to_api_track(file_title, api_tracks, title_similarity)
 
     # Fallback: match via filename (without track number prefix and extension)
     if not matched_track:
@@ -888,7 +992,7 @@ def _repair_single_track(file_path: str, filename: str, api_tracks: List[Dict],
         # Strip leading track number prefix like "01 - " or "01. "
         clean_name = re.sub(r'^\d{1,3}[\s.\-_]*', '', basename).strip()
         if clean_name:
-            matched_track = _match_title_to_api_track(clean_name, api_tracks, title_similarity)
+            matched_track, _ = _match_title_to_api_track(clean_name, api_tracks, title_similarity)
 
     if not matched_track:
         return False

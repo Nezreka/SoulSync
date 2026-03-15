@@ -78,6 +78,8 @@ class OrphanFileDetectorJob(RepairJob):
         total = len(audio_files)
         if context.update_progress:
             context.update_progress(0, total)
+        if context.report_progress:
+            context.report_progress(phase=f'Checking {total} files...', total=total)
 
         for i, fpath in enumerate(audio_files):
             if context.check_stop():
@@ -86,6 +88,14 @@ class OrphanFileDetectorJob(RepairJob):
                 return result
 
             result.scanned += 1
+
+            if context.report_progress and i % 50 == 0:
+                context.report_progress(
+                    scanned=i + 1, total=total,
+                    phase=f'Checking {i + 1} / {total}',
+                    log_line=f'Checking: {os.path.basename(fpath)}',
+                    log_type='info'
+                )
 
             # Check if this file matches any known DB path via suffix matching
             fpath_parts = fpath.replace('\\', '/').split('/')
@@ -98,6 +108,11 @@ class OrphanFileDetectorJob(RepairJob):
 
             if not is_known:
                 # This file is an orphan — create finding
+                if context.report_progress:
+                    context.report_progress(
+                        log_line=f'Orphan: {os.path.basename(fpath)}',
+                        log_type='skip'
+                    )
                 try:
                     stat = os.stat(fpath)
                     ext = os.path.splitext(fpath)[1].lower().lstrip('.')

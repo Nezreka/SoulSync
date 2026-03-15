@@ -60,7 +60,8 @@ class MetadataGapFillerJob(RepairJob):
             cursor = conn.cursor()
             cursor.execute(f"""
                 SELECT t.id, t.title, ar.name, al.title, t.spotify_track_id,
-                       t.isrc, t.musicbrainz_recording_id
+                       t.isrc, t.musicbrainz_recording_id,
+                       al.thumb_url, ar.thumb_url
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -86,14 +87,25 @@ class MetadataGapFillerJob(RepairJob):
 
         logger.info("Found %d tracks with metadata gaps", total)
 
+        if context.report_progress:
+            context.report_progress(phase=f'Enriching {total} tracks...', total=total)
+
         for i, row in enumerate(tracks):
             if context.check_stop():
                 return result
             if i % 20 == 0 and context.wait_if_paused():
                 return result
 
-            track_id, title, artist_name, album_title, spotify_track_id, isrc, mb_id = row
+            track_id, title, artist_name, album_title, spotify_track_id, isrc, mb_id, album_thumb, artist_thumb = row
             result.scanned += 1
+
+            if context.report_progress:
+                context.report_progress(
+                    scanned=i + 1, total=total,
+                    phase=f'Enriching {i + 1} / {total}',
+                    log_line=f'Looking up: {title or "Unknown"} — {artist_name or "Unknown"}',
+                    log_type='info'
+                )
             found_fields = {}
 
             # Try Spotify enrichment first (most reliable for ISRC)
@@ -121,6 +133,11 @@ class MetadataGapFillerJob(RepairJob):
 
             # Create finding for user to review instead of auto-writing
             if found_fields:
+                if context.report_progress:
+                    context.report_progress(
+                        log_line=f'Found: {", ".join(found_fields.keys())} for {title or "Unknown"}',
+                        log_type='success'
+                    )
                 if context.create_finding:
                     try:
                         field_names = ', '.join(found_fields.keys())
@@ -143,6 +160,8 @@ class MetadataGapFillerJob(RepairJob):
                                 'album': album_title,
                                 'spotify_track_id': spotify_track_id,
                                 'found_fields': found_fields,
+                                'album_thumb_url': album_thumb or None,
+                                'artist_thumb_url': artist_thumb or None,
                             }
                         )
                         result.findings_created += 1

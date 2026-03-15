@@ -63,7 +63,8 @@ class DeadFileCleanerJob(RepairJob):
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT t.id, t.title, ar.name, al.title, t.file_path
+                SELECT t.id, t.title, ar.name, al.title, t.file_path,
+                       al.thumb_url, ar.thumb_url
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -87,20 +88,36 @@ class DeadFileCleanerJob(RepairJob):
         if context.config_manager:
             download_folder = context.config_manager.get('soulseek.download_path', '')
 
+        if context.report_progress:
+            context.report_progress(phase=f'Checking {total} tracks...', total=total)
+
         for i, row in enumerate(tracks):
             if context.check_stop():
                 return result
             if i % 200 == 0 and context.wait_if_paused():
                 return result
 
-            track_id, title, artist_name, album_title, file_path = row
+            track_id, title, artist_name, album_title, file_path, album_thumb, artist_thumb = row
             result.scanned += 1
+
+            if context.report_progress and i % 50 == 0:
+                context.report_progress(
+                    scanned=i + 1, total=total,
+                    phase=f'Checking {i + 1} / {total}',
+                    log_line=f'Checking: {title or "Unknown"} — {artist_name or "Unknown"}',
+                    log_type='info'
+                )
 
             # Use the same path resolution logic as library playback
             resolved = _resolve_file_path(file_path, context.transfer_folder, download_folder)
 
             if resolved is None:
                 # File is truly missing — create finding
+                if context.report_progress:
+                    context.report_progress(
+                        log_line=f'Missing: {title or "Unknown"} — {os.path.basename(file_path)}',
+                        log_type='error'
+                    )
                 if context.create_finding:
                     try:
                         context.create_finding(
@@ -118,6 +135,8 @@ class DeadFileCleanerJob(RepairJob):
                                 'artist': artist_name,
                                 'album': album_title,
                                 'original_path': file_path,
+                                'album_thumb_url': album_thumb or None,
+                                'artist_thumb_url': artist_thumb or None,
                             }
                         )
                         result.findings_created += 1

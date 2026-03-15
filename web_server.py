@@ -37657,6 +37657,15 @@ def repair_findings_list():
             job_id=job_id, status=status, severity=severity,
             page=page, limit=limit
         )
+
+        # Fix Plex/Jellyfin relative thumb URLs in finding details
+        for item in result.get('items', []):
+            details = item.get('details')
+            if details and isinstance(details, dict):
+                for key in ('album_thumb_url', 'artist_thumb_url'):
+                    if details.get(key):
+                        details[key] = fix_artist_image_url(details[key])
+
         return jsonify(result), 200
     except Exception as e:
         logger.error(f"Error getting repair findings: {e}")
