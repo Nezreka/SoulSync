@@ -9291,6 +9291,353 @@ def get_artist_enhanced_detail(artist_id):
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/library/artist/<artist_id>/quality-analysis')
+def get_artist_quality_analysis(artist_id):
+    """Analyze track quality for an artist — returns tier classification for each track."""
+    try:
+        database = get_database()
+        result = database.get_artist_full_detail(artist_id)
+        if not result.get('success'):
+            return jsonify(result), 404
+
+        artist = result.get('artist', {})
+        albums = result.get('albums', [])
+
+        # Get user's quality profile to determine min acceptable tier
+        quality_profile = database.get_quality_profile()
+        preferred_qualities = quality_profile.get('qualities', {})
+        min_acceptable_tier = 999
+        tier_map = {'flac': 'lossless', 'mp3_320': 'low_lossy', 'mp3_256': 'low_lossy', 'mp3_192': 'low_lossy'}
+        for qname, qconfig in preferred_qualities.items():
+            if qconfig.get('enabled', False):
+                tname = tier_map.get(qname)
+                if tname and tname in QUALITY_TIERS:
+                    min_acceptable_tier = min(min_acceptable_tier, QUALITY_TIERS[tname]['tier'])
+
+        tracks = []
+        summary = {'total': 0, 'lossless': 0, 'high_lossy': 0, 'standard_lossy': 0, 'low_lossy': 0, 'unknown': 0}
+
+        for album in albums:
+            album_title = album.get('title', 'Unknown Album')
+            album_id = album.get('id')
+            for track in album.get('tracks', []):
+                file_path = track.get('file_path')
+                if not file_path:
+                    continue
+
+                tier_name, tier_num = _get_quality_tier_from_extension(file_path)
+                ext = os.path.splitext(file_path)[1].lstrip('.').upper()
+
+                # Use filename as fallback when title is empty
+                title = track.get('title', '') or ''
+                if not title.strip():
+                    title = os.path.splitext(os.path.basename(file_path))[0]
+
+                tracks.append({
+                    'track_id': track.get('id'),
+                    'title': title,
+                    'album_title': album_title,
+                    'album_id': album_id,
+                    'file_path': file_path,
+                    'format': ext or 'Unknown',
+                    'tier_name': tier_name,
+                    'tier_num': tier_num,
+                    'bitrate': track.get('bitrate'),
+                    'spotify_track_id': track.get('spotify_track_id'),
+                    'track_number': track.get('track_number'),
+                    'disc_number': track.get('disc_number'),
+                })
+                summary['total'] += 1
+                if tier_name in summary:
+                    summary[tier_name] += 1
+                else:
+                    summary['unknown'] += 1
+
+        return jsonify({
+            'success': True,
+            'artist_name': artist.get('name', 'Unknown Artist'),
+            'artist_id': artist_id,
+            'tracks': tracks,
+            'quality_summary': summary,
+            'min_acceptable_tier': min_acceptable_tier
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/library/artist/<artist_id>/enhance', methods=['POST'])
+def enhance_artist_quality(artist_id):
+    """Add selected tracks to wishlist for quality enhancement re-download."""
+    try:
+        data = request.get_json() or {}
+        track_ids = data.get('track_ids', [])
+        if not track_ids:
+            return jsonify({"success": False, "error": "No track IDs provided"}), 400
+
+        database = get_database()
+        from core.wishlist_service import get_wishlist_service
+        wishlist_service = get_wishlist_service()
+        profile_id = get_current_profile_id()
+
+        # Get artist info
+        artist_result = database.get_artist_full_detail(artist_id)
+        if not artist_result.get('success'):
+            return jsonify({"success": False, "error": "Artist not found"}), 404
+
+        artist_name = artist_result.get('artist', {}).get('name', 'Unknown Artist')
+
+        # Build lookup of all tracks for this artist
+        track_lookup = {}
+        for album in artist_result.get('albums', []):
+            album_title = album.get('title', '')
+            for track in album.get('tracks', []):
+                tid = str(track.get('id', ''))
+                track['_album_title'] = album_title
+                track['_album_id'] = album.get('id')
+                track_lookup[tid] = track
+
+        enhanced_count = 0
+        failed_count = 0
+        failed_tracks = []
+
+        for track_id in track_ids:
+            track_id_str = str(track_id)
+            track = track_lookup.get(track_id_str)
+            if not track:
+                failed_count += 1
+                failed_tracks.append({'track_id': track_id, 'reason': 'Track not found'})
+                continue
+
+            file_path = track.get('file_path')
+            if not file_path:
+                failed_count += 1
+                failed_tracks.append({'track_id': track_id, 'reason': 'No file path'})
+                continue
+
+            tier_name, tier_num = _get_quality_tier_from_extension(file_path)
+            title = track.get('title', '') or ''
+            if not title.strip():
+                title = os.path.splitext(os.path.basename(file_path))[0]
+            spotify_tid = track.get('spotify_track_id')
+
+            # Build Spotify track data for wishlist
+            matched_track_data = None
+
+            if spotify_tid and spotify_client:
+                # Direct lookup via stored Spotify ID — raw_data has full Spotify API format
+                try:
+                    track_details = spotify_client.get_track_details(spotify_tid)
+                    if track_details and track_details.get('raw_data'):
+                        matched_track_data = track_details['raw_data']
+                    elif track_details:
+                        # Enhanced format — rebuild with images for wishlist compatibility
+                        album_data = track_details.get('album', {})
+                        album_images = []
+                        # Try to get album art from a full album lookup
+                        if album_data.get('id'):
+                            try:
+                                full_album = spotify_client.get_album(album_data['id'])
+                                if full_album and full_album.get('images'):
+                                    album_images = full_album['images']
+                            except Exception:
+                                pass
+                        matched_track_data = {
+                            'id': spotify_tid,
+                            'name': track_details.get('name', title),
+                            'artists': [{'name': a} for a in track_details.get('artists', [artist_name])],
+                            'album': {
+                                'id': album_data.get('id', ''),
+                                'name': album_data.get('name', track.get('_album_title', '')),
+                                'album_type': album_data.get('album_type', 'album'),
+                                'release_date': album_data.get('release_date', ''),
+                                'total_tracks': album_data.get('total_tracks', 1),
+                                'artists': [{'name': a} for a in album_data.get('artists', [artist_name])],
+                                'images': album_images,
+                            },
+                            'duration_ms': track_details.get('duration_ms', track.get('duration', 0)),
+                            'track_number': track_details.get('track_number', track.get('track_number', 1)),
+                            'disc_number': track_details.get('disc_number', 1),
+                            'popularity': 0,
+                            'preview_url': None,
+                            'external_urls': {},
+                        }
+                except Exception as e:
+                    print(f"⚠️ [Enhance] Spotify lookup failed for {spotify_tid}: {e}")
+
+            if not matched_track_data and spotify_client:
+                # Fallback: Spotify search matching — need full track data for wishlist
+                try:
+                    temp_track = type('TempTrack', (), {
+                        'name': title, 'artists': [artist_name],
+                        'album': track.get('_album_title', '')
+                    })()
+                    search_queries = matching_engine.generate_download_queries(temp_track)
+                    best_match = None
+                    best_match_raw = None
+                    best_confidence = 0.0
+
+                    for search_query in search_queries[:3]:  # Limit queries
+                        try:
+                            results = spotify_client.search_tracks(search_query, limit=5)
+                            if not results:
+                                continue
+                            for sp_track in results:
+                                artist_conf = max(
+                                    (matching_engine.similarity_score(
+                                        matching_engine.normalize_string(artist_name),
+                                        matching_engine.normalize_string(a)
+                                    ) for a in (sp_track.artists or [artist_name])),
+                                    default=0
+                                )
+                                title_conf = matching_engine.similarity_score(
+                                    matching_engine.normalize_string(title),
+                                    matching_engine.normalize_string(sp_track.name)
+                                )
+                                combined = artist_conf * 0.5 + title_conf * 0.5
+                                if combined > best_confidence and combined >= 0.7:
+                                    best_confidence = combined
+                                    best_match = sp_track
+                            if best_confidence >= 0.9:
+                                break
+                        except Exception:
+                            continue
+
+                    if best_match:
+                        # Fetch full track data from Spotify for proper wishlist format
+                        try:
+                            full_details = spotify_client.get_track_details(best_match.id)
+                            if full_details and full_details.get('raw_data'):
+                                matched_track_data = full_details['raw_data']
+                            else:
+                                raise ValueError("No raw_data from get_track_details")
+                        except Exception:
+                            # Build from Track dataclass with image
+                            album_images = [{'url': best_match.image_url}] if best_match.image_url else []
+                            matched_track_data = {
+                                'id': best_match.id,
+                                'name': best_match.name,
+                                'artists': [{'name': a} for a in best_match.artists],
+                                'album': {
+                                    'name': best_match.album,
+                                    'artists': [{'name': a} for a in best_match.artists],
+                                    'album_type': 'album',
+                                    'images': album_images,
+                                },
+                                'duration_ms': best_match.duration_ms,
+                                'popularity': best_match.popularity or 0,
+                                'preview_url': best_match.preview_url,
+                                'external_urls': best_match.external_urls or {},
+                            }
+                except Exception as e:
+                    print(f"⚠️ [Enhance] Search match failed for {title}: {e}")
+
+            # iTunes fallback when Spotify unavailable or no match found
+            if not matched_track_data:
+                try:
+                    from core.itunes_client import iTunesClient
+                    itunes_client = iTunesClient()
+                    itunes_best = None
+                    itunes_best_conf = 0.0
+
+                    itunes_queries = matching_engine.generate_download_queries(
+                        type('TempTrack', (), {
+                            'name': title, 'artists': [artist_name],
+                            'album': track.get('_album_title', '')
+                        })()
+                    )
+
+                    for search_query in itunes_queries[:3]:
+                        try:
+                            itunes_results = itunes_client.search_tracks(search_query, limit=5)
+                            if not itunes_results:
+                                continue
+                            for it_track in itunes_results:
+                                artist_conf = max(
+                                    (matching_engine.similarity_score(
+                                        matching_engine.normalize_string(artist_name),
+                                        matching_engine.normalize_string(a)
+                                    ) for a in (it_track.artists or [artist_name])),
+                                    default=0
+                                )
+                                title_conf = matching_engine.similarity_score(
+                                    matching_engine.normalize_string(title),
+                                    matching_engine.normalize_string(it_track.name)
+                                )
+                                combined = artist_conf * 0.5 + title_conf * 0.5
+                                if combined > itunes_best_conf and combined >= 0.7:
+                                    itunes_best_conf = combined
+                                    itunes_best = it_track
+                            if itunes_best_conf >= 0.9:
+                                break
+                        except Exception:
+                            continue
+
+                    if itunes_best:
+                        album_images = [{'url': itunes_best.image_url, 'height': 600, 'width': 600}] if itunes_best.image_url else []
+                        matched_track_data = {
+                            'id': itunes_best.id,
+                            'name': itunes_best.name,
+                            'artists': [{'name': a} for a in itunes_best.artists],
+                            'album': {
+                                'name': itunes_best.album,
+                                'artists': [{'name': a} for a in itunes_best.artists],
+                                'album_type': 'album',
+                                'images': album_images,
+                                'release_date': itunes_best.release_date or '',
+                                'total_tracks': 1,
+                            },
+                            'duration_ms': itunes_best.duration_ms,
+                            'track_number': itunes_best.track_number or 1,
+                            'disc_number': itunes_best.disc_number or 1,
+                            'popularity': itunes_best.popularity or 0,
+                            'preview_url': itunes_best.preview_url,
+                            'external_urls': itunes_best.external_urls or {},
+                        }
+                        print(f"🍎 [Enhance] iTunes fallback match for {title}: {itunes_best.artists[0]} - {itunes_best.name} (conf: {itunes_best_conf:.3f})")
+                except Exception as e:
+                    print(f"⚠️ [Enhance] iTunes fallback failed for {title}: {e}")
+
+            if not matched_track_data:
+                failed_count += 1
+                failed_tracks.append({'track_id': track_id, 'title': title, 'reason': 'No Spotify or iTunes match'})
+                continue
+
+            # Add to wishlist with enhance source
+            source_context = {
+                'enhance': True,
+                'original_file_path': file_path,
+                'original_format': tier_name,
+                'original_bitrate': track.get('bitrate'),
+                'original_tier': tier_num,
+                'artist_name': artist_name,
+            }
+
+            success = wishlist_service.add_spotify_track_to_wishlist(
+                spotify_track_data=matched_track_data,
+                failure_reason=f"Quality enhance - upgrading from {tier_name.replace('_', ' ').title()}",
+                source_type='enhance',
+                source_context=source_context,
+                profile_id=profile_id
+            )
+
+            if success:
+                enhanced_count += 1
+                print(f"✅ [Enhance] Queued for upgrade: {artist_name} - {title} ({tier_name})")
+            else:
+                failed_count += 1
+                failed_tracks.append({'track_id': track_id, 'title': title, 'reason': 'Wishlist add failed'})
+
+        return jsonify({
+            'success': True,
+            'enhanced_count': enhanced_count,
+            'failed_count': failed_count,
+            'failed_tracks': failed_tracks
+        })
+    except Exception as e:
+        print(f"❌ [Enhance] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/library/artist/<artist_id>', methods=['PUT'])
 def update_library_artist(artist_id):
     """Update artist metadata fields."""
@@ -13223,6 +13570,22 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
     original_search = context.get("original_search_result", {})
     playlist_folder_mode = track_info.get("_playlist_folder_mode", False)
 
+    # ENHANCE BYPASS: Place file in same location as original (different extension OK)
+    _source_info = track_info.get('source_info') or {}
+    if isinstance(_source_info, str):
+        try:
+            _source_info = json.loads(_source_info)
+        except (json.JSONDecodeError, TypeError):
+            _source_info = {}
+    if _source_info.get('enhance') and _source_info.get('original_file_path'):
+        original_path = _source_info['original_file_path']
+        original_dir = os.path.dirname(original_path)
+        original_stem = os.path.splitext(os.path.basename(original_path))[0]
+        final_path = os.path.join(original_dir, original_stem + file_ext)
+        os.makedirs(original_dir, exist_ok=True)
+        print(f"🔄 [Enhance] Using original file location: {final_path}")
+        return final_path, True
+
     # Extract year and album_type from spotify_album for template use (safe for all modes)
     year = ''  # Empty string instead of 'Unknown' to avoid "Unknown albumName"
     spotify_album = context.get("spotify_album", {})
@@ -15440,6 +15803,15 @@ def _post_process_matched_download(context_key, context, file_path):
             pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
             # Continue anyway - file can still be moved
 
+        # Detect enhance mode from track context
+        _enhance_source_info = context.get('track_info', {}).get('source_info') or {}
+        if isinstance(_enhance_source_info, str):
+            try:
+                _enhance_source_info = json.loads(_enhance_source_info)
+            except (json.JSONDecodeError, TypeError):
+                _enhance_source_info = {}
+        is_enhance_download = _enhance_source_info.get('enhance', False)
+
         print(f"🚚 Moving '{os.path.basename(file_path)}' to '{final_path}'")
         if os.path.exists(final_path):
             # PROTECTION: If destination already exists, check before overwriting
@@ -15452,7 +15824,7 @@ def _post_process_matched_download(context_key, context, file_path):
                 existing_file = MutagenFile(final_path)
                 has_metadata = existing_file is not None and len(existing_file.tags or {}) > 2  # More than basic tags
 
-                if has_metadata:
+                if has_metadata and not is_enhance_download:
                     print(f"⚠️ [Protection] Existing file already has metadata enhancement - skipping overwrite: {os.path.basename(final_path)}")
                     print(f"🗑️ [Protection] Removing redundant download file: {os.path.basename(file_path)}")
                     try:
@@ -15462,6 +15834,13 @@ def _post_process_matched_download(context_key, context, file_path):
                     except Exception as e:
                         print(f"⚠️ [Protection] Error removing redundant file: {e}")
                     return  # Don't overwrite the good file
+                elif is_enhance_download:
+                    # ENHANCE BYPASS: Allow overwrite — backup original, then remove to allow move
+                    print(f"🔄 [Enhance] Quality enhance mode — replacing existing file: {os.path.basename(final_path)}")
+                    try:
+                        os.remove(final_path)
+                    except Exception as e:
+                        print(f"⚠️ [Enhance] Could not remove existing file for replacement: {e}")
                 else:
                     print(f"🔄 [Protection] Existing file lacks metadata - safe to overwrite: {os.path.basename(final_path)}")
                     try:
@@ -15518,6 +15897,22 @@ def _post_process_matched_download(context_key, context, file_path):
                     raise FileNotFoundError(f"Source file vanished before move and destination does not exist: {file_path}")
 
         _safe_move_file(file_path, final_path)
+
+        # ENHANCE CLEANUP: If format changed (e.g. MP3→FLAC), remove old-format file
+        if is_enhance_download and _enhance_source_info.get('original_file_path'):
+            original_enhance_path = _enhance_source_info['original_file_path']
+            if os.path.normpath(original_enhance_path) != os.path.normpath(final_path) and os.path.exists(original_enhance_path):
+                try:
+                    os.remove(original_enhance_path)
+                    old_fmt = os.path.splitext(original_enhance_path)[1]
+                    new_fmt = os.path.splitext(final_path)[1]
+                    print(f"✅ [Enhance] Upgraded {old_fmt} → {new_fmt}: {os.path.basename(final_path)}")
+                except Exception as e:
+                    print(f"⚠️ [Enhance] Could not remove old-format file: {e}")
+            elif is_enhance_download:
+                old_fmt = _enhance_source_info.get('original_format', 'unknown')
+                new_fmt = os.path.splitext(final_path)[1]
+                print(f"✅ [Enhance] Replaced in-place ({old_fmt} → {new_fmt}): {os.path.basename(final_path)}")
 
         _download_cover_art(album_info, os.path.dirname(final_path))
 
@@ -17616,6 +18011,10 @@ def start_wishlist_missing_downloads():
         cleanup_removed = 0
 
         for track in cleanup_tracks:
+            # BYPASS: Don't remove enhance tracks — they intentionally re-download existing library tracks
+            if track.get('source_type') == 'enhance':
+                continue
+
             track_name = track.get('name', '')
             artists = track.get('artists', [])
             spotify_track_id = track.get('spotify_track_id') or track.get('id')
