@@ -770,25 +770,50 @@ class RepairWorker:
                 conn.close()
 
     def get_findings_counts(self) -> dict:
-        """Get counts by status."""
+        """Get counts by status and by job."""
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
+
+            # Overall counts by status
             cursor.execute("""
                 SELECT status, COUNT(*) FROM repair_findings
                 GROUP BY status
             """)
-            counts = {row[0]: row[1] for row in cursor.fetchall()}
+            status_counts = {row[0]: row[1] for row in cursor.fetchall()}
+
+            # Pending counts per job
+            cursor.execute("""
+                SELECT job_id, finding_type, severity, COUNT(*) FROM repair_findings
+                WHERE status = 'pending'
+                GROUP BY job_id, finding_type, severity
+            """)
+            by_job = {}
+            for job_id, finding_type, severity, cnt in cursor.fetchall():
+                if job_id not in by_job:
+                    by_job[job_id] = {'total': 0, 'types': {}, 'warning': 0, 'info': 0}
+                by_job[job_id]['total'] += cnt
+                by_job[job_id]['types'][finding_type] = by_job[job_id]['types'].get(finding_type, 0) + cnt
+                if severity in ('warning', 'info'):
+                    by_job[job_id][severity] += cnt
+
+            # Resolve display names
+            self._ensure_jobs_loaded()
+            for job_id in by_job:
+                job = self._jobs.get(job_id)
+                by_job[job_id]['display_name'] = job.display_name if job else job_id
+
             return {
-                'pending': counts.get('pending', 0),
-                'resolved': counts.get('resolved', 0),
-                'dismissed': counts.get('dismissed', 0),
-                'auto_fixed': counts.get('auto_fixed', 0),
-                'total': sum(counts.values()),
+                'pending': status_counts.get('pending', 0),
+                'resolved': status_counts.get('resolved', 0),
+                'dismissed': status_counts.get('dismissed', 0),
+                'auto_fixed': status_counts.get('auto_fixed', 0),
+                'total': sum(status_counts.values()),
+                'by_job': by_job,
             }
         except Exception:
-            return {'pending': 0, 'resolved': 0, 'dismissed': 0, 'auto_fixed': 0, 'total': 0}
+            return {'pending': 0, 'resolved': 0, 'dismissed': 0, 'auto_fixed': 0, 'total': 0, 'by_job': {}}
         finally:
             if conn:
                 conn.close()

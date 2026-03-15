@@ -9,6 +9,31 @@ from utils.logging_config import get_logger
 logger = get_logger("repair_job.dead_files")
 
 
+def _resolve_file_path(file_path, transfer_folder, download_folder=None):
+    """Resolve a stored DB path to an actual file on disk.
+
+    Mirrors _resolve_library_file_path from web_server.py — tries the raw
+    path first, then progressively shorter suffixes against configured dirs.
+    """
+    if not file_path:
+        return None
+    if os.path.exists(file_path):
+        return file_path
+
+    path_parts = file_path.replace('\\', '/').split('/')
+
+    for base_dir in [transfer_folder, download_folder]:
+        if not base_dir or not os.path.isdir(base_dir):
+            continue
+        # Skip index 0 to avoid drive letter issues (e.g. E:)
+        for i in range(1, len(path_parts)):
+            candidate = os.path.join(base_dir, *path_parts[i:])
+            if os.path.exists(candidate):
+                return candidate
+
+    return None
+
+
 @register_job
 class DeadFileCleanerJob(RepairJob):
     job_id = 'dead_file_cleaner'
@@ -57,6 +82,11 @@ class DeadFileCleanerJob(RepairJob):
         if context.update_progress:
             context.update_progress(0, total)
 
+        # Get download folder for path resolution fallback
+        download_folder = None
+        if context.config_manager:
+            download_folder = context.config_manager.get('soulseek.download_path', '')
+
         for i, row in enumerate(tracks):
             if context.check_stop():
                 return result
@@ -66,8 +96,11 @@ class DeadFileCleanerJob(RepairJob):
             track_id, title, artist_name, album_title, file_path = row
             result.scanned += 1
 
-            if not os.path.exists(file_path):
-                # File is missing — create finding
+            # Use the same path resolution logic as library playback
+            resolved = _resolve_file_path(file_path, context.transfer_folder, download_folder)
+
+            if resolved is None:
+                # File is truly missing — create finding
                 if context.create_finding:
                     try:
                         context.create_finding(

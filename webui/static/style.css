@@ -39720,9 +39720,9 @@ tr.tag-diff-same {
     background: rgba(14, 14, 14, 0.98);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 16px;
-    width: 90vw;
-    max-width: 900px;
-    max-height: 85vh;
+    width: 94vw;
+    max-width: 1100px;
+    max-height: 90vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -40132,19 +40132,134 @@ tr.tag-diff-same {
     opacity: 0.85;
 }
 
+/* ── Findings Dashboard ── */
+.repair-findings-dashboard {
+    margin-bottom: 16px;
+}
+
+.repair-dashboard-summary {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+
+.repair-dashboard-stat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.repair-dashboard-stat .stat-count {
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1;
+}
+
+.repair-dashboard-stat.pending .stat-count {
+    color: #f59e0b;
+}
+
+.repair-dashboard-stat.resolved .stat-count {
+    color: #22c55e;
+}
+
+.repair-dashboard-stat.dismissed .stat-count {
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.repair-dashboard-stat.auto-fixed .stat-count {
+    color: #3b82f6;
+}
+
+.repair-dashboard-jobs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.repair-dashboard-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 0;
+}
+
+.repair-dashboard-chip:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.14);
+}
+
+.repair-dashboard-chip.active {
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.12);
+    border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.3);
+}
+
+.repair-dashboard-chip-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.75);
+    white-space: nowrap;
+}
+
+.repair-dashboard-chip-count {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    min-width: 20px;
+    text-align: center;
+}
+
+.repair-dashboard-chip-bar {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+}
+
+.repair-dashboard-chip-severity {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+}
+
+.repair-dashboard-chip-severity.warning {
+    background: #f59e0b;
+    box-shadow: 0 0 4px rgba(245, 158, 11, 0.4);
+}
+
+.repair-dashboard-chip-severity.info {
+    background: #3b82f6;
+    box-shadow: 0 0 4px rgba(59, 130, 246, 0.3);
+}
+
 /* ── Findings Tab ── */
-.repair-findings-header {
+.repair-findings-toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
-    gap: 12px;
+    margin-bottom: 14px;
+    gap: 10px;
     flex-wrap: wrap;
 }
 
 .repair-findings-filters {
     display: flex;
-    gap: 8px;
+    gap: 6px;
+    flex-wrap: wrap;
 }
 
 .repair-findings-filters select {
@@ -40161,9 +40276,20 @@ tr.tag-diff-same {
     background: #1a1a1a;
 }
 
+.repair-findings-summary {
+    display: flex;
+    gap: 16px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.4);
+}
+.repair-findings-summary strong {
+    color: #fff;
+    font-weight: 600;
+}
+
 .repair-findings-bulk {
     display: flex;
-    gap: 8px;
+    gap: 6px;
 }
 
 .repair-bulk-btn {
@@ -40188,38 +40314,39 @@ tr.tag-diff-same {
     gap: 6px;
 }
 
+/* Finding card — expandable two-row layout */
 .repair-finding-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 12px 14px;
-    background: rgba(22, 22, 22, 0.8);
+    background: rgba(22, 22, 22, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 8px;
-    transition: border-color 0.2s ease;
+    border-radius: 10px;
+    overflow: hidden;
+    transition: all 0.2s ease;
 }
-
 .repair-finding-card:hover {
     border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(28, 28, 28, 0.98);
 }
-
 .repair-finding-card.warning {
     border-left: 3px solid rgba(245, 158, 11, 0.5);
 }
-
 .repair-finding-card.critical {
     border-left: 3px solid rgba(239, 68, 68, 0.5);
 }
-
 .repair-finding-card.info {
     border-left: 3px solid rgba(59, 130, 246, 0.3);
 }
 
-.repair-finding-select {
-    padding-top: 2px;
-    flex-shrink: 0;
+.repair-finding-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
 }
 
+.repair-finding-select {
+    flex-shrink: 0;
+}
 .repair-finding-select input[type="checkbox"] {
     accent-color: var(--accent-color, #6366f1);
 }
@@ -40227,23 +40354,24 @@ tr.tag-diff-same {
 .repair-finding-content {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .repair-finding-title {
     font-size: 13px;
     font-weight: 500;
     color: #fff;
-    margin-bottom: 3px;
     display: flex;
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
 }
-
 .repair-finding-icon {
     font-size: 12px;
+    flex-shrink: 0;
 }
-
 .repair-finding-status-badge {
     font-size: 9px;
     font-weight: 600;
@@ -40251,78 +40379,211 @@ tr.tag-diff-same {
     border-radius: 8px;
     text-transform: uppercase;
 }
-
 .repair-finding-status-badge.resolved {
     background: rgba(34, 197, 94, 0.12);
     color: #22c55e;
 }
-
 .repair-finding-status-badge.dismissed {
     background: rgba(255, 255, 255, 0.06);
     color: rgba(255, 255, 255, 0.4);
 }
+.repair-finding-type-badge {
+    font-size: 10px;
+    font-weight: 500;
+    padding: 1px 7px;
+    border-radius: 8px;
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.1);
+    color: rgb(var(--accent-light-rgb, 129, 140, 248));
+}
 
 .repair-finding-desc {
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.4);
-    margin-bottom: 3px;
+    color: rgba(255, 255, 255, 0.45);
+    line-height: 1.4;
+}
+
+.repair-finding-path {
+    font-size: 11px;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    color: rgba(255, 255, 255, 0.3);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .repair-finding-meta {
-    font-size: 11px;
+    font-size: 10px;
     color: rgba(255, 255, 255, 0.25);
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
 }
 
 .repair-finding-actions {
     display: flex;
     gap: 4px;
     flex-shrink: 0;
+    align-items: center;
 }
 
 .repair-finding-btn {
     background: none;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 5px;
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    font-size: 13px;
     transition: all 0.2s ease;
 }
-
 .repair-finding-btn.resolve {
     color: #22c55e;
 }
-
 .repair-finding-btn.resolve:hover {
     background: rgba(34, 197, 94, 0.15);
     border-color: rgba(34, 197, 94, 0.3);
 }
-
 .repair-finding-btn.dismiss {
     color: rgba(255, 255, 255, 0.4);
 }
-
 .repair-finding-btn.dismiss:hover {
     background: rgba(239, 68, 68, 0.12);
     border-color: rgba(239, 68, 68, 0.3);
     color: #ef4444;
 }
+.repair-finding-expand-btn {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 5px;
+    width: 26px;
+    height: 26px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.3);
+    transition: all 0.2s ease;
+}
+.repair-finding-expand-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.6);
+}
+.repair-finding-expand-btn.open {
+    transform: rotate(180deg);
+}
+
+/* Finding detail panel — expandable */
+.repair-finding-detail {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.25s ease;
+}
+.repair-finding-detail.open {
+    max-height: 600px;
+    overflow-y: auto;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+.repair-finding-detail-inner {
+    padding: 12px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Detail key-value rows */
+.repair-detail-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 14px;
+    font-size: 12px;
+}
+.repair-detail-key {
+    color: rgba(255, 255, 255, 0.4);
+    white-space: nowrap;
+    font-weight: 500;
+}
+.repair-detail-val {
+    color: rgba(255, 255, 255, 0.75);
+    word-break: break-all;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 11px;
+}
+.repair-detail-val.path {
+    color: rgba(var(--accent-light-rgb, 129, 140, 248), 0.8);
+}
+.repair-detail-val.highlight {
+    color: #fbbf24;
+}
+.repair-detail-val.success {
+    color: #4ade80;
+}
+.repair-detail-val.error {
+    color: #f87171;
+}
+
+/* Detail sub-items (for duplicates, missing tracks, etc.) */
+.repair-detail-sublist {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+}
+.repair-detail-subitem {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.55);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.repair-detail-subitem strong {
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 500;
+}
+.repair-detail-subitem .mono {
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+/* Score bars (for AcoustID) */
+.repair-score-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.repair-score-bar-track {
+    flex: 1;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+    overflow: hidden;
+    max-width: 120px;
+}
+.repair-score-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+.repair-score-bar-fill.good { background: #4ade80; }
+.repair-score-bar-fill.warn { background: #fbbf24; }
+.repair-score-bar-fill.bad { background: #f87171; }
 
 /* Pagination */
 .repair-findings-pagination {
     display: flex;
     justify-content: center;
+    align-items: center;
     gap: 4px;
-    padding: 12px 0 4px;
+    padding: 14px 0 4px;
 }
-
 .repair-page-btn {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -40333,16 +40594,19 @@ tr.tag-diff-same {
     font-size: 12px;
     transition: all 0.2s ease;
 }
-
 .repair-page-btn.active {
     background: var(--accent-color, #6366f1);
     color: #fff;
     border-color: var(--accent-color, #6366f1);
 }
-
 .repair-page-btn:hover:not(.active) {
     background: rgba(255, 255, 255, 0.12);
     color: #fff;
+}
+.repair-page-info {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.3);
+    padding: 0 8px;
 }
 
 /* ── History Tab ── */
@@ -40353,23 +40617,47 @@ tr.tag-diff-same {
 }
 
 .repair-history-entry {
-    padding: 10px 14px;
-    background: rgba(22, 22, 22, 0.8);
+    padding: 12px 14px;
+    background: rgba(22, 22, 22, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 8px;
+    border-radius: 10px;
+    transition: all 0.2s ease;
+}
+.repair-history-entry:hover {
+    border-color: rgba(255, 255, 255, 0.1);
+    background: rgba(28, 28, 28, 0.98);
 }
 
-.repair-history-job {
+.repair-history-header {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-bottom: 4px;
+    margin-bottom: 8px;
+}
+.repair-history-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.repair-history-dot.success {
+    background: #4ade80;
+    box-shadow: 0 0 6px rgba(74, 222, 128, 0.4);
+}
+.repair-history-dot.error {
+    background: #f87171;
+    box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
+}
+.repair-history-dot.running {
+    background: rgb(var(--accent-rgb, 99, 102, 241));
+    box-shadow: 0 0 6px rgba(var(--accent-rgb, 99, 102, 241), 0.4);
 }
 
 .repair-history-name {
     font-size: 13px;
-    font-weight: 500;
+    font-weight: 600;
     color: #fff;
+    flex: 1;
 }
 
 .repair-history-status {
@@ -40379,32 +40667,72 @@ tr.tag-diff-same {
     border-radius: 8px;
     text-transform: uppercase;
 }
-
 .repair-history-status.success {
     background: rgba(34, 197, 94, 0.12);
     color: #22c55e;
 }
-
 .repair-history-status.error {
     background: rgba(239, 68, 68, 0.12);
     color: #ef4444;
 }
-
 .repair-history-status.running {
     background: rgba(var(--accent-rgb, 99, 102, 241), 0.12);
     color: var(--accent-color, #6366f1);
 }
-
-.repair-history-meta {
+.repair-history-duration {
     font-size: 11px;
     color: rgba(255, 255, 255, 0.35);
 }
 
+.repair-history-stats {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+.repair-history-stat {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.45);
+}
+.repair-history-stat strong {
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 600;
+}
+.repair-history-stat.findings {
+    background: rgba(245, 158, 11, 0.08);
+    color: rgba(245, 158, 11, 0.7);
+}
+.repair-history-stat.findings strong {
+    color: #f59e0b;
+}
+.repair-history-stat.errors {
+    background: rgba(239, 68, 68, 0.08);
+    color: rgba(239, 68, 68, 0.7);
+}
+.repair-history-stat.errors strong {
+    color: #ef4444;
+}
+.repair-history-stat.fixed {
+    background: rgba(34, 197, 94, 0.08);
+    color: rgba(34, 197, 94, 0.7);
+}
+.repair-history-stat.fixed strong {
+    color: #22c55e;
+}
+
+.repair-history-meta {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.25);
+    margin-top: 6px;
+}
+
 /* ── Responsive ── */
-@media (max-width: 640px) {
+@media (max-width: 768px) {
     .repair-modal {
         width: 98vw;
-        max-height: 92vh;
+        max-height: 95vh;
         border-radius: 12px;
     }
 
@@ -40427,6 +40755,15 @@ tr.tag-diff-same {
 
     .repair-job-actions {
         align-self: flex-end;
+    }
+
+    .repair-detail-grid {
+        grid-template-columns: 1fr;
+        gap: 2px;
+    }
+
+    .repair-help-modal {
+        max-width: 95vw;
     }
 }
 

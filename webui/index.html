@@ -5638,18 +5638,21 @@
             </div>
 
             <div class="repair-tab-content" id="repair-tab-findings" style="display:none;">
-                <div class="repair-findings-header">
+                <!-- Summary dashboard -->
+                <div class="repair-findings-dashboard" id="repair-findings-dashboard"></div>
+
+                <!-- Toolbar: filters + bulk actions -->
+                <div class="repair-findings-toolbar">
                     <div class="repair-findings-filters">
-                        <select id="repair-findings-job-filter" onchange="loadRepairFindings()">
+                        <select id="repair-findings-job-filter" onchange="_repairFindingsPage=0;loadRepairFindings()">
                             <option value="">All Jobs</option>
                         </select>
-                        <select id="repair-findings-severity-filter" onchange="loadRepairFindings()">
+                        <select id="repair-findings-severity-filter" onchange="_repairFindingsPage=0;loadRepairFindings()">
                             <option value="">All Severity</option>
                             <option value="info">Info</option>
                             <option value="warning">Warning</option>
-                            <option value="critical">Critical</option>
                         </select>
-                        <select id="repair-findings-status-filter" onchange="loadRepairFindings()">
+                        <select id="repair-findings-status-filter" onchange="_repairFindingsPage=0;loadRepairFindings()">
                             <option value="pending">Pending</option>
                             <option value="">All Status</option>
                             <option value="resolved">Resolved</option>
