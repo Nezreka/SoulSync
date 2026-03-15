@@ -4943,7 +4943,7 @@ function populateQualityProfileUI(profile) {
                 }
             }
 
-            // FLAC-specific: restore bit depth selector
+            // FLAC-specific: restore bit depth selector and fallback toggle
             if (quality === 'flac') {
                 const bitDepthValue = config.bit_depth || 'any';
                 document.querySelectorAll('.bit-depth-btn').forEach(btn => {
@@ -4956,6 +4956,15 @@ function populateQualityProfileUI(profile) {
                     } else {
                         bitDepthSelector.classList.add('disabled');
                     }
+                }
+                // Show/hide and restore fallback toggle
+                const fallbackToggle = document.getElementById('flac-fallback-toggle');
+                if (fallbackToggle) {
+                    fallbackToggle.style.display = bitDepthValue === 'any' ? 'none' : 'block';
+                }
+                const fallbackCb = document.getElementById('flac-bit-depth-fallback');
+                if (fallbackCb) {
+                    fallbackCb.checked = config.bit_depth_fallback !== false;
                 }
             }
         }
@@ -5033,6 +5042,12 @@ function setFlacBitDepth(value) {
         btn.classList.toggle('active', btn.getAttribute('data-value') === value);
     });
 
+    // Show/hide fallback toggle — only relevant when a specific bit depth is selected
+    const fallbackToggle = document.getElementById('flac-fallback-toggle');
+    if (fallbackToggle) {
+        fallbackToggle.style.display = value === 'any' ? 'none' : 'block';
+    }
+
     // Mark preset as custom when manually changing
     if (currentQualityProfile) {
         currentQualityProfile.preset = 'custom';
@@ -5041,6 +5056,16 @@ function setFlacBitDepth(value) {
         });
     }
 
+    debouncedAutoSaveSettings();
+}
+
+function setFlacBitDepthFallback(enabled) {
+    if (currentQualityProfile) {
+        currentQualityProfile.preset = 'custom';
+        document.querySelectorAll('.preset-button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+    }
     debouncedAutoSaveSettings();
 }
 
@@ -5094,10 +5119,12 @@ function collectQualityProfileFromUI() {
             priority: existingPriority
         };
 
-        // Add FLAC-specific bit_depth setting
+        // Add FLAC-specific bit_depth and fallback settings
         if (quality === 'flac') {
             const activeBtn = document.querySelector('.bit-depth-btn.active');
             profile.qualities[quality].bit_depth = activeBtn ? activeBtn.getAttribute('data-value') : 'any';
+            const fallbackCb = document.getElementById('flac-bit-depth-fallback');
+            profile.qualities[quality].bit_depth_fallback = fallbackCb ? fallbackCb.checked : true;
         }
     });
 
