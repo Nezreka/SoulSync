@@ -4210,25 +4210,82 @@
 
                             <!-- Metadata Enhancement Settings -->
                             <div class="settings-group">
-                                <h3>🎵 Metadata Enhancement</h3>
+                                <h3>🎵 Post-Processing</h3>
 
                                 <div class="form-group">
                                     <label class="checkbox-label">
-                                        <input type="checkbox" id="metadata-enabled" checked>
-                                        Enable metadata enhancement with Spotify data
+                                        <input type="checkbox" id="metadata-enabled" checked
+                                            onchange="document.getElementById('post-processing-options').style.display = this.checked ? 'block' : 'none'">
+                                        Enable post-processing on downloaded files
                                     </label>
+                                    <small class="settings-hint">Master toggle — disabling this skips all metadata, artwork, and lyrics processing</small>
                                 </div>
 
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="embed-album-art" checked>
-                                        Embed high-quality album art from Spotify
-                                    </label>
-                                </div>
+                                <div id="post-processing-options">
+                                    <!-- Core Features -->
+                                    <div class="post-processing-section">
+                                        <div class="post-processing-section-title">Core Features</div>
+                                        <div class="form-group">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="embed-album-art" checked>
+                                                Embed album art into file
+                                            </label>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="cover-art-download" checked>
+                                                Download cover.jpg to album folder
+                                            </label>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="lrclib-enabled" checked>
+                                                Generate .lrc lyrics files (LRClib)
+                                            </label>
+                                        </div>
+                                    </div>
 
-                                <div class="form-group">
-                                    <label>Supported Formats:</label>
-                                    <div class="supported-formats">MP3, FLAC, MP4/M4A, OGG</div>
+                                    <!-- Metadata Services -->
+                                    <div class="post-processing-section">
+                                        <div class="post-processing-section-title">Metadata Services</div>
+                                        <small class="settings-hint" style="margin-bottom: 8px; display: block;">Choose which services embed IDs, genres, and metadata into your files during download</small>
+
+                                        <div class="post-processing-grid">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="embed-musicbrainz" checked>
+                                                MusicBrainz
+                                            </label>
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="embed-deezer" checked>
+                                                Deezer
+                                            </label>
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="embed-audiodb" checked>
+                                                AudioDB
+                                            </label>
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="embed-tidal" checked>
+                                                Tidal
+                                            </label>
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="embed-qobuz" checked>
+                                                Qobuz
+                                            </label>
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="embed-lastfm" checked>
+                                                Last.fm
+                                            </label>
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="embed-genius" checked>
+                                                Genius
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>Supported Formats:</label>
+                                        <div class="supported-formats">MP3, FLAC, MP4/M4A, OGG</div>
+                                    </div>
                                 </div>
                             </div>
 

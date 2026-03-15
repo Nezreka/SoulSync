@@ -4198,7 +4198,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -14314,6 +14314,8 @@ def _generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: 
     Generate LRC lyrics file using LRClib API.
     Elegant addition to post-processing - extracts metadata from existing context.
     """
+    if not config_manager.get('metadata_enhancement.lrclib_enabled', True):
+        return False
     try:
         # Extract track information from existing context (same as metadata enhancement)
         original_search = context.get("original_search_result", {})
@@ -14698,7 +14700,9 @@ def _embed_source_ids(audio_file, metadata: dict):
         # ── 2d. Tidal lookup for ISRC fallback, copyright, and source IDs ──
         tidal_isrc = None
         tidal_copyright = None
-        if track_title and artist_name:
+        if not config_manager.get('tidal.embed_tags', True):
+            pass
+        elif track_title and artist_name:
             try:
                 if tidal_client and tidal_client.is_authenticated():
                     td_result = tidal_client.search_track(artist_name, track_title)
@@ -14729,7 +14733,9 @@ def _embed_source_ids(audio_file, metadata: dict):
         qobuz_isrc = None
         qobuz_copyright = None
         qobuz_label = None
-        if track_title and artist_name:
+        if not config_manager.get('qobuz.embed_tags', True):
+            pass
+        elif track_title and artist_name:
             try:
                 qz_client = qobuz_enrichment_worker.client if qobuz_enrichment_worker else None
                 if qz_client and qz_client.is_authenticated():
@@ -14768,7 +14774,9 @@ def _embed_source_ids(audio_file, metadata: dict):
         # ── 2f. Last.fm lookup for tags (genre merge) and URL ──
         lastfm_tags = []
         lastfm_url = None
-        if track_title and artist_name:
+        if not config_manager.get('lastfm.embed_tags', True):
+            pass
+        elif track_title and artist_name:
             try:
                 lf_client = lastfm_worker.client if lastfm_worker else None
                 if lf_client:
@@ -14794,7 +14802,9 @@ def _embed_source_ids(audio_file, metadata: dict):
         # state directly and skip immediately if Genius is rate-limited, rather
         # than entering search_song which would sleep for up to 120s.
         genius_url = None
-        if track_title and artist_name:
+        if not config_manager.get('genius.embed_tags', True):
+            pass
+        elif track_title and artist_name:
             try:
                 import core.genius_client as _genius_module
                 if time.time() < _genius_module._rate_limit_until:
@@ -14980,6 +14990,8 @@ def _embed_source_ids(audio_file, metadata: dict):
 
 def _download_cover_art(album_info: dict, target_dir: str):
     """Downloads cover.jpg into the specified directory."""
+    if not config_manager.get('metadata_enhancement.cover_art_download', True):
+        return
     try:
         cover_path = os.path.join(target_dir, "cover.jpg")
         if os.path.exists(cover_path):
