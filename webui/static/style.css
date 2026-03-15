@@ -40308,6 +40308,17 @@ tr.tag-diff-same {
     color: #fff;
 }
 
+.repair-bulk-btn.fix {
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.12);
+    border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.3);
+    color: rgb(var(--accent-light-rgb, 129, 140, 248));
+    font-weight: 600;
+}
+
+.repair-bulk-btn.fix:hover {
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.2);
+}
+
 .repair-findings-list {
     display: flex;
     flex-direction: column;
@@ -40430,7 +40441,7 @@ tr.tag-diff-same {
     background: none;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 5px;
-    width: 26px;
+    min-width: 26px;
     height: 26px;
     cursor: pointer;
     display: flex;
@@ -40438,6 +40449,22 @@ tr.tag-diff-same {
     justify-content: center;
     font-size: 13px;
     transition: all 0.2s ease;
+}
+.repair-finding-btn.fix {
+    color: rgb(var(--accent-light-rgb, 129, 140, 248));
+    border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.25);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 0 8px;
+    letter-spacing: 0.02em;
+}
+.repair-finding-btn.fix:hover {
+    background: rgba(var(--accent-rgb, 99, 102, 241), 0.15);
+    border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.4);
+}
+.repair-finding-btn.fix:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 .repair-finding-btn.resolve {
     color: #22c55e;
