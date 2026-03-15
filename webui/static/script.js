@@ -50535,6 +50535,33 @@ function _formatFileSize(bytes) {
     return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
+function _renderPlayButton(f) {
+    const d = f.details || {};
+    const filePath = f.file_path || d.file_path || d.original_path;
+    if (!filePath) return '';
+    const title = d.expected_title || d.title || d.file_title || d.matched_title || '';
+    const artist = d.expected_artist || d.artist || d.artist_name || '';
+    const album = d.album || d.album_title || '';
+    const albumArt = d.album_thumb_url || '';
+    return `<button class="repair-finding-play-btn" onclick="event.stopPropagation(); playFindingTrack(this)"
+        data-path="${_escFinding(filePath)}" data-title="${_escFinding(title)}"
+        data-artist="${_escFinding(artist)}" data-album="${_escFinding(album)}"
+        data-art="${_escFinding(albumArt)}" data-entity-id="${_escFinding(f.entity_id || '')}" title="Play this track">
+        <svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg> Play
+    </button>`;
+}
+
+function playFindingTrack(btn) {
+    const track = {
+        file_path: btn.dataset.path,
+        title: btn.dataset.title || 'Unknown Track',
+        id: btn.dataset.entityId || null
+    };
+    const albumTitle = btn.dataset.album || '';
+    const artistName = btn.dataset.artist || '';
+    playLibraryTrack(track, albumTitle, artistName);
+}
+
 function _renderFindingMedia(d) {
     const albumUrl = d.album_thumb_url;
     const artistUrl = d.artist_thumb_url;
@@ -50572,7 +50599,7 @@ function _renderFindingDetail(f) {
             if (d.title) rows.push(['Title', d.title]);
             if (d.track_id) rows.push(['Track ID', d.track_id]);
             if (d.original_path) rows.push(['Original Path', d.original_path, 'path']);
-            return media + _gridRows(rows);
+            return media + _gridRows(rows) + _renderPlayButton(f);
 
         case 'orphan_file':
             if (d.folder) rows.push(['Folder', d.folder, 'path']);
@@ -50580,7 +50607,7 @@ function _renderFindingDetail(f) {
             if (d.file_size) rows.push(['File Size', _formatFileSize(d.file_size)]);
             if (d.modified) rows.push(['Last Modified', d.modified]);
             if (f.file_path) rows.push(['Full Path', f.file_path, 'path']);
-            return _gridRows(rows);
+            return _gridRows(rows) + _renderPlayButton(f);
 
         case 'acoustid_mismatch': {
             let html = media + '<div style="margin-bottom:8px">';
@@ -50593,14 +50620,14 @@ function _renderFindingDetail(f) {
             rows.push(['AcoustID Title', d.acoustid_title || '-', 'highlight']);
             rows.push(['AcoustID Artist', d.acoustid_artist || '-', 'highlight']);
             if (f.file_path) rows.push(['File', f.file_path, 'path']);
-            return html + _gridRows(rows);
+            return html + _gridRows(rows) + _renderPlayButton(f);
         }
 
         case 'acoustid_no_match':
             if (d.expected_title) rows.push(['Expected Title', d.expected_title]);
             if (d.expected_artist) rows.push(['Expected Artist', d.expected_artist]);
             if (f.file_path) rows.push(['File', f.file_path, 'path']);
-            return media + _gridRows(rows);
+            return media + _gridRows(rows) + _renderPlayButton(f);
 
         case 'fake_lossless': {
             const cutoff = d.detected_cutoff_khz || 0;
@@ -50628,7 +50655,7 @@ function _renderFindingDetail(f) {
             if (d.bitrate) rows.push(['Bitrate', `${d.bitrate} kbps`]);
             if (d.file_size) rows.push(['File Size', _formatFileSize(d.file_size)]);
             if (f.file_path) rows.push(['File', f.file_path, 'path']);
-            return flHtml + _gridRows(rows);
+            return flHtml + _gridRows(rows) + _renderPlayButton(f);
         }
 
         case 'duplicate_tracks':
@@ -50736,6 +50763,7 @@ function _renderFindingDetail(f) {
                 tnHtml += `<div class="repair-detail-sublist">${d.changes.map(c => `
                     <div class="repair-detail-subitem"><strong>${_escFinding(c)}</strong></div>`).join('')}</div>`;
             }
+            tnHtml += _renderPlayButton(f);
             return tnHtml;
 
         default:
