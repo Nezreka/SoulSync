@@ -16868,6 +16868,61 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔧 Library Maintenance Suite",
+                "description": "Full-featured library repair system with 9 automated jobs, fix actions, and rich findings UI",
+                "features": [
+                    "• 9 repair jobs: track number mismatch, dead files, duplicates, metadata gaps, album completeness, missing cover art, AcoustID scanner, orphan files, fake lossless detection",
+                    "• One-click fix actions for findings — remove dead entries, delete orphans, resolve duplicates, apply metadata, update track numbers",
+                    "• Findings dashboard with per-job filter chips, summary stats, and expandable detail panels",
+                    "• Album art and artist images displayed in findings with labeled media cards",
+                    "• Real-time progress on job cards via WebSocket — phase, log lines, and per-item activity",
+                    "• Visual detail renderers: cover art previews, KEEP/REMOVE badges for duplicates, completion progress bars, spectral analysis for fake lossless",
+                    "• Job help text modals explaining what each repair job checks and how to interpret findings"
+                ]
+            },
+            {
+                "title": "🏷️ Post-Processing Enhancements",
+                "description": "Granular control over post-processing and richer file tagging",
+                "features": [
+                    "• Granular toggles for each post-processing step — enable/disable metadata services, cover art, and lyrics individually",
+                    "• Embed Tidal, Qobuz, Last.fm, and Genius metadata directly into audio file tags during post-processing",
+                    "• FLAC bit depth fallback option in quality profiles — accept lower bit depth when preferred isn't available"
+                ]
+            },
+            {
+                "title": "🧠 Per-Profile ListenBrainz",
+                "description": "Each profile can connect their own ListenBrainz account for personalized playlists",
+                "features": [
+                    "• Personal settings modal with ListenBrainz connect/disconnect flow",
+                    "• Per-profile playlist caching — switching profiles shows that user's playlists",
+                    "• Graceful fallback to global ListenBrainz token when no personal token is set",
+                    "• Stale playlist cache recovery for interrupted syncs"
+                ]
+            },
+            {
+                "title": "⬆️ Quality Enhance",
+                "description": "Upgrade existing library tracks to higher quality versions",
+                "features": [
+                    "• Quality enhance button on library tracks — find and download a higher quality version",
+                    "• iTunes fallback for quality enhance when Spotify metadata isn't available",
+                    "• Full metadata source parity between Spotify and iTunes for upgrade searches"
+                ]
+            },
+            {
+                "title": "🐛 Recent Bug Fixes",
+                "description": "Stability fixes and edge case handling",
+                "features": [
+                    "• Fix watchlist NOT NULL constraint blocking iTunes-only artists from being added",
+                    "• Fix Windows path mangling for artist names with trailing dots (e.g. Fred again..)",
+                    "• Fix watchlist scan failing entirely when Spotify is rate limited — iTunes provider fallback added",
+                    "• Fix per-profile ListenBrainz playlist cache scoping and stale data recovery",
+                    "• Harden metadata cache — prevent simplified data from overwriting full entries, fix connection leaks",
+                    "• Scope automation-triggered watchlist scans to the calling profile",
+                    "• Fix watchlist scan silently skipping all albums due to metadata cache returning incomplete data",
+                    "• Optimized enhanced library view performance with event delegation and scoped DOM queries"
+                ]
+            },
+            {
                 "title": "📋 Library Issue Reporting",
                 "description": "Report and track issues for tracks, albums, and artists directly from the library",
                 "features": [
