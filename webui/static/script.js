@@ -49919,7 +49919,7 @@ function switchRepairTab(tab) {
     if (content) content.style.display = '';
 
     if (tab === 'jobs') loadRepairJobs();
-    else if (tab === 'findings') loadRepairFindings();
+    else if (tab === 'findings') { loadRepairFindingsDashboard(); loadRepairFindings(); }
     else if (tab === 'history') loadRepairHistory();
 }
 
@@ -50303,6 +50303,84 @@ function updateRepairJobProgressFromData(data) {
     }
 }
 
+async function loadRepairFindingsDashboard() {
+    const dashboard = document.getElementById('repair-findings-dashboard');
+    if (!dashboard) return;
+
+    try {
+        const response = await fetch('/api/repair/findings/counts');
+        if (!response.ok) throw new Error('Failed to fetch counts');
+        const data = await response.json();
+
+        const pending = data.pending || 0;
+        const resolved = data.resolved || 0;
+        const dismissed = data.dismissed || 0;
+        const autoFixed = data.auto_fixed || 0;
+        const byJob = data.by_job || {};
+
+        // Summary stats row
+        let html = '<div class="repair-dashboard-summary">';
+        html += `<div class="repair-dashboard-stat pending">
+            <span class="stat-count">${pending.toLocaleString()}</span> pending
+        </div>`;
+        html += `<div class="repair-dashboard-stat resolved">
+            <span class="stat-count">${resolved.toLocaleString()}</span> resolved
+        </div>`;
+        html += `<div class="repair-dashboard-stat dismissed">
+            <span class="stat-count">${dismissed.toLocaleString()}</span> dismissed
+        </div>`;
+        if (autoFixed > 0) {
+            html += `<div class="repair-dashboard-stat auto-fixed">
+                <span class="stat-count">${autoFixed.toLocaleString()}</span> auto-fixed
+            </div>`;
+        }
+        html += '</div>';
+
+        // Per-job chips (only if there are pending findings)
+        const jobIds = Object.keys(byJob).sort((a, b) => byJob[b].total - byJob[a].total);
+        if (jobIds.length > 0) {
+            html += '<div class="repair-dashboard-jobs">';
+            const jobFilter = document.getElementById('repair-findings-job-filter');
+            const activeJob = jobFilter ? jobFilter.value : '';
+
+            for (const jid of jobIds) {
+                const job = byJob[jid];
+                const isActive = activeJob === jid;
+                const severityDots = [];
+                if (job.warning > 0) severityDots.push(`<span class="repair-dashboard-chip-severity warning" title="${job.warning} warnings"></span>`);
+                if (job.info > 0) severityDots.push(`<span class="repair-dashboard-chip-severity info" title="${job.info} info"></span>`);
+
+                html += `<div class="repair-dashboard-chip ${isActive ? 'active' : ''}" onclick="filterFindingsByJob('${jid}')">
+                    <span class="repair-dashboard-chip-count">${job.total.toLocaleString()}</span>
+                    <span class="repair-dashboard-chip-name">${_escFinding(job.display_name || jid.replace(/_/g, ' '))}</span>
+                    ${severityDots.length ? `<span class="repair-dashboard-chip-bar">${severityDots.join('')}</span>` : ''}
+                </div>`;
+            }
+            html += '</div>';
+        }
+
+        dashboard.innerHTML = html;
+    } catch (error) {
+        console.error('Error loading findings dashboard:', error);
+        dashboard.innerHTML = '';
+    }
+}
+
+function filterFindingsByJob(jobId) {
+    const jobFilter = document.getElementById('repair-findings-job-filter');
+    if (!jobFilter) return;
+
+    // Toggle: click same chip again to clear filter
+    if (jobFilter.value === jobId) {
+        jobFilter.value = '';
+    } else {
+        jobFilter.value = jobId;
+    }
+    _repairFindingsPage = 0;
+    loadRepairFindingsDashboard();
+    loadRepairFindings();
+}
+
 async function loadRepairFindings() {
     const container = document.getElementById('repair-findings-list');
     if (!container) return;
@@ -50339,33 +50417,58 @@ async function loadRepairFindings() {
         }
 
         const severityIcons = { info: 'ℹ️', warning: '⚠️', critical: '🔴' };
+        const typeLabels = {
+            dead_file: 'Dead File', orphan_file: 'Orphan', acoustid_mismatch: 'Wrong Song',
+            acoustid_no_match: 'No Match', fake_lossless: 'Fake Lossless',
+            duplicate_tracks: 'Duplicate', incomplete_album: 'Incomplete',
+            path_mismatch: 'Path Mismatch', metadata_gap: 'Missing Metadata',
+            missing_cover_art: 'Missing Art', track_number_mismatch: 'Track Number'
+        };
 
         container.innerHTML = items.map(f => {
             const icon = severityIcons[f.severity] || 'ℹ️';
             const age = formatCacheAge(f.created_at);
             const statusBadge = f.status !== 'pending' ?
                 `<span class="repair-finding-status-badge ${f.status}">${f.status}</span>` : '';
+            const typeLabel = typeLabels[f.finding_type] || f.finding_type.replace(/_/g, ' ');
+            const d = f.details || {};
+            const filePath = f.file_path || d.original_path || d.file_path || '';
 
             return `<div class="repair-finding-card ${f.severity}" data-id="${f.id}">
-                <div class="repair-finding-select">
-                    <input type="checkbox" onchange="toggleFindingSelect(${f.id}, this.checked)">
-                </div>
-                <div class="repair-finding-content">
-                    <div class="repair-finding-title">
-                        <span class="repair-finding-icon">${icon}</span>
-                        ${f.title}
-                        ${statusBadge}
+                <div class="repair-finding-main" onclick="toggleFindingDetail(${f.id})">
+                    <div class="repair-finding-select" onclick="event.stopPropagation()">
+                        <input type="checkbox" onchange="toggleFindingSelect(${f.id}, this.checked)">
                     </div>
-                    <div class="repair-finding-desc">${f.description || ''}</div>
-                    <div class="repair-finding-meta">
-                        ${f.job_id.replace(/_/g, ' ')} &middot; ${f.entity_type || 'file'} &middot; ${age}
+                    <div class="repair-finding-content">
+                        <div class="repair-finding-title">
+                            <span class="repair-finding-icon">${icon}</span>
+                            ${_escFinding(f.title)}
+                            <span class="repair-finding-type-badge">${typeLabel}</span>
+                            ${statusBadge}
+                        </div>
+                        <div class="repair-finding-desc">${_escFinding(f.description || '')}</div>
+                        ${filePath ? `<div class="repair-finding-path">${_escFinding(filePath)}</div>` : ''}
+                        <div class="repair-finding-meta">
+                            <span>${f.job_id.replace(/_/g, ' ')}</span>
+                            <span>&middot;</span>
+                            <span>${f.entity_type || 'file'}</span>
+                            ${f.entity_id ? `<span>&middot;</span><span>ID: ${f.entity_id}</span>` : ''}
+                            <span>&middot;</span>
+                            <span>${age}</span>
+                        </div>
+                    </div>
+                    <div class="repair-finding-actions" onclick="event.stopPropagation()">
+                        ${f.status === 'pending' ? `
+                            <button class="repair-finding-btn resolve" onclick="resolveRepairFinding(${f.id})" title="Resolve">&#10003;</button>
+                            <button class="repair-finding-btn dismiss" onclick="dismissRepairFinding(${f.id})" title="Dismiss">&times;</button>
+                        ` : ''}
+                        <button class="repair-finding-expand-btn" data-finding="${f.id}" title="Details">&#9660;</button>
                     </div>
                 </div>
-                <div class="repair-finding-actions">
-                    ${f.status === 'pending' ? `
-                        <button class="repair-finding-btn resolve" onclick="resolveRepairFinding(${f.id})" title="Resolve">&#10003;</button>
-                        <button class="repair-finding-btn dismiss" onclick="dismissRepairFinding(${f.id})" title="Dismiss">&times;</button>
-                    ` : ''}
+                <div class="repair-finding-detail" id="repair-detail-${f.id}">
+                    <div class="repair-finding-detail-inner">
+                        ${_renderFindingDetail(f)}
+                    </div>
                 </div>
             </div>`;
         }).join('');
@@ -50377,6 +50480,168 @@ async function loadRepairFindings() {
         console.error('Error loading findings:', error);
         container.innerHTML = '<div class="repair-empty">Error loading findings</div>';
     }
+}
+
+function _escFinding(s) {
+    if (!s) return '';
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function _renderScoreBar(value, label) {
+    const pct = Math.round((value || 0) * 100);
+    const cls = pct >= 80 ? 'good' : pct >= 50 ? 'warn' : 'bad';
+    return `<div class="repair-score-bar">
+        <span class="repair-detail-key">${label}</span>
+        <div class="repair-score-bar-track"><div class="repair-score-bar-fill ${cls}" style="width:${pct}%"></div></div>
+        <span class="repair-detail-val">${pct}%</span>
+    </div>`;
+}
+
+function _formatFileSize(bytes) {
+    if (!bytes) return '-';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function _renderFindingDetail(f) {
+    const d = f.details || {};
+    const rows = [];
+
+    switch (f.finding_type) {
+        case 'dead_file':
+            if (d.artist) rows.push(['Artist', d.artist]);
+            if (d.album) rows.push(['Album', d.album]);
+            if (d.title) rows.push(['Title', d.title]);
+            if (d.track_id) rows.push(['Track ID', d.track_id]);
+            if (d.original_path) rows.push(['Original Path', d.original_path, 'path']);
+            return _gridRows(rows);
+
+        case 'orphan_file':
+            if (d.folder) rows.push(['Folder', d.folder, 'path']);
+            if (d.format) rows.push(['Format', d.format.toUpperCase()]);
+            if (d.file_size) rows.push(['File Size', _formatFileSize(d.file_size)]);
+            if (d.modified) rows.push(['Last Modified', d.modified]);
+            if (f.file_path) rows.push(['Full Path', f.file_path, 'path']);
+            return _gridRows(rows);
+
+        case 'acoustid_mismatch':
+            let html = '<div style="margin-bottom:8px">';
+            html += _renderScoreBar(d.fingerprint_score, 'Fingerprint');
+            html += _renderScoreBar(d.title_similarity, 'Title Match');
+            html += _renderScoreBar(d.artist_similarity, 'Artist Match');
+            html += '</div>';
+            rows.push(['Expected Title', d.expected_title || '-']);
+            rows.push(['Expected Artist', d.expected_artist || '-']);
+            rows.push(['AcoustID Title', d.acoustid_title || '-', 'highlight']);
+            rows.push(['AcoustID Artist', d.acoustid_artist || '-', 'highlight']);
+            if (f.file_path) rows.push(['File', f.file_path, 'path']);
+            return html + _gridRows(rows);
+
+        case 'acoustid_no_match':
+            if (d.expected_title) rows.push(['Expected Title', d.expected_title]);
+            if (d.expected_artist) rows.push(['Expected Artist', d.expected_artist]);
+            if (f.file_path) rows.push(['File', f.file_path, 'path']);
+            return _gridRows(rows);
+
+        case 'fake_lossless':
+            if (d.format) rows.push(['Format', d.format.toUpperCase()]);
+            rows.push(['Spectral Cutoff', `${d.detected_cutoff_khz || '?'} kHz`]);
+            rows.push(['Expected Min', `${d.expected_min_khz || '?'} kHz`]);
+            if (d.sample_rate) rows.push(['Sample Rate', `${d.sample_rate} Hz`]);
+            if (d.nyquist_khz) rows.push(['Nyquist', `${d.nyquist_khz} kHz`]);
+            if (d.bit_depth) rows.push(['Bit Depth', `${d.bit_depth}-bit`]);
+            if (d.bitrate) rows.push(['Bitrate', `${d.bitrate} kbps`]);
+            if (d.file_size) rows.push(['File Size', _formatFileSize(d.file_size)]);
+            if (f.file_path) rows.push(['File', f.file_path, 'path']);
+            return _gridRows(rows);
+
+        case 'duplicate_tracks':
+            if (!d.tracks || !d.tracks.length) return _gridRows([['Count', d.count || '?']]);
+            return `<div class="repair-detail-sublist">${d.tracks.map((t, i) => `
+                <div class="repair-detail-subitem">
+                    <strong>Copy ${i + 1}: ${_escFinding(t.title)} by ${_escFinding(t.artist)}</strong>
+                    <span>Album: ${_escFinding(t.album || 'Unknown')}</span>
+                    ${t.bitrate ? `<span>Bitrate: ${t.bitrate} kbps${t.duration ? ` &middot; Duration: ${Math.round(t.duration)}s` : ''}</span>` : ''}
+                    ${t.file_path ? `<span class="mono">${_escFinding(t.file_path)}</span>` : ''}
+                </div>`).join('')}</div>`;
+
+        case 'incomplete_album':
+            if (d.artist) rows.push(['Artist', d.artist]);
+            if (d.album_title) rows.push(['Album', d.album_title]);
+            rows.push(['Tracks Found', `${d.actual_tracks || '?'} of ${d.expected_tracks || '?'}`]);
+            if (d.spotify_album_id) rows.push(['Spotify ID', d.spotify_album_id]);
+            if (d.missing_tracks && d.missing_tracks.length) {
+                return _gridRows(rows) + `<div class="repair-detail-sublist">${d.missing_tracks.map(t => `
+                    <div class="repair-detail-subitem">
+                        <strong>#${t.track_number || '?'} ${_escFinding(t.name || t.title || 'Unknown')}</strong>
+                        ${t.duration_ms ? `<span>Duration: ${Math.round(t.duration_ms / 1000)}s</span>` : ''}
+                    </div>`).join('')}</div>`;
+            }
+            return _gridRows(rows);
+
+        case 'path_mismatch':
+            if (d.from) rows.push(['Current Path', d.from, 'path']);
+            if (d.to) rows.push(['Expected Path', d.to, 'success']);
+            return _gridRows(rows);
+
+        case 'metadata_gap':
+            if (d.artist) rows.push(['Artist', d.artist]);
+            if (d.album) rows.push(['Album', d.album]);
+            if (d.title) rows.push(['Title', d.title]);
+            if (d.spotify_track_id) rows.push(['Spotify ID', d.spotify_track_id]);
+            if (d.found_fields && typeof d.found_fields === 'object') {
+                Object.entries(d.found_fields).forEach(([k, v]) => {
+                    rows.push([`Found: ${k}`, String(v), 'success']);
+                });
+            }
+            return _gridRows(rows);
+
+        case 'missing_cover_art':
+            if (d.artist) rows.push(['Artist', d.artist]);
+            if (d.album_title) rows.push(['Album', d.album_title]);
+            if (d.spotify_album_id) rows.push(['Spotify ID', d.spotify_album_id]);
+            if (d.found_artwork_url) rows.push(['Artwork URL', d.found_artwork_url, 'success']);
+            return _gridRows(rows);
+
+        case 'track_number_mismatch':
+            if (d.matched_title) rows.push(['Matched To', d.matched_title]);
+            if (d.file_title) rows.push(['File Title', d.file_title]);
+            if (d.current_track_num !== undefined) rows.push(['Current Track #', String(d.current_track_num)]);
+            if (d.correct_track_num !== undefined) rows.push(['Correct Track #', String(d.correct_track_num), 'success']);
+            if (f.file_path) rows.push(['File', f.file_path, 'path']);
+            let tnHtml = _gridRows(rows);
+            if (d.changes && d.changes.length) {
+                tnHtml += `<div class="repair-detail-sublist">${d.changes.map(c => `
+                    <div class="repair-detail-subitem"><strong>${_escFinding(c)}</strong></div>`).join('')}</div>`;
+            }
+            return tnHtml;
+
+        default:
+            // Generic: render all detail keys
+            Object.entries(d).forEach(([k, v]) => {
+                if (typeof v !== 'object') {
+                    rows.push([k.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), String(v)]);
+                }
+            });
+            if (f.file_path) rows.push(['File', f.file_path, 'path']);
+            return rows.length ? _gridRows(rows) : '<span style="color:rgba(255,255,255,0.3);font-size:12px;">No additional details available</span>';
+    }
+}
+
+function _gridRows(rows) {
+    if (!rows.length) return '';
+    return `<div class="repair-detail-grid">${rows.map(([k, v, cls]) =>
+        `<span class="repair-detail-key">${_escFinding(k)}</span><span class="repair-detail-val ${cls || ''}">${_escFinding(v)}</span>`
+    ).join('')}</div>`;
+}
+
+function toggleFindingDetail(id) {
+    const panel = document.getElementById(`repair-detail-${id}`);
+    const btn = document.querySelector(`.repair-finding-expand-btn[data-finding="${id}"]`);
+    if (!panel) return;
+    const isOpen = panel.classList.toggle('open');
+    if (btn) btn.classList.toggle('open', isOpen);
 }
 
 function toggleFindingSelect(id, checked) {
@@ -50398,19 +50663,36 @@ function renderRepairFindingsPagination(total, currentPage) {
     if (currentPage > 0) {
         html += `<button class="repair-page-btn" onclick="_repairFindingsPage=${currentPage - 1};loadRepairFindings()">&larr;</button>`;
     }
-    for (let i = 0; i < totalPages && i < 10; i++) {
+
+    // Smart page range
+    let startPage = Math.max(0, currentPage - 3);
+    let endPage = Math.min(totalPages, startPage + 7);
+    if (endPage - startPage < 7) startPage = Math.max(0, endPage - 7);
+
+    if (startPage > 0) {
+        html += `<button class="repair-page-btn" onclick="_repairFindingsPage=0;loadRepairFindings()">1</button>`;
+        if (startPage > 1) html += '<span class="repair-page-info">...</span>';
+    }
+    for (let i = startPage; i < endPage; i++) {
         html += `<button class="repair-page-btn ${i === currentPage ? 'active' : ''}"
                          onclick="_repairFindingsPage=${i};loadRepairFindings()">${i + 1}</button>`;
     }
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) html += '<span class="repair-page-info">...</span>';
+        html += `<button class="repair-page-btn" onclick="_repairFindingsPage=${totalPages - 1};loadRepairFindings()">${totalPages}</button>`;
+    }
+
     if (currentPage < totalPages - 1) {
         html += `<button class="repair-page-btn" onclick="_repairFindingsPage=${currentPage + 1};loadRepairFindings()">&rarr;</button>`;
     }
+    html += `<span class="repair-page-info">${total.toLocaleString()} total</span>`;
     container.innerHTML = html;
 }
 
 async function resolveRepairFinding(id) {
     try {
         await fetch(`/api/repair/findings/${id}/resolve`, { method: 'POST' });
+        loadRepairFindingsDashboard();
         loadRepairFindings();
         updateRepairStatus();
     } catch (error) {
@@ -50421,6 +50703,7 @@ async function resolveRepairFinding(id) {
 async function dismissRepairFinding(id) {
     try {
         await fetch(`/api/repair/findings/${id}/dismiss`, { method: 'POST' });
+        loadRepairFindingsDashboard();
         loadRepairFindings();
         updateRepairStatus();
     } catch (error) {
@@ -50438,6 +50721,7 @@ async function bulkRepairAction(action) {
         });
         showToast(`${_repairSelectedFindings.size} findings ${action === 'dismiss' ? 'dismissed' : 'resolved'}`, 'success');
         _repairSelectedFindings.clear();
+        loadRepairFindingsDashboard();
         loadRepairFindings();
         updateRepairStatus();
     } catch (error) {
@@ -50471,18 +50755,26 @@ async function loadRepairHistory() {
             const statusClass = run.status === 'completed' ? 'success' :
                                 run.status === 'failed' ? 'error' : 'running';
 
+            // Build stat pills
+            const stats = [];
+            stats.push(`<span class="repair-history-stat"><strong>${(run.items_scanned || 0).toLocaleString()}</strong> scanned</span>`);
+            if (run.findings_created) stats.push(`<span class="repair-history-stat findings"><strong>${run.findings_created}</strong> findings</span>`);
+            if (run.auto_fixed) stats.push(`<span class="repair-history-stat fixed"><strong>${run.auto_fixed}</strong> fixed</span>`);
+            if (run.errors) stats.push(`<span class="repair-history-stat errors"><strong>${run.errors}</strong> errors</span>`);
+
+            // Format timestamps
+            const startTime = run.started_at ? new Date(run.started_at).toLocaleString() : '-';
+            const endTime = run.finished_at ? new Date(run.finished_at).toLocaleString() : 'In progress';
+
             return `<div class="repair-history-entry">
-                <div class="repair-history-job">
+                <div class="repair-history-header">
+                    <div class="repair-history-dot ${statusClass}"></div>
                     <span class="repair-history-name">${run.display_name || run.job_id}</span>
                     <span class="repair-history-status ${statusClass}">${run.status}</span>
+                    <span class="repair-history-duration">${duration}</span>
                 </div>
-                <div class="repair-history-meta">
-                    ${age} &middot; ${duration} &middot;
-                    Scanned: ${(run.items_scanned || 0).toLocaleString()} &middot;
-                    Fixed: ${run.auto_fixed || 0} &middot;
-                    Findings: ${run.findings_created || 0}
-                    ${run.errors ? ` &middot; Errors: ${run.errors}` : ''}
-                </div>
+                <div class="repair-history-stats">${stats.join('')}</div>
+                <div class="repair-history-meta">${age} &middot; ${startTime} &rarr; ${endTime}</div>
             </div>`;
         }).join('');
 

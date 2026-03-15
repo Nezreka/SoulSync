@@ -39,16 +39,24 @@ class OrphanFileDetectorJob(RepairJob):
             logger.warning("Transfer folder does not exist: %s", transfer)
             return result
 
-        # Build set of all known file paths from DB
-        known_paths = set()
+        # Build set of known file-path suffixes from DB.
+        # DB may store paths with a different base prefix than the local filesystem
+        # (e.g. DB has /mnt/musicBackup/Artist/Album/track.mp3, local disk is
+        # H:\Music\Artist\Album\track.mp3).  We compare using suffix fragments
+        # of depth 1-3 (filename, album/filename, artist/album/filename) which
+        # covers all realistic path-prefix mismatches.
+        known_suffixes = set()
         conn = None
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT file_path FROM tracks WHERE file_path IS NOT NULL AND file_path != ''")
             for row in cursor.fetchall():
-                # Normalize path for comparison
-                known_paths.add(os.path.normpath(row[0]))
+                parts = row[0].replace('\\', '/').split('/')
+                # Store last 1, 2, and 3 path components as lowercase suffixes
+                for depth in range(1, min(4, len(parts) + 1)):
+                    suffix = '/'.join(parts[-depth:]).lower()
+                    known_suffixes.add(suffix)
         except Exception as e:
             logger.error("Error reading known file paths from DB: %s", e, exc_info=True)
             result.errors += 1
@@ -78,9 +86,17 @@ class OrphanFileDetectorJob(RepairJob):
                 return result
 
             result.scanned += 1
-            norm_path = os.path.normpath(fpath)
 
-            if norm_path not in known_paths:
+            # Check if this file matches any known DB path via suffix matching
+            fpath_parts = fpath.replace('\\', '/').split('/')
+            is_known = False
+            for depth in range(1, min(4, len(fpath_parts) + 1)):
+                suffix = '/'.join(fpath_parts[-depth:]).lower()
+                if suffix in known_suffixes:
+                    is_known = True
+                    break
+
+            if not is_known:
                 # This file is an orphan — create finding
                 try:
                     stat = os.stat(fpath)
