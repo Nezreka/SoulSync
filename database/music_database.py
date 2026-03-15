@@ -348,6 +348,7 @@ class MusicDatabase:
             self._add_profile_support_v3(cursor)
             self._add_profile_support_v4(cursor)
             self._add_profile_settings(cursor)
+            self._add_profile_listenbrainz_support(cursor)
 
             # Spotify library cache
             self._add_spotify_library_cache_table(cursor)
@@ -2279,6 +2280,149 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error in profile settings migration: {e}")
 
+    def _add_profile_listenbrainz_support(self, cursor):
+        """Add per-profile ListenBrainz credentials and scope playlist cache by profile"""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_listenbrainz_v1' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+
+            logger.info("Applying per-profile ListenBrainz migration...")
+
+            # Per-profile LB credentials on profiles table
+            for col_sql in [
+                "ALTER TABLE profiles ADD COLUMN listenbrainz_token TEXT DEFAULT NULL",
+                "ALTER TABLE profiles ADD COLUMN listenbrainz_base_url TEXT DEFAULT NULL",
+                "ALTER TABLE profiles ADD COLUMN listenbrainz_username TEXT DEFAULT NULL",
+            ]:
+                try:
+                    cursor.execute(col_sql)
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+
+            # Recreate listenbrainz_playlists with profile_id and compound unique constraint
+            # (SQLite can't ALTER constraints, so we must recreate the table)
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='listenbrainz_playlists'")
+            if cursor.fetchone():
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS listenbrainz_playlists_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        playlist_mbid TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        creator TEXT,
+                        playlist_type TEXT NOT NULL,
+                        track_count INTEGER DEFAULT 0,
+                        annotation_data TEXT,
+                        profile_id INTEGER DEFAULT 1,
+                        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        cached_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(playlist_mbid, profile_id)
+                    )
+                """)
+                cursor.execute("""
+                    INSERT OR IGNORE INTO listenbrainz_playlists_new
+                    (id, playlist_mbid, title, creator, playlist_type, track_count, annotation_data, profile_id, last_updated, cached_date)
+                    SELECT id, playlist_mbid, title, creator, playlist_type, track_count, annotation_data, 1, last_updated, cached_date
+                    FROM listenbrainz_playlists
+                """)
+                cursor.execute("DROP TABLE listenbrainz_playlists")
+                cursor.execute("ALTER TABLE listenbrainz_playlists_new RENAME TO listenbrainz_playlists")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lb_playlists_profile ON listenbrainz_playlists (profile_id)")
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value) VALUES ('profiles_listenbrainz_v1', '1')
+            """)
+
+            logger.info("Per-profile ListenBrainz migration completed successfully")
+
+        except Exception as e:
+            logger.error(f"Error in per-profile ListenBrainz migration: {e}")
+
+    def set_profile_listenbrainz(self, profile_id: int, token: str, base_url: str = '', username: str = '') -> bool:
+        """Save encrypted ListenBrainz credentials for a profile"""
+        try:
+            from config.settings import config_manager
+            encrypted_token = config_manager._encrypt_value(token) if token else None
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE profiles
+                    SET listenbrainz_token = ?, listenbrainz_base_url = ?, listenbrainz_username = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (encrypted_token, base_url or None, username or None, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting ListenBrainz credentials for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_listenbrainz(self, profile_id: int) -> Dict[str, Any]:
+        """Get decrypted ListenBrainz credentials for a profile"""
+        try:
+            from config.settings import config_manager
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT listenbrainz_token, listenbrainz_base_url, listenbrainz_username
+                    FROM profiles WHERE id = ?
+                """, (profile_id,))
+                row = cursor.fetchone()
+                if not row:
+                    return {'token': None, 'base_url': None, 'username': None}
+                token_raw = row[0]
+                token = config_manager._decrypt_value(token_raw) if token_raw else None
+                return {
+                    'token': token,
+                    'base_url': row[1] or '',
+                    'username': row[2] or '',
+                }
+        except Exception as e:
+            logger.error(f"Error getting ListenBrainz credentials for profile {profile_id}: {e}")
+            return {'token': None, 'base_url': None, 'username': None}
+
+    def clear_profile_listenbrainz(self, profile_id: int) -> bool:
+        """Clear ListenBrainz credentials for a profile"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE profiles
+                    SET listenbrainz_token = NULL, listenbrainz_base_url = NULL, listenbrainz_username = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (profile_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error clearing ListenBrainz credentials for profile {profile_id}: {e}")
+            return False
+
+    def get_profiles_with_listenbrainz(self) -> List[Dict[str, Any]]:
+        """Get all profiles that have ListenBrainz tokens configured"""
+        try:
+            from config.settings import config_manager
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, listenbrainz_token, listenbrainz_base_url
+                    FROM profiles WHERE listenbrainz_token IS NOT NULL
+                """)
+                results = []
+                for row in cursor.fetchall():
+                    token = config_manager._decrypt_value(row[1]) if row[1] else None
+                    if token:
+                        results.append({
+                            'id': row[0],
+                            'token': token,
+                            'base_url': row[2] or '',
+                        })
+                return results
+        except Exception as e:
+            logger.error(f"Error getting profiles with ListenBrainz tokens: {e}")
+            return []
+
     def _add_spotify_library_cache_table(self, cursor):
         """Create spotify_library_cache table for caching user's saved Spotify albums"""
         try:
@@ -2478,6 +2622,8 @@ class MusicDatabase:
                         'home_page': row['home_page'] if 'home_page' in columns else None,
                         'allowed_pages': json.loads(ap_raw) if ap_raw else None,
                         'can_download': bool(row['can_download']) if 'can_download' in columns else True,
+                        'has_listenbrainz': row['listenbrainz_token'] is not None if 'listenbrainz_token' in columns else False,
+                        'listenbrainz_username': row['listenbrainz_username'] if 'listenbrainz_username' in columns else None,
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
                     })
@@ -2506,6 +2652,8 @@ class MusicDatabase:
                         'home_page': row['home_page'] if 'home_page' in columns else None,
                         'allowed_pages': json.loads(ap_raw) if ap_raw else None,
                         'can_download': bool(row['can_download']) if 'can_download' in columns else True,
+                        'has_listenbrainz': row['listenbrainz_token'] is not None if 'listenbrainz_token' in columns else False,
+                        'listenbrainz_username': row['listenbrainz_username'] if 'listenbrainz_username' in columns else None,
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at'],
                     }

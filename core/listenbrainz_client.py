@@ -9,8 +9,12 @@ logger = get_logger("listenbrainz_client")
 class ListenBrainzClient:
     """Client for interacting with ListenBrainz API"""
 
-    def __init__(self):
-        custom_url = config_manager.get("listenbrainz.base_url", "")
+    def __init__(self, token=None, base_url=None):
+        # Use provided params or fall back to global config
+        if base_url is not None:
+            custom_url = base_url
+        else:
+            custom_url = config_manager.get("listenbrainz.base_url", "")
         if custom_url:
             # Strip trailing slashes and ensure /1 API version suffix
             custom_url = custom_url.rstrip('/')
@@ -19,7 +23,7 @@ class ListenBrainzClient:
             self.base_url = custom_url
         else:
             self.base_url = "https://api.listenbrainz.org/1"
-        self.token = config_manager.get("listenbrainz.token", "")
+        self.token = token if token is not None else config_manager.get("listenbrainz.token", "")
         self.username = None
 
         # Create a session for connection pooling

@@ -97,6 +97,22 @@
         </div>
     </div>
 
+    <!-- Personal Settings Modal -->
+    <div id="personal-settings-overlay" class="personal-settings-overlay" style="display: none;" onclick="if(event.target===this)closePersonalSettings()">
+        <div class="personal-settings-container">
+            <div class="personal-settings-header">
+                <h3>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    My Settings
+                </h3>
+                <button class="personal-settings-close" onclick="closePersonalSettings()">&times;</button>
+            </div>
+            <div class="personal-settings-body" id="personal-settings-body">
+                <!-- Populated dynamically by JS -->
+            </div>
+        </div>
+    </div>
+
     <div class="main-container">
         <!-- Mobile Navigation -->
         <button class="hamburger-btn" id="hamburger-btn" aria-label="Toggle navigation">
@@ -115,6 +131,9 @@
                 <div id="profile-indicator" class="profile-indicator" style="display: none;" title="Switch profile">
                     <div id="profile-indicator-avatar" class="profile-indicator-avatar"></div>
                     <span id="profile-indicator-name" class="profile-indicator-name"></span>
+                    <button id="personal-settings-btn" class="personal-settings-trigger" onclick="event.stopPropagation(); openPersonalSettings()" title="My Settings">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    </button>
                 </div>
             </div>
 
@@ -3323,7 +3342,7 @@
                         <div class="discover-section-header">
                             <div>
                                 <h2 class="discover-section-title">🧠 ListenBrainz Playlists</h2>
-                                <p class="discover-section-subtitle">Playlists from ListenBrainz</p>
+                                <p class="discover-section-subtitle" id="listenbrainz-section-subtitle">Playlists from ListenBrainz</p>
                             </div>
                             <div class="discover-section-actions">
                                 <button class="action-button primary" id="listenbrainz-refresh-btn"

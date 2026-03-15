@@ -32864,6 +32864,343 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
     white-space: nowrap;
 }
 
+/* Personal Settings Trigger (gear icon) */
+.personal-settings-trigger {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.3);
+    cursor: pointer;
+    padding: 2px;
+    margin-left: auto;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+.personal-settings-trigger:hover {
+    color: rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.08);
+    transform: rotate(30deg);
+}
+
+/* Personal Settings Modal */
+.personal-settings-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(8px);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: ps-fade-in 0.2s ease;
+}
+@keyframes ps-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+.personal-settings-container {
+    background: linear-gradient(145deg, rgba(28, 28, 32, 0.98), rgba(18, 18, 22, 0.99));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    width: 90%;
+    max-width: 460px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+    animation: ps-slide-up 0.25s ease;
+    overflow: hidden;
+}
+@keyframes ps-slide-up {
+    from { opacity: 0; transform: translateY(20px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.personal-settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 22px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.personal-settings-header h3 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.personal-settings-header h3 svg {
+    color: rgba(255, 255, 255, 0.5);
+}
+.personal-settings-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 22px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    transition: color 0.2s;
+}
+.personal-settings-close:hover {
+    color: rgba(255, 255, 255, 0.9);
+}
+.personal-settings-body {
+    padding: 20px 22px 24px;
+}
+
+/* LB Section within Personal Settings */
+.ps-section {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 16px 18px;
+}
+.ps-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+.ps-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: #eb743b;
+    margin: 0;
+}
+.ps-connection-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 500;
+}
+.ps-connection-badge.connected {
+    color: rgb(var(--accent-rgb));
+}
+.ps-connection-badge.disconnected {
+    color: rgba(255, 255, 255, 0.35);
+}
+.ps-connection-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.ps-connection-badge.connected .ps-connection-dot {
+    background: rgb(var(--accent-rgb));
+    box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.4);
+}
+.ps-connection-badge.disconnected .ps-connection-dot {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+/* Connected State */
+.ps-connected-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: rgba(var(--accent-rgb), 0.06);
+    border: 1px solid rgba(var(--accent-rgb), 0.12);
+    border-radius: 10px;
+    margin-bottom: 12px;
+}
+.ps-connected-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+}
+.ps-connected-details {
+    flex: 1;
+    min-width: 0;
+}
+.ps-connected-username {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+}
+.ps-connected-server {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.4);
+    margin-top: 2px;
+}
+.ps-connected-source {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.3);
+    font-style: italic;
+    margin-top: 2px;
+}
+
+/* Form Fields */
+.ps-form-group {
+    margin-bottom: 12px;
+}
+.ps-form-group label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.55);
+    margin-bottom: 5px;
+    letter-spacing: 0.2px;
+}
+.ps-form-group input {
+    width: 100%;
+    padding: 9px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 12px;
+    transition: all 0.25s ease;
+    box-sizing: border-box;
+}
+.ps-form-group input:focus {
+    outline: none;
+    border-color: rgba(235, 116, 59, 0.5);
+    background: rgba(235, 116, 59, 0.06);
+    box-shadow: 0 0 0 3px rgba(235, 116, 59, 0.1);
+}
+.ps-form-group input::placeholder {
+    color: rgba(255, 255, 255, 0.2);
+}
+.ps-help-text {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.35);
+    margin-top: 4px;
+}
+.ps-help-text a {
+    color: #eb743b;
+    text-decoration: none;
+}
+.ps-help-text a:hover {
+    text-decoration: underline;
+}
+
+/* Buttons */
+.ps-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+}
+.ps-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s ease;
+}
+.ps-btn-primary {
+    background: #eb743b;
+    color: #fff;
+}
+.ps-btn-primary:hover {
+    background: #d4632f;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(235, 116, 59, 0.3);
+}
+.ps-btn-secondary {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.ps-btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+}
+.ps-btn-danger {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+.ps-btn-danger:hover {
+    background: rgba(239, 68, 68, 0.2);
+}
+.ps-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+/* Inline feedback */
+.ps-inline-result {
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 500;
+    animation: ps-fade-in 0.2s ease;
+}
+.ps-inline-result.success {
+    background: rgba(var(--accent-rgb), 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.15);
+    color: rgb(var(--accent-rgb));
+}
+.ps-inline-result.error {
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+
+/* ListenBrainz empty state on Discover page */
+.lb-empty-state {
+    text-align: center;
+    padding: 40px 24px;
+    background: rgba(255, 255, 255, 0.015);
+    border: 1px dashed rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    margin: 8px 0;
+}
+.lb-empty-state .lb-empty-icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+}
+.lb-empty-state h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    margin: 0 0 8px 0;
+}
+.lb-empty-state p {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+    margin: 0 0 16px 0;
+    max-width: 340px;
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.5;
+}
+.lb-empty-state .lb-connect-btn {
+    background: #eb743b !important;
+    border-color: #eb743b !important;
+    color: #fff !important;
+    padding: 10px 24px !important;
+    font-size: 13px !important;
+    border-radius: 10px !important;
+}
+.lb-empty-state .lb-connect-btn:hover {
+    background: #d4632f !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(235, 116, 59, 0.3);
+}
+.lb-empty-state .lb-empty-help {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.3);
+    margin-top: 12px;
+}
+.lb-empty-state .lb-empty-help a {
+    color: #eb743b;
+    text-decoration: none;
+}
+.lb-empty-state .lb-empty-help a:hover {
+    text-decoration: underline;
+}
+
 /* ===========================
    AUTOMATIONS PAGE
    =========================== */

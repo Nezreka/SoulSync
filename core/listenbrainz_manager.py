@@ -18,9 +18,10 @@ logger = get_logger("listenbrainz_manager")
 class ListenBrainzManager:
     """Manages caching of ListenBrainz data in local database"""
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, profile_id: int = 1, token: str = None, base_url: str = None):
         self.db_path = db_path
-        self.client = ListenBrainzClient()
+        self.profile_id = profile_id
+        self.client = ListenBrainzClient(token=token, base_url=base_url)
         self._ensure_tables()
 
     def _ensure_tables(self):
@@ -30,14 +31,16 @@ class ListenBrainzManager:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS listenbrainz_playlists (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                playlist_mbid TEXT NOT NULL UNIQUE,
+                playlist_mbid TEXT NOT NULL,
                 title TEXT NOT NULL,
                 creator TEXT,
                 playlist_type TEXT NOT NULL,
                 track_count INTEGER DEFAULT 0,
                 annotation_data TEXT,
+                profile_id INTEGER DEFAULT 1,
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                cached_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                cached_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(playlist_mbid, profile_id)
             )
         """)
         cursor.execute("""
@@ -151,8 +154,8 @@ class ListenBrainzManager:
         cursor.execute("""
             SELECT id, track_count, last_updated
             FROM listenbrainz_playlists
-            WHERE playlist_mbid = ?
-        """, (playlist_mbid,))
+            WHERE playlist_mbid = ? AND profile_id = ?
+        """, (playlist_mbid, self.profile_id))
 
         existing = cursor.fetchone()
 
@@ -187,15 +190,16 @@ class ListenBrainzManager:
             # Insert new playlist
             cursor.execute("""
                 INSERT INTO listenbrainz_playlists
-                (playlist_mbid, title, creator, playlist_type, track_count, annotation_data)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (playlist_mbid, title, creator, playlist_type, track_count, annotation_data, profile_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 playlist_mbid,
                 title,
                 creator,
                 playlist_type,
                 track_count,
-                json.dumps(playlist.get('annotation', {}))
+                json.dumps(playlist.get('annotation', {})),
+                self.profile_id
             ))
 
             playlist_id = cursor.lastrowid
@@ -335,10 +339,10 @@ class ListenBrainzManager:
                 # Get IDs of playlists to delete (all except 25 most recent)
                 cursor.execute("""
                     SELECT id FROM listenbrainz_playlists
-                    WHERE playlist_type = ?
+                    WHERE playlist_type = ? AND profile_id = ?
                     ORDER BY last_updated DESC
                     LIMIT -1 OFFSET 25
-                """, (playlist_type,))
+                """, (playlist_type, self.profile_id))
 
                 old_playlist_ids = [row[0] for row in cursor.fetchall()]
 
@@ -362,7 +366,7 @@ class ListenBrainzManager:
         """Check if there are any cached playlists in the database"""
         conn = self._get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM listenbrainz_playlists")
+        cursor.execute("SELECT COUNT(*) FROM listenbrainz_playlists WHERE profile_id = ?", (self.profile_id,))
         count = cursor.fetchone()[0]
         conn.close()
         return count > 0
@@ -375,10 +379,10 @@ class ListenBrainzManager:
         cursor.execute("""
             SELECT id, playlist_mbid, title, creator, track_count, annotation_data, last_updated
             FROM listenbrainz_playlists
-            WHERE playlist_type = ?
+            WHERE playlist_type = ? AND profile_id = ?
             ORDER BY last_updated DESC
             LIMIT 25
-        """, (playlist_type,))
+        """, (playlist_type, self.profile_id))
 
         playlists = []
         for row in cursor.fetchall():
@@ -400,10 +404,10 @@ class ListenBrainzManager:
         conn = self._get_db_connection()
         cursor = conn.cursor()
 
-        # Get playlist ID
+        # Get playlist ID (scoped to this profile)
         cursor.execute("""
-            SELECT id FROM listenbrainz_playlists WHERE playlist_mbid = ?
-        """, (playlist_mbid,))
+            SELECT id FROM listenbrainz_playlists WHERE playlist_mbid = ? AND profile_id = ?
+        """, (playlist_mbid, self.profile_id))
 
         playlist_row = cursor.fetchone()
         if not playlist_row:
