@@ -15062,6 +15062,7 @@ def _check_flac_bit_depth(file_path, context, context_key):
     """
     Check if a FLAC file matches the user's preferred bit depth.
     Returns True if the file was rejected (caller should return), False if OK.
+    With fallback enabled (default), accepts any FLAC bit depth rather than quarantining.
     """
     if not context.get('_audio_quality', '').startswith('FLAC'):
         return False
@@ -15069,7 +15070,8 @@ def _check_flac_bit_depth(file_path, context, context_key):
     from database.music_database import MusicDatabase
     _qp_db = MusicDatabase()
     _quality_profile = _qp_db.get_quality_profile()
-    _flac_pref = _quality_profile.get('qualities', {}).get('flac', {}).get('bit_depth', 'any')
+    _flac_config = _quality_profile.get('qualities', {}).get('flac', {})
+    _flac_pref = _flac_config.get('bit_depth', 'any')
 
     if _flac_pref == 'any':
         return False
@@ -15079,7 +15081,17 @@ def _check_flac_bit_depth(file_path, context, context_key):
     if _actual_bits == _flac_pref:
         return False
 
-    # Reject — same pattern as AcoustID verification failure
+    # Bit depth doesn't match preference — check if fallback is enabled
+    _flac_fallback = _flac_config.get('bit_depth_fallback', True)
+
+    if _flac_fallback:
+        # Accept the file — a FLAC at any bit depth is better than a failed download
+        track_info = context.get('track_info', {})
+        track_name = track_info.get('name', os.path.basename(file_path))
+        print(f"📀 [FLAC Fallback] Accepted {_actual_bits}-bit FLAC (preferred {_flac_pref}-bit): {track_name}")
+        return False
+
+    # Strict mode — reject and quarantine
     rejection_msg = f"FLAC bit depth mismatch: file is {_actual_bits}-bit, preference is {_flac_pref}-bit"
     try:
         quarantine_path = _move_to_quarantine(file_path, context, rejection_msg)

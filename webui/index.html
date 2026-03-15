@@ -4014,8 +4014,14 @@
                                             <button class="bit-depth-btn" data-value="16" onclick="setFlacBitDepth('16')">16-bit</button>
                                             <button class="bit-depth-btn" data-value="24" onclick="setFlacBitDepth('24')">24-bit</button>
                                         </div>
-                                        <div style="color: #888; font-size: 0.75em; margin-top: 4px;">
-                                            Rejects FLAC files that don't match the selected bit depth
+                                        <div class="flac-fallback-toggle" id="flac-fallback-toggle" style="display: none; margin-top: 6px;">
+                                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.8em; color: #ccc;">
+                                                <input type="checkbox" id="flac-bit-depth-fallback" checked onchange="setFlacBitDepthFallback(this.checked)">
+                                                Accept other bit depths as fallback
+                                            </label>
+                                            <div style="color: #888; font-size: 0.75em; margin-top: 2px;">
+                                                When enabled, accepts any FLAC rather than rejecting on bit depth mismatch
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
