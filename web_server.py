@@ -26821,12 +26821,13 @@ def _run_youtube_discovery_worker(url_hash):
     finally:
         _resume_enrichment_workers(_ew_state, 'YouTube discovery')
 
-def _run_listenbrainz_discovery_worker(playlist_mbid):
+def _run_listenbrainz_discovery_worker(state_key):
     """Background worker for ListenBrainz music discovery process (Spotify preferred, iTunes fallback)"""
+    playlist_mbid = state_key.split(':', 1)[1] if ':' in state_key else state_key
     _ew_state = {}
     try:
         _ew_state = _pause_enrichment_workers('ListenBrainz discovery')
-        state = listenbrainz_playlist_states[playlist_mbid]
+        state = listenbrainz_playlist_states[state_key]
         playlist = state['playlist']
         tracks = playlist['tracks']
 
@@ -28629,6 +28630,119 @@ def set_profile_pin(profile_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# --- Per-Profile ListenBrainz Settings ---
+
+def _get_lb_credentials_for_profile(profile_id=None):
+    """Get LB token + base_url for profile, falling back to global config."""
+    if profile_id is None:
+        profile_id = get_current_profile_id()
+    db = get_database()
+    settings = db.get_profile_listenbrainz(profile_id)
+    if settings and settings.get('token'):
+        return settings['token'], settings.get('base_url', ''), settings.get('username', ''), 'profile'
+    # Fallback to global config
+    return (config_manager.get('listenbrainz.token', ''),
+            config_manager.get('listenbrainz.base_url', ''),
+            None, 'global')
+
+def _validate_lb_token(token, base_url=''):
+    """Validate a ListenBrainz token and return (success, username_or_error)"""
+    try:
+        custom_base = (base_url or '').rstrip('/')
+        if custom_base:
+            if not custom_base.endswith('/1'):
+                custom_base += '/1'
+            lb_api_base = custom_base
+        else:
+            lb_api_base = "https://api.listenbrainz.org/1"
+        url = f"{lb_api_base}/validate-token"
+        headers = {'Authorization': f'Token {token}'}
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('valid'):
+                return True, data.get('user_name', 'Unknown')
+            return False, "Invalid ListenBrainz token."
+        elif response.status_code == 401:
+            return False, "Invalid ListenBrainz token (unauthorized)."
+        else:
+            return False, f"Could not connect to ListenBrainz (HTTP {response.status_code})"
+    except Exception as e:
+        return False, f"ListenBrainz connection error: {str(e)}"
+
+@app.route('/api/profiles/me/listenbrainz', methods=['GET'])
+def get_profile_listenbrainz():
+    """Get current profile's ListenBrainz connection status"""
+    try:
+        profile_id = get_current_profile_id()
+        token, base_url, username, source = _get_lb_credentials_for_profile(profile_id)
+        connected = bool(token)
+        return jsonify({
+            'success': True,
+            'connected': connected,
+            'username': username if connected else None,
+            'base_url': base_url or '',
+            'source': source
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles/me/listenbrainz', methods=['POST'])
+def save_profile_listenbrainz():
+    """Save ListenBrainz credentials for current profile"""
+    try:
+        data = request.json or {}
+        token = data.get('token', '').strip()
+        base_url = data.get('base_url', '').strip()
+
+        if not token:
+            return jsonify({'success': False, 'error': 'Token is required'}), 400
+
+        # Validate token first
+        valid, result = _validate_lb_token(token, base_url)
+        if not valid:
+            return jsonify({'success': False, 'error': result}), 400
+
+        username = result
+        profile_id = get_current_profile_id()
+        db = get_database()
+        success = db.set_profile_listenbrainz(profile_id, token, base_url, username)
+
+        if success:
+            return jsonify({'success': True, 'username': username})
+        return jsonify({'success': False, 'error': 'Failed to save credentials'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles/me/listenbrainz', methods=['DELETE'])
+def delete_profile_listenbrainz():
+    """Clear ListenBrainz credentials for current profile"""
+    try:
+        profile_id = get_current_profile_id()
+        db = get_database()
+        db.clear_profile_listenbrainz(profile_id)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles/me/listenbrainz/test', methods=['POST'])
+def test_profile_listenbrainz():
+    """Test a ListenBrainz token without saving"""
+    try:
+        data = request.json or {}
+        token = data.get('token', '').strip()
+        base_url = data.get('base_url', '').strip()
+
+        if not token:
+            return jsonify({'success': False, 'error': 'Token is required'}), 400
+
+        valid, result = _validate_lb_token(token, base_url)
+        if valid:
+            return jsonify({'success': True, 'username': result})
+        return jsonify({'success': False, 'error': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 # --- Watchlist API Endpoints ---
 
 @app.route('/api/watchlist/count', methods=['GET'])
@@ -29371,13 +29485,24 @@ def start_watchlist_scan():
                 watchlist_scan_state['current_phase'] = 'updating_listenbrainz'
                 try:
                     from core.listenbrainz_manager import ListenBrainzManager
-                    lb_manager = ListenBrainzManager(str(get_database().database_path))
-                    lb_result = lb_manager.update_all_playlists()
-                    if lb_result.get('success'):
-                        summary = lb_result.get('summary', {})
-                        print(f"✅ ListenBrainz update complete: {summary}")
+                    db = get_database()
+                    db_path = str(db.database_path)
+                    # Update for all profiles with LB tokens
+                    lb_profiles = db.get_profiles_with_listenbrainz()
+                    if lb_profiles:
+                        for lb_prof in lb_profiles:
+                            lb_manager = ListenBrainzManager(db_path, profile_id=lb_prof['id'], token=lb_prof['token'], base_url=lb_prof['base_url'])
+                            lb_result = lb_manager.update_all_playlists()
+                            if lb_result.get('success'):
+                                print(f"✅ ListenBrainz update complete for profile {lb_prof['id']}: {lb_result.get('summary', {})}")
                     else:
-                        print(f"⚠️ ListenBrainz update skipped: {lb_result.get('error')}")
+                        # Fallback: use global config token
+                        lb_manager = ListenBrainzManager(db_path)
+                        lb_result = lb_manager.update_all_playlists()
+                        if lb_result.get('success'):
+                            print(f"✅ ListenBrainz update complete (global): {lb_result.get('summary', {})}")
+                        elif lb_result.get('error'):
+                            print(f"⚠️ ListenBrainz update skipped: {lb_result.get('error')}")
                 except Exception as lb_error:
                     print(f"⚠️ Error updating ListenBrainz: {lb_error}")
                     import traceback
@@ -30385,19 +30510,30 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
                                          log_line='Fetching ListenBrainz playlists...', log_type='info')
             try:
                 from core.listenbrainz_manager import ListenBrainzManager
-                lb_manager = ListenBrainzManager(str(get_database().database_path))
-                lb_result = lb_manager.update_all_playlists()
-                if lb_result.get('success'):
-                    summary = lb_result.get('summary', {})
-                    updated = summary.get('updated', 0)
-                    total_lb = summary.get('total', 0)
-                    print(f"✅ ListenBrainz update complete: {summary}")
-                    _update_automation_progress(automation_id,
-                                                 log_line=f'ListenBrainz: {updated}/{total_lb} playlists updated', log_type='success')
+                db = get_database()
+                db_path = str(db.database_path)
+                lb_profiles = db.get_profiles_with_listenbrainz()
+                if lb_profiles:
+                    for lb_prof in lb_profiles:
+                        lb_manager = ListenBrainzManager(db_path, profile_id=lb_prof['id'], token=lb_prof['token'], base_url=lb_prof['base_url'])
+                        lb_result = lb_manager.update_all_playlists()
+                        if lb_result.get('success'):
+                            summary = lb_result.get('summary', {})
+                            print(f"✅ ListenBrainz update complete for profile {lb_prof['id']}: {summary}")
+                            _update_automation_progress(automation_id,
+                                                         log_line=f'ListenBrainz (profile {lb_prof["id"]}): playlists updated', log_type='success')
                 else:
-                    print(f"⚠️ ListenBrainz update had issues: {lb_result.get('error', 'Unknown error')}")
-                    _update_automation_progress(automation_id,
-                                                 log_line=f'ListenBrainz: {lb_result.get("error", "Unknown error")}', log_type='error')
+                    lb_manager = ListenBrainzManager(db_path)
+                    lb_result = lb_manager.update_all_playlists()
+                    if lb_result.get('success'):
+                        summary = lb_result.get('summary', {})
+                        print(f"✅ ListenBrainz update complete (global): {summary}")
+                        _update_automation_progress(automation_id,
+                                                     log_line=f'ListenBrainz: playlists updated', log_type='success')
+                    else:
+                        print(f"⚠️ ListenBrainz update had issues: {lb_result.get('error', 'Unknown error')}")
+                        _update_automation_progress(automation_id,
+                                                     log_line=f'ListenBrainz: {lb_result.get("error", "Unknown error")}', log_type='error')
             except Exception as lb_error:
                 print(f"⚠️ Error updating ListenBrainz: {lb_error}")
                 import traceback
@@ -31872,50 +32008,57 @@ def get_discover_genre_playlist(genre_name):
 # LISTENBRAINZ DISCOVER ENDPOINTS
 # ===============================
 
+def _get_profile_lb_manager():
+    """Create a profile-aware ListenBrainzManager for the current user"""
+    from core.listenbrainz_manager import ListenBrainzManager
+    profile_id = get_current_profile_id()
+    token, base_url, username, source = _get_lb_credentials_for_profile(profile_id)
+    return ListenBrainzManager(str(get_database().database_path), profile_id=profile_id, token=token, base_url=base_url), username, source
+
+def _get_lb_discover_playlists(playlist_type):
+    """Shared logic for the 3 LB discover endpoints"""
+    lb_manager, username, source = _get_profile_lb_manager()
+
+    # Check if cache is empty - if so, populate it on first load
+    if not lb_manager.has_cached_playlists():
+        if not lb_manager.client.is_authenticated():
+            return jsonify({
+                "success": False,
+                "error": "Not authenticated",
+                "playlists": [],
+                "count": 0,
+                "username": None
+            })
+        print(f"📦 Cache empty for profile {lb_manager.profile_id}, populating ListenBrainz playlists...")
+        lb_manager.update_all_playlists()
+
+    playlists = lb_manager.get_cached_playlists(playlist_type)
+
+    formatted_playlists = []
+    for playlist in playlists:
+        formatted_playlists.append({
+            "playlist": {
+                "identifier": f"https://listenbrainz.org/playlist/{playlist['playlist_mbid']}",
+                "title": playlist['title'],
+                "creator": playlist['creator'],
+                "annotation": playlist.get('annotation', {}),
+                "track": []
+            }
+        })
+
+    return jsonify({
+        "success": True,
+        "playlists": formatted_playlists,
+        "count": len(formatted_playlists),
+        "username": username,
+        "source": source
+    })
+
 @app.route('/api/discover/listenbrainz/created-for', methods=['GET'])
 def get_listenbrainz_created_for():
     """Get playlists created for the user by ListenBrainz (from cache)"""
     try:
-        from core.listenbrainz_manager import ListenBrainzManager
-
-        lb_manager = ListenBrainzManager(str(get_database().database_path))
-
-        # Check if cache is empty - if so, populate it on first load
-        if not lb_manager.has_cached_playlists():
-            # Check if authenticated
-            if not lb_manager.client.is_authenticated():
-                return jsonify({
-                    "success": False,
-                    "error": "Not authenticated",
-                    "playlists": [],
-                    "count": 0
-                })
-
-            # Populate cache on first load
-            print("📦 Cache empty, populating ListenBrainz playlists...")
-            lb_manager.update_all_playlists()
-
-        playlists = lb_manager.get_cached_playlists('created_for')
-
-        # Convert to JSPF-like format for frontend compatibility
-        formatted_playlists = []
-        for playlist in playlists:
-            formatted_playlists.append({
-                "playlist": {
-                    "identifier": f"https://listenbrainz.org/playlist/{playlist['playlist_mbid']}",
-                    "title": playlist['title'],
-                    "creator": playlist['creator'],
-                    "annotation": playlist.get('annotation', {}),
-                    "track": []  # Track count is in annotation
-                }
-            })
-
-        return jsonify({
-            "success": True,
-            "playlists": formatted_playlists,
-            "count": len(formatted_playlists)
-        })
-
+        return _get_lb_discover_playlists('created_for')
     except Exception as e:
         print(f"Error getting cached ListenBrainz created-for playlists: {e}")
         import traceback
@@ -31926,46 +32069,7 @@ def get_listenbrainz_created_for():
 def get_listenbrainz_user_playlists():
     """Get user's own ListenBrainz playlists (from cache)"""
     try:
-        from core.listenbrainz_manager import ListenBrainzManager
-
-        lb_manager = ListenBrainzManager(str(get_database().database_path))
-
-        # Check if cache is empty - if so, populate it on first load
-        if not lb_manager.has_cached_playlists():
-            # Check if authenticated
-            if not lb_manager.client.is_authenticated():
-                return jsonify({
-                    "success": False,
-                    "error": "Not authenticated",
-                    "playlists": [],
-                    "count": 0
-                })
-
-            # Populate cache on first load
-            print("📦 Cache empty, populating ListenBrainz playlists...")
-            lb_manager.update_all_playlists()
-
-        playlists = lb_manager.get_cached_playlists('user')
-
-        # Convert to JSPF-like format for frontend compatibility
-        formatted_playlists = []
-        for playlist in playlists:
-            formatted_playlists.append({
-                "playlist": {
-                    "identifier": f"https://listenbrainz.org/playlist/{playlist['playlist_mbid']}",
-                    "title": playlist['title'],
-                    "creator": playlist['creator'],
-                    "annotation": playlist.get('annotation', {}),
-                    "track": []
-                }
-            })
-
-        return jsonify({
-            "success": True,
-            "playlists": formatted_playlists,
-            "count": len(formatted_playlists)
-        })
-
+        return _get_lb_discover_playlists('user')
     except Exception as e:
         print(f"Error getting cached ListenBrainz user playlists: {e}")
         import traceback
@@ -31976,46 +32080,7 @@ def get_listenbrainz_user_playlists():
 def get_listenbrainz_collaborative():
     """Get collaborative ListenBrainz playlists (from cache)"""
     try:
-        from core.listenbrainz_manager import ListenBrainzManager
-
-        lb_manager = ListenBrainzManager(str(get_database().database_path))
-
-        # Check if cache is empty - if so, populate it on first load
-        if not lb_manager.has_cached_playlists():
-            # Check if authenticated
-            if not lb_manager.client.is_authenticated():
-                return jsonify({
-                    "success": False,
-                    "error": "Not authenticated",
-                    "playlists": [],
-                    "count": 0
-                })
-
-            # Populate cache on first load
-            print("📦 Cache empty, populating ListenBrainz playlists...")
-            lb_manager.update_all_playlists()
-
-        playlists = lb_manager.get_cached_playlists('collaborative')
-
-        # Convert to JSPF-like format for frontend compatibility
-        formatted_playlists = []
-        for playlist in playlists:
-            formatted_playlists.append({
-                "playlist": {
-                    "identifier": f"https://listenbrainz.org/playlist/{playlist['playlist_mbid']}",
-                    "title": playlist['title'],
-                    "creator": playlist['creator'],
-                    "annotation": playlist.get('annotation', {}),
-                    "track": []
-                }
-            })
-
-        return jsonify({
-            "success": True,
-            "playlists": formatted_playlists,
-            "count": len(formatted_playlists)
-        })
-
+        return _get_lb_discover_playlists('collaborative')
     except Exception as e:
         print(f"Error getting cached ListenBrainz collaborative playlists: {e}")
         import traceback
@@ -32026,9 +32091,7 @@ def get_listenbrainz_collaborative():
 def get_listenbrainz_playlist_tracks(playlist_mbid):
     """Get tracks from a specific ListenBrainz playlist (from cache)"""
     try:
-        from core.listenbrainz_manager import ListenBrainzManager
-
-        lb_manager = ListenBrainzManager(str(get_database().database_path))
+        lb_manager, username, source = _get_profile_lb_manager()
         tracks = lb_manager.get_cached_tracks(playlist_mbid)
 
         if not tracks:
@@ -32055,9 +32118,7 @@ def get_listenbrainz_playlist_tracks(playlist_mbid):
 def refresh_listenbrainz():
     """Manually refresh ListenBrainz playlists cache"""
     try:
-        from core.listenbrainz_manager import ListenBrainzManager
-
-        lb_manager = ListenBrainzManager(str(get_database().database_path))
+        lb_manager, username, source = _get_profile_lb_manager()
         result = lb_manager.update_all_playlists()
 
         return jsonify(result)
@@ -32072,16 +32133,27 @@ def refresh_listenbrainz():
 # LISTENBRAINZ PLAYLIST MANAGEMENT (Discovery System)
 # ========================================
 
+def _lb_state_key(playlist_mbid, profile_id=None):
+    """Build profile-scoped key for listenbrainz_playlist_states"""
+    if profile_id is None:
+        profile_id = get_current_profile_id()
+    return f"{profile_id}:{playlist_mbid}"
+
 @app.route('/api/listenbrainz/playlists', methods=['GET'])
 def get_all_listenbrainz_playlists():
-    """Get all stored ListenBrainz playlists for frontend hydration"""
+    """Get all stored ListenBrainz playlists for frontend hydration (scoped to current profile)"""
     try:
         playlists = []
         current_time = time.time()
+        profile_id = get_current_profile_id()
+        prefix = f"{profile_id}:"
 
-        for playlist_mbid, state in listenbrainz_playlist_states.items():
+        for state_key, state in listenbrainz_playlist_states.items():
+            if not state_key.startswith(prefix):
+                continue
             # Update access time when requested
             state['last_accessed'] = current_time
+            playlist_mbid = state_key[len(prefix):]
 
             # Return essential data for card recreation
             playlist_info = {
@@ -32099,7 +32171,7 @@ def get_all_listenbrainz_playlists():
             }
             playlists.append(playlist_info)
 
-        print(f"📋 Returning {len(playlists)} stored ListenBrainz playlists for hydration")
+        print(f"📋 Returning {len(playlists)} stored ListenBrainz playlists for profile {profile_id}")
         return jsonify({"playlists": playlists})
 
     except Exception as e:
@@ -32110,10 +32182,11 @@ def get_all_listenbrainz_playlists():
 def get_listenbrainz_playlist_state(playlist_mbid):
     """Get specific ListenBrainz playlist state (detailed version)"""
     try:
-        if playlist_mbid not in listenbrainz_playlist_states:
+        state_key = _lb_state_key(playlist_mbid)
+        if state_key not in listenbrainz_playlist_states:
             return jsonify({"error": "ListenBrainz playlist not found"}), 404
 
-        state = listenbrainz_playlist_states[playlist_mbid]
+        state = listenbrainz_playlist_states[state_key]
         state['last_accessed'] = time.time()
 
         # Return full state information (including results for modal hydration)
@@ -32144,10 +32217,11 @@ def get_listenbrainz_playlist_state(playlist_mbid):
 def reset_listenbrainz_playlist(playlist_mbid):
     """Reset ListenBrainz playlist to fresh phase (clear discovery/sync data)"""
     try:
-        if playlist_mbid not in listenbrainz_playlist_states:
+        state_key = _lb_state_key(playlist_mbid)
+        if state_key not in listenbrainz_playlist_states:
             return jsonify({"error": "ListenBrainz playlist not found"}), 404
 
-        state = listenbrainz_playlist_states[playlist_mbid]
+        state = listenbrainz_playlist_states[state_key]
 
         # Stop any active discovery
         if 'discovery_future' in state and state['discovery_future']:
@@ -32176,17 +32250,18 @@ def reset_listenbrainz_playlist(playlist_mbid):
 def remove_listenbrainz_playlist(playlist_mbid):
     """Remove ListenBrainz playlist from state (doesn't affect cache)"""
     try:
-        if playlist_mbid not in listenbrainz_playlist_states:
+        state_key = _lb_state_key(playlist_mbid)
+        if state_key not in listenbrainz_playlist_states:
             return jsonify({"error": "ListenBrainz playlist not found"}), 404
 
-        state = listenbrainz_playlist_states[playlist_mbid]
+        state = listenbrainz_playlist_states[state_key]
 
         # Stop any active discovery
         if 'discovery_future' in state and state['discovery_future']:
             state['discovery_future'].cancel()
 
         # Remove from state
-        del listenbrainz_playlist_states[playlist_mbid]
+        del listenbrainz_playlist_states[state_key]
 
         print(f"🗑️ Removed ListenBrainz playlist from state: {playlist_mbid}")
         return jsonify({"success": True})
@@ -32206,9 +32281,10 @@ def start_listenbrainz_discovery(playlist_mbid):
             return jsonify({"error": "Playlist data required"}), 400
 
         # Create or update state
-        if playlist_mbid not in listenbrainz_playlist_states:
+        state_key = _lb_state_key(playlist_mbid)
+        if state_key not in listenbrainz_playlist_states:
             # Initialize new state
-            listenbrainz_playlist_states[playlist_mbid] = {
+            listenbrainz_playlist_states[state_key] = {
                 'playlist_mbid': playlist_mbid,
                 'playlist': playlist_data,
                 'phase': 'discovering',
@@ -32223,7 +32299,7 @@ def start_listenbrainz_discovery(playlist_mbid):
             print(f"✅ Created new ListenBrainz playlist state: {playlist_data.get('name', 'Unknown')}")
         else:
             # State already exists, update it
-            state = listenbrainz_playlist_states[playlist_mbid]
+            state = listenbrainz_playlist_states[state_key]
             if state['phase'] == 'discovering':
                 return jsonify({"error": "Discovery already in progress"}), 400
 
@@ -32235,15 +32311,15 @@ def start_listenbrainz_discovery(playlist_mbid):
             state['discovery_results'] = []
             state['last_accessed'] = time.time()
 
-        state = listenbrainz_playlist_states[playlist_mbid]
+        state = listenbrainz_playlist_states[state_key]
 
         # Add activity for discovery start
         playlist_name = playlist_data.get('name', 'Unknown Playlist')
         track_count = len(playlist_data.get('tracks', []))
         add_activity_item("🔍", "ListenBrainz Discovery Started", f"'{playlist_name}' - {track_count} tracks", "Now")
 
-        # Start discovery worker
-        future = listenbrainz_discovery_executor.submit(_run_listenbrainz_discovery_worker, playlist_mbid)
+        # Start discovery worker (pass state_key for profile-scoped state access)
+        future = listenbrainz_discovery_executor.submit(_run_listenbrainz_discovery_worker, state_key)
         state['discovery_future'] = future
 
         print(f"🔍 Started Spotify discovery for ListenBrainz playlist: {playlist_name}")
@@ -32259,10 +32335,11 @@ def start_listenbrainz_discovery(playlist_mbid):
 def get_listenbrainz_discovery_status(playlist_mbid):
     """Get real-time discovery status for a ListenBrainz playlist"""
     try:
-        if playlist_mbid not in listenbrainz_playlist_states:
+        state_key = _lb_state_key(playlist_mbid)
+        if state_key not in listenbrainz_playlist_states:
             return jsonify({"error": "ListenBrainz playlist not found"}), 404
 
-        state = listenbrainz_playlist_states[playlist_mbid]
+        state = listenbrainz_playlist_states[state_key]
         state['last_accessed'] = time.time()
 
         response = {
@@ -32285,7 +32362,8 @@ def get_listenbrainz_discovery_status(playlist_mbid):
 def update_listenbrainz_phase(playlist_mbid):
     """Update ListenBrainz playlist phase (for phase transitions and persistence)"""
     try:
-        if playlist_mbid not in listenbrainz_playlist_states:
+        state_key = _lb_state_key(playlist_mbid)
+        if state_key not in listenbrainz_playlist_states:
             return jsonify({"error": "ListenBrainz playlist not found"}), 404
 
         data = request.get_json() or {}
@@ -32294,7 +32372,7 @@ def update_listenbrainz_phase(playlist_mbid):
         if not new_phase:
             return jsonify({"error": "Phase is required"}), 400
 
-        state = listenbrainz_playlist_states[playlist_mbid]
+        state = listenbrainz_playlist_states[state_key]
         state['phase'] = new_phase
         state['last_accessed'] = time.time()
 
@@ -32331,8 +32409,8 @@ def update_listenbrainz_discovery_match():
         if not identifier or track_index is None or not spotify_track:
             return jsonify({'error': 'Missing required fields'}), 400
 
-        # Get the state
-        state = listenbrainz_playlist_states.get(identifier)
+        # Get the state (identifier is playlist_mbid)
+        state = listenbrainz_playlist_states.get(_lb_state_key(identifier))
 
         if not state:
             return jsonify({'error': 'Discovery state not found'}), 404
@@ -32421,10 +32499,11 @@ def convert_listenbrainz_results_to_spotify_tracks(discovery_results):
 def start_listenbrainz_sync(playlist_mbid):
     """Start sync process for a ListenBrainz playlist using discovered Spotify tracks"""
     try:
-        if playlist_mbid not in listenbrainz_playlist_states:
+        state_key = _lb_state_key(playlist_mbid)
+        if state_key not in listenbrainz_playlist_states:
             return jsonify({"error": "ListenBrainz playlist not found"}), 404
 
-        state = listenbrainz_playlist_states[playlist_mbid]
+        state = listenbrainz_playlist_states[state_key]
         state['last_accessed'] = time.time()  # Update access time
 
         if state['phase'] not in ['discovered', 'sync_complete']:
@@ -32473,10 +32552,11 @@ def start_listenbrainz_sync(playlist_mbid):
 def get_listenbrainz_sync_status(playlist_mbid):
     """Get sync status for a ListenBrainz playlist"""
     try:
-        if playlist_mbid not in listenbrainz_playlist_states:
+        state_key = _lb_state_key(playlist_mbid)
+        if state_key not in listenbrainz_playlist_states:
             return jsonify({"error": "ListenBrainz playlist not found"}), 404
 
-        state = listenbrainz_playlist_states[playlist_mbid]
+        state = listenbrainz_playlist_states[state_key]
         state['last_accessed'] = time.time()  # Update access time
         sync_playlist_id = state.get('sync_playlist_id')
 
@@ -32517,10 +32597,11 @@ def get_listenbrainz_sync_status(playlist_mbid):
 def cancel_listenbrainz_sync(playlist_mbid):
     """Cancel sync for a ListenBrainz playlist"""
     try:
-        if playlist_mbid not in listenbrainz_playlist_states:
+        state_key = _lb_state_key(playlist_mbid)
+        if state_key not in listenbrainz_playlist_states:
             return jsonify({"error": "ListenBrainz playlist not found"}), 404
 
-        state = listenbrainz_playlist_states[playlist_mbid]
+        state = listenbrainz_playlist_states[state_key]
         state['last_accessed'] = time.time()  # Update access time
         sync_playlist_id = state.get('sync_playlist_id')
 

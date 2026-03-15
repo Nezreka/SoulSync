@@ -1044,6 +1044,8 @@ async function selectProfile(profileId) {
             if (socket && socket.connected) {
                 socket.emit('profile:join', { profile_id: profileId, old_profile_id: oldProfileId });
             }
+            // Invalidate ListenBrainz cache on profile switch (each profile has their own playlists)
+            _invalidateListenBrainzCache();
         }
         return data.success;
     } catch (e) {
@@ -1098,6 +1100,202 @@ function updateProfileIndicator() {
         document.body.classList.remove('downloads-disabled');
     } else {
         document.body.classList.add('downloads-disabled');
+    }
+}
+
+// =====================
+// PERSONAL SETTINGS MODAL
+// =====================
+
+async function openPersonalSettings() {
+    const overlay = document.getElementById('personal-settings-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+
+    const body = document.getElementById('personal-settings-body');
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:rgba(255,255,255,0.4);">Loading...</div>';
+
+    try {
+        const res = await fetch('/api/profiles/me/listenbrainz');
+        const data = await res.json();
+        renderPersonalSettingsLB(data);
+    } catch (e) {
+        body.innerHTML = '<div style="color:#ef4444;padding:16px;">Failed to load settings</div>';
+    }
+}
+
+function closePersonalSettings() {
+    const overlay = document.getElementById('personal-settings-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+function renderPersonalSettingsLB(data) {
+    const body = document.getElementById('personal-settings-body');
+    const connected = data.connected;
+    const username = data.username || '';
+    const baseUrl = data.base_url || '';
+    const source = data.source || 'global';
+
+    const tokenFormHtml = `
+        <div class="ps-form-group">
+            <label>User Token</label>
+            <input type="password" id="ps-lb-token" placeholder="Paste your ListenBrainz token">
+        </div>
+        <div class="ps-form-group">
+            <label>Server URL <span style="font-weight:400;color:rgba(255,255,255,0.3)">(optional)</span></label>
+            <input type="text" id="ps-lb-base-url" placeholder="Leave empty for official (api.listenbrainz.org)">
+            <div class="ps-help-text">
+                Get your token from <a href="https://listenbrainz.org/profile/" target="_blank">listenbrainz.org/profile</a>
+            </div>
+        </div>
+        <div id="ps-lb-result"></div>
+        <div class="ps-actions">
+            <button class="ps-btn ps-btn-secondary" onclick="testPersonalListenBrainz()">Test</button>
+            <button class="ps-btn ps-btn-primary" onclick="connectPersonalListenBrainz()">Connect</button>
+        </div>
+    `;
+
+    let contentHtml;
+    if (connected && source === 'profile') {
+        // Personal token — show connected state with Disconnect
+        const serverDisplay = baseUrl ? baseUrl.replace(/\/1$/, '').replace(/^https?:\/\//, '') : 'api.listenbrainz.org';
+        contentHtml = `
+            <div class="ps-connected-info">
+                <div class="ps-connected-icon">&#129504;</div>
+                <div class="ps-connected-details">
+                    <div class="ps-connected-username">Connected as ${escapeHtml(username)}</div>
+                    <div class="ps-connected-server">${escapeHtml(serverDisplay)}</div>
+                    <div class="ps-connected-source">Personal token</div>
+                </div>
+            </div>
+            <div class="ps-actions">
+                <button class="ps-btn ps-btn-danger" onclick="disconnectPersonalListenBrainz()">Disconnect</button>
+            </div>
+        `;
+    } else if (connected && source === 'global') {
+        // Using admin's shared token — show status + option to set own token
+        const serverDisplay = baseUrl ? baseUrl.replace(/\/1$/, '').replace(/^https?:\/\//, '') : 'api.listenbrainz.org';
+        contentHtml = `
+            <div class="ps-connected-info">
+                <div class="ps-connected-icon">&#129504;</div>
+                <div class="ps-connected-details">
+                    <div class="ps-connected-username">Connected as ${escapeHtml(username)}</div>
+                    <div class="ps-connected-server">${escapeHtml(serverDisplay)}</div>
+                    <div class="ps-connected-source">Using shared token from Settings</div>
+                </div>
+            </div>
+            <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);">
+                <div style="font-size:11px;color:rgba(255,255,255,0.45);margin-bottom:10px;">Set your own token to use a different ListenBrainz account:</div>
+                ${tokenFormHtml}
+            </div>
+        `;
+    } else {
+        // Not connected at all
+        contentHtml = tokenFormHtml;
+    }
+
+    body.innerHTML = `
+        <div class="ps-section">
+            <div class="ps-section-header">
+                <h4 class="ps-section-title">ListenBrainz</h4>
+                <span class="ps-connection-badge ${connected ? 'connected' : 'disconnected'}">
+                    <span class="ps-connection-dot"></span>
+                    ${connected ? 'Connected' : 'Not connected'}
+                </span>
+            </div>
+            ${contentHtml}
+        </div>
+    `;
+}
+
+async function testPersonalListenBrainz() {
+    const token = document.getElementById('ps-lb-token')?.value?.trim();
+    const baseUrl = document.getElementById('ps-lb-base-url')?.value?.trim() || '';
+    const resultEl = document.getElementById('ps-lb-result');
+    if (!token) {
+        if (resultEl) resultEl.innerHTML = '<div class="ps-inline-result error">Please enter a token</div>';
+        return;
+    }
+    if (resultEl) resultEl.innerHTML = '<div class="ps-inline-result" style="color:rgba(255,255,255,0.5);">Testing...</div>';
+    try {
+        const res = await fetch('/api/profiles/me/listenbrainz/test', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({token, base_url: baseUrl})
+        });
+        const data = await res.json();
+        if (data.success) {
+            resultEl.innerHTML = `<div class="ps-inline-result success">Valid token — ${escapeHtml(data.username)}</div>`;
+        } else {
+            resultEl.innerHTML = `<div class="ps-inline-result error">${escapeHtml(data.error || 'Invalid token')}</div>`;
+        }
+    } catch (e) {
+        resultEl.innerHTML = '<div class="ps-inline-result error">Connection failed</div>';
+    }
+}
+
+async function connectPersonalListenBrainz() {
+    const token = document.getElementById('ps-lb-token')?.value?.trim();
+    const baseUrl = document.getElementById('ps-lb-base-url')?.value?.trim() || '';
+    const resultEl = document.getElementById('ps-lb-result');
+    if (!token) {
+        if (resultEl) resultEl.innerHTML = '<div class="ps-inline-result error">Please enter a token</div>';
+        return;
+    }
+    // Disable buttons during connect
+    document.querySelectorAll('.ps-actions .ps-btn').forEach(b => b.disabled = true);
+    if (resultEl) resultEl.innerHTML = '<div class="ps-inline-result" style="color:rgba(255,255,255,0.5);">Connecting...</div>';
+    try {
+        const res = await fetch('/api/profiles/me/listenbrainz', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({token, base_url: baseUrl})
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Connected to ListenBrainz as ${data.username}`, 'success');
+            // Re-render as connected
+            renderPersonalSettingsLB({connected: true, username: data.username, base_url: baseUrl, source: 'profile'});
+            // Refresh LB playlists on discover page
+            _invalidateListenBrainzCache();
+            if (typeof initializeListenBrainzTabs === 'function') {
+                initializeListenBrainzTabs();
+            }
+        } else {
+            resultEl.innerHTML = `<div class="ps-inline-result error">${escapeHtml(data.error || 'Connection failed')}</div>`;
+            document.querySelectorAll('.ps-actions .ps-btn').forEach(b => b.disabled = false);
+        }
+    } catch (e) {
+        resultEl.innerHTML = '<div class="ps-inline-result error">Connection failed</div>';
+        document.querySelectorAll('.ps-actions .ps-btn').forEach(b => b.disabled = false);
+    }
+}
+
+async function disconnectPersonalListenBrainz() {
+    try {
+        await fetch('/api/profiles/me/listenbrainz', {method: 'DELETE'});
+        showToast('ListenBrainz disconnected', 'info');
+        // Re-render as disconnected — re-fetch to check if global fallback exists
+        const res = await fetch('/api/profiles/me/listenbrainz');
+        const data = await res.json();
+        renderPersonalSettingsLB(data);
+        // Refresh LB playlists on discover page
+        _invalidateListenBrainzCache();
+        if (typeof initializeListenBrainzTabs === 'function') {
+            initializeListenBrainzTabs();
+        }
+    } catch (e) {
+        showToast('Failed to disconnect', 'error');
+    }
+}
+
+function _invalidateListenBrainzCache() {
+    if (typeof listenbrainzPlaylistsLoaded !== 'undefined') listenbrainzPlaylistsLoaded = false;
+    if (typeof listenbrainzPlaylistsCache !== 'undefined') {
+        try { Object.keys(listenbrainzPlaylistsCache).forEach(k => delete listenbrainzPlaylistsCache[k]); } catch(e) {}
+    }
+    if (typeof listenbrainzTracksCache !== 'undefined') {
+        try { Object.keys(listenbrainzTracksCache).forEach(k => delete listenbrainzTracksCache[k]); } catch(e) {}
     }
 }
 
@@ -45545,10 +45743,14 @@ async function initializeListenBrainzTabs() {
             { id: 'collaborative', label: '🤝 Collaborative', hasData: false }
         ];
 
+        // Track LB username for header display
+        let lbUsername = null;
+
         // Check which tabs have data
         if (createdForRes.ok) {
             const data = await createdForRes.json();
             console.log('📋 Created For data:', data);
+            if (data.username) lbUsername = data.username;
             if (data.success && data.playlists && data.playlists.length > 0) {
                 listenbrainzPlaylistsCache['recommendations'] = data.playlists;
                 tabs[0].hasData = true;
@@ -45559,6 +45761,7 @@ async function initializeListenBrainzTabs() {
         if (userPlaylistsRes.ok) {
             const data = await userPlaylistsRes.json();
             console.log('📚 User Playlists data:', data);
+            if (data.username && !lbUsername) lbUsername = data.username;
             if (data.success && data.playlists && data.playlists.length > 0) {
                 listenbrainzPlaylistsCache['user'] = data.playlists;
                 tabs[1].hasData = true;
@@ -45569,6 +45772,7 @@ async function initializeListenBrainzTabs() {
         if (collaborativeRes.ok) {
             const data = await collaborativeRes.json();
             console.log('🤝 Collaborative data:', data);
+            if (data.username && !lbUsername) lbUsername = data.username;
             if (data.success && data.playlists && data.playlists.length > 0) {
                 listenbrainzPlaylistsCache['collaborative'] = data.playlists;
                 tabs[2].hasData = true;
@@ -45598,11 +45802,26 @@ async function initializeListenBrainzTabs() {
 
         if (tabs.every(t => !t.hasData)) {
             console.log('⚠️ No tabs have data');
-            tabsContainer.innerHTML = '<div class="discover-empty"><p>No ListenBrainz playlists available. Configure your token in Settings.</p></div>';
+            tabsContainer.innerHTML = `
+                <div class="lb-empty-state">
+                    <div class="lb-empty-icon">&#129504;</div>
+                    <h3>Connect ListenBrainz</h3>
+                    <p>Link your ListenBrainz account to see personalized playlists, recommendations, and collaborative playlists.</p>
+                    <button class="action-button primary lb-connect-btn" onclick="openPersonalSettings()">
+                        Connect ListenBrainz
+                    </button>
+                    <p class="lb-empty-help">Get your token from <a href="https://listenbrainz.org/profile/" target="_blank">listenbrainz.org/profile</a></p>
+                </div>`;
             return;
         }
 
         tabsContainer.innerHTML = tabsHtml;
+
+        // Update section subtitle with username
+        const lbSubtitle = document.getElementById('listenbrainz-section-subtitle');
+        if (lbSubtitle) {
+            lbSubtitle.textContent = lbUsername ? `Playlists for ${lbUsername}` : 'Playlists from ListenBrainz';
+        }
 
         // Load first available tab
         const firstTab = tabs.find(t => t.hasData);
