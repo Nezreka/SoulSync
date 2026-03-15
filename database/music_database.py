@@ -4960,6 +4960,19 @@ class MusicDatabase:
                         # Case-insensitive comparison of track name and primary artist
                         if (existing_name.lower() == track_name.lower() and
                             existing_artist.lower() == artist_name.lower()):
+                            # Enhance mode: upsert existing entry with enhance bypass context
+                            if source_type == 'enhance':
+                                source_json = json.dumps(source_info or {})
+                                cursor.execute("""
+                                    UPDATE wishlist_tracks
+                                    SET source_type = ?, source_info = ?, failure_reason = ?,
+                                        spotify_data = ?, spotify_track_id = ?
+                                    WHERE id = ?
+                                """, (source_type, source_json, failure_reason,
+                                      json.dumps(spotify_track_data), track_id, existing['id']))
+                                conn.commit()
+                                logger.info(f"Upserted wishlist entry to enhance mode: '{track_name}' by {artist_name}")
+                                return True
                             logger.info(f"Skipping duplicate wishlist entry: '{track_name}' by {artist_name} (already exists as ID: {existing['id']})")
                             return False  # Already exists, don't add duplicate
                     except Exception as parse_error:
