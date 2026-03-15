@@ -90,7 +90,7 @@ class AlbumCompletenessJob(RepairJob):
             # If we don't know the expected track count, try to get it from API
             expected_total = db_track_count
 
-            if not expected_total and context.spotify_client:
+            if not expected_total and context.spotify_client and not context.is_spotify_rate_limited():
                 try:
                     album_data = context.spotify_client.get_album(spotify_album_id)
                     if album_data:
@@ -106,7 +106,7 @@ class AlbumCompletenessJob(RepairJob):
 
             # Album is incomplete — try to find which tracks are missing
             missing_tracks = []
-            if context.spotify_client:
+            if context.spotify_client and not context.is_spotify_rate_limited():
                 try:
                     api_tracks = context.spotify_client.get_album_tracks(spotify_album_id)
                     if api_tracks and 'items' in api_tracks:

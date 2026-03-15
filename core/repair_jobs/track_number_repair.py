@@ -314,7 +314,7 @@ class TrackNumberRepairJob(RepairJob):
 
         # Fallback 3: Spotify track ID → discover album ID
         client = context.spotify_client
-        if spotify_track_id and client and client.is_spotify_authenticated():
+        if spotify_track_id and client and client.is_spotify_authenticated() and not context.is_spotify_rate_limited():
             try:
                 track_details = client.get_track_details(spotify_track_id)
                 if track_details and track_details.get('album', {}).get('id'):
@@ -328,7 +328,7 @@ class TrackNumberRepairJob(RepairJob):
                 logger.debug("Spotify track lookup failed for %s: %s", spotify_track_id, e)
 
         # Fallback 4: Search Spotify/iTunes by album name + artist
-        if album_name and client:
+        if album_name and client and not context.is_spotify_rate_limited():
             try:
                 query = f"{artist_name} {album_name}" if artist_name else album_name
                 results = client.search_albums(query, limit=5)
@@ -1031,7 +1031,7 @@ def _get_album_tracklist(album_id: str, context: JobContext,
 
     # Try Spotify first
     client = context.spotify_client
-    if client and client.is_spotify_authenticated():
+    if client and client.is_spotify_authenticated() and not context.is_spotify_rate_limited():
         try:
             data = client.get_album_tracks(album_id)
             if data and 'items' in data and data['items']:

@@ -41,6 +41,18 @@ class JobContext:
         """Return True if the worker should stop."""
         return self.should_stop() if self.should_stop else False
 
+    def is_spotify_rate_limited(self) -> bool:
+        """Check if Spotify is currently under a global rate limit ban.
+
+        Jobs should call this before making Spotify API calls in their
+        scan loops to avoid churning through items uselessly.
+        """
+        try:
+            from core.spotify_client import SpotifyClient
+            return SpotifyClient.is_rate_limited()
+        except Exception:
+            return False
+
     def wait_if_paused(self):
         """Block until unpaused or stopped. Returns True if should stop."""
         import time
