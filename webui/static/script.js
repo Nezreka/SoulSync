@@ -36047,6 +36047,7 @@ async function loadEnhancedViewData(artistId) {
         artistDetailPageState.enhancedTrackSort = {};
         artistDetailPageState.serverType = data.server_type || null;
         _tagPreviewServerType = data.server_type || null;
+        _rebuildAlbumMap();
         renderEnhancedView();
 
     } catch (error) {
@@ -36538,9 +36539,21 @@ function toggleAlbumExpand(albumId) {
 }
 
 function findEnhancedAlbum(albumId) {
+    // Use cached map for O(1) lookups instead of O(n) array scan
+    if (artistDetailPageState._albumMap) {
+        return artistDetailPageState._albumMap.get(String(albumId)) || null;
+    }
     const data = artistDetailPageState.enhancedData;
     if (!data || !data.albums) return null;
     return data.albums.find(a => String(a.id) === String(albumId));
+}
+
+function _rebuildAlbumMap() {
+    const data = artistDetailPageState.enhancedData;
+    if (!data || !data.albums) { artistDetailPageState._albumMap = null; return; }
+    const map = new Map();
+    data.albums.forEach(a => map.set(String(a.id), a));
+    artistDetailPageState._albumMap = map;
 }
 
 function renderExpandedAlbumHeader(album) {
@@ -36781,6 +36794,323 @@ function renderAlbumMetaRow(album) {
     return row;
 }
 
+function _buildTrackRow(track, album, admin) {
+    const tr = document.createElement('tr');
+    tr.dataset.trackId = track.id;
+    tr.dataset.albumId = album.id;
+    if (artistDetailPageState.selectedTracks.has(String(track.id))) tr.classList.add('selected');
+
+    // Checkbox (admin only)
+    if (admin) {
+        const cbTd = document.createElement('td');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'enhanced-track-checkbox';
+        cb.checked = artistDetailPageState.selectedTracks.has(String(track.id));
+        cbTd.appendChild(cb);
+        tr.appendChild(cbTd);
+    }
+
+    // Play button
+    const playTd = document.createElement('td');
+    playTd.className = 'col-play';
+    const playBtn = document.createElement('button');
+    playBtn.className = 'enhanced-play-btn';
+    playBtn.innerHTML = '&#9654;';
+    playBtn.title = track.file_path ? 'Play track' : 'No file available';
+    if (!track.file_path) playBtn.disabled = true;
+    playTd.appendChild(playBtn);
+    tr.appendChild(playTd);
+
+    // Track number
+    const numTd = document.createElement('td');
+    numTd.className = 'col-num' + (admin ? ' editable' : '');
+    numTd.textContent = track.track_number || '-';
+    tr.appendChild(numTd);
+
+    // Disc number
+    const discTd = document.createElement('td');
+    discTd.className = 'col-disc';
+    discTd.textContent = track.disc_number || '-';
+    tr.appendChild(discTd);
+
+    // Title
+    const titleTd = document.createElement('td');
+    titleTd.className = 'col-title' + (admin ? ' editable' : '');
+    titleTd.textContent = track.title || 'Unknown';
+    tr.appendChild(titleTd);
+
+    // Duration
+    const durTd = document.createElement('td');
+    durTd.className = 'col-duration';
+    durTd.textContent = formatDurationMs(track.duration);
+    tr.appendChild(durTd);
+
+    // Format
+    const fmtTd = document.createElement('td');
+    fmtTd.className = 'col-format';
+    const format = extractFormat(track.file_path);
+    const fmtSpan = document.createElement('span');
+    const fmtClass = format === 'FLAC' ? 'flac' : (format === 'MP3' ? 'mp3' : 'other');
+    fmtSpan.className = `enhanced-format-badge ${fmtClass}`;
+    fmtSpan.textContent = format;
+    fmtTd.appendChild(fmtSpan);
+    tr.appendChild(fmtTd);
+
+    // Bitrate
+    const brTd = document.createElement('td');
+    brTd.className = 'col-bitrate';
+    const brSpan = document.createElement('span');
+    const brClass = (track.bitrate || 0) >= 320 ? 'high' : ((track.bitrate || 0) >= 192 ? 'medium' : 'low');
+    brSpan.className = `enhanced-bitrate ${brClass}`;
+    brSpan.textContent = track.bitrate ? track.bitrate + ' kbps' : '-';
+    brTd.appendChild(brSpan);
+    tr.appendChild(brTd);
+
+    // BPM
+    const bpmTd = document.createElement('td');
+    bpmTd.className = 'col-bpm' + (admin ? ' editable' : '');
+    bpmTd.textContent = track.bpm || '-';
+    tr.appendChild(bpmTd);
+
+    // File path
+    const pathTd = document.createElement('td');
+    pathTd.className = 'col-path';
+    const filePath = track.file_path || '-';
+    const fileName = filePath !== '-' ? filePath.split(/[\\/]/).pop() : '-';
+    pathTd.textContent = fileName;
+    pathTd.title = filePath;
+    tr.appendChild(pathTd);
+
+    // Match status chips
+    const matchTd = document.createElement('td');
+    matchTd.className = 'col-match';
+    const matchCell = document.createElement('div');
+    matchCell.className = 'enhanced-track-match-cell';
+    const trackServices = [
+        { svc: 'spotify', col: 'spotify_track_id', label: 'SP' },
+        { svc: 'musicbrainz', col: 'musicbrainz_recording_id', label: 'MB' },
+        { svc: 'deezer', col: 'deezer_id', label: 'Dz' },
+        { svc: 'audiodb', col: 'audiodb_id', label: 'ADB' },
+        { svc: 'itunes', col: 'itunes_track_id', label: 'iT' },
+        { svc: 'lastfm', col: 'lastfm_url', label: 'LFM' },
+        { svc: 'genius', col: 'genius_id', label: 'Gen' },
+    ];
+    trackServices.forEach(s => {
+        const hasId = !!track[s.col];
+        const chip = document.createElement('span');
+        chip.className = 'enhanced-track-match-chip' + (hasId ? ' matched' : ' not-found');
+        chip.textContent = s.label;
+        chip.title = hasId ? `${s.svc}: ${track[s.col]}` : `${s.svc}: no match`;
+        chip.dataset.service = s.svc;
+        matchCell.appendChild(chip);
+    });
+    matchTd.appendChild(matchCell);
+    tr.appendChild(matchTd);
+
+    // Add to Queue button
+    const queueTd = document.createElement('td');
+    queueTd.className = 'col-queue';
+    if (track.file_path) {
+        const queueBtn = document.createElement('button');
+        queueBtn.className = 'enhanced-queue-btn';
+        queueBtn.innerHTML = '&#43;';
+        queueBtn.title = 'Add to queue';
+        queueTd.appendChild(queueBtn);
+    }
+    tr.appendChild(queueTd);
+
+    if (admin) {
+        // Write Tags button (admin only)
+        const tagTd = document.createElement('td');
+        tagTd.className = 'col-writetag';
+        if (track.file_path) {
+            const tagBtn = document.createElement('button');
+            tagBtn.className = 'enhanced-write-tag-btn';
+            tagBtn.innerHTML = '&#9998;';
+            tagBtn.title = 'Write tags to file';
+            tagTd.appendChild(tagBtn);
+        }
+        tr.appendChild(tagTd);
+
+        // Delete button (admin only)
+        const delTd = document.createElement('td');
+        delTd.className = 'col-delete';
+        const delBtn = document.createElement('button');
+        delBtn.className = 'enhanced-delete-btn';
+        delBtn.innerHTML = '&#10005;';
+        delBtn.title = 'Delete track from library';
+        delTd.appendChild(delBtn);
+        tr.appendChild(delTd);
+    } else {
+        // Report Issue button per track (non-admin)
+        const reportTd = document.createElement('td');
+        reportTd.className = 'col-report';
+        const reportBtn = document.createElement('button');
+        reportBtn.className = 'enhanced-track-report-btn';
+        reportBtn.innerHTML = '&#9873;';
+        reportBtn.title = 'Report issue with this track';
+        reportTd.appendChild(reportBtn);
+        tr.appendChild(reportTd);
+    }
+
+    return tr;
+}
+
+function _getTrackDataFromRow(tr) {
+    const trackId = tr.dataset.trackId;
+    const albumId = tr.dataset.albumId;
+    const album = findEnhancedAlbum(albumId);
+    if (!album) return null;
+    const track = (album.tracks || []).find(t => String(t.id) === String(trackId));
+    return track ? { track, album, trackId, albumId } : null;
+}
+
+function _attachTableDelegation(table, album) {
+    // Single click handler for the entire table — replaces 12-16 per-row handlers
+    const admin = isEnhancedAdmin();
+    table.addEventListener('click', (e) => {
+        const target = e.target;
+        const tr = target.closest('tr[data-track-id]');
+
+        // Header checkbox (select all)
+        if (target.closest('thead') && target.classList.contains('enhanced-track-checkbox')) {
+            toggleSelectAllTracks(album.id, target.checked);
+            return;
+        }
+
+        // Sort header click
+        const th = target.closest('th[data-sort-field]');
+        if (th) {
+            cancelInlineEdit();
+            const sortField = th.dataset.sortField;
+            const current = artistDetailPageState.enhancedTrackSort[album.id];
+            const ascending = current && current.field === sortField ? !current.ascending : true;
+            artistDetailPageState.enhancedTrackSort[album.id] = { field: sortField, ascending };
+            sortEnhancedTracks(album, sortField, ascending);
+            _rebuildTbody(table, album);
+            // Update header sort indicators
+            table.querySelectorAll('th[data-sort-field]').forEach(h => {
+                const sf = h.dataset.sortField;
+                const baseLabel = h.dataset.label || '';
+                const sort = artistDetailPageState.enhancedTrackSort[album.id];
+                h.textContent = sort && sort.field === sf ? baseLabel + (sort.ascending ? ' \u25B2' : ' \u25BC') : baseLabel;
+            });
+            return;
+        }
+
+        if (!tr) return;
+        const info = _getTrackDataFromRow(tr);
+        if (!info) return;
+        const { track, trackId } = info;
+
+        // Checkbox
+        if (target.classList.contains('enhanced-track-checkbox')) {
+            toggleTrackSelection(String(trackId));
+            return;
+        }
+
+        // Play button
+        if (target.closest('.enhanced-play-btn')) {
+            e.stopPropagation();
+            if (track.file_path) {
+                const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+                playLibraryTrack(track, album.title || '', artistName);
+            }
+            return;
+        }
+
+        // Inline editable cells (admin)
+        if (admin) {
+            const cell = target.closest('td.editable');
+            if (cell) {
+                e.stopPropagation();
+                if (cell.classList.contains('col-num')) {
+                    startInlineEdit(cell, 'track', track.id, 'track_number', track.track_number || '');
+                } else if (cell.classList.contains('col-title')) {
+                    startInlineEdit(cell, 'track', track.id, 'title', track.title || '');
+                } else if (cell.classList.contains('col-bpm')) {
+                    startInlineEdit(cell, 'track', track.id, 'bpm', track.bpm || '');
+                }
+                return;
+            }
+        }
+
+        // Match chip click (admin — open manual match modal)
+        if (admin) {
+            const chip = target.closest('.enhanced-track-match-chip');
+            if (chip) {
+                e.stopPropagation();
+                const svc = chip.dataset.service;
+                const aId = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : null;
+                openManualMatchModal('track', track.id, svc, track.title || '', aId);
+                return;
+            }
+        }
+
+        // Queue button
+        if (target.closest('.enhanced-queue-btn')) {
+            e.stopPropagation();
+            if (track.file_path) {
+                const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+                let albumArt = album.thumb_url || null;
+                if (!albumArt && artistDetailPageState.enhancedData) {
+                    albumArt = artistDetailPageState.enhancedData.artist?.thumb_url;
+                }
+                addToQueue({
+                    title: track.title || 'Unknown Track',
+                    artist: artistName || 'Unknown Artist',
+                    album: album.title || 'Unknown Album',
+                    file_path: track.file_path,
+                    filename: track.file_path,
+                    is_library: true,
+                    image_url: albumArt,
+                    id: track.id,
+                    artist_id: artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : null,
+                    album_id: album.id,
+                    bitrate: track.bitrate,
+                    sample_rate: track.sample_rate
+                });
+            }
+            return;
+        }
+
+        // Write tags button (admin)
+        if (target.closest('.enhanced-write-tag-btn')) {
+            e.stopPropagation();
+            showTagPreview(track.id);
+            return;
+        }
+
+        // Delete button (admin)
+        if (target.closest('.enhanced-delete-btn')) {
+            e.stopPropagation();
+            deleteLibraryTrack(track.id, album.id);
+            return;
+        }
+
+        // Report button (non-admin)
+        if (target.closest('.enhanced-track-report-btn')) {
+            e.stopPropagation();
+            const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+            showReportIssueModal('track', track.id, track.title || 'Unknown', artistName, album.title || '');
+            return;
+        }
+    });
+}
+
+function _rebuildTbody(table, album) {
+    // Replace only the tbody — keeps thead and event delegation intact
+    const admin = isEnhancedAdmin();
+    const oldTbody = table.querySelector('tbody');
+    const newTbody = document.createElement('tbody');
+    (album.tracks || []).forEach(track => {
+        newTbody.appendChild(_buildTrackRow(track, album, admin));
+    });
+    if (oldTbody) table.replaceChild(newTbody, oldTbody);
+    else table.appendChild(newTbody);
+}
+
 function renderTrackTable(album) {
     const wrapper = document.createElement('div');
     const tracks = album.tracks || [];
@@ -36798,6 +37128,7 @@ function renderTrackTable(album) {
 
     const table = document.createElement('table');
     table.className = 'enhanced-track-table';
+    table.dataset.albumId = album.id;
 
     const admin = isEnhancedAdmin();
     // Clear stale selections for non-admin to prevent ghost state
@@ -36813,7 +37144,6 @@ function renderTrackTable(album) {
         const selectAllCb = document.createElement('input');
         selectAllCb.type = 'checkbox';
         selectAllCb.className = 'enhanced-track-checkbox';
-        selectAllCb.onchange = function() { toggleSelectAllTracks(album.id, this.checked); };
         selectAllTh.appendChild(selectAllCb);
         headRow.appendChild(selectAllTh);
     }
@@ -36837,34 +37167,19 @@ function renderTrackTable(album) {
             { label: '', cls: 'col-report' },
         ]),
     ];
+    const currentSort = artistDetailPageState.enhancedTrackSort[album.id];
     columns.forEach(col => {
         const th = document.createElement('th');
         th.className = col.cls;
-        const sortField = col.sortField;
-        const currentSort = artistDetailPageState.enhancedTrackSort[album.id];
-        if (sortField) {
+        if (col.sortField) {
             let headerText = col.label;
-            if (currentSort && currentSort.field === sortField) {
+            if (currentSort && currentSort.field === col.sortField) {
                 headerText += currentSort.ascending ? ' \u25B2' : ' \u25BC';
             }
             th.textContent = headerText;
             th.style.cursor = 'pointer';
-            th.onclick = () => {
-                cancelInlineEdit();
-                const current = artistDetailPageState.enhancedTrackSort[album.id];
-                const ascending = current && current.field === sortField ? !current.ascending : true;
-                artistDetailPageState.enhancedTrackSort[album.id] = { field: sortField, ascending };
-                sortEnhancedTracks(album, sortField, ascending);
-                const panelWrapper = th.closest('.enhanced-tracks-panel');
-                if (panelWrapper) {
-                    const tableContainer = panelWrapper.querySelector('.enhanced-track-table')?.parentElement;
-                    if (tableContainer) {
-                        const parent = tableContainer.parentElement;
-                        const newTable = renderTrackTable(album);
-                        parent.replaceChild(newTable, tableContainer);
-                    }
-                }
-            };
+            th.dataset.sortField = col.sortField;
+            th.dataset.label = col.label;
         } else {
             th.textContent = col.label;
         }
@@ -36876,223 +37191,14 @@ function renderTrackTable(album) {
     // Body
     const tbody = document.createElement('tbody');
     tracks.forEach(track => {
-        const tr = document.createElement('tr');
-        tr.dataset.trackId = track.id;
-        if (artistDetailPageState.selectedTracks.has(String(track.id))) tr.classList.add('selected');
-
-        // Checkbox (admin only)
-        if (admin) {
-            const cbTd = document.createElement('td');
-            const cb = document.createElement('input');
-            cb.type = 'checkbox';
-            cb.className = 'enhanced-track-checkbox';
-            cb.checked = artistDetailPageState.selectedTracks.has(String(track.id));
-            cb.onchange = () => toggleTrackSelection(String(track.id));
-            cbTd.appendChild(cb);
-            tr.appendChild(cbTd);
-        }
-
-        // Play button
-        const playTd = document.createElement('td');
-        playTd.className = 'col-play';
-        const playBtn = document.createElement('button');
-        playBtn.className = 'enhanced-play-btn';
-        playBtn.innerHTML = '&#9654;';
-        playBtn.title = 'Play track';
-        if (track.file_path) {
-            const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
-            playBtn.onclick = (e) => {
-                e.stopPropagation();
-                playLibraryTrack(track, album.title || '', artistName);
-            };
-        } else {
-            playBtn.disabled = true;
-            playBtn.title = 'No file available';
-        }
-        playTd.appendChild(playBtn);
-        tr.appendChild(playTd);
-
-        // Track number (editable for admin)
-        const numTd = document.createElement('td');
-        numTd.className = 'col-num' + (admin ? ' editable' : '');
-        numTd.textContent = track.track_number || '-';
-        if (admin) {
-            numTd.onclick = (e) => { e.stopPropagation(); startInlineEdit(numTd, 'track', track.id, 'track_number', track.track_number || ''); };
-        }
-        tr.appendChild(numTd);
-
-        // Disc number
-        const discTd = document.createElement('td');
-        discTd.className = 'col-disc';
-        discTd.textContent = track.disc_number || '-';
-        tr.appendChild(discTd);
-
-        // Title (editable for admin)
-        const titleTd = document.createElement('td');
-        titleTd.className = 'col-title' + (admin ? ' editable' : '');
-        titleTd.textContent = track.title || 'Unknown';
-        if (admin) {
-            titleTd.onclick = (e) => { e.stopPropagation(); startInlineEdit(titleTd, 'track', track.id, 'title', track.title || ''); };
-        }
-        tr.appendChild(titleTd);
-
-        // Duration
-        const durTd = document.createElement('td');
-        durTd.className = 'col-duration';
-        durTd.textContent = formatDurationMs(track.duration);
-        tr.appendChild(durTd);
-
-        // Format
-        const fmtTd = document.createElement('td');
-        fmtTd.className = 'col-format';
-        const format = extractFormat(track.file_path);
-        const fmtSpan = document.createElement('span');
-        const fmtClass = format === 'FLAC' ? 'flac' : (format === 'MP3' ? 'mp3' : 'other');
-        fmtSpan.className = `enhanced-format-badge ${fmtClass}`;
-        fmtSpan.textContent = format;
-        fmtTd.appendChild(fmtSpan);
-        tr.appendChild(fmtTd);
-
-        // Bitrate
-        const brTd = document.createElement('td');
-        brTd.className = 'col-bitrate';
-        const brSpan = document.createElement('span');
-        const brClass = (track.bitrate || 0) >= 320 ? 'high' : ((track.bitrate || 0) >= 192 ? 'medium' : 'low');
-        brSpan.className = `enhanced-bitrate ${brClass}`;
-        brSpan.textContent = track.bitrate ? track.bitrate + ' kbps' : '-';
-        brTd.appendChild(brSpan);
-        tr.appendChild(brTd);
-
-        // BPM (editable for admin)
-        const bpmTd = document.createElement('td');
-        bpmTd.className = 'col-bpm' + (admin ? ' editable' : '');
-        bpmTd.textContent = track.bpm || '-';
-        if (admin) {
-            bpmTd.onclick = (e) => { e.stopPropagation(); startInlineEdit(bpmTd, 'track', track.id, 'bpm', track.bpm || ''); };
-        }
-        tr.appendChild(bpmTd);
-
-        // File path (last column)
-        const pathTd = document.createElement('td');
-        pathTd.className = 'col-path';
-        const filePath = track.file_path || '-';
-        const fileName = filePath !== '-' ? filePath.split(/[\\/]/).pop() : '-';
-        pathTd.textContent = fileName;
-        pathTd.title = filePath;
-        tr.appendChild(pathTd);
-
-        // Match status chips
-        const matchTd = document.createElement('td');
-        matchTd.className = 'col-match';
-        const matchCell = document.createElement('div');
-        matchCell.className = 'enhanced-track-match-cell';
-        const trackServices = [
-            { svc: 'spotify', col: 'spotify_track_id', label: 'SP' },
-            { svc: 'musicbrainz', col: 'musicbrainz_recording_id', label: 'MB' },
-            { svc: 'deezer', col: 'deezer_id', label: 'Dz' },
-            { svc: 'audiodb', col: 'audiodb_id', label: 'ADB' },
-            { svc: 'itunes', col: 'itunes_track_id', label: 'iT' },
-            { svc: 'lastfm', col: 'lastfm_url', label: 'LFM' },
-            { svc: 'genius', col: 'genius_id', label: 'Gen' },
-        ];
-        const aId = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : null;
-        trackServices.forEach(s => {
-            const hasId = !!track[s.col];
-            const chip = document.createElement('span');
-            chip.className = 'enhanced-track-match-chip' + (hasId ? ' matched' : ' not-found');
-            chip.textContent = s.label;
-            chip.title = hasId ? `${s.svc}: ${track[s.col]}` : `${s.svc}: no match`;
-            if (admin) {
-                chip.onclick = (e) => {
-                    e.stopPropagation();
-                    openManualMatchModal('track', track.id, s.svc, track.title || '', aId);
-                };
-            }
-            matchCell.appendChild(chip);
-        });
-        matchTd.appendChild(matchCell);
-        tr.appendChild(matchTd);
-
-        // Add to Queue button
-        const queueTd = document.createElement('td');
-        queueTd.className = 'col-queue';
-        if (track.file_path) {
-            const queueBtn = document.createElement('button');
-            queueBtn.className = 'enhanced-queue-btn';
-            queueBtn.innerHTML = '&#43;';
-            queueBtn.title = 'Add to queue';
-            queueBtn.onclick = (e) => {
-                e.stopPropagation();
-                const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
-                let albumArt = album.thumb_url || null;
-                if (!albumArt && artistDetailPageState.enhancedData) {
-                    albumArt = artistDetailPageState.enhancedData.artist?.thumb_url;
-                }
-                addToQueue({
-                    title: track.title || 'Unknown Track',
-                    artist: artistName || 'Unknown Artist',
-                    album: album.title || 'Unknown Album',
-                    file_path: track.file_path,
-                    filename: track.file_path,
-                    is_library: true,
-                    image_url: albumArt,
-                    id: track.id,
-                    artist_id: artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : null,
-                    album_id: album.id,
-                    bitrate: track.bitrate,
-                    sample_rate: track.sample_rate
-                });
-            };
-            queueTd.appendChild(queueBtn);
-        }
-        tr.appendChild(queueTd);
-
-        if (admin) {
-            // Write Tags button (admin only)
-            const tagTd = document.createElement('td');
-            tagTd.className = 'col-writetag';
-            if (track.file_path) {
-                const tagBtn = document.createElement('button');
-                tagBtn.className = 'enhanced-write-tag-btn';
-                tagBtn.innerHTML = '&#9998;';
-                tagBtn.title = 'Write tags to file';
-                tagBtn.onclick = (e) => { e.stopPropagation(); showTagPreview(track.id); };
-                tagTd.appendChild(tagBtn);
-            }
-            tr.appendChild(tagTd);
-
-            // Delete button (admin only)
-            const delTd = document.createElement('td');
-            delTd.className = 'col-delete';
-            const delBtn = document.createElement('button');
-            delBtn.className = 'enhanced-delete-btn';
-            delBtn.innerHTML = '&#10005;';
-            delBtn.title = 'Delete track from library';
-            delBtn.onclick = (e) => { e.stopPropagation(); deleteLibraryTrack(track.id, album.id); };
-            delTd.appendChild(delBtn);
-            tr.appendChild(delTd);
-        } else {
-            // Report Issue button per track (non-admin)
-            const reportTd = document.createElement('td');
-            reportTd.className = 'col-report';
-            const reportBtn = document.createElement('button');
-            reportBtn.className = 'enhanced-track-report-btn';
-            reportBtn.innerHTML = '&#9873;';
-            reportBtn.title = 'Report issue with this track';
-            reportBtn.onclick = (e) => {
-                e.stopPropagation();
-                const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
-                showReportIssueModal('track', track.id, track.title || 'Unknown', artistName, album.title || '');
-            };
-            reportTd.appendChild(reportBtn);
-            tr.appendChild(reportTd);
-        }
-
-        tbody.appendChild(tr);
+        tbody.appendChild(_buildTrackRow(track, album, admin));
     });
     table.appendChild(tbody);
-    wrapper.appendChild(table);
 
+    // Single delegated event listener for the whole table
+    _attachTableDelegation(table, album);
+
+    wrapper.appendChild(table);
     return wrapper;
 }
 
@@ -37153,6 +37259,7 @@ async function deleteLibraryAlbum(albumId) {
                 album.tracks.forEach(t => artistDetailPageState.selectedTracks.delete(String(t.id)));
             }
             artistDetailPageState.enhancedData.albums = (artistDetailPageState.enhancedData.albums || []).filter(a => a.id !== albumId);
+            _rebuildAlbumMap();
         }
         artistDetailPageState.expandedAlbums.delete(albumId);
         delete artistDetailPageState.enhancedTrackSort[albumId];
@@ -37365,32 +37472,37 @@ function toggleSelectAllTracks(albumId, checked) {
     const album = findEnhancedAlbum(albumId);
     if (!album || !album.tracks) return;
 
+    // Batch update state
     album.tracks.forEach(track => {
         const tid = String(track.id);
         if (checked) artistDetailPageState.selectedTracks.add(tid);
         else artistDetailPageState.selectedTracks.delete(tid);
+    });
 
-        const row = document.querySelector(`tr[data-track-id="${tid}"]`);
-        if (row) {
+    // Scoped DOM query — only search within this album's panel, not entire document
+    const panel = document.getElementById(`enhanced-tracks-panel-${albumId}`);
+    if (panel) {
+        panel.querySelectorAll('tr[data-track-id]').forEach(row => {
             row.classList.toggle('selected', checked);
             const cb = row.querySelector('.enhanced-track-checkbox');
             if (cb) cb.checked = checked;
-        }
-    });
+        });
+    }
     updateBulkBar();
 }
 
 function clearTrackSelection() {
-    artistDetailPageState.selectedTracks.forEach(tid => {
-        const row = document.querySelector(`tr[data-track-id="${tid}"]`);
-        if (row) {
+    // Scoped batch clear — query the container once instead of per-track
+    const container = document.getElementById('enhanced-view-container');
+    if (container) {
+        container.querySelectorAll('tr[data-track-id].selected').forEach(row => {
             row.classList.remove('selected');
             const cb = row.querySelector('.enhanced-track-checkbox');
             if (cb) cb.checked = false;
-        }
-    });
+        });
+        container.querySelectorAll('.enhanced-track-table thead .enhanced-track-checkbox').forEach(cb => cb.checked = false);
+    }
     artistDetailPageState.selectedTracks.clear();
-    document.querySelectorAll('.enhanced-track-table thead .enhanced-track-checkbox').forEach(cb => cb.checked = false);
     updateBulkBar();
 }
 
@@ -37821,6 +37933,7 @@ async function applyManualMatch(entityType, entityId, service, serviceId, artist
         // Update view with fresh data
         if (result.updated_data && result.updated_data.success) {
             artistDetailPageState.enhancedData = result.updated_data;
+            _rebuildAlbumMap();
             renderEnhancedView();
         } else if (artistDetailPageState.currentArtistId) {
             await loadEnhancedViewData(artistDetailPageState.currentArtistId);
@@ -37903,6 +38016,7 @@ async function runEnrichment(entityType, entityId, service, name, artistName, ar
         // Update local data with fresh response and re-render (preserves expanded state)
         if (result.updated_data && result.updated_data.success) {
             artistDetailPageState.enhancedData = result.updated_data;
+            _rebuildAlbumMap();
             renderEnhancedView();
         } else if (artistDetailPageState.currentArtistId) {
             await loadEnhancedViewData(artistDetailPageState.currentArtistId);
@@ -37917,8 +38031,9 @@ async function runEnrichment(entityType, entityId, service, name, artistName, ar
     }
 }
 
-// Close enrich dropdowns when clicking outside
+// Close enrich dropdowns when clicking outside (early bail when enhanced view isn't active)
 document.addEventListener('click', (e) => {
+    if (!artistDetailPageState.enhancedView) return;
     if (!e.target.closest('.enhanced-enrich-wrap')) {
         document.querySelectorAll('.enhanced-enrich-menu.visible').forEach(m => m.classList.remove('visible'));
     }
