@@ -109,7 +109,7 @@ class MetadataGapFillerJob(RepairJob):
             found_fields = {}
 
             # Try Spotify enrichment first (most reliable for ISRC)
-            if spotify_track_id and context.spotify_client:
+            if spotify_track_id and context.spotify_client and not context.is_spotify_rate_limited():
                 try:
                     track_data = context.spotify_client.get_track_details(spotify_track_id)
                     if track_data:

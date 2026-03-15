@@ -147,6 +147,9 @@ class MissingCoverArtJob(RepairJob):
             return None
 
         try:
+            if context.is_spotify_rate_limited():
+                return None
+
             # If we have a Spotify album ID, fetch directly
             if spotify_album_id and client.is_spotify_authenticated():
                 album_data = client.get_album(spotify_album_id)
