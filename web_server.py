@@ -32009,7 +32009,8 @@ def get_discover_genre_playlist(genre_name):
 # ===============================
 
 def _get_profile_lb_manager():
-    """Create a profile-aware ListenBrainzManager for the current user"""
+    """Create a profile-aware ListenBrainzManager for the current user.
+    Always uses the actual profile_id so each profile has its own playlist cache."""
     from core.listenbrainz_manager import ListenBrainzManager
     profile_id = get_current_profile_id()
     token, base_url, username, source = _get_lb_credentials_for_profile(profile_id)
@@ -32089,10 +32090,23 @@ def get_listenbrainz_collaborative():
 
 @app.route('/api/discover/listenbrainz/playlist/<playlist_mbid>', methods=['GET'])
 def get_listenbrainz_playlist_tracks(playlist_mbid):
-    """Get tracks from a specific ListenBrainz playlist (from cache)"""
+    """Get tracks from a specific ListenBrainz playlist (from cache, with on-demand refresh)"""
     try:
         lb_manager, username, source = _get_profile_lb_manager()
         tracks = lb_manager.get_cached_tracks(playlist_mbid)
+
+        if not tracks:
+            # Cache miss or stale entry with no tracks — try fetching from LB API
+            if lb_manager.client.is_authenticated():
+                print(f"🔄 Cache miss for playlist {playlist_mbid}, fetching from ListenBrainz...")
+                # Remove stale playlist row (if any) so _update_playlist doesn't
+                # skip due to matching track_count with 0 actual tracks
+                existing_type = lb_manager.get_playlist_type(playlist_mbid) or 'created_for'
+                lb_manager.delete_cached_playlist(playlist_mbid)
+                full_playlist = lb_manager.client.get_playlist_details(playlist_mbid)
+                if full_playlist:
+                    lb_manager._update_playlist(full_playlist, existing_type)
+                    tracks = lb_manager.get_cached_tracks(playlist_mbid)
 
         if not tracks:
             return jsonify({

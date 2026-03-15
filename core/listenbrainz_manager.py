@@ -399,6 +399,35 @@ class ListenBrainzManager:
         conn.close()
         return playlists
 
+    def get_playlist_type(self, playlist_mbid: str) -> str:
+        """Get the playlist_type for a cached playlist, or None if not found"""
+        conn = self._get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT playlist_type FROM listenbrainz_playlists WHERE playlist_mbid = ? AND profile_id = ?",
+            (playlist_mbid, self.profile_id)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else None
+
+    def delete_cached_playlist(self, playlist_mbid: str):
+        """Delete a cached playlist and its tracks (CASCADE handles tracks via FK)"""
+        conn = self._get_db_connection()
+        cursor = conn.cursor()
+        # Delete tracks first (SQLite FK CASCADE requires PRAGMA foreign_keys=ON)
+        cursor.execute("""
+            DELETE FROM listenbrainz_tracks WHERE playlist_id IN (
+                SELECT id FROM listenbrainz_playlists WHERE playlist_mbid = ? AND profile_id = ?
+            )
+        """, (playlist_mbid, self.profile_id))
+        cursor.execute(
+            "DELETE FROM listenbrainz_playlists WHERE playlist_mbid = ? AND profile_id = ?",
+            (playlist_mbid, self.profile_id)
+        )
+        conn.commit()
+        conn.close()
+
     def get_cached_tracks(self, playlist_mbid: str) -> List[Dict]:
         """Get cached tracks for a playlist from database"""
         conn = self._get_db_connection()
