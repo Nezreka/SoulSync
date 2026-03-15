@@ -19,6 +19,17 @@ class FakeLosslessDetectorJob(RepairJob):
     job_id = 'fake_lossless_detector'
     display_name = 'Fake Lossless Detector'
     description = 'Detects FLAC/WAV files likely transcoded from lossy'
+    help_text = (
+        'Analyzes the spectral content of FLAC and WAV files to detect if they were '
+        'transcoded from a lossy source (like MP3 or AAC). A genuine lossless file has '
+        'audio content extending to 20kHz+, while a transcoded file shows a sharp '
+        'frequency cutoff around 16-18kHz.\n\n'
+        'Files flagged as fake lossless are reported as findings. You may want to '
+        're-download them from a better source or keep the lossy version.\n\n'
+        'Settings:\n'
+        '- Spectral Cutoff kHz: Frequency threshold below which a file is considered '
+        'suspicious (default 16.0 kHz)'
+    )
     icon = 'repair-icon-lossless'
     default_enabled = False
     default_interval_hours = 168

@@ -14,6 +14,16 @@ class MetadataGapFillerJob(RepairJob):
     job_id = 'metadata_gap_filler'
     display_name = 'Metadata Gap Filler'
     description = 'Finds tracks missing ISRC or MusicBrainz IDs and locates them'
+    help_text = (
+        'Searches for tracks in your library that are missing important metadata identifiers: '
+        'ISRC codes and MusicBrainz recording IDs. These identifiers are used for accurate '
+        'matching, scrobbling, and enrichment.\n\n'
+        'For each track with gaps, the job queries MusicBrainz by title and artist to find '
+        'the correct IDs. Results are reported as findings for your review.\n\n'
+        'Settings:\n'
+        '- Fill ISRC: Look up missing ISRC codes\n'
+        '- Fill MusicBrainz ID: Look up missing MusicBrainz recording IDs'
+    )
     icon = 'repair-icon-metadata'
     default_enabled = False
     default_interval_hours = 72

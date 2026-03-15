@@ -17,6 +17,14 @@ class OrphanFileDetectorJob(RepairJob):
     job_id = 'orphan_file_detector'
     display_name = 'Orphan File Detector'
     description = 'Finds audio files not tracked in the database'
+    help_text = (
+        'Walks your transfer folder looking for audio files (FLAC, MP3, M4A, OGG, WAV, etc.) '
+        'that exist on disk but have no matching entry in the SoulSync database.\n\n'
+        'Orphan files can appear after manual folder edits, interrupted downloads, or database '
+        'issues. Each orphan is reported as a finding so you can decide whether to import it '
+        'into your library or remove it.\n\n'
+        'This job only scans and reports — it never moves or deletes files on its own.'
+    )
     icon = 'repair-icon-orphan'
     default_enabled = True
     default_interval_hours = 24

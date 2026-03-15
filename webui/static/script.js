@@ -49857,6 +49857,7 @@ let _repairCurrentTab = 'jobs';
 let _repairFindingsPage = 0;
 let _repairSelectedFindings = new Set();
 const REPAIR_FINDINGS_PAGE_SIZE = 30;
+let _repairJobsCache = {}; // Cache job data for help modal
 
 /**
  * Open the Library Maintenance modal
@@ -49932,8 +49933,16 @@ async function loadRepairJobs() {
         const data = await response.json();
         const jobs = data.jobs || [];
 
+        // Cache job data for help modal
+        _repairJobsCache = {};
+        jobs.forEach(j => { _repairJobsCache[j.job_id] = j; });
+
         if (jobs.length === 0) {
-            container.innerHTML = '<div class="repair-empty">No jobs available</div>';
+            container.innerHTML = `<div class="repair-empty-state">
+                <div class="repair-empty-icon">🔧</div>
+                <div class="repair-empty-title">No Maintenance Jobs</div>
+                <div class="repair-empty-text">Library maintenance jobs will appear here once available.</div>
+            </div>`;
             return;
         }
 
@@ -49952,8 +49961,39 @@ async function loadRepairJobs() {
             const lastRunText = job.last_run ? formatCacheAge(job.last_run.finished_at) : 'Never';
             const nextRunText = job.next_run ? formatCacheAge(job.next_run) : (job.enabled ? 'Pending' : '-');
             const statusClass = job.is_running ? 'running' : (job.enabled ? 'idle' : 'disabled');
-            const statusText = job.is_running ? 'Running' : (job.enabled ? 'Idle' : 'Disabled');
-            const lastStats = job.last_run ? `Scanned: ${(job.last_run.items_scanned || 0).toLocaleString()}` : '';
+            const dotClass = job.is_running ? 'running' : (job.enabled ? 'enabled' : 'disabled');
+            const cardClass = job.is_running ? 'running' : (!job.enabled ? 'disabled' : '');
+
+            // Build flow badges
+            const flowParts = [];
+            flowParts.push(`<span class="repair-flow-badge scan">${job.is_running ? '&#9654; Running' : 'Scan'}</span>`);
+            if (job.auto_fix) {
+                flowParts.push('<span class="repair-flow-arrow">&rarr;</span>');
+                const isDryRun = job.settings && job.settings.dry_run === true;
+                if (isDryRun) {
+                    flowParts.push('<span class="repair-flow-badge dryrun">Dry Run</span>');
+                } else {
+                    flowParts.push('<span class="repair-flow-badge autofix">Auto-fix</span>');
+                }
+            }
+            // Show pending findings count
+            const findingsCount = job.last_run ? (job.last_run.findings_created || 0) : 0;
+            if (findingsCount > 0) {
+                flowParts.push('<span class="repair-flow-arrow">&rarr;</span>');
+                flowParts.push(`<span class="repair-flow-badge findings">${findingsCount} finding${findingsCount !== 1 ? 's' : ''}</span>`);
+            }
+
+            // Build meta parts
+            const metaParts = [];
+            metaParts.push('Last: ' + lastRunText);
+            metaParts.push('Next: ' + nextRunText);
+            if (job.last_run) {
+                metaParts.push(`Scanned: ${(job.last_run.items_scanned || 0).toLocaleString()}`);
+                if (job.last_run.auto_fixed) metaParts.push(`Fixed: ${job.last_run.auto_fixed}`);
+            }
+            if (job.last_run && job.last_run.duration_seconds) {
+                metaParts.push(`${job.last_run.duration_seconds.toFixed(1)}s`);
+            }
 
             // Build settings HTML
             let settingsHtml = '';
@@ -49986,20 +50026,13 @@ async function loadRepairJobs() {
                     </div>`;
             }
 
-            return `<div class="repair-job-card ${statusClass}" data-job-id="${job.job_id}">
+            return `<div class="repair-job-card ${cardClass}" data-job-id="${job.job_id}">
                 <div class="repair-job-main">
+                    <div class="repair-job-status ${dotClass}"></div>
                     <div class="repair-job-info">
-                        <div class="repair-job-title">
-                            <span class="repair-job-icon"><span class="${job.icon || 'repair-icon-default'}"></span></span>
-                            <span class="repair-job-name">${job.display_name}</span>
-                            <span class="repair-job-status-pill ${statusClass}">${statusText}</span>
-                            ${job.auto_fix ? '<span class="repair-job-autofix-pill">Auto-fix</span>' : ''}
-                        </div>
-                        <div class="repair-job-desc">${job.description}</div>
-                        <div class="repair-job-meta">
-                            Last: ${lastRunText} &middot; Next: ${nextRunText}
-                            ${lastStats ? ' &middot; ' + lastStats : ''}
-                        </div>
+                        <div class="repair-job-name">${job.display_name}</div>
+                        <div class="repair-job-flow">${flowParts.join('')}</div>
+                        <div class="repair-job-meta">${metaParts.join(' &middot; ')}</div>
                     </div>
                     <div class="repair-job-actions">
                         <label class="repair-job-toggle">
@@ -50012,6 +50045,8 @@ async function loadRepairJobs() {
                         ${Object.keys(job.settings || {}).length > 0 ?
                             `<button class="repair-settings-btn" onclick="expandRepairJobSettings('${job.job_id}')"
                                      title="Settings">&#9881;</button>` : ''}
+                        <button class="repair-help-btn" onclick="event.stopPropagation(); showRepairJobHelp('${job.job_id}')"
+                                title="About this job">?</button>
                     </div>
                 </div>
                 ${settingsHtml}
@@ -50031,6 +50066,13 @@ async function toggleRepairJob(jobId, enabled) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled })
         });
+        // Update card visuals immediately
+        const card = document.querySelector(`.repair-job-card[data-job-id="${jobId}"]`);
+        if (card) {
+            card.classList.toggle('disabled', !enabled);
+            const dot = card.querySelector('.repair-job-status');
+            if (dot) dot.className = 'repair-job-status ' + (enabled ? 'enabled' : 'disabled');
+        }
     } catch (error) {
         console.error('Error toggling job:', error);
         showToast('Error toggling job', 'error');
@@ -50040,6 +50082,74 @@ async function toggleRepairJob(jobId, enabled) {
 function expandRepairJobSettings(jobId) {
     const el = document.getElementById(`repair-settings-${jobId}`);
     if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+function showRepairJobHelp(jobId) {
+    const job = _repairJobsCache[jobId];
+    if (!job) return;
+
+    // Remove existing overlay if present
+    let overlay = document.getElementById('repair-help-overlay');
+    if (overlay) overlay.remove();
+
+    // Build settings summary
+    let settingsHtml = '';
+    if (job.settings && Object.keys(job.settings).length > 0) {
+        const rows = Object.entries(job.settings).map(([key, val]) => {
+            const label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const display = typeof val === 'boolean' ? (val ? 'Yes' : 'No') : val;
+            return `<div class="repair-help-setting"><span class="repair-help-setting-key">${label}</span><span class="repair-help-setting-val">${display}</span></div>`;
+        }).join('');
+        settingsHtml = `<div class="repair-help-settings-section">
+            <div class="repair-help-section-title">Current Settings</div>
+            ${rows}
+        </div>`;
+    }
+
+    // Build info badges
+    const badges = [];
+    if (job.auto_fix) {
+        const isDryRun = job.settings && job.settings.dry_run === true;
+        badges.push(isDryRun
+            ? '<span class="repair-flow-badge dryrun">Dry Run</span>'
+            : '<span class="repair-flow-badge autofix">Auto-fix</span>');
+    } else {
+        badges.push('<span class="repair-flow-badge scan">Scan Only</span>');
+    }
+    badges.push(`<span class="repair-flow-badge scan">Every ${job.interval_hours}h</span>`);
+    if (job.enabled) {
+        badges.push('<span class="repair-flow-badge" style="background:rgba(74,222,128,0.12);color:#4ade80;">Enabled</span>');
+    } else {
+        badges.push('<span class="repair-flow-badge" style="background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.4);">Disabled</span>');
+    }
+
+    // Format help text paragraphs
+    const helpBody = (job.help_text || job.description || '').split('\n\n').map(p => {
+        if (p.startsWith('Settings:\n')) {
+            const lines = p.split('\n').slice(1);
+            return '<div class="repair-help-setting-list">' +
+                lines.map(l => `<div class="repair-help-setting-item">${l.replace(/^- /, '')}</div>`).join('') +
+                '</div>';
+        }
+        return `<p>${p.replace(/\n/g, '<br>')}</p>`;
+    }).join('');
+
+    overlay = document.createElement('div');
+    overlay.id = 'repair-help-overlay';
+    overlay.className = 'repair-help-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    overlay.innerHTML = `
+        <div class="repair-help-modal">
+            <div class="repair-help-header">
+                <h3>${job.display_name}</h3>
+                <button class="repair-help-close" onclick="document.getElementById('repair-help-overlay').remove()">&times;</button>
+            </div>
+            <div class="repair-help-badges">${badges.join('')}</div>
+            <div class="repair-help-body">${helpBody}</div>
+            ${settingsHtml}
+        </div>
+    `;
+    document.body.appendChild(overlay);
 }
 
 async function saveRepairJobSettings(jobId) {
@@ -50092,28 +50202,36 @@ function updateRepairJobProgressFromData(data) {
         const card = document.querySelector(`.repair-job-card[data-job-id="${jobId}"]`);
         if (!card) continue;
 
-        // Update status pill
-        const pill = card.querySelector('.repair-job-status-pill');
-        if (pill) {
-            pill.className = 'repair-job-status-pill ' + state.status;
-            if (state.status === 'running') pill.textContent = 'Running';
-            else if (state.status === 'finished') pill.textContent = 'Complete';
-            else if (state.status === 'error') pill.textContent = 'Error';
+        // Update status dot
+        const statusDot = card.querySelector('.repair-job-status');
+        if (statusDot) {
+            if (state.status === 'running') statusDot.className = 'repair-job-status running';
+            else if (state.status === 'finished') statusDot.className = 'repair-job-status enabled';
+            else if (state.status === 'error') statusDot.className = 'repair-job-status enabled';
+        }
+
+        // Update flow badge to show running state
+        const firstBadge = card.querySelector('.repair-flow-badge.scan');
+        if (firstBadge) {
+            if (state.status === 'running') firstBadge.innerHTML = '&#9654; Running';
+            else if (state.status === 'finished') firstBadge.innerHTML = '&#10003; Complete';
+            else if (state.status === 'error') firstBadge.innerHTML = '&#10007; Error';
         }
 
         // Add/update card running class
         card.classList.toggle('running', state.status === 'running');
+        card.classList.remove('disabled');
 
-        // Create or find progress panel
+        // Create or find progress panel (bar-first layout like automation)
         let panel = card.querySelector('.repair-job-progress');
         if (!panel) {
             panel = document.createElement('div');
             panel.className = 'repair-job-progress';
             panel.innerHTML = `
-                <div class="repair-progress-phase"></div>
                 <div class="repair-progress-bar-wrap">
                     <div class="repair-progress-bar" style="width:0%"></div>
                 </div>
+                <div class="repair-progress-phase"></div>
                 <div class="repair-progress-log"></div>
             `;
             card.appendChild(panel);
@@ -50124,13 +50242,27 @@ function updateRepairJobProgressFromData(data) {
         panel.classList.toggle('finished', state.status === 'finished');
         panel.classList.toggle('error', state.status === 'error');
 
-        // Update phase
-        const phaseEl = panel.querySelector('.repair-progress-phase');
-        if (phaseEl && state.phase) phaseEl.textContent = state.phase;
+        if (state.status === 'running') {
+            panel.classList.remove('finished', 'error');
+            if (_repairProgressHideTimers[jobId]) {
+                clearTimeout(_repairProgressHideTimers[jobId]);
+                delete _repairProgressHideTimers[jobId];
+            }
+            // Reset log for re-run
+            if (_repairProgressLogCounts[jobId] > 0 && state.log && state.log.length < _repairProgressLogCounts[jobId]) {
+                const existingLog = panel.querySelector('.repair-progress-log');
+                if (existingLog) existingLog.innerHTML = '';
+                _repairProgressLogCounts[jobId] = 0;
+            }
+        }
 
         // Update progress bar
         const bar = panel.querySelector('.repair-progress-bar');
         if (bar) bar.style.width = (state.progress || 0) + '%';
+
+        // Update phase
+        const phaseEl = panel.querySelector('.repair-progress-phase');
+        if (phaseEl && state.phase) phaseEl.textContent = state.phase;
 
         // Update log
         const logEl = panel.querySelector('.repair-progress-log');
@@ -50197,7 +50329,11 @@ async function loadRepairFindings() {
         if (bulkBar) bulkBar.style.display = 'none';
 
         if (items.length === 0) {
-            container.innerHTML = '<div class="repair-empty">No findings match your filters</div>';
+            container.innerHTML = `<div class="repair-empty-state">
+                <div class="repair-empty-icon">&#10003;</div>
+                <div class="repair-empty-title">All Clear</div>
+                <div class="repair-empty-text">No findings match your filters. Your library is looking good!</div>
+            </div>`;
             document.getElementById('repair-findings-pagination').innerHTML = '';
             return;
         }
@@ -50321,7 +50457,11 @@ async function loadRepairHistory() {
         const runs = data.runs || [];
 
         if (runs.length === 0) {
-            container.innerHTML = '<div class="repair-empty">No job history yet</div>';
+            container.innerHTML = `<div class="repair-empty-state">
+                <div class="repair-empty-icon">&#128337;</div>
+                <div class="repair-empty-title">No History Yet</div>
+                <div class="repair-empty-text">Job run history will appear here after maintenance jobs complete their first scan.</div>
+            </div>`;
             return;
         }
 

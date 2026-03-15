@@ -225,6 +225,19 @@ class LibraryReorganizeJob(RepairJob):
     job_id = 'library_reorganize'
     display_name = 'Library Reorganize'
     description = 'Moves files to match the current file organization template (dry run by default)'
+    help_text = (
+        'Scans your transfer folder and reads each audio file\'s tags (artist, album, title, '
+        'track number, disc number) to compute the expected file path based on your current '
+        'file organization template from Settings.\n\n'
+        'Any file whose actual path doesn\'t match the expected template gets flagged. In dry '
+        'run mode (default), a finding is created showing the current and expected paths. '
+        'Disable dry run to have the job move files automatically.\n\n'
+        'Safety features: case-insensitive path comparison on Windows/macOS, collision '
+        'detection, path escape prevention, and sidecar file handling (.lrc, .nfo, etc.).\n\n'
+        'Settings:\n'
+        '- Dry Run: When enabled, only reports what would change without moving files\n'
+        '- Move Sidecars: Also move associated files (.lrc, .jpg, .nfo) alongside audio files'
+    )
     icon = 'repair-icon-reorganize'
     default_enabled = False
     default_interval_hours = 168  # Weekly — but disabled by default so won't auto-run

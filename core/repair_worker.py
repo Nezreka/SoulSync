@@ -231,6 +231,7 @@ class RepairWorker:
                 'job_id': job_id,
                 'display_name': job.display_name,
                 'description': job.description,
+                'help_text': job.help_text,
                 'icon': job.icon,
                 'auto_fix': job.auto_fix,
                 'enabled': config['enabled'],
