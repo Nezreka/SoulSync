@@ -2069,6 +2069,43 @@ const DOCS_SECTIONS = [
     }
 ];
 
+function _showDebugTextModal(text) {
+    // Remove existing modal if any
+    const existing = document.getElementById('debug-text-modal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'debug-text-modal';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:#1a1a2e;border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:20px;width:90%;max-width:700px;max-height:80vh;display:flex;flex-direction:column;gap:12px;';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;';
+    header.innerHTML = '<span style="color:#fff;font-weight:600;">Debug Info — Select All &amp; Copy</span>';
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '\u2715';
+    closeBtn.style.cssText = 'background:none;border:none;color:#888;font-size:18px;cursor:pointer;';
+    closeBtn.onclick = () => overlay.remove();
+    header.appendChild(closeBtn);
+
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.readOnly = true;
+    ta.style.cssText = 'width:100%;height:50vh;background:#0d0d1a;color:#e0e0e0;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:12px;font-family:monospace;font-size:12px;resize:none;outline:none;';
+
+    modal.appendChild(header);
+    modal.appendChild(ta);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Auto-select all text for easy copying
+    ta.focus();
+    ta.select();
+}
+
 let _docsInitialized = false;
 
 function initializeDocsPage() {
@@ -2231,14 +2268,15 @@ function initializeDocsPage() {
                 if (copied) {
                     debugBtn.innerHTML = '&#x2705; Copied!';
                     debugBtn.classList.add('copied');
+                    setTimeout(() => {
+                        debugBtn.innerHTML = '&#x1F4CB; Copy Debug Info';
+                        debugBtn.classList.remove('copied');
+                    }, 2000);
                 } else {
-                    debugBtn.innerHTML = '&#x274C; Copy failed — open console (F12) to see output';
-                    console.log(text);
-                }
-                setTimeout(() => {
+                    // Clipboard APIs blocked (HTTP over LAN) — show selectable text modal
+                    _showDebugTextModal(text);
                     debugBtn.innerHTML = '&#x1F4CB; Copy Debug Info';
-                    debugBtn.classList.remove('copied');
-                }, 2000);
+                }
             } catch (err) {
                 debugBtn.innerHTML = '&#x274C; Failed';
                 console.error('Debug info error:', err);
