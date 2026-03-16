@@ -908,13 +908,18 @@ class MusicDatabase:
             if table_schema and 'album_spotify_id TEXT NOT NULL' in (table_schema[0] or ''):
                 logger.info("Migrating discovery_recent_albums to allow NULL album_spotify_id for iTunes support...")
                 # SQLite doesn't support ALTER COLUMN, so recreate table
+                cursor.execute("PRAGMA table_info(discovery_recent_albums)")
+                old_cols_info = cursor.fetchall()
+                old_col_names = [c[1] for c in old_cols_info]
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS discovery_recent_albums_new (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         album_spotify_id TEXT,
                         album_itunes_id TEXT,
+                        album_deezer_id TEXT,
                         artist_spotify_id TEXT,
                         artist_itunes_id TEXT,
+                        artist_deezer_id TEXT,
                         source TEXT NOT NULL DEFAULT 'spotify',
                         album_name TEXT NOT NULL,
                         artist_name TEXT NOT NULL,
@@ -922,13 +927,16 @@ class MusicDatabase:
                         release_date TEXT NOT NULL,
                         album_type TEXT DEFAULT 'album',
                         cached_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE(album_spotify_id, album_itunes_id, source)
+                        UNIQUE(album_spotify_id, album_itunes_id, album_deezer_id, source)
                     )
                 """)
-                cursor.execute("""
-                    INSERT OR IGNORE INTO discovery_recent_albums_new
-                    SELECT * FROM discovery_recent_albums
-                """)
+                new_cols = ['id', 'album_spotify_id', 'album_itunes_id', 'album_deezer_id',
+                            'artist_spotify_id', 'artist_itunes_id', 'artist_deezer_id',
+                            'source', 'album_name', 'artist_name', 'album_cover_url',
+                            'release_date', 'album_type', 'cached_date']
+                shared_cols = [c for c in new_cols if c in old_col_names]
+                cols_str = ', '.join(shared_cols)
+                cursor.execute(f"INSERT OR IGNORE INTO discovery_recent_albums_new ({cols_str}) SELECT {cols_str} FROM discovery_recent_albums")
                 cursor.execute("DROP TABLE discovery_recent_albums")
                 cursor.execute("ALTER TABLE discovery_recent_albums_new RENAME TO discovery_recent_albums")
                 conn.commit()
@@ -2148,8 +2156,10 @@ class MusicDatabase:
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             album_spotify_id TEXT,
                             album_itunes_id TEXT,
+                            album_deezer_id TEXT,
                             artist_spotify_id TEXT,
                             artist_itunes_id TEXT,
+                            artist_deezer_id TEXT,
                             source TEXT NOT NULL DEFAULT 'spotify',
                             album_name TEXT NOT NULL,
                             artist_name TEXT NOT NULL,
@@ -2158,12 +2168,13 @@ class MusicDatabase:
                             album_type TEXT DEFAULT 'album',
                             cached_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             profile_id INTEGER DEFAULT 1,
-                            UNIQUE(profile_id, album_spotify_id, album_itunes_id, source)
+                            UNIQUE(profile_id, album_spotify_id, album_itunes_id, album_deezer_id, source)
                         )
                     """)
 
-                    new_cols = ['id', 'album_spotify_id', 'album_itunes_id', 'artist_spotify_id',
-                                'artist_itunes_id', 'source', 'album_name', 'artist_name',
+                    new_cols = ['id', 'album_spotify_id', 'album_itunes_id', 'album_deezer_id',
+                                'artist_spotify_id', 'artist_itunes_id', 'artist_deezer_id',
+                                'source', 'album_name', 'artist_name',
                                 'album_cover_url', 'release_date', 'album_type', 'cached_date', 'profile_id']
                     shared_cols = [c for c in new_cols if c in old_cols]
                     cols_str = ', '.join(shared_cols)
