@@ -327,6 +327,9 @@ if soulseek_client:
     if hasattr(soulseek_client, 'qobuz'):
          soulseek_client.qobuz.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
          print("  ✅ Configured Qobuz client shutdown callback")
+    if hasattr(soulseek_client, 'hifi'):
+         soulseek_client.hifi.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
+         print("  ✅ Configured HiFi client shutdown callback")
 
 # Initialize web scan manager for automatic post-download scanning
 try:
@@ -1619,7 +1622,7 @@ def get_cached_transfer_data():
                 all_downloads = run_async(soulseek_client.get_all_downloads())
                 for download in all_downloads:
                     # Only add streaming source downloads (Soulseek ones are already in the lookup)
-                    if download.username in ('youtube', 'tidal', 'qobuz'):
+                    if download.username in ('youtube', 'tidal', 'qobuz', 'hifi'):
                         key = _make_context_key(download.username, download.filename)
                         # Convert DownloadStatus to transfer dict format
                         live_transfers_lookup[key] = {
@@ -1943,7 +1946,7 @@ class WebUIDownloadMonitor:
                 all_downloads = run_async(soulseek_client.get_all_downloads())
                 for download in all_downloads:
                     # Only add streaming source downloads (Soulseek ones are already in the lookup from slskd API)
-                    if download.username in ('youtube', 'tidal', 'qobuz'):
+                    if download.username in ('youtube', 'tidal', 'qobuz', 'hifi'):
                         key = _make_context_key(download.username, download.filename)
                         # Convert DownloadStatus to transfer dict format for monitor compatibility
                         live_transfers[key] = {
@@ -2973,20 +2976,21 @@ def _find_downloaded_file(download_path, track_data):
     audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
     target_filename = extract_filename(track_data.get('filename', ''))
 
-    # YOUTUBE/TIDAL/QOBUZ SUPPORT: Handle encoded filename format "id||title"
+    # YOUTUBE/TIDAL/QOBUZ/HIFI SUPPORT: Handle encoded filename format "id||title"
     # The file on disk will be "title.ext", not "id||title"
     is_youtube = track_data.get('username') == 'youtube'
     is_tidal = track_data.get('username') == 'tidal'
     is_qobuz = track_data.get('username') == 'qobuz'
-    is_streaming_source = is_youtube or is_tidal or is_qobuz
+    is_hifi = track_data.get('username') == 'hifi'
+    is_streaming_source = is_youtube or is_tidal or is_qobuz or is_hifi
     target_filename_youtube = None
     if is_streaming_source and '||' in target_filename:
         _, title = target_filename.split('||', 1)
-        if is_tidal or is_qobuz:
-            # Tidal/Qobuz files can be flac or m4a or mp3 — match any audio extension
+        if is_tidal or is_qobuz or is_hifi:
+            # Tidal/Qobuz/HiFi files can be flac or m4a — match any audio extension
             safe_title = re.sub(r'[<>:"/\\|?*]', '_', title)
             target_filename_youtube = safe_title  # Extension-less for flexible matching
-            source_name = 'Qobuz' if is_qobuz else 'Tidal'
+            source_name = 'HiFi' if is_hifi else ('Qobuz' if is_qobuz else 'Tidal')
             print(f"🎵 [{source_name} Stream] Looking for file starting with: {target_filename_youtube}")
         else:
             # yt-dlp will create "Title.mp3" from "Title"
@@ -3024,11 +3028,11 @@ def _find_downloaded_file(download_path, track_data):
                     # For Tidal, compare without extension (file could be .flac or .m4a)
                     compare_target = target_filename_youtube.lower()
                     compare_file = file.lower()
-                    if is_tidal or is_qobuz:
+                    if is_tidal or is_qobuz or is_hifi:
                         compare_file = os.path.splitext(compare_file)[0]
                     similarity = SequenceMatcher(None, compare_file, compare_target).ratio()
 
-                    source_label = 'Qobuz' if is_qobuz else ('Tidal' if is_tidal else 'YouTube')
+                    source_label = 'HiFi' if is_hifi else ('Qobuz' if is_qobuz else ('Tidal' if is_tidal else 'YouTube'))
                     print(f"🔍 [{source_label} Stream] Comparing: '{file}' vs '{target_filename_youtube}' = {similarity:.2f}")
 
                     # Keep track of best match
@@ -3179,6 +3183,8 @@ def run_service_test(service, test_config):
                     'soulseek': "Successfully connected to Soulseek network via slskd.",
                     'youtube': "YouTube download source ready.",
                     'tidal': "Tidal download source ready.",
+                    'qobuz': "Qobuz download source ready.",
+                    'hifi': "HiFi download source ready.",
                     'hybrid': "Download sources ready (Hybrid mode)."
                 }
                 message = mode_messages.get(download_mode, "Download source connected.")
@@ -3189,6 +3195,8 @@ def run_service_test(service, test_config):
                     'soulseek': "slskd is not connected to the Soulseek network. Check slskd status and credentials.",
                     'youtube': "YouTube download source not available.",
                     'tidal': "Tidal download source not available. Check authentication.",
+                    'qobuz': "Qobuz download source not available. Check authentication.",
+                    'hifi': "HiFi download source not available. Public API instances may be down.",
                     'hybrid': "Could not connect to download sources. Check configuration."
                 }
                 error = mode_errors.get(download_mode, "Download source connection failed.")
@@ -4198,7 +4206,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -6643,7 +6651,7 @@ def stream_enhanced_search_track():
         search_queries = []
         import re
 
-        if download_mode in ('youtube', 'tidal', 'qobuz') or (download_mode == 'hybrid' and config_manager.get('download_source.hybrid_primary') in ('youtube', 'tidal', 'qobuz')):
+        if download_mode in ('youtube', 'tidal', 'qobuz', 'hifi') or (download_mode == 'hybrid' and config_manager.get('download_source.hybrid_primary') in ('youtube', 'tidal', 'qobuz', 'hifi')):
             # YouTube/Tidal mode: Include artist for better context
             # Primary query: Artist + Track
             if artist_name and track_name:
@@ -6819,7 +6827,7 @@ def start_download():
             if download_id:
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
-                is_streaming_source = username in ('youtube', 'tidal', 'qobuz')
+                is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi')
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
                         'search_result': {
@@ -7197,7 +7205,7 @@ def get_download_status():
             all_streaming_downloads = run_async(soulseek_client.get_all_downloads())
 
             for download in all_streaming_downloads:
-                if download.username in ('youtube', 'tidal', 'qobuz'):
+                if download.username in ('youtube', 'tidal', 'qobuz', 'hifi'):
                     source_label = download.username.title()
                     # Convert DownloadStatus to transfer format that frontend expects
                     streaming_transfer = {
@@ -19939,7 +19947,7 @@ def get_valid_candidates(results, spotify_track, query):
         return []
 
     # Skip quality filtering for YouTube/Tidal/Qobuz results (quality is fixed by source, not user-selectable per-result)
-    is_streaming_source = initial_candidates[0].username in ("youtube", "tidal", "qobuz") if initial_candidates else False
+    is_streaming_source = initial_candidates[0].username in ("youtube", "tidal", "qobuz", "hifi") if initial_candidates else False
 
     if is_streaming_source:
         source_label = initial_candidates[0].username.title()
@@ -22178,7 +22186,7 @@ def _try_source_reuse(task_id, batch_id, track):
     if not source_tracks or not last_source:
         _sr.info(f"Skipped — no source_tracks or no last_source")
         return False
-    if last_source.get('username') in ('youtube', 'tidal', 'qobuz'):
+    if last_source.get('username') in ('youtube', 'tidal', 'qobuz', 'hifi'):
         _sr.info(f"Skipped — {last_source.get('username')} source (no folder-based reuse)")
         return False
 
@@ -22280,7 +22288,7 @@ def _store_batch_source(batch_id, username, filename):
     """Browse the successful download's folder and store results on the batch for reuse."""
     _sr = source_reuse_logger
     _sr.info(f"_store_batch_source called: batch={batch_id}, user={username}, file={filename}")
-    if not batch_id or username in ('youtube', 'tidal', 'qobuz'):
+    if not batch_id or username in ('youtube', 'tidal', 'qobuz', 'hifi'):
         _sr.info(f"Skipped — no batch_id or streaming source ({username})")
         return
 
@@ -24296,6 +24304,26 @@ def get_discover_album(source, album_id):
     except Exception as e:
         logger.error(f"Error fetching discover album: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# ===================================================================
+# HIFI DOWNLOAD ENDPOINTS
+# ===================================================================
+
+@app.route('/api/hifi/status', methods=['GET'])
+def hifi_status():
+    """Check if HiFi API instances are reachable."""
+    try:
+        hifi = soulseek_client.hifi
+        available = hifi.is_available()
+        version = hifi.get_version() if available else None
+        return jsonify({
+            "available": available,
+            "version": version,
+            "instance": hifi._get_instance(),
+        })
+    except Exception as e:
+        return jsonify({"available": False, "error": str(e)})
 
 
 # ===================================================================

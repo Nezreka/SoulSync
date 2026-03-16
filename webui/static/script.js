@@ -4817,6 +4817,7 @@ async function loadSettingsData() {
         updateHybridSecondaryOptions();
         document.getElementById('tidal-download-quality').value = settings.tidal_download?.quality || 'lossless';
         document.getElementById('qobuz-quality').value = settings.qobuz?.quality || 'lossless';
+        document.getElementById('hifi-download-quality').value = settings.hifi_download?.quality || 'lossless';
 
         // Populate YouTube settings
         document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
@@ -5035,6 +5036,7 @@ function updateDownloadSourceUI() {
     const tidalContainer = document.getElementById('tidal-download-settings-container');
     const qobuzContainer = document.getElementById('qobuz-settings-container');
     const youtubeContainer = document.getElementById('youtube-settings-container');
+    const hifiContainer = document.getElementById('hifi-download-settings-container');
 
     hybridContainer.style.display = mode === 'hybrid' ? 'block' : 'none';
 
@@ -5053,6 +5055,7 @@ function updateDownloadSourceUI() {
     tidalContainer.style.display = activeSources.has('tidal') ? 'block' : 'none';
     qobuzContainer.style.display = activeSources.has('qobuz') ? 'block' : 'none';
     youtubeContainer.style.display = activeSources.has('youtube') ? 'block' : 'none';
+    hifiContainer.style.display = activeSources.has('hifi') ? 'block' : 'none';
 
     // Quality profile is Soulseek-only (streaming sources handle quality via their own settings)
     const qualityProfileSection = document.getElementById('quality-profile-section');
@@ -5066,6 +5069,9 @@ function updateDownloadSourceUI() {
     if (activeSources.has('qobuz')) {
         checkQobuzAuthStatus();
     }
+    if (activeSources.has('hifi')) {
+        testHiFiConnection();
+    }
 }
 
 function updateHybridSecondaryOptions() {
@@ -5077,6 +5083,7 @@ function updateHybridSecondaryOptions() {
         { value: 'youtube', label: 'YouTube' },
         { value: 'tidal', label: 'Tidal' },
         { value: 'qobuz', label: 'Qobuz' },
+        { value: 'hifi', label: 'HiFi' },
     ];
 
     secondary.innerHTML = '';
@@ -5644,6 +5651,9 @@ async function saveSettings(quiet = false) {
         },
         tidal_download: {
             quality: document.getElementById('tidal-download-quality').value || 'lossless'
+        },
+        hifi_download: {
+            quality: document.getElementById('hifi-download-quality').value || 'lossless'
         },
         qobuz: {
             quality: document.getElementById('qobuz-quality').value || 'lossless',
@@ -6254,6 +6264,28 @@ async function authenticateTidal() {
 }
 
 // ===== Tidal Download Auth (Device Flow) =====
+
+async function testHiFiConnection() {
+    const statusEl = document.getElementById('hifi-connection-status');
+    const btn = document.getElementById('hifi-test-btn');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        const resp = await fetch('/api/hifi/status');
+        const data = await resp.json();
+        if (data.available) {
+            statusEl.textContent = `Connected (v${data.version || '?'})`;
+            statusEl.style.color = '#4caf50';
+        } else {
+            statusEl.textContent = 'No instances reachable';
+            statusEl.style.color = '#ff9800';
+        }
+    } catch (e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+    }
+}
 
 async function checkTidalDownloadAuthStatus() {
     const statusEl = document.getElementById('tidal-download-auth-status');
@@ -7119,7 +7151,7 @@ function initializeSearchModeToggle() {
             const slskdResult = data.result;
 
             // Check if audio format is supported (YouTube/Tidal use encoded filenames, skip check)
-            const isStreamingSource = slskdResult.username === 'youtube' || slskdResult.username === 'tidal';
+            const isStreamingSource = slskdResult.username === 'youtube' || slskdResult.username === 'tidal' || slskdResult.username === 'qobuz' || slskdResult.username === 'hifi';
             if (!isStreamingSource && slskdResult.filename && !isAudioFormatSupported(slskdResult.filename)) {
                 const format = getFileExtension(slskdResult.filename);
                 hideLoadingOverlay();
@@ -13026,7 +13058,7 @@ async function updateModalWithLiveDownloadProgress() {
                 // Extract display title from filename (handle YouTube encoding)
                 let downloadTitle = '';
                 if (downloadInfo.filename) {
-                    if ((downloadInfo.username === 'youtube' || downloadInfo.username === 'tidal') && downloadInfo.filename.includes('||')) {
+                    if ((downloadInfo.username === 'youtube' || downloadInfo.username === 'tidal' || downloadInfo.username === 'qobuz' || downloadInfo.username === 'hifi') && downloadInfo.filename.includes('||')) {
                         const parts = downloadInfo.filename.split('||');
                         downloadTitle = parts[1] || parts[0];
                     } else {
@@ -13868,7 +13900,7 @@ function renderQueue(containerId, downloads, isActiveQueue) {
         let title = 'Unknown File';
         if (item.filename) {
             // YouTube/Tidal filenames are encoded as "id||title"
-            if ((item.username === 'youtube' || item.username === 'tidal') && item.filename.includes('||')) {
+            if ((item.username === 'youtube' || item.username === 'tidal' || item.username === 'qobuz' || item.username === 'hifi') && item.filename.includes('||')) {
                 const parts = item.filename.split('||');
                 title = parts[1] || parts[0];  // Use title part, fallback to id
             } else {
@@ -14426,8 +14458,8 @@ async function streamTrack(index) {
         const result = window.currentSearchResults[index];
         console.log(`🎵 Streaming track:`, result);
 
-        // Check for unsupported formats before streaming (YouTube/Tidal use encoded filenames, skip check)
-        const isStreamingSource = result.username === 'youtube' || result.username === 'tidal';
+        // Check for unsupported formats before streaming (streaming sources use encoded filenames, skip check)
+        const isStreamingSource = result.username === 'youtube' || result.username === 'tidal' || result.username === 'qobuz' || result.username === 'hifi';
         if (!isStreamingSource && result.filename) {
             const format = getFileExtension(result.filename);
             console.log(`🎵 [STREAM CHECK] File: ${result.filename}, Extension: ${format}`);
@@ -14466,7 +14498,7 @@ async function streamAlbumTrack(albumIndex, trackIndex) {
         console.log(`🎵 Album data:`, album);
 
         // Surgical Fix: Handle YouTube/Tidal results which are "flat" (no tracks array)
-        if (album.username === 'youtube' || album.username === 'tidal') {
+        if (album.username === 'youtube' || album.username === 'tidal' || album.username === 'qobuz' || album.username === 'hifi') {
             // For YouTube/Tidal results, the "album" is actually the track itself
             const track = album;
             const trackData = {
@@ -14502,8 +14534,8 @@ async function streamAlbumTrack(albumIndex, trackIndex) {
 
         console.log(`🎵 Enhanced track data:`, trackData);
 
-        // Check for unsupported formats before streaming (YouTube/Tidal use encoded filenames, skip check)
-        const isStreamingSource2 = trackData.username === 'youtube' || trackData.username === 'tidal';
+        // Check for unsupported formats before streaming (streaming sources use encoded filenames, skip check)
+        const isStreamingSource2 = trackData.username === 'youtube' || trackData.username === 'tidal' || trackData.username === 'qobuz' || trackData.username === 'hifi';
         if (!isStreamingSource2 && trackData.filename && !isAudioFormatSupported(trackData.filename)) {
             const format = getFileExtension(trackData.filename);
             showToast(`Sorry, ${format.toUpperCase()} format is not supported in web browsers. Try downloading instead.`, 'error');
