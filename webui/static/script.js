@@ -18032,6 +18032,131 @@ async function loadMetadataCacheStats() {
     }
 }
 
+// ── Library History Modal ────────────────────────────────────────────
+let _libraryHistoryState = { tab: 'download', page: 1, limit: 50 };
+
+function openLibraryHistoryModal() {
+    const overlay = document.getElementById('library-history-overlay');
+    if (overlay) {
+        overlay.classList.remove('hidden');
+        _libraryHistoryState.page = 1;
+        loadLibraryHistory();
+    }
+}
+
+function closeLibraryHistoryModal() {
+    const overlay = document.getElementById('library-history-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+function switchHistoryTab(tab) {
+    _libraryHistoryState.tab = tab;
+    _libraryHistoryState.page = 1;
+    document.querySelectorAll('.library-history-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === tab);
+    });
+    loadLibraryHistory();
+}
+
+async function loadLibraryHistory() {
+    const { tab, page, limit } = _libraryHistoryState;
+    const list = document.getElementById('library-history-list');
+    const pagination = document.getElementById('library-history-pagination');
+    if (!list) return;
+    list.innerHTML = '<div class="library-history-loading">Loading...</div>';
+    if (pagination) pagination.innerHTML = '';
+
+    try {
+        const resp = await fetch(`/api/library/history?type=${tab}&page=${page}&limit=${limit}`);
+        const data = await resp.json();
+
+        // Update tab counts
+        const dlCount = document.getElementById('history-download-count');
+        const imCount = document.getElementById('history-import-count');
+        if (dlCount) dlCount.textContent = data.stats?.downloads || 0;
+        if (imCount) imCount.textContent = data.stats?.imports || 0;
+
+        if (!data.entries || data.entries.length === 0) {
+            const emptyIcon = tab === 'download' ? '📥' : '📚';
+            const emptyText = tab === 'download'
+                ? 'No downloads recorded yet. Completed downloads will appear here.'
+                : 'No server imports recorded yet. New tracks from library scans will appear here.';
+            list.innerHTML = `<div class="library-history-empty">${emptyIcon}<br><br>${emptyText}</div>`;
+            return;
+        }
+
+        list.innerHTML = data.entries.map(renderHistoryEntry).join('');
+        renderHistoryPagination(data.total, page, limit);
+    } catch (err) {
+        console.error('Error loading library history:', err);
+        list.innerHTML = '<div class="library-history-empty">Error loading history</div>';
+    }
+}
+
+function renderHistoryEntry(entry) {
+    const thumb = entry.thumb_url
+        ? `<img src="${escapeHtml(entry.thumb_url)}" class="library-history-thumb" loading="lazy">`
+        : `<div class="library-history-thumb-placeholder">${entry.event_type === 'download' ? '📥' : '📚'}</div>`;
+
+    let badge = '';
+    if (entry.event_type === 'download' && entry.quality) {
+        badge = `<span class="library-history-badge download">${escapeHtml(entry.quality)}</span>`;
+    } else if (entry.event_type === 'import' && entry.server_source) {
+        const sourceName = { plex: 'Plex', jellyfin: 'Jellyfin', navidrome: 'Navidrome' }[entry.server_source] || entry.server_source;
+        badge = `<span class="library-history-badge import">${escapeHtml(sourceName)}</span>`;
+    }
+
+    const meta = [entry.artist_name, entry.album_name].filter(Boolean).join(' — ');
+
+    return `<div class="library-history-entry">
+        ${thumb}
+        <div class="library-history-entry-text">
+            <div class="library-history-entry-title">${escapeHtml(entry.title || 'Unknown')}</div>
+            <div class="library-history-entry-meta">${escapeHtml(meta)}</div>
+        </div>
+        ${badge}
+        <div class="library-history-entry-time">${formatHistoryTime(entry.created_at)}</div>
+    </div>`;
+}
+
+function formatHistoryTime(isoStr) {
+    if (!isoStr) return '';
+    try {
+        const date = new Date(isoStr);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        const diffHours = Math.floor(diffMins / 60);
+        if (diffHours < 24) return `${diffHours}h ago`;
+        const diffDays = Math.floor(diffHours / 24);
+        if (diffDays < 7) return `${diffDays}d ago`;
+        return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    } catch { return ''; }
+}
+
+function renderHistoryPagination(total, page, limit) {
+    const pagination = document.getElementById('library-history-pagination');
+    if (!pagination) return;
+
+    const totalPages = Math.ceil(total / limit);
+    if (totalPages <= 1) { pagination.innerHTML = ''; return; }
+
+    pagination.innerHTML = `
+        <button class="library-history-page-btn" onclick="changeHistoryPage(${page - 1})" ${page <= 1 ? 'disabled' : ''}>Prev</button>
+        <span class="library-history-page-info">Page ${page} of ${totalPages}</span>
+        <button class="library-history-page-btn" onclick="changeHistoryPage(${page + 1})" ${page >= totalPages ? 'disabled' : ''}>Next</button>
+    `;
+}
+
+function changeHistoryPage(newPage) {
+    if (newPage < 1) return;
+    _libraryHistoryState.page = newPage;
+    loadLibraryHistory();
+}
+
+// ── Metadata Cache Modal ────────────────────────────────────────────
 let _mcacheCurrentTab = 'artist';
 let _mcachePage = 0;
 let _mcacheSearchTimeout = null;

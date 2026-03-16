@@ -466,6 +466,24 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_library_issues_entity ON library_issues (entity_type, entity_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_library_issues_created ON library_issues (created_at)")
 
+            # Library history — persistent log of downloads and server imports
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS library_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    artist_name TEXT,
+                    album_name TEXT,
+                    quality TEXT,
+                    server_source TEXT,
+                    file_path TEXT,
+                    thumb_url TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_event_type ON library_history (event_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_created_at ON library_history (created_at DESC)")
+
             conn.commit()
             logger.info("Database initialized successfully")
             
@@ -3629,14 +3647,38 @@ class MusicDatabase:
                 if file_path is None and hasattr(track_obj, 'suffix') and track_obj.suffix:
                     file_path = f"{track_obj.title}.{track_obj.suffix}"
                 
+                # Check if this is a genuinely new track (for history logging)
+                cursor.execute("SELECT 1 FROM tracks WHERE id = ? LIMIT 1", (track_id,))
+                is_new_track = cursor.fetchone() is None
+
                 # Use INSERT OR REPLACE to handle duplicate IDs gracefully
                 cursor.execute("""
-                    INSERT OR REPLACE INTO tracks 
+                    INSERT OR REPLACE INTO tracks
                     (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source))
-                
+
                 conn.commit()
+
+                # Log new imports to library history
+                if is_new_track:
+                    try:
+                        cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,))
+                        artist_row = cursor.fetchone()
+                        cursor.execute("SELECT title, thumb_url FROM albums WHERE id = ?", (album_id,))
+                        album_row = cursor.fetchone()
+                        self.add_library_history_entry(
+                            event_type='import',
+                            title=title,
+                            artist_name=artist_row[0] if artist_row else None,
+                            album_name=album_row[0] if album_row else None,
+                            server_source=server_source,
+                            file_path=file_path,
+                            thumb_url=album_row[1] if album_row and len(album_row) > 1 else None
+                        )
+                    except Exception:
+                        pass  # Non-critical history logging
+
                 return True
                 
             except Exception as e:
@@ -7805,6 +7847,70 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"API: Error getting genres from {table}: {e}")
             return []
+
+    # ── Library History ─────────────────────────────────────────────────
+
+    def add_library_history_entry(self, event_type, title, artist_name=None, album_name=None,
+                                  quality=None, server_source=None, file_path=None, thumb_url=None):
+        """Record a download or import event to the library history table."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO library_history (event_type, title, artist_name, album_name,
+                                             quality, server_source, file_path, thumb_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (event_type, title, artist_name, album_name, quality, server_source, file_path, thumb_url))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.debug(f"Error adding library history entry: {e}")
+            return False
+
+    def get_library_history(self, event_type=None, page=1, limit=50):
+        """Query library history with optional type filter and pagination.
+
+        Returns (entries_list, total_count).
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            where = "WHERE event_type = ?" if event_type else ""
+            params = [event_type] if event_type else []
+
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM library_history {where}", params)
+            total = cursor.fetchone()['cnt']
+
+            offset = (page - 1) * limit
+            cursor.execute(f"""
+                SELECT * FROM library_history {where}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            """, params + [limit, offset])
+            entries = [dict(row) for row in cursor.fetchall()]
+
+            return entries, total
+        except Exception as e:
+            logger.error(f"Error querying library history: {e}")
+            return [], 0
+
+    def get_library_history_stats(self):
+        """Return counts per event_type: {downloads: int, imports: int}."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT event_type, COUNT(*) as cnt FROM library_history GROUP BY event_type")
+            stats = {'downloads': 0, 'imports': 0}
+            for row in cursor.fetchall():
+                if row['event_type'] == 'download':
+                    stats['downloads'] = row['cnt']
+                elif row['event_type'] == 'import':
+                    stats['imports'] = row['cnt']
+            return stats
+        except Exception as e:
+            logger.debug(f"Error getting library history stats: {e}")
+            return {'downloads': 0, 'imports': 0}
 
     def api_get_recently_added(self, entity_type: str = "albums", limit: int = 50) -> List[Dict[str, Any]]:
         """Get recently added entities, ordered by created_at DESC."""
