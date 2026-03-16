@@ -20743,6 +20743,13 @@ def _on_download_completed(batch_id, task_id, success=True):
                         deezer_discovery_states[deezer_playlist_id]['phase'] = 'download_complete'
                         print(f"📋 Updated Deezer playlist {deezer_playlist_id} to download_complete phase")
 
+                # Update Spotify Public playlist phase to 'download_complete' if this is a Spotify Public playlist
+                if playlist_id and playlist_id.startswith('spotify_public_'):
+                    spotify_public_url_hash = playlist_id.replace('spotify_public_', '')
+                    if spotify_public_url_hash in spotify_public_discovery_states:
+                        spotify_public_discovery_states[spotify_public_url_hash]['phase'] = 'download_complete'
+                        print(f"📋 Updated Spotify Public playlist {spotify_public_url_hash} to download_complete phase")
+
                 print(f"🎉 [Batch Manager] Batch {batch_id} complete - stopping monitor")
                 download_monitor.stop_monitoring(batch_id)
 
@@ -20941,6 +20948,20 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         if tidal_playlist_id in tidal_discovery_states:
                             tidal_discovery_states[tidal_playlist_id]['phase'] = 'download_complete'
                             print(f"📋 Updated Tidal playlist {tidal_playlist_id} to download_complete phase (no missing tracks)")
+
+                    # Update Deezer playlist phase to 'download_complete' if this is a Deezer playlist
+                    if playlist_id.startswith('deezer_'):
+                        deezer_playlist_id = playlist_id.replace('deezer_', '')
+                        if deezer_playlist_id in deezer_discovery_states:
+                            deezer_discovery_states[deezer_playlist_id]['phase'] = 'download_complete'
+                            print(f"📋 Updated Deezer playlist {deezer_playlist_id} to download_complete phase (no missing tracks)")
+
+                    # Update Spotify Public playlist phase to 'download_complete' if this is a Spotify Public playlist
+                    if playlist_id.startswith('spotify_public_'):
+                        spotify_public_url_hash = playlist_id.replace('spotify_public_', '')
+                        if spotify_public_url_hash in spotify_public_discovery_states:
+                            spotify_public_discovery_states[spotify_public_url_hash]['phase'] = 'download_complete'
+                            print(f"📋 Updated Spotify Public playlist {spotify_public_url_hash} to download_complete phase (no missing tracks)")
 
             # Handle auto-initiated wishlist completion even when no missing tracks
             if is_auto_batch and playlist_id == 'wishlist':
@@ -23256,7 +23277,21 @@ def _check_batch_completion_v2(batch_id):
                     if tidal_playlist_id in tidal_discovery_states:
                         tidal_discovery_states[tidal_playlist_id]['phase'] = 'download_complete'
                         print(f"📋 [Completion Check V2] Updated Tidal playlist {tidal_playlist_id} to download_complete phase")
-                
+
+                # Update Deezer playlist phase to 'download_complete' if this is a Deezer playlist
+                if playlist_id and playlist_id.startswith('deezer_'):
+                    deezer_playlist_id = playlist_id.replace('deezer_', '')
+                    if deezer_playlist_id in deezer_discovery_states:
+                        deezer_discovery_states[deezer_playlist_id]['phase'] = 'download_complete'
+                        print(f"📋 [Completion Check V2] Updated Deezer playlist {deezer_playlist_id} to download_complete phase")
+
+                # Update Spotify Public playlist phase to 'download_complete' if this is a Spotify Public playlist
+                if playlist_id and playlist_id.startswith('spotify_public_'):
+                    spotify_public_url_hash = playlist_id.replace('spotify_public_', '')
+                    if spotify_public_url_hash in spotify_public_discovery_states:
+                        spotify_public_discovery_states[spotify_public_url_hash]['phase'] = 'download_complete'
+                        print(f"📋 [Completion Check V2] Updated Spotify Public playlist {spotify_public_url_hash} to download_complete phase")
+
                 print(f"🎉 [Completion Check V2] Batch {batch_id} complete - stopping monitor")
                 download_monitor.stop_monitoring(batch_id)
 
@@ -23560,6 +23595,24 @@ def start_missing_tracks_process(playlist_id):
             tidal_discovery_states[tidal_playlist_id]['phase'] = 'downloading'
             tidal_discovery_states[tidal_playlist_id]['converted_spotify_playlist_id'] = playlist_id
             print(f"🔗 Linked Tidal playlist {tidal_playlist_id} to download process {batch_id} (converted ID: {playlist_id})")
+
+    # Link Spotify Public playlist to download process if this is a Spotify Public playlist
+    if playlist_id.startswith('spotify_public_'):
+        sp_url_hash = playlist_id.replace('spotify_public_', '')
+        if sp_url_hash in spotify_public_discovery_states:
+            spotify_public_discovery_states[sp_url_hash]['download_process_id'] = batch_id
+            spotify_public_discovery_states[sp_url_hash]['phase'] = 'downloading'
+            spotify_public_discovery_states[sp_url_hash]['converted_spotify_playlist_id'] = playlist_id
+            print(f"🔗 Linked Spotify Public playlist {sp_url_hash} to download process {batch_id} (converted ID: {playlist_id})")
+
+    # Link Deezer playlist to download process if this is a Deezer playlist
+    if playlist_id.startswith('deezer_'):
+        deezer_playlist_id = playlist_id.replace('deezer_', '')
+        if deezer_playlist_id in deezer_discovery_states:
+            deezer_discovery_states[deezer_playlist_id]['download_process_id'] = batch_id
+            deezer_discovery_states[deezer_playlist_id]['phase'] = 'downloading'
+            deezer_discovery_states[deezer_playlist_id]['converted_spotify_playlist_id'] = playlist_id
+            print(f"🔗 Linked Deezer playlist {deezer_playlist_id} to download process {batch_id} (converted ID: {playlist_id})")
 
     missing_download_executor.submit(_run_full_missing_tracks_process, batch_id, playlist_id, tracks)
 
@@ -26116,6 +26169,14 @@ def update_deezer_playlist_phase(playlist_id):
         state['phase'] = new_phase
         state['last_accessed'] = time.time()
 
+        # Update download process ID if provided (for download persistence)
+        if 'download_process_id' in data:
+            state['download_process_id'] = data['download_process_id']
+
+        # Update converted Spotify playlist ID if provided (for download persistence)
+        if 'converted_spotify_playlist_id' in data:
+            state['converted_spotify_playlist_id'] = data['converted_spotify_playlist_id']
+
         print(f"🔄 Updated Deezer playlist {playlist_id} phase: {old_phase} → {new_phase}")
         return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
 
@@ -26520,6 +26581,826 @@ def cancel_deezer_sync(playlist_id):
 
     except Exception as e:
         print(f"❌ Error cancelling Deezer sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ===================================================================
+# SPOTIFY PUBLIC PLAYLIST DISCOVERY API ENDPOINTS
+# ===================================================================
+
+# Global state for Spotify Public playlist management
+spotify_public_discovery_states = {}  # Key: url_hash, Value: discovery state
+spotify_public_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="spotify_public_discovery")
+
+@app.route('/api/spotify/parse-public', methods=['POST'])
+def parse_spotify_public_endpoint():
+    """Parse a public Spotify playlist or album URL without API auth"""
+    try:
+        data = request.get_json()
+        url = data.get('url', '').strip()
+
+        if not url:
+            return jsonify({"error": "Spotify URL is required"}), 400
+
+        from core.spotify_public_scraper import parse_spotify_url, scrape_spotify_embed
+
+        parsed = parse_spotify_url(url)
+        if not parsed:
+            return jsonify({"error": "Invalid Spotify URL. Please use a playlist or album link from open.spotify.com"}), 400
+
+        print(f"🎵 Scraping public Spotify {parsed['type']}: {parsed['id']}")
+
+        result = scrape_spotify_embed(parsed['type'], parsed['id'])
+
+        if 'error' in result:
+            return jsonify(result), 400
+
+        # Convert scraped tracks to Spotify-compatible format
+        spotify_tracks = []
+        for track in result['tracks']:
+            spotify_tracks.append({
+                'id': track['id'],
+                'name': track['name'],
+                'artists': track['artists'],
+                'album': {
+                    'name': result['name'] if result['type'] == 'album' else '',
+                    'images': []
+                },
+                'duration_ms': track['duration_ms'],
+                'explicit': track.get('is_explicit', False),
+                'track_number': track.get('track_number', 0)
+            })
+
+        url_hash = result['url_hash']
+
+        response_data = {
+            'id': result['id'],
+            'type': result['type'],
+            'name': result['name'],
+            'subtitle': result['subtitle'],
+            'url': result['url'],
+            'url_hash': url_hash,
+            'track_count': len(spotify_tracks),
+            'tracks': spotify_tracks
+        }
+
+        # Store playlist data in state for discovery (if not already there)
+        if url_hash not in spotify_public_discovery_states:
+            spotify_public_discovery_states[url_hash] = {
+                'playlist': response_data,
+                'phase': 'fresh',
+                'status': 'fresh',
+                'discovery_progress': 0,
+                'spotify_matches': 0,
+                'spotify_total': len(spotify_tracks),
+                'discovery_results': [],
+                'sync_playlist_id': None,
+                'converted_spotify_playlist_id': None,
+                'download_process_id': None,
+                'created_at': time.time(),
+                'last_accessed': time.time(),
+                'discovery_future': None,
+                'sync_progress': {}
+            }
+        else:
+            # Update playlist data in existing state
+            spotify_public_discovery_states[url_hash]['playlist'] = response_data
+            spotify_public_discovery_states[url_hash]['last_accessed'] = time.time()
+
+        print(f"✅ Spotify {parsed['type']} scraped: {result['name']} ({len(spotify_tracks)} tracks)")
+        return jsonify(response_data)
+
+    except Exception as e:
+        print(f"❌ Error parsing Spotify URL: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/spotify-public/discovery/start/<url_hash>', methods=['POST'])
+def start_spotify_public_discovery(url_hash):
+    """Start Spotify discovery process for a Spotify Public playlist"""
+    try:
+        # Initialize discovery state if it doesn't exist, or update existing state
+        if url_hash in spotify_public_discovery_states:
+            existing_state = spotify_public_discovery_states[url_hash]
+            if existing_state['phase'] == 'discovering':
+                return jsonify({"error": "Discovery already in progress"}), 400
+
+            if not existing_state.get('playlist'):
+                return jsonify({"error": "Spotify Public playlist not found. Please parse the URL first."}), 404
+
+            # Update existing state for discovery
+            existing_state['phase'] = 'discovering'
+            existing_state['status'] = 'discovering'
+            existing_state['last_accessed'] = time.time()
+            state = existing_state
+        else:
+            return jsonify({"error": "Spotify Public playlist not found. Please parse the URL first."}), 404
+
+        # Add activity for discovery start
+        playlist_name = state['playlist']['name']
+        track_count = len(state['playlist']['tracks'])
+        add_activity_item("🔍", "Spotify Link Discovery Started", f"'{playlist_name}' - {track_count} tracks", "Now")
+
+        # Start discovery worker
+        future = spotify_public_discovery_executor.submit(_run_spotify_public_discovery_worker, url_hash)
+        state['discovery_future'] = future
+
+        print(f"🔍 Started Spotify discovery for Spotify Public playlist: {playlist_name}")
+        return jsonify({"success": True, "message": "Discovery started"})
+
+    except Exception as e:
+        print(f"❌ Error starting Spotify Public discovery: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/spotify-public/discovery/status/<url_hash>', methods=['GET'])
+def get_spotify_public_discovery_status(url_hash):
+    """Get real-time discovery status for a Spotify Public playlist"""
+    try:
+        if url_hash not in spotify_public_discovery_states:
+            return jsonify({"error": "Spotify Public discovery not found"}), 404
+
+        state = spotify_public_discovery_states[url_hash]
+        state['last_accessed'] = time.time()
+
+        response = {
+            'phase': state['phase'],
+            'status': state['status'],
+            'progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'results': state['discovery_results'],
+            'complete': state['phase'] == 'discovered'
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"❌ Error getting Spotify Public discovery status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/spotify-public/discovery/update_match', methods=['POST'])
+def update_spotify_public_discovery_match():
+    """Update a Spotify Public discovery result with manually selected Spotify track"""
+    try:
+        data = request.get_json()
+        identifier = data.get('identifier')  # url_hash
+        track_index = data.get('track_index')
+        spotify_track = data.get('spotify_track')
+
+        if not identifier or track_index is None or not spotify_track:
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        # Get the state
+        state = spotify_public_discovery_states.get(identifier)
+
+        if not state:
+            return jsonify({'error': 'Discovery state not found'}), 404
+
+        if track_index >= len(state['discovery_results']):
+            return jsonify({'error': 'Invalid track index'}), 400
+
+        # Update the result
+        result = state['discovery_results'][track_index]
+        old_status = result.get('status')
+
+        # Update with user-selected track
+        result['status'] = '✅ Found'
+        result['status_class'] = 'found'
+        result['spotify_track'] = spotify_track['name']
+        result['spotify_artist'] = _join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else _extract_artist_name(spotify_track['artists'])
+        result['spotify_album'] = spotify_track['album']
+        result['spotify_id'] = spotify_track['id']
+
+        # Format duration
+        duration_ms = spotify_track.get('duration_ms', 0)
+        if duration_ms:
+            minutes = duration_ms // 60000
+            seconds = (duration_ms % 60000) // 1000
+            result['duration'] = f"{minutes}:{seconds:02d}"
+        else:
+            result['duration'] = '0:00'
+
+        # IMPORTANT: Also set spotify_data for sync/download compatibility
+        result['spotify_data'] = {
+            'id': spotify_track['id'],
+            'name': spotify_track['name'],
+            'artists': spotify_track['artists'],
+            'album': spotify_track['album'],
+            'duration_ms': spotify_track.get('duration_ms', 0)
+        }
+
+        result['manual_match'] = True
+
+        # Update match count if status changed from not found/error
+        if old_status != 'found' and old_status != '✅ Found':
+            state['spotify_matches'] = state.get('spotify_matches', 0) + 1
+
+        print(f"✅ Manual match updated: spotify_public - {identifier} - track {track_index}")
+        print(f"   → {result['spotify_artist']} - {result['spotify_track']}")
+
+        # Save manual fix to discovery cache so it appears in discovery pool
+        try:
+            original_track = result.get('spotify_public_track', {})
+            original_name = original_track.get('name', spotify_track['name'])
+            original_artists = original_track.get('artists', [])
+            original_artist = original_artists[0] if original_artists else ''
+
+            cache_key = _get_discovery_cache_key(original_name, original_artist)
+            # Normalize artists to plain strings for cache consistency
+            artists_list = spotify_track['artists']
+            if isinstance(artists_list, list):
+                artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
+            album_raw = spotify_track.get('album', '')
+            album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
+
+            matched_data = {
+                'id': spotify_track['id'],
+                'name': spotify_track['name'],
+                'artists': artists_list,
+                'album': album_obj,
+                'duration_ms': spotify_track.get('duration_ms', 0),
+                'source': 'spotify',
+            }
+            cache_db = get_database()
+            cache_db.save_discovery_cache_match(
+                cache_key[0], cache_key[1], 'spotify', 1.0, matched_data,
+                original_name, original_artist
+            )
+            print(f"💾 Manual fix saved to discovery cache: {original_name} by {original_artist}")
+        except Exception as cache_err:
+            print(f"⚠️ Error saving manual fix to discovery cache: {cache_err}")
+
+        return jsonify({'success': True, 'result': result})
+
+    except Exception as e:
+        print(f"❌ Error updating Spotify Public discovery match: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/spotify-public/playlists/states', methods=['GET'])
+def get_spotify_public_playlist_states():
+    """Get all stored Spotify Public playlist discovery states for frontend hydration"""
+    try:
+        states = []
+        current_time = time.time()
+
+        for url_hash, state in spotify_public_discovery_states.items():
+            state['last_accessed'] = current_time
+
+            state_info = {
+                'playlist_id': url_hash,
+                'phase': state['phase'],
+                'status': state['status'],
+                'discovery_progress': state['discovery_progress'],
+                'spotify_matches': state['spotify_matches'],
+                'spotify_total': state['spotify_total'],
+                'discovery_results': state['discovery_results'],
+                'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+                'download_process_id': state.get('download_process_id'),
+                'last_accessed': state['last_accessed']
+            }
+            states.append(state_info)
+
+        print(f"🎵 Returning {len(states)} stored Spotify Public playlist states for hydration")
+        return jsonify({"states": states})
+
+    except Exception as e:
+        print(f"❌ Error getting Spotify Public playlist states: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/spotify-public/state/<url_hash>', methods=['GET'])
+def get_spotify_public_playlist_state(url_hash):
+    """Get specific Spotify Public playlist state (detailed version)"""
+    try:
+        if url_hash not in spotify_public_discovery_states:
+            return jsonify({"error": "Spotify Public playlist not found"}), 404
+
+        state = spotify_public_discovery_states[url_hash]
+        state['last_accessed'] = time.time()
+
+        response = {
+            'playlist_id': url_hash,
+            'playlist': state['playlist'],
+            'phase': state['phase'],
+            'status': state['status'],
+            'discovery_progress': state['discovery_progress'],
+            'spotify_matches': state['spotify_matches'],
+            'spotify_total': state['spotify_total'],
+            'discovery_results': state['discovery_results'],
+            'sync_playlist_id': state.get('sync_playlist_id'),
+            'converted_spotify_playlist_id': state.get('converted_spotify_playlist_id'),
+            'download_process_id': state.get('download_process_id'),
+            'sync_progress': state.get('sync_progress', {}),
+            'last_accessed': state['last_accessed']
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"❌ Error getting Spotify Public playlist state: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/spotify-public/reset/<url_hash>', methods=['POST'])
+def reset_spotify_public_playlist(url_hash):
+    """Reset Spotify Public playlist to fresh phase (clear discovery/sync data)"""
+    try:
+        if url_hash not in spotify_public_discovery_states:
+            return jsonify({"error": "Spotify Public playlist not found"}), 404
+
+        state = spotify_public_discovery_states[url_hash]
+
+        # Stop any active discovery
+        if 'discovery_future' in state and state['discovery_future']:
+            state['discovery_future'].cancel()
+
+        # Reset state to fresh (preserve original playlist data)
+        state['phase'] = 'fresh'
+        state['status'] = 'fresh'
+        state['discovery_results'] = []
+        state['discovery_progress'] = 0
+        state['spotify_matches'] = 0
+        state['sync_playlist_id'] = None
+        state['converted_spotify_playlist_id'] = None
+        state['download_process_id'] = None
+        state['sync_progress'] = {}
+        state['discovery_future'] = None
+        state['last_accessed'] = time.time()
+
+        print(f"🔄 Reset Spotify Public playlist to fresh: {url_hash}")
+        return jsonify({"success": True, "message": "Playlist reset to fresh phase"})
+
+    except Exception as e:
+        print(f"❌ Error resetting Spotify Public playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/spotify-public/delete/<url_hash>', methods=['POST'])
+def delete_spotify_public_playlist(url_hash):
+    """Delete Spotify Public playlist state completely"""
+    try:
+        if url_hash not in spotify_public_discovery_states:
+            return jsonify({"error": "Spotify Public playlist not found"}), 404
+
+        state = spotify_public_discovery_states[url_hash]
+
+        # Stop any active discovery
+        if 'discovery_future' in state and state['discovery_future']:
+            state['discovery_future'].cancel()
+
+        # Remove from state dictionary
+        del spotify_public_discovery_states[url_hash]
+
+        print(f"🗑️ Deleted Spotify Public playlist state: {url_hash}")
+        return jsonify({"success": True, "message": "Playlist deleted"})
+
+    except Exception as e:
+        print(f"❌ Error deleting Spotify Public playlist: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/spotify-public/update_phase/<url_hash>', methods=['POST'])
+def update_spotify_public_playlist_phase(url_hash):
+    """Update Spotify Public playlist phase (used when modal closes to reset from download_complete to discovered)"""
+    try:
+        if url_hash not in spotify_public_discovery_states:
+            return jsonify({"error": "Spotify Public playlist not found"}), 404
+
+        data = request.get_json()
+        if not data or 'phase' not in data:
+            return jsonify({"error": "Phase not provided"}), 400
+
+        new_phase = data['phase']
+        valid_phases = ['fresh', 'discovering', 'discovered', 'syncing', 'sync_complete', 'downloading', 'download_complete']
+
+        if new_phase not in valid_phases:
+            return jsonify({"error": f"Invalid phase. Must be one of: {', '.join(valid_phases)}"}), 400
+
+        state = spotify_public_discovery_states[url_hash]
+        old_phase = state.get('phase', 'unknown')
+        state['phase'] = new_phase
+        state['last_accessed'] = time.time()
+
+        # Update download process ID if provided (for download persistence)
+        if 'download_process_id' in data:
+            state['download_process_id'] = data['download_process_id']
+
+        # Update converted Spotify playlist ID if provided (for download persistence)
+        if 'converted_spotify_playlist_id' in data:
+            state['converted_spotify_playlist_id'] = data['converted_spotify_playlist_id']
+
+        print(f"🔄 Updated Spotify Public playlist {url_hash} phase: {old_phase} → {new_phase}")
+        return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
+
+    except Exception as e:
+        print(f"❌ Error updating Spotify Public playlist phase: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+def _run_spotify_public_discovery_worker(url_hash):
+    """Background worker for Spotify Public discovery process (Spotify preferred, iTunes fallback)"""
+    _ew_state = {}
+    try:
+        _ew_state = _pause_enrichment_workers('Spotify Public discovery')
+        state = spotify_public_discovery_states[url_hash]
+        playlist = state['playlist']
+
+        # Determine which provider to use
+        use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
+        discovery_source = 'spotify' if use_spotify else 'itunes'
+
+        # Initialize iTunes client if needed
+        itunes_client_instance = None
+        if not use_spotify:
+            from core.itunes_client import iTunesClient
+            itunes_client_instance = iTunesClient()
+
+        print(f"🎵 Starting Spotify Public discovery for: {playlist['name']} (using {discovery_source.upper()})")
+
+        # Store discovery source in state for frontend
+        state['discovery_source'] = discovery_source
+
+        successful_discoveries = 0
+        tracks = playlist['tracks']
+
+        for i, sp_track in enumerate(tracks):
+            if state.get('cancelled', False):
+                break
+
+            try:
+                track_name = sp_track['name']
+                track_artists_raw = sp_track.get('artists', [])
+                # Normalize artists to list of strings
+                track_artists = []
+                for a in track_artists_raw:
+                    if isinstance(a, dict):
+                        track_artists.append(a.get('name', ''))
+                    else:
+                        track_artists.append(str(a))
+                track_id = sp_track.get('id', '')
+                track_album = sp_track.get('album', '')
+                if isinstance(track_album, dict):
+                    track_album_name = track_album.get('name', '')
+                else:
+                    track_album_name = track_album or ''
+                track_duration_ms = sp_track.get('duration_ms', 0)
+
+                print(f"🔍 [{i+1}/{len(tracks)}] Searching {discovery_source.upper()}: {track_name} by {', '.join(track_artists)}")
+
+                # Check discovery cache first
+                cache_key = _get_discovery_cache_key(track_name, track_artists[0] if track_artists else '')
+                try:
+                    cache_db = get_database()
+                    cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
+                    if cached_match and _validate_discovery_cache_artist(track_artists[0] if track_artists else '', cached_match):
+                        print(f"⚡ CACHE HIT [{i+1}/{len(tracks)}]: {track_name} by {', '.join(track_artists)}")
+                        # Extract display-friendly artist string from cached match
+                        cached_artists = cached_match.get('artists', [])
+                        if cached_artists:
+                            cached_artist_str = ', '.join(
+                                a if isinstance(a, str) else a.get('name', '') for a in cached_artists
+                            )
+                        else:
+                            cached_artist_str = ''
+                        cached_album = cached_match.get('album', '')
+                        if isinstance(cached_album, dict):
+                            cached_album = cached_album.get('name', '')
+
+                        result = {
+                            'spotify_public_track': {
+                                'id': track_id,
+                                'name': track_name,
+                                'artists': track_artists or [],
+                                'album': track_album_name,
+                                'duration_ms': track_duration_ms,
+                            },
+                            'spotify_data': cached_match,
+                            'match_data': cached_match,
+                            'status': '✅ Found',
+                            'status_class': 'found',
+                            'spotify_track': cached_match.get('name', ''),
+                            'spotify_artist': cached_artist_str,
+                            'spotify_album': cached_album,
+                            'spotify_id': cached_match.get('id', ''),
+                            'discovery_source': discovery_source,
+                            'index': i
+                        }
+                        successful_discoveries += 1
+                        state['spotify_matches'] = successful_discoveries
+                        state['discovery_results'].append(result)
+                        state['discovery_progress'] = int(((i + 1) / len(tracks)) * 100)
+                        continue
+                except Exception as cache_err:
+                    print(f"⚠️ Cache lookup error: {cache_err}")
+
+                # Create a SimpleNamespace duck-type object for _search_spotify_for_tidal_track
+                track_ns = types.SimpleNamespace(
+                    id=track_id,
+                    name=track_name,
+                    artists=track_artists,
+                    album=track_album_name,
+                    duration_ms=track_duration_ms
+                )
+
+                # Use the search function with appropriate provider
+                track_result = _search_spotify_for_tidal_track(
+                    track_ns,
+                    use_spotify=use_spotify,
+                    itunes_client=itunes_client_instance
+                )
+
+                # Create result entry
+                result = {
+                    'spotify_public_track': {
+                        'id': track_id,
+                        'name': track_name,
+                        'artists': track_artists or [],
+                        'album': track_album_name,
+                        'duration_ms': track_duration_ms,
+                    },
+                    'spotify_data': None,
+                    'match_data': None,
+                    'status': '❌ Not Found',
+                    'status_class': 'not-found',
+                    'spotify_track': '',
+                    'spotify_artist': '',
+                    'spotify_album': '',
+                    'discovery_source': discovery_source
+                }
+
+                match_confidence = 0.0
+
+                if use_spotify and isinstance(track_result, tuple):
+                    # Spotify: Function returns (Track, raw_data, confidence)
+                    track_obj, raw_track_data, match_confidence = track_result
+                    album_obj = raw_track_data.get('album', {}) if raw_track_data else {}
+                    # Extract image URL from album data or track object
+                    _album_images = album_obj.get('images', [])
+                    _image_url = _album_images[0].get('url', '') if _album_images else (getattr(track_obj, 'image_url', '') or '')
+
+                    match_data = {
+                        'id': track_obj.id,
+                        'name': track_obj.name,
+                        'artists': track_obj.artists,
+                        'album': album_obj,
+                        'duration_ms': track_obj.duration_ms,
+                        'external_urls': track_obj.external_urls,
+                        'image_url': _image_url,
+                        'source': 'spotify'
+                    }
+                    result['spotify_data'] = match_data
+                    result['match_data'] = match_data
+                    result['status'] = '✅ Found'
+                    result['status_class'] = 'found'
+                    result['spotify_track'] = track_obj.name
+                    result['spotify_artist'] = ', '.join(track_obj.artists) if isinstance(track_obj.artists, list) else str(track_obj.artists)
+                    result['spotify_album'] = album_obj.get('name', '') if isinstance(album_obj, dict) else str(album_obj)
+                    result['spotify_id'] = track_obj.id
+                    result['confidence'] = match_confidence
+                    successful_discoveries += 1
+                    state['spotify_matches'] = successful_discoveries
+
+                elif not use_spotify and track_result and isinstance(track_result, dict):
+                    # iTunes: Function returns a dict with track data (includes 'confidence' key)
+                    match_confidence = track_result.pop('confidence', 0.80)
+                    match_data = track_result
+                    match_data['source'] = 'itunes'
+                    # Extract image URL from iTunes album images
+                    _itunes_album = match_data.get('album', {})
+                    _itunes_images = _itunes_album.get('images', []) if isinstance(_itunes_album, dict) else []
+                    if _itunes_images and 'image_url' not in match_data:
+                        match_data['image_url'] = _itunes_images[0].get('url', '')
+                    result['spotify_data'] = match_data
+                    result['match_data'] = match_data
+                    result['status'] = '✅ Found'
+                    result['status_class'] = 'found'
+                    result['spotify_track'] = match_data.get('name', '')
+                    itunes_artists = match_data.get('artists', [])
+                    result['spotify_artist'] = ', '.join(a if isinstance(a, str) else a.get('name', '') for a in itunes_artists) if itunes_artists else ''
+                    result['spotify_album'] = match_data.get('album', {}).get('name', '') if isinstance(match_data.get('album'), dict) else match_data.get('album', '')
+                    result['spotify_id'] = match_data.get('id', '')
+                    result['confidence'] = match_confidence
+                    successful_discoveries += 1
+                    state['spotify_matches'] = successful_discoveries
+
+                # Save to discovery cache if match found
+                if result['status_class'] == 'found' and result.get('match_data'):
+                    try:
+                        cache_db = get_database()
+                        cache_db.save_discovery_cache_match(
+                            cache_key[0], cache_key[1], discovery_source, match_confidence,
+                            result['match_data'], track_name,
+                            track_artists[0] if track_artists else ''
+                        )
+                        print(f"💾 CACHE SAVED: {track_name} (confidence: {match_confidence:.3f})")
+                    except Exception as cache_err:
+                        print(f"⚠️ Cache save error: {cache_err}")
+
+                result['index'] = i
+                state['discovery_results'].append(result)
+                state['discovery_progress'] = int(((i + 1) / len(tracks)) * 100)
+
+                # Add delay between requests
+                time.sleep(0.1)
+
+            except Exception as e:
+                print(f"❌ Error processing track {i+1}: {e}")
+                # Add error result
+                result = {
+                    'spotify_public_track': {
+                        'name': sp_track.get('name', 'Unknown'),
+                        'artists': sp_track.get('artists', []),
+                    },
+                    'spotify_data': None,
+                    'match_data': None,
+                    'status': '❌ Error',
+                    'status_class': 'error',
+                    'spotify_track': '',
+                    'spotify_artist': '',
+                    'spotify_album': '',
+                    'error': str(e),
+                    'discovery_source': discovery_source,
+                    'index': i
+                }
+                state['discovery_results'].append(result)
+                state['discovery_progress'] = int(((i + 1) / len(tracks)) * 100)
+
+        # Mark as complete
+        state['phase'] = 'discovered'
+        state['status'] = 'discovered'
+        state['discovery_progress'] = 100
+
+        # Add activity for discovery completion
+        source_label = discovery_source.upper()
+        add_activity_item("✅", f"Spotify Link Discovery Complete ({source_label})", f"'{playlist['name']}' - {successful_discoveries}/{len(tracks)} tracks found", "Now")
+
+        print(f"✅ Spotify Public discovery complete ({source_label}): {successful_discoveries}/{len(tracks)} tracks found")
+
+    except Exception as e:
+        print(f"❌ Error in Spotify Public discovery worker: {e}")
+        if url_hash in spotify_public_discovery_states:
+            spotify_public_discovery_states[url_hash]['phase'] = 'error'
+            spotify_public_discovery_states[url_hash]['status'] = f'error: {str(e)}'
+    finally:
+        _resume_enrichment_workers(_ew_state, 'Spotify Public discovery')
+
+
+def convert_spotify_public_results_to_spotify_tracks(discovery_results):
+    """Convert Spotify Public discovery results to Spotify tracks format for sync"""
+    spotify_tracks = []
+
+    for result in discovery_results:
+        # Support both data formats: spotify_data (manual fixes) and individual fields (automatic discovery)
+        if result.get('spotify_data'):
+            spotify_data = result['spotify_data']
+
+            track = {
+                'id': spotify_data['id'],
+                'name': spotify_data['name'],
+                'artists': spotify_data['artists'],
+                'album': spotify_data['album'],
+                'duration_ms': spotify_data.get('duration_ms', 0)
+            }
+            spotify_tracks.append(track)
+        elif result.get('spotify_track') and result.get('status_class') == 'found':
+            track = {
+                'id': result.get('spotify_id', 'unknown'),
+                'name': result.get('spotify_track', 'Unknown Track'),
+                'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
+                'album': result.get('spotify_album', 'Unknown Album'),
+                'duration_ms': 0
+            }
+            spotify_tracks.append(track)
+
+    print(f"🔄 Converted {len(spotify_tracks)} Spotify Public matches to Spotify tracks for sync")
+    return spotify_tracks
+
+
+# ===================================================================
+# SPOTIFY PUBLIC SYNC API ENDPOINTS
+# ===================================================================
+
+@app.route('/api/spotify-public/sync/start/<url_hash>', methods=['POST'])
+def start_spotify_public_sync(url_hash):
+    """Start sync process for a Spotify Public playlist using discovered Spotify tracks"""
+    try:
+        if url_hash not in spotify_public_discovery_states:
+            return jsonify({"error": "Spotify Public playlist not found"}), 404
+
+        state = spotify_public_discovery_states[url_hash]
+        state['last_accessed'] = time.time()
+
+        if state['phase'] not in ['discovered', 'sync_complete']:
+            return jsonify({"error": "Spotify Public playlist not ready for sync"}), 400
+
+        # Convert discovery results to Spotify tracks format
+        spotify_tracks = convert_spotify_public_results_to_spotify_tracks(state['discovery_results'])
+
+        if not spotify_tracks:
+            return jsonify({"error": "No Spotify matches found for sync"}), 400
+
+        # Create a temporary playlist ID for sync tracking
+        sync_playlist_id = f"spotify_public_{url_hash}"
+        playlist_name = state['playlist']['name']
+
+        # Add activity for sync start
+        add_activity_item("🔄", "Spotify Link Sync Started", f"'{playlist_name}' - {len(spotify_tracks)} tracks", "Now")
+
+        # Update Spotify Public state
+        state['phase'] = 'syncing'
+        state['sync_playlist_id'] = sync_playlist_id
+        state['sync_progress'] = {}
+
+        # Start the sync using existing sync infrastructure
+        sync_data = {
+            'playlist_id': sync_playlist_id,
+            'playlist_name': playlist_name,
+            'tracks': spotify_tracks
+        }
+
+        with sync_lock:
+            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+
+        # Submit sync task
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks)
+        active_sync_workers[sync_playlist_id] = future
+
+        print(f"🔄 Started Spotify Public sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
+        return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
+
+    except Exception as e:
+        print(f"❌ Error starting Spotify Public sync: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/spotify-public/sync/status/<url_hash>', methods=['GET'])
+def get_spotify_public_sync_status(url_hash):
+    """Get sync status for a Spotify Public playlist"""
+    try:
+        if url_hash not in spotify_public_discovery_states:
+            return jsonify({"error": "Spotify Public playlist not found"}), 404
+
+        state = spotify_public_discovery_states[url_hash]
+        state['last_accessed'] = time.time()
+        sync_playlist_id = state.get('sync_playlist_id')
+
+        if not sync_playlist_id:
+            return jsonify({"error": "No sync in progress"}), 404
+
+        # Get sync status from existing sync infrastructure
+        with sync_lock:
+            sync_state = sync_states.get(sync_playlist_id, {})
+
+        response = {
+            'phase': state['phase'],
+            'sync_status': sync_state.get('status', 'unknown'),
+            'progress': sync_state.get('progress', {}),
+            'complete': sync_state.get('status') == 'finished',
+            'error': sync_state.get('error')
+        }
+
+        # Update Spotify Public state if sync completed
+        if sync_state.get('status') == 'finished':
+            state['phase'] = 'sync_complete'
+            state['sync_progress'] = sync_state.get('progress', {})
+            playlist_name = state['playlist']['name']
+            add_activity_item("🔄", "Sync Complete", f"Spotify Link playlist '{playlist_name}' synced successfully", "Now")
+        elif sync_state.get('status') == 'error':
+            state['phase'] = 'discovered'  # Revert on error
+            playlist_name = state['playlist']['name']
+            add_activity_item("❌", "Sync Failed", f"Spotify Link playlist '{playlist_name}' sync failed", "Now")
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"❌ Error getting Spotify Public sync status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/spotify-public/sync/cancel/<url_hash>', methods=['POST'])
+def cancel_spotify_public_sync(url_hash):
+    """Cancel sync for a Spotify Public playlist"""
+    try:
+        if url_hash not in spotify_public_discovery_states:
+            return jsonify({"error": "Spotify Public playlist not found"}), 404
+
+        state = spotify_public_discovery_states[url_hash]
+        state['last_accessed'] = time.time()
+        sync_playlist_id = state.get('sync_playlist_id')
+
+        if sync_playlist_id:
+            # Cancel the sync using existing sync infrastructure
+            with sync_lock:
+                sync_states[sync_playlist_id] = {"status": "cancelled"}
+
+            # Clean up sync worker
+            if sync_playlist_id in active_sync_workers:
+                del active_sync_workers[sync_playlist_id]
+
+        # Revert Spotify Public state
+        state['phase'] = 'discovered'
+        state['sync_playlist_id'] = None
+        state['sync_progress'] = {}
+
+        return jsonify({"success": True, "message": "Spotify Public sync cancelled"})
+
+    except Exception as e:
+        print(f"❌ Error cancelling Spotify Public sync: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -39092,6 +39973,7 @@ def _emit_discovery_progress_loop():
         'youtube': lambda: youtube_playlist_states,
         'beatport': lambda: beatport_chart_states,
         'listenbrainz': lambda: listenbrainz_playlist_states,
+        'spotify_public': lambda: spotify_public_discovery_states,
     }
     while True:
         socketio.sleep(1)

@@ -989,6 +989,9 @@
                             <button class="sync-tab-button active" data-tab="spotify">
                                 <span class="tab-icon spotify-icon"></span> Spotify
                             </button>
+                            <button class="sync-tab-button" data-tab="spotify-public">
+                                <span class="tab-icon spotify-icon"></span> Spotify Link
+                            </button>
                             <button class="sync-tab-button" data-tab="tidal">
                                 <span class="tab-icon tidal-icon"></span> Tidal
                             </button>
@@ -1052,6 +1055,18 @@
                             </div>
                             <div class="playlist-scroll-container" id="youtube-playlist-container">
                                 <div class="playlist-placeholder">Parsed YouTube playlists will appear here.</div>
+                            </div>
+                        </div>
+
+                        <!-- Spotify Public Link Tab Content -->
+                        <div class="sync-tab-content" id="spotify-public-tab-content">
+                            <div class="youtube-input-section">
+                                <input type="text" id="spotify-public-url-input"
+                                    placeholder="Paste Spotify Playlist or Album URL...">
+                                <button id="spotify-public-parse-btn">Load</button>
+                            </div>
+                            <div class="playlist-scroll-container" id="spotify-public-playlist-container">
+                                <div class="playlist-placeholder">Paste a Spotify playlist or album URL above to load tracks without needing Spotify API credentials.</div>
                             </div>
                         </div>
 
