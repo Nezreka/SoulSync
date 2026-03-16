@@ -776,6 +776,7 @@ class RepairWorker:
             'missing_cover_art': self._fix_missing_cover_art,
             'metadata_gap': self._fix_metadata_gap,
             'duplicate_tracks': self._fix_duplicates,
+            'mbid_mismatch': self._fix_mbid_mismatch,
         }
         handler = handlers.get(finding_type)
         if not handler:
@@ -990,6 +991,36 @@ class RepairWorker:
         if files_deleted:
             msg += f' and {files_deleted} file(s) from disk'
         return {'success': True, 'action': 'removed_duplicates', 'message': msg}
+
+    def _fix_mbid_mismatch(self, entity_type, entity_id, file_path, details):
+        """Remove the mismatched MusicBrainz recording ID from the audio file."""
+        if not file_path:
+            return {'success': False, 'error': 'No file path associated with this finding'}
+
+        # Resolve path
+        download_folder = None
+        if self._config_manager:
+            download_folder = self._config_manager.get('soulseek.download_path', '')
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder)
+        if not resolved or not os.path.exists(resolved):
+            return {'success': False, 'error': f'File not found: {file_path}'}
+
+        try:
+            from core.repair_jobs.mbid_mismatch_detector import _remove_mbid_from_file
+            removed = _remove_mbid_from_file(resolved)
+            if removed:
+                mbid = details.get('mbid', 'unknown')
+                mb_title = details.get('mb_title', 'unknown')
+                title = details.get('title', 'unknown')
+                return {
+                    'success': True,
+                    'action': 'removed_mbid',
+                    'message': f'Removed wrong MBID ({mbid[:8]}...) from "{title}" — was pointing to "{mb_title}"'
+                }
+            else:
+                return {'success': False, 'error': 'MBID tag not found in file (may have been removed already)'}
+        except Exception as e:
+            return {'success': False, 'error': f'Failed to remove MBID: {str(e)}'}
 
     def dismiss_finding(self, finding_id: int) -> bool:
         """Dismiss a finding."""

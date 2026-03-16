@@ -302,10 +302,17 @@ class MusicBrainzService:
             for result in results:
                 mb_title = result.get('title', '')
                 mb_score = result.get('score', 0)
-                
+
                 # Calculate title similarity
                 title_similarity = self._calculate_similarity(track_name, mb_title)
-                
+
+                # Hard gate: title must be at least 60% similar.
+                # Without this, artist bonus + MB score can push totally
+                # different titles (e.g. "Sweet Surrender" → "Answers")
+                # past the confidence threshold.
+                if title_similarity < 0.6:
+                    continue
+
                 # If we have artist info, check artist match too
                 artist_bonus = 0
                 if artist_name and 'artist-credit' in result:
@@ -317,14 +324,14 @@ class MusicBrainzService:
                             if artist_similarity > 0.7:
                                 artist_bonus = 20
                                 break
-                
+
                 # Combine scores - cap at 100
                 confidence = min(100, int((title_similarity * 50) + (mb_score / 100 * 30) + artist_bonus))
-                
+
                 if confidence > best_confidence:
                     best_confidence = confidence
                     best_match = result
-            
+
             # Only return matches with confidence >= 70%
             if best_match and best_confidence >= 70:
                 mbid = best_match.get('id')
