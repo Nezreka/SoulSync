@@ -957,7 +957,10 @@
                     </div>
 
                     <div class="dashboard-section">
-                        <h3 class="section-title">Recent Activity</h3>
+                        <div class="section-title-row">
+                            <h3 class="section-title">Recent Activity</h3>
+                            <button class="library-history-btn" onclick="openLibraryHistoryModal()" title="View full library history">History</button>
+                        </div>
                         <div class="activity-feed-container" id="dashboard-activity-feed">
                             <div class="activity-item">
                                 <span class="activity-icon">📊</span>
@@ -5596,6 +5599,26 @@
             <div class="tool-help-modal-body" id="tool-help-modal-body">
                 <!-- Content will be dynamically inserted -->
             </div>
+        </div>
+    </div>
+
+    <!-- Library History Modal -->
+    <div class="modal-overlay hidden" id="library-history-overlay" onclick="if(event.target===this)closeLibraryHistoryModal()">
+        <div class="library-history-modal">
+            <div class="library-history-modal-header">
+                <h3>Library History</h3>
+                <button class="library-history-modal-close" onclick="closeLibraryHistoryModal()">&times;</button>
+            </div>
+            <div class="library-history-tabs">
+                <button class="library-history-tab active" data-tab="download" onclick="switchHistoryTab('download')">
+                    Downloads <span class="library-history-tab-count" id="history-download-count">0</span>
+                </button>
+                <button class="library-history-tab" data-tab="import" onclick="switchHistoryTab('import')">
+                    Server Imports <span class="library-history-tab-count" id="history-import-count">0</span>
+                </button>
+            </div>
+            <div class="library-history-list" id="library-history-list"></div>
+            <div class="library-history-pagination" id="library-history-pagination"></div>
         </div>
     </div>
 

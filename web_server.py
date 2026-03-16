@@ -1371,6 +1371,53 @@ def _emit_track_downloaded(context):
     except Exception:
         pass
 
+
+def _record_library_history_download(context):
+    """Record a completed download to the library_history table. Non-blocking."""
+    try:
+        ti = context.get('track_info') or context.get('search_result') or {}
+        artist_name = ''
+        artists = ti.get('artists', [])
+        if artists:
+            a = artists[0]
+            artist_name = a.get('name', str(a)) if isinstance(a, dict) else str(a)
+        if not artist_name:
+            artist_name = ti.get('artist', '')
+
+        album_raw = ti.get('album', '')
+        album_name = album_raw.get('name', '') if isinstance(album_raw, dict) else str(album_raw or '')
+
+        title = ti.get('name', ti.get('title', ''))
+        quality = context.get('_audio_quality', '')
+        file_path = context.get('_final_processed_path', context.get('_final_path', ''))
+
+        # Try to get album art URL
+        thumb_url = ''
+        spotify_album = context.get('spotify_album')
+        if spotify_album and isinstance(spotify_album, dict):
+            thumb_url = spotify_album.get('image_url', '')
+            if not thumb_url:
+                images = spotify_album.get('images', [])
+                if images:
+                    thumb_url = images[0].get('url', '')
+        if not thumb_url:
+            album_info = context.get('album_info', {})
+            if isinstance(album_info, dict):
+                thumb_url = album_info.get('album_image_url', '')
+
+        db = get_database()
+        db.add_library_history_entry(
+            event_type='download',
+            title=title,
+            artist_name=artist_name,
+            album_name=album_name,
+            quality=quality,
+            file_path=file_path,
+            thumb_url=thumb_url
+        )
+    except Exception:
+        pass  # Non-critical, never block download flow
+
 # --- Register Public REST API Blueprint (v1) ---
 try:
     from api import create_api_blueprint, limiter
@@ -7871,6 +7918,33 @@ def fix_artist_image_url(thumb_url):
     except Exception as e:
         print(f"Error fixing image URL '{thumb_url}': {e}")
         return thumb_url
+
+@app.route('/api/library/history')
+def get_library_history():
+    """Get persistent library history (downloads and server imports)."""
+    try:
+        event_type = request.args.get('type', None)
+        if event_type and event_type not in ('download', 'import'):
+            event_type = None
+        page = max(1, int(request.args.get('page', 1)))
+        limit = min(200, max(1, int(request.args.get('limit', 50))))
+
+        db = get_database()
+        entries, total = db.get_library_history(event_type=event_type, page=page, limit=limit)
+        stats = db.get_library_history_stats()
+
+        return jsonify({
+            'success': True,
+            'entries': entries,
+            'total': total,
+            'page': page,
+            'limit': limit,
+            'stats': stats
+        })
+    except Exception as e:
+        logger.error(f"Error fetching library history: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/library/artists')
 def get_library_artists():
@@ -15706,6 +15780,7 @@ def _post_process_matched_download(context_key, context, file_path):
             context['_simple_download_completed'] = True
             context['_final_path'] = str(destination)
             _emit_track_downloaded(context)
+            _record_library_history_download(context)
             return
         # --- END SIMPLE DOWNLOAD HANDLING ---
 
@@ -15789,6 +15864,7 @@ def _post_process_matched_download(context_key, context, file_path):
                 print(f"⚠️ [Playlist Folder] Error checking wishlist removal: {wishlist_error}")
 
             _emit_track_downloaded(context)
+            _record_library_history_download(context)
 
             # Mark as stream processed so the verification worker doesn't search
             # for the file by its original Soulseek name (which no longer exists after rename)
@@ -16130,6 +16206,7 @@ def _post_process_matched_download(context_key, context, file_path):
         print(f"✅ Post-processing complete for: {context.get('_final_processed_path', final_path)}")
 
         _emit_track_downloaded(context)
+        _record_library_history_download(context)
 
         # RETAG DATA CAPTURE: Record completed album/single downloads for retag tool
         try:
