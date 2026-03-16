@@ -16876,6 +16876,27 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🎵 HiFi Download Source",
+                "description": "Free lossless downloads via public hifi-api instances — no account or subscription required",
+                "features": [
+                    "• New download mode alongside Soulseek, YouTube, Tidal, and Qobuz — select HiFi Only or use in hybrid mode",
+                    "• Quality selection: Hi-Res, Lossless, High, or Low with automatic fallback chain (hires → lossless → high → low)",
+                    "• Automatic instance rotation across 6 public API servers — if one goes down, the next is tried seamlessly",
+                    "• Full search, download, streaming, and post-processing support — works identically to other download sources",
+                    "• Test connection button in Settings to verify instance availability"
+                ]
+            },
+            {
+                "title": "🔗 Spotify Link (No API Credentials)",
+                "description": "Scrape Spotify playlists and albums by URL without needing Spotify API credentials",
+                "features": [
+                    "• New Spotify Link tab on the playlist sync page — paste any public Spotify playlist or album URL",
+                    "• Extracts all track metadata (title, artist, album, duration, cover art) via web scraping",
+                    "• Works without Spotify client ID/secret — great for users who don't want to set up a Spotify developer app",
+                    "• Full download and sync support — tracks are matched and downloaded like any other playlist source"
+                ]
+            },
+            {
                 "title": "🔧 Library Maintenance Suite",
                 "description": "Full-featured library repair system with 9 automated jobs, fix actions, and rich findings UI",
                 "features": [
@@ -16917,9 +16938,14 @@ def get_version_info():
                 ]
             },
             {
-                "title": "🐛 Recent Bug Fixes",
-                "description": "Stability fixes and edge case handling",
+                "title": "🐛 Recent Bug Fixes & Improvements",
+                "description": "Stability fixes, UX improvements, and edge case handling",
                 "features": [
+                    "• Redownload button on enhanced library view — re-download any album directly from the library manager",
+                    "• Hemisphere setting for seasonal playlists — southern hemisphere users get correct seasonal recommendations",
+                    "• Play button on repair findings — preview tracks directly from the maintenance findings list",
+                    "• Spotify rate limit guards added to all repair jobs — prevents ban escalation during library maintenance",
+                    "• Fix watchlist migration dropping profile_id & fix profile delete dialog hidden behind overlay",
                     "• Fix watchlist NOT NULL constraint blocking iTunes-only artists from being added",
                     "• Fix Windows path mangling for artist names with trailing dots (e.g. Fred again..)",
                     "• Fix watchlist scan failing entirely when Spotify is rate limited — iTunes provider fallback added",
@@ -16927,7 +16953,8 @@ def get_version_info():
                     "• Harden metadata cache — prevent simplified data from overwriting full entries, fix connection leaks",
                     "• Scope automation-triggered watchlist scans to the calling profile",
                     "• Fix watchlist scan silently skipping all albums due to metadata cache returning incomplete data",
-                    "• Optimized enhanced library view performance with event delegation and scoped DOM queries"
+                    "• Optimized enhanced library view performance with event delegation and scoped DOM queries",
+                    "• Fix Qobuz and HiFi streaming source checks that blocked playback with 'format not supported' error"
                 ]
             },
             {
