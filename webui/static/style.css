@@ -35928,6 +35928,27 @@ textarea.enhanced-meta-field-input {
     border-color: rgba(100, 149, 237, 0.35);
 }
 
+.enhanced-redownload-album-btn {
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    background: rgba(34, 197, 94, 0.06);
+    border: 1px solid rgba(34, 197, 94, 0.15);
+    color: rgba(34, 197, 94, 0.6);
+    transition: all 0.15s ease;
+}
+.enhanced-redownload-album-btn:hover {
+    background: rgba(34, 197, 94, 0.12);
+    color: rgba(34, 197, 94, 0.9);
+    border-color: rgba(34, 197, 94, 0.35);
+}
+.enhanced-redownload-album-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* ── Reorganize Modal ── */
 .reorganize-modal {
     max-width: 900px;

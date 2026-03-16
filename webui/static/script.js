@@ -11874,7 +11874,7 @@ async function startMissingTracksProcess(playlistId) {
 
         // If this is an artist album download, use album name and include full context
         // Match 'artist_album_', 'enhanced_search_album_', 'enhanced_search_track_', 'discover_album_', and 'seasonal_album_' prefixes
-        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('enhanced_search_track_') || playlistId.startsWith('discover_album_') || playlistId.startsWith('seasonal_album_') || playlistId.startsWith('spotify_library_') || playlistId.startsWith('issue_download_')) {
+        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('enhanced_search_track_') || playlistId.startsWith('discover_album_') || playlistId.startsWith('seasonal_album_') || playlistId.startsWith('spotify_library_') || playlistId.startsWith('issue_download_') || playlistId.startsWith('library_redownload_')) {
             requestBody.playlist_name = process.album?.name || process.playlist.name;
             requestBody.is_album_download = true;
             requestBody.album_context = process.album;   // Full Spotify album object
@@ -37085,6 +37085,17 @@ function renderExpandedAlbumHeader(album) {
         reorganizeBtn.onclick = (e) => { e.stopPropagation(); showReorganizeModal(album.id); };
         enrichRow.appendChild(reorganizeBtn);
 
+        const redownloadBtn = document.createElement('button');
+        redownloadBtn.className = 'enhanced-redownload-album-btn';
+        redownloadBtn.innerHTML = '&#8635; Redownload';
+        redownloadBtn.title = 'Redownload this album (opens Download Missing modal with force-download)';
+        redownloadBtn.onclick = (e) => {
+            e.stopPropagation();
+            const aName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+            redownloadLibraryAlbum(album, aName, redownloadBtn);
+        };
+        enrichRow.appendChild(redownloadBtn);
+
         const deleteAlbumBtn = document.createElement('button');
         deleteAlbumBtn.className = 'enhanced-delete-album-btn';
         deleteAlbumBtn.textContent = 'Delete Album';
@@ -55261,7 +55272,7 @@ async function issueDownloadAlbum(spotifyAlbumId, artistName, albumName) {
         }));
 
         const playlistName = `[${artistName}] ${albumData.name}`;
-        const artistObject = { id: null, name: artistName };
+        const artistObject = { id: `issue_${artistName}`, name: artistName, image_url: '' };
         const fullAlbumObject = {
             name: albumData.name,
             id: albumData.id,
@@ -55276,11 +55287,110 @@ async function issueDownloadAlbum(spotifyAlbumId, artistName, albumName) {
             virtualPlaylistId, playlistName, enrichedTracks, fullAlbumObject, artistObject, true
         );
 
+        // Register download bubble so it appears on the dashboard
+        const albumType = fullAlbumObject.album_type || 'album';
+        registerArtistDownload(artistObject, fullAlbumObject, virtualPlaylistId, albumType);
+
     } catch (error) {
         console.error('Issue download error:', error);
         showToast(`Error: ${error.message}`, 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download Album'; }
+    }
+}
+
+// --- Redownload Library Album (Enhanced View) ---
+async function redownloadLibraryAlbum(album, artistName, btn) {
+    const albumName = album.title || '';
+    const spotifyAlbumId = album.spotify_album_id || '';
+
+    if (!spotifyAlbumId && !albumName) {
+        showToast('No album ID or name available for redownload', 'warning');
+        return;
+    }
+
+    const origText = btn ? btn.innerHTML : '';
+    try {
+        if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
+
+        let response;
+        if (spotifyAlbumId) {
+            const params = new URLSearchParams({ name: albumName, artist: artistName || '' });
+            response = await fetch(`/api/spotify/album/${encodeURIComponent(spotifyAlbumId)}?${params}`);
+        }
+
+        // Fallback: search by name if no ID or direct fetch failed
+        if (!response || !response.ok) {
+            const query = `${artistName || ''} ${albumName}`.trim();
+            const searchResp = await fetch('/api/enhanced-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query })
+            });
+            if (!searchResp.ok) throw new Error('Album search failed');
+            const searchData = await searchResp.json();
+            const found = searchData.spotify_albums?.[0] || searchData.itunes_albums?.[0];
+            if (!found || !found.id) {
+                showToast(`Could not find "${albumName}" by ${artistName || 'unknown'}`, 'warning');
+                return;
+            }
+            const params = new URLSearchParams({ name: found.name || albumName, artist: found.artist || artistName || '' });
+            response = await fetch(`/api/spotify/album/${encodeURIComponent(found.id)}?${params}`);
+        }
+
+        if (!response.ok) throw new Error(`Failed to load album: ${response.status}`);
+
+        const albumData = await response.json();
+        if (!albumData || !albumData.tracks || albumData.tracks.length === 0) {
+            showToast(`No tracks found for "${albumName}"`, 'warning');
+            return;
+        }
+
+        const resolvedId = albumData.id || spotifyAlbumId || album.id;
+        const virtualPlaylistId = `library_redownload_${resolvedId}`;
+        const playlistName = `[${artistName || 'Unknown'}] ${albumData.name}`;
+
+        const enrichedTracks = albumData.tracks.map(track => ({
+            ...track,
+            album: {
+                name: albumData.name,
+                id: albumData.id,
+                album_type: albumData.album_type || 'album',
+                images: albumData.images || [],
+                release_date: albumData.release_date,
+                total_tracks: albumData.total_tracks
+            }
+        }));
+
+        const enhancedArtist = artistDetailPageState.enhancedData?.artist;
+        const artistObject = {
+            id: artistDetailPageState.currentArtistId || `library_${artistName || album.id}`,
+            name: artistName || '',
+            image_url: enhancedArtist?.thumb_url || ''
+        };
+        const fullAlbumObject = {
+            name: albumData.name,
+            id: albumData.id,
+            album_type: albumData.album_type || 'album',
+            images: albumData.images || [],
+            release_date: albumData.release_date,
+            total_tracks: albumData.total_tracks,
+            artists: albumData.artists || [{ name: artistName || '' }]
+        };
+
+        await openDownloadMissingModalForArtistAlbum(
+            virtualPlaylistId, playlistName, enrichedTracks, fullAlbumObject, artistObject, true
+        );
+
+        // Register download bubble so it appears on the dashboard
+        const albumType = fullAlbumObject.album_type || 'album';
+        registerArtistDownload(artistObject, fullAlbumObject, virtualPlaylistId, albumType);
+
+    } catch (error) {
+        console.error('Redownload album error:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = origText; }
     }
 }
 
