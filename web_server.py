@@ -16953,6 +16953,26 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "📜 Library History",
+                "description": "Persistent record of every download and server import — viewable from the dashboard",
+                "features": [
+                    "• History button next to Recent Activity opens a modal with Downloads and Server Imports tabs",
+                    "• Every completed SoulSync download is logged with title, artist, album, quality, and cover art",
+                    "• Every new track imported from Plex, Jellyfin, or Navidrome is logged automatically",
+                    "• Paginated browsing with tab count badges and relative timestamps",
+                    "• History persists across restarts — unlike the in-memory activity feed"
+                ]
+            },
+            {
+                "title": "🔬 MusicBrainz MBID Mismatch Repair",
+                "description": "New repair job to detect and fix wrong MusicBrainz recording IDs on library tracks",
+                "features": [
+                    "• Detects tracks where the stored MusicBrainz recording ID resolves to a different title than expected",
+                    "• Fix action clears the bad MBID so enrichment can re-match correctly",
+                    "• Also fixes MusicBrainz recording matching returning wrong titles due to unstable MBID lookups"
+                ]
+            },
+            {
                 "title": "🎵 HiFi Download Source",
                 "description": "Free lossless downloads via public hifi-api instances — no account or subscription required",
                 "features": [
@@ -17018,6 +17038,11 @@ def get_version_info():
                 "title": "🐛 Recent Bug Fixes & Improvements",
                 "description": "Stability fixes, UX improvements, and edge case handling",
                 "features": [
+                    "• Fix $year template variable empty for playlist/sync downloads — album metadata from discovery was being discarded in the fallback download path",
+                    "• Fix empty brackets in folder names ($year, $quality etc.) not being cleaned when template variables resolve to empty",
+                    "• Fix missing album cover art in download progress bubbles for redownload and issue modal downloads",
+                    "• Cancel button for watchlist scans — stop manual or automation-triggered scans mid-run",
+                    "• Fix service status labels missing HiFi and Qobuz display names",
                     "• Redownload button on enhanced library view — re-download any album directly from the library manager",
                     "• Hemisphere setting for seasonal playlists — southern hemisphere users get correct seasonal recommendations",
                     "• Play button on repair findings — preview tracks directly from the maintenance findings list",
