@@ -34267,21 +34267,26 @@ async function showWatchlistModal() {
                             if (artist.include_remixes) pills.push('<span class="watchlist-pill watchlist-pill-filter">Remixes</span>');
                             if (artist.include_acoustic) pills.push('<span class="watchlist-pill watchlist-pill-filter">Acoustic</span>');
                             if (artist.include_compilations) pills.push('<span class="watchlist-pill watchlist-pill-filter">Compilations</span>');
+                            const sourceBadges = [];
+                            if (artist.spotify_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-spotify">Spotify</span>');
+                            if (artist.itunes_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-itunes">iTunes</span>');
+                            if (artist.deezer_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-deezer">Deezer</span>');
+                            const artistPrimaryId = artist.spotify_artist_id || artist.itunes_artist_id || artist.deezer_artist_id;
                             return `
                             <div class="watchlist-artist-card"
                                  data-artist-name="${artist.artist_name.toLowerCase().replace(/"/g, '&quot;')}"
-                                 data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}">
+                                 data-artist-id="${artistPrimaryId}">
 
                                 <label class="watchlist-card-checkbox" onclick="event.stopPropagation();">
                                     <input type="checkbox" class="watchlist-select-cb"
-                                           data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}"
+                                           data-artist-id="${artistPrimaryId}"
                                            data-artist-name="${escapeHtml(artist.artist_name)}"
                                            onchange="updateWatchlistBatchBar()">
                                     <span class="watchlist-checkbox-custom"></span>
                                 </label>
 
                                 <button class="watchlist-card-gear"
-                                        data-artist-id="${artist.spotify_artist_id || artist.itunes_artist_id}"
+                                        data-artist-id="${artistPrimaryId}"
                                         data-artist-name="${escapeHtml(artist.artist_name)}"
                                         onclick="event.stopPropagation();"
                                         title="Artist settings">
@@ -34303,6 +34308,7 @@ async function showWatchlistModal() {
                                     <span class="watchlist-card-name">${escapeHtml(artist.artist_name)}</span>
                                     <span class="watchlist-card-meta">${formatRelativeScanTime(artist.last_scan_timestamp)}</span>
                                 </div>
+                                ${sourceBadges.length > 0 ? `<div class="watchlist-card-sources">${sourceBadges.join('')}</div>` : ''}
                                 ${pills.length > 0 ? `<div class="watchlist-card-pills">${pills.join('')}</div>` : ''}
                             </div>
                         `}).join('')}
