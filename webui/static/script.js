@@ -33903,6 +33903,13 @@ async function showWatchlistModal() {
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                             ${scanStatus === 'scanning' ? 'Scanning...' : 'Scan for New Releases'}
                         </button>
+                        <button class="playlist-modal-btn playlist-modal-btn-secondary watchlist-btn-cancel"
+                                id="cancel-watchlist-scan-btn"
+                                onclick="cancelWatchlistScan()"
+                                style="display: ${scanStatus === 'scanning' ? '' : 'none'};">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                            Cancel Scan
+                        </button>
                         <button class="playlist-modal-btn playlist-modal-btn-secondary watchlist-btn-similar"
                                 id="update-similar-artists-btn"
                                 onclick="updateSimilarArtists()"
@@ -34899,6 +34906,37 @@ function filterWatchlistArtists() {
 /**
  * Start watchlist scan
  */
+async function cancelWatchlistScan() {
+    try {
+        const cancelBtn = document.getElementById('cancel-watchlist-scan-btn');
+        if (cancelBtn) {
+            cancelBtn.disabled = true;
+            cancelBtn.textContent = 'Cancelling...';
+        }
+
+        const response = await fetch('/api/watchlist/scan/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to cancel scan');
+        }
+
+        showToast('Cancel request sent — scan will stop after current artist', 'info');
+
+    } catch (error) {
+        console.error('Error cancelling watchlist scan:', error);
+        showToast(`Error cancelling scan: ${error.message}`, 'error');
+        const cancelBtn = document.getElementById('cancel-watchlist-scan-btn');
+        if (cancelBtn) {
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = 'Cancel Scan';
+        }
+    }
+}
+
 async function startWatchlistScan() {
     try {
         const button = document.getElementById('scan-watchlist-btn');
@@ -34917,6 +34955,14 @@ async function startWatchlistScan() {
         }
 
         button.textContent = 'Scanning...';
+
+        // Show cancel button
+        const cancelBtn = document.getElementById('cancel-watchlist-scan-btn');
+        if (cancelBtn) {
+            cancelBtn.style.display = '';
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = 'Cancel Scan';
+        }
 
         // Show scan status
         const statusDiv = document.getElementById('watchlist-scan-status');
@@ -34943,6 +34989,12 @@ async function startWatchlistScan() {
 function handleWatchlistScanData(data) {
     const button = document.getElementById('scan-watchlist-btn');
     const liveActivity = document.getElementById('watchlist-live-activity');
+
+    // Show/hide cancel button based on scan status
+    const cancelBtn = document.getElementById('cancel-watchlist-scan-btn');
+    if (cancelBtn) {
+        cancelBtn.style.display = data.status === 'scanning' ? '' : 'none';
+    }
 
     // Update live visual activity display
     if (liveActivity && data.status === 'scanning') {
@@ -35049,11 +35101,64 @@ function handleWatchlistScanData(data) {
 
         console.log('Watchlist scan completed:', data.summary);
 
+    } else if (data.status === 'cancelled') {
+        if (button) {
+            button.disabled = false;
+            button.textContent = 'Scan for New Releases';
+            button.classList.remove('btn-processing');
+        }
+
+        // Hide cancel button
+        const cancelBtn = document.getElementById('cancel-watchlist-scan-btn');
+        if (cancelBtn) {
+            cancelBtn.style.display = 'none';
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = 'Cancel Scan';
+        }
+
+        // Hide live activity
+        if (liveActivity) {
+            liveActivity.style.display = 'none';
+        }
+
+        // Show cancellation message
+        const statusDiv = document.getElementById('watchlist-scan-status');
+        if (statusDiv && data.summary) {
+            const scanned = data.summary.total_artists || 0;
+            const newTracks = data.summary.new_tracks_found || 0;
+            const addedTracks = data.summary.tracks_added_to_wishlist || 0;
+
+            statusDiv.innerHTML = `
+                <div class="watchlist-scan-completion">
+                    <div class="watchlist-scan-completion-message">Scan cancelled after ${scanned} artist${scanned !== 1 ? 's' : ''}</div>
+                    <div style="font-size: 13px; opacity: 0.8;">
+                        <span class="sync-stat">Scanned: ${scanned}</span>
+                        <span class="sync-separator"> &bull; </span>
+                        <span class="sync-stat">New tracks: ${newTracks}</span>
+                        <span class="sync-separator"> &bull; </span>
+                        <span class="sync-stat">Added to wishlist: ${addedTracks}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Update watchlist count
+        updateWatchlistButtonCount();
+
+        showToast('Watchlist scan cancelled', 'info');
+        console.log('Watchlist scan cancelled:', data.summary);
+
     } else if (data.status === 'error') {
         if (button) {
             button.disabled = false;
             button.textContent = 'Scan for New Releases';
             button.classList.remove('btn-processing');
+        }
+
+        // Hide cancel button
+        const cancelBtn = document.getElementById('cancel-watchlist-scan-btn');
+        if (cancelBtn) {
+            cancelBtn.style.display = 'none';
         }
 
         // Hide live activity
@@ -35073,7 +35178,7 @@ async function pollWatchlistScanStatus() {
 
         if (data.success) {
             handleWatchlistScanData(data);
-            if (data.status === 'completed' || data.status === 'error') {
+            if (data.status === 'completed' || data.status === 'error' || data.status === 'cancelled') {
                 return; // Stop polling
             }
         }
