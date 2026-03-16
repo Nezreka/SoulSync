@@ -176,20 +176,63 @@ class SeasonalDiscoveryService:
         except Exception as e:
             logger.error(f"Error creating seasonal database schema: {e}")
 
+    def _get_effective_month(self, hemisphere: str = None) -> int:
+        """Get the effective month, adjusted for hemisphere setting.
+
+        Southern hemisphere offsets by 6 months so seasons align correctly
+        (e.g., December in southern hemisphere maps to June = summer → winter).
+        Holiday months (Halloween, Christmas, Valentine's) are NOT offset.
+        """
+        month = datetime.now().month
+        if hemisphere is None:
+            hemisphere = self._get_hemisphere()
+        if hemisphere == 'southern':
+            # Offset by 6 months for seasonal content
+            return ((month - 1 + 6) % 12) + 1
+        return month
+
+    def _get_hemisphere(self) -> str:
+        """Get configured hemisphere from database metadata."""
+        try:
+            with self.database._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT value FROM metadata WHERE key = 'hemisphere'")
+                row = cursor.fetchone()
+                if row:
+                    val = row[0] if isinstance(row, tuple) else row['value']
+                    if val in ('northern', 'southern'):
+                        return val
+        except Exception:
+            pass
+        return 'northern'
+
     def get_current_season(self) -> Optional[str]:
         """
         Detect current season based on current month.
+        Respects hemisphere setting — southern hemisphere offsets seasonal
+        months by 6, but holidays stay calendar-fixed.
 
         Returns:
             Season key (e.g., 'halloween', 'christmas') or None
         """
-        current_month = datetime.now().month
+        real_month = datetime.now().month
+        hemisphere = self._get_hemisphere()
+        effective_month = self._get_effective_month(hemisphere)
+
+        # Holidays that are calendar-fixed (not season-dependent)
+        _HOLIDAY_KEYS = {'halloween', 'christmas', 'valentines'}
 
         # Check each season to find active ones
         active_seasons = []
         for season_key, config in SEASONAL_CONFIG.items():
-            if current_month in config['active_months']:
-                active_seasons.append(season_key)
+            if hemisphere == 'southern' and season_key in _HOLIDAY_KEYS:
+                # Holidays use real calendar month
+                if real_month in config['active_months']:
+                    active_seasons.append(season_key)
+            else:
+                # Seasons use effective (offset) month
+                if effective_month in config['active_months']:
+                    active_seasons.append(season_key)
 
         if not active_seasons:
             return None
@@ -205,13 +248,21 @@ class SeasonalDiscoveryService:
         return active_seasons[0] if active_seasons else None
 
     def get_all_active_seasons(self) -> List[str]:
-        """Get all seasons active in current month (for displaying multiple sections)"""
-        current_month = datetime.now().month
+        """Get all seasons active in current month (hemisphere-aware)"""
+        real_month = datetime.now().month
+        hemisphere = self._get_hemisphere()
+        effective_month = self._get_effective_month(hemisphere)
+
+        _HOLIDAY_KEYS = {'halloween', 'christmas', 'valentines'}
 
         active_seasons = []
         for season_key, config in SEASONAL_CONFIG.items():
-            if current_month in config['active_months']:
-                active_seasons.append(season_key)
+            if hemisphere == 'southern' and season_key in _HOLIDAY_KEYS:
+                if real_month in config['active_months']:
+                    active_seasons.append(season_key)
+            else:
+                if effective_month in config['active_months']:
+                    active_seasons.append(season_key)
 
         return active_seasons
 
