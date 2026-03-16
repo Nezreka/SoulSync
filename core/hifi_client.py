@@ -191,7 +191,7 @@ class HiFiClient:
                 self._rotate_instance(instance)
             except http_requests.exceptions.HTTPError as e:
                 status = e.response.status_code if e.response is not None else 0
-                if status in (502, 503, 504):
+                if status >= 500:
                     logger.warning(f"HiFi API server error ({status}): {instance}")
                     self._rotate_instance(instance)
                 else:
