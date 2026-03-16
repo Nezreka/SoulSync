@@ -40803,7 +40803,7 @@ tr.tag-diff-same {
 .repair-findings-toolbar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    flex-wrap: wrap;
     margin-bottom: 14px;
     gap: 10px;
     flex-wrap: wrap;
@@ -40870,6 +40870,23 @@ tr.tag-diff-same {
 
 .repair-bulk-btn.fix:hover {
     background: rgba(var(--accent-rgb, 99, 102, 241), 0.2);
+}
+
+.repair-clear-btn {
+    margin-left: auto;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: 6px;
+    padding: 5px 12px;
+    color: #f87171;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.repair-clear-btn:hover {
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(239, 68, 68, 0.4);
 }
 
 .repair-findings-list {

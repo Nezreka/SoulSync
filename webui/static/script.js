@@ -52617,6 +52617,47 @@ async function bulkFixFindings() {
     updateRepairStatus();
 }
 
+async function clearRepairFindings() {
+    const jobFilter = document.getElementById('repair-findings-job-filter');
+    const statusFilter = document.getElementById('repair-findings-status-filter');
+    const jobId = jobFilter ? jobFilter.value : '';
+    const status = statusFilter ? statusFilter.value : '';
+
+    const scopeLabel = jobId ? jobId.replace(/_/g, ' ') : 'all jobs';
+    const statusLabel = status ? ` (${status})` : '';
+    if (!await showConfirmDialog({
+        title: 'Clear Findings',
+        message: `Delete all findings for ${scopeLabel}${statusLabel}? This cannot be undone.`,
+        confirmText: 'Clear',
+        destructive: true
+    })) return;
+
+    try {
+        const body = {};
+        if (jobId) body.job_id = jobId;
+        if (status) body.status = status;
+
+        const response = await fetch('/api/repair/findings/clear', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const result = await response.json();
+        if (result.success) {
+            showToast(`Cleared ${result.deleted} findings`, 'success');
+        } else {
+            showToast(result.error || 'Failed to clear findings', 'error');
+        }
+        _repairSelectedFindings.clear();
+        loadRepairFindingsDashboard();
+        loadRepairFindings();
+        updateRepairStatus();
+    } catch (error) {
+        console.error('Error clearing findings:', error);
+        showToast('Error clearing findings', 'error');
+    }
+}
+
 async function loadRepairHistory() {
     const container = document.getElementById('repair-history-list');
     if (!container) return;

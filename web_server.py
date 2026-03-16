@@ -39031,6 +39031,23 @@ def repair_findings_bulk():
         logger.error(f"Error bulk updating findings: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/repair/findings/clear', methods=['POST'])
+def repair_findings_clear():
+    """Clear (delete) findings, optionally filtered by job_id and/or status"""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        data = request.get_json(silent=True) or {}
+        job_id = data.get('job_id')
+        status = data.get('status')
+
+        count = repair_worker.clear_findings(job_id=job_id, status=status)
+        return jsonify({'success': True, 'deleted': count}), 200
+    except Exception as e:
+        logger.error(f"Error clearing findings: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/repair/history', methods=['GET'])
 def repair_history():
     """Get job run history"""

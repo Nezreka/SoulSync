@@ -1075,6 +1075,36 @@ class RepairWorker:
             if conn:
                 conn.close()
 
+    def clear_findings(self, job_id: str = None, status: str = None) -> int:
+        """Delete findings from the database. Optionally filter by job_id and/or status. Returns count deleted."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            conditions = []
+            params = []
+            if job_id:
+                conditions.append("job_id = ?")
+                params.append(job_id)
+            if status:
+                conditions.append("status = ?")
+                params.append(status)
+            where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+            cursor.execute(f"SELECT COUNT(*) FROM repair_findings{where}", params)
+            count = cursor.fetchone()[0]
+            cursor.execute(f"DELETE FROM repair_findings{where}", params)
+            conn.commit()
+            logger.info("Cleared %d findings%s%s", count,
+                         f" for job {job_id}" if job_id else "",
+                         f" with status {status}" if status else "")
+            return count
+        except Exception as e:
+            logger.error("Error clearing findings: %s", e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
+
     def _get_findings_count(self, status: str = None) -> int:
         """Get count of findings by status."""
         conn = None
