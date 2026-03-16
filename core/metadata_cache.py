@@ -465,9 +465,9 @@ class MetadataCache:
                 cursor = conn.cursor()
 
                 stats = {
-                    'artists': {'spotify': 0, 'itunes': 0},
-                    'albums': {'spotify': 0, 'itunes': 0},
-                    'tracks': {'spotify': 0, 'itunes': 0},
+                    'artists': {'spotify': 0, 'itunes': 0, 'deezer': 0},
+                    'albums': {'spotify': 0, 'itunes': 0, 'deezer': 0},
+                    'tracks': {'spotify': 0, 'itunes': 0, 'deezer': 0},
                     'searches': 0,
                     'total_entries': 0,
                     'total_hits': 0,
@@ -509,9 +509,9 @@ class MetadataCache:
         except Exception as e:
             logger.error(f"Cache stats error: {e}")
             return {
-                'artists': {'spotify': 0, 'itunes': 0},
-                'albums': {'spotify': 0, 'itunes': 0},
-                'tracks': {'spotify': 0, 'itunes': 0},
+                'artists': {'spotify': 0, 'itunes': 0, 'deezer': 0},
+                'albums': {'spotify': 0, 'itunes': 0, 'deezer': 0},
+                'tracks': {'spotify': 0, 'itunes': 0, 'deezer': 0},
                 'searches': 0, 'total_entries': 0, 'total_hits': 0,
                 'oldest': None, 'newest': None,
             }
@@ -610,6 +610,8 @@ class MetadataCache:
             return self._extract_spotify_fields(entity_type, raw_data)
         elif source == 'itunes':
             return self._extract_itunes_fields(entity_type, raw_data)
+        elif source == 'deezer':
+            return self._extract_deezer_fields(entity_type, raw_data)
         return {'name': str(raw_data.get('name', raw_data.get('trackName', '')))}
 
     def _extract_spotify_fields(self, entity_type: str, data: dict) -> dict:
@@ -661,6 +663,60 @@ class MetadataCache:
             fields['isrc'] = ext_ids.get('isrc') if isinstance(ext_ids, dict) else None
             fields['preview_url'] = data.get('preview_url')
             fields['external_urls'] = json.dumps(data.get('external_urls', {}))
+
+        return fields
+
+    def _extract_deezer_fields(self, entity_type: str, data: dict) -> dict:
+        """Extract fields from Deezer API response."""
+        fields = {}
+
+        if entity_type == 'artist':
+            fields['name'] = data.get('name', '')
+            fields['genres'] = '[]'
+            fields['popularity'] = 0
+            fields['followers'] = data.get('nb_fan', 0)
+            fields['image_url'] = data.get('picture_xl') or data.get('picture_big') or data.get('picture_medium')
+            urls = {}
+            if data.get('link'):
+                urls['deezer'] = data['link']
+            fields['external_urls'] = json.dumps(urls)
+
+        elif entity_type == 'album':
+            fields['name'] = data.get('title', '')
+            artist = data.get('artist', {})
+            fields['artist_name'] = artist.get('name', '') if isinstance(artist, dict) else ''
+            fields['artist_id'] = str(artist.get('id', '')) if isinstance(artist, dict) else ''
+            fields['release_date'] = data.get('release_date', '')
+            fields['total_tracks'] = data.get('nb_tracks', 0)
+            record_type = data.get('record_type', 'album')
+            fields['album_type'] = record_type if record_type in ('single', 'ep', 'album') else 'album'
+            fields['label'] = data.get('label', '')
+            fields['image_url'] = data.get('cover_xl') or data.get('cover_big') or data.get('cover_medium')
+            urls = {}
+            if data.get('link'):
+                urls['deezer'] = data['link']
+            fields['external_urls'] = json.dumps(urls)
+
+        elif entity_type == 'track':
+            fields['name'] = data.get('title', '')
+            artist = data.get('artist', {})
+            fields['artist_name'] = artist.get('name', '') if isinstance(artist, dict) else ''
+            fields['artist_id'] = str(artist.get('id', '')) if isinstance(artist, dict) else ''
+            album = data.get('album', {})
+            fields['album_name'] = album.get('title', '') if isinstance(album, dict) else ''
+            fields['album_id'] = str(album.get('id', '')) if isinstance(album, dict) else ''
+            fields['image_url'] = (album.get('cover_xl') or album.get('cover_big') or album.get('cover_medium')) if isinstance(album, dict) else None
+            fields['duration_ms'] = data.get('duration', 0) * 1000
+            fields['track_number'] = data.get('track_position')
+            fields['disc_number'] = data.get('disk_number', 1)
+            fields['explicit'] = 1 if data.get('explicit_lyrics') else 0
+            fields['popularity'] = data.get('rank', 0)
+            fields['isrc'] = data.get('isrc')
+            fields['preview_url'] = data.get('preview')
+            urls = {}
+            if data.get('link'):
+                urls['deezer'] = data['link']
+            fields['external_urls'] = json.dumps(urls)
 
         return fields
 

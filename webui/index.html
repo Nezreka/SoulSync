@@ -3626,6 +3626,21 @@
                                     </div>
                                 </div>
 
+                                <!-- Metadata Source Selection -->
+                                <div class="api-service-frame">
+                                    <h4 class="service-title" style="color: #e8e8e8;">Metadata Source</h4>
+                                    <div class="form-group">
+                                        <label>Fallback Source:</label>
+                                        <select id="metadata-fallback-source">
+                                            <option value="itunes">iTunes / Apple Music</option>
+                                            <option value="deezer">Deezer</option>
+                                        </select>
+                                    </div>
+                                    <div class="callback-info">
+                                        <div class="callback-help">When Spotify is not connected, this source provides artist, album, and track metadata. Both are free and require no API key.</div>
+                                    </div>
+                                </div>
+
                                 <!-- Test Connection Buttons -->
                                 <div class="api-test-buttons">
                                     <button class="test-button" onclick="testConnection('spotify')">Test
@@ -5645,6 +5660,10 @@
                     <span class="mcache-stat-pill-value" id="mcache-browse-itunes-count">0</span>
                 </div>
                 <div class="mcache-stat-pill">
+                    <span class="mcache-stat-pill-label">Deezer</span>
+                    <span class="mcache-stat-pill-value" id="mcache-browse-deezer-count">0</span>
+                </div>
+                <div class="mcache-stat-pill">
                     <span class="mcache-stat-pill-label">Total Hits</span>
                     <span class="mcache-stat-pill-value" id="mcache-browse-hits">0</span>
                 </div>
@@ -5664,6 +5683,7 @@
                     <option value="">All Sources</option>
                     <option value="spotify">Spotify</option>
                     <option value="itunes">iTunes</option>
+                    <option value="deezer">Deezer</option>
                 </select>
                 <select class="mcache-sort-filter" id="mcache-sort-filter" onchange="loadMetadataCacheBrowse()">
                     <option value="last_accessed_at">Recently Accessed</option>
@@ -5836,7 +5856,7 @@
                 <button class="modal-button modal-button--secondary" onclick="closeRateLimitModal()">Dismiss</button>
                 <button class="modal-button rate-limit-disconnect-btn" onclick="disconnectSpotifyFromRateLimit()">
                     Disconnect Spotify
-                    <span class="rate-limit-disconnect-sub">Clear ban, pause enrichment &amp; switch to iTunes</span>
+                    <span class="rate-limit-disconnect-sub">Clear ban, pause enrichment &amp; switch to fallback source</span>
                 </button>
             </div>
         </div>

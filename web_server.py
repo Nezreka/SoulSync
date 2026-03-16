@@ -3147,11 +3147,12 @@ def run_service_test(service, test_config):
                  if temp_client.is_spotify_authenticated():
                      return True, "Spotify connection successful!"
                  else:
-                     # Using iTunes fallback
+                     # Using fallback metadata source
+                     fallback_name = 'Deezer' if _get_metadata_fallback_source() == 'deezer' else 'Apple Music'
                      if spotify_configured:
-                         return True, "Apple Music connection successful! (Spotify configured but not authenticated)"
+                         return True, f"{fallback_name} connection successful! (Spotify configured but not authenticated)"
                      else:
-                         return True, "Apple Music connection successful! (Spotify not configured)"
+                         return True, f"{fallback_name} connection successful! (Spotify not configured)"
             else:
                  return False, "Music service authentication failed. Check credentials and complete OAuth flow in browser if prompted."
         elif service == "tidal":
@@ -3647,13 +3648,13 @@ def get_status():
             if is_rate_limited or cooldown_remaining > 0:
                 # During rate limit or post-ban cooldown, skip the auth probe entirely.
                 # Probing Spotify here would reset the rate limit timer.
-                music_source = 'itunes'  # App uses iTunes during ban — reflect truth
+                music_source = _get_metadata_fallback_source()  # App uses fallback during ban
                 spotify_response_time = 0
             else:
                 spotify_start = time.time()
                 spotify_connected = spotify_client.is_spotify_authenticated() if spotify_client else False
                 spotify_response_time = (time.time() - spotify_start) * 1000
-                music_source = 'spotify' if spotify_connected else 'itunes'
+                music_source = 'spotify' if spotify_connected else _get_metadata_fallback_source()
 
             _status_cache['spotify'] = {
                 'connected': True,  # Always true — iTunes fallback is always available
@@ -4253,7 +4254,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -4294,6 +4295,8 @@ def handle_settings():
                 genius_worker._init_client()
             if tidal_enrichment_worker:
                 tidal_enrichment_worker.client = tidal_client
+            # Invalidate status cache so next poll reflects new settings (e.g. fallback source change)
+            _status_cache_timestamps['spotify'] = 0
             print("✅ Service clients re-initialized with new settings.")
             return jsonify({"success": True, "message": "Settings saved successfully."})
         except Exception as e:
@@ -5101,7 +5104,7 @@ def test_connection_endpoint():
         current_time = time.time()
         if service == 'spotify':
             _status_cache['spotify']['connected'] = True
-            _status_cache['spotify']['source'] = 'spotify' if (spotify_client and spotify_client.is_spotify_authenticated()) else 'itunes'
+            _status_cache['spotify']['source'] = 'spotify' if (spotify_client and spotify_client.is_spotify_authenticated()) else _get_metadata_fallback_source()
             _status_cache_timestamps['spotify'] = current_time
             print("✅ Updated Spotify status cache after successful test")
         elif service in ['plex', 'jellyfin', 'navidrome']:
@@ -5151,7 +5154,7 @@ def test_dashboard_connection_endpoint():
         current_time = time.time()
         if service == 'spotify':
             _status_cache['spotify']['connected'] = True
-            _status_cache['spotify']['source'] = 'spotify' if (spotify_client and spotify_client.is_spotify_authenticated()) else 'itunes'
+            _status_cache['spotify']['source'] = 'spotify' if (spotify_client and spotify_client.is_spotify_authenticated()) else _get_metadata_fallback_source()
             _status_cache_timestamps['spotify'] = current_time
             print("✅ Updated Spotify status cache after successful dashboard test")
         elif service in ['plex', 'jellyfin', 'navidrome']:
@@ -5819,16 +5822,18 @@ def spotify_disconnect():
             spotify_enrichment_worker.pause()
         spotify_client.disconnect()
         # Immediately update status cache so UI reflects the change
+        fallback_src = _get_metadata_fallback_source()
         _status_cache['spotify'] = {
-            'connected': True,  # iTunes fallback is always available
+            'connected': True,  # Fallback source is always available
             'response_time': 0,
-            'source': 'itunes',
+            'source': fallback_src,
             'rate_limited': False,
             'rate_limit': None
         }
         _status_cache_timestamps['spotify'] = time.time()
-        add_activity_item("🔌", "Spotify Disconnected", "Switched to Apple Music/iTunes metadata source", "Now")
-        return jsonify({'success': True, 'message': 'Spotify disconnected. Now using Apple Music/iTunes.'})
+        fallback_label = 'Deezer' if fallback_src == 'deezer' else 'Apple Music/iTunes'
+        add_activity_item("🔌", "Spotify Disconnected", f"Switched to {fallback_label} metadata source", "Now")
+        return jsonify({'success': True, 'message': f'Spotify disconnected. Now using {fallback_label}.'})
     except Exception as e:
         logger.error(f"Error disconnecting Spotify: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -8462,10 +8467,9 @@ def get_artist_image(artist_id):
                 return jsonify({"success": True, "image_url": image_url})
             return jsonify({"success": True, "image_url": None})
         else:
-            # Use iTunes fallback - fetch album art
-            from core.itunes_client import iTunesClient
-            itunes = iTunesClient()
-            image_url = itunes._get_artist_image_from_albums(artist_id)
+            # Use fallback source - fetch album art
+            fallback = _get_metadata_fallback_client()
+            image_url = fallback._get_artist_image_from_albums(artist_id)
             return jsonify({"success": True, "image_url": image_url})
     except Exception as e:
         print(f"Error fetching artist image: {e}")
@@ -8485,9 +8489,9 @@ def get_artist_discography(artist_id):
         # Determine which source to use
         spotify_available = spotify_client and spotify_client.is_spotify_authenticated()
 
-        # Import iTunes client for fallback
-        from core.itunes_client import iTunesClient
-        itunes_client = iTunesClient()
+        # Import fallback client for non-Spotify lookups
+        fallback_client = _get_metadata_fallback_client()
+        fallback_source = _get_metadata_fallback_source()
 
         print(f"🎤 Fetching discography for artist: {artist_id} (name: {artist_name}, spotify: {spotify_available})")
 
@@ -8518,36 +8522,36 @@ def get_artist_discography(artist_id):
             except Exception as e:
                 print(f"Spotify lookup failed: {e}")
 
-        # Try iTunes if Spotify didn't work or if it's a numeric ID
+        # Try fallback source if Spotify didn't work or if it's a numeric ID
         if not albums:
             try:
                 if is_numeric_id:
-                    # It's an iTunes ID, use directly
-                    albums = itunes_client.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                    # It's a numeric ID (iTunes/Deezer), use directly
+                    albums = fallback_client.get_artist_albums(artist_id, album_type='album,single', limit=50)
                     if albums:
-                        active_source = 'itunes'
-                        print(f"📊 Got {len(albums)} albums from iTunes (direct ID)")
+                        active_source = fallback_source
+                        print(f"📊 Got {len(albums)} albums from {fallback_source} (direct ID)")
                 elif artist_name:
-                    # Search iTunes by name
-                    print(f"🔄 Trying iTunes search by name: '{artist_name}'")
-                    itunes_artists = itunes_client.search_artists(artist_name, limit=5)
-                    if itunes_artists:
+                    # Search fallback by name
+                    print(f"🔄 Trying {fallback_source} search by name: '{artist_name}'")
+                    fallback_artists = fallback_client.search_artists(artist_name, limit=5)
+                    if fallback_artists:
                         # Find best match
                         best_match = None
-                        for artist in itunes_artists:
+                        for artist in fallback_artists:
                             if artist.name.lower() == artist_name.lower():
                                 best_match = artist
                                 break
                         if not best_match:
-                            best_match = itunes_artists[0]
+                            best_match = fallback_artists[0]
 
-                        print(f"✅ Found iTunes artist: {best_match.name} (ID: {best_match.id})")
-                        albums = itunes_client.get_artist_albums(best_match.id, album_type='album,single', limit=50)
+                        print(f"✅ Found {fallback_source} artist: {best_match.name} (ID: {best_match.id})")
+                        albums = fallback_client.get_artist_albums(best_match.id, album_type='album,single', limit=50)
                         if albums:
-                            active_source = 'itunes'
-                            print(f"📊 Got {len(albums)} albums from iTunes (name search)")
+                            active_source = fallback_source
+                            print(f"📊 Got {len(albums)} albums from {fallback_source} (name search)")
             except Exception as e:
-                print(f"iTunes lookup failed: {e}")
+                print(f"{fallback_source} lookup failed: {e}")
 
         print(f"📊 Total albums returned: {len(albums)} (source: {active_source})")
         
@@ -9612,11 +9616,10 @@ def enhance_artist_quality(artist_id):
                 except Exception as e:
                     print(f"⚠️ [Enhance] Search match failed for {title}: {e}")
 
-            # iTunes fallback when Spotify unavailable or no match found
+            # Fallback source when Spotify unavailable or no match found
             if not matched_track_data:
                 try:
-                    from core.itunes_client import iTunesClient
-                    itunes_client = iTunesClient()
+                    fallback_client = _get_metadata_fallback_client()
                     itunes_best = None
                     itunes_best_conf = 0.0
 
@@ -9629,7 +9632,7 @@ def enhance_artist_quality(artist_id):
 
                     for search_query in itunes_queries[:3]:
                         try:
-                            itunes_results = itunes_client.search_tracks(search_query, limit=5)
+                            itunes_results = fallback_client.search_tracks(search_query, limit=5)
                             if not itunes_results:
                                 continue
                             for it_track in itunes_results:
@@ -9674,13 +9677,13 @@ def enhance_artist_quality(artist_id):
                             'preview_url': itunes_best.preview_url,
                             'external_urls': itunes_best.external_urls or {},
                         }
-                        print(f"🍎 [Enhance] iTunes fallback match for {title}: {itunes_best.artists[0]} - {itunes_best.name} (conf: {itunes_best_conf:.3f})")
+                        print(f"🍎 [Enhance] Fallback match for {title}: {itunes_best.artists[0]} - {itunes_best.name} (conf: {itunes_best_conf:.3f})")
                 except Exception as e:
-                    print(f"⚠️ [Enhance] iTunes fallback failed for {title}: {e}")
+                    print(f"⚠️ [Enhance] Fallback source failed for {title}: {e}")
 
             if not matched_track_data:
                 failed_count += 1
-                failed_tracks.append({'track_id': track_id, 'title': title, 'reason': 'No Spotify or iTunes match'})
+                failed_tracks.append({'track_id': track_id, 'title': title, 'reason': 'No Spotify or fallback match'})
                 continue
 
             # Add to wishlist with enhance source
@@ -24267,10 +24270,9 @@ def search_itunes_tracks():
         else:
             if hydrabase_worker and dev_mode_enabled:
                 hydrabase_worker.enqueue(query, 'track')
-            from core.itunes_client import iTunesClient
-            itunes_client = iTunesClient()
-            tracks = itunes_client.search_tracks(query, limit=limit)
-            source = 'itunes'
+            fallback_client = _get_metadata_fallback_client()
+            tracks = fallback_client.search_tracks(query, limit=limit)
+            source = _get_metadata_fallback_source()
 
         tracks_dict = [{
             'id': t.id,
@@ -24326,16 +24328,14 @@ def get_itunes_album_tracks(album_id):
             except Exception as e:
                 logger.warning(f"Hydrabase album_tracks failed for '{album_id}', falling back to iTunes: {e}")
 
-        from core.itunes_client import iTunesClient
-
-        itunes_client = iTunesClient()
-        album_data = itunes_client.get_album(album_id)
+        fallback_client = _get_metadata_fallback_client()
+        album_data = fallback_client.get_album(album_id)
 
         if not album_data:
             return jsonify({"error": "Album not found"}), 404
 
         # Get tracks for this album
-        tracks_data = itunes_client.get_album_tracks(album_id)
+        tracks_data = fallback_client.get_album_tracks(album_id)
         tracks = tracks_data.get('items', []) if tracks_data else []
 
         # Format response to match Spotify structure for frontend compatibility
@@ -24348,12 +24348,12 @@ def get_itunes_album_tracks(album_id):
             'album_type': album_data.get('album_type', 'album'),
             'images': album_data.get('images', []),
             'tracks': tracks,
-            'source': 'itunes'
+            'source': _get_metadata_fallback_source()
         }
         return jsonify(album_dict)
 
     except Exception as e:
-        logger.error(f"Error fetching iTunes album tracks: {e}")
+        logger.error(f"Error fetching album tracks: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -24423,15 +24423,14 @@ def get_discover_album(source, album_id):
                 'source': 'spotify'
             })
 
-        elif source == 'itunes':
-            from core.itunes_client import iTunesClient
-            itunes_client = iTunesClient()
+        elif source in ('itunes', 'deezer'):
+            fallback_client = _get_metadata_fallback_client()
 
-            album_data = itunes_client.get_album(album_id)
+            album_data = fallback_client.get_album(album_id)
             if not album_data:
                 return jsonify({"error": "Album not found"}), 404
 
-            tracks_data = itunes_client.get_album_tracks(album_id)
+            tracks_data = fallback_client.get_album_tracks(album_id)
             tracks = tracks_data.get('items', []) if tracks_data else []
 
             return jsonify({
@@ -24443,7 +24442,7 @@ def get_discover_album(source, album_id):
                 'album_type': album_data.get('album_type', 'album'),
                 'images': album_data.get('images', []),
                 'tracks': tracks,
-                'source': 'itunes'
+                'source': source
             })
 
         else:
@@ -25055,17 +25054,16 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
     try:
         _ew_state = _pause_enrichment_workers('mirrored playlist discovery')
         use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        discovery_source = 'spotify' if use_spotify else 'itunes'
+        discovery_source = 'spotify' if use_spotify else _get_metadata_fallback_source()
 
         itunes_client_instance = None
         if not use_spotify:
             try:
-                from core.itunes_client import iTunesClient
-                itunes_client_instance = iTunesClient()
+                itunes_client_instance = _get_metadata_fallback_client()
             except Exception:
-                print("❌ Neither Spotify nor iTunes available for discovery")
+                print(f"❌ Neither Spotify nor {_get_metadata_fallback_source()} available for discovery")
                 _update_automation_progress(automation_id, status='error', progress=100,
-                                            phase='Error', log_line='Neither Spotify nor iTunes available',
+                                            phase='Error', log_line=f'Neither Spotify nor {_get_metadata_fallback_source()} available',
                                             log_type='error')
                 return
 
@@ -25467,13 +25465,12 @@ def _run_tidal_discovery_worker(playlist_id):
 
         # Determine which provider to use
         use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        discovery_source = 'spotify' if use_spotify else 'itunes'
+        discovery_source = 'spotify' if use_spotify else _get_metadata_fallback_source()
 
-        # Initialize iTunes client if needed
+        # Initialize fallback client if needed
         itunes_client_instance = None
         if not use_spotify:
-            from core.itunes_client import iTunesClient
-            itunes_client_instance = iTunesClient()
+            itunes_client_instance = _get_metadata_fallback_client()
 
         print(f"🎵 Starting Tidal discovery for: {playlist.name} (using {discovery_source.upper()})")
 
@@ -25567,15 +25564,15 @@ def _run_tidal_discovery_worker(playlist_id):
                     state['spotify_matches'] = successful_discoveries
 
                 elif not use_spotify and track_result and isinstance(track_result, dict):
-                    # iTunes: Function returns a dict with track data (includes 'confidence' key)
+                    # Fallback: Function returns a dict with track data (includes 'confidence' key)
                     match_confidence = track_result.pop('confidence', 0.80)
                     match_data = track_result
-                    match_data['source'] = 'itunes'
-                    # Extract image URL from iTunes album images
-                    _itunes_album = match_data.get('album', {})
-                    _itunes_images = _itunes_album.get('images', []) if isinstance(_itunes_album, dict) else []
-                    if _itunes_images and 'image_url' not in match_data:
-                        match_data['image_url'] = _itunes_images[0].get('url', '')
+                    match_data['source'] = discovery_source
+                    # Extract image URL from album images
+                    _fb_album = match_data.get('album', {})
+                    _fb_images = _fb_album.get('images', []) if isinstance(_fb_album, dict) else []
+                    if _fb_images and 'image_url' not in match_data:
+                        match_data['image_url'] = _fb_images[0].get('url', '')
                     result['spotify_data'] = match_data
                     result['match_data'] = match_data
                     result['status'] = 'found'
@@ -25639,16 +25636,16 @@ def _run_tidal_discovery_worker(playlist_id):
 
 
 def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client=None):
-    """Search Spotify/iTunes for a Tidal track using matching_engine for better accuracy
+    """Search Spotify/fallback for a Tidal track using matching_engine for better accuracy
 
     Args:
         tidal_track: The Tidal track to search for
-        use_spotify: If True, use Spotify; if False, use iTunes
-        itunes_client: iTunes client instance (required when use_spotify=False)
+        use_spotify: If True, use Spotify; if False, use fallback source
+        itunes_client: Fallback client instance (required when use_spotify=False)
 
     Returns:
         For Spotify: (Track, raw_data, confidence) tuple or None
-        For iTunes: dict with track data (includes 'confidence' key) or None
+        For fallback: dict with track data (includes 'confidence' key) or None
     """
     if use_spotify:
         if not spotify_client or not spotify_client.is_authenticated():
@@ -25667,7 +25664,7 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
 
         artist_name = artists[0]  # Use primary artist
         source_duration = getattr(tidal_track, 'duration_ms', 0) or 0
-        source_name = "Spotify" if use_spotify else "iTunes"
+        source_name = "Spotify" if use_spotify else _get_metadata_fallback_source().capitalize()
 
         print(f"🔍 Tidal track: '{artist_name}' - '{track_name}' (searching {source_name})")
 
@@ -25762,7 +25759,7 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                 result_artists = best_match.artists if hasattr(best_match, 'artists') else []
                 result_artist = result_artists[0] if result_artists else 'Unknown'
                 result_name = best_match.name if hasattr(best_match, 'name') else 'Unknown'
-                print(f"✅ Final Tidal iTunes match: {result_artist} - {result_name} (confidence: {best_confidence:.3f})")
+                print(f"✅ Final Tidal {source_name} match: {result_artist} - {result_name} (confidence: {best_confidence:.3f})")
 
                 album_name = best_match.album if hasattr(best_match, 'album') else 'Unknown Album'
                 image_url = best_match.image_url if hasattr(best_match, 'image_url') else ''
@@ -25779,7 +25776,7 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                         'images': [{'url': image_url, 'height': 300, 'width': 300}] if image_url else []
                     },
                     'duration_ms': duration_ms,
-                    'source': 'itunes',
+                    'source': _get_metadata_fallback_source(),
                     'confidence': best_confidence
                 }
         else:
@@ -25979,6 +25976,22 @@ def _get_deezer_client():
                 from core.deezer_client import DeezerClient
                 _deezer_client_instance = DeezerClient()
     return _deezer_client_instance
+
+def _get_metadata_fallback_source():
+    """Get the configured metadata fallback source ('itunes' or 'deezer')."""
+    try:
+        return config_manager.get('metadata.fallback_source', 'itunes') or 'itunes'
+    except Exception:
+        return 'itunes'
+
+def _get_metadata_fallback_client():
+    """Get the active metadata fallback client based on settings.
+    Returns an iTunesClient or DeezerClient instance with identical interfaces."""
+    source = _get_metadata_fallback_source()
+    if source == 'deezer':
+        return _get_deezer_client()
+    from core.itunes_client import iTunesClient
+    return iTunesClient()
 
 @app.route('/api/deezer/playlist/<playlist_id>', methods=['GET'])
 def get_deezer_playlist(playlist_id):
@@ -26371,13 +26384,12 @@ def _run_deezer_discovery_worker(playlist_id):
 
         # Determine which provider to use
         use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        discovery_source = 'spotify' if use_spotify else 'itunes'
+        discovery_source = 'spotify' if use_spotify else _get_metadata_fallback_source()
 
-        # Initialize iTunes client if needed
+        # Initialize fallback client if needed
         itunes_client_instance = None
         if not use_spotify:
-            from core.itunes_client import iTunesClient
-            itunes_client_instance = iTunesClient()
+            itunes_client_instance = _get_metadata_fallback_client()
 
         print(f"🎵 Starting Deezer discovery for: {playlist['name']} (using {discovery_source.upper()})")
 
@@ -26514,15 +26526,15 @@ def _run_deezer_discovery_worker(playlist_id):
                     state['spotify_matches'] = successful_discoveries
 
                 elif not use_spotify and track_result and isinstance(track_result, dict):
-                    # iTunes: Function returns a dict with track data (includes 'confidence' key)
+                    # Fallback: Function returns a dict with track data (includes 'confidence' key)
                     match_confidence = track_result.pop('confidence', 0.80)
                     match_data = track_result
-                    match_data['source'] = 'itunes'
-                    # Extract image URL from iTunes album images
-                    _itunes_album = match_data.get('album', {})
-                    _itunes_images = _itunes_album.get('images', []) if isinstance(_itunes_album, dict) else []
-                    if _itunes_images and 'image_url' not in match_data:
-                        match_data['image_url'] = _itunes_images[0].get('url', '')
+                    match_data['source'] = discovery_source
+                    # Extract image URL from album images
+                    _fb_album = match_data.get('album', {})
+                    _fb_images = _fb_album.get('images', []) if isinstance(_fb_album, dict) else []
+                    if _fb_images and 'image_url' not in match_data:
+                        match_data['image_url'] = _fb_images[0].get('url', '')
                     result['spotify_data'] = match_data
                     result['match_data'] = match_data
                     result['status'] = '✅ Found'
@@ -27180,13 +27192,12 @@ def _run_spotify_public_discovery_worker(url_hash):
 
         # Determine which provider to use
         use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        discovery_source = 'spotify' if use_spotify else 'itunes'
+        discovery_source = 'spotify' if use_spotify else _get_metadata_fallback_source()
 
-        # Initialize iTunes client if needed
+        # Initialize fallback client if needed
         itunes_client_instance = None
         if not use_spotify:
-            from core.itunes_client import iTunesClient
-            itunes_client_instance = iTunesClient()
+            itunes_client_instance = _get_metadata_fallback_client()
 
         print(f"🎵 Starting Spotify Public discovery for: {playlist['name']} (using {discovery_source.upper()})")
 
@@ -27334,15 +27345,15 @@ def _run_spotify_public_discovery_worker(url_hash):
                     state['spotify_matches'] = successful_discoveries
 
                 elif not use_spotify and track_result and isinstance(track_result, dict):
-                    # iTunes: Function returns a dict with track data (includes 'confidence' key)
+                    # Fallback: Function returns a dict with track data (includes 'confidence' key)
                     match_confidence = track_result.pop('confidence', 0.80)
                     match_data = track_result
-                    match_data['source'] = 'itunes'
-                    # Extract image URL from iTunes album images
-                    _itunes_album = match_data.get('album', {})
-                    _itunes_images = _itunes_album.get('images', []) if isinstance(_itunes_album, dict) else []
-                    if _itunes_images and 'image_url' not in match_data:
-                        match_data['image_url'] = _itunes_images[0].get('url', '')
+                    match_data['source'] = discovery_source
+                    # Extract image URL from album images
+                    _fb_album = match_data.get('album', {})
+                    _fb_images = _fb_album.get('images', []) if isinstance(_fb_album, dict) else []
+                    if _fb_images and 'image_url' not in match_data:
+                        match_data['image_url'] = _fb_images[0].get('url', '')
                     result['spotify_data'] = match_data
                     result['match_data'] = match_data
                     result['status'] = '✅ Found'
@@ -27851,11 +27862,10 @@ def _run_youtube_discovery_worker(url_hash):
 
         # Determine which provider to use (Spotify preferred, iTunes fallback)
         use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        discovery_source = 'spotify' if use_spotify else 'itunes'
+        discovery_source = 'spotify' if use_spotify else _get_metadata_fallback_source()
 
-        # Get iTunes client for fallback
-        from core.itunes_client import iTunesClient
-        itunes_client = iTunesClient()
+        # Get fallback client
+        itunes_client = _get_metadata_fallback_client()
 
         print(f"🔍 Starting {discovery_source} discovery for {len(tracks)} YouTube tracks...")
 
@@ -28168,11 +28178,10 @@ def _run_listenbrainz_discovery_worker(state_key):
 
         # Determine which provider to use (Spotify preferred, iTunes fallback)
         use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        discovery_source = 'spotify' if use_spotify else 'itunes'
+        discovery_source = 'spotify' if use_spotify else _get_metadata_fallback_source()
 
-        # Get iTunes client for fallback
-        from core.itunes_client import iTunesClient
-        itunes_client = iTunesClient()
+        # Get fallback client
+        itunes_client = _get_metadata_fallback_client()
 
         print(f"🔍 Starting {discovery_source} discovery for {len(tracks)} ListenBrainz tracks...")
 
@@ -30145,43 +30154,48 @@ def add_to_watchlist():
             return jsonify({"success": False, "error": "Missing artist_id or artist_name"}), 400
 
         database = get_database()
-        success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id())
+        # Detect ID type and determine source
+        is_numeric_id = artist_id.isdigit()
+        fallback_source = _get_metadata_fallback_source()
+        source = fallback_source if is_numeric_id else 'spotify'
+        success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=source)
 
         if success:
-            # Detect ID type: iTunes IDs are purely numeric, Spotify IDs are alphanumeric
-            is_itunes_id = artist_id.isdigit()
-            
+
             # Fetch and cache artist image immediately
             try:
-                if is_itunes_id:
-                    # For iTunes artists, fetch image from iTunes API
-                    # We look up 'album' entity because 'artist' entity doesn't always have artwork
-                    # We fallback to the first album's artwork as the artist image
+                if is_numeric_id:
+                    # For numeric IDs, fetch image from the configured fallback source
                     try:
-                        itunes_url = f"https://itunes.apple.com/lookup?id={artist_id}&entity=album&limit=5"
-                        print(f"🔍 Fetching iTunes artist image: {itunes_url}")
-                        resp = requests.get(itunes_url, timeout=5)
-                        
-                        image_url = None
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            results = data.get('results', [])
-                            
-                            # Iterate results to find one with artwork
-                            for res in results:
-                                if 'artworkUrl100' in res:
-                                    # Get highest res by replacing dimensions
-                                    # iTunes artwork URLs usually end in .../100x100bb.jpg
-                                    image_url = res['artworkUrl100'].replace('100x100', '600x600')
-                                    break
-                        
+                        if fallback_source == 'deezer':
+                            # Deezer artists have direct image URLs
+                            fallback = _get_metadata_fallback_client()
+                            artist_info = fallback.get_artist(artist_id)
+                            image_url = artist_info.get('images', [{}])[0].get('url') if artist_info and artist_info.get('images') else None
+                        else:
+                            # iTunes: look up album entity for artwork
+                            itunes_url = f"https://itunes.apple.com/lookup?id={artist_id}&entity=album&limit=5"
+                            print(f"🔍 Fetching iTunes artist image: {itunes_url}")
+                            resp = requests.get(itunes_url, timeout=5)
+
+                            image_url = None
+                            if resp.status_code == 200:
+                                resp_data = resp.json()
+                                results = resp_data.get('results', [])
+
+                                # Iterate results to find one with artwork
+                                for res in results:
+                                    if 'artworkUrl100' in res:
+                                        image_url = res['artworkUrl100'].replace('100x100', '600x600')
+                                        break
+
                         if image_url:
                             database.update_watchlist_artist_image(artist_id, image_url)
-                            print(f"✅ Cached iTunes artist image for {artist_name}")
+                            print(f"✅ Cached {fallback_source} artist image for {artist_name}")
                         else:
-                            print(f"⚠️ No artwork found for iTunes artist {artist_name}")
-                    except Exception as itunes_error:
-                        print(f"⚠️ Error fetching iTunes artwork: {itunes_error}")
+                            print(f"⚠️ No artwork found for {fallback_source} artist {artist_name}")
+                    except Exception as fb_error:
+                        print(f"⚠️ Error fetching {fallback_source} artwork: {fb_error}")
                 elif spotify_client and spotify_client.is_authenticated():
                     # For Spotify artists, fetch from Spotify API
                     artist_data = spotify_client.get_artist(artist_id)
@@ -30285,27 +30299,39 @@ def add_batch_to_watchlist():
             if not artist_id or not artist_name:
                 continue
 
-            # Check if already watched
-            if database.is_artist_in_watchlist(artist_id, profile_id=get_current_profile_id()):
+            # Check if already watched (by ID or name)
+            if database.is_artist_in_watchlist(artist_id, profile_id=get_current_profile_id(), artist_name=artist_name):
                 skipped += 1
                 continue
 
-            success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id())
+            is_numeric = artist_id.isdigit()
+            fb_source = _get_metadata_fallback_source()
+            src = fb_source if is_numeric else 'spotify'
+            success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=src)
             if success:
                 added += 1
                 # Cache artist image
                 try:
-                    is_itunes_id = artist_id.isdigit()
-                    if is_itunes_id:
-                        itunes_url = f"https://itunes.apple.com/lookup?id={artist_id}&entity=album&limit=5"
-                        resp = requests.get(itunes_url, timeout=5)
-                        if resp.status_code == 200:
-                            results = resp.json().get('results', [])
-                            for res in results:
-                                if 'artworkUrl100' in res:
-                                    image_url = res['artworkUrl100'].replace('100x100', '600x600')
+                    is_numeric_id = artist_id.isdigit()
+                    if is_numeric_id:
+                        fb_source = _get_metadata_fallback_source()
+                        if fb_source == 'deezer':
+                            fb_client = _get_metadata_fallback_client()
+                            fb_artist = fb_client.get_artist(artist_id)
+                            if fb_artist and fb_artist.get('images'):
+                                image_url = fb_artist['images'][0].get('url')
+                                if image_url:
                                     database.update_watchlist_artist_image(artist_id, image_url)
-                                    break
+                        else:
+                            itunes_url = f"https://itunes.apple.com/lookup?id={artist_id}&entity=album&limit=5"
+                            resp = requests.get(itunes_url, timeout=5)
+                            if resp.status_code == 200:
+                                results = resp.json().get('results', [])
+                                for res in results:
+                                    if 'artworkUrl100' in res:
+                                        image_url = res['artworkUrl100'].replace('100x100', '600x600')
+                                        database.update_watchlist_artist_image(artist_id, image_url)
+                                        break
                     elif spotify_client and spotify_client.is_authenticated():
                         artist_data = spotify_client.get_artist(artist_id)
                         if artist_data and 'images' in artist_data and artist_data['images']:
@@ -30368,11 +30394,14 @@ def watchlist_all_unwatched_library_artists():
                 continue
 
             # Check if already watched (shouldn't be since we filtered, but safety check)
-            if database.is_artist_in_watchlist(artist_id, profile_id=get_current_profile_id()):
+            if database.is_artist_in_watchlist(artist_id, profile_id=get_current_profile_id(), artist_name=artist_name):
                 skipped_already += 1
                 continue
 
-            success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id())
+            is_numeric = artist_id.isdigit()
+            fb_source = _get_metadata_fallback_source()
+            src = fb_source if is_numeric else 'spotify'
+            success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=src)
             if success:
                 added += 1
                 # Use library thumb_url if available (no HTTP calls needed)
@@ -30472,19 +30501,20 @@ def check_watchlist_status_batch():
 def start_watchlist_scan():
     """Start a watchlist scan for new releases"""
     try:
-        # Check if MetadataService can provide a working client (Spotify OR iTunes)
+        # Check if MetadataService can provide a working client (Spotify OR fallback)
         from core.metadata_service import MetadataService
         metadata_service = MetadataService()
-        
-        # Get active provider - will be either spotify or itunes
+
+        # Get active provider - will be spotify or the configured fallback
         active_provider = metadata_service.get_active_provider()
         provider_info = metadata_service.get_provider_info()
-        
+
         # Verify we have at least one working provider
         if not provider_info['spotify_authenticated'] and not provider_info['itunes_available']:
+            fallback_name = provider_info.get('fallback_source', 'iTunes').capitalize()
             return jsonify({
-                "success": False, 
-                "error": "No music provider available. Please authenticate Spotify or ensure iTunes is accessible."
+                "success": False,
+                "error": f"No music provider available. Please authenticate Spotify or ensure {fallback_name} is accessible."
             }), 400
         
         logger.info(f"Starting watchlist scan with {active_provider} provider")
@@ -31239,9 +31269,9 @@ def watchlist_artist_link_provider(artist_id):
             return jsonify({"success": False, "error": "No data provided"}), 400
 
         new_provider_id = data.get('provider_id', '').strip()
-        provider = data.get('provider', '').strip()  # 'spotify' or 'itunes'
+        provider = data.get('provider', '').strip()  # 'spotify', 'itunes', or 'deezer'
 
-        if not new_provider_id or provider not in ('spotify', 'itunes'):
+        if not new_provider_id or provider not in ('spotify', 'itunes', 'deezer'):
             return jsonify({"success": False, "error": "Missing provider or provider_id"}), 400
 
         conn = sqlite3.connect(str(database.database_path))
@@ -31251,8 +31281,8 @@ def watchlist_artist_link_provider(artist_id):
         cursor.execute("""
             SELECT id, artist_name, spotify_artist_id, itunes_artist_id
             FROM watchlist_artists
-            WHERE spotify_artist_id = ? OR itunes_artist_id = ?
-        """, (artist_id, artist_id))
+            WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+        """, (artist_id, artist_id, artist_id))
         row = cursor.fetchone()
 
         if not row:
@@ -31263,7 +31293,8 @@ def watchlist_artist_link_provider(artist_id):
         artist_name = row[1]
 
         # Check for duplicate — another watchlist artist already has this provider ID
-        col = 'spotify_artist_id' if provider == 'spotify' else 'itunes_artist_id'
+        col_map = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id', 'deezer': 'deezer_artist_id'}
+        col = col_map[provider]
         cursor.execute(f"SELECT id, artist_name FROM watchlist_artists WHERE {col} = ? AND id != ?",
                        (new_provider_id, watchlist_row_id))
         duplicate = cursor.fetchone()
@@ -31271,12 +31302,8 @@ def watchlist_artist_link_provider(artist_id):
             conn.close()
             return jsonify({"success": False, "error": f"Another watchlist artist ('{duplicate[1]}') already has this {provider} ID"}), 409
 
-        if provider == 'spotify':
-            cursor.execute("UPDATE watchlist_artists SET spotify_artist_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                           (new_provider_id, watchlist_row_id))
-        else:
-            cursor.execute("UPDATE watchlist_artists SET itunes_artist_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                           (new_provider_id, watchlist_row_id))
+        cursor.execute(f"UPDATE watchlist_artists SET {col} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                       (new_provider_id, watchlist_row_id))
 
         conn.commit()
         conn.close()
@@ -32057,11 +32084,11 @@ metadata_update_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=
 def _get_active_discovery_source():
     """
     Determine which music source is active for discovery.
-    Returns 'spotify' if Spotify is authenticated, 'itunes' otherwise.
+    Returns 'spotify' if Spotify is authenticated, otherwise the configured fallback.
     """
     if spotify_client and spotify_client.is_spotify_authenticated():
         return 'spotify'
-    return 'itunes'
+    return _get_metadata_fallback_source()
 
 
 @app.route('/api/discover/hero', methods=['GET'])
@@ -32074,9 +32101,8 @@ def get_discover_hero():
         active_source = _get_active_discovery_source()
         print(f"🎵 Discover hero using source: {active_source}")
 
-        # Import iTunes client for fallback
-        from core.itunes_client import iTunesClient
-        itunes_client = iTunesClient()
+        # Import fallback client for non-Spotify lookups
+        itunes_client = _get_metadata_fallback_client()
 
         # Get top similar artists (excluding watchlist, cycled by last_featured)
         # Fetch more than needed since strict source filtering may drop many
@@ -32098,7 +32124,12 @@ def get_discover_hero():
 
             hero_artists = []
             for artist in shuffled_watchlist[:10]:
-                artist_id = artist.itunes_artist_id if active_source == 'itunes' else artist.spotify_artist_id
+                if active_source == 'spotify':
+                    artist_id = artist.spotify_artist_id
+                elif active_source == 'deezer':
+                    artist_id = getattr(artist, 'deezer_artist_id', None) or artist.itunes_artist_id
+                else:
+                    artist_id = artist.itunes_artist_id
                 if not artist_id:
                     continue
 
@@ -32127,35 +32158,41 @@ def get_discover_hero():
         for artist in similar_artists:
             if active_source == 'spotify' and artist.similar_artist_spotify_id:
                 valid_artists.append(artist)
+            elif active_source == 'deezer' and getattr(artist, 'similar_artist_deezer_id', None):
+                valid_artists.append(artist)
             elif active_source == 'itunes' and artist.similar_artist_itunes_id:
                 valid_artists.append(artist)
 
-        # FALLBACK: If no valid artists for iTunes, try to resolve iTunes IDs on-the-fly
-        if active_source == 'itunes' and not valid_artists:
-            print(f"[iTunes Fallback] No artists with iTunes IDs found, attempting on-the-fly resolution for {len(similar_artists)} artists")
+        # FALLBACK: If no valid artists for fallback source, try to resolve IDs on-the-fly
+        if active_source in ('itunes', 'deezer') and not valid_artists:
+            print(f"[{active_source} Fallback] No artists with {active_source} IDs found, attempting on-the-fly resolution for {len(similar_artists)} artists")
             resolved_count = 0
             for artist in similar_artists:
-                if artist.similar_artist_itunes_id:
+                existing_id = getattr(artist, f'similar_artist_{active_source}_id', None) or (artist.similar_artist_itunes_id if active_source == 'itunes' else None)
+                if existing_id:
                     valid_artists.append(artist)
                     continue
-                # Try to resolve iTunes ID by name
+                # Try to resolve ID by name
                 try:
-                    itunes_results = itunes_client.search_artists(artist.similar_artist_name, limit=1)
-                    if itunes_results and len(itunes_results) > 0:
-                        itunes_id = itunes_results[0].id
+                    search_results = itunes_client.search_artists(artist.similar_artist_name, limit=1)
+                    if search_results and len(search_results) > 0:
+                        resolved_id = search_results[0].id
                         # Cache the resolved ID for future use
-                        database.update_similar_artist_itunes_id(artist.id, itunes_id)
-                        # Create a modified artist object with the resolved ID
-                        artist.similar_artist_itunes_id = itunes_id
+                        if active_source == 'deezer':
+                            database.update_similar_artist_deezer_id(artist.id, resolved_id)
+                            artist.similar_artist_deezer_id = resolved_id
+                        else:
+                            database.update_similar_artist_itunes_id(artist.id, resolved_id)
+                            artist.similar_artist_itunes_id = resolved_id
                         valid_artists.append(artist)
                         resolved_count += 1
-                        print(f"  [Resolved] {artist.similar_artist_name} -> iTunes ID: {itunes_id}")
+                        print(f"  [Resolved] {artist.similar_artist_name} -> {active_source} ID: {resolved_id}")
                 except Exception as resolve_err:
-                    print(f"  [Failed] Could not resolve iTunes ID for {artist.similar_artist_name}: {resolve_err}")
+                    print(f"  [Failed] Could not resolve {active_source} ID for {artist.similar_artist_name}: {resolve_err}")
                 # Stop after 10 successful resolutions to avoid rate limiting
                 if len(valid_artists) >= 10:
                     break
-            print(f"[iTunes Fallback] Resolved {resolved_count} artists with iTunes IDs")
+            print(f"[{active_source} Fallback] Resolved {resolved_count} artists with IDs")
 
         print(f"[Discover Hero] Found {len(valid_artists)} valid artists for source: {active_source}")
 
@@ -32168,6 +32205,8 @@ def get_discover_hero():
             # Use the ID for the active source, falling back to the other if needed
             if active_source == 'spotify':
                 artist_id = artist.similar_artist_spotify_id or artist.similar_artist_itunes_id
+            elif active_source == 'deezer':
+                artist_id = getattr(artist, 'similar_artist_deezer_id', None) or artist.similar_artist_itunes_id or artist.similar_artist_spotify_id
             else:
                 artist_id = artist.similar_artist_itunes_id or artist.similar_artist_spotify_id
 
@@ -32202,18 +32241,21 @@ def get_discover_hero():
                                     artist.id, artist_data.get('image_url'),
                                     artist_data.get('genres'), artist_data.get('popularity')
                                 )
-                    elif active_source == 'itunes' and artist.similar_artist_itunes_id:
-                        itunes_artist = itunes_client.get_artist(artist.similar_artist_itunes_id)
-                        if itunes_artist:
-                            artist_data['artist_name'] = itunes_artist.get('name', artist.similar_artist_name)
-                            artist_data['image_url'] = itunes_artist.get('images', [{}])[0].get('url') if itunes_artist.get('images') else None
-                            artist_data['genres'] = itunes_artist.get('genres', [])
-                            artist_data['popularity'] = itunes_artist.get('popularity', 0)
-                            # Cache it
-                            database.update_similar_artist_metadata(
-                                artist.id, artist_data.get('image_url'),
-                                artist_data.get('genres'), artist_data.get('popularity')
-                            )
+                    elif active_source in ('itunes', 'deezer'):
+                        fb_artist_id = getattr(artist, 'similar_artist_deezer_id', None) if active_source == 'deezer' else None
+                        fb_artist_id = fb_artist_id or artist.similar_artist_itunes_id
+                        if fb_artist_id:
+                            fb_artist_data = itunes_client.get_artist(fb_artist_id)
+                            if fb_artist_data:
+                                artist_data['artist_name'] = fb_artist_data.get('name', artist.similar_artist_name)
+                                artist_data['image_url'] = fb_artist_data.get('images', [{}])[0].get('url') if fb_artist_data.get('images') else None
+                                artist_data['genres'] = fb_artist_data.get('genres', [])
+                                artist_data['popularity'] = fb_artist_data.get('popularity', 0)
+                                # Cache it
+                                database.update_similar_artist_metadata(
+                                    artist.id, artist_data.get('image_url'),
+                                    artist_data.get('genres'), artist_data.get('popularity')
+                                )
                 except Exception as img_err:
                     print(f"Could not fetch artist image: {img_err}")
 
@@ -32247,11 +32289,15 @@ def get_discover_similar_artists():
         for artist in similar_artists:
             if active_source == 'spotify' and not artist.similar_artist_spotify_id:
                 continue
+            if active_source == 'deezer' and not getattr(artist, 'similar_artist_deezer_id', None) and not artist.similar_artist_itunes_id:
+                continue
             if active_source == 'itunes' and not artist.similar_artist_itunes_id:
                 continue
 
             if active_source == 'spotify':
                 artist_id = artist.similar_artist_spotify_id
+            elif active_source == 'deezer':
+                artist_id = getattr(artist, 'similar_artist_deezer_id', None) or artist.similar_artist_itunes_id
             else:
                 artist_id = artist.similar_artist_itunes_id
 
@@ -32308,7 +32354,12 @@ def enrich_similar_artists():
         cached_artists = database.get_top_similar_artists(limit=500, profile_id=get_current_profile_id())
         cache_map = {}
         for artist in cached_artists:
-            ext_id = artist.similar_artist_spotify_id if source == 'spotify' else artist.similar_artist_itunes_id
+            if source == 'spotify':
+                ext_id = artist.similar_artist_spotify_id
+            elif source == 'deezer':
+                ext_id = getattr(artist, 'similar_artist_deezer_id', None) or artist.similar_artist_itunes_id
+            else:
+                ext_id = artist.similar_artist_itunes_id
             if ext_id and ext_id not in cache_map:
                 cache_map[ext_id] = artist
 
@@ -32352,23 +32403,23 @@ def enrich_similar_artists():
                     _detect_and_set_rate_limit(e, 'enrich_similar_artists')
                     print(f"Error enriching Spotify batch: {e}")
             else:
-                from core.itunes_client import iTunesClient
-                itunes_client = iTunesClient()
+                fallback_client = _get_metadata_fallback_client()
+                fallback_source = _get_metadata_fallback_source()
                 for aid in uncached_ids[:50]:
                     try:
-                        itunes_artist = itunes_client.get_artist(aid)
-                        if itunes_artist:
-                            img_url = itunes_artist.get('images', [{}])[0].get('url') if itunes_artist.get('images') else None
-                            genres = itunes_artist.get('genres', [])[:3]
+                        fb_artist = fallback_client.get_artist(aid)
+                        if fb_artist:
+                            img_url = fb_artist.get('images', [{}])[0].get('url') if fb_artist.get('images') else None
+                            genres = fb_artist.get('genres', [])[:3]
                             enriched[aid] = {
-                                "artist_name": itunes_artist.get('name'),
+                                "artist_name": fb_artist.get('name'),
                                 "image_url": img_url,
                                 "genres": genres,
                                 "popularity": 0
                             }
                             # Cache to DB for future use
                             database.update_similar_artist_metadata_by_external_id(
-                                aid, 'itunes',
+                                aid, fallback_source,
                                 image_url=img_url, genres=genres, popularity=0
                             )
                     except Exception:
@@ -32533,6 +32584,8 @@ def get_discover_release_radar():
             for track in discovery_tracks:
                 if active_source == 'spotify' and track.spotify_track_id:
                     tracks_by_id[track.spotify_track_id] = track
+                elif active_source == 'deezer' and getattr(track, 'deezer_track_id', None):
+                    tracks_by_id[track.deezer_track_id] = track
                 elif active_source == 'itunes' and track.itunes_track_id:
                     tracks_by_id[track.itunes_track_id] = track
 
@@ -32550,9 +32603,10 @@ def get_discover_release_radar():
                             track_data = None
 
                     selected_tracks.append({
-                        "track_id": track.spotify_track_id or track.itunes_track_id,
+                        "track_id": track.spotify_track_id or getattr(track, 'deezer_track_id', None) or track.itunes_track_id,
                         "spotify_track_id": track.spotify_track_id,
                         "itunes_track_id": track.itunes_track_id,
+                        "deezer_track_id": getattr(track, 'deezer_track_id', None),
                         "track_name": track.track_name,
                         "artist_name": track.artist_name,
                         "album_name": track.album_name,
@@ -32597,6 +32651,8 @@ def get_discover_weekly():
             for track in discovery_tracks:
                 if active_source == 'spotify' and track.spotify_track_id:
                     tracks_by_id[track.spotify_track_id] = track
+                elif active_source == 'deezer' and getattr(track, 'deezer_track_id', None):
+                    tracks_by_id[track.deezer_track_id] = track
                 elif active_source == 'itunes' and track.itunes_track_id:
                     tracks_by_id[track.itunes_track_id] = track
 
@@ -32614,9 +32670,10 @@ def get_discover_weekly():
                             track_data = None
 
                     selected_tracks.append({
-                        "track_id": track.spotify_track_id or track.itunes_track_id,
+                        "track_id": track.spotify_track_id or getattr(track, 'deezer_track_id', None) or track.itunes_track_id,
                         "spotify_track_id": track.spotify_track_id,
                         "itunes_track_id": track.itunes_track_id,
+                        "deezer_track_id": getattr(track, 'deezer_track_id', None),
                         "track_name": track.track_name,
                         "artist_name": track.artist_name,
                         "album_name": track.album_name,
@@ -33186,14 +33243,13 @@ def search_artists_for_playlist():
                     logger.warning(f"Spotify artist search failed, falling back to iTunes: {e}")
 
             if not artists:
-                from core.itunes_client import iTunesClient
-                itunes = iTunesClient()
-                artist_objs = itunes.search_artists(query, limit=10)
+                fallback = _get_metadata_fallback_client()
+                artist_objs = fallback.search_artists(query, limit=10)
                 for artist in artist_objs:
-                    # iTunes artist search rarely returns images — grab from album art
+                    # Fallback artist search may not return images — grab from album art
                     image = artist.image_url
                     if not image:
-                        image = itunes._get_artist_image_from_albums(artist.id)
+                        image = fallback._get_artist_image_from_albums(artist.id)
                     artists.append({
                         'id': artist.id,
                         'name': artist.name,
@@ -35821,13 +35877,12 @@ def _run_beatport_discovery_worker(url_hash):
 
         # Determine which provider to use
         use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        discovery_source = 'spotify' if use_spotify else 'itunes'
+        discovery_source = 'spotify' if use_spotify else _get_metadata_fallback_source()
 
-        # Initialize iTunes client if needed
+        # Initialize fallback client if needed
         itunes_client_instance = None
         if not use_spotify:
-            from core.itunes_client import iTunesClient
-            itunes_client_instance = iTunesClient()
+            itunes_client_instance = _get_metadata_fallback_client()
 
         print(f"🔍 Starting {discovery_source.upper()} discovery for {len(tracks)} Beatport tracks...")
 
@@ -36051,7 +36106,7 @@ def _run_beatport_discovery_worker(url_hash):
                             'artists': formatted_artists,
                             'album': album_data,
                             'id': track_id,
-                            'source': 'itunes'
+                            'source': discovery_source
                         }
 
                     state['spotify_matches'] += 1

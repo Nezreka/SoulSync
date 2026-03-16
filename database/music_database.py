@@ -87,6 +87,7 @@ class WatchlistArtist:
     updated_at: Optional[datetime] = None
     image_url: Optional[str] = None
     itunes_artist_id: Optional[str] = None  # Cross-provider support
+    deezer_artist_id: Optional[str] = None  # Cross-provider support
     include_albums: bool = True
     include_eps: bool = True
     include_singles: bool = True
@@ -99,7 +100,7 @@ class WatchlistArtist:
 
 @dataclass
 class SimilarArtist:
-    """Similar artist recommendation from Spotify/iTunes"""
+    """Similar artist recommendation from Spotify/iTunes/Deezer"""
     id: int
     source_artist_id: str  # Watchlist artist's database ID
     similar_artist_spotify_id: Optional[str]  # Spotify artist ID (may be None if iTunes-only)
@@ -111,6 +112,7 @@ class SimilarArtist:
     image_url: Optional[str] = None  # Cached artist image
     genres: Optional[List[str]] = None  # Cached genres
     popularity: int = 0  # Cached popularity score
+    similar_artist_deezer_id: Optional[str] = None  # Deezer artist ID
 
 @dataclass
 class DiscoveryTrack:
@@ -122,7 +124,10 @@ class DiscoveryTrack:
     itunes_track_id: Optional[str]  # iTunes track ID (None if Spotify source)
     itunes_album_id: Optional[str]  # iTunes album ID (None if Spotify source)
     itunes_artist_id: Optional[str]  # iTunes artist ID (None if Spotify source)
-    source: str  # 'spotify' or 'itunes'
+    deezer_track_id: Optional[str]  # Deezer track ID (None if non-Deezer source)
+    deezer_album_id: Optional[str]  # Deezer album ID (None if non-Deezer source)
+    deezer_artist_id: Optional[str]  # Deezer artist ID (None if non-Deezer source)
+    source: str  # 'spotify', 'itunes', or 'deezer'
     track_name: str
     artist_name: str
     album_name: str
@@ -141,7 +146,8 @@ class RecentRelease:
     watchlist_artist_id: int
     album_spotify_id: Optional[str]  # Spotify album ID (None if iTunes source)
     album_itunes_id: Optional[str]  # iTunes album ID (None if Spotify source)
-    source: str  # 'spotify' or 'itunes'
+    album_deezer_id: Optional[str]  # Deezer album ID (None if non-Deezer source)
+    source: str  # 'spotify', 'itunes', or 'deezer'
     album_name: str
     release_date: str
     album_cover_url: Optional[str]
@@ -846,6 +852,13 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE discovery_pool ADD COLUMN source TEXT DEFAULT 'spotify'")
                 logger.info("Added iTunes columns to discovery_pool table for dual-source discovery")
 
+            # Migration: Add Deezer columns to discovery_pool for tri-source discovery
+            if 'deezer_track_id' not in discovery_pool_columns:
+                cursor.execute("ALTER TABLE discovery_pool ADD COLUMN deezer_track_id TEXT")
+                cursor.execute("ALTER TABLE discovery_pool ADD COLUMN deezer_album_id TEXT")
+                cursor.execute("ALTER TABLE discovery_pool ADD COLUMN deezer_artist_id TEXT")
+                logger.info("Added Deezer columns to discovery_pool table")
+
             # Migration: Add iTunes ID to similar_artists for dual-source discovery
             cursor.execute("PRAGMA table_info(similar_artists)")
             similar_artists_columns = [column[1] for column in cursor.fetchall()]
@@ -853,6 +866,10 @@ class MusicDatabase:
             if 'similar_artist_itunes_id' not in similar_artists_columns:
                 cursor.execute("ALTER TABLE similar_artists ADD COLUMN similar_artist_itunes_id TEXT")
                 logger.info("Added similar_artist_itunes_id column to similar_artists table")
+
+            if 'similar_artist_deezer_id' not in similar_artists_columns:
+                cursor.execute("ALTER TABLE similar_artists ADD COLUMN similar_artist_deezer_id TEXT")
+                logger.info("Added similar_artist_deezer_id column to similar_artists table")
 
             # Migration: Add iTunes columns to recent_releases for dual-source discovery
             cursor.execute("PRAGMA table_info(recent_releases)")
@@ -863,6 +880,11 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE recent_releases ADD COLUMN source TEXT DEFAULT 'spotify'")
                 logger.info("Added iTunes columns to recent_releases table for dual-source discovery")
 
+            # Migration: Add Deezer column to recent_releases for tri-source discovery
+            if 'album_deezer_id' not in recent_releases_columns:
+                cursor.execute("ALTER TABLE recent_releases ADD COLUMN album_deezer_id TEXT")
+                logger.info("Added album_deezer_id column to recent_releases table")
+
             # Migration: Add iTunes columns to discovery_recent_albums for dual-source discovery
             cursor.execute("PRAGMA table_info(discovery_recent_albums)")
             discovery_recent_albums_columns = [column[1] for column in cursor.fetchall()]
@@ -872,6 +894,12 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE discovery_recent_albums ADD COLUMN artist_itunes_id TEXT")
                 cursor.execute("ALTER TABLE discovery_recent_albums ADD COLUMN source TEXT DEFAULT 'spotify'")
                 logger.info("Added iTunes columns to discovery_recent_albums table for dual-source discovery")
+
+            # Migration: Add Deezer columns to discovery_recent_albums for tri-source discovery
+            if 'album_deezer_id' not in discovery_recent_albums_columns:
+                cursor.execute("ALTER TABLE discovery_recent_albums ADD COLUMN album_deezer_id TEXT")
+                cursor.execute("ALTER TABLE discovery_recent_albums ADD COLUMN artist_deezer_id TEXT")
+                logger.info("Added Deezer columns to discovery_recent_albums table")
 
             # Migration: Fix NOT NULL constraint on album_spotify_id (required for iTunes-only albums)
             # Check if album_spotify_id has NOT NULL constraint by checking table schema
@@ -973,6 +1001,8 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_itunes_track ON discovery_pool (itunes_track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_artist ON discovery_pool (spotify_artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_itunes_artist ON discovery_pool (itunes_artist_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_deezer_track ON discovery_pool (deezer_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_deezer_artist ON discovery_pool (deezer_artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_source ON discovery_pool (source)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_added_date ON discovery_pool (added_date)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_is_new ON discovery_pool (is_new_release)")
@@ -1098,6 +1128,10 @@ class MusicDatabase:
             if 'itunes_artist_id' not in columns:
                 cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN itunes_artist_id TEXT")
                 logger.info("Added itunes_artist_id column to watchlist_artists table for cross-provider support")
+
+            if 'deezer_artist_id' not in columns:
+                cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN deezer_artist_id TEXT")
+                logger.info("Added deezer_artist_id column to watchlist_artists table for cross-provider support")
 
         except Exception as e:
             logger.error(f"Error adding itunes_artist_id column to watchlist_artists: {e}")
@@ -5428,28 +5462,63 @@ class MusicDatabase:
             return 0
 
     # Watchlist operations
-    def add_artist_to_watchlist(self, artist_id: str, artist_name: str, profile_id: int = 1) -> bool:
+    def add_artist_to_watchlist(self, artist_id: str, artist_name: str, profile_id: int = 1, source: str = None) -> bool:
         """Add an artist to the watchlist for monitoring new releases.
 
-        Automatically detects if artist_id is a Spotify ID (alphanumeric) or iTunes ID (numeric).
+        Automatically detects if artist_id is a Spotify ID (alphanumeric) or iTunes/Deezer ID (numeric).
+        If the artist already exists (by name match), updates the existing row with the new source ID.
         """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Detect ID type: iTunes IDs are purely numeric, Spotify IDs are alphanumeric
-                is_itunes_id = artist_id.isdigit()
+                # Check if artist already exists by name (case-insensitive) for this profile
+                cursor.execute("""
+                    SELECT id, spotify_artist_id, itunes_artist_id, deezer_artist_id
+                    FROM watchlist_artists
+                    WHERE LOWER(artist_name) = LOWER(?) AND profile_id = ?
+                    LIMIT 1
+                """, (artist_name, profile_id))
+                existing = cursor.fetchone()
 
-                if is_itunes_id:
+                # Detect source: explicit source param, or infer from ID format
+                if not source:
+                    source = 'itunes' if artist_id.isdigit() else 'spotify'
+
+                if existing:
+                    # Artist already on watchlist — update with new source ID if missing
+                    col_map = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id', 'deezer': 'deezer_artist_id'}
+                    col = col_map.get(source)
+                    if col and not existing[col]:
+                        cursor.execute(f"""
+                            UPDATE watchlist_artists
+                            SET {col} = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        """, (artist_id, existing['id']))
+                        conn.commit()
+                        logger.info(f"Updated existing watchlist artist '{artist_name}' with {source} ID: {artist_id}")
+                    else:
+                        logger.info(f"Artist '{artist_name}' already on watchlist (profile: {profile_id})")
+                    return True
+
+                # New artist — insert with the appropriate ID column
+                if source == 'deezer':
                     cursor.execute("""
-                        INSERT OR REPLACE INTO watchlist_artists
+                        INSERT INTO watchlist_artists
+                        (deezer_artist_id, artist_name, date_added, updated_at, profile_id)
+                        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+                    """, (artist_id, artist_name, profile_id))
+                    logger.info(f"Added artist '{artist_name}' to watchlist (Deezer ID: {artist_id}, profile: {profile_id})")
+                elif source == 'itunes':
+                    cursor.execute("""
+                        INSERT INTO watchlist_artists
                         (itunes_artist_id, artist_name, date_added, updated_at, profile_id)
                         VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
                     """, (artist_id, artist_name, profile_id))
                     logger.info(f"Added artist '{artist_name}' to watchlist (iTunes ID: {artist_id}, profile: {profile_id})")
                 else:
                     cursor.execute("""
-                        INSERT OR REPLACE INTO watchlist_artists
+                        INSERT INTO watchlist_artists
                         (spotify_artist_id, artist_name, date_added, updated_at, profile_id)
                         VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
                     """, (artist_id, artist_name, profile_id))
@@ -5463,23 +5532,23 @@ class MusicDatabase:
             return False
 
     def remove_artist_from_watchlist(self, artist_id: str, profile_id: int = 1) -> bool:
-        """Remove an artist from the watchlist (checks both Spotify and iTunes IDs)"""
+        """Remove an artist from the watchlist (checks Spotify, iTunes, and Deezer IDs)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Get artist name for logging (check both ID columns)
+                # Get artist name for logging (check all ID columns)
                 cursor.execute("""
                     SELECT artist_name FROM watchlist_artists
-                    WHERE (spotify_artist_id = ? OR itunes_artist_id = ?) AND profile_id = ?
-                """, (artist_id, artist_id, profile_id))
+                    WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?) AND profile_id = ?
+                """, (artist_id, artist_id, artist_id, profile_id))
                 result = cursor.fetchone()
                 artist_name = result['artist_name'] if result else "Unknown"
 
                 cursor.execute("""
                     DELETE FROM watchlist_artists
-                    WHERE (spotify_artist_id = ? OR itunes_artist_id = ?) AND profile_id = ?
-                """, (artist_id, artist_id, profile_id))
+                    WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?) AND profile_id = ?
+                """, (artist_id, artist_id, artist_id, profile_id))
 
                 if cursor.rowcount > 0:
                     conn.commit()
@@ -5493,18 +5562,25 @@ class MusicDatabase:
             logger.error(f"Error removing artist from watchlist (ID: {artist_id}): {e}")
             return False
 
-    def is_artist_in_watchlist(self, artist_id: str, profile_id: int = 1) -> bool:
-        """Check if an artist is currently in the watchlist (checks both Spotify and iTunes IDs)"""
+    def is_artist_in_watchlist(self, artist_id: str, profile_id: int = 1, artist_name: str = None) -> bool:
+        """Check if an artist is currently in the watchlist (checks Spotify, iTunes, Deezer IDs and name)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Check both spotify_artist_id and itunes_artist_id columns
-                cursor.execute("""
-                    SELECT 1 FROM watchlist_artists
-                    WHERE (spotify_artist_id = ? OR itunes_artist_id = ?) AND profile_id = ?
-                    LIMIT 1
-                """, (artist_id, artist_id, profile_id))
+                # Check all ID columns and optionally artist name
+                if artist_name:
+                    cursor.execute("""
+                        SELECT 1 FROM watchlist_artists
+                        WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR LOWER(artist_name) = LOWER(?)) AND profile_id = ?
+                        LIMIT 1
+                    """, (artist_id, artist_id, artist_id, artist_name, profile_id))
+                else:
+                    cursor.execute("""
+                        SELECT 1 FROM watchlist_artists
+                        WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?) AND profile_id = ?
+                        LIMIT 1
+                    """, (artist_id, artist_id, artist_id, profile_id))
                 result = cursor.fetchone()
 
                 return result is not None
@@ -5526,7 +5602,7 @@ class MusicDatabase:
                 # Build SELECT query based on existing columns
                 base_columns = ['id', 'spotify_artist_id', 'artist_name', 'date_added',
                                'last_scan_timestamp', 'created_at', 'updated_at']
-                optional_columns = ['image_url', 'itunes_artist_id', 'include_albums', 'include_eps', 'include_singles',
+                optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
                                    'include_instrumentals']
 
@@ -5553,6 +5629,7 @@ class MusicDatabase:
                     # Safely get optional columns with defaults (sqlite3.Row uses dict-style access)
                     image_url = row['image_url'] if 'image_url' in existing_columns else None
                     itunes_artist_id = row['itunes_artist_id'] if 'itunes_artist_id' in existing_columns else None
+                    deezer_artist_id = row['deezer_artist_id'] if 'deezer_artist_id' in existing_columns else None
                     include_albums = bool(row['include_albums']) if 'include_albums' in existing_columns else True
                     include_eps = bool(row['include_eps']) if 'include_eps' in existing_columns else True
                     include_singles = bool(row['include_singles']) if 'include_singles' in existing_columns else True
@@ -5572,6 +5649,7 @@ class MusicDatabase:
                         updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None,
                         image_url=image_url,
                         itunes_artist_id=itunes_artist_id,
+                        deezer_artist_id=deezer_artist_id,
                         include_albums=include_albums,
                         include_eps=include_eps,
                         include_singles=include_singles,
@@ -5840,6 +5918,27 @@ class MusicDatabase:
             logger.error(f"Error caching watchlist iTunes ID: {e}")
             return False
 
+    def update_watchlist_artist_deezer_id(self, spotify_artist_id: str, deezer_id: str) -> bool:
+        """Update the Deezer artist ID for a watchlist artist by Spotify ID (for cross-provider caching)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    UPDATE watchlist_artists
+                    SET deezer_artist_id = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE spotify_artist_id = ?
+                """, (deezer_id, spotify_artist_id))
+
+                conn.commit()
+                if cursor.rowcount > 0:
+                    logger.info(f"Cached Deezer ID {deezer_id} for Spotify artist {spotify_artist_id}")
+                return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Error caching watchlist Deezer ID: {e}")
+            return False
+
     # === Discovery Feature Methods ===
 
     def add_or_update_similar_artist(self, source_artist_id: str, similar_artist_name: str,
@@ -5849,8 +5948,9 @@ class MusicDatabase:
                                       profile_id: int = 1,
                                       image_url: Optional[str] = None,
                                       genres: Optional[list] = None,
-                                      popularity: int = 0) -> bool:
-        """Add or update a similar artist recommendation (supports both Spotify and iTunes IDs)"""
+                                      popularity: int = 0,
+                                      similar_artist_deezer_id: Optional[str] = None) -> bool:
+        """Add or update a similar artist recommendation (supports Spotify, iTunes, and Deezer IDs)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -5859,14 +5959,15 @@ class MusicDatabase:
                 # Use artist name as the unique key (allows storing both IDs for same artist)
                 cursor.execute("""
                     INSERT INTO similar_artists
-                    (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_name,
+                    (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_deezer_id, similar_artist_name,
                      similarity_rank, occurrence_count, last_updated, profile_id,
                      image_url, genres, popularity, metadata_updated_at)
-                    VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(profile_id, source_artist_id, similar_artist_name)
                     DO UPDATE SET
                         similar_artist_spotify_id = COALESCE(excluded.similar_artist_spotify_id, similar_artist_spotify_id),
                         similar_artist_itunes_id = COALESCE(excluded.similar_artist_itunes_id, similar_artist_itunes_id),
+                        similar_artist_deezer_id = COALESCE(excluded.similar_artist_deezer_id, similar_artist_deezer_id),
                         similarity_rank = excluded.similarity_rank,
                         occurrence_count = occurrence_count + 1,
                         last_updated = CURRENT_TIMESTAMP,
@@ -5874,7 +5975,7 @@ class MusicDatabase:
                         genres = COALESCE(excluded.genres, genres),
                         popularity = CASE WHEN excluded.popularity > 0 THEN excluded.popularity ELSE popularity END,
                         metadata_updated_at = CASE WHEN excluded.image_url IS NOT NULL THEN CURRENT_TIMESTAMP ELSE metadata_updated_at END
-                """, (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_name,
+                """, (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id, similar_artist_deezer_id, similar_artist_name,
                       similarity_rank, profile_id, image_url, genres_json, popularity))
 
                 conn.commit()
@@ -5905,7 +6006,8 @@ class MusicDatabase:
                     similar_artist_name=row['similar_artist_name'],
                     similarity_rank=row['similarity_rank'],
                     occurrence_count=row['occurrence_count'],
-                    last_updated=datetime.fromisoformat(row['last_updated'])
+                    last_updated=datetime.fromisoformat(row['last_updated']),
+                    similar_artist_deezer_id=row['similar_artist_deezer_id'] if 'similar_artist_deezer_id' in row.keys() else None,
                 ) for row in rows]
 
         except Exception as e:
@@ -5914,14 +6016,19 @@ class MusicDatabase:
 
     def get_similar_artists_missing_itunes_ids(self, source_artist_id: str, profile_id: int = 1) -> List[SimilarArtist]:
         """Get similar artists for a source that are missing iTunes IDs (for backfill)"""
+        return self.get_similar_artists_missing_fallback_ids(source_artist_id, 'itunes', profile_id)
+
+    def get_similar_artists_missing_fallback_ids(self, source_artist_id: str, fallback_source: str = 'itunes', profile_id: int = 1) -> List[SimilarArtist]:
+        """Get similar artists missing IDs for the given fallback source (for backfill)"""
         try:
+            col = 'similar_artist_deezer_id' if fallback_source == 'deezer' else 'similar_artist_itunes_id'
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT * FROM similar_artists
                     WHERE source_artist_id = ? AND profile_id = ?
-                    AND (similar_artist_itunes_id IS NULL OR similar_artist_itunes_id = '')
+                    AND ({col} IS NULL OR {col} = '')
                     ORDER BY occurrence_count DESC
                     LIMIT 50
                 """, (source_artist_id, profile_id))
@@ -5931,15 +6038,16 @@ class MusicDatabase:
                     id=row['id'],
                     source_artist_id=row['source_artist_id'],
                     similar_artist_spotify_id=row['similar_artist_spotify_id'],
-                    similar_artist_itunes_id=None,
+                    similar_artist_itunes_id=row['similar_artist_itunes_id'] if 'similar_artist_itunes_id' in row.keys() else None,
                     similar_artist_name=row['similar_artist_name'],
                     similarity_rank=row['similarity_rank'],
                     occurrence_count=row['occurrence_count'],
-                    last_updated=datetime.fromisoformat(row['last_updated'])
+                    last_updated=datetime.fromisoformat(row['last_updated']),
+                    similar_artist_deezer_id=row['similar_artist_deezer_id'] if 'similar_artist_deezer_id' in row.keys() else None,
                 ) for row in rows]
 
         except Exception as e:
-            logger.error(f"Error getting similar artists missing iTunes IDs: {e}")
+            logger.error(f"Error getting similar artists missing {fallback_source} IDs: {e}")
             return []
 
     def update_similar_artist_itunes_id(self, similar_artist_id: int, itunes_id: str) -> bool:
@@ -5959,6 +6067,25 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error updating similar artist iTunes ID: {e}")
+            return False
+
+    def update_similar_artist_deezer_id(self, similar_artist_id: int, deezer_id: str) -> bool:
+        """Update a similar artist's Deezer ID (for backfill)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    UPDATE similar_artists
+                    SET similar_artist_deezer_id = ?
+                    WHERE id = ?
+                """, (deezer_id, similar_artist_id))
+
+                conn.commit()
+                return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Error updating similar artist Deezer ID: {e}")
             return False
 
     def update_similar_artist_metadata(self, similar_artist_id: int, image_url: str = None,
@@ -5989,6 +6116,8 @@ class MusicDatabase:
                 genres_json = json.dumps(genres) if genres else None
                 if source == 'spotify':
                     where_clause = "similar_artist_spotify_id = ?"
+                elif source == 'deezer':
+                    where_clause = "similar_artist_deezer_id = ?"
                 else:
                     where_clause = "similar_artist_itunes_id = ?"
                 cursor.execute(f"""
@@ -6091,6 +6220,7 @@ class MusicDatabase:
                         MAX(sa.source_artist_id) as source_artist_id,
                         MAX(sa.similar_artist_spotify_id) as similar_artist_spotify_id,
                         MAX(sa.similar_artist_itunes_id) as similar_artist_itunes_id,
+                        MAX(sa.similar_artist_deezer_id) as similar_artist_deezer_id,
                         sa.similar_artist_name,
                         AVG(sa.similarity_rank) as similarity_rank,
                         SUM(sa.occurrence_count) as occurrence_count,
@@ -6102,6 +6232,7 @@ class MusicDatabase:
                     LEFT JOIN watchlist_artists wa ON (
                         (sa.similar_artist_spotify_id IS NOT NULL AND sa.similar_artist_spotify_id = wa.spotify_artist_id)
                         OR (sa.similar_artist_itunes_id IS NOT NULL AND sa.similar_artist_itunes_id = wa.itunes_artist_id)
+                        OR (sa.similar_artist_deezer_id IS NOT NULL AND sa.similar_artist_deezer_id = wa.deezer_artist_id)
                         OR LOWER(sa.similar_artist_name) = LOWER(wa.artist_name)
                     ) AND wa.profile_id = ?
                     WHERE wa.id IS NULL AND sa.profile_id = ?
@@ -6127,6 +6258,7 @@ class MusicDatabase:
                         source_artist_id=row['source_artist_id'],
                         similar_artist_spotify_id=row['similar_artist_spotify_id'],
                         similar_artist_itunes_id=row['similar_artist_itunes_id'] if 'similar_artist_itunes_id' in row.keys() else None,
+                        similar_artist_deezer_id=row['similar_artist_deezer_id'] if 'similar_artist_deezer_id' in row.keys() else None,
                         similar_artist_name=row['similar_artist_name'],
                         similarity_rank=int(row['similarity_rank']),
                         occurrence_count=row['occurrence_count'],
@@ -6171,6 +6303,9 @@ class MusicDatabase:
                 elif source == 'itunes' and track_data.get('itunes_track_id'):
                     cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE itunes_track_id = ? AND source = 'itunes' AND profile_id = ?",
                                   (track_data['itunes_track_id'], profile_id))
+                elif source == 'deezer' and track_data.get('deezer_track_id'):
+                    cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE deezer_track_id = ? AND source = 'deezer' AND profile_id = ?",
+                                  (track_data['deezer_track_id'], profile_id))
                 else:
                     # Fallback check by track name and artist
                     cursor.execute("SELECT COUNT(*) as count FROM discovery_pool WHERE track_name = ? AND artist_name = ? AND source = ? AND profile_id = ?",
@@ -6187,9 +6322,10 @@ class MusicDatabase:
                     INSERT INTO discovery_pool
                     (spotify_track_id, spotify_album_id, spotify_artist_id,
                      itunes_track_id, itunes_album_id, itunes_artist_id,
+                     deezer_track_id, deezer_album_id, deezer_artist_id,
                      source, track_name, artist_name, album_name, album_cover_url,
                      duration_ms, popularity, release_date, is_new_release, track_data_json, artist_genres, added_date, profile_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
                 """, (
                     track_data.get('spotify_track_id'),
                     track_data.get('spotify_album_id'),
@@ -6197,6 +6333,9 @@ class MusicDatabase:
                     track_data.get('itunes_track_id'),
                     track_data.get('itunes_album_id'),
                     track_data.get('itunes_artist_id'),
+                    track_data.get('deezer_track_id'),
+                    track_data.get('deezer_album_id'),
+                    track_data.get('deezer_artist_id'),
                     source,
                     track_data['track_name'],
                     track_data['artist_name'],
@@ -6284,6 +6423,9 @@ class MusicDatabase:
                     itunes_track_id=row['itunes_track_id'] if 'itunes_track_id' in row_keys else None,
                     itunes_album_id=row['itunes_album_id'] if 'itunes_album_id' in row_keys else None,
                     itunes_artist_id=row['itunes_artist_id'] if 'itunes_artist_id' in row_keys else None,
+                    deezer_track_id=row['deezer_track_id'] if 'deezer_track_id' in row_keys else None,
+                    deezer_album_id=row['deezer_album_id'] if 'deezer_album_id' in row_keys else None,
+                    deezer_artist_id=row['deezer_artist_id'] if 'deezer_artist_id' in row_keys else None,
                     source=row['source'] if 'source' in row_keys else 'spotify',
                     track_name=row['track_name'],
                     artist_name=row['artist_name'],
@@ -6309,14 +6451,17 @@ class MusicDatabase:
 
                 cursor.execute("""
                     INSERT OR REPLACE INTO discovery_recent_albums
-                    (album_spotify_id, album_itunes_id, artist_spotify_id, artist_itunes_id, source,
+                    (album_spotify_id, album_itunes_id, album_deezer_id,
+                     artist_spotify_id, artist_itunes_id, artist_deezer_id, source,
                      album_name, artist_name, album_cover_url, release_date, album_type, cached_date, profile_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
                 """, (
                     album_data.get('album_spotify_id'),
                     album_data.get('album_itunes_id'),
+                    album_data.get('album_deezer_id'),
                     album_data.get('artist_spotify_id'),
                     album_data.get('artist_itunes_id'),
+                    album_data.get('artist_deezer_id'),
                     source,
                     album_data['album_name'],
                     album_data['artist_name'],
@@ -6539,6 +6684,7 @@ class MusicDatabase:
                     watchlist_artist_id=row['watchlist_artist_id'],
                     album_spotify_id=row['album_spotify_id'],
                     album_itunes_id=row['album_itunes_id'] if 'album_itunes_id' in row.keys() else None,
+                    album_deezer_id=row['album_deezer_id'] if 'album_deezer_id' in row.keys() else None,
                     source=row['source'] if 'source' in row.keys() else 'spotify',
                     album_name=row['album_name'],
                     release_date=row['release_date'],
