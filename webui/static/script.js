@@ -33423,7 +33423,7 @@ function updateServiceStatus(service, statusData) {
 
     // Update download source title on dashboard card
     if (service === 'soulseek' && statusData.source) {
-        const sourceNames = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', hybrid: 'Hybrid' };
+        const sourceNames = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', hybrid: 'Hybrid' };
         const displayName = sourceNames[statusData.source] || 'Soulseek';
         const titleEl = document.getElementById('download-source-title');
         if (titleEl) titleEl.textContent = displayName;
@@ -33471,7 +33471,7 @@ function updateSidebarServiceStatus(service, statusData) {
 
         // Update download source name based on configured mode
         if (service === 'soulseek' && statusData.source) {
-            const sourceNames = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', hybrid: 'Hybrid' };
+            const sourceNames = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', hybrid: 'Hybrid' };
             const displayName = sourceNames[statusData.source] || 'Soulseek';
             const sidebarName = document.getElementById('download-source-name');
             if (sidebarName) sidebarName.textContent = displayName;
