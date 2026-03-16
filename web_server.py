@@ -12649,7 +12649,7 @@ def _sanitize_context_values(context: dict) -> dict:
     """
     sanitized = {}
     for key, value in context.items():
-        if isinstance(value, str):
+        if isinstance(value, str) and value:
             sanitized[key] = _sanitize_filename(value)
         else:
             sanitized[key] = value
@@ -22106,8 +22106,27 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                 print(f"🎵 [Explicit Context] Using real album data: '{spotify_album_context['name']}' ({spotify_album_context['album_type']}, {spotify_album_context['total_discs']} disc(s))")
             else:
                 # Fallback to generic context for playlists/wishlists
+                # Extract album metadata from track_info if available (discovery enriches tracks with full album objects)
+                fallback_album = track_info.get('album', {}) if track_info else {}
+                if isinstance(fallback_album, str):
+                    fallback_album = {'name': fallback_album}
+                elif not isinstance(fallback_album, dict):
+                    fallback_album = {}
+                fallback_image_url = None
+                fallback_images = fallback_album.get('images', [])
+                if fallback_album.get('image_url'):
+                    fallback_image_url = fallback_album['image_url']
+                elif fallback_images and isinstance(fallback_images, list) and len(fallback_images) > 0:
+                    fallback_image_url = fallback_images[0].get('url') if isinstance(fallback_images[0], dict) else None
                 spotify_artist_context = {'id': 'from_sync_modal', 'name': track.artists[0] if track.artists else 'Unknown', 'genres': []}
-                spotify_album_context = {'id': 'from_sync_modal', 'name': track.album, 'release_date': '', 'image_url': None, 'album_type': 'album'}
+                spotify_album_context = {
+                    'id': fallback_album.get('id', 'from_sync_modal'),
+                    'name': fallback_album.get('name', '') or track.album,
+                    'release_date': fallback_album.get('release_date', ''),
+                    'image_url': fallback_image_url,
+                    'album_type': fallback_album.get('album_type', 'album'),
+                    'total_tracks': fallback_album.get('total_tracks', 0)
+                }
 
             download_payload = candidate.__dict__
 
