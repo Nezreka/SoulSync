@@ -30128,6 +30128,7 @@ def get_watchlist_artists():
                 "updated_at": artist.updated_at.isoformat() if artist.updated_at else None,
                 "image_url": artist.image_url,  # Cached during watchlist scans
                 "itunes_artist_id": artist.itunes_artist_id,  # For iTunes-only artists
+                "deezer_artist_id": getattr(artist, 'deezer_artist_id', None),
                 "include_albums": artist.include_albums,
                 "include_eps": artist.include_eps,
                 "include_singles": artist.include_singles,
