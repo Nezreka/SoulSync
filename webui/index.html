@@ -3807,6 +3807,7 @@
                                         <option value="youtube">YouTube Only</option>
                                         <option value="tidal">Tidal Only</option>
                                         <option value="qobuz">Qobuz Only</option>
+                                        <option value="hifi">HiFi Only (Free Lossless)</option>
                                         <option value="hybrid">Hybrid (Primary + Fallback)</option>
                                     </select>
                                     <div class="setting-help-text">
@@ -3824,6 +3825,7 @@
                                             <option value="youtube">YouTube</option>
                                             <option value="tidal">Tidal</option>
                                             <option value="qobuz">Qobuz</option>
+                                            <option value="hifi">HiFi</option>
                                         </select>
                                         <div class="setting-help-text">
                                             First source to try for downloads.
@@ -3836,6 +3838,7 @@
                                             <option value="youtube">YouTube</option>
                                             <option value="tidal">Tidal</option>
                                             <option value="qobuz">Qobuz</option>
+                                            <option value="hifi">HiFi</option>
                                         </select>
                                         <div class="setting-help-text">
                                             If the primary source finds nothing, try this source next.
@@ -3942,6 +3945,34 @@
                                         </div>
                                         <div class="setting-help-text" style="margin-top: 6px;">
                                             Requires a paid Qobuz subscription. Streams are DRM-free.
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- HiFi Download Settings (shown only when hifi mode is selected) -->
+                                <div id="hifi-download-settings-container" style="display: none;">
+                                    <div class="form-group">
+                                        <label>HiFi Download Quality:</label>
+                                        <select id="hifi-download-quality" class="form-select">
+                                            <option value="low">Low (AAC 96kbps)</option>
+                                            <option value="high">High (AAC 320kbps)</option>
+                                            <option value="lossless">Lossless (FLAC 16-bit/44.1kHz)</option>
+                                            <option value="hires">HiRes (FLAC 24-bit/96kHz)</option>
+                                        </select>
+                                        <div class="setting-help-text">
+                                            Audio quality for HiFi downloads. Uses public API instances — no account required.
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>HiFi Status:</label>
+                                        <div class="form-actions" style="margin-top: 4px;">
+                                            <button class="test-button" id="hifi-test-btn" onclick="testHiFiConnection()">
+                                                Test Connection
+                                            </button>
+                                            <span id="hifi-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                        </div>
+                                        <div class="setting-help-text" style="margin-top: 6px;">
+                                            Free lossless downloads via community-run hifi-api instances. No authentication or subscription needed.
                                         </div>
                                     </div>
                                 </div>

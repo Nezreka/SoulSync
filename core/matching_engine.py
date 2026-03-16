@@ -440,7 +440,7 @@ class MusicMatchingEngine:
         # Often YouTube videos are titled "Artist - Album - Title" or similar
         # Only include if mode is youtube or hybrid (safe for Soulseek default)
         download_mode = config_manager.get('download_source.mode', 'soulseek')
-        if download_mode in ['youtube', 'hybrid'] and album_name and album_name.lower() not in ['single', 'ep', 'greatest hits']:
+        if download_mode in ['youtube', 'tidal', 'qobuz', 'hifi', 'hybrid'] and album_name and album_name.lower() not in ['single', 'ep', 'greatest hits']:
              album_clean = self.clean_album_name(album_name)
              if album_clean:
                  # Standard query: Artist Album Title
