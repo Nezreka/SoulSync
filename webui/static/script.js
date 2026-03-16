@@ -730,6 +730,21 @@ function applyParticlesSetting(enabled) {
     localStorage.setItem('soulsync-particles', String(enabled));
 }
 
+function applyWorkerOrbsSetting(enabled) {
+    window._workerOrbsEnabled = enabled;
+    localStorage.setItem('soulsync-worker-orbs', String(enabled));
+    if (window.workerOrbs) {
+        if (enabled) {
+            const activePage = document.querySelector('.page.active');
+            if (activePage && activePage.id === 'dashboard-page') {
+                window.workerOrbs.setPage('dashboard');
+            }
+        } else {
+            window.workerOrbs.setPage('_disabled');
+        }
+    }
+}
+
 function initAccentColorListeners() {
     const presetSelect = document.getElementById('accent-preset');
     const customGroup = document.getElementById('custom-color-group');
@@ -758,7 +773,14 @@ function initAccentColorListeners() {
     if (particlesCheckbox) {
         particlesCheckbox.addEventListener('change', () => {
             applyParticlesSetting(particlesCheckbox.checked);
-            // Server save handled by the global debouncedAutoSaveSettings listener on all checkboxes
+        });
+    }
+
+    // Worker orbs toggle — apply immediately on change
+    const workerOrbsCheckbox = document.getElementById('worker-orbs-enabled');
+    if (workerOrbsCheckbox) {
+        workerOrbsCheckbox.addEventListener('change', () => {
+            applyWorkerOrbsSetting(workerOrbsCheckbox.checked);
         });
     }
 }
@@ -773,6 +795,11 @@ function initAccentColorListeners() {
         window._particlesEnabled = false;
         const canvas = document.getElementById('page-particles-canvas');
         if (canvas) canvas.style.display = 'none';
+    }
+    // Bootstrap worker orbs setting from localStorage
+    const workerOrbsSaved = localStorage.getItem('soulsync-worker-orbs');
+    if (workerOrbsSaved === 'false') {
+        window._workerOrbsEnabled = false;
     }
 })();
 
@@ -2061,6 +2088,9 @@ function navigateToPage(pageId) {
 
     // Update page background particles
     if (window.pageParticles && window._particlesEnabled !== false) window.pageParticles.setPage(pageId);
+
+    // Update worker orbs
+    if (window.workerOrbs) window.workerOrbs.setPage(pageId);
 }
 
 // REPLACE your old loadPageData function with this one:
@@ -4905,6 +4935,12 @@ async function loadSettingsData() {
         if (particlesCheckbox) particlesCheckbox.checked = particlesEnabled;
         applyParticlesSetting(particlesEnabled);
 
+        // Worker orbs toggle
+        const workerOrbsEnabled = settings.ui_appearance?.worker_orbs_enabled !== false; // default true
+        const workerOrbsCheckbox = document.getElementById('worker-orbs-enabled');
+        if (workerOrbsCheckbox) workerOrbsCheckbox.checked = workerOrbsEnabled;
+        applyWorkerOrbsSetting(workerOrbsEnabled);
+
         // Populate Logging information (read-only)
         document.getElementById('log-level-display').textContent = settings.logging?.level || 'INFO';
         document.getElementById('log-path-display').textContent = settings.logging?.path || 'logs/app.log';
@@ -5713,7 +5749,8 @@ async function saveSettings(quiet = false) {
             accent_preset: document.getElementById('accent-preset')?.value || '#1db954',
             accent_color: document.getElementById('accent-custom-color')?.value || '#1db954',
             sidebar_visualizer: document.getElementById('sidebar-visualizer-type')?.value || 'bars',
-            particles_enabled: document.getElementById('particles-enabled')?.checked !== false
+            particles_enabled: document.getElementById('particles-enabled')?.checked !== false,
+            worker_orbs_enabled: document.getElementById('worker-orbs-enabled')?.checked !== false
         },
         youtube: {
             cookies_browser: document.getElementById('youtube-cookies-browser').value,
