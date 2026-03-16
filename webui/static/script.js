@@ -56622,6 +56622,7 @@ async function issueDownloadAlbum(spotifyAlbumId, artistName, albumName) {
             id: albumData.id,
             album_type: albumData.album_type || 'album',
             images: albumData.images || [],
+            image_url: albumData.images?.[0]?.url || null,
             release_date: albumData.release_date,
             total_tracks: albumData.total_tracks,
             artists: albumData.artists || [{ name: artistName }]
@@ -56717,6 +56718,7 @@ async function redownloadLibraryAlbum(album, artistName, btn) {
             id: albumData.id,
             album_type: albumData.album_type || 'album',
             images: albumData.images || [],
+            image_url: albumData.images?.[0]?.url || null,
             release_date: albumData.release_date,
             total_tracks: albumData.total_tracks,
             artists: albumData.artists || [{ name: artistName || '' }]
