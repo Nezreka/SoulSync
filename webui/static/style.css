@@ -6690,6 +6690,12 @@ body {
     box-shadow: 0 4px 15px rgba(255, 0, 0, 0.3);
 }
 
+.sync-tab-button[data-tab="spotify-public"].active {
+    background: #1DB954;
+    color: #fff;
+    box-shadow: 0 4px 15px rgba(29, 185, 84, 0.3);
+}
+
 .sync-tab-button:hover:not(.active) {
     background: rgba(255, 255, 255, 0.1);
     color: #ffffff;
@@ -10118,7 +10124,8 @@ body {
 }
 
 #youtube-url-input,
-#deezer-url-input {
+#deezer-url-input,
+#spotify-public-url-input {
     flex: 1;
     background: transparent;
     border: none;
@@ -10131,13 +10138,15 @@ body {
 }
 
 #youtube-url-input::placeholder,
-#deezer-url-input::placeholder {
+#deezer-url-input::placeholder,
+#spotify-public-url-input::placeholder {
     color: rgba(255, 255, 255, 0.3);
     font-weight: 400;
 }
 
 #youtube-parse-btn,
-#deezer-parse-btn {
+#deezer-parse-btn,
+#spotify-public-parse-btn {
     flex-shrink: 0;
     padding: 10px 22px;
     border: none;
@@ -10186,7 +10195,8 @@ body {
 }
 
 #youtube-parse-btn:disabled,
-#deezer-parse-btn:disabled {
+#deezer-parse-btn:disabled,
+#spotify-public-parse-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
     transform: none;
@@ -10202,6 +10212,28 @@ body {
 #deezer-tab-content .youtube-input-section:focus-within {
     border-color: rgba(162, 56, 255, 0.25);
     box-shadow: 0 0 16px rgba(162, 56, 255, 0.08);
+}
+
+#spotify-public-parse-btn {
+    background: linear-gradient(135deg, #1DB954, #1ed760);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(29, 185, 84, 0.2);
+}
+
+#spotify-public-parse-btn:hover {
+    background: linear-gradient(135deg, #1ed760, #2de86e);
+    box-shadow: 0 4px 16px rgba(29, 185, 84, 0.3);
+    transform: translateY(-1px);
+}
+
+#spotify-public-parse-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 4px rgba(29, 185, 84, 0.2);
+}
+
+#spotify-public-tab-content .youtube-input-section:focus-within {
+    border-color: rgba(29, 185, 84, 0.25);
+    box-shadow: 0 0 16px rgba(29, 185, 84, 0.08);
 }
 
 /* Right Sidebar */
@@ -10655,6 +10687,25 @@ body {
 .deezer-playlist-card .playlist-card-action-btn:hover {
     background: linear-gradient(135deg, #b44dff, #c562ff);
     box-shadow: 0 0 15px rgba(162, 56, 255, 0.4);
+}
+
+/* ===============================
+   SPOTIFY PUBLIC CARD STYLES (extends YouTube card styles)
+   ===============================*/
+
+.spotify-public-card .playlist-card-icon {
+    background: rgba(29, 185, 84, 0.2);
+    border-color: #1DB954;
+    color: #1DB954;
+}
+
+.spotify-public-card .playlist-card-action-btn {
+    background: linear-gradient(135deg, #1DB954, #1ed760);
+}
+
+.spotify-public-card .playlist-card-action-btn:hover {
+    background: linear-gradient(135deg, #1ed760, #3be477);
+    box-shadow: 0 0 15px rgba(29, 185, 84, 0.4);
 }
 
 /* ===============================

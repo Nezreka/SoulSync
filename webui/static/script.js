@@ -10035,13 +10035,14 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     const source = virtualPlaylistId.startsWith('beatport_') ? 'Beatport' :
         virtualPlaylistId.startsWith('tidal_') ? 'Tidal' :
             virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
-                virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
-                    virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
-                        virtualPlaylistId.startsWith('spotify_library_') ? 'SoulSync' :
-                            virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
-                                virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
-                                    virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
-                                        'YouTube';
+                virtualPlaylistId.startsWith('spotify_public_') ? 'Spotify' :
+                    virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
+                        virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
+                            virtualPlaylistId.startsWith('spotify_library_') ? 'SoulSync' :
+                                virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
+                                    virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
+                                        virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
+                                            'YouTube';
 
     // Store metadata for discover download sidebar (will be added when Begin Analysis is clicked)
     if (source === 'SoulSync' || virtualPlaylistId.startsWith('discover_lb_') || virtualPlaylistId.startsWith('listenbrainz_')) {
@@ -10384,6 +10385,88 @@ async function closeDownloadMissingModal(playlistId) {
                 }
             } else {
                 console.error(`❌ [Modal Close] No ListenBrainz state found for mbid: ${playlistMbid}`);
+            }
+        }
+
+        // Reset Spotify Public playlist phase to 'discovered' when modal is closed
+        if (playlistId.startsWith('spotify_public_')) {
+            const spUrlHash = playlistId.replace('spotify_public_', '');
+
+            console.log(`🧹 [Modal Close] Processing Spotify Public playlist close: playlistId="${playlistId}", urlHash="${spUrlHash}"`);
+
+            if (spotifyPublicPlaylistStates[spUrlHash]) {
+                const currentPhase = spotifyPublicPlaylistStates[spUrlHash].phase;
+                console.log(`🧹 [Modal Close] Current phase before reset: ${currentPhase}`);
+
+                const preservedData = {
+                    playlist: spotifyPublicPlaylistStates[spUrlHash].playlist,
+                    discovery_results: spotifyPublicPlaylistStates[spUrlHash].discovery_results,
+                    spotify_matches: spotifyPublicPlaylistStates[spUrlHash].spotify_matches,
+                    discovery_progress: spotifyPublicPlaylistStates[spUrlHash].discovery_progress,
+                    convertedSpotifyPlaylistId: spotifyPublicPlaylistStates[spUrlHash].convertedSpotifyPlaylistId
+                };
+
+                delete spotifyPublicPlaylistStates[spUrlHash].download_process_id;
+                delete spotifyPublicPlaylistStates[spUrlHash].phase;
+
+                Object.assign(spotifyPublicPlaylistStates[spUrlHash], preservedData);
+                spotifyPublicPlaylistStates[spUrlHash].phase = 'discovered';
+
+                console.log(`🧹 [Modal Close] Reset Spotify Public playlist ${spUrlHash} - cleared download state, preserved discovery data`);
+            }
+
+            updateSpotifyPublicCardPhase(spUrlHash, 'discovered');
+
+            try {
+                await fetch(`/api/spotify-public/update_phase/${spUrlHash}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phase: 'discovered' })
+                });
+                console.log(`✅ [Modal Close] Updated backend phase for Spotify Public playlist ${spUrlHash} to 'discovered'`);
+            } catch (error) {
+                console.error(`❌ [Modal Close] Error updating backend phase for Spotify Public playlist ${spUrlHash}:`, error);
+            }
+        }
+
+        // Reset Deezer playlist phase to 'discovered' when modal is closed
+        if (playlistId.startsWith('deezer_')) {
+            const deezerPlaylistId = playlistId.replace('deezer_', '');
+
+            console.log(`🧹 [Modal Close] Processing Deezer playlist close: playlistId="${playlistId}", deezerPlaylistId="${deezerPlaylistId}"`);
+
+            if (deezerPlaylistStates[deezerPlaylistId]) {
+                const currentPhase = deezerPlaylistStates[deezerPlaylistId].phase;
+                console.log(`🧹 [Modal Close] Current phase before reset: ${currentPhase}`);
+
+                const preservedData = {
+                    playlist: deezerPlaylistStates[deezerPlaylistId].playlist,
+                    discovery_results: deezerPlaylistStates[deezerPlaylistId].discovery_results,
+                    spotify_matches: deezerPlaylistStates[deezerPlaylistId].spotify_matches,
+                    discovery_progress: deezerPlaylistStates[deezerPlaylistId].discovery_progress,
+                    convertedSpotifyPlaylistId: deezerPlaylistStates[deezerPlaylistId].convertedSpotifyPlaylistId
+                };
+
+                delete deezerPlaylistStates[deezerPlaylistId].download_process_id;
+                delete deezerPlaylistStates[deezerPlaylistId].phase;
+
+                Object.assign(deezerPlaylistStates[deezerPlaylistId], preservedData);
+                deezerPlaylistStates[deezerPlaylistId].phase = 'discovered';
+
+                console.log(`🧹 [Modal Close] Reset Deezer playlist ${deezerPlaylistId} - cleared download state, preserved discovery data`);
+            }
+
+            updateDeezerCardPhase(deezerPlaylistId, 'discovered');
+
+            try {
+                await fetch(`/api/deezer/update_phase/${deezerPlaylistId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phase: 'discovered' })
+                });
+                console.log(`✅ [Modal Close] Updated backend phase for Deezer playlist ${deezerPlaylistId} to 'discovered'`);
+            } catch (error) {
+                console.error(`❌ [Modal Close] Error updating backend phase for Deezer playlist ${deezerPlaylistId}:`, error);
             }
         }
 
@@ -11783,6 +11866,50 @@ async function startMissingTracksProcess(playlistId) {
                 }
 
                 console.log(`🔄 Updated Beatport chart ${chartHash} to downloading phase`);
+            }
+        }
+
+        // Update Spotify Public playlist phase to 'downloading' if this is a Spotify Public playlist
+        if (playlistId.startsWith('spotify_public_')) {
+            const urlHash = playlistId.replace('spotify_public_', '');
+            if (spotifyPublicPlaylistStates[urlHash]) {
+                spotifyPublicPlaylistStates[urlHash].phase = 'downloading';
+                spotifyPublicPlaylistStates[urlHash].convertedSpotifyPlaylistId = playlistId;
+                updateSpotifyPublicCardPhase(urlHash, 'downloading');
+
+                try {
+                    fetch(`/api/spotify-public/update_phase/${urlHash}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ phase: 'downloading', converted_spotify_playlist_id: playlistId })
+                    });
+                } catch (error) {
+                    console.warn('Error updating backend Spotify Public phase to downloading:', error);
+                }
+
+                console.log(`🔄 Updated Spotify Public playlist ${urlHash} to downloading phase`);
+            }
+        }
+
+        // Update Deezer playlist phase to 'downloading' if this is a Deezer playlist
+        if (playlistId.startsWith('deezer_')) {
+            const deezerPlaylistId = playlistId.replace('deezer_', '');
+            if (deezerPlaylistStates[deezerPlaylistId]) {
+                deezerPlaylistStates[deezerPlaylistId].phase = 'downloading';
+                deezerPlaylistStates[deezerPlaylistId].convertedSpotifyPlaylistId = playlistId;
+                updateDeezerCardPhase(deezerPlaylistId, 'downloading');
+
+                try {
+                    fetch(`/api/deezer/update_phase/${deezerPlaylistId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ phase: 'downloading', converted_spotify_playlist_id: playlistId })
+                    });
+                } catch (error) {
+                    console.warn('Error updating backend Deezer phase to downloading:', error);
+                }
+
+                console.log(`🔄 Updated Deezer playlist ${deezerPlaylistId} to downloading phase`);
             }
         }
 
@@ -15154,13 +15281,17 @@ async function selectDiscoveryFixTrack(track) {
             // For Deezer, backend expects the actual playlist_id, not url_hash
             const state = youtubePlaylistStates[identifier];
             backendIdentifier = state?.deezer_playlist_id || identifier;
+        } else if (platform === 'spotify_public') {
+            // For Spotify Public, backend expects the url_hash
+            const state = youtubePlaylistStates[identifier];
+            backendIdentifier = state?.spotify_public_playlist_id || identifier;
         } else if (platform === 'beatport') {
             // For Beatport, backend expects url_hash (same as identifier)
             backendIdentifier = identifier;
         }
 
         // Mirrored playlists route through the YouTube endpoint (which already handles mirrored_ prefixes)
-        const apiPlatform = platform === 'mirrored' ? 'youtube' : platform;
+        const apiPlatform = platform === 'mirrored' ? 'youtube' : (platform === 'spotify_public' ? 'spotify-public' : platform);
 
         const requestBody = {
             identifier: backendIdentifier,
@@ -15278,6 +15409,18 @@ async function selectDiscoveryFixTrack(track) {
                     const tidalState = tidalPlaylistStates?.[state.tidal_playlist_id];
                     if (tidalState) {
                         tidalState.spotifyMatches = state.spotifyMatches;
+                    }
+                }
+
+                // Also update the Spotify Public playlist card if this is a Spotify Public fix
+                if (platform === 'spotify_public' && state.spotify_public_playlist_id) {
+                    const spState = spotifyPublicPlaylistStates?.[state.spotify_public_playlist_id];
+                    if (spState) {
+                        spState.spotifyMatches = state.spotifyMatches;
+                        updateSpotifyPublicCardProgress(state.spotify_public_playlist_id, {
+                            spotify_matches: state.spotifyMatches,
+                            spotify_total: spotify_total
+                        });
                     }
                 }
             }
@@ -21890,13 +22033,14 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
     const source = virtualPlaylistId.startsWith('beatport_') ? 'Beatport' :
         virtualPlaylistId.startsWith('tidal_') ? 'Tidal' :
             virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
-                virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
-                    virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
-                        virtualPlaylistId.startsWith('spotify_library_') ? 'SoulSync' :
-                            virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
-                                virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
-                                    virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
-                                        'YouTube';
+                virtualPlaylistId.startsWith('spotify_public_') ? 'Spotify' :
+                    virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
+                        virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
+                            virtualPlaylistId.startsWith('spotify_library_') ? 'SoulSync' :
+                                virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
+                                    virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
+                                        virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
+                                            'YouTube';
 
     const heroContext = {
         type: 'playlist',
@@ -22073,7 +22217,7 @@ async function loadDeezerPlaylist() {
                 track_name: t.name || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artists || ''),
                 album_name: typeof t.album === 'string' ? t.album : '', duration_ms: t.duration_ms || 0,
                 source_track_id: t.id || ''
-            })), { owner: playlist.owner, image_url: playlist.image_url, description: playlist.description });
+            })), { owner: playlist.owner, image_url: playlist.image_url, description: rawUrl });
         }
 
         renderDeezerPlaylists();
@@ -23184,6 +23328,22 @@ function initializeSyncPage() {
         youtubeUrlInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 parseYouTubePlaylist();
+            }
+        });
+    }
+
+    // Logic for Spotify Public parse button
+    const spotifyPublicParseBtn = document.getElementById('spotify-public-parse-btn');
+    if (spotifyPublicParseBtn) {
+        spotifyPublicParseBtn.addEventListener('click', parseSpotifyPublicUrl);
+    }
+
+    // Logic for Spotify Public URL input (Enter key support)
+    const spotifyPublicUrlInput = document.getElementById('spotify-public-url-input');
+    if (spotifyPublicUrlInput) {
+        spotifyPublicUrlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                parseSpotifyPublicUrl();
             }
         });
     }
@@ -26140,6 +26300,991 @@ async function handleGenreChartTypeClick(genreSlug, genreId, genreName, chartTyp
 }
 
 // ===============================
+// SPOTIFY PUBLIC LINK FUNCTIONALITY
+// ===============================
+
+let spotifyPublicPlaylists = []; // Array of loaded Spotify public playlist objects
+let spotifyPublicPlaylistStates = {}; // Key: url_hash, Value: state dict
+
+async function parseSpotifyPublicUrl() {
+    const urlInput = document.getElementById('spotify-public-url-input');
+    const url = urlInput.value.trim();
+
+    if (!url) {
+        showToast('Please enter a Spotify URL', 'error');
+        return;
+    }
+
+    // Basic URL validation
+    if (!url.includes('open.spotify.com/playlist') && !url.includes('open.spotify.com/album') &&
+        !url.startsWith('spotify:playlist:') && !url.startsWith('spotify:album:')) {
+        showToast('Please enter a valid Spotify playlist or album URL', 'error');
+        return;
+    }
+
+    const parseBtn = document.getElementById('spotify-public-parse-btn');
+    if (parseBtn) {
+        parseBtn.disabled = true;
+        parseBtn.textContent = 'Loading...';
+    }
+
+    try {
+        console.log('🎵 Parsing public Spotify URL:', url);
+
+        const response = await fetch('/api/spotify/parse-public', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            showToast(`Error: ${result.error}`, 'error');
+            return;
+        }
+
+        // Check if already loaded
+        if (spotifyPublicPlaylists.find(p => String(p.url_hash) === String(result.url_hash))) {
+            showToast('This playlist is already loaded', 'info');
+            urlInput.value = '';
+            return;
+        }
+
+        console.log(`✅ Spotify ${result.type} parsed: ${result.name} (${result.track_count} tracks)`);
+
+        spotifyPublicPlaylists.push(result);
+
+        // Auto-mirror
+        if (result.tracks && result.tracks.length > 0) {
+            mirrorPlaylist('spotify_public', result.url_hash, result.name, result.tracks.map(t => ({
+                track_name: t.name || '',
+                artist_name: Array.isArray(t.artists) ? t.artists.map(a => a.name).join(', ') : '',
+                album_name: t.album?.name || '',
+                duration_ms: t.duration_ms || 0,
+                source_track_id: t.id || ''
+            })), { owner: result.subtitle || '', image_url: '', description: result.url || '' });
+        }
+
+        renderSpotifyPublicPlaylists();
+        await loadSpotifyPublicPlaylistStatesFromBackend();
+
+        urlInput.value = '';
+        showToast(`Loaded: ${result.name} (${result.track_count} tracks)`, 'success');
+        console.log(`🎵 Loaded Spotify playlist: ${result.name}`);
+
+    } catch (error) {
+        console.error('❌ Error parsing Spotify URL:', error);
+        showToast(`Error parsing Spotify URL: ${error.message}`, 'error');
+    } finally {
+        if (parseBtn) {
+            parseBtn.disabled = false;
+            parseBtn.textContent = 'Load';
+        }
+    }
+}
+
+function renderSpotifyPublicPlaylists() {
+    const container = document.getElementById('spotify-public-playlist-container');
+    if (spotifyPublicPlaylists.length === 0) {
+        container.innerHTML = `<div class="playlist-placeholder">Paste a Spotify playlist or album URL above to load tracks without needing Spotify API credentials.</div>`;
+        return;
+    }
+
+    container.innerHTML = spotifyPublicPlaylists.map(p => {
+        if (!spotifyPublicPlaylistStates[p.url_hash]) {
+            spotifyPublicPlaylistStates[p.url_hash] = {
+                phase: 'fresh',
+                playlist: p
+            };
+        }
+        return createSpotifyPublicCard(p);
+    }).join('');
+
+    // Add click handlers to cards
+    spotifyPublicPlaylists.forEach(p => {
+        const card = document.getElementById(`spotify-public-card-${p.url_hash}`);
+        if (card) {
+            card.addEventListener('click', () => handleSpotifyPublicCardClick(p.url_hash));
+        }
+    });
+}
+
+function createSpotifyPublicCard(playlist) {
+    const state = spotifyPublicPlaylistStates[playlist.url_hash];
+    const phase = state ? state.phase : 'fresh';
+    const isAlbum = playlist.type === 'album';
+
+    let buttonText = getActionButtonText(phase);
+    let phaseText = getPhaseText(phase);
+    let phaseColor = getPhaseColor(phase);
+
+    return `
+        <div class="youtube-playlist-card spotify-public-card" id="spotify-public-card-${playlist.url_hash}">
+            <div class="playlist-card-icon">${isAlbum ? '💿' : '🎵'}</div>
+            <div class="playlist-card-content">
+                <div class="playlist-card-name">${escapeHtml(playlist.name)}</div>
+                <div class="playlist-card-info">
+                    <span class="playlist-card-type-badge" style="color: ${isAlbum ? '#b3b3b3' : '#1DB954'}; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.5px;">${isAlbum ? 'Album' : 'Playlist'}</span>
+                    <span class="playlist-card-track-count">${playlist.track_count || playlist.tracks.length} tracks</span>
+                    <span class="playlist-card-phase-text" style="color: ${phaseColor};">${phaseText}</span>
+                </div>
+            </div>
+            <div class="playlist-card-progress ${phase === 'fresh' ? 'hidden' : ''}">
+                <!-- Progress will be dynamically updated based on phase -->
+            </div>
+            <button class="playlist-card-action-btn">${buttonText}</button>
+        </div>
+    `;
+}
+
+async function handleSpotifyPublicCardClick(urlHash) {
+    const state = spotifyPublicPlaylistStates[urlHash];
+    if (!state) {
+        console.error(`No state found for Spotify public playlist: ${urlHash}`);
+        showToast('Playlist state not found - try refreshing the page', 'error');
+        return;
+    }
+
+    if (!state.playlist) {
+        console.error(`No playlist data found for Spotify public playlist: ${urlHash}`);
+        showToast('Playlist data missing - try refreshing the page', 'error');
+        return;
+    }
+
+    if (!state.phase) {
+        state.phase = 'fresh';
+    }
+
+    console.log(`🎵 [Card Click] Spotify public card clicked: ${urlHash}, Phase: ${state.phase}`);
+
+    if (state.phase === 'fresh') {
+        console.log(`🎵 Using pre-loaded Spotify public playlist data for: ${state.playlist.name}`);
+        openSpotifyPublicDiscoveryModal(urlHash, state.playlist);
+
+    } else if (state.phase === 'discovering' || state.phase === 'discovered' || state.phase === 'syncing' || state.phase === 'sync_complete') {
+        console.log(`🎵 [Card Click] Opening Spotify public discovery modal for ${state.phase} phase`);
+
+        if (state.phase === 'discovered' && (!state.discovery_results || state.discovery_results.length === 0)) {
+            try {
+                const stateResponse = await fetch(`/api/spotify-public/state/${urlHash}`);
+                if (stateResponse.ok) {
+                    const fullState = await stateResponse.json();
+                    if (fullState.discovery_results) {
+                        state.discovery_results = fullState.discovery_results;
+                        state.spotify_matches = fullState.spotify_matches || state.spotify_matches;
+                        state.discovery_progress = fullState.discovery_progress || state.discovery_progress;
+                        spotifyPublicPlaylistStates[urlHash] = { ...spotifyPublicPlaylistStates[urlHash], ...state };
+                        console.log(`Restored ${fullState.discovery_results.length} discovery results from backend`);
+                    }
+                }
+            } catch (error) {
+                console.error(`Failed to fetch discovery results from backend: ${error}`);
+            }
+        }
+
+        openSpotifyPublicDiscoveryModal(urlHash, state.playlist);
+    } else if (state.phase === 'downloading' || state.phase === 'download_complete') {
+        if (state.convertedSpotifyPlaylistId) {
+            if (activeDownloadProcesses[state.convertedSpotifyPlaylistId]) {
+                const process = activeDownloadProcesses[state.convertedSpotifyPlaylistId];
+                if (process.modalElement) {
+                    process.modalElement.style.display = 'flex';
+                } else {
+                    await rehydrateSpotifyPublicDownloadModal(urlHash, state);
+                }
+            } else {
+                await rehydrateSpotifyPublicDownloadModal(urlHash, state);
+            }
+        } else {
+            if (state.discovery_results && state.discovery_results.length > 0) {
+                openSpotifyPublicDiscoveryModal(urlHash, state.playlist);
+            } else {
+                showToast('Unable to open download modal - missing playlist data', 'error');
+            }
+        }
+    }
+}
+
+async function rehydrateSpotifyPublicDownloadModal(urlHash, state) {
+    try {
+        if (!state || !state.playlist) {
+            showToast('Cannot open download modal - invalid playlist data', 'error');
+            return;
+        }
+
+        const spotifyTracks = state.discovery_results
+            ?.filter(result => result.spotify_data)
+            ?.map(result => result.spotify_data) || [];
+
+        if (spotifyTracks.length > 0) {
+            const virtualPlaylistId = state.convertedSpotifyPlaylistId || `spotify_public_${urlHash}`;
+            await openDownloadMissingModalForTidal(virtualPlaylistId, state.playlist.name, spotifyTracks);
+
+            if (state.download_process_id) {
+                const process = activeDownloadProcesses[virtualPlaylistId];
+                if (process) {
+                    process.status = 'running';
+                    process.batchId = state.download_process_id;
+                    const beginBtn = document.getElementById(`begin-analysis-btn-${virtualPlaylistId}`);
+                    const cancelBtn = document.getElementById(`cancel-all-btn-${virtualPlaylistId}`);
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                    startModalDownloadPolling(virtualPlaylistId);
+                }
+            }
+        } else {
+            showToast('No Spotify tracks found for download', 'error');
+        }
+    } catch (error) {
+        console.error(`Error rehydrating Spotify public download modal: ${error}`);
+    }
+}
+
+async function openSpotifyPublicDiscoveryModal(urlHash, playlistData) {
+    console.log(`🎵 Opening Spotify public discovery modal (reusing YouTube modal): ${playlistData.name}`);
+
+    const fakeUrlHash = `spotifypublic_${urlHash}`;
+
+    const cardState = spotifyPublicPlaylistStates[urlHash];
+    const isAlreadyDiscovered = cardState && (cardState.phase === 'discovered' || cardState.phase === 'syncing' || cardState.phase === 'sync_complete');
+    const isCurrentlyDiscovering = cardState && cardState.phase === 'discovering';
+
+    let transformedResults = [];
+    let actualMatches = 0;
+    if (isAlreadyDiscovered && cardState.discovery_results) {
+        transformedResults = cardState.discovery_results.map((result, index) => {
+            const isFound = result.status === 'found' ||
+                result.status === '✅ Found' ||
+                result.status_class === 'found' ||
+                result.spotify_data ||
+                result.spotify_track;
+            if (isFound) actualMatches++;
+
+            return {
+                index: index,
+                yt_track: result.spotify_public_track ? result.spotify_public_track.name : 'Unknown',
+                yt_artist: result.spotify_public_track ? (result.spotify_public_track.artists ? result.spotify_public_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                status: isFound ? '✅ Found' : '❌ Not Found',
+                status_class: isFound ? 'found' : 'not-found',
+                spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
+                spotify_artist: result.spotify_data && result.spotify_data.artists ?
+                    (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists.join(', ') : result.spotify_data.artists) : (result.spotify_artist || '-'),
+                spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
+                spotify_data: result.spotify_data,
+                spotify_id: result.spotify_id,
+                manual_match: result.manual_match
+            };
+        });
+        console.log(`🎵 Spotify public modal: Calculated ${actualMatches} matches from ${transformedResults.length} results`);
+    }
+
+    // Normalize artist objects to strings for the discovery modal table
+    const normalizedTracks = playlistData.tracks.map(t => ({
+        ...t,
+        artists: Array.isArray(t.artists)
+            ? t.artists.map(a => typeof a === 'object' ? a.name : a)
+            : t.artists
+    }));
+
+    const modalPhase = cardState ? cardState.phase : 'fresh';
+    youtubePlaylistStates[fakeUrlHash] = {
+        phase: modalPhase,
+        playlist: {
+            name: playlistData.name,
+            tracks: normalizedTracks
+        },
+        is_spotify_public_playlist: true,
+        spotify_public_playlist_id: urlHash,
+        discovery_progress: isAlreadyDiscovered ? 100 : 0,
+        spotify_matches: isAlreadyDiscovered ? actualMatches : 0,
+        spotifyMatches: isAlreadyDiscovered ? actualMatches : 0,
+        spotify_total: playlistData.tracks.length,
+        discovery_results: transformedResults,
+        discoveryResults: transformedResults,
+        discoveryProgress: isAlreadyDiscovered ? 100 : 0
+    };
+
+    if (!isAlreadyDiscovered && !isCurrentlyDiscovering) {
+        try {
+            console.log(`🔍 Starting Spotify public discovery for: ${playlistData.name}`);
+
+            const response = await fetch(`/api/spotify-public/discovery/start/${urlHash}`, {
+                method: 'POST'
+            });
+
+            const result = await response.json();
+
+            if (result.error) {
+                console.error('Error starting Spotify public discovery:', result.error);
+                showToast(`Error starting discovery: ${result.error}`, 'error');
+                return;
+            }
+
+            console.log('Spotify public discovery started, beginning polling...');
+
+            spotifyPublicPlaylistStates[urlHash].phase = 'discovering';
+            updateSpotifyPublicCardPhase(urlHash, 'discovering');
+            youtubePlaylistStates[fakeUrlHash].phase = 'discovering';
+
+            startSpotifyPublicDiscoveryPolling(fakeUrlHash, urlHash);
+
+        } catch (error) {
+            console.error('Error starting Spotify public discovery:', error);
+            showToast(`Error starting discovery: ${error.message}`, 'error');
+        }
+    } else if (isCurrentlyDiscovering) {
+        console.log(`🔄 Resuming Spotify public discovery polling for: ${playlistData.name}`);
+        startSpotifyPublicDiscoveryPolling(fakeUrlHash, urlHash);
+    } else if (cardState && cardState.phase === 'syncing') {
+        console.log(`🔄 Resuming Spotify public sync polling for: ${playlistData.name}`);
+        startSpotifyPublicSyncPolling(fakeUrlHash);
+    } else {
+        console.log('Using existing results - no need to re-discover');
+    }
+
+    openYouTubeDiscoveryModal(fakeUrlHash);
+}
+
+function startSpotifyPublicDiscoveryPolling(fakeUrlHash, urlHash) {
+    console.log(`🔄 Starting Spotify public discovery polling for: ${urlHash}`);
+
+    if (activeYouTubePollers[fakeUrlHash]) {
+        clearInterval(activeYouTubePollers[fakeUrlHash]);
+    }
+
+    // WebSocket subscription
+    if (socketConnected) {
+        socket.emit('discovery:subscribe', { ids: [urlHash] });
+        _discoveryProgressCallbacks[urlHash] = (data) => {
+            if (data.error) {
+                if (activeYouTubePollers[fakeUrlHash]) { clearInterval(activeYouTubePollers[fakeUrlHash]); delete activeYouTubePollers[fakeUrlHash]; }
+                socket.emit('discovery:unsubscribe', { ids: [urlHash] }); delete _discoveryProgressCallbacks[urlHash];
+                return;
+            }
+            const transformed = {
+                progress: data.progress, spotify_matches: data.spotify_matches, spotify_total: data.spotify_total,
+                results: (data.results || []).map((r, i) => {
+                    const isFound = r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found' || r.spotify_data || r.spotify_track;
+                    return {
+                        index: i, yt_track: r.spotify_public_track ? r.spotify_public_track.name : 'Unknown',
+                        yt_artist: r.spotify_public_track ? (r.spotify_public_track.artists ? r.spotify_public_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                        status: isFound ? '✅ Found' : '❌ Not Found', status_class: isFound ? 'found' : 'not-found',
+                        spotify_track: r.spotify_data ? r.spotify_data.name : (r.spotify_track || '-'),
+                        spotify_artist: r.spotify_data && r.spotify_data.artists ? (Array.isArray(r.spotify_data.artists) ? r.spotify_data.artists.join(', ') : r.spotify_data.artists) : (r.spotify_artist || '-'),
+                        spotify_album: r.spotify_data ? (typeof r.spotify_data.album === 'object' ? r.spotify_data.album.name : r.spotify_data.album) : (r.spotify_album || '-'),
+                        spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match
+                    };
+                })
+            };
+            const st = youtubePlaylistStates[fakeUrlHash];
+            if (st) {
+                st.discovery_progress = data.progress; st.discoveryProgress = data.progress;
+                st.spotify_matches = data.spotify_matches; st.spotifyMatches = data.spotify_matches;
+                st.discovery_results = data.results; st.discoveryResults = transformed.results;
+                st.phase = data.phase;
+                updateYouTubeDiscoveryModal(fakeUrlHash, transformed);
+            }
+            if (spotifyPublicPlaylistStates[urlHash]) {
+                spotifyPublicPlaylistStates[urlHash].phase = data.phase;
+                spotifyPublicPlaylistStates[urlHash].discovery_results = data.results;
+                spotifyPublicPlaylistStates[urlHash].spotify_matches = data.spotify_matches;
+                spotifyPublicPlaylistStates[urlHash].discovery_progress = data.progress;
+                updateSpotifyPublicCardPhase(urlHash, data.phase);
+            }
+            updateSpotifyPublicCardProgress(urlHash, data);
+            if (data.complete) {
+                if (activeYouTubePollers[fakeUrlHash]) { clearInterval(activeYouTubePollers[fakeUrlHash]); delete activeYouTubePollers[fakeUrlHash]; }
+                socket.emit('discovery:unsubscribe', { ids: [urlHash] }); delete _discoveryProgressCallbacks[urlHash];
+            }
+        };
+    }
+
+    const pollInterval = setInterval(async () => {
+        if (socketConnected) return;
+        try {
+            const response = await fetch(`/api/spotify-public/discovery/status/${urlHash}`);
+            const status = await response.json();
+
+            if (status.error) {
+                console.error('Error polling Spotify public discovery status:', status.error);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[fakeUrlHash];
+                return;
+            }
+
+            const transformedStatus = {
+                progress: status.progress,
+                spotify_matches: status.spotify_matches,
+                spotify_total: status.spotify_total,
+                results: status.results.map((result, index) => {
+                    const isFound = result.status === 'found' ||
+                        result.status === '✅ Found' ||
+                        result.status_class === 'found' ||
+                        result.spotify_data ||
+                        result.spotify_track;
+
+                    return {
+                        index: index,
+                        yt_track: result.spotify_public_track ? result.spotify_public_track.name : 'Unknown',
+                        yt_artist: result.spotify_public_track ? (result.spotify_public_track.artists ? result.spotify_public_track.artists.join(', ') : 'Unknown') : 'Unknown',
+                        status: isFound ? '✅ Found' : '❌ Not Found',
+                        status_class: isFound ? 'found' : 'not-found',
+                        spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
+                        spotify_artist: result.spotify_data && result.spotify_data.artists ?
+                            (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists.join(', ') : result.spotify_data.artists) : (result.spotify_artist || '-'),
+                        spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
+                        spotify_data: result.spotify_data,
+                        spotify_id: result.spotify_id,
+                        manual_match: result.manual_match
+                    };
+                })
+            };
+
+            const state = youtubePlaylistStates[fakeUrlHash];
+            if (state) {
+                state.discovery_progress = status.progress;
+                state.discoveryProgress = status.progress;
+                state.spotify_matches = status.spotify_matches;
+                state.spotifyMatches = status.spotify_matches;
+                state.discovery_results = status.results;
+                state.discoveryResults = transformedStatus.results;
+                state.phase = status.phase;
+
+                updateYouTubeDiscoveryModal(fakeUrlHash, transformedStatus);
+
+                if (spotifyPublicPlaylistStates[urlHash]) {
+                    spotifyPublicPlaylistStates[urlHash].phase = status.phase;
+                    spotifyPublicPlaylistStates[urlHash].discovery_results = status.results;
+                    spotifyPublicPlaylistStates[urlHash].spotify_matches = status.spotify_matches;
+                    spotifyPublicPlaylistStates[urlHash].discovery_progress = status.progress;
+                    updateSpotifyPublicCardPhase(urlHash, status.phase);
+                }
+
+                updateSpotifyPublicCardProgress(urlHash, status);
+
+                console.log(`🔄 Spotify public discovery progress: ${status.progress}% (${status.spotify_matches}/${status.spotify_total} found)`);
+            }
+
+            if (status.complete) {
+                console.log(`Spotify public discovery complete: ${status.spotify_matches}/${status.spotify_total} tracks found`);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[fakeUrlHash];
+            }
+
+        } catch (error) {
+            console.error('Error polling Spotify public discovery:', error);
+            clearInterval(pollInterval);
+            delete activeYouTubePollers[fakeUrlHash];
+        }
+    }, 1000);
+
+    activeYouTubePollers[fakeUrlHash] = pollInterval;
+}
+
+async function loadSpotifyPublicPlaylistStatesFromBackend() {
+    try {
+        console.log('🎵 Loading Spotify public playlist states from backend...');
+
+        const response = await fetch('/api/spotify-public/playlists/states');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch Spotify public playlist states');
+        }
+
+        const data = await response.json();
+        const states = data.states || [];
+
+        console.log(`🎵 Found ${states.length} stored Spotify public playlist states in backend`);
+
+        if (states.length === 0) return;
+
+        for (const stateInfo of states) {
+            await applySpotifyPublicPlaylistState(stateInfo);
+        }
+
+        // Rehydrate download modals for playlists in downloading/download_complete phases
+        for (const stateInfo of states) {
+            if ((stateInfo.phase === 'downloading' || stateInfo.phase === 'download_complete') &&
+                stateInfo.converted_spotify_playlist_id && stateInfo.download_process_id) {
+
+                const convertedPlaylistId = stateInfo.converted_spotify_playlist_id;
+
+                if (!activeDownloadProcesses[convertedPlaylistId]) {
+                    console.log(`Rehydrating download modal for Spotify public playlist: ${stateInfo.playlist_id}`);
+                    try {
+                        const playlistData = spotifyPublicPlaylists.find(p => String(p.url_hash) === String(stateInfo.playlist_id));
+                        if (!playlistData) continue;
+
+                        const spotifyTracks = spotifyPublicPlaylistStates[stateInfo.playlist_id]?.discovery_results
+                            ?.filter(result => result.spotify_data)
+                            ?.map(result => result.spotify_data) || [];
+
+                        if (spotifyTracks.length > 0) {
+                            await openDownloadMissingModalForTidal(
+                                convertedPlaylistId,
+                                playlistData.name,
+                                spotifyTracks
+                            );
+
+                            const process = activeDownloadProcesses[convertedPlaylistId];
+                            if (process) {
+                                process.status = 'running';
+                                process.batchId = stateInfo.download_process_id;
+                                const beginBtn = document.getElementById(`begin-analysis-btn-${convertedPlaylistId}`);
+                                const cancelBtn = document.getElementById(`cancel-all-btn-${convertedPlaylistId}`);
+                                if (beginBtn) beginBtn.style.display = 'none';
+                                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                                startModalDownloadPolling(convertedPlaylistId);
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`Error rehydrating Spotify public download modal for ${stateInfo.playlist_id}:`, error);
+                    }
+                }
+            }
+        }
+
+        console.log('Spotify public playlist states loaded and applied');
+
+    } catch (error) {
+        console.error('Error loading Spotify public playlist states:', error);
+    }
+}
+
+async function applySpotifyPublicPlaylistState(stateInfo) {
+    const { playlist_id, phase, discovery_progress, spotify_matches, discovery_results, converted_spotify_playlist_id, download_process_id } = stateInfo;
+
+    try {
+        console.log(`🎵 Applying saved state for Spotify public playlist: ${playlist_id}, Phase: ${phase}`);
+
+        const playlistData = spotifyPublicPlaylists.find(p => String(p.url_hash) === String(playlist_id));
+        if (!playlistData) {
+            console.warn(`Playlist data not found for state ${playlist_id} - skipping`);
+            return;
+        }
+
+        if (!spotifyPublicPlaylistStates[playlist_id]) {
+            spotifyPublicPlaylistStates[playlist_id] = {
+                playlist: playlistData,
+                phase: 'fresh'
+            };
+        }
+
+        spotifyPublicPlaylistStates[playlist_id].phase = phase;
+        spotifyPublicPlaylistStates[playlist_id].discovery_progress = discovery_progress;
+        spotifyPublicPlaylistStates[playlist_id].spotify_matches = spotify_matches;
+        spotifyPublicPlaylistStates[playlist_id].discovery_results = discovery_results;
+        spotifyPublicPlaylistStates[playlist_id].convertedSpotifyPlaylistId = converted_spotify_playlist_id;
+        spotifyPublicPlaylistStates[playlist_id].download_process_id = download_process_id;
+        spotifyPublicPlaylistStates[playlist_id].playlist = playlistData;
+
+        if (phase !== 'fresh' && phase !== 'discovering') {
+            try {
+                const stateResponse = await fetch(`/api/spotify-public/state/${playlist_id}`);
+                if (stateResponse.ok) {
+                    const fullState = await stateResponse.json();
+                    if (fullState.discovery_results && spotifyPublicPlaylistStates[playlist_id]) {
+                        spotifyPublicPlaylistStates[playlist_id].discovery_results = fullState.discovery_results;
+                        spotifyPublicPlaylistStates[playlist_id].discovery_progress = fullState.discovery_progress;
+                        spotifyPublicPlaylistStates[playlist_id].spotify_matches = fullState.spotify_matches;
+                        spotifyPublicPlaylistStates[playlist_id].convertedSpotifyPlaylistId = fullState.converted_spotify_playlist_id;
+                        spotifyPublicPlaylistStates[playlist_id].download_process_id = fullState.download_process_id;
+                    }
+                }
+            } catch (error) {
+                console.warn(`Error fetching full discovery results for Spotify public playlist ${playlistData.name}:`, error.message);
+            }
+        }
+
+        updateSpotifyPublicCardPhase(playlist_id, phase);
+
+        if (phase === 'discovered' && spotifyPublicPlaylistStates[playlist_id]) {
+            const progressInfo = {
+                spotify_total: playlistData.track_count || playlistData.tracks?.length || 0,
+                spotify_matches: spotifyPublicPlaylistStates[playlist_id].spotify_matches || 0
+            };
+            updateSpotifyPublicCardProgress(playlist_id, progressInfo);
+        }
+
+        if (phase === 'discovering') {
+            const fakeUrlHash = `spotifypublic_${playlist_id}`;
+            startSpotifyPublicDiscoveryPolling(fakeUrlHash, playlist_id);
+        } else if (phase === 'syncing') {
+            const fakeUrlHash = `spotifypublic_${playlist_id}`;
+            startSpotifyPublicSyncPolling(fakeUrlHash);
+        }
+
+    } catch (error) {
+        console.error(`Error applying Spotify public playlist state for ${playlist_id}:`, error);
+    }
+}
+
+function updateSpotifyPublicCardPhase(urlHash, phase) {
+    const state = spotifyPublicPlaylistStates[urlHash];
+    if (!state) return;
+
+    state.phase = phase;
+
+    const card = document.getElementById(`spotify-public-card-${urlHash}`);
+    if (card) {
+        const newCardHtml = createSpotifyPublicCard(state.playlist);
+        card.outerHTML = newCardHtml;
+
+        const newCard = document.getElementById(`spotify-public-card-${urlHash}`);
+        if (newCard) {
+            newCard.addEventListener('click', () => handleSpotifyPublicCardClick(urlHash));
+        }
+
+        if ((phase === 'syncing' || phase === 'sync_complete') && state.lastSyncProgress) {
+            setTimeout(() => {
+                updateSpotifyPublicCardSyncProgress(urlHash, state.lastSyncProgress);
+            }, 0);
+        }
+    }
+}
+
+function updateSpotifyPublicCardProgress(urlHash, progress) {
+    const state = spotifyPublicPlaylistStates[urlHash];
+    if (!state) return;
+
+    const card = document.getElementById(`spotify-public-card-${urlHash}`);
+    if (!card) return;
+
+    const progressElement = card.querySelector('.playlist-card-progress');
+    if (!progressElement) return;
+
+    progressElement.classList.remove('hidden');
+
+    const total = progress.spotify_total || 0;
+    const matches = progress.spotify_matches || 0;
+
+    if (total > 0) {
+        progressElement.innerHTML = `
+            <div class="playlist-card-sync-status">
+                <span class="sync-stat matched-tracks">✓ ${matches}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat total-tracks">♪ ${total}</span>
+            </div>
+        `;
+    }
+}
+
+// ===============================
+// SPOTIFY PUBLIC SYNC FUNCTIONALITY
+// ===============================
+
+async function startSpotifyPublicPlaylistSync(urlHash) {
+    try {
+        console.log('🎵 Starting Spotify public playlist sync:', urlHash);
+
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_spotify_public_playlist) {
+            console.error('Invalid Spotify public playlist state for sync');
+            return;
+        }
+
+        const playlistId = state.spotify_public_playlist_id;
+        const response = await fetch(`/api/spotify-public/sync/start/${playlistId}`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            showToast(`Error starting sync: ${result.error}`, 'error');
+            return;
+        }
+
+        const syncPlaylistId = result.sync_playlist_id;
+        if (state) state.syncPlaylistId = syncPlaylistId;
+
+        updateSpotifyPublicCardPhase(playlistId, 'syncing');
+        updateSpotifyPublicModalButtons(urlHash, 'syncing');
+
+        startSpotifyPublicSyncPolling(urlHash, syncPlaylistId);
+
+        showToast('Spotify public playlist sync started!', 'success');
+
+    } catch (error) {
+        console.error('Error starting Spotify public sync:', error);
+        showToast(`Error starting sync: ${error.message}`, 'error');
+    }
+}
+
+function startSpotifyPublicSyncPolling(urlHash, syncPlaylistId) {
+    if (activeYouTubePollers[urlHash]) {
+        clearInterval(activeYouTubePollers[urlHash]);
+    }
+
+    const state = youtubePlaylistStates[urlHash];
+    const playlistId = state.spotify_public_playlist_id;
+
+    syncPlaylistId = syncPlaylistId || (state && state.syncPlaylistId);
+
+    // WebSocket subscription
+    if (socketConnected && syncPlaylistId) {
+        socket.emit('sync:subscribe', { playlist_ids: [syncPlaylistId] });
+        _syncProgressCallbacks[syncPlaylistId] = (data) => {
+            const progress = data.progress || {};
+            updateSpotifyPublicCardSyncProgress(playlistId, progress);
+            updateSpotifyPublicModalSyncProgress(urlHash, progress);
+
+            if (data.status === 'finished') {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                if (spotifyPublicPlaylistStates[playlistId]) spotifyPublicPlaylistStates[playlistId].phase = 'sync_complete';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'sync_complete';
+                updateSpotifyPublicCardPhase(playlistId, 'sync_complete');
+                updateSpotifyPublicModalButtons(urlHash, 'sync_complete');
+                showToast('Spotify public playlist sync complete!', 'success');
+            } else if (data.status === 'error' || data.status === 'cancelled') {
+                if (activeYouTubePollers[urlHash]) { clearInterval(activeYouTubePollers[urlHash]); delete activeYouTubePollers[urlHash]; }
+                socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+                delete _syncProgressCallbacks[syncPlaylistId];
+                if (spotifyPublicPlaylistStates[playlistId]) spotifyPublicPlaylistStates[playlistId].phase = 'discovered';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'discovered';
+                updateSpotifyPublicCardPhase(playlistId, 'discovered');
+                updateSpotifyPublicModalButtons(urlHash, 'discovered');
+                showToast(`Sync failed: ${data.error || 'Unknown error'}`, 'error');
+            }
+        };
+    }
+
+    const pollFunction = async () => {
+        if (socketConnected) return;
+        try {
+            const response = await fetch(`/api/spotify-public/sync/status/${playlistId}`);
+            const status = await response.json();
+
+            if (status.error) {
+                console.error('Error polling Spotify public sync status:', status.error);
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                return;
+            }
+
+            updateSpotifyPublicCardSyncProgress(playlistId, status.progress);
+            updateSpotifyPublicModalSyncProgress(urlHash, status.progress);
+
+            if (status.complete) {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                if (spotifyPublicPlaylistStates[playlistId]) spotifyPublicPlaylistStates[playlistId].phase = 'sync_complete';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'sync_complete';
+                updateSpotifyPublicCardPhase(playlistId, 'sync_complete');
+                updateSpotifyPublicModalButtons(urlHash, 'sync_complete');
+                showToast('Spotify public playlist sync complete!', 'success');
+            } else if (status.sync_status === 'error') {
+                clearInterval(pollInterval);
+                delete activeYouTubePollers[urlHash];
+                if (spotifyPublicPlaylistStates[playlistId]) spotifyPublicPlaylistStates[playlistId].phase = 'discovered';
+                if (youtubePlaylistStates[urlHash]) youtubePlaylistStates[urlHash].phase = 'discovered';
+                updateSpotifyPublicCardPhase(playlistId, 'discovered');
+                updateSpotifyPublicModalButtons(urlHash, 'discovered');
+                showToast(`Sync failed: ${status.error || 'Unknown error'}`, 'error');
+            }
+        } catch (error) {
+            console.error('Error polling Spotify public sync:', error);
+            if (activeYouTubePollers[urlHash]) {
+                clearInterval(activeYouTubePollers[urlHash]);
+                delete activeYouTubePollers[urlHash];
+            }
+        }
+    };
+
+    if (!socketConnected) pollFunction();
+
+    const pollInterval = setInterval(pollFunction, 1000);
+    activeYouTubePollers[urlHash] = pollInterval;
+}
+
+async function cancelSpotifyPublicSync(urlHash) {
+    try {
+        console.log('Cancelling Spotify public sync:', urlHash);
+
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_spotify_public_playlist) {
+            console.error('Invalid Spotify public playlist state');
+            return;
+        }
+
+        const playlistId = state.spotify_public_playlist_id;
+        const response = await fetch(`/api/spotify-public/sync/cancel/${playlistId}`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            showToast(`Error cancelling sync: ${result.error}`, 'error');
+            return;
+        }
+
+        if (activeYouTubePollers[urlHash]) {
+            clearInterval(activeYouTubePollers[urlHash]);
+            delete activeYouTubePollers[urlHash];
+        }
+
+        const syncId = state && state.syncPlaylistId;
+        if (syncId && _syncProgressCallbacks[syncId]) {
+            if (socketConnected) socket.emit('sync:unsubscribe', { playlist_ids: [syncId] });
+            delete _syncProgressCallbacks[syncId];
+        }
+
+        updateSpotifyPublicCardPhase(playlistId, 'discovered');
+        updateSpotifyPublicModalButtons(urlHash, 'discovered');
+
+        showToast('Spotify public sync cancelled', 'info');
+
+    } catch (error) {
+        console.error('Error cancelling Spotify public sync:', error);
+        showToast(`Error cancelling sync: ${error.message}`, 'error');
+    }
+}
+
+function updateSpotifyPublicCardSyncProgress(urlHash, progress) {
+    const state = spotifyPublicPlaylistStates[urlHash];
+    if (!state || !state.playlist || !progress) return;
+
+    state.lastSyncProgress = progress;
+
+    const card = document.getElementById(`spotify-public-card-${urlHash}`);
+    if (!card) return;
+
+    const progressElement = card.querySelector('.playlist-card-progress');
+
+    let statusCounterHTML = '';
+    if (progress && progress.total_tracks > 0) {
+        const matched = progress.matched_tracks || 0;
+        const failed = progress.failed_tracks || 0;
+        const total = progress.total_tracks || 0;
+        const processed = matched + failed;
+        const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+        statusCounterHTML = `
+            <div class="playlist-card-sync-status">
+                <span class="sync-stat total-tracks">♪ ${total}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat matched-tracks">✓ ${matched}</span>
+                <span class="sync-separator">/</span>
+                <span class="sync-stat failed-tracks">✗ ${failed}</span>
+                <span class="sync-stat percentage">(${percentage}%)</span>
+            </div>
+        `;
+    }
+
+    if (statusCounterHTML) {
+        progressElement.innerHTML = statusCounterHTML;
+    }
+}
+
+function updateSpotifyPublicModalSyncProgress(urlHash, progress) {
+    const statusDisplay = document.getElementById(`spotify-public-sync-status-${urlHash}`);
+    if (!statusDisplay || !progress) return;
+
+    const totalEl = document.getElementById(`spotify-public-total-${urlHash}`);
+    const matchedEl = document.getElementById(`spotify-public-matched-${urlHash}`);
+    const failedEl = document.getElementById(`spotify-public-failed-${urlHash}`);
+    const percentageEl = document.getElementById(`spotify-public-percentage-${urlHash}`);
+
+    const total = progress.total_tracks || 0;
+    const matched = progress.matched_tracks || 0;
+    const failed = progress.failed_tracks || 0;
+
+    if (totalEl) totalEl.textContent = total;
+    if (matchedEl) matchedEl.textContent = matched;
+    if (failedEl) failedEl.textContent = failed;
+
+    if (total > 0) {
+        const processed = matched + failed;
+        const percentage = Math.round((processed / total) * 100);
+        if (percentageEl) percentageEl.textContent = percentage;
+    }
+}
+
+function updateSpotifyPublicModalButtons(urlHash, phase) {
+    const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+    if (!modal) return;
+
+    const footerLeft = modal.querySelector('.modal-footer-left');
+    if (footerLeft) {
+        footerLeft.innerHTML = getModalActionButtons(urlHash, phase);
+    }
+}
+
+async function startSpotifyPublicDownloadMissing(urlHash) {
+    try {
+        console.log('🔍 Starting download missing tracks for Spotify public playlist:', urlHash);
+
+        const state = youtubePlaylistStates[urlHash];
+        if (!state || !state.is_spotify_public_playlist) {
+            console.error('Invalid Spotify public playlist state for download');
+            return;
+        }
+
+        const discoveryResults = state.discoveryResults || state.discovery_results;
+
+        if (!discoveryResults) {
+            showToast('No discovery results available for download', 'error');
+            return;
+        }
+
+        const spotifyTracks = [];
+        for (const result of discoveryResults) {
+            if (result.spotify_data) {
+                spotifyTracks.push(result.spotify_data);
+            } else if (result.spotify_track && result.status_class === 'found') {
+                const albumData = result.spotify_album || 'Unknown Album';
+                const albumObject = typeof albumData === 'object' && albumData !== null
+                    ? albumData
+                    : {
+                        name: typeof albumData === 'string' ? albumData : 'Unknown Album',
+                        album_type: 'album',
+                        images: []
+                    };
+
+                spotifyTracks.push({
+                    id: result.spotify_id || 'unknown',
+                    name: result.spotify_track || 'Unknown Track',
+                    artists: result.spotify_artist ? [result.spotify_artist] : ['Unknown Artist'],
+                    album: albumObject,
+                    duration_ms: 0
+                });
+            }
+        }
+
+        if (spotifyTracks.length === 0) {
+            showToast('No Spotify matches found for download', 'error');
+            return;
+        }
+
+        const realUrlHash = state.spotify_public_playlist_id;
+        const virtualPlaylistId = `spotify_public_${realUrlHash}`;
+        const playlistName = state.playlist.name;
+
+        state.convertedSpotifyPlaylistId = virtualPlaylistId;
+
+        // Sync convertedSpotifyPlaylistId to spotifyPublicPlaylistStates for card click routing
+        if (realUrlHash && spotifyPublicPlaylistStates[realUrlHash]) {
+            spotifyPublicPlaylistStates[realUrlHash].convertedSpotifyPlaylistId = virtualPlaylistId;
+        }
+
+        const discoveryModal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+        if (discoveryModal) {
+            discoveryModal.classList.add('hidden');
+        }
+
+        await openDownloadMissingModalForTidal(virtualPlaylistId, playlistName, spotifyTracks);
+
+    } catch (error) {
+        console.error('Error starting Spotify public download missing:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+// ===============================
 // YOUTUBE PLAYLIST FUNCTIONALITY
 // ===============================
 
@@ -26191,7 +27336,7 @@ async function parseYouTubePlaylist() {
         mirrorPlaylist('youtube', result.url_hash, result.name, result.tracks.map(t => ({
             track_name: t.name || t.title || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artist || ''),
             album_name: '', duration_ms: t.duration_ms || 0, source_track_id: t.id || ''
-        })));
+        })), { description: url });
 
         // Clear input
         urlInput.value = '';
@@ -26640,6 +27785,8 @@ function openYouTubeDiscoveryModal(urlHash) {
                 startTidalSyncPolling(urlHash);
             } else if (state.is_deezer_playlist) {
                 startDeezerSyncPolling(urlHash);
+            } else if (state.is_spotify_public_playlist) {
+                startSpotifyPublicSyncPolling(urlHash);
             } else if (state.is_beatport_playlist) {
                 startBeatportSyncPolling(urlHash);
             } else if (state.is_listenbrainz_playlist) {
@@ -26649,19 +27796,22 @@ function openYouTubeDiscoveryModal(urlHash) {
             }
         }
     } else {
-        // Create new modal (support YouTube, Tidal, Deezer, Beatport, ListenBrainz, and Mirrored)
+        // Create new modal (support YouTube, Tidal, Deezer, Beatport, ListenBrainz, Spotify Public, and Mirrored)
         const isTidal = state.is_tidal_playlist;
         const isDeezer = state.is_deezer_playlist;
+        const isSpotifyPublic = state.is_spotify_public_playlist;
         const isBeatport = state.is_beatport_playlist;
         const isListenBrainz = state.is_listenbrainz_playlist;
         const isMirrored = state.is_mirrored_playlist;
         const modalTitle = isMirrored ? '🎵 Mirrored Playlist Discovery' :
+            isSpotifyPublic ? '🎵 Spotify Playlist Discovery' :
             isDeezer ? '🎵 Deezer Playlist Discovery' :
             isTidal ? '🎵 Tidal Playlist Discovery' :
             isBeatport ? '🎵 Beatport Chart Discovery' :
                 isListenBrainz ? '🎵 ListenBrainz Playlist Discovery' :
                     '🎵 YouTube Playlist Discovery';
         const sourceLabel = isMirrored ? (state.mirrored_source ? state.mirrored_source.charAt(0).toUpperCase() + state.mirrored_source.slice(1) : 'Source') :
+            isSpotifyPublic ? 'Spotify' :
             isDeezer ? 'Deezer' :
             isTidal ? 'Tidal' :
             isBeatport ? 'Beatport' :
@@ -26674,7 +27824,7 @@ function openYouTubeDiscoveryModal(urlHash) {
                     <div class="modal-header">
                         <h2>${modalTitle}</h2>
                         <div class="modal-subtitle">${state.playlist.name} (${state.playlist.tracks.length} tracks)</div>
-                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport, isListenBrainz, isMirrored, isDeezer)}</div>
+                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport, isListenBrainz, isMirrored, isDeezer, isSpotifyPublic)}</div>
                         <button class="modal-close-btn" onclick="closeYouTubeDiscoveryModal('${urlHash}')">✕</button>
                     </div>
 
@@ -26809,6 +27959,8 @@ function openYouTubeDiscoveryModal(urlHash) {
                 startTidalSyncPolling(urlHash);
             } else if (state.is_deezer_playlist) {
                 startDeezerSyncPolling(urlHash);
+            } else if (state.is_spotify_public_playlist) {
+                startSpotifyPublicSyncPolling(urlHash);
             } else if (state.is_beatport_playlist) {
                 startBeatportSyncPolling(urlHash);
             } else {
@@ -26828,6 +27980,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
 
     const isTidal = state && state.is_tidal_playlist;
     const isDeezer = state && state.is_deezer_playlist;
+    const isSpotifyPublic = state && state.is_spotify_public_playlist;
     const isBeatport = state && state.is_beatport_playlist;
     const isListenBrainz = state && state.is_listenbrainz_playlist;
 
@@ -26846,6 +27999,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                 } else if (isTidal) {
                     return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
                 } else if (isDeezer) {
+                    return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
+                } else if (isSpotifyPublic) {
                     return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
                 } else if (isBeatport) {
                     return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
@@ -26875,6 +28030,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isDeezer) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isSpotifyPublic) {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isBeatport) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else {
@@ -26885,12 +28042,13 @@ function getModalActionButtons(urlHash, phase, state = null) {
             // Only show download button if we have matches or a converted playlist ID
             if (hasSpotifyMatches || hasConvertedPlaylistId) {
                 if (isListenBrainz) {
-                    // ListenBrainz uses same download function as others (to be implemented)
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isTidal) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startTidalDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isDeezer) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isSpotifyPublic) {
+                    buttons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isBeatport) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else {
@@ -26950,6 +28108,18 @@ function getModalActionButtons(urlHash, phase, state = null) {
                         <span class="sync-stat percentage">(<span id="deezer-percentage-${urlHash}">0</span>%)</span>
                     </div>
                 `;
+            } else if (isSpotifyPublic) {
+                return `
+                    <button class="modal-btn modal-btn-danger" onclick="cancelSpotifyPublicSync('${urlHash}')">❌ Cancel Sync</button>
+                    <div class="playlist-modal-sync-status" id="spotify-public-sync-status-${urlHash}" style="display: flex;">
+                        <span class="sync-stat total-tracks">♪ <span id="spotify-public-total-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat matched-tracks">✓ <span id="spotify-public-matched-${urlHash}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat failed-tracks">✗ <span id="spotify-public-failed-${urlHash}">0</span></span>
+                        <span class="sync-stat percentage">(<span id="spotify-public-percentage-${urlHash}">0</span>%)</span>
+                    </div>
+                `;
             } else if (isBeatport) {
                 return `
                     <button class="modal-btn modal-btn-danger" onclick="cancelBeatportSync('${urlHash}')">❌ Cancel Sync</button>
@@ -26985,6 +28155,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isTidal) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isSpotifyPublic) {
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isBeatport) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else {
@@ -26998,6 +28170,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isTidal) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isSpotifyPublic) {
+                    syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else if (isBeatport) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
                 } else {
@@ -27023,8 +28197,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
     }
 }
 
-function getModalDescription(phase, isTidal = false, isBeatport = false, isListenBrainz = false, isMirrored = false, isDeezer = false) {
-    const source = isMirrored ? 'mirrored' : (isDeezer ? 'Deezer' : (isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube'))));
+function getModalDescription(phase, isTidal = false, isBeatport = false, isListenBrainz = false, isMirrored = false, isDeezer = false, isSpotifyPublic = false) {
+    const source = isMirrored ? 'mirrored' : (isSpotifyPublic ? 'Spotify' : (isDeezer ? 'Deezer' : (isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube')))));
     switch (phase) {
         case 'fresh':
             return `Ready to discover clean ${currentMusicSourceName} metadata for ${source} tracks...`;
@@ -27057,10 +28231,11 @@ function getInitialProgressText(phase, isTidal = false, isBeatport = false, isLi
 function generateTableRowsFromState(state, urlHash) {
     const isTidal = state.is_tidal_playlist;
     const isDeezer = state.is_deezer_playlist;
+    const isSpotifyPublic = state.is_spotify_public_playlist;
     const isBeatport = state.is_beatport_playlist;
     const isListenBrainz = state.is_listenbrainz_playlist;
     const isMirrored = state.is_mirrored_playlist;
-    const platform = isMirrored ? 'mirrored' : (isDeezer ? 'deezer' : (isListenBrainz ? 'listenbrainz' : (isTidal ? 'tidal' : (isBeatport ? 'beatport' : 'youtube'))));
+    const platform = isMirrored ? 'mirrored' : (isSpotifyPublic ? 'spotify_public' : (isDeezer ? 'deezer' : (isListenBrainz ? 'listenbrainz' : (isTidal ? 'tidal' : (isBeatport ? 'beatport' : 'youtube')))));
 
     // Support both camelCase and snake_case
     const discoveryResults = state.discoveryResults || state.discovery_results;
@@ -27205,10 +28380,11 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
         if (actionsCell) {
             const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
             const platform = state?.is_mirrored_playlist ? 'mirrored' :
+                (state?.is_spotify_public_playlist ? 'spotify_public' :
                 (state?.is_deezer_playlist ? 'deezer' :
                 (state?.is_listenbrainz_playlist ? 'listenbrainz' :
                 (state?.is_tidal_playlist ? 'tidal' :
-                    (state?.is_beatport_playlist ? 'beatport' : 'youtube'))));
+                    (state?.is_beatport_playlist ? 'beatport' : 'youtube')))));
             actionsCell.innerHTML = generateDiscoveryActionButton(result, urlHash, platform);
         }
     });
@@ -27269,13 +28445,44 @@ function closeYouTubeDiscoveryModal(urlHash) {
     if (state) {
         const isTidal = state.is_tidal_playlist;
         const isDeezer = state.is_deezer_playlist;
+        const isSpotifyPublic = state.is_spotify_public_playlist;
         const isBeatport = state.is_beatport_playlist;
 
         // Reset to 'discovered' phase if modal is closed after completion (like Tidal does)
         if (state.phase === 'sync_complete' || state.phase === 'download_complete') {
-            console.log(`🧹 [Modal Close] Resetting ${isDeezer ? 'Deezer' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube'))} state after completion`);
+            console.log(`🧹 [Modal Close] Resetting ${isSpotifyPublic ? 'Spotify Public' : (isDeezer ? 'Deezer' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube')))} state after completion`);
 
-            if (isDeezer) {
+            if (isSpotifyPublic) {
+                // Spotify Public: Extract url_hash and reset state
+                const spUrlHash = state.spotify_public_playlist_id || null;
+                if (spUrlHash && spotifyPublicPlaylistStates[spUrlHash]) {
+                    const preservedData = {
+                        playlist: spotifyPublicPlaylistStates[spUrlHash].playlist,
+                        discovery_results: spotifyPublicPlaylistStates[spUrlHash].discovery_results,
+                        spotify_matches: spotifyPublicPlaylistStates[spUrlHash].spotify_matches,
+                        discovery_progress: spotifyPublicPlaylistStates[spUrlHash].discovery_progress,
+                        convertedSpotifyPlaylistId: spotifyPublicPlaylistStates[spUrlHash].convertedSpotifyPlaylistId
+                    };
+
+                    delete spotifyPublicPlaylistStates[spUrlHash].download_process_id;
+                    delete spotifyPublicPlaylistStates[spUrlHash].phase;
+
+                    Object.assign(spotifyPublicPlaylistStates[spUrlHash], preservedData);
+                    spotifyPublicPlaylistStates[spUrlHash].phase = 'discovered';
+
+                    updateSpotifyPublicCardPhase(spUrlHash, 'discovered');
+
+                    try {
+                        fetch(`/api/spotify-public/update_phase/${spUrlHash}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ phase: 'discovered' })
+                        });
+                    } catch (error) {
+                        console.warn('Error updating backend Spotify Public phase:', error);
+                    }
+                }
+            } else if (isDeezer) {
                 // Deezer: Extract playlist ID and reset Deezer state
                 const deezerPlaylistId = state.deezer_playlist_id || null;
                 if (deezerPlaylistId && deezerPlaylistStates[deezerPlaylistId]) {
