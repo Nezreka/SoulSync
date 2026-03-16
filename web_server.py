@@ -18124,6 +18124,49 @@ def set_discovery_lookback_period():
         print(f"Error setting discovery lookback period: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/discovery/hemisphere', methods=['GET'])
+def get_hemisphere():
+    """Get the hemisphere setting for seasonal content."""
+    try:
+        db = get_database()
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM metadata WHERE key = 'hemisphere'")
+            row = cursor.fetchone()
+            value = 'northern'
+            if row:
+                val = row[0] if isinstance(row, tuple) else row['value']
+                if val in ('northern', 'southern'):
+                    value = val
+        return jsonify({"hemisphere": value})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/discovery/hemisphere', methods=['POST'])
+def set_hemisphere():
+    """Set the hemisphere for seasonal content (northern or southern)."""
+    try:
+        data = request.get_json()
+        hemisphere = data.get('hemisphere', '').lower()
+        if hemisphere not in ('northern', 'southern'):
+            return jsonify({"error": "Must be 'northern' or 'southern'"}), 400
+
+        db = get_database()
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value, updated_at)
+                VALUES ('hemisphere', ?, CURRENT_TIMESTAMP)
+            """, (hemisphere,))
+            conn.commit()
+
+        logger.info("Hemisphere set to: %s", hemisphere)
+        return jsonify({"success": True, "hemisphere": hemisphere})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/wishlist/tracks', methods=['GET'])
 def get_wishlist_tracks():
     """

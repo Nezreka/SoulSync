@@ -4916,6 +4916,17 @@ async function loadSettingsData() {
             console.error('Error loading discovery lookback period:', error);
         }
 
+        // Load Hemisphere setting
+        try {
+            const hemiResponse = await fetch('/api/discovery/hemisphere');
+            const hemiData = await hemiResponse.json();
+            if (hemiData.hemisphere) {
+                document.getElementById('discovery-hemisphere').value = hemiData.hemisphere;
+            }
+        } catch (error) {
+            console.error('Error loading hemisphere setting:', error);
+        }
+
         // Load current log level
         try {
             const logLevelResponse = await fetch('/api/settings/log-level');
@@ -5723,6 +5734,18 @@ async function saveSettings(quiet = false) {
         } catch (error) {
             console.error('Error saving discovery lookback period:', error);
             lookbackSaved = false;
+        }
+
+        // Save hemisphere setting
+        try {
+            const hemisphere = document.getElementById('discovery-hemisphere').value;
+            await fetch('/api/discovery/hemisphere', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ hemisphere })
+            });
+        } catch (error) {
+            console.error('Error saving hemisphere setting:', error);
         }
 
         if (result.success && qualityProfileSaved && lookbackSaved) {
