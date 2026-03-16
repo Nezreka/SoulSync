@@ -31,7 +31,7 @@ from config.settings import config_manager
 logger = get_logger("web_server")
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-SOULSYNC_VERSION = "1.9"
+SOULSYNC_VERSION = "2.0"
 
 # Dedicated source reuse logger — writes to logs/source_reuse.log
 import logging as _logging
@@ -16956,6 +16956,18 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🎵 Deezer Metadata Source",
+                "description": "Deezer added as a configurable free metadata fallback alongside iTunes/Apple Music",
+                "features": [
+                    "• New setting to choose between iTunes and Deezer as your fallback metadata source — switch anytime from Settings",
+                    "• All metadata lookups, watchlist scans, discovery, and enrichment seamlessly use whichever fallback is configured",
+                    "• On-the-fly artist ID resolution — switching sources auto-matches existing watchlist artists by name on the next scan",
+                    "• Source badges on watchlist artist cards show which services (Spotify, iTunes, Deezer) each artist is matched to",
+                    "• Full backward compatibility — existing iTunes users experience zero changes on upgrade",
+                    "• Name-based duplicate detection prevents adding the same artist twice across different metadata sources"
+                ]
+            },
+            {
                 "title": "📜 Library History",
                 "description": "Persistent record of every download and server import — viewable from the dashboard",
                 "features": [
@@ -16981,7 +16993,7 @@ def get_version_info():
                 "features": [
                     "• New download mode alongside Soulseek, YouTube, Tidal, and Qobuz — select HiFi Only or use in hybrid mode",
                     "• Quality selection: Hi-Res, Lossless, High, or Low with automatic fallback chain (hires → lossless → high → low)",
-                    "• Automatic instance rotation across 6 public API servers — if one goes down, the next is tried seamlessly",
+                    "• Automatic instance rotation across 6 public API servers — any server error triggers failover to the next instance",
                     "• Full search, download, streaming, and post-processing support — works identically to other download sources",
                     "• Test connection button in Settings to verify instance availability"
                 ]
@@ -17045,6 +17057,7 @@ def get_version_info():
                     "• Fix empty brackets in folder names ($year, $quality etc.) not being cleaned when template variables resolve to empty",
                     "• Fix missing album cover art in download progress bubbles for redownload and issue modal downloads",
                     "• Cancel button for watchlist scans — stop manual or automation-triggered scans mid-run",
+                    "• Fix HiFi client not failing over to next instance on HTTP 500 — previously only 502/503/504 triggered rotation",
                     "• Fix service status labels missing HiFi and Qobuz display names",
                     "• Redownload button on enhanced library view — re-download any album directly from the library manager",
                     "• Hemisphere setting for seasonal playlists — southern hemisphere users get correct seasonal recommendations",
