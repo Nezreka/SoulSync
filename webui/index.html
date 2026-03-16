@@ -4476,6 +4476,13 @@
                                     </label>
                                     <small class="settings-hint">Animated particle effects behind each page. Disable to reduce GPU usage.</small>
                                 </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="worker-orbs-enabled" checked>
+                                        Worker Orbs
+                                    </label>
+                                    <small class="settings-hint">Dashboard header buttons animate as floating orbs. Hover the header to expand. Desktop only.</small>
+                                </div>
                             </div>
 
                             <!-- Database Settings -->
@@ -5867,6 +5874,7 @@
     <script src="{{ url_for('static', filename='script.js') }}"></script>
     <script src="{{ url_for('static', filename='docs.js') }}"></script>
     <script src="{{ url_for('static', filename='particles.js') }}"></script>
+    <script src="{{ url_for('static', filename='worker-orbs.js') }}"></script>
 </body>
 
 </html>
