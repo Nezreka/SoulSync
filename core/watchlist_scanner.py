@@ -29,6 +29,21 @@ ITUNES_MAX_RETRIES = 3
 ITUNES_BASE_DELAY = 1.0  # Base delay in seconds for exponential backoff
 
 
+def _get_fallback_metadata_client():
+    """Get the configured metadata fallback client (iTunes or Deezer)."""
+    try:
+        from config.settings import config_manager
+        source = config_manager.get('metadata.fallback_source', 'itunes') or 'itunes'
+        if source == 'deezer':
+            from core.deezer_client import DeezerClient
+            return DeezerClient(), 'deezer'
+        from core.itunes_client import iTunesClient
+        return iTunesClient(), 'itunes'
+    except Exception:
+        from core.itunes_client import iTunesClient
+        return iTunesClient(), 'itunes'
+
+
 def itunes_api_call_with_retry(func, *args, max_retries=ITUNES_MAX_RETRIES, **kwargs):
     """
     Execute an iTunes API call with exponential backoff retry logic.
@@ -402,29 +417,38 @@ class WatchlistScanner:
             else:
                 logger.warning(f"No Spotify ID for {watchlist_artist.artist_name}, cannot scan with Spotify")
                 return (None, None, None)
-        else:  # itunes
-            if watchlist_artist.itunes_artist_id:
-                return (self.metadata_service.itunes, watchlist_artist.itunes_artist_id, 'itunes')
+        else:  # itunes or deezer fallback
+            fallback_source = provider  # 'itunes' or 'deezer'
+            fallback_client = self.metadata_service.itunes  # May be iTunesClient or DeezerClient
+            # Pick the right stored ID for the active fallback source
+            stored_id = watchlist_artist.deezer_artist_id if fallback_source == 'deezer' else watchlist_artist.itunes_artist_id
+            if stored_id:
+                return (fallback_client, stored_id, fallback_source)
             else:
-                # No iTunes ID stored - search by name and cache it
-                logger.info(f"No iTunes ID for {watchlist_artist.artist_name}, searching by name...")
+                # No ID stored for this source - search by name and cache it
+                logger.info(f"No {fallback_source} ID for {watchlist_artist.artist_name}, searching by name...")
                 try:
-                    itunes_client = self.metadata_service.itunes
-                    search_results = itunes_client.search_artists(watchlist_artist.artist_name, limit=1)
+                    search_results = fallback_client.search_artists(watchlist_artist.artist_name, limit=1)
                     if search_results and len(search_results) > 0:
-                        itunes_id = search_results[0].id
-                        logger.info(f"Found iTunes ID {itunes_id} for {watchlist_artist.artist_name}")
-                        # Cache the iTunes ID in the database for future use
-                        self.database.update_watchlist_artist_itunes_id(
-                            watchlist_artist.spotify_artist_id or str(watchlist_artist.id),
-                            itunes_id
-                        )
-                        return (itunes_client, itunes_id, 'itunes')
+                        found_id = search_results[0].id
+                        logger.info(f"Found {fallback_source} ID {found_id} for {watchlist_artist.artist_name}")
+                        # Cache the ID in the database for future use
+                        if fallback_source == 'deezer':
+                            self.database.update_watchlist_artist_deezer_id(
+                                watchlist_artist.spotify_artist_id or str(watchlist_artist.id),
+                                found_id
+                            )
+                        else:
+                            self.database.update_watchlist_artist_itunes_id(
+                                watchlist_artist.spotify_artist_id or str(watchlist_artist.id),
+                                found_id
+                            )
+                        return (fallback_client, found_id, fallback_source)
                     else:
-                        logger.warning(f"Could not find {watchlist_artist.artist_name} on iTunes")
+                        logger.warning(f"Could not find {watchlist_artist.artist_name} on {fallback_source}")
                         return (None, None, None)
                 except Exception as e:
-                    logger.error(f"Error searching iTunes for {watchlist_artist.artist_name}: {e}")
+                    logger.error(f"Error searching {fallback_source} for {watchlist_artist.artist_name}: {e}")
                     return (None, None, None)
 
     def get_active_client_and_artist_id(self, watchlist_artist: WatchlistArtist):
@@ -1551,13 +1575,12 @@ class WatchlistScanner:
 
             logger.info(f"Found {len(similar_artist_names)} similar artists from MusicMap")
 
-            # Get iTunes client for matching
-            from core.itunes_client import iTunesClient
-            itunes_client = iTunesClient()
+            # Get fallback metadata client for matching (iTunes or Deezer)
+            itunes_client, fallback_source = _get_fallback_metadata_client()
 
             # Get the searched artist's IDs to exclude them
             searched_spotify_id = None
-            searched_itunes_id = None
+            searched_fallback_id = None
             try:
                 # Try Spotify search
                 if self.spotify_client and self.spotify_client.is_spotify_authenticated():
@@ -1568,14 +1591,14 @@ class WatchlistScanner:
                 logger.debug(f"Could not get searched artist Spotify ID: {e}")
 
             try:
-                # Try iTunes search
-                itunes_results = itunes_client.search_artists(artist_name, limit=1)
-                if itunes_results and len(itunes_results) > 0:
-                    searched_itunes_id = itunes_results[0].id
+                # Try fallback source (iTunes/Deezer) search
+                fallback_results = itunes_client.search_artists(artist_name, limit=1)
+                if fallback_results and len(fallback_results) > 0:
+                    searched_fallback_id = fallback_results[0].id
             except Exception as e:
-                logger.debug(f"Could not get searched artist iTunes ID: {e}")
+                logger.debug(f"Could not get searched artist {fallback_source} ID: {e}")
 
-            # Match each artist to both Spotify and iTunes
+            # Match each artist to both Spotify and fallback source (iTunes/Deezer)
             matched_artists = []
             seen_names = set()  # Track seen artist names to prevent duplicates
 
@@ -1590,6 +1613,7 @@ class WatchlistScanner:
                         'name': artist_name_to_match,
                         'spotify_id': None,
                         'itunes_id': None,
+                        'deezer_id': None,
                         'image_url': None,
                         'genres': [],
                         'popularity': 0
@@ -1611,42 +1635,48 @@ class WatchlistScanner:
                         except Exception as e:
                             logger.debug(f"Spotify match failed for {artist_name_to_match}: {e}")
 
-                    # Try to match on iTunes (with retry for rate limiting)
+                    # Try to match on fallback source (iTunes/Deezer) with retry for rate limiting
                     try:
-                        itunes_results = itunes_api_call_with_retry(
+                        fallback_results = itunes_api_call_with_retry(
                             itunes_client.search_artists, artist_name_to_match, limit=1
                         )
-                        if itunes_results and len(itunes_results) > 0:
-                            itunes_artist = itunes_results[0]
+                        if fallback_results and len(fallback_results) > 0:
+                            fallback_artist = fallback_results[0]
                             # Skip if this is the searched artist
-                            if itunes_artist.id != searched_itunes_id:
-                                artist_data['itunes_id'] = itunes_artist.id
-                                # Use iTunes name if we don't have Spotify
+                            if fallback_artist.id != searched_fallback_id:
+                                # Store under the appropriate key based on fallback source
+                                if fallback_source == 'deezer':
+                                    artist_data['deezer_id'] = fallback_artist.id
+                                else:
+                                    artist_data['itunes_id'] = fallback_artist.id
+                                # Use fallback name if we don't have Spotify
                                 if not artist_data['spotify_id']:
-                                    artist_data['name'] = itunes_artist.name
-                                # Use iTunes genres if we don't have Spotify genres
-                                if not artist_data['genres'] and hasattr(itunes_artist, 'genres'):
-                                    artist_data['genres'] = itunes_artist.genres
+                                    artist_data['name'] = fallback_artist.name
+                                # Use fallback genres if we don't have Spotify genres
+                                if not artist_data['genres'] and hasattr(fallback_artist, 'genres'):
+                                    artist_data['genres'] = fallback_artist.genres
                         else:
-                            logger.info(f"  [iTunes] No match found for: {artist_name_to_match}")
+                            logger.info(f"  [{fallback_source}] No match found for: {artist_name_to_match}")
                     except Exception as e:
-                        logger.info(f"  [iTunes] Match failed for {artist_name_to_match}: {e}")
+                        logger.info(f"  [{fallback_source}] Match failed for {artist_name_to_match}: {e}")
 
                     # Only add if we got at least one ID
-                    if artist_data['spotify_id'] or artist_data['itunes_id']:
+                    fallback_id_key = 'deezer_id' if fallback_source == 'deezer' else 'itunes_id'
+                    if artist_data['spotify_id'] or artist_data.get(fallback_id_key):
                         seen_names.add(name_lower)
                         matched_artists.append(artist_data)
-                        logger.debug(f"  Matched: {artist_data['name']} (Spotify: {artist_data['spotify_id']}, iTunes: {artist_data['itunes_id']})")
+                        logger.debug(f"  Matched: {artist_data['name']} (Spotify: {artist_data['spotify_id']}, {fallback_source}: {artist_data.get(fallback_id_key)})")
 
                 except Exception as match_error:
                     logger.debug(f"Error matching {artist_name_to_match}: {match_error}")
                     continue
 
             # Log detailed matching statistics
-            itunes_matched = sum(1 for a in matched_artists if a.get('itunes_id'))
+            fallback_id_key = 'deezer_id' if fallback_source == 'deezer' else 'itunes_id'
+            fallback_matched = sum(1 for a in matched_artists if a.get(fallback_id_key))
             spotify_matched = sum(1 for a in matched_artists if a.get('spotify_id'))
-            both_matched = sum(1 for a in matched_artists if a.get('itunes_id') and a.get('spotify_id'))
-            logger.info(f"Matched {len(matched_artists)} similar artists - iTunes: {itunes_matched}, Spotify: {spotify_matched}, Both: {both_matched}")
+            both_matched = sum(1 for a in matched_artists if a.get(fallback_id_key) and a.get('spotify_id'))
+            logger.info(f"Matched {len(matched_artists)} similar artists - {fallback_source}: {fallback_matched}, Spotify: {spotify_matched}, Both: {both_matched}")
             return matched_artists
 
         except requests.exceptions.RequestException as e:
@@ -1669,40 +1699,42 @@ class WatchlistScanner:
             Number of similar artists updated with iTunes IDs
         """
         try:
-            # Get similar artists that are missing iTunes IDs
-            similar_artists = self.database.get_similar_artists_missing_itunes_ids(source_artist_id, profile_id=profile_id)
+            # Get fallback metadata client (iTunes or Deezer)
+            fallback_client, fallback_source = _get_fallback_metadata_client()
+
+            # Get similar artists that are missing IDs for the active fallback source
+            similar_artists = self.database.get_similar_artists_missing_fallback_ids(source_artist_id, fallback_source, profile_id=profile_id)
 
             if not similar_artists:
                 return 0
 
-            logger.info(f"Backfilling iTunes IDs for {len(similar_artists)} similar artists")
-
-            # Get iTunes client
-            from core.itunes_client import iTunesClient
-            itunes_client = iTunesClient()
+            logger.info(f"Backfilling {fallback_source} IDs for {len(similar_artists)} similar artists")
 
             updated_count = 0
             for similar_artist in similar_artists:
                 try:
-                    # Search iTunes by artist name
-                    itunes_results = itunes_client.search_artists(similar_artist.similar_artist_name, limit=1)
-                    if itunes_results and len(itunes_results) > 0:
-                        itunes_id = itunes_results[0].id
-                        # Update the similar artist with the iTunes ID
-                        if self.database.update_similar_artist_itunes_id(similar_artist.id, itunes_id):
+                    results = fallback_client.search_artists(similar_artist.similar_artist_name, limit=1)
+                    if results and len(results) > 0:
+                        found_id = results[0].id
+                        # Update the similar artist with the correct source ID
+                        if fallback_source == 'deezer':
+                            success = self.database.update_similar_artist_deezer_id(similar_artist.id, found_id)
+                        else:
+                            success = self.database.update_similar_artist_itunes_id(similar_artist.id, found_id)
+                        if success:
                             updated_count += 1
-                            logger.debug(f"  Backfilled iTunes ID {itunes_id} for {similar_artist.similar_artist_name}")
+                            logger.debug(f"  Backfilled {fallback_source} ID {found_id} for {similar_artist.similar_artist_name}")
                 except Exception as e:
-                    logger.debug(f"  Could not backfill iTunes ID for {similar_artist.similar_artist_name}: {e}")
+                    logger.debug(f"  Could not backfill {fallback_source} ID for {similar_artist.similar_artist_name}: {e}")
                     continue
 
             if updated_count > 0:
-                logger.info(f"Backfilled {updated_count} similar artists with iTunes IDs")
+                logger.info(f"Backfilled {updated_count} similar artists with {fallback_source} IDs")
 
             return updated_count
 
         except Exception as e:
-            logger.error(f"Error backfilling similar artists iTunes IDs: {e}")
+            logger.error(f"Error backfilling similar artists {fallback_source if 'fallback_source' in dir() else 'fallback'} IDs: {e}")
             return 0
 
     def update_similar_artists(self, watchlist_artist: WatchlistArtist, limit: int = 10, profile_id: int = 1) -> bool:
@@ -1730,7 +1762,7 @@ class WatchlistScanner:
             stored_count = 0
             for rank, similar_artist in enumerate(similar_artists, 1):
                 try:
-                    # similar_artist has 'name', 'spotify_id', 'itunes_id', 'image_url', 'genres', 'popularity'
+                    # similar_artist has 'name', 'spotify_id', 'itunes_id', 'deezer_id', 'image_url', 'genres', 'popularity'
                     success = self.database.add_or_update_similar_artist(
                         source_artist_id=source_artist_id,
                         similar_artist_name=similar_artist['name'],
@@ -1740,12 +1772,15 @@ class WatchlistScanner:
                         profile_id=profile_id,
                         image_url=similar_artist.get('image_url'),
                         genres=similar_artist.get('genres'),
-                        popularity=similar_artist.get('popularity', 0)
+                        popularity=similar_artist.get('popularity', 0),
+                        similar_artist_deezer_id=similar_artist.get('deezer_id')
                     )
 
                     if success:
                         stored_count += 1
-                        logger.debug(f"  #{rank}: {similar_artist['name']} (Spotify: {similar_artist.get('spotify_id')}, iTunes: {similar_artist.get('itunes_id')})")
+                        fallback_id = similar_artist.get('deezer_id') or similar_artist.get('itunes_id')
+                        fallback_label = 'Deezer' if similar_artist.get('deezer_id') else 'iTunes'
+                        logger.debug(f"  #{rank}: {similar_artist['name']} (Spotify: {similar_artist.get('spotify_id')}, {fallback_label}: {fallback_id})")
 
                 except Exception as e:
                     logger.warning(f"Error storing similar artist {similar_artist.get('name', 'Unknown')}: {e}")
@@ -1795,16 +1830,15 @@ class WatchlistScanner:
             # Determine which sources are available
             spotify_available = self.spotify_client and self.spotify_client.is_spotify_authenticated()
 
-            # Import iTunes client for fallback
-            from core.itunes_client import iTunesClient
-            itunes_client = iTunesClient()
-            itunes_available = True  # iTunes is always available (no auth needed)
+            # Import fallback metadata client (iTunes or Deezer)
+            itunes_client, fallback_source = _get_fallback_metadata_client()
+            fallback_available = True  # Fallback source is always available (no auth needed)
 
-            if not spotify_available and not itunes_available:
+            if not spotify_available and not fallback_available:
                 logger.warning("No music sources available to populate discovery pool")
                 return
 
-            logger.info(f"Sources available - Spotify: {spotify_available}, iTunes: {itunes_available}")
+            logger.info(f"Sources available - Spotify: {spotify_available}, {fallback_source}: {fallback_available}")
 
             # Get top similar artists for this profile's watchlist (ordered by occurrence_count)
             similar_artists = self.database.get_top_similar_artists(limit=top_artists_limit, profile_id=profile_id)
@@ -1834,25 +1868,28 @@ class WatchlistScanner:
                         progress_callback('artist', f'{similar_artist.similar_artist_name} ({artist_idx}/{len(similar_artists)})')
 
                     # Build list of sources to process for this artist
-                    # iTunes is ALWAYS processed (baseline), Spotify is added if authenticated
+                    # Fallback source (iTunes/Deezer) is ALWAYS processed (baseline), Spotify is added if authenticated
                     sources_to_process = []
 
-                    # Always add iTunes first (baseline source)
-                    itunes_id = similar_artist.similar_artist_itunes_id
-                    if not itunes_id:
-                        # On-the-fly lookup for missing iTunes ID (seamless provider switching)
+                    # Always add fallback source first (baseline source)
+                    fallback_id = similar_artist.similar_artist_itunes_id if fallback_source == 'itunes' else getattr(similar_artist, 'similar_artist_deezer_id', None)
+                    if not fallback_id:
+                        # On-the-fly lookup for missing fallback ID (seamless provider switching)
                         try:
-                            itunes_results = itunes_client.search_artists(similar_artist.similar_artist_name, limit=1)
-                            if itunes_results and len(itunes_results) > 0:
-                                itunes_id = itunes_results[0].id
+                            fallback_results = itunes_client.search_artists(similar_artist.similar_artist_name, limit=1)
+                            if fallback_results and len(fallback_results) > 0:
+                                fallback_id = fallback_results[0].id
                                 # Cache it for future use
-                                self.database.update_similar_artist_itunes_id(similar_artist.id, itunes_id)
-                                logger.debug(f"  Resolved iTunes ID {itunes_id} for {similar_artist.similar_artist_name}")
+                                if fallback_source == 'deezer':
+                                    self.database.update_similar_artist_deezer_id(similar_artist.id, fallback_id)
+                                else:
+                                    self.database.update_similar_artist_itunes_id(similar_artist.id, fallback_id)
+                                logger.debug(f"  Resolved {fallback_source} ID {fallback_id} for {similar_artist.similar_artist_name}")
                         except Exception as e:
-                            logger.debug(f"  Could not resolve iTunes ID for {similar_artist.similar_artist_name}: {e}")
+                            logger.debug(f"  Could not resolve {fallback_source} ID for {similar_artist.similar_artist_name}: {e}")
 
-                    if itunes_id:
-                        sources_to_process.append(('itunes', itunes_id))
+                    if fallback_id:
+                        sources_to_process.append((fallback_source, fallback_id))
 
                     # Add Spotify if authenticated and we have an ID
                     if spotify_available and similar_artist.similar_artist_spotify_id:
@@ -1874,7 +1911,7 @@ class WatchlistScanner:
                                     album_type='album,single,ep',
                                     limit=50
                                 )
-                            else:  # itunes
+                            else:  # itunes or deezer fallback
                                 all_albums = itunes_client.get_artist_albums(
                                     artist_id,
                                     album_type='album,single,ep',
@@ -1892,7 +1929,7 @@ class WatchlistScanner:
                                     artist_data = self.spotify_client.get_artist(artist_id)
                                     if artist_data and 'genres' in artist_data:
                                         artist_genres = artist_data['genres']
-                                else:  # iTunes - genres from artist lookup
+                                else:  # itunes/deezer - genres from artist lookup
                                     artist_data = itunes_client.get_artist(artist_id)
                                     if artist_data and 'genres' in artist_data:
                                         artist_genres = artist_data['genres']
@@ -1938,7 +1975,7 @@ class WatchlistScanner:
                                         if not album_data or 'tracks' not in album_data:
                                             continue
                                         tracks = album_data['tracks'].get('items', [])
-                                    else:  # itunes
+                                    else:  # itunes or deezer fallback
                                         album_data = itunes_client.get_album(album.id)
                                         if not album_data:
                                             continue
@@ -1978,9 +2015,9 @@ class WatchlistScanner:
                                             }
 
                                             # Build track data for discovery pool with source-specific IDs
-                                            # iTunes has no popularity data — synthesize from recency + occurrence
+                                            # iTunes/Deezer have no popularity data — synthesize from recency + occurrence
                                             raw_popularity = album_data.get('popularity', 0)
-                                            if source == 'itunes' and raw_popularity == 0:
+                                            if source in ('itunes', 'deezer') and raw_popularity == 0:
                                                 # Base 45, boost by recency and artist occurrence count
                                                 synth_pop = 45
                                                 if is_new:
@@ -2022,6 +2059,10 @@ class WatchlistScanner:
                                                 track_data['spotify_track_id'] = track.get('id')
                                                 track_data['spotify_album_id'] = album_data.get('id')
                                                 track_data['spotify_artist_id'] = similar_artist.similar_artist_spotify_id
+                                            elif source == 'deezer':
+                                                track_data['deezer_track_id'] = track.get('id')
+                                                track_data['deezer_album_id'] = album_data.get('id')
+                                                track_data['deezer_artist_id'] = getattr(similar_artist, 'similar_artist_deezer_id', None)
                                             else:  # itunes
                                                 track_data['itunes_track_id'] = track.get('id')
                                                 track_data['itunes_album_id'] = album_data.get('id')
@@ -2100,22 +2141,22 @@ class WatchlistScanner:
                                 except Exception as e:
                                     logger.debug(f"Spotify search failed for {album_row['title']}: {e}")
 
-                            # Fall back to iTunes if Spotify didn't work
-                            if not tracks and itunes_available:
+                            # Fall back to fallback source (iTunes/Deezer) if Spotify didn't work
+                            if not tracks and fallback_available:
                                 try:
                                     search_results = itunes_client.search_albums(query, limit=1)
                                     if search_results and len(search_results) > 0:
-                                        itunes_album = search_results[0]
-                                        album_data = itunes_client.get_album(itunes_album.id)
+                                        fallback_album = search_results[0]
+                                        album_data = itunes_client.get_album(fallback_album.id)
                                         if album_data:
-                                            tracks_data = itunes_client.get_album_tracks(itunes_album.id)
+                                            tracks_data = itunes_client.get_album_tracks(fallback_album.id)
                                             tracks = tracks_data.get('items', []) if tracks_data else []
-                                            db_source = 'itunes'
-                                            # For iTunes, artist ID is in the album data
+                                            db_source = fallback_source
+                                            # Artist ID is in the album data
                                             if album_data.get('artists'):
                                                 artist_id_for_genres = album_data['artists'][0].get('id')
                                 except Exception as e:
-                                    logger.debug(f"iTunes search failed for {album_row['title']}: {e}")
+                                    logger.debug(f"{fallback_source} search failed for {album_row['title']}: {e}")
 
                             if not tracks or not album_data:
                                 continue
@@ -2177,6 +2218,10 @@ class WatchlistScanner:
                                         track_data['spotify_track_id'] = track.get('id')
                                         track_data['spotify_album_id'] = album_data.get('id')
                                         track_data['spotify_artist_id'] = artist_id_for_genres or ''
+                                    elif db_source == 'deezer':
+                                        track_data['deezer_track_id'] = track.get('id')
+                                        track_data['deezer_album_id'] = album_data.get('id')
+                                        track_data['deezer_artist_id'] = artist_id_for_genres or ''
                                     else:  # itunes
                                         track_data['itunes_track_id'] = track.get('id')
                                         track_data['itunes_album_id'] = album_data.get('id')
@@ -2395,24 +2440,23 @@ class WatchlistScanner:
 
             # 30-day window for recent releases
             cutoff_date = datetime.now() - timedelta(days=30)
-            cached_count = {'spotify': 0, 'itunes': 0}
+            cached_count = {'spotify': 0, 'itunes': 0, 'deezer': 0}
             albums_checked = 0
 
             # Determine available sources
             spotify_available = self.spotify_client and self.spotify_client.is_spotify_authenticated()
 
-            # Get iTunes client
-            from core.itunes_client import iTunesClient
-            itunes_client = iTunesClient()
+            # Get fallback metadata client (iTunes or Deezer)
+            itunes_client, fallback_source = _get_fallback_metadata_client()
 
             # Get artists to check (scoped to profile)
             watchlist_artists = self.database.get_watchlist_artists(profile_id=profile_id)
             similar_artists = self.database.get_top_similar_artists(limit=50, profile_id=profile_id)
 
             logger.info(f"Checking albums from {len(watchlist_artists)} watchlist + {len(similar_artists)} similar artists")
-            logger.info(f"Sources: Spotify={spotify_available}, iTunes=True")
+            logger.info(f"Sources: Spotify={spotify_available}, {fallback_source}=True")
 
-            def process_album(album, artist_name, artist_spotify_id, artist_itunes_id, source):
+            def process_album(album, artist_name, artist_spotify_id, artist_itunes_id, source, artist_deezer_id=None):
                 """Helper to process and cache a single album"""
                 nonlocal albums_checked
                 try:
@@ -2422,7 +2466,7 @@ class WatchlistScanner:
                     if not release_str:
                         return False
 
-                    # Handle iTunes ISO format (2017-12-08T08:00:00Z)
+                    # Handle iTunes/Deezer ISO format (2017-12-08T08:00:00Z)
                     if 'T' in release_str:
                         release_str = release_str.split('T')[0]
 
@@ -2432,10 +2476,12 @@ class WatchlistScanner:
                             album_data = {
                                 'album_spotify_id': album.id if source == 'spotify' else None,
                                 'album_itunes_id': album.id if source == 'itunes' else None,
+                                'album_deezer_id': album.id if source == 'deezer' else None,
                                 'album_name': album.name,
                                 'artist_name': artist_name,
                                 'artist_spotify_id': artist_spotify_id,
                                 'artist_itunes_id': artist_itunes_id,
+                                'artist_deezer_id': artist_deezer_id,
                                 'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
                                 'release_date': release_str[:10],
                                 'album_type': album.album_type if hasattr(album, 'album_type') else 'album'
@@ -2449,39 +2495,44 @@ class WatchlistScanner:
                 return False
 
             # Track resolution stats
-            itunes_resolved = 0
-            itunes_failed_resolve = 0
+            fallback_resolved = 0
+            fallback_failed_resolve = 0
 
             # Process watchlist artists
             for artist in watchlist_artists:
-                # Always process iTunes (baseline)
-                itunes_id = artist.itunes_artist_id
-                if not itunes_id:
-                    # Try to resolve iTunes ID on-the-fly (with retry for rate limiting)
+                # Always process fallback source (iTunes or Deezer) as baseline
+                fallback_id = artist.itunes_artist_id if fallback_source == 'itunes' else artist.deezer_artist_id
+                if not fallback_id:
+                    # Try to resolve fallback ID on-the-fly (with retry for rate limiting)
                     try:
                         results = itunes_api_call_with_retry(
                             itunes_client.search_artists, artist.artist_name, limit=1
                         )
                         if results and len(results) > 0:
-                            itunes_id = results[0].id
-                            itunes_resolved += 1
-                            logger.debug(f"[iTunes] Resolved ID for {artist.artist_name}: {itunes_id}")
+                            fallback_id = results[0].id
+                            fallback_resolved += 1
+                            logger.debug(f"[{fallback_source}] Resolved ID for {artist.artist_name}: {fallback_id}")
                         else:
-                            itunes_failed_resolve += 1
-                            logger.info(f"[iTunes] No artist found for: {artist.artist_name}")
+                            fallback_failed_resolve += 1
+                            logger.info(f"[{fallback_source}] No artist found for: {artist.artist_name}")
                     except Exception as e:
-                        itunes_failed_resolve += 1
-                        logger.info(f"[iTunes] Failed to resolve {artist.artist_name}: {e}")
+                        fallback_failed_resolve += 1
+                        logger.info(f"[{fallback_source}] Failed to resolve {artist.artist_name}: {e}")
 
-                if itunes_id:
+                if fallback_id:
                     try:
                         albums = itunes_api_call_with_retry(
-                            itunes_client.get_artist_albums, itunes_id, album_type='album,single,ep', limit=20
+                            itunes_client.get_artist_albums, fallback_id, album_type='album,single,ep', limit=20
                         )
                         for album in albums or []:
-                            process_album(album, artist.artist_name, artist.spotify_artist_id, itunes_id, 'itunes')
+                            process_album(
+                                album, artist.artist_name, artist.spotify_artist_id,
+                                fallback_id if fallback_source == 'itunes' else None,
+                                fallback_source,
+                                artist_deezer_id=fallback_id if fallback_source == 'deezer' else None
+                            )
                     except Exception as e:
-                        logger.info(f"[iTunes] Error fetching albums for {artist.artist_name}: {e}")
+                        logger.info(f"[{fallback_source}] Error fetching albums for {artist.artist_name}: {e}")
 
                 # Process Spotify if authenticated
                 if spotify_available and artist.spotify_artist_id:
@@ -2492,7 +2543,7 @@ class WatchlistScanner:
                             limit=20
                         )
                         for album in albums or []:
-                            process_album(album, artist.artist_name, artist.spotify_artist_id, itunes_id, 'spotify')
+                            process_album(album, artist.artist_name, artist.spotify_artist_id, fallback_id if fallback_source == 'itunes' else None, 'spotify')
                     except Exception as e:
                         logger.debug(f"Error fetching Spotify albums for {artist.artist_name}: {e}")
 
@@ -2500,36 +2551,44 @@ class WatchlistScanner:
 
             # Process similar artists
             for artist in similar_artists:
-                # Always process iTunes (baseline)
-                itunes_id = artist.similar_artist_itunes_id
-                if not itunes_id:
-                    # Try to resolve iTunes ID on-the-fly (with retry for rate limiting)
+                # Always process fallback source (iTunes or Deezer) as baseline
+                fallback_id = artist.similar_artist_itunes_id if fallback_source == 'itunes' else getattr(artist, 'similar_artist_deezer_id', None)
+                if not fallback_id:
+                    # Try to resolve fallback ID on-the-fly (with retry for rate limiting)
                     try:
                         results = itunes_api_call_with_retry(
                             itunes_client.search_artists, artist.similar_artist_name, limit=1
                         )
                         if results and len(results) > 0:
-                            itunes_id = results[0].id
+                            fallback_id = results[0].id
                             # Cache for future
-                            self.database.update_similar_artist_itunes_id(artist.id, itunes_id)
-                            itunes_resolved += 1
-                            logger.debug(f"[iTunes] Resolved ID for similar artist {artist.similar_artist_name}: {itunes_id}")
+                            if fallback_source == 'deezer':
+                                self.database.update_similar_artist_deezer_id(artist.id, fallback_id)
+                            else:
+                                self.database.update_similar_artist_itunes_id(artist.id, fallback_id)
+                            fallback_resolved += 1
+                            logger.debug(f"[{fallback_source}] Resolved ID for similar artist {artist.similar_artist_name}: {fallback_id}")
                         else:
-                            itunes_failed_resolve += 1
-                            logger.info(f"[iTunes] No artist found for similar: {artist.similar_artist_name}")
+                            fallback_failed_resolve += 1
+                            logger.info(f"[{fallback_source}] No artist found for similar: {artist.similar_artist_name}")
                     except Exception as e:
-                        itunes_failed_resolve += 1
-                        logger.info(f"[iTunes] Failed to resolve similar {artist.similar_artist_name}: {e}")
+                        fallback_failed_resolve += 1
+                        logger.info(f"[{fallback_source}] Failed to resolve similar {artist.similar_artist_name}: {e}")
 
-                if itunes_id:
+                if fallback_id:
                     try:
                         albums = itunes_api_call_with_retry(
-                            itunes_client.get_artist_albums, itunes_id, album_type='album,single,ep', limit=20
+                            itunes_client.get_artist_albums, fallback_id, album_type='album,single,ep', limit=20
                         )
                         for album in albums or []:
-                            process_album(album, artist.similar_artist_name, artist.similar_artist_spotify_id, itunes_id, 'itunes')
+                            process_album(
+                                album, artist.similar_artist_name, artist.similar_artist_spotify_id,
+                                fallback_id if fallback_source == 'itunes' else None,
+                                fallback_source,
+                                artist_deezer_id=fallback_id if fallback_source == 'deezer' else None
+                            )
                     except Exception as e:
-                        logger.info(f"[iTunes] Error fetching albums for similar {artist.similar_artist_name}: {e}")
+                        logger.info(f"[{fallback_source}] Error fetching albums for similar {artist.similar_artist_name}: {e}")
 
                 # Process Spotify if authenticated
                 if spotify_available and artist.similar_artist_spotify_id:
@@ -2540,15 +2599,15 @@ class WatchlistScanner:
                             limit=20
                         )
                         for album in albums or []:
-                            process_album(album, artist.similar_artist_name, artist.similar_artist_spotify_id, itunes_id, 'spotify')
+                            process_album(album, artist.similar_artist_name, artist.similar_artist_spotify_id, fallback_id if fallback_source == 'itunes' else None, 'spotify')
                     except Exception as e:
                         logger.debug(f"Error fetching Spotify albums for {artist.similar_artist_name}: {e}")
 
                 time.sleep(DELAY_BETWEEN_ARTISTS)
 
-            total_cached = cached_count['spotify'] + cached_count['itunes']
-            logger.info(f"Cached {total_cached} recent albums (Spotify: {cached_count['spotify']}, iTunes: {cached_count['itunes']}) from {albums_checked} albums checked")
-            logger.info(f"[iTunes] ID resolution stats: {itunes_resolved} resolved, {itunes_failed_resolve} failed")
+            total_cached = cached_count['spotify'] + cached_count.get(fallback_source, 0)
+            logger.info(f"Cached {total_cached} recent albums (Spotify: {cached_count['spotify']}, {fallback_source}: {cached_count.get(fallback_source, 0)}) from {albums_checked} albums checked")
+            logger.info(f"[{fallback_source}] ID resolution stats: {fallback_resolved} resolved, {fallback_failed_resolve} failed")
 
         except Exception as e:
             logger.error(f"Error caching discovery recent albums: {e}")
@@ -2566,16 +2625,15 @@ class WatchlistScanner:
         try:
             import random
             from datetime import datetime
-            from core.itunes_client import iTunesClient
 
             logger.info("Curating discovery playlists...")
 
             # Determine available sources
             spotify_available = self.spotify_client and self.spotify_client.is_spotify_authenticated()
-            itunes_client = iTunesClient()
+            itunes_client, fallback_source = _get_fallback_metadata_client()
 
             # Process each available source
-            sources_to_process = ['itunes']  # iTunes always available
+            sources_to_process = [fallback_source]  # Fallback source (iTunes/Deezer) always available
             if spotify_available:
                 sources_to_process.append('spotify')
 
@@ -2609,7 +2667,12 @@ class WatchlistScanner:
                         for album in albums:
                             try:
                                 # Get album data from appropriate source
-                                album_id = album.get('album_spotify_id') if source == 'spotify' else album.get('album_itunes_id')
+                                if source == 'spotify':
+                                    album_id = album.get('album_spotify_id')
+                                elif source == 'deezer':
+                                    album_id = album.get('album_deezer_id')
+                                else:
+                                    album_id = album.get('album_itunes_id')
                                 if not album_id:
                                     continue
 
@@ -2641,8 +2704,8 @@ class WatchlistScanner:
                                     # Calculate track score
                                     recency_score = max(0, 100 - (days_old * 7))
                                     popularity_score = track.get('popularity', album_data.get('popularity', 0))
-                                    # iTunes has no popularity — use recency-based synthetic score
-                                    if source == 'itunes' and popularity_score == 0:
+                                    # iTunes/Deezer have no popularity — use recency-based synthetic score
+                                    if source in ('itunes', 'deezer') and popularity_score == 0:
                                         popularity_score = max(40, 70 - days_old)
                                     is_single = album.get('album_type', 'album') == 'single'
                                     single_bonus = 20 if is_single else 0
@@ -2703,6 +2766,9 @@ class WatchlistScanner:
                             if source == 'spotify':
                                 formatted_track['spotify_track_id'] = track_data['id']
                                 formatted_track['spotify_album_id'] = track_data['album'].get('id', '')
+                            elif source == 'deezer':
+                                formatted_track['deezer_track_id'] = track_data['id']
+                                formatted_track['deezer_album_id'] = track_data['album'].get('id', '')
                             else:
                                 formatted_track['itunes_track_id'] = track_data['id']
                                 formatted_track['itunes_album_id'] = track_data['album'].get('id', '')
@@ -2758,13 +2824,15 @@ class WatchlistScanner:
                             discovery_weekly_tracks.append(track.spotify_track_id)
                         elif source == 'itunes' and track.itunes_track_id:
                             discovery_weekly_tracks.append(track.itunes_track_id)
+                        elif source == 'deezer' and track.deezer_track_id:
+                            discovery_weekly_tracks.append(track.deezer_track_id)
 
                 playlist_key = f'discovery_weekly_{source}'
                 self.database.save_curated_playlist(playlist_key, discovery_weekly_tracks, profile_id=profile_id)
                 logger.info(f"Discovery Weekly ({source}) curated: {len(discovery_weekly_tracks)} tracks")
 
             # Also save without suffix for backward compatibility (use active source)
-            active_source = 'spotify' if spotify_available else 'itunes'
+            active_source = 'spotify' if spotify_available else fallback_source
             release_radar_key = f'release_radar_{active_source}'
             discovery_weekly_key = f'discovery_weekly_{active_source}'
 

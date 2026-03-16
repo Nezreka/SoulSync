@@ -4805,6 +4805,9 @@ async function loadSettingsData() {
         // Populate iTunes settings
         document.getElementById('itunes-country').value = settings.itunes?.country || 'US';
 
+        // Populate Metadata source setting
+        document.getElementById('metadata-fallback-source').value = settings.metadata?.fallback_source || 'itunes';
+
         // Populate Download settings (right column)
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
         document.getElementById('transfer-path').value = settings.soulseek?.transfer_path || './Transfer';
@@ -5644,6 +5647,9 @@ async function saveSettings(quiet = false) {
         itunes: {
             country: document.getElementById('itunes-country').value || 'US'
         },
+        metadata: {
+            fallback_source: document.getElementById('metadata-fallback-source').value || 'itunes'
+        },
         download_source: {
             mode: document.getElementById('download-source-mode').value,
             hybrid_primary: document.getElementById('hybrid-primary-source').value,
@@ -5760,13 +5766,13 @@ async function saveSettings(quiet = false) {
 
         if (result.success && qualityProfileSaved && lookbackSaved) {
             showToast(quiet ? 'Settings auto-saved' : 'Settings saved successfully', 'success');
-            setTimeout(updateServiceStatus, 1000);
+            _forceServiceStatusRefresh();
         } else if (result.success && qualityProfileSaved && !lookbackSaved) {
             showToast('Settings saved, but discovery lookback period failed to save', 'warning');
-            setTimeout(updateServiceStatus, 1000);
+            _forceServiceStatusRefresh();
         } else if (result.success && !qualityProfileSaved) {
             showToast('Settings saved, but quality profile failed to save', 'warning');
-            setTimeout(updateServiceStatus, 1000);
+            _forceServiceStatusRefresh();
         } else {
             showToast(`Failed to save settings: ${result.error}`, 'error', 'set-services');
         }
@@ -6114,7 +6120,8 @@ async function authenticateSpotify() {
 }
 
 async function disconnectSpotify() {
-    if (!await showConfirmDialog({ title: 'Disconnect Spotify', message: 'Disconnect Spotify? The app will switch to Apple Music/iTunes for metadata.' })) {
+    const fallbackName = currentMusicSourceName !== 'Spotify' ? currentMusicSourceName : 'the configured fallback source';
+    if (!await showConfirmDialog({ title: 'Disconnect Spotify', message: `Disconnect Spotify? The app will switch to ${fallbackName} for metadata.` })) {
         return;
     }
     try {
@@ -6122,7 +6129,7 @@ async function disconnectSpotify() {
         const response = await fetch('/api/spotify/disconnect', { method: 'POST' });
         const data = await response.json();
         if (data.success) {
-            showToast('Spotify disconnected. Now using Apple Music/iTunes.', 'success');
+            showToast(`Spotify disconnected. Now using ${fallbackName}.`, 'success');
             // Immediately refresh status to update UI
             await fetchAndUpdateServiceStatus();
         } else {
@@ -6222,7 +6229,7 @@ async function disconnectSpotifyFromRateLimit() {
         const data = await response.json();
         if (data.success) {
             _spotifyRateLimitShown = false;
-            showToast('Spotify disconnected. Now using Apple Music/iTunes.', 'success');
+            showToast(`Spotify disconnected. Now using ${currentMusicSourceName}.`, 'success');
             await fetchAndUpdateServiceStatus();
             if (currentPage === 'discover') {
                 loadDiscoverPage();
@@ -15234,10 +15241,10 @@ async function searchDiscoveryFix() {
     const identifier = currentDiscoveryFix.identifier;
     const state = listenbrainzPlaylistStates[identifier] || youtubePlaylistStates[identifier];
     const discoverySource = state?.discovery_source || state?.discoverySource || 'spotify';
-    const useItunes = discoverySource === 'itunes';
+    const useFallback = discoverySource !== 'spotify';
 
     const resultsContainer = fixModalOverlay.querySelector('#fix-modal-results');
-    const sourceLabel = useItunes ? 'iTunes' : 'Spotify';
+    const sourceLabel = discoverySource === 'spotify' ? 'Spotify' : discoverySource === 'deezer' ? 'Deezer' : 'iTunes';
     resultsContainer.innerHTML = `<div class="loading">🔍 Searching ${sourceLabel}...</div>`;
 
     try {
@@ -15245,7 +15252,7 @@ async function searchDiscoveryFix() {
         const query = `${artistInput} ${trackInput}`.trim();
 
         // Call appropriate search API based on discovery source
-        const searchEndpoint = useItunes ? '/api/itunes/search_tracks' : '/api/spotify/search_tracks';
+        const searchEndpoint = useFallback ? '/api/itunes/search_tracks' : '/api/spotify/search_tracks';
         const response = await fetch(`${searchEndpoint}?query=${encodeURIComponent(query)}&limit=20`);
         const data = await response.json();
 
@@ -18026,9 +18033,9 @@ async function loadMetadataCacheStats() {
         const tracksEl = document.getElementById('mcache-stat-tracks');
         const hitsEl = document.getElementById('mcache-stat-hits');
 
-        if (artistsEl) artistsEl.textContent = (stats.artists?.spotify || 0) + (stats.artists?.itunes || 0);
-        if (albumsEl) albumsEl.textContent = (stats.albums?.spotify || 0) + (stats.albums?.itunes || 0);
-        if (tracksEl) tracksEl.textContent = (stats.tracks?.spotify || 0) + (stats.tracks?.itunes || 0);
+        if (artistsEl) artistsEl.textContent = (stats.artists?.spotify || 0) + (stats.artists?.itunes || 0) + (stats.artists?.deezer || 0);
+        if (albumsEl) albumsEl.textContent = (stats.albums?.spotify || 0) + (stats.albums?.itunes || 0) + (stats.albums?.deezer || 0);
+        if (tracksEl) tracksEl.textContent = (stats.tracks?.spotify || 0) + (stats.tracks?.itunes || 0) + (stats.tracks?.deezer || 0);
         if (hitsEl) hitsEl.textContent = stats.total_hits || 0;
     } catch (e) {
         // Silently fail — cache may not be initialized yet
@@ -18203,8 +18210,10 @@ async function loadMetadataCacheBrowseStats() {
 
         const spotifyTotal = (stats.artists?.spotify || 0) + (stats.albums?.spotify || 0) + (stats.tracks?.spotify || 0);
         const itunesTotal = (stats.artists?.itunes || 0) + (stats.albums?.itunes || 0) + (stats.tracks?.itunes || 0);
+        const deezerTotal = (stats.artists?.deezer || 0) + (stats.albums?.deezer || 0) + (stats.tracks?.deezer || 0);
         el('mcache-browse-spotify-count', spotifyTotal);
         el('mcache-browse-itunes-count', itunesTotal);
+        el('mcache-browse-deezer-count', deezerTotal);
         el('mcache-browse-hits', stats.total_hits || 0);
         el('mcache-browse-searches', stats.searches || 0);
     } catch (e) { /* ignore */ }
@@ -33627,6 +33636,18 @@ function escapeHtml(text) {
 
 // --- Service Status and System Stats Functions ---
 
+async function _forceServiceStatusRefresh() {
+    // Force an immediate status refresh (bypasses WebSocket check) — used after settings save
+    try {
+        const response = await fetch('/status');
+        if (!response.ok) return;
+        const data = await response.json();
+        handleServiceStatusUpdate(data);
+    } catch (error) {
+        console.warn('Could not force service status refresh:', error);
+    }
+}
+
 async function fetchAndUpdateServiceStatus() {
     if (document.hidden) return; // Skip polling when tab is not visible
     if (socketConnected) return; // WebSocket is pushing updates — skip HTTP poll
@@ -33669,7 +33690,8 @@ function updateServiceStatus(service, statusData) {
                 ? formatRateLimitDuration(statusData.rate_limit?.remaining_seconds || 0)
                 : formatRateLimitDuration(statusData.post_ban_cooldown);
             const phase = statusData.rate_limited ? 'paused' : 'recovering';
-            statusText.textContent = `Apple Music (Spotify ${phase} \u2014 ${remaining})`;
+            const fallbackLabel = statusData.source === 'deezer' ? 'Deezer' : 'Apple Music';
+            statusText.textContent = `${fallbackLabel} (Spotify ${phase} \u2014 ${remaining})`;
             statusText.className = 'service-card-status-text rate-limited';
         } else if (statusData.connected) {
             indicator.className = 'service-card-indicator connected';
@@ -33686,7 +33708,7 @@ function updateServiceStatus(service, statusData) {
     if (service === 'spotify' && statusData.source) {
         const musicSourceTitleElement = document.getElementById('music-source-title');
         if (musicSourceTitleElement) {
-            const sourceName = statusData.source === 'itunes' ? 'Apple Music' : 'Spotify';
+            const sourceName = statusData.source === 'spotify' ? 'Spotify' : statusData.source === 'deezer' ? 'Deezer' : 'Apple Music';
             musicSourceTitleElement.textContent = sourceName;
             // Update global variable for use in discovery modals
             currentMusicSourceName = sourceName;
@@ -33742,7 +33764,7 @@ function updateSidebarServiceStatus(service, statusData) {
         if (service === 'spotify' && statusData.source) {
             const musicSourceNameElement = document.getElementById('music-source-name');
             if (musicSourceNameElement) {
-                const sourceName = statusData.source === 'itunes' ? 'Apple Music' : 'Spotify';
+                const sourceName = statusData.source === 'spotify' ? 'Spotify' : statusData.source === 'deezer' ? 'Deezer' : 'Apple Music';
                 musicSourceNameElement.textContent = sourceName;
             }
         }
@@ -45423,7 +45445,7 @@ async function openRecommendedArtistsModal() {
         // Phase 2: Enrich with images/genres progressively in batches of 50
         // Skip artists that already have cached metadata from the initial response
         const source = data.source || 'spotify';
-        const idKey = source === 'spotify' ? 'spotify_artist_id' : 'itunes_artist_id';
+        const idKey = source === 'spotify' ? 'spotify_artist_id' : source === 'deezer' ? 'deezer_artist_id' : 'itunes_artist_id';
         const allIds = data.artists
             .filter(a => !a.image_url)  // Only enrich artists without cached images
             .map(a => a[idKey]).filter(Boolean);
@@ -49382,8 +49404,8 @@ async function openDownloadModalForRecentAlbum(albumIndex) {
 
     try {
         // Determine source and album ID - use source-agnostic endpoint
-        const source = album.source || (album.album_spotify_id ? 'spotify' : 'itunes');
-        const albumId = source === 'spotify' ? album.album_spotify_id : album.album_itunes_id;
+        const source = album.source || (album.album_spotify_id ? 'spotify' : album.album_deezer_id ? 'deezer' : 'itunes');
+        const albumId = source === 'spotify' ? album.album_spotify_id : source === 'deezer' ? album.album_deezer_id : album.album_itunes_id;
 
         if (!albumId) {
             throw new Error(`No ${source} album ID available`);
@@ -49431,7 +49453,7 @@ async function openDownloadModalForRecentAlbum(albumIndex) {
 
         // CRITICAL FIX: Pass proper artist/album context for modal display
         const artistContext = {
-            id: source === 'spotify' ? album.artist_spotify_id : album.artist_itunes_id,
+            id: source === 'spotify' ? album.artist_spotify_id : source === 'deezer' ? album.artist_deezer_id : album.artist_itunes_id,
             name: album.artist_name,
             source: source
         };

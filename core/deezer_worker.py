@@ -363,7 +363,7 @@ class DeezerWorker:
                 full_album = None
                 if deezer_album_id:
                     try:
-                        full_album = self.client.get_album(deezer_album_id)
+                        full_album = self.client.get_album_raw(deezer_album_id)
                     except Exception as e:
                         logger.warning(f"Failed to fetch full album details for '{album_name}' (Deezer ID: {deezer_album_id}): {e}")
 
@@ -403,7 +403,7 @@ class DeezerWorker:
                 full_track = None
                 if deezer_track_id:
                     try:
-                        full_track = self.client.get_track(deezer_track_id)
+                        full_track = self.client.get_track_raw(deezer_track_id)
                     except Exception as e:
                         logger.warning(f"Failed to fetch full track details for '{track_name}' (Deezer ID: {deezer_track_id}): {e}")
 

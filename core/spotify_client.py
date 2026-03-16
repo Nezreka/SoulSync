@@ -407,6 +407,7 @@ class SpotifyClient:
         self.sp: Optional[spotipy.Spotify] = None
         self.user_id: Optional[str] = None
         self._itunes_client = None  # Lazy-loaded iTunes fallback
+        self._deezer_client = None  # Lazy-loaded Deezer fallback
         self._auth_cache_lock = threading.Lock()
         self._auth_cached_result: Optional[bool] = None
         self._auth_cache_time: float = 0
@@ -414,26 +415,50 @@ class SpotifyClient:
         self._setup_client()
 
     def _is_spotify_id(self, id_str: str) -> bool:
-        """Check if an ID is a Spotify ID (alphanumeric) vs iTunes ID (numeric only)"""
+        """Check if an ID is a Spotify ID (alphanumeric) vs a fallback source ID (numeric only)"""
         if not id_str:
             return False
-        # Spotify IDs contain letters and numbers, iTunes IDs are purely numeric
+        # Spotify IDs contain letters and numbers; iTunes/Deezer IDs are purely numeric
         return not id_str.isdigit()
 
     def _is_itunes_id(self, id_str: str) -> bool:
-        """Check if an ID is an iTunes ID (numeric only)"""
+        """Check if an ID is numeric (iTunes or Deezer format, not Spotify)"""
         if not id_str:
             return False
         return id_str.isdigit()
 
     @property
     def _itunes(self):
-        """Lazy-load iTunes client for fallback when Spotify not authenticated"""
+        """Lazy-load iTunes client"""
         if self._itunes_client is None:
             from core.itunes_client import iTunesClient
             self._itunes_client = iTunesClient()
             logger.info("iTunes fallback client initialized")
         return self._itunes_client
+
+    @property
+    def _deezer(self):
+        """Lazy-load Deezer client for metadata fallback"""
+        if self._deezer_client is None:
+            from core.deezer_client import DeezerClient
+            self._deezer_client = DeezerClient()
+            logger.info("Deezer fallback client initialized")
+        return self._deezer_client
+
+    @property
+    def _fallback_source(self) -> str:
+        """Get configured metadata fallback source ('itunes' or 'deezer')"""
+        try:
+            return config_manager.get('metadata.fallback_source', 'itunes') or 'itunes'
+        except Exception:
+            return 'itunes'
+
+    @property
+    def _fallback(self):
+        """Get the active fallback metadata client based on settings"""
+        if self._fallback_source == 'deezer':
+            return self._deezer
+        return self._itunes
 
     def reload_config(self):
         """Reload configuration and re-initialize client"""
@@ -471,14 +496,14 @@ class SpotifyClient:
     def is_authenticated(self) -> bool:
         """
         Check if client can service metadata requests.
-        Returns True if Spotify is authenticated OR iTunes fallback is available.
+        Returns True if Spotify is authenticated OR fallback (iTunes/Deezer) is available.
         For Spotify-specific auth check, use is_spotify_authenticated().
         """
         # If Spotify is authenticated, we're good
         if self.is_spotify_authenticated():
             return True
 
-        # iTunes fallback is always available
+        # Fallback (iTunes or Deezer) is always available — no auth required
         return True
 
     def _invalidate_auth_cache(self):
@@ -920,24 +945,23 @@ class SpotifyClient:
     
     @rate_limited
     def search_tracks(self, query: str, limit: int = 10) -> List[Track]:
-        """Search for tracks - falls back to iTunes if Spotify not authenticated"""
+        """Search for tracks - falls back to configured metadata source if Spotify not authenticated"""
         cache = get_metadata_cache()
         use_spotify = self.is_spotify_authenticated()
-        source = 'spotify' if use_spotify else 'itunes'
-
-        # Check search cache
-        cached_results = cache.get_search_results(source, 'track', query, min(limit, 10))
-        if cached_results is not None:
-            tracks = []
-            for raw in cached_results:
-                try:
-                    tracks.append(Track.from_spotify_track(raw) if source == 'spotify' else Track.from_itunes_track(raw))
-                except Exception:
-                    pass
-            if tracks:
-                return tracks
 
         if use_spotify:
+            # Check Spotify cache
+            cached_results = cache.get_search_results('spotify', 'track', query, min(limit, 10))
+            if cached_results is not None:
+                tracks = []
+                for raw in cached_results:
+                    try:
+                        tracks.append(Track.from_spotify_track(raw))
+                    except Exception:
+                        pass
+                if tracks:
+                    return tracks
+
             try:
                 results = self.sp.search(q=query, type='track', limit=min(limit, 10))
                 tracks = []
@@ -958,32 +982,32 @@ class SpotifyClient:
 
             except Exception as e:
                 logger.error(f"Error searching tracks via Spotify: {e}")
-                # Fall through to iTunes fallback
+                # Fall through to fallback
 
-        # iTunes fallback
-        logger.debug(f"Using iTunes fallback for track search: {query}")
-        return self._itunes.search_tracks(query, limit)
+        # Fallback (iTunes or Deezer — configured in settings)
+        logger.debug(f"Using {self._fallback_source} fallback for track search: {query}")
+        return self._fallback.search_tracks(query, limit)
 
     @rate_limited
     def search_artists(self, query: str, limit: int = 10) -> List[Artist]:
-        """Search for artists - falls back to iTunes if Spotify not authenticated"""
+        """Search for artists - falls back to configured metadata source if Spotify not authenticated"""
         cache = get_metadata_cache()
         use_spotify = self.is_spotify_authenticated()
-        source = 'spotify' if use_spotify else 'itunes'
 
-        # Check search cache
-        cached_results = cache.get_search_results(source, 'artist', query, min(limit, 10))
-        if cached_results is not None:
-            artists = []
-            for raw in cached_results:
-                try:
-                    artists.append(Artist.from_spotify_artist(raw) if source == 'spotify' else Artist.from_itunes_artist(raw))
-                except Exception:
-                    pass
-            if artists:
-                query_lower = query.lower().strip()
-                artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
-                return artists
+        if use_spotify:
+            # Check Spotify cache
+            cached_results = cache.get_search_results('spotify', 'artist', query, min(limit, 10))
+            if cached_results is not None:
+                artists = []
+                for raw in cached_results:
+                    try:
+                        artists.append(Artist.from_spotify_artist(raw))
+                    except Exception:
+                        pass
+                if artists:
+                    query_lower = query.lower().strip()
+                    artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
+                    return artists
 
         if use_spotify:
             try:
@@ -1013,31 +1037,31 @@ class SpotifyClient:
                 logger.error(f"Error searching artists via Spotify: {e}")
                 # Fall through to iTunes fallback
 
-        # iTunes fallback
-        logger.debug(f"Using iTunes fallback for artist search: {query}")
-        artists = self._itunes.search_artists(query, limit)
+        # Fallback (iTunes or Deezer)
+        logger.debug(f"Using {self._fallback_source} fallback for artist search: {query}")
+        artists = self._fallback.search_artists(query, limit)
         query_lower = query.lower().strip()
         artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
         return artists
 
     @rate_limited
     def search_albums(self, query: str, limit: int = 10) -> List[Album]:
-        """Search for albums - falls back to iTunes if Spotify not authenticated"""
+        """Search for albums - falls back to configured metadata source if Spotify not authenticated"""
         cache = get_metadata_cache()
         use_spotify = self.is_spotify_authenticated()
-        source = 'spotify' if use_spotify else 'itunes'
 
-        # Check search cache
-        cached_results = cache.get_search_results(source, 'album', query, min(limit, 10))
-        if cached_results is not None:
-            albums = []
-            for raw in cached_results:
-                try:
-                    albums.append(Album.from_spotify_album(raw) if source == 'spotify' else Album.from_itunes_album(raw))
-                except Exception:
-                    pass
-            if albums:
-                return albums
+        if use_spotify:
+            # Check Spotify cache
+            cached_results = cache.get_search_results('spotify', 'album', query, min(limit, 10))
+            if cached_results is not None:
+                albums = []
+                for raw in cached_results:
+                    try:
+                        albums.append(Album.from_spotify_album(raw))
+                    except Exception:
+                        pass
+                if albums:
+                    return albums
 
         if use_spotify:
             try:
@@ -1062,16 +1086,17 @@ class SpotifyClient:
                 logger.error(f"Error searching albums via Spotify: {e}")
                 # Fall through to iTunes fallback
 
-        # iTunes fallback
-        logger.debug(f"Using iTunes fallback for album search: {query}")
-        return self._itunes.search_albums(query, limit)
+        # Fallback (iTunes or Deezer)
+        logger.debug(f"Using {self._fallback_source} fallback for album search: {query}")
+        return self._fallback.search_albums(query, limit)
     
     @rate_limited
     def get_track_details(self, track_id: str) -> Optional[Dict[str, Any]]:
-        """Get detailed track information - falls back to iTunes if Spotify not authenticated"""
+        """Get detailed track information - falls back to configured metadata source"""
         # Check cache — we store raw track_data, reconstruct enhanced on hit
         cache = get_metadata_cache()
-        source = 'itunes' if self._is_itunes_id(track_id) else 'spotify'
+        fallback_src = self._fallback_source
+        source = fallback_src if self._is_itunes_id(track_id) else 'spotify'
         cached = cache.get_entity(source, 'track', track_id)
         if cached:
             if source == 'spotify':
@@ -1081,8 +1106,8 @@ class SpotifyClient:
                 # Simplified track cached by get_album_tracks — treat as cache miss
                 logger.debug(f"Cache hit for track {track_id} lacks album data, fetching full data")
             else:
-                # iTunes cache hit — delegate to iTunesClient which reconstructs enhanced format
-                return self._itunes.get_track_details(track_id)
+                # Fallback cache hit — delegate to fallback client which reconstructs enhanced format
+                return self._fallback.get_track_details(track_id)
 
         if self.is_spotify_authenticated():
             try:
@@ -1100,13 +1125,13 @@ class SpotifyClient:
                 logger.error(f"Error fetching track details via Spotify: {e}")
                 # Fall through to iTunes fallback
 
-        # iTunes fallback - only if ID is numeric (iTunes format)
+        # Fallback - only if ID is numeric (non-Spotify format)
         if self._is_itunes_id(track_id):
-            logger.debug(f"Using iTunes fallback for track details: {track_id}")
-            result = self._itunes.get_track_details(track_id)
+            logger.debug(f"Using {fallback_src} fallback for track details: {track_id}")
+            result = self._fallback.get_track_details(track_id)
             return result
         else:
-            logger.debug(f"Cannot use iTunes fallback for Spotify track ID: {track_id}")
+            logger.debug(f"Cannot use fallback for Spotify track ID: {track_id}")
             return None
 
     @staticmethod
@@ -1158,10 +1183,11 @@ class SpotifyClient:
     
     @rate_limited
     def get_album(self, album_id: str) -> Optional[Dict[str, Any]]:
-        """Get album information - falls back to iTunes if Spotify not authenticated"""
+        """Get album information - falls back to configured metadata source"""
         # Check cache first
         cache = get_metadata_cache()
-        source = 'itunes' if self._is_itunes_id(album_id) else 'spotify'
+        fallback_src = self._fallback_source
+        source = fallback_src if self._is_itunes_id(album_id) else 'spotify'
         cached = cache.get_entity(source, 'album', album_id)
         if cached:
             if source == 'spotify':
@@ -1171,8 +1197,8 @@ class SpotifyClient:
                 # Simplified album cached by get_artist_albums — treat as cache miss
                 logger.debug(f"Cache hit for album {album_id} lacks tracks, fetching full data")
             else:
-                # iTunes cache hit — delegate to iTunesClient which reconstructs Spotify-compatible format
-                return self._itunes.get_album(album_id)
+                # Fallback cache hit — delegate to fallback client
+                return self._fallback.get_album(album_id)
 
         if self.is_spotify_authenticated():
             try:
@@ -1184,23 +1210,23 @@ class SpotifyClient:
             except Exception as e:
                 _detect_and_set_rate_limit(e, 'get_album')
                 logger.error(f"Error fetching album via Spotify: {e}")
-                # Fall through to iTunes fallback
+                # Fall through to fallback
 
-        # iTunes fallback - only if ID is numeric (iTunes format)
+        # Fallback - only if ID is numeric (non-Spotify format)
         if self._is_itunes_id(album_id):
-            logger.debug(f"Using iTunes fallback for album: {album_id}")
-            result = self._itunes.get_album(album_id)
-            return result
+            logger.debug(f"Using {fallback_src} fallback for album: {album_id}")
+            return self._fallback.get_album(album_id)
         else:
-            logger.debug(f"Cannot use iTunes fallback for Spotify album ID: {album_id}")
+            logger.debug(f"Cannot use fallback for Spotify album ID: {album_id}")
             return None
     
     @rate_limited
     def get_album_tracks(self, album_id: str) -> Optional[Dict[str, Any]]:
-        """Get album tracks - falls back to iTunes if Spotify not authenticated"""
+        """Get album tracks - falls back to configured metadata source"""
         # Cache key uses album_id with '_tracks' suffix to differentiate from album metadata
         cache = get_metadata_cache()
-        source = 'itunes' if self._is_itunes_id(album_id) else 'spotify'
+        fallback_src = self._fallback_source
+        source = fallback_src if self._is_itunes_id(album_id) else 'spotify'
         cache_key = f"{album_id}_tracks"
         cached = cache.get_entity(source, 'album', cache_key)
         if cached:
@@ -1251,13 +1277,13 @@ class SpotifyClient:
                 logger.error(f"Error fetching album tracks via Spotify: {e}")
                 # Fall through to iTunes fallback
 
-        # iTunes fallback - only if ID is numeric (iTunes format)
+        # Fallback - only if ID is numeric (non-Spotify format)
         if self._is_itunes_id(album_id):
-            logger.debug(f"Using iTunes fallback for album tracks: {album_id}")
-            result = self._itunes.get_album_tracks(album_id)
+            logger.debug(f"Using {fallback_src} fallback for album tracks: {album_id}")
+            result = self._fallback.get_album_tracks(album_id)
             return result
         else:
-            logger.debug(f"Cannot use iTunes fallback for Spotify album ID: {album_id}")
+            logger.debug(f"Cannot use fallback for Spotify album ID: {album_id}")
             return None
     
     @rate_limited
@@ -1293,12 +1319,12 @@ class SpotifyClient:
                 logger.error(f"Error fetching artist albums via Spotify: {e}")
                 # Fall through to iTunes fallback
 
-        # iTunes fallback - only if ID is numeric (iTunes format)
+        # Fallback - only if ID is numeric (non-Spotify format)
         if self._is_itunes_id(artist_id):
-            logger.debug(f"Using iTunes fallback for artist albums: {artist_id}")
-            return self._itunes.get_artist_albums(artist_id, album_type, limit)
+            logger.debug(f"Using {self._fallback_source} fallback for artist albums: {artist_id}")
+            return self._fallback.get_artist_albums(artist_id, album_type, limit)
         else:
-            logger.debug(f"Cannot use iTunes fallback for Spotify artist ID: {artist_id}")
+            logger.debug(f"Cannot use fallback for Spotify artist ID: {artist_id}")
             return []
 
     @rate_limited
@@ -1315,23 +1341,24 @@ class SpotifyClient:
     @rate_limited
     def get_artist(self, artist_id: str) -> Optional[Dict[str, Any]]:
         """
-        Get full artist details - falls back to iTunes if Spotify not authenticated.
+        Get full artist details - falls back to configured metadata source.
 
         Args:
-            artist_id: Artist ID (Spotify or iTunes depending on authentication)
+            artist_id: Artist ID (Spotify or fallback source depending on authentication)
 
         Returns:
             Dictionary with artist data including images, genres, popularity
         """
         # Check cache first (works even during rate limit bans)
         cache = get_metadata_cache()
-        source = 'itunes' if self._is_itunes_id(artist_id) else 'spotify'
+        fallback_src = self._fallback_source
+        source = fallback_src if self._is_itunes_id(artist_id) else 'spotify'
         cached = cache.get_entity(source, 'artist', artist_id)
         if cached:
             if source == 'spotify':
                 return cached  # Spotify raw format is the expected format
-            # iTunes cache hit — delegate to iTunesClient which reconstructs Spotify-compatible format
-            return self._itunes.get_artist(artist_id)
+            # Fallback cache hit — delegate to fallback client which reconstructs Spotify-compatible format
+            return self._fallback.get_artist(artist_id)
 
         if self.is_spotify_authenticated():
             try:
@@ -1344,13 +1371,12 @@ class SpotifyClient:
                 logger.error(f"Error fetching artist via Spotify: {e}")
                 # Fall through to iTunes fallback
 
-        # iTunes fallback - only if ID is numeric (iTunes format)
+        # Fallback - only if ID is numeric (non-Spotify format)
         if self._is_itunes_id(artist_id):
-            logger.debug(f"Using iTunes fallback for artist: {artist_id}")
-            result = self._itunes.get_artist(artist_id)
-            return result
+            logger.debug(f"Using {fallback_src} fallback for artist: {artist_id}")
+            return self._fallback.get_artist(artist_id)
         else:
-            logger.debug(f"Cannot use iTunes fallback for Spotify artist ID: {artist_id}")
+            logger.debug(f"Cannot use fallback for Spotify artist ID: {artist_id}")
             return None
 
     @rate_limited

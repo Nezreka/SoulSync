@@ -951,8 +951,8 @@ class PersonalizedPlaylistsService:
                         logger.warning(f"Error getting albums for {artist.get('name', artist['id'])}: {e}")
                         continue
             else:
-                from core.itunes_client import iTunesClient
-                itunes = iTunesClient()
+                from core.metadata_service import _create_fallback_client
+                itunes = _create_fallback_client()
                 for artist in artists_for_albums:
                     try:
                         albums = itunes.get_artist_albums(artist['id'], limit=10)
@@ -1007,8 +1007,8 @@ class PersonalizedPlaylistsService:
                         logger.warning(f"Error getting tracks from album: {e}")
                         continue
             else:
-                from core.itunes_client import iTunesClient
-                itunes = iTunesClient()
+                from core.metadata_service import _create_fallback_client
+                itunes = _create_fallback_client()
                 for album in selected_albums:
                     try:
                         album_data = itunes.get_album(album.id, include_tracks=True)

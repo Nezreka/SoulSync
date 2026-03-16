@@ -48,13 +48,14 @@ def register_routes(bp):
                     tracks = [_serialize_track(t) for t in results]
                     return api_success({"tracks": tracks, "source": "spotify"})
 
-            if source in ("itunes", "auto"):
-                from core.itunes_client import iTunesClient
-                itunes = iTunesClient()
-                results = itunes.search_tracks(query, limit=limit)
+            if source in ("itunes", "deezer", "auto"):
+                from core.metadata_service import _create_fallback_client, _get_configured_fallback_source
+                fallback = _create_fallback_client()
+                fallback_source = _get_configured_fallback_source()
+                results = fallback.search_tracks(query, limit=limit)
                 if results:
                     tracks = [_serialize_track(t) for t in results]
-                    return api_success({"tracks": tracks, "source": "itunes"})
+                    return api_success({"tracks": tracks, "source": fallback_source})
 
             return api_success({"tracks": [], "source": source})
         except Exception as e:
@@ -85,12 +86,13 @@ def register_routes(bp):
                         "source": "spotify",
                     })
 
-            from core.itunes_client import iTunesClient
-            itunes = iTunesClient()
-            results = itunes.search_albums(query, limit=limit)
+            from core.metadata_service import _create_fallback_client, _get_configured_fallback_source
+            fallback = _create_fallback_client()
+            fallback_source = _get_configured_fallback_source()
+            results = fallback.search_albums(query, limit=limit)
             return api_success({
                 "albums": [_serialize_album(a) for a in results] if results else [],
-                "source": "itunes",
+                "source": fallback_source,
             })
         except Exception as e:
             return api_error("SEARCH_ERROR", str(e), 500)
@@ -120,12 +122,13 @@ def register_routes(bp):
                         "source": "spotify",
                     })
 
-            from core.itunes_client import iTunesClient
-            itunes = iTunesClient()
-            results = itunes.search_artists(query, limit=limit)
+            from core.metadata_service import _create_fallback_client, _get_configured_fallback_source
+            fallback = _create_fallback_client()
+            fallback_source = _get_configured_fallback_source()
+            results = fallback.search_artists(query, limit=limit)
             return api_success({
                 "artists": [_serialize_artist(a) for a in results] if results else [],
-                "source": "itunes",
+                "source": fallback_source,
             })
         except Exception as e:
             return api_error("SEARCH_ERROR", str(e), 500)

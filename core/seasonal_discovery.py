@@ -448,6 +448,10 @@ class SeasonalDiscoveryService:
             # IMPROVED: Sample 20 random watchlist artists (up from 10) for more variety
             sampled_artists = random.sample(watchlist_artists, min(20, len(watchlist_artists)))
 
+            from core.metadata_service import _create_fallback_client, _get_configured_fallback_source
+            fallback_client = _create_fallback_client()
+            fallback_source = _get_configured_fallback_source()
+
             for artist in sampled_artists:
                 try:
                     albums = []
@@ -457,14 +461,14 @@ class SeasonalDiscoveryService:
                             album_type='album,single,ep',
                             limit=50
                         ) or []
-                    elif hasattr(artist, 'itunes_artist_id') and artist.itunes_artist_id:
-                        from core.itunes_client import iTunesClient
-                        itunes_client = iTunesClient()
-                        albums = itunes_client.get_artist_albums(
-                            artist.itunes_artist_id,
-                            album_type='album,single,ep',
-                            limit=50
-                        ) or []
+                    elif not use_spotify:
+                        artist_id = getattr(artist, 'deezer_artist_id', None) if fallback_source == 'deezer' else getattr(artist, 'itunes_artist_id', None)
+                        if artist_id:
+                            albums = fallback_client.get_artist_albums(
+                                artist_id,
+                                album_type='album,single,ep',
+                                limit=50
+                            ) or []
 
                     # Filter albums by seasonal keywords in title
                     for album in albums:
@@ -547,13 +551,13 @@ class SeasonalDiscoveryService:
                         logger.debug(f"Error searching Spotify for '{keyword}': {e}")
                         continue
             else:
-                # iTunes fallback
-                from core.itunes_client import iTunesClient
-                itunes_client = iTunesClient()
+                # Fallback metadata source (iTunes or Deezer)
+                from core.metadata_service import _create_fallback_client
+                fallback_client = _create_fallback_client()
 
                 for keyword in search_keywords:
                     try:
-                        search_results = itunes_client.search_albums(keyword, limit=20)
+                        search_results = fallback_client.search_albums(keyword, limit=20)
 
                         for album in search_results:
                             if album.id in seen_album_ids:
@@ -765,6 +769,9 @@ class SeasonalDiscoveryService:
             seasonal_albums = self.get_seasonal_albums(season_key, limit=50, source=source)
 
             use_spotify = self.spotify_client and self.spotify_client.is_authenticated()
+            if not use_spotify:
+                from core.metadata_service import _create_fallback_client
+                fallback_client = _create_fallback_client()
 
             for album in seasonal_albums:
                 try:
@@ -774,10 +781,7 @@ class SeasonalDiscoveryService:
                     if use_spotify:
                         album_data = self.spotify_client.get_album(album_id)
                     else:
-                        # iTunes fallback
-                        from core.itunes_client import iTunesClient
-                        itunes_client = iTunesClient()
-                        album_data = itunes_client.get_album(album_id)
+                        album_data = fallback_client.get_album(album_id)
 
                     if not album_data or 'tracks' not in album_data:
                         continue
