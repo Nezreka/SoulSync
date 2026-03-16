@@ -10422,6 +10422,105 @@ body {
     padding: 40px;
 }
 
+/* URL History Bar (saved playlist URLs) */
+.url-history-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    flex-shrink: 0;
+}
+
+.url-history-bar::-webkit-scrollbar {
+    display: none;
+}
+
+.url-history-bar-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding-left: 4px;
+}
+
+.url-history-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px 4px 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+    max-width: 220px;
+}
+
+.url-history-pill:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.url-history-pill-icon {
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.url-history-pill-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.75);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.url-history-pill:hover .url-history-pill-name {
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.url-history-pill-remove {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.3);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+    padding: 0;
+    line-height: 1;
+}
+
+.url-history-pill-remove:hover {
+    color: #ff4444;
+    background: rgba(255, 68, 68, 0.15);
+}
+
+/* Source-specific pill accent on hover */
+#youtube-url-history .url-history-pill:hover {
+    border-color: rgba(255, 32, 32, 0.3);
+}
+#deezer-url-history .url-history-pill:hover {
+    border-color: rgba(162, 56, 255, 0.3);
+}
+#spotify-public-url-history .url-history-pill:hover {
+    border-color: rgba(29, 185, 84, 0.3);
+}
+
 /* Playlist URL input section (YouTube, Deezer) */
 .youtube-input-section {
     display: flex;

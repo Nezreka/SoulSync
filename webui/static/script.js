@@ -7611,6 +7611,9 @@ async function loadSyncData() {
 
     // Load Beatport charts from backend (always refresh to get latest state)
     await loadBeatportChartsFromBackend();
+
+    // Render saved URL histories for YouTube, Deezer, Spotify Link tabs
+    initUrlHistories();
 }
 
 async function checkForActiveProcesses() {
@@ -22377,6 +22380,9 @@ async function loadDeezerPlaylist() {
             })), { owner: playlist.owner, image_url: playlist.image_url, description: rawUrl });
         }
 
+        // Save to URL history
+        saveUrlHistory('deezer', rawUrl, playlist.name);
+
         renderDeezerPlaylists();
         await loadDeezerPlaylistStatesFromBackend();
 
@@ -26479,6 +26485,13 @@ async function parseSpotifyPublicUrl() {
         return;
     }
 
+    // Check if already loaded
+    if (_isUrlAlreadyLoaded('spotify-public', url)) {
+        showToast('This playlist is already loaded', 'info');
+        urlInput.value = '';
+        return;
+    }
+
     const parseBtn = document.getElementById('spotify-public-parse-btn');
     if (parseBtn) {
         parseBtn.disabled = true;
@@ -26522,6 +26535,9 @@ async function parseSpotifyPublicUrl() {
                 source_track_id: t.id || ''
             })), { owner: result.subtitle || '', image_url: '', description: result.url || '' });
         }
+
+        // Save to URL history
+        saveUrlHistory('spotify-public', url, result.name);
 
         renderSpotifyPublicPlaylists();
         await loadSpotifyPublicPlaylistStatesFromBackend();
@@ -27442,6 +27458,133 @@ async function startSpotifyPublicDownloadMissing(urlHash) {
 }
 
 // ===============================
+// URL HISTORY (Saved playlist URLs)
+// ===============================
+
+const URL_HISTORY_MAX = 10;
+const URL_HISTORY_SOURCES = {
+    youtube:          { key: 'soulsync-url-history-youtube',         icon: '▶',  inputId: 'youtube-url-input',          containerId: 'youtube-url-history',          loadFn: () => parseYouTubePlaylist() },
+    deezer:           { key: 'soulsync-url-history-deezer',          icon: '🎵', inputId: 'deezer-url-input',           containerId: 'deezer-url-history',           loadFn: () => loadDeezerPlaylist() },
+    'spotify-public': { key: 'soulsync-url-history-spotify-public', icon: '🎧', inputId: 'spotify-public-url-input',   containerId: 'spotify-public-url-history',   loadFn: () => parseSpotifyPublicUrl() }
+};
+
+function getUrlHistory(source) {
+    try {
+        const cfg = URL_HISTORY_SOURCES[source];
+        if (!cfg) return [];
+        const raw = localStorage.getItem(cfg.key);
+        return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+}
+
+function saveUrlHistory(source, url, name) {
+    const cfg = URL_HISTORY_SOURCES[source];
+    if (!cfg || !url) return;
+    let history = getUrlHistory(source);
+    // Remove duplicate (same URL)
+    history = history.filter(h => h.url !== url);
+    // Add to front
+    history.unshift({ url, name: name || url, ts: Date.now() });
+    // Cap
+    if (history.length > URL_HISTORY_MAX) history = history.slice(0, URL_HISTORY_MAX);
+    localStorage.setItem(cfg.key, JSON.stringify(history));
+    renderUrlHistory(source);
+}
+
+function removeUrlHistoryEntry(source, url) {
+    const cfg = URL_HISTORY_SOURCES[source];
+    if (!cfg) return;
+    let history = getUrlHistory(source);
+    history = history.filter(h => h.url !== url);
+    localStorage.setItem(cfg.key, JSON.stringify(history));
+    renderUrlHistory(source);
+}
+
+function renderUrlHistory(source) {
+    const cfg = URL_HISTORY_SOURCES[source];
+    if (!cfg) return;
+    const container = document.getElementById(cfg.containerId);
+    if (!container) return;
+    const history = getUrlHistory(source);
+    if (history.length === 0) {
+        container.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+    container.style.display = 'flex';
+    container.innerHTML = `<span class="url-history-bar-label">Recent</span>` +
+        history.map(h => {
+            const rawName = h.name.length > 30 ? h.name.substring(0, 28) + '...' : h.name;
+            const safeName = escapeHtml(rawName);
+            const safeTitle = escapeHtml(h.name);
+            const safeUrl = h.url.replace(/"/g, '&quot;');
+            return `<div class="url-history-pill" data-url="${safeUrl}" title="${safeTitle}">
+                <span class="url-history-pill-icon">${cfg.icon}</span>
+                <span class="url-history-pill-name">${safeName}</span>
+                <button class="url-history-pill-remove" data-source="${source}" data-url="${safeUrl}">&times;</button>
+            </div>`;
+        }).join('');
+
+    // Pill click → fill input and load (skip if already loaded)
+    container.querySelectorAll('.url-history-pill').forEach(pill => {
+        pill.addEventListener('click', (e) => {
+            // Don't trigger if clicking the X button
+            if (e.target.classList.contains('url-history-pill-remove')) return;
+            const pillUrl = pill.dataset.url;
+            if (_isUrlAlreadyLoaded(source, pillUrl)) {
+                showToast('This playlist is already loaded', 'info');
+                return;
+            }
+            const input = document.getElementById(cfg.inputId);
+            if (input) input.value = pillUrl;
+            cfg.loadFn();
+        });
+    });
+
+    // X button click → remove entry
+    container.querySelectorAll('.url-history-pill-remove').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeUrlHistoryEntry(btn.dataset.source, btn.dataset.url);
+        });
+    });
+}
+
+function _isUrlAlreadyLoaded(source, url) {
+    if (source === 'youtube') {
+        // Check for existing YouTube card with this URL
+        const container = document.getElementById('youtube-playlist-container');
+        if (container) {
+            const cards = container.querySelectorAll('.youtube-playlist-card[data-url]');
+            for (const card of cards) {
+                if (card.dataset.url === url) return true;
+            }
+        }
+        return false;
+    } else if (source === 'deezer') {
+        // Extract playlist ID from URL and check deezerPlaylists array
+        const match = url.match(/deezer\.com\/(?:[a-z]{2}\/)?playlist\/(\d+)/i);
+        const id = match ? match[1] : (/^\d+$/.test(url) ? url : null);
+        if (id && deezerPlaylists.find(p => String(p.id) === String(id))) return true;
+        return false;
+    } else if (source === 'spotify-public') {
+        // Extract Spotify ID from URL and compare against loaded playlists
+        const spMatch = url.match(/open\.spotify\.com\/(playlist|album)\/([a-zA-Z0-9]+)/);
+        const spId = spMatch ? spMatch[2] : null;
+        if (spId && spotifyPublicPlaylists.some(p => p.id === spId)) return true;
+        // Fallback: direct URL comparison
+        return spotifyPublicPlaylists.some(p => p.url === url);
+    }
+    return false;
+}
+
+function initUrlHistories() {
+    for (const source of Object.keys(URL_HISTORY_SOURCES)) {
+        renderUrlHistory(source);
+    }
+}
+
+// ===============================
 // YOUTUBE PLAYLIST FUNCTIONALITY
 // ===============================
 
@@ -27457,6 +27600,13 @@ async function parseYouTubePlaylist() {
     // Validate URL format
     if (!url.includes('youtube.com/playlist') && !url.includes('music.youtube.com/playlist')) {
         showToast('Please enter a valid YouTube playlist URL', 'error');
+        return;
+    }
+
+    // Check if already loaded
+    if (_isUrlAlreadyLoaded('youtube', url)) {
+        showToast('This playlist is already loaded', 'info');
+        urlInput.value = '';
         return;
     }
 
@@ -27484,6 +27634,9 @@ async function parseYouTubePlaylist() {
         }
 
         console.log('✅ YouTube playlist parsed:', result.name, `(${result.tracks.length} tracks)`);
+
+        // Save to URL history
+        saveUrlHistory('youtube', url, result.name);
 
         // Update card with parsed data and stay in 'fresh' phase
         updateYouTubeCardData(result.url_hash, result);
