@@ -36977,6 +36977,10 @@ def prepare_mirrored_discovery(playlist_id):
                 'extra_data': extra,
             })
 
+        # Determine current active metadata source for provider-mismatch detection
+        _use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
+        _current_provider = 'spotify' if _use_spotify else _get_metadata_fallback_source()
+
         # Check for cached discovery results in extra_data
         pre_discovered_results = []
         pre_discovered_count = 0
@@ -36985,7 +36989,29 @@ def prepare_mirrored_discovery(playlist_id):
         for idx, track in enumerate(tracks):
             extra = track.get('extra_data')
             if extra and extra.get('discovered'):
-                # Previously found match
+                cached_provider = extra.get('provider', 'spotify')
+
+                # If the cached result was discovered by a different provider than the
+                # currently active one, treat it as pending so re-discovery uses the
+                # correct source (IDs, album data, images differ between providers).
+                if cached_provider != _current_provider:
+                    has_pending = True
+                    dur = track.get('duration_ms', 0)
+                    pre_discovered_results.append({
+                        'index': idx,
+                        'yt_track': track['name'],
+                        'yt_artist': track['artists'][0] if track['artists'] else 'Unknown',
+                        'status': '🔄 Provider changed',
+                        'status_class': 'not-found',
+                        'spotify_track': '',
+                        'spotify_artist': '',
+                        'spotify_album': '',
+                        'duration': f"{dur // 60000}:{(dur % 60000) // 1000:02d}" if dur else '0:00',
+                        'confidence': 0,
+                    })
+                    continue
+
+                # Previously found match — provider matches current source
                 matched = extra.get('matched_data', {})
                 artists_raw = matched.get('artists', [])
                 if artists_raw and isinstance(artists_raw[0], dict):
@@ -37015,19 +37041,22 @@ def prepare_mirrored_discovery(playlist_id):
                 pre_discovered_results.append(result)
                 pre_discovered_count += 1
             elif extra and extra.get('discovery_attempted'):
-                # Previously attempted but not found
+                # Previously attempted but not found — also retry if provider changed
+                cached_provider = extra.get('provider', 'spotify')
+                if cached_provider != _current_provider:
+                    has_pending = True
                 dur = track.get('duration_ms', 0)
                 pre_discovered_results.append({
                     'index': idx,
                     'yt_track': track['name'],
                     'yt_artist': track['artists'][0] if track['artists'] else 'Unknown',
-                    'status': '❌ Not Found',
+                    'status': '🔄 Provider changed' if cached_provider != _current_provider else '❌ Not Found',
                     'status_class': 'not-found',
                     'spotify_track': '',
                     'spotify_artist': '',
                     'spotify_album': '',
                     'duration': f"{dur // 60000}:{(dur % 60000) // 1000:02d}" if dur else '0:00',
-                    'discovery_source': extra.get('provider', 'spotify'),
+                    'discovery_source': cached_provider,
                     'confidence': 0,
                 })
             elif not extra or (not extra.get('discovered') and not extra.get('discovery_attempted')):
@@ -37047,8 +37076,13 @@ def prepare_mirrored_discovery(playlist_id):
                     'confidence': 0,
                 })
 
-        # Only treat as cached if at least one track has been discovered or attempted
-        has_cached = any(t.get('extra_data') and (t['extra_data'].get('discovered') or t['extra_data'].get('discovery_attempted')) for t in tracks)
+        # Only treat as cached if at least one track was discovered by the current provider
+        has_cached = any(
+            t.get('extra_data') and
+            (t['extra_data'].get('discovered') or t['extra_data'].get('discovery_attempted')) and
+            t['extra_data'].get('provider', 'spotify') == _current_provider
+            for t in tracks
+        )
 
         playlist_data = {
             'id': url_hash,
