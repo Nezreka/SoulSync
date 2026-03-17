@@ -4373,11 +4373,23 @@
                                 </div>
                             </div>
 
-                            <!-- Lossy Copy Settings -->
+                            <!-- Post-Download Conversion Settings -->
                             <div class="settings-group">
-                                <h3>📀 Lossy Copy</h3>
+                                <h3>📀 Post-Download Conversion</h3>
 
                                 <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="downsample-hires">
+                                        Downsample Hi-Res FLAC to CD quality (16-bit / 44.1kHz)
+                                    </label>
+                                </div>
+                                <div class="help-text">
+                                    When a 24-bit or high sample rate FLAC is downloaded, it will be
+                                    automatically converted to 16-bit/44.1kHz. The hi-res original is
+                                    replaced — not kept alongside. Requires ffmpeg.
+                                </div>
+
+                                <div class="form-group" style="margin-top: 16px;">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="lossy-copy-enabled"
                                             onchange="document.getElementById('lossy-copy-options').style.display = this.checked ? 'block' : 'none'">

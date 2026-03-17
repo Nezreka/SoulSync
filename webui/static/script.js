@@ -4893,7 +4893,8 @@ async function loadSettingsData() {
         // Populate Playlist Sync settings
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup !== false;
 
-        // Populate Lossy Copy settings
+        // Populate Post-Download Conversion settings
+        document.getElementById('downsample-hires').checked = settings.lossy_copy?.downsample_hires === true;
         document.getElementById('lossy-copy-enabled').checked = settings.lossy_copy?.enabled === true;
         document.getElementById('lossy-copy-bitrate').value = settings.lossy_copy?.bitrate || '320';
         document.getElementById('lossy-copy-delete-original').checked = settings.lossy_copy?.delete_original === true;
@@ -5744,7 +5745,8 @@ async function saveSettings(quiet = false) {
         lossy_copy: {
             enabled: document.getElementById('lossy-copy-enabled').checked,
             bitrate: document.getElementById('lossy-copy-bitrate').value,
-            delete_original: document.getElementById('lossy-copy-delete-original').checked
+            delete_original: document.getElementById('lossy-copy-delete-original').checked,
+            downsample_hires: document.getElementById('downsample-hires').checked
         },
         import: {
             staging_path: document.getElementById('staging-path').value || './Staging'
