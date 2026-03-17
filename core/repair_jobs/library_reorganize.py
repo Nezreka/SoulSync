@@ -25,6 +25,13 @@ logger = get_logger("repair_job.library_reorganize")
 
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 SIDECAR_EXTENSIONS = {'.lrc', '.jpg', '.jpeg', '.png', '.nfo', '.txt', '.cue'}
+ALBUM_SIDECAR_NAMES = {
+    'cover.jpg', 'cover.jpeg', 'cover.png',
+    'folder.jpg', 'folder.jpeg', 'folder.png',
+    'album.jpg', 'album.jpeg', 'album.png',
+    'front.jpg', 'front.jpeg', 'front.png',
+    'thumb.jpg', 'thumb.png',
+}
 
 # Windows and macOS use case-insensitive filesystems by default
 _CASE_INSENSITIVE = sys.platform in ('win32', 'darwin')
@@ -325,6 +332,8 @@ class LibraryReorganizeJob(RepairJob):
 
         # Track claimed destinations to detect in-batch collisions
         claimed_destinations = set()
+        # Track src_dir -> dest_dir for post-pass sidecar cleanup
+        moved_dirs = {}  # src_dir -> dest_dir (last used destination)
 
         for i, fpath in enumerate(audio_files):
             if context.check_stop():
@@ -490,11 +499,18 @@ class LibraryReorganizeJob(RepairJob):
                         shutil.move(actual_norm, expected_norm)
 
                     result.auto_fixed += 1
+                    # Record src->dest for post-pass sidecar cleanup
+                    # For multi-disc, use album root (parent of Disc N/) as destination
+                    sidecar_dest = dest_dir
+                    if is_album and total_discs > 1 and '$disc' not in album_template:
+                        sidecar_dest = os.path.dirname(dest_dir)
+                    moved_dirs[os.path.dirname(actual_norm)] = sidecar_dest
 
                     # Move sidecar files (LRC, cover art, etc.)
                     if move_sidecars:
                         stem = os.path.splitext(os.path.basename(actual_norm))[0]
                         src_dir = os.path.dirname(actual_norm)
+                        # Track-level sidecars (same stem as audio file)
                         for sidecar_ext in SIDECAR_EXTENSIONS:
                             sidecar_src = os.path.join(src_dir, stem + sidecar_ext)
                             if os.path.isfile(sidecar_src):
@@ -504,9 +520,24 @@ class LibraryReorganizeJob(RepairJob):
                                     shutil.move(sidecar_src, sidecar_dst)
                                 except Exception as se:
                                     logger.debug("Failed to move sidecar %s: %s", sidecar_src, se)
+                        # Album-level sidecars (cover.jpg, folder.jpg, etc.)
+                        # For multi-disc, place in the album root (parent of Disc N/)
+                        album_dest = dest_dir
+                        if is_album and total_discs > 1 and '$disc' not in album_template:
+                            album_dest = os.path.dirname(dest_dir)
+                            os.makedirs(album_dest, exist_ok=True)
+                        for album_sidecar in ALBUM_SIDECAR_NAMES:
+                            sidecar_src = os.path.join(src_dir, album_sidecar)
+                            if os.path.isfile(sidecar_src):
+                                sidecar_dst = os.path.join(album_dest, album_sidecar)
+                                if not os.path.exists(sidecar_dst):
+                                    try:
+                                        shutil.move(sidecar_src, sidecar_dst)
+                                    except Exception as se:
+                                        logger.debug("Failed to move album sidecar %s: %s", sidecar_src, se)
 
                     # Update DB file_path if there's a matching track
-                    self._update_db_path(context.db, actual_norm, expected_norm)
+                    self._update_db_path(context.db, actual_norm, expected_norm, transfer)
 
                     # Clean up empty source directories
                     _remove_empty_dirs(os.path.dirname(actual_norm), transfer)
@@ -533,6 +564,35 @@ class LibraryReorganizeJob(RepairJob):
 
         if context.update_progress:
             context.update_progress(total, total)
+
+        # Post-pass: move leftover sidecar files from directories that lost all audio
+        if not dry_run and move_sidecars and moved_dirs:
+            for src_dir, dest_dir in moved_dirs.items():
+                if not os.path.isdir(src_dir):
+                    continue
+                # Check if any audio files remain in this directory
+                has_audio = any(
+                    os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS
+                    for f in os.listdir(src_dir)
+                    if os.path.isfile(os.path.join(src_dir, f))
+                )
+                if has_audio:
+                    continue
+                # Move all remaining sidecar-type files to the destination
+                for f in os.listdir(src_dir):
+                    fpath_full = os.path.join(src_dir, f)
+                    if not os.path.isfile(fpath_full):
+                        continue
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in SIDECAR_EXTENSIONS:
+                        dst = os.path.join(dest_dir, f)
+                        if not os.path.exists(dst):
+                            try:
+                                shutil.move(fpath_full, dst)
+                            except Exception:
+                                pass
+                # Try cleaning up the now-potentially-empty directory
+                _remove_empty_dirs(src_dir, transfer)
 
         mode_text = 'Dry run' if dry_run else 'Reorganize'
         summary = f"{mode_text} complete: {result.scanned} scanned, {result.auto_fixed} moved, {result.findings_created} findings, {result.skipped} skipped, {result.errors} errors"
@@ -564,19 +624,55 @@ class LibraryReorganizeJob(RepairJob):
             return context.config_manager.get(f'repair.jobs.{self.job_id}.settings.{key}', default)
         return default
 
-    def _update_db_path(self, db, old_path: str, new_path: str):
-        """Update file_path in the tracks table when a file is moved."""
+    def _update_db_path(self, db, old_path: str, new_path: str, transfer_folder: str = ''):
+        """Update file_path in the tracks table when a file is moved.
+
+        DB may store server-side paths (e.g. /mnt/musicBackup/Artist/Album/track.flac)
+        while local paths use the transfer folder (e.g. H:\\Music\\Artist\\Album\\track.flac).
+        Falls back to suffix matching when exact match fails.
+        """
         conn = None
         try:
             conn = db._get_connection()
             cursor = conn.cursor()
+
             # Try exact match first
             cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
                            (new_path, old_path))
-            if cursor.rowcount == 0:
-                # Try normalized path match
-                cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
-                               (new_path, os.path.normpath(old_path)))
+            if cursor.rowcount > 0:
+                conn.commit()
+                return
+
+            # Try normalized path match
+            cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
+                           (new_path, os.path.normpath(old_path)))
+            if cursor.rowcount > 0:
+                conn.commit()
+                return
+
+            # Suffix match: compute path relative to transfer folder and match
+            # against DB paths that may use a different base prefix
+            if transfer_folder:
+                try:
+                    rel_suffix = os.path.relpath(old_path, transfer_folder).replace('\\', '/')
+                    # Escape LIKE wildcards (% _ ^) so artist/album names are literal
+                    escaped = rel_suffix.replace('^', '^^').replace('%', '^%').replace('_', '^_')
+                    cursor.execute(
+                        "UPDATE tracks SET file_path = ? WHERE file_path LIKE ? ESCAPE '^'",
+                        (new_path, '%/' + escaped)
+                    )
+                    if cursor.rowcount > 0:
+                        conn.commit()
+                        return
+                    # Also try with backslash separators (Windows DB paths)
+                    escaped_bs = escaped.replace('/', '\\')
+                    cursor.execute(
+                        "UPDATE tracks SET file_path = ? WHERE file_path LIKE ? ESCAPE '^'",
+                        (new_path, '%\\' + escaped_bs)
+                    )
+                except Exception:
+                    pass
+
             conn.commit()
         except Exception as e:
             logger.debug("DB path update failed for %s: %s", old_path, e)
