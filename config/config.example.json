@@ -58,7 +58,8 @@
   },
   "lossy_copy": {
     "enabled": false,
-    "bitrate": "320"
+    "bitrate": "320",
+    "downsample_hires": false
   },
   "playlist_sync": {
     "create_backup": true

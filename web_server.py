@@ -14137,6 +14137,124 @@ def _get_audio_quality_string(file_path):
         logger.debug(f"Could not determine audio quality for {file_path}: {e}")
         return ''
 
+def _downsample_hires_flac(final_path, context):
+    """Downsample a 24-bit hi-res FLAC to 16-bit/44.1kHz CD quality.
+
+    Only runs when downsample_hires is enabled and the file is a 24-bit FLAC.
+    Replaces the original file in-place (write to temp, verify, swap).
+
+    Returns the (possibly renamed) final_path, or None if no conversion needed.
+    """
+    if not config_manager.get('lossy_copy.downsample_hires', False):
+        return None
+
+    ext = os.path.splitext(final_path)[1].lower()
+    if ext != '.flac':
+        return None
+
+    # Check current bit depth — only downsample if hi-res (>16 bit)
+    try:
+        from mutagen.flac import FLAC
+        audio = FLAC(final_path)
+        original_bits = audio.info.bits_per_sample
+        original_rate = audio.info.sample_rate
+    except Exception as e:
+        print(f"⚠️ [Downsample] Could not read FLAC info: {e}")
+        return None
+
+    if original_bits <= 16 and original_rate <= 44100:
+        return None  # Already CD quality or below
+
+    print(f"📀 [Downsample] Converting {original_bits}-bit/{original_rate}Hz → 16-bit/44100Hz: {os.path.basename(final_path)}")
+
+    ffmpeg_bin = shutil.which('ffmpeg')
+    if not ffmpeg_bin:
+        local = os.path.join(os.path.dirname(__file__), 'tools', 'ffmpeg')
+        if os.path.isfile(local):
+            ffmpeg_bin = local
+        else:
+            print("⚠️ [Downsample] ffmpeg not found — skipping hi-res conversion")
+            return None
+
+    temp_path = final_path + '.tmp.flac'
+    try:
+        result = subprocess.run([
+            ffmpeg_bin, '-i', final_path,
+            '-sample_fmt', 's16',
+            '-ar', '44100',
+            '-map_metadata', '0',
+            '-compression_level', '8',
+            '-y', temp_path
+        ], capture_output=True, text=True, timeout=300)
+
+        if result.returncode != 0:
+            print(f"⚠️ [Downsample] ffmpeg failed: {result.stderr[:200]}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            return None
+
+        # Verify the output is a valid 16-bit FLAC
+        if not os.path.isfile(temp_path) or os.path.getsize(temp_path) == 0:
+            print(f"⚠️ [Downsample] Output file missing or empty")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            return None
+
+        verify_audio = FLAC(temp_path)
+        if verify_audio.info.bits_per_sample != 16:
+            print(f"⚠️ [Downsample] Output not 16-bit ({verify_audio.info.bits_per_sample}-bit), aborting")
+            os.remove(temp_path)
+            return None
+
+        # Atomic swap — replace original with downsampled version
+        os.replace(temp_path, final_path)
+        print(f"✅ [Downsample] Converted to 16-bit/44.1kHz: {os.path.basename(final_path)}")
+
+        # Update QUALITY tag in the new file
+        new_quality = 'FLAC 16bit'
+        try:
+            updated_audio = FLAC(final_path)
+            updated_audio['QUALITY'] = new_quality
+            updated_audio.save()
+        except Exception as tag_err:
+            print(f"⚠️ [Downsample] Could not update QUALITY tag: {tag_err}")
+
+        # Update context so downstream (lossy copy, metadata) reflects new quality
+        old_quality = context.get('_audio_quality', '')
+        context['_audio_quality'] = new_quality
+
+        # If filename contains old quality string (from $quality template), rename
+        if old_quality and old_quality != new_quality and old_quality in os.path.basename(final_path):
+            new_basename = os.path.basename(final_path).replace(old_quality, new_quality)
+            new_path = os.path.join(os.path.dirname(final_path), new_basename)
+            try:
+                os.rename(final_path, new_path)
+                print(f"📝 [Downsample] Renamed: {os.path.basename(final_path)} → {new_basename}")
+                # Rename matching LRC file if it exists
+                old_lrc = os.path.splitext(final_path)[0] + '.lrc'
+                if os.path.isfile(old_lrc):
+                    new_lrc = os.path.splitext(new_path)[0] + '.lrc'
+                    os.rename(old_lrc, new_lrc)
+                return new_path
+            except Exception as rename_err:
+                print(f"⚠️ [Downsample] Could not rename file: {rename_err}")
+
+        return final_path
+
+    except subprocess.TimeoutExpired:
+        print(f"⚠️ [Downsample] Conversion timed out for: {os.path.basename(final_path)}")
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    except Exception as e:
+        print(f"⚠️ [Downsample] Conversion error: {e}")
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+    return None
+
+
 def _create_lossy_copy(final_path):
     """Convert a FLAC file to MP3 at the user's configured bitrate.
 
@@ -15528,14 +15646,18 @@ def _check_flac_bit_depth(file_path, context, context_key):
     if _actual_bits == _flac_pref:
         return False
 
-    # Bit depth doesn't match preference — check if fallback is enabled
+    # Bit depth doesn't match preference — check if fallback or downsample is enabled
     _flac_fallback = _flac_config.get('bit_depth_fallback', True)
+    _downsample_enabled = config_manager.get('lossy_copy.downsample_hires', False)
 
-    if _flac_fallback:
-        # Accept the file — a FLAC at any bit depth is better than a failed download
+    if _flac_fallback or _downsample_enabled:
+        # Accept the file — it will be downsampled or a FLAC at any bit depth is better than a failed download
         track_info = context.get('track_info', {})
         track_name = track_info.get('name', os.path.basename(file_path))
-        print(f"📀 [FLAC Fallback] Accepted {_actual_bits}-bit FLAC (preferred {_flac_pref}-bit): {track_name}")
+        if _downsample_enabled:
+            print(f"📀 [FLAC Downsample] Accepted {_actual_bits}-bit FLAC (will be downsampled to {_flac_pref}-bit): {track_name}")
+        else:
+            print(f"📀 [FLAC Fallback] Accepted {_actual_bits}-bit FLAC (preferred {_flac_pref}-bit): {track_name}")
         return False
 
     # Strict mode — reject and quarantine
@@ -16028,8 +16150,14 @@ def _post_process_matched_download(context_key, context, file_path):
             print(f"🚚 Moving '{os.path.basename(file_path)}' to '{final_path}'")
             _safe_move_file(file_path, final_path)
 
-            # Store final path for verification wrapper (before lossy copy may override)
+            # Store final path for verification wrapper (before conversions may override)
             context['_final_processed_path'] = final_path
+
+            # Downsample hi-res FLAC to CD quality if enabled (must run before lossy copy)
+            downsampled_path = _downsample_hires_flac(final_path, context)
+            if downsampled_path:
+                final_path = downsampled_path
+                context['_final_processed_path'] = final_path
 
             # Lossy copy: create MP3 version if enabled
             blasphemy_path = _create_lossy_copy(final_path)
@@ -16379,6 +16507,12 @@ def _post_process_matched_download(context_key, context, file_path):
 
         # 4. Generate LRC lyrics file at final location (elegant addition)
         _generate_lrc_file(final_path, context, spotify_artist, album_info)
+
+        # Downsample hi-res FLAC to CD quality if enabled (must run before lossy copy)
+        downsampled_path = _downsample_hires_flac(final_path, context)
+        if downsampled_path:
+            final_path = downsampled_path
+            context['_final_processed_path'] = final_path
 
         # Lossy copy: create MP3 version if enabled
         blasphemy_path = _create_lossy_copy(final_path)
