@@ -1905,7 +1905,7 @@ class BeatportUnifiedScraper:
 
         # Method 2 (FALLBACK): Look for the specific wrapper class (legacy support)
         if len(tracks) < 5:
-            hero_wrapper = soup.find('div', class_='Homepage-style__NewOnBeatportWrapper-sc-deeb4244-2 iyIchZ')
+            hero_wrapper = soup.select_one('[class*="Homepage-style__NewOnBeatportWrapper"]')
             if hero_wrapper:
                 print("   ✅ Found Homepage NewOnBeatportWrapper (fallback)")
                 tracks.extend(self._extract_from_hero_wrapper(hero_wrapper, limit))
@@ -3788,7 +3788,7 @@ class BeatportUnifiedScraper:
                     data['release_slug'] = url_parts[1]
 
             # Extract release title
-            title_elem = release_element.select_one('.HeroRelease-style__ReleaseName-sc-aeec852a-3')
+            title_elem = release_element.select_one('[class*="HeroRelease-style__ReleaseName"]')
             if title_elem:
                 data['title'] = self.clean_text(title_elem.get_text(strip=True))
 
@@ -3799,7 +3799,7 @@ class BeatportUnifiedScraper:
                 data['alt_text'] = img_elem.get('alt', '')
 
             # Extract artists
-            artists_container = release_element.select_one('.HeroRelease-style__Artists-sc-aeec852a-1')
+            artists_container = release_element.select_one('[class*="HeroRelease-style__Artists"]')
             if artists_container:
                 artist_links = artists_container.find_all('a')
                 artists = []
@@ -3817,7 +3817,7 @@ class BeatportUnifiedScraper:
                 data['artists_string'] = ', '.join([a['name'] for a in artists])
 
             # Extract label
-            label_elem = release_element.select_one('.HeroRelease-style__Label-sc-aeec852a-0')
+            label_elem = release_element.select_one('[class*="HeroRelease-style__Label"]')
             if label_elem:
                 label_link = label_elem.find('a')
                 if label_link:
@@ -3826,7 +3826,7 @@ class BeatportUnifiedScraper:
                     data['label_beatport_url'] = urljoin(self.base_url, data['label_url']) if data['label_url'] else None
 
             # Extract any badges (like EXCLUSIVE)
-            badges_elem = release_element.select_one('.HeroRelease-style__Badges-sc-aeec852a-8')
+            badges_elem = release_element.select_one('[class*="HeroRelease-style__Badges"]')
             if badges_elem:
                 badge_text = self.clean_text(badges_elem.get_text(strip=True))
                 if badge_text:
