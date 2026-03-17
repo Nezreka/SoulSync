@@ -6251,8 +6251,27 @@ def get_beatport_new_releases():
         if not soup:
             raise Exception("Could not fetch Beatport homepage")
 
-        # Extract release cards using the working CSS selector
-        release_cards = soup.select('.ReleaseCard-style__Wrapper-sc-7c61989b-12.duhBUN')
+        # Find New Releases GridSlider container by section heading
+        # Use partial class match to avoid brittle hashed class names
+        gridsliders = soup.select('[class*="GridSlider-style__Wrapper"]')
+        releases_container = None
+
+        for container in gridsliders:
+            h2 = container.select_one('h2')
+            if h2:
+                title = h2.get_text(strip=True).lower()
+                if 'new release' in title:
+                    releases_container = container
+                    logger.info(f"🆕 FOUND NEW RELEASES: '{h2.get_text(strip=True)}'")
+                    break
+
+        # Fallback: try ReleaseCard partial class match on whole page
+        if releases_container:
+            release_cards = releases_container.select('[class*="ReleaseCard-style__Wrapper"]')
+        else:
+            logger.warning("⚠️ No New Releases GridSlider found, trying page-wide ReleaseCard search")
+            release_cards = soup.select('[class*="ReleaseCard-style__Wrapper"]')
+
         releases = []
 
         logger.info(f"🔍 Found {len(release_cards)} release cards")
@@ -6260,22 +6279,24 @@ def get_beatport_new_releases():
         for i, card in enumerate(release_cards[:100]):  # Limit to 100 for 10 slides
             release_data = {}
 
-            # Extract title
-            title_elem = card.select_one('[class*="title"], [class*="Title"], h1, h2, h3, h4, h5, h6')
+            # Extract title from Meta section
+            title_elem = card.select_one('[class*="ReleaseCard-style__Meta"] a[href*="/release/"]')
+            if not title_elem:
+                title_elem = card.select_one('[class*="title"], [class*="Title"], h3, h4, h5, h6')
             if title_elem:
                 title_text = title_elem.get_text(strip=True)
                 if title_text and len(title_text) > 2 and title_text not in ['New Releases', 'Buy', 'Play']:
                     release_data['title'] = title_text
 
             # Extract artist
-            artist_elem = card.select_one('[class*="artist"], [class*="Artist"], a[href*="/artist/"]')
+            artist_elem = card.select_one('a[href*="/artist/"]')
             if artist_elem:
                 artist_text = artist_elem.get_text(strip=True)
                 if artist_text and len(artist_text) > 1:
                     release_data['artist'] = artist_text
 
             # Extract label
-            label_elem = card.select_one('[class*="label"], [class*="Label"], a[href*="/label/"]')
+            label_elem = card.select_one('a[href*="/label/"]')
             if label_elem:
                 label_text = label_elem.get_text(strip=True)
                 if label_text and len(label_text) > 1:
