@@ -540,6 +540,7 @@ def _register_automation_handlers():
                             from core.spotify_public_scraper import scrape_spotify_embed
                             embed_data = scrape_spotify_embed('playlist', source_id)
                             if embed_data and not embed_data.get('error') and embed_data.get('tracks'):
+                                embed_album = embed_data.get('name', '') if embed_data.get('type') == 'album' else ''
                                 tracks = []
                                 for t in embed_data['tracks']:
                                     artist_names = [a['name'] for a in t.get('artists', [])]
@@ -547,7 +548,7 @@ def _register_automation_handlers():
                                     track_dict = {
                                         'track_name': t.get('name', ''),
                                         'artist_name': artist_name,
-                                        'album_name': '',
+                                        'album_name': embed_album,
                                         'duration_ms': t.get('duration_ms', 0),
                                         'source_track_id': t.get('id', ''),
                                     }
@@ -577,6 +578,7 @@ def _register_automation_handlers():
                         if parsed:
                             embed_data = scrape_spotify_embed(parsed['type'], parsed['id'])
                             if embed_data and not embed_data.get('error') and embed_data.get('tracks'):
+                                embed_album = embed_data.get('name', '') if embed_data.get('type') == 'album' else ''
                                 tracks = []
                                 for t in embed_data['tracks']:
                                     artist_names = [a['name'] for a in t.get('artists', [])]
@@ -584,7 +586,7 @@ def _register_automation_handlers():
                                     track_dict = {
                                         'track_name': t.get('name', ''),
                                         'artist_name': artist_name,
-                                        'album_name': '',
+                                        'album_name': embed_album,
                                         'duration_ms': t.get('duration_ms', 0),
                                         'source_track_id': t.get('id', ''),
                                     }
@@ -624,7 +626,12 @@ def _register_automation_handlers():
                     except Exception as e:
                         logger.warning(f"Deezer playlist refresh failed for {source_id}: {e}")
 
-                elif source == 'tidal' and tidal_client and tidal_client.is_authenticated():
+                elif source == 'tidal':
+                    if not tidal_client or not tidal_client.is_authenticated():
+                        logger.warning(f"Tidal not authenticated — skipping refresh for '{pl.get('name', '')}'")
+                        _update_automation_progress(auto_id,
+                            log_line=f'Skipped "{pl.get("name", "")}" — Tidal not authenticated', log_type='skip')
+                        continue
                     full_playlist = tidal_client.get_playlist(source_id)
                     if full_playlist and full_playlist.tracks:
                         tracks = []
@@ -25395,9 +25402,10 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
 
                 time.sleep(0.15)
 
-        # Emit completion event
+        # Emit completion event only if new tracks were actually discovered
+        # (no point triggering downstream sync if nothing changed)
         try:
-            if automation_engine:
+            if automation_engine and total_discovered > 0:
                 automation_engine.emit('discovery_completed', {
                     'playlist_name': last_playlist_name if len(playlists) == 1 else f'{len(playlists)} playlists',
                     'total_tracks': str(total_tracks),
