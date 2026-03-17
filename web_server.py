@@ -17366,10 +17366,28 @@ def get_version_info():
                 ]
             },
             {
+                "title": "📀 Hi-Res FLAC Downsampling",
+                "description": "Automatically convert 24-bit hi-res downloads to 16-bit/44.1kHz CD quality",
+                "features": [
+                    "• New toggle in Settings → Post-Download Conversion: downsample hi-res FLAC to CD quality after download",
+                    "• Converts 24-bit and/or high sample rate FLAC files to 16-bit/44.1kHz — saves ~50% disk space with no audible difference",
+                    "• Safe in-place replacement: writes to temp file, verifies output, then atomic swap — original untouched on failure",
+                    "• Runs before lossy copy so MP3s are created from the downsampled version when both are enabled",
+                    "• Automatically updates $quality in filenames and QUALITY tags after conversion",
+                    "• Overrides strict bit depth rejection — files are accepted and converted instead of quarantined"
+                ]
+            },
+            {
                 "title": "🐛 Recent Bug Fixes & Improvements",
                 "description": "Stability fixes, UX improvements, and edge case handling",
                 "features": [
-                    "• Fix $year template variable empty for playlist/sync downloads — album metadata from discovery was being discarded in the fallback download path",
+                    "• Fix $year template variable empty for playlist/sync downloads — album metadata now backfilled from Spotify API",
+                    "• Fix dead file cleaner reporting 66k+ false positives — transfer path fell back to ./Transfer under DB contention",
+                    "• Fix library reorganize not updating database paths after moving files — suffix-based matching with SQL LIKE escaping",
+                    "• Fix library reorganize not moving cover.jpg and other album-level sidecar files with tracks",
+                    "• Fix orphaned sidecar files left behind after reorganize — post-pass sweep moves remaining non-audio files",
+                    "• Fix Navidrome library scan was a no-op — now triggers actual scan via Subsonic startScan API",
+                    "• Select All, Fix Selected, and Fix All bulk actions for Library Maintenance findings",
                     "• Fix empty brackets in folder names ($year, $quality etc.) not being cleaned when template variables resolve to empty",
                     "• Fix missing album cover art in download progress bubbles for redownload and issue modal downloads",
                     "• Cancel button for watchlist scans — stop manual or automation-triggered scans mid-run",
