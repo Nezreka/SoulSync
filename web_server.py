@@ -22348,7 +22348,8 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                     'release_date': fallback_album.get('release_date', ''),
                     'image_url': fallback_image_url,
                     'album_type': fallback_album.get('album_type', 'album'),
-                    'total_tracks': fallback_album.get('total_tracks', 0)
+                    'total_tracks': fallback_album.get('total_tracks', 0),
+                    'total_discs': fallback_album.get('total_discs', 1)
                 }
 
             download_payload = candidate.__dict__
@@ -22402,6 +22403,22 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                                     enhanced_payload['track_number'] = detailed_track['track_number']
                                     enhanced_payload['disc_number'] = detailed_track.get('disc_number', 1)
                                     print(f"🔢 [Context] Added Spotify track_number: {detailed_track['track_number']}, disc_number: {enhanced_payload['disc_number']}")
+
+                                    # Backfill album metadata from detailed track when fallback path
+                                    # produced incomplete data (e.g. album was a plain string from
+                                    # discovery playlists, or release_date missing from track listing)
+                                    if not has_explicit_context and isinstance(detailed_track.get('album'), dict):
+                                        dt_album = detailed_track['album']
+                                        if not spotify_album_context.get('release_date') and dt_album.get('release_date'):
+                                            spotify_album_context['release_date'] = dt_album['release_date']
+                                            print(f"📅 [Context] Backfilled release_date from Spotify API: {dt_album['release_date']}")
+                                        if dt_album.get('album_type') and not fallback_album.get('album_type'):
+                                            spotify_album_context['album_type'] = dt_album['album_type']
+                                        if not spotify_album_context.get('total_tracks') and dt_album.get('total_tracks'):
+                                            spotify_album_context['total_tracks'] = dt_album['total_tracks']
+                                        if not spotify_album_context.get('name') or spotify_album_context['name'] == track.album:
+                                            if dt_album.get('name'):
+                                                spotify_album_context['name'] = dt_album['name']
                                 else:
                                     enhanced_payload['track_number'] = track_info.get('track_number', 1)
                                     enhanced_payload['disc_number'] = track_info.get('disc_number', 1)
