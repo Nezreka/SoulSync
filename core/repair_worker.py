@@ -779,6 +779,7 @@ class RepairWorker:
             'missing_cover_art': self._fix_missing_cover_art,
             'metadata_gap': self._fix_metadata_gap,
             'duplicate_tracks': self._fix_duplicates,
+            'single_album_redundant': self._fix_single_album_redundant,
             'mbid_mismatch': self._fix_mbid_mismatch,
         }
         handler = handlers.get(finding_type)
@@ -994,6 +995,69 @@ class RepairWorker:
         if files_deleted:
             msg += f' and {files_deleted} file(s) from disk'
         return {'success': True, 'action': 'removed_duplicates', 'message': msg}
+
+    def _fix_single_album_redundant(self, entity_type, entity_id, file_path, details):
+        """Remove the single/EP version, keeping the album version."""
+        single_info = details.get('single_track', {})
+        album_info = details.get('album_track', {})
+        single_id = single_info.get('id') or entity_id
+        single_path = single_info.get('file_path') or file_path
+
+        if not single_id:
+            return {'success': False, 'error': 'No single track ID to remove'}
+
+        # Verify the album track still exists before removing the single
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            album_id = album_info.get('id')
+            if album_id:
+                cursor.execute("SELECT id FROM tracks WHERE id = ?", (album_id,))
+                if not cursor.fetchone():
+                    return {'success': False, 'error': 'Album version no longer exists in library — keeping single'}
+
+            # Remove single from DB
+            cursor.execute("DELETE FROM tracks WHERE id = ?", (single_id,))
+            conn.commit()
+            removed = cursor.rowcount
+        finally:
+            if conn:
+                conn.close()
+
+        if removed == 0:
+            return {'success': True, 'action': 'already_removed', 'message': 'Single track was already removed'}
+
+        # Delete single file from disk
+        file_deleted = False
+        if single_path:
+            download_folder = None
+            if self._config_manager:
+                download_folder = self._config_manager.get('soulseek.download_path', '')
+            try:
+                resolved = _resolve_file_path(single_path, self.transfer_folder, download_folder)
+                if resolved and os.path.exists(resolved):
+                    os.remove(resolved)
+                    file_deleted = True
+                    # Clean up empty parent directories
+                    transfer_norm = os.path.normpath(self.transfer_folder)
+                    parent = os.path.dirname(resolved)
+                    for _ in range(3):
+                        if (parent and os.path.isdir(parent)
+                                and os.path.normpath(parent) != transfer_norm
+                                and not os.listdir(parent)):
+                            os.rmdir(parent)
+                            parent = os.path.dirname(parent)
+                        else:
+                            break
+            except OSError:
+                pass  # Best effort — DB entry already removed
+
+        album_name = album_info.get('album', 'unknown album')
+        msg = f'Removed single, album version on "{album_name}" kept'
+        if file_deleted:
+            msg += ' (file deleted)'
+        return {'success': True, 'action': 'removed_single', 'message': msg}
 
     def _fix_mbid_mismatch(self, entity_type, entity_id, file_path, details):
         """Remove the mismatched MusicBrainz recording ID from the audio file."""
