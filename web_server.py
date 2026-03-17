@@ -713,7 +713,8 @@ def _register_automation_handlers():
 
     def _auto_sync_playlist(config):
         """Sync a mirrored playlist to media server.
-        Uses discovered metadata when available, skips undiscovered tracks."""
+        Uses discovered metadata when available, skips undiscovered tracks.
+        When triggered on a schedule, skips if nothing changed since last sync."""
         auto_id = config.get('_automation_id')
         playlist_id = config.get('playlist_id')
         if not playlist_id:
@@ -727,6 +728,44 @@ def _register_automation_handlers():
         tracks = db.get_mirrored_playlist_tracks(int(playlist_id))
         if not tracks:
             return {'status': 'error', 'reason': 'No tracks in playlist'}
+
+        # Count currently discovered tracks for smart-skip check
+        current_discovered = 0
+        for t in tracks:
+            extra = {}
+            if t.get('extra_data'):
+                try:
+                    extra = json.loads(t['extra_data']) if isinstance(t['extra_data'], str) else t['extra_data']
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if extra.get('discovered') and extra.get('matched_data'):
+                current_discovered += 1
+
+        # Smart skip: only re-sync if something could have changed
+        # Skip when: same discovered count, same total, AND last sync already matched all discovered tracks
+        # Re-sync when: new tracks discovered, tracks added/removed, or last sync had unmatched tracks
+        #   (unmatched = discovered but not on server — wishlist may have downloaded them since)
+        sync_id_key = f"auto_mirror_{playlist_id}"
+        try:
+            sync_statuses = _load_sync_status_file()
+            last_status = sync_statuses.get(sync_id_key, {})
+            last_matched = last_status.get('matched_tracks', -1)
+            last_discovered = last_status.get('discovered_tracks', -1)
+            last_total = last_status.get('total_tracks', -1)
+
+            if (last_discovered == current_discovered and
+                last_total == len(tracks) and
+                last_matched >= current_discovered):
+                # All discovered tracks were already matched on server last time — nothing to do
+                _update_automation_progress(auto_id,
+                    log_line=f'All {current_discovered} tracks already synced — skipping',
+                    log_type='skip')
+                return {
+                    'status': 'skipped',
+                    'reason': f'All {current_discovered} tracks already synced',
+                }
+        except Exception:
+            pass  # If we can't read last status, just run the sync
 
         # Convert mirrored tracks to format expected by _run_sync_task
         # Use discovered metadata when available, skip undiscovered tracks
@@ -23985,21 +24024,26 @@ def _save_sync_status_file(sync_statuses):
     except Exception as e:
         print(f"❌ Error saving sync status: {e}")
 
-def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, snapshot_id):
+def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, snapshot_id, **kwargs):
     """Updates the sync status for a given playlist and saves to file (same logic as GUI)."""
     try:
         # Load existing sync statuses
         sync_statuses = _load_sync_status_file()
-        
+
         # Update this playlist's sync status
         from datetime import datetime
         now = datetime.now()
-        sync_statuses[playlist_id] = {
+        status = {
             'name': playlist_name,
             'owner': playlist_owner,
             'snapshot_id': snapshot_id,
             'last_synced': now.isoformat()
         }
+        # Store match counts for smart-skip on scheduled syncs
+        for key in ('matched_tracks', 'total_tracks', 'discovered_tracks'):
+            if key in kwargs:
+                status[key] = kwargs[key]
+        sync_statuses[playlist_id] = status
         
         # Save to file
         _save_sync_status_file(sync_statuses)
@@ -29236,10 +29280,12 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
         except Exception:
             pass
 
-        # Save sync status to storage/sync_status.json (same as GUI)
-        # Handle snapshot_id safely - may not exist in all playlist objects
+        # Save sync status with match counts for smart-skip on next scheduled sync
         snapshot_id = getattr(playlist, 'snapshot_id', None)
-        _update_and_save_sync_status(playlist_id, playlist_name, playlist.owner, snapshot_id)
+        _update_and_save_sync_status(playlist_id, playlist_name, playlist.owner, snapshot_id,
+            matched_tracks=getattr(result, 'matched_tracks', 0),
+            total_tracks=getattr(result, 'total_tracks', 0),
+            discovered_tracks=len(tracks_json))
 
     except Exception as e:
         print(f"❌ SYNC FAILED for {playlist_id}: {e}")
