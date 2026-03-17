@@ -9788,6 +9788,7 @@ def enhance_artist_quality(artist_id):
                                     'name': best_match.album,
                                     'artists': [{'name': a} for a in best_match.artists],
                                     'album_type': 'album',
+                                    'release_date': getattr(best_match, 'release_date', '') or '',
                                     'images': album_images,
                                 },
                                 'duration_ms': best_match.duration_ms,
@@ -19910,7 +19911,8 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
                             'album': {
                                 'name': best_match.album,
                                 'artists': [{'name': artist} for artist in best_match.artists],
-                                'album_type': 'album'  # Default to 'album' for quality scanner matches
+                                'album_type': 'album',  # Default to 'album' for quality scanner matches
+                                'release_date': getattr(best_match, 'release_date', '') or ''
                             },
                             'duration_ms': best_match.duration_ms,
                             'popularity': best_match.popularity,
@@ -25596,7 +25598,7 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                     match_artists = best_match.artists if hasattr(best_match, 'artists') else []
                     match_image = getattr(best_match, 'image_url', None)
                     album_name = best_match.album if hasattr(best_match, 'album') else ''
-                    album_obj = {'name': album_name}
+                    album_obj = {'name': album_name, 'release_date': getattr(best_match, 'release_date', '') or ''}
                     if match_image:
                         album_obj['images'] = [{'url': match_image, 'height': 600, 'width': 600}]
                     matched_data = {
@@ -25918,6 +25920,9 @@ def _run_tidal_discovery_worker(playlist_id):
                         album_obj['name'] = track_obj.album
                     elif not album_obj and track_obj.album:
                         album_obj = {'name': track_obj.album}
+                    # Ensure release_date is present (raw Spotify data has it, but fallback may not)
+                    if isinstance(album_obj, dict) and not album_obj.get('release_date'):
+                        album_obj['release_date'] = getattr(track_obj, 'release_date', '') or ''
                     # Extract image URL from album data or track object
                     _album_images = album_obj.get('images', []) if isinstance(album_obj, dict) else []
                     _image_url = _album_images[0].get('url', '') if _album_images else (getattr(track_obj, 'image_url', '') or '')
@@ -26149,6 +26154,7 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                     'album': {
                         'name': album_name,
                         'album_type': 'album',
+                        'release_date': getattr(best_match, 'release_date', '') or '',
                         'images': [{'url': image_url, 'height': 300, 'width': 300}] if image_url else []
                     },
                     'duration_ms': duration_ms,
@@ -26880,6 +26886,9 @@ def _run_deezer_discovery_worker(playlist_id):
                         album_obj['name'] = track_obj.album
                     elif not album_obj and track_obj.album:
                         album_obj = {'name': track_obj.album}
+                    # Ensure release_date is present (raw Spotify data has it, but fallback may not)
+                    if isinstance(album_obj, dict) and not album_obj.get('release_date'):
+                        album_obj['release_date'] = getattr(track_obj, 'release_date', '') or ''
                     # Extract image URL from album data or track object
                     _album_images = album_obj.get('images', []) if isinstance(album_obj, dict) else []
                     _image_url = _album_images[0].get('url', '') if _album_images else (getattr(track_obj, 'image_url', '') or '')
@@ -27704,6 +27713,9 @@ def _run_spotify_public_discovery_worker(url_hash):
                         album_obj['name'] = track_obj.album
                     elif not album_obj and track_obj.album:
                         album_obj = {'name': track_obj.album}
+                    # Ensure release_date is present (raw Spotify data has it, but fallback may not)
+                    if isinstance(album_obj, dict) and not album_obj.get('release_date'):
+                        album_obj['release_date'] = getattr(track_obj, 'release_date', '') or ''
                     # Extract image URL from album data or track object
                     _album_images = album_obj.get('images', []) if isinstance(album_obj, dict) else []
                     _image_url = _album_images[0].get('url', '') if _album_images else (getattr(track_obj, 'image_url', '') or '')
@@ -28481,6 +28493,7 @@ def _run_youtube_discovery_worker(url_hash):
                         album_data = {
                             'name': matched_track.album,
                             'album_type': 'album',
+                            'release_date': getattr(matched_track, 'release_date', '') or '',
                             'images': [{'url': matched_track.image_url}] if hasattr(matched_track, 'image_url') and matched_track.image_url else []
                         }
 
@@ -28794,6 +28807,7 @@ def _run_listenbrainz_discovery_worker(state_key):
                         album_data = {
                             'name': matched_track.album,
                             'album_type': 'album',
+                            'release_date': getattr(matched_track, 'release_date', '') or '',
                             'images': [{'url': matched_track.image_url}] if hasattr(matched_track, 'image_url') and matched_track.image_url else []
                         }
 
@@ -36517,7 +36531,7 @@ def _run_beatport_discovery_worker(url_hash):
                         album_data = best_raw_track.get('album', {}) if best_raw_track else {}
                         if not album_data:
                             # Fallback to string album name
-                            album_data = {'name': found_track.album, 'album_type': 'album', 'images': []}
+                            album_data = {'name': found_track.album, 'album_type': 'album', 'release_date': getattr(found_track, 'release_date', '') or '', 'images': []}
 
                         result_entry['spotify_data'] = {
                             'name': found_track.name,
@@ -36543,6 +36557,7 @@ def _run_beatport_discovery_worker(url_hash):
                         album_data = {
                             'name': album_name,
                             'album_type': 'album',
+                            'release_date': getattr(found_track, 'release_date', '') or '',
                             'images': [{'url': image_url, 'height': 300, 'width': 300}] if image_url else []
                         }
 
