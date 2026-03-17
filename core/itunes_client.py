@@ -72,6 +72,8 @@ class Track:
     release_date: Optional[str] = None
     track_number: Optional[int] = None
     disc_number: Optional[int] = None
+    album_type: Optional[str] = None
+    total_tracks: Optional[int] = None
 
     @classmethod
     def from_itunes_track(cls, track_data: Dict[str, Any], clean_artist_name: Optional[str] = None) -> 'Track':
@@ -92,6 +94,15 @@ class Track:
         if 'trackViewUrl' in track_data:
             external_urls['itunes'] = track_data['trackViewUrl']
 
+        # Infer album type from track count
+        track_count = track_data.get('trackCount', 0)
+        if track_count <= 3:
+            album_type = 'single'
+        elif track_count <= 6:
+            album_type = 'ep'
+        else:
+            album_type = 'album'
+
         return cls(
             id=str(track_data.get('trackId', '')),
             name=track_data.get('trackName', ''),
@@ -102,7 +113,9 @@ class Track:
             preview_url=track_data.get('previewUrl'),
             external_urls=external_urls if external_urls else None,
             image_url=album_image_url,
-            release_date=track_data.get('releaseDate', '').split('T')[0] if track_data.get('releaseDate') else None
+            release_date=track_data.get('releaseDate', '').split('T')[0] if track_data.get('releaseDate') else None,
+            album_type=album_type,
+            total_tracks=track_count or None
         )
 
 @dataclass

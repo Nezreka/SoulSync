@@ -9761,6 +9761,12 @@ def enhance_artist_quality(artist_id):
                                     matching_engine.normalize_string(sp_track.name)
                                 )
                                 combined = artist_conf * 0.5 + title_conf * 0.5
+                                # Small bonus for album tracks over singles
+                                _at = getattr(sp_track, 'album_type', None) or ''
+                                if _at == 'album':
+                                    combined += 0.02
+                                elif _at == 'ep':
+                                    combined += 0.01
                                 if combined > best_confidence and combined >= 0.7:
                                     best_confidence = combined
                                     best_match = sp_track
@@ -9831,6 +9837,12 @@ def enhance_artist_quality(artist_id):
                                     matching_engine.normalize_string(it_track.name)
                                 )
                                 combined = artist_conf * 0.5 + title_conf * 0.5
+                                # Small bonus for album tracks over singles
+                                _at = getattr(it_track, 'album_type', None) or ''
+                                if _at == 'album':
+                                    combined += 0.02
+                                elif _at == 'ep':
+                                    combined += 0.01
                                 if combined > itunes_best_conf and combined >= 0.7:
                                     itunes_best_conf = combined
                                     itunes_best = it_track
@@ -13012,10 +13024,10 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
         query = f"artist:{artist_name} track:{clean_title}"
         tracks = spotify_client.search_tracks(query, limit=5)
         
-        # Find the best matching track
+        # Find the best matching track (prefer album versions over singles)
         best_match = None
         best_confidence = 0
-        
+
         if tracks:
             from core.matching_engine import MusicMatchingEngine
             matching_engine = MusicMatchingEngine()
@@ -13029,9 +13041,16 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
                     matching_engine.normalize_string(clean_title),
                     matching_engine.normalize_string(track.name)
                 )
-                
+
                 combined_confidence = (artist_confidence * 0.6 + title_confidence * 0.4)
-                
+
+                # Small bonus for album tracks so they win ties over singles/EPs
+                album_type = getattr(track, 'album_type', None) or ''
+                if album_type == 'album':
+                    combined_confidence += 0.02
+                elif album_type == 'ep':
+                    combined_confidence += 0.01
+
                 if combined_confidence > best_confidence and combined_confidence > 0.75:  # Higher threshold to avoid bad matches
                     best_match = track
                     best_confidence = combined_confidence
@@ -19876,6 +19895,13 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
 
                                     # Combined confidence (50% artist + 50% title)
                                     combined_confidence = (artist_confidence * 0.5 + title_confidence * 0.5)
+
+                                    # Small bonus for album tracks over singles
+                                    _at = getattr(spotify_track, 'album_type', None) or ''
+                                    if _at == 'album':
+                                        combined_confidence += 0.02
+                                    elif _at == 'ep':
+                                        combined_confidence += 0.01
 
                                     print(f"🔍 [Quality Scanner] Candidate: '{spotify_track.artists[0]}' - '{spotify_track.name}' (confidence: {combined_confidence:.3f})")
 

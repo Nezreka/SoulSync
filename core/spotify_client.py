@@ -317,7 +317,9 @@ class Track:
             preview_url=track_data.get('preview_url'),
             external_urls=track_data.get('external_urls'),
             image_url=album_image_url,
-            release_date=track_data.get('album', {}).get('release_date')
+            release_date=track_data.get('album', {}).get('release_date'),
+            album_type=track_data.get('album', {}).get('album_type'),
+            total_tracks=track_data.get('album', {}).get('total_tracks')
         )
 
 @dataclass
