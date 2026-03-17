@@ -34141,7 +34141,7 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
 .automation-meta { font-size: 10px; color: rgba(255,255,255,0.35); line-height: 1.3; }
 
 .automation-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-.automation-run-btn, .automation-edit-btn, .automation-delete-btn {
+.automation-run-btn, .automation-edit-btn, .automation-delete-btn, .automation-dupe-btn, .automation-group-btn {
     background: transparent; border: 1px solid rgba(255,255,255,0.08);
     border-radius: 6px; width: 26px; height: 26px;
     display: flex; align-items: center; justify-content: center;
@@ -34219,6 +34219,93 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
     50% { opacity: 0.5; }
 }
 
+/* Duplicate & Group button hovers */
+.automation-dupe-btn:hover { background: rgba(var(--accent-rgb),0.2); border-color: rgba(var(--accent-rgb),0.4); color: rgb(var(--accent-light-rgb)); }
+.automation-group-btn:hover { background: rgba(250,204,21,0.15); border-color: rgba(250,204,21,0.35); color: #facc15; }
+.automation-group-btn.grouped { color: #facc15; }
+
+/* --- Filter Bar --- */
+.auto-filter-bar {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin-bottom: 12px;
+    background: rgba(22, 22, 22, 0.8); border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 12px; flex-wrap: wrap;
+}
+.auto-filter-search {
+    flex: 1; min-width: 180px; max-width: 320px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; padding: 7px 12px; color: #fff; font-size: 12px; outline: none;
+    transition: border-color 0.2s ease;
+}
+.auto-filter-search:focus { border-color: rgba(var(--accent-rgb),0.5); background: rgba(var(--accent-rgb),0.04); }
+.auto-filter-search::placeholder { color: rgba(255,255,255,0.25); }
+.auto-filter-select {
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; padding: 7px 10px; color: rgba(255,255,255,0.7); font-size: 11px;
+    outline: none; cursor: pointer; transition: border-color 0.2s ease;
+    -webkit-appearance: none; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='rgba(255,255,255,0.3)'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 8px center; padding-right: 24px;
+}
+.auto-filter-select:focus { border-color: rgba(var(--accent-rgb),0.5); }
+.auto-filter-select option { background: #1a1a1a; color: #fff; }
+.auto-filter-count {
+    font-size: 11px; color: rgba(255,255,255,0.35); white-space: nowrap; margin-left: auto;
+}
+
+/* --- Inspiration / Templates Section --- */
+.auto-template-card {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; border-radius: 12px;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    cursor: pointer; transition: all 0.25s ease; position: relative;
+}
+.auto-template-card:hover {
+    background: rgba(var(--accent-rgb),0.06); border-color: rgba(var(--accent-rgb),0.25);
+    transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+.auto-template-icon {
+    font-size: 22px; width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    background: rgba(255,255,255,0.04); border-radius: 10px;
+}
+.auto-template-info { flex: 1; min-width: 0; }
+.auto-template-name { font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 3px; }
+.auto-template-desc { font-size: 11px; color: rgba(255,255,255,0.4); line-height: 1.4; margin-bottom: 6px; }
+.auto-template-flow { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.auto-template-use {
+    flex-shrink: 0; padding: 5px 14px; border-radius: 16px; border: none;
+    background: rgba(var(--accent-rgb),0.15); color: rgb(var(--accent-light-rgb));
+    font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.2s ease;
+}
+.auto-template-use:hover { background: rgba(var(--accent-rgb),0.3); transform: translateY(-1px); }
+
+/* --- Group Dropdown Popover --- */
+.auto-group-dropdown {
+    z-index: 9999;
+    background: rgba(22,22,22,0.97); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px; padding: 6px; min-width: 180px; max-width: 240px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5); backdrop-filter: blur(12px);
+    margin-top: 4px;
+}
+.auto-group-option {
+    padding: 7px 10px; border-radius: 6px; font-size: 12px; color: rgba(255,255,255,0.7);
+    cursor: pointer; transition: background 0.15s ease; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.auto-group-option:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.auto-group-option.active { color: rgb(var(--accent-light-rgb)); background: rgba(var(--accent-rgb),0.12); }
+.auto-group-option.ungroup { color: rgba(255,255,255,0.4); font-style: italic; }
+.auto-group-divider { height: 1px; background: rgba(255,255,255,0.08); margin: 4px 0; }
+.auto-group-input {
+    width: 100%; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px; padding: 6px 8px; color: #fff; font-size: 11px; outline: none;
+    margin-top: 2px;
+}
+.auto-group-input::placeholder { color: rgba(255,255,255,0.25); }
+.auto-group-input:focus { border-color: rgba(var(--accent-rgb),0.5); }
+
+/* Group section label styling */
+.automations-section .section-group-icon { margin-right: 4px; font-size: 12px; }
+
 /* --- Empty State --- */
 .automations-empty {
     text-align: center; padding: 80px 24px;
@@ -34258,6 +34345,13 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
 }
 .builder-name-input:focus { border-color: rgba(var(--accent-rgb),0.5); }
 .builder-name-input::placeholder { color: rgba(255,255,255,0.3); }
+.builder-group-input {
+    width: 160px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; padding: 7px 10px; color: rgba(255,255,255,0.7); font-size: 12px;
+    outline: none; transition: border-color 0.2s ease;
+}
+.builder-group-input:focus { border-color: rgba(var(--accent-rgb),0.5); }
+.builder-group-input::placeholder { color: rgba(255,255,255,0.25); }
 .builder-header-actions { display: flex; gap: 8px; }
 .builder-header-actions .btn-cancel {
     background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);

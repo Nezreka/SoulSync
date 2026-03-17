@@ -2339,6 +2339,12 @@
                             </div>
                         </div>
                         <div class="automations-stats" id="automations-stats"></div>
+                        <div class="auto-filter-bar" id="auto-filter-bar" style="display:none;">
+                            <input type="text" class="auto-filter-search" id="auto-filter-search" placeholder="Search automations...">
+                            <select class="auto-filter-select" id="auto-filter-trigger"><option value="">All Triggers</option></select>
+                            <select class="auto-filter-select" id="auto-filter-action"><option value="">All Actions</option></select>
+                            <span class="auto-filter-count" id="auto-filter-count"></span>
+                        </div>
                         <div class="automations-list" id="automations-list"></div>
                         <div class="automations-empty" id="automations-empty" style="display:none;">
                             <div class="automations-empty-icon">&#9889;</div>
@@ -2354,6 +2360,8 @@
                     <div class="builder-header">
                         <button class="builder-back-btn" onclick="hideAutomationBuilder()" title="Back to list">&#8592;</button>
                         <input type="text" id="builder-name" class="builder-name-input" placeholder="Automation Name">
+                        <input type="text" id="builder-group-name" class="builder-group-input" placeholder="Group (optional)" list="builder-group-list">
+                        <datalist id="builder-group-list"></datalist>
                         <div class="builder-header-actions">
                             <button class="btn-cancel" onclick="hideAutomationBuilder()">Cancel</button>
                             <button class="btn-save" onclick="saveAutomation()">Save</button>
