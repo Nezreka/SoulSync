@@ -15231,8 +15231,8 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
     fixModalOverlay.classList.remove('hidden');
     console.log('✅ Fix modal opened, starting auto-search...');
 
-    // Auto-search with initial values (after a tiny delay to ensure modal is rendered)
-    setTimeout(() => searchDiscoveryFix(), 100);
+    // Auto-search with initial values (delay allows modal layout to settle and prevents accidental clicks)
+    setTimeout(() => searchDiscoveryFix(), 500);
 }
 
 /**
@@ -15352,6 +15352,10 @@ function renderDiscoveryFixResults(tracks, fixModalOverlay) {
  */
 async function selectDiscoveryFixTrack(track) {
     console.log('✅ User selected track:', track);
+
+    // Confirm selection to prevent accidental clicks from layout shift
+    const artists = (track.artists || ['Unknown Artist']).join(', ');
+    if (!await showConfirmDialog({ title: 'Confirm Match', message: `Match to "${track.name}" by ${artists}?`, confirmText: 'Confirm' })) return;
 
     const { platform, identifier, trackIndex } = currentDiscoveryFix;
 
@@ -54851,8 +54855,8 @@ function openPoolFixModal(trackId, trackName, artistName) {
     trackInput.addEventListener('keypress', enterHandler);
     artistInput.addEventListener('keypress', enterHandler);
 
-    // Auto-search
-    setTimeout(() => searchPoolFix(), 100);
+    // Auto-search (delay allows modal layout to settle and prevents accidental clicks)
+    setTimeout(() => searchPoolFix(), 500);
 }
 
 function closePoolFixModal() {
@@ -54907,6 +54911,10 @@ async function selectPoolFixTrack(track) {
     const fixOverlay = document.getElementById('pool-fix-overlay');
     if (!fixOverlay) return;
     const trackId = parseInt(fixOverlay.dataset.trackId);
+
+    // Confirm selection to prevent accidental clicks from layout shift
+    const artists = (track.artists || []).join(', ');
+    if (!await showConfirmDialog({ title: 'Confirm Match', message: `Match to "${track.name}" by ${artists}?`, confirmText: 'Confirm' })) return;
 
     try {
         const res = await fetch('/api/discovery-pool/fix', {
