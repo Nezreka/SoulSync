@@ -29035,10 +29035,21 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
         print(f"🔄 Converting JSON tracks to SpotifyTrack objects...")
 
         # Store original track data with full album objects (for wishlist with cover art)
+        # Normalize formats: album must be dict {'name': ...}, artists must be [{'name': ...}]
         original_tracks_map = {}
         for t in tracks_json:
             track_id = t.get('id', '')
             if track_id:
+                # Normalize album to dict format
+                raw_album = t.get('album', '')
+                if isinstance(raw_album, str):
+                    t['album'] = {'name': raw_album} if raw_album else {'name': 'Unknown Album'}
+                elif not isinstance(raw_album, dict):
+                    t['album'] = {'name': str(raw_album) if raw_album else 'Unknown Album'}
+                # Normalize artists to list of dicts
+                raw_artists = t.get('artists', [])
+                if raw_artists and isinstance(raw_artists[0], str):
+                    t['artists'] = [{'name': a} for a in raw_artists]
                 original_tracks_map[track_id] = t
 
         tracks = []

@@ -4337,7 +4337,7 @@ body {
 /* Confirm Dialog Modal */
 /* Confirm dialog must sit above all other modals (playlist, download, etc.) */
 #confirm-modal-overlay {
-    z-index: 100000;
+    z-index: 200000;
 }
 
 .confirm-modal {
@@ -13549,7 +13549,7 @@ body {
     height: 100vh;
     background: rgba(0, 0, 0, 0.7);
     backdrop-filter: blur(8px);
-    z-index: 12000;
+    z-index: 200000;
     display: flex;
     align-items: center;
     justify-content: center;
