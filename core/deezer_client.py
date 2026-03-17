@@ -83,6 +83,17 @@ class Track:
         if track_data.get('link'):
             external_urls['deezer'] = track_data['link']
 
+        # Deezer search doesn't return album_type directly; infer if nb_tracks available
+        nb_tracks = album_data.get('nb_tracks') if isinstance(album_data, dict) else None
+        album_type = track_data.get('type')  # Deezer sometimes returns 'album'/'single'
+        if not album_type and nb_tracks:
+            if nb_tracks <= 3:
+                album_type = 'single'
+            elif nb_tracks <= 6:
+                album_type = 'ep'
+            else:
+                album_type = 'album'
+
         return cls(
             id=str(track_data.get('id', '')),
             name=track_data.get('title', ''),
@@ -96,6 +107,8 @@ class Track:
             release_date=track_data.get('release_date') or (album_data.get('release_date') if isinstance(album_data, dict) else None),
             track_number=track_data.get('track_position'),
             disc_number=track_data.get('disk_number', 1),
+            album_type=album_type,
+            total_tracks=nb_tracks,
         )
 
 
