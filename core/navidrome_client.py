@@ -857,13 +857,28 @@ class NavidromeClient:
             return False
 
     def trigger_library_scan(self, library_name: str = "Music") -> bool:
-        """Trigger Navidrome library scan - Navidrome doesn't have scanning, always returns True"""
-        logger.info(f"🎵 Navidrome doesn't require library scans - library is always current")
-        return True
+        """Trigger Navidrome library scan via Subsonic startScan endpoint."""
+        try:
+            result = self._make_request('startScan')
+            if result is not None:
+                logger.info("Navidrome library scan triggered")
+                return True
+            logger.warning("Navidrome startScan returned no response")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to trigger Navidrome scan: {e}")
+            return False
 
     def is_library_scanning(self, library_name: str = "Music") -> bool:
-        """Check if Navidrome library is currently scanning - always returns False"""
-        return False
+        """Check if Navidrome library is currently scanning via Subsonic getScanStatus."""
+        try:
+            result = self._make_request('getScanStatus')
+            if result is not None:
+                scan_status = result.get('scanStatus', {})
+                return scan_status.get('scanning', False)
+            return False
+        except Exception:
+            return False
 
     # Metadata update methods for compatibility with metadata updater
     def update_artist_genres(self, artist, genres: List[str]):
