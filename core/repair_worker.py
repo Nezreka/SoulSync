@@ -500,8 +500,11 @@ class RepairWorker:
         self._current_job_name = job.display_name
         self._current_progress = {'scanned': 0, 'total': 0, 'percent': 0}
 
-        # Re-read transfer path
-        raw = self._get_transfer_path_from_db()
+        # Re-read transfer path — prefer config_manager (same source as web_server)
+        if self._config_manager:
+            raw = self._config_manager.get('soulseek.transfer_path', './Transfer')
+        else:
+            raw = self._get_transfer_path_from_db()
         self.transfer_folder = self._resolve_path(raw)
 
         # Notify rich progress system
