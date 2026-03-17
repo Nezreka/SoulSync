@@ -32453,8 +32453,16 @@ def enrich_similar_artists():
 
 @app.route('/api/discover/spotify-library', methods=['GET'])
 def get_spotify_library():
-    """Get cached Spotify library albums with ownership status"""
+    """Get cached Spotify library albums with ownership status. Only available when Spotify is authenticated."""
     try:
+        # Skip entirely if Spotify is not the active source
+        if not spotify_client or not spotify_client.is_spotify_authenticated():
+            return jsonify({
+                "success": True, "albums": [], "total": 0,
+                "offset": 0, "limit": 0,
+                "stats": {"total": 0, "owned": 0, "missing": 0}
+            })
+
         database = get_database()
         profile_id = get_current_profile_id()
 
