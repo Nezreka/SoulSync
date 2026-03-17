@@ -297,6 +297,8 @@ class Track:
     external_urls: Optional[Dict[str, str]] = None
     image_url: Optional[str] = None
     release_date: Optional[str] = None
+    album_type: Optional[str] = None
+    total_tracks: Optional[int] = None
 
     @classmethod
     def from_spotify_track(cls, track_data: Dict[str, Any]) -> 'Track':

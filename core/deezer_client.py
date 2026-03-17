@@ -58,6 +58,8 @@ class Track:
     release_date: Optional[str] = None
     track_number: Optional[int] = None
     disc_number: Optional[int] = None
+    album_type: Optional[str] = None
+    total_tracks: Optional[int] = None
 
     @classmethod
     def from_deezer_track(cls, track_data: Dict[str, Any]) -> 'Track':
