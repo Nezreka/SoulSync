@@ -500,34 +500,89 @@ def _register_automation_handlers():
                     current_item=pl.get('name', ''))
                 tracks = None
 
-                if source == 'spotify' and spotify_client and spotify_client.is_spotify_authenticated():
-                    playlist_obj = spotify_client.get_playlist_by_id(source_id)
-                    if playlist_obj and playlist_obj.tracks:
-                        tracks = []
-                        for t in playlist_obj.tracks:
-                            artist_name = t.artists[0] if t.artists else ''
-                            track_dict = {
-                                'track_name': t.name or '',
-                                'artist_name': str(artist_name),
-                                'album_name': t.album or '',
-                                'duration_ms': t.duration_ms or 0,
-                                'source_track_id': t.id or '',
-                            }
-                            # Spotify data IS official — auto-mark as discovered
-                            if t.id:
-                                track_dict['extra_data'] = json.dumps({
-                                    'discovered': True,
-                                    'provider': 'spotify',
-                                    'confidence': 1.0,
-                                    'matched_data': {
-                                        'id': t.id,
-                                        'name': t.name or '',
-                                        'artists': [{'name': str(a)} for a in (t.artists or [])],
-                                        'album': t.album or '',
-                                        'duration_ms': t.duration_ms or 0,
+                if source == 'spotify':
+                    # Try authenticated API first, fall back to public embed scraper
+                    if spotify_client and spotify_client.is_spotify_authenticated():
+                        playlist_obj = spotify_client.get_playlist_by_id(source_id)
+                        if playlist_obj and playlist_obj.tracks:
+                            tracks = []
+                            for t in playlist_obj.tracks:
+                                artist_name = t.artists[0] if t.artists else ''
+                                track_dict = {
+                                    'track_name': t.name or '',
+                                    'artist_name': str(artist_name),
+                                    'album_name': t.album or '',
+                                    'duration_ms': t.duration_ms or 0,
+                                    'source_track_id': t.id or '',
+                                }
+                                # Spotify data IS official — auto-mark as discovered
+                                if t.id:
+                                    track_dict['extra_data'] = json.dumps({
+                                        'discovered': True,
+                                        'provider': 'spotify',
+                                        'confidence': 1.0,
+                                        'matched_data': {
+                                            'id': t.id,
+                                            'name': t.name or '',
+                                            'artists': [{'name': str(a)} for a in (t.artists or [])],
+                                            'album': t.album or '',
+                                            'duration_ms': t.duration_ms or 0,
+                                        }
+                                    })
+                                tracks.append(track_dict)
+
+                    # Fallback: public embed scraper (no auth needed)
+                    if tracks is None:
+                        try:
+                            from core.spotify_public_scraper import scrape_spotify_embed
+                            embed_data = scrape_spotify_embed('playlist', source_id)
+                            if embed_data and not embed_data.get('error') and embed_data.get('tracks'):
+                                tracks = []
+                                for t in embed_data['tracks']:
+                                    artist_names = [a['name'] for a in t.get('artists', [])]
+                                    artist_name = artist_names[0] if artist_names else ''
+                                    track_dict = {
+                                        'track_name': t.get('name', ''),
+                                        'artist_name': artist_name,
+                                        'album_name': '',
+                                        'duration_ms': t.get('duration_ms', 0),
+                                        'source_track_id': t.get('id', ''),
                                     }
+                                    if t.get('id'):
+                                        track_dict['extra_data'] = json.dumps({
+                                            'discovered': True,
+                                            'provider': 'spotify',
+                                            'confidence': 1.0,
+                                            'matched_data': {
+                                                'id': t['id'],
+                                                'name': t.get('name', ''),
+                                                'artists': t.get('artists', []),
+                                                'album': '',
+                                                'duration_ms': t.get('duration_ms', 0),
+                                            }
+                                        })
+                                    tracks.append(track_dict)
+                        except Exception as e:
+                            logger.warning(f"Spotify public scraper fallback failed for {source_id}: {e}")
+
+                elif source == 'deezer':
+                    try:
+                        from core.deezer_client import DeezerClient
+                        deezer = DeezerClient()
+                        playlist_data = deezer.get_playlist(source_id)
+                        if playlist_data and playlist_data.get('tracks'):
+                            tracks = []
+                            for t in playlist_data['tracks']:
+                                artist_name = t['artists'][0] if t.get('artists') else ''
+                                tracks.append({
+                                    'track_name': t.get('name', ''),
+                                    'artist_name': str(artist_name),
+                                    'album_name': t.get('album', ''),
+                                    'duration_ms': t.get('duration_ms', 0),
+                                    'source_track_id': str(t.get('id', '')),
                                 })
-                            tracks.append(track_dict)
+                    except Exception as e:
+                        logger.warning(f"Deezer playlist refresh failed for {source_id}: {e}")
 
                 elif source == 'tidal' and tidal_client and tidal_client.is_authenticated():
                     full_playlist = tidal_client.get_playlist(source_id)
@@ -27643,8 +27698,41 @@ def parse_youtube_playlist_endpoint():
         if not playlist_data:
             return jsonify({"error": "Failed to parse YouTube playlist"}), 500
         
-        # Create URL hash for state tracking
-        url_hash = str(hash(url))
+        # Use deterministic hash for state tracking (built-in hash() is randomized per process restart)
+        import hashlib
+        yt_playlist_id = playlist_data.get('id', '')
+        if yt_playlist_id and yt_playlist_id != 'unknown_id':
+            # Use canonical URL with the stable YouTube playlist ID
+            canonical_url = f"https://youtube.com/playlist?list={yt_playlist_id}"
+        else:
+            canonical_url = url
+        url_hash = hashlib.md5(canonical_url.encode()).hexdigest()[:12]
+
+        # Migrate existing mirrored playlists that used the old non-deterministic hash()
+        # and deduplicate any copies created by the bug
+        try:
+            database = get_database()
+            profile_id = get_current_profile_id()
+            existing = database.get_mirrored_playlists(profile_id=profile_id)
+            yt_dupes = [mp for mp in existing if mp['source'] == 'youtube' and mp['name'] == playlist_data['name']]
+            if yt_dupes:
+                # Keep the newest one, delete the rest
+                keep = yt_dupes[0]  # Already sorted by updated_at DESC from get_mirrored_playlists
+                for dupe in yt_dupes[1:]:
+                    database.delete_mirrored_playlist(dupe['id'])
+                    logger.info(f"Removed duplicate YouTube mirrored playlist '{dupe['name']}' (id={dupe['id']})")
+                # Update the kept entry's source_playlist_id to the new deterministic hash
+                if keep['source_playlist_id'] != url_hash:
+                    with database._get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "UPDATE mirrored_playlists SET source_playlist_id = ? WHERE id = ?",
+                            (url_hash, keep['id'])
+                        )
+                        conn.commit()
+                    logger.info(f"Migrated YouTube mirrored playlist '{keep['name']}' source_playlist_id to deterministic hash {url_hash}")
+        except Exception as e:
+            logger.debug(f"YouTube mirror migration check: {e}")
         
         # Initialize persistent playlist state (similar to Spotify download_batches structure)
         youtube_playlist_states[url_hash] = {
