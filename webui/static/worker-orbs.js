@@ -43,6 +43,8 @@
     let onDashboard = false;
     let expandProgress = 0;
     let staggerTimers = [];
+    let collapseDelay = null;
+    const COLLAPSE_DELAY_MS = 7000;
 
     // ── Init ──
 
@@ -251,6 +253,11 @@
 
     function onMouseEnter() {
         if (!onDashboard) return;
+        // Cancel any pending collapse
+        if (collapseDelay) {
+            clearTimeout(collapseDelay);
+            collapseDelay = null;
+        }
         if (state === 'orbs' || state === 'collapsing') {
             state = 'expanding';
             expandProgress = 0;
@@ -260,7 +267,14 @@
     function onMouseLeave() {
         if (!onDashboard) return;
         if (state === 'expanded' || state === 'expanding') {
-            enterCollapsingState();
+            // Delay before collapsing back to orbs
+            if (collapseDelay) clearTimeout(collapseDelay);
+            collapseDelay = setTimeout(() => {
+                collapseDelay = null;
+                if (state === 'expanded' || state === 'expanding') {
+                    enterCollapsingState();
+                }
+            }, COLLAPSE_DELAY_MS);
         }
     }
 
@@ -551,6 +565,7 @@
             sparks = [];
             enterOrbState();
         } else if (!onDashboard && wasDashboard) {
+            if (collapseDelay) { clearTimeout(collapseDelay); collapseDelay = null; }
             stopLoop();
             state = 'idle';
             sparks = [];

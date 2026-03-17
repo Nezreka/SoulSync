@@ -312,12 +312,20 @@ function handleServiceStatusUpdate(data) {
     }
 }
 
+function _updateHeroBtnCount(buttonId, badgeId, count) {
+    const badge = document.getElementById(badgeId);
+    if (badge) {
+        badge.textContent = count;
+        badge.classList.toggle('has-items', count > 0);
+    }
+}
+
 function handleWatchlistCountUpdate(data) {
     if (data.success) {
+        _updateHeroBtnCount('watchlist-button', 'watchlist-badge', data.count);
         const watchlistButton = document.getElementById('watchlist-button');
         if (watchlistButton) {
             const countdownText = data.next_run_in_seconds ? formatCountdownTime(data.next_run_in_seconds) : '';
-            watchlistButton.textContent = `\u{1F441}\uFE0F Watchlist (${data.count})`;
             if (countdownText) {
                 watchlistButton.title = `Next auto-scan in ${countdownText}`;
             }
@@ -399,11 +407,10 @@ function handleDashboardDbStats(stats) {
 }
 
 function handleDashboardWishlistCount(data) {
-    // Same logic as updateWishlistCount response handler
     const count = data.count || 0;
+    _updateHeroBtnCount('wishlist-button', 'wishlist-badge', count);
     const wishlistButton = document.getElementById('wishlist-button');
     if (wishlistButton) {
-        wishlistButton.textContent = `\uD83C\uDFB5 Wishlist (${count})`;
         if (count === 0) {
             wishlistButton.classList.remove('wishlist-active');
             wishlistButton.classList.add('wishlist-inactive');
@@ -20816,11 +20823,9 @@ async function updateWishlistCount() {
         const data = await response.json();
         const count = data.count || 0;
 
+        _updateHeroBtnCount('wishlist-button', 'wishlist-badge', count);
         const wishlistButton = document.getElementById('wishlist-button');
         if (wishlistButton) {
-            wishlistButton.textContent = `🎵 Wishlist (${count})`;
-
-            // Update button styling based on count (matching GUI behavior)
             if (count === 0) {
                 wishlistButton.classList.remove('wishlist-active');
                 wishlistButton.classList.add('wishlist-inactive');
@@ -34060,11 +34065,10 @@ async function updateWatchlistButtonCount() {
         const data = await response.json();
 
         if (data.success) {
+            _updateHeroBtnCount('watchlist-button', 'watchlist-badge', data.count);
             const watchlistButton = document.getElementById('watchlist-button');
             if (watchlistButton) {
-                // Format countdown for button tooltip (optional enhancement)
                 const countdownText = data.next_run_in_seconds ? formatCountdownTime(data.next_run_in_seconds) : '';
-                watchlistButton.textContent = `👁️ Watchlist (${data.count})`;
                 if (countdownText) {
                     watchlistButton.title = `Next auto-scan in ${countdownText}`;
                 }
