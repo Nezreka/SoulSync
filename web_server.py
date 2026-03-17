@@ -4484,7 +4484,7 @@ def _is_hydrabase_active():
         return False
 
 def _run_background_comparison(query, hydrabase_counts=None):
-    """Run Spotify + iTunes searches in background and store for comparison.
+    """Run Spotify + fallback source searches in background and store for comparison.
 
     Args:
         query: Search query string.
@@ -4527,29 +4527,30 @@ def _run_background_comparison(query, hydrabase_counts=None):
                     logger.debug(f"Comparison Spotify search failed: {e}")
             result['spotify'] = spotify_data
 
-            # iTunes results
-            itunes_data = {'tracks': 0, 'artists': 0, 'albums': 0}
+            # Fallback metadata source results (iTunes or Deezer)
+            fallback_source = _get_metadata_fallback_source()
+            fallback_data = {'tracks': 0, 'artists': 0, 'albums': 0}
             try:
-                from core.itunes_client import iTunesClient
-                itunes = iTunesClient()
-                i_tracks = itunes.search_tracks(query, limit=10)
-                i_artists = itunes.search_artists(query, limit=10)
-                i_albums = itunes.search_albums(query, limit=10)
-                itunes_data = {
-                    'tracks': len(i_tracks),
-                    'artists': len(i_artists),
-                    'albums': len(i_albums)
+                fallback_client = _get_metadata_fallback_client()
+                f_tracks = fallback_client.search_tracks(query, limit=10)
+                f_artists = fallback_client.search_artists(query, limit=10)
+                f_albums = fallback_client.search_albums(query, limit=10)
+                fallback_data = {
+                    'tracks': len(f_tracks),
+                    'artists': len(f_artists),
+                    'albums': len(f_albums)
                 }
             except Exception as e:
-                logger.debug(f"Comparison iTunes search failed: {e}")
-            result['itunes'] = itunes_data
+                logger.debug(f"Comparison {fallback_source} search failed: {e}")
+            result['fallback'] = fallback_data
+            result['fallback_source'] = fallback_source
 
             with _comparison_lock:
                 _hydrabase_comparisons[query] = result
                 while len(_hydrabase_comparisons) > _COMPARISON_MAX_ENTRIES:
                     _hydrabase_comparisons.popitem(last=False)
 
-            logger.info(f"Background comparison stored for '{query}': H={hydra_data}, S={spotify_data}, I={itunes_data}")
+            logger.info(f"Background comparison stored for '{query}': H={hydra_data}, S={spotify_data}, {fallback_source.capitalize()}={fallback_data}")
 
         except Exception as e:
             logger.error(f"Background comparison failed for '{query}': {e}")
@@ -4635,7 +4636,7 @@ def hydrabase_status():
 
 @app.route('/api/hydrabase/comparisons')
 def hydrabase_comparisons():
-    """Get recent comparison results (Hydrabase vs Spotify vs iTunes)."""
+    """Get recent comparison results (Hydrabase vs Spotify vs fallback source)."""
     if not dev_mode_enabled:
         return jsonify({"success": False, "error": "Dev mode not active"}), 403
     with _comparison_lock:
