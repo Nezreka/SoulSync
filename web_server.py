@@ -29035,22 +29035,24 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
         print(f"🔄 Converting JSON tracks to SpotifyTrack objects...")
 
         # Store original track data with full album objects (for wishlist with cover art)
-        # Normalize formats: album must be dict {'name': ...}, artists must be [{'name': ...}]
+        # Normalize formats for wishlist: album must be dict {'name': ...}, artists must be [{'name': ...}]
+        # Important: copy data — don't mutate tracks_json since SpotifyTrack expects List[str] artists
         original_tracks_map = {}
         for t in tracks_json:
             track_id = t.get('id', '')
             if track_id:
+                normalized = dict(t)
                 # Normalize album to dict format
-                raw_album = t.get('album', '')
+                raw_album = normalized.get('album', '')
                 if isinstance(raw_album, str):
-                    t['album'] = {'name': raw_album} if raw_album else {'name': 'Unknown Album'}
+                    normalized['album'] = {'name': raw_album} if raw_album else {'name': 'Unknown Album'}
                 elif not isinstance(raw_album, dict):
-                    t['album'] = {'name': str(raw_album) if raw_album else 'Unknown Album'}
+                    normalized['album'] = {'name': str(raw_album) if raw_album else 'Unknown Album'}
                 # Normalize artists to list of dicts
-                raw_artists = t.get('artists', [])
+                raw_artists = normalized.get('artists', [])
                 if raw_artists and isinstance(raw_artists[0], str):
-                    t['artists'] = [{'name': a} for a in raw_artists]
-                original_tracks_map[track_id] = t
+                    normalized['artists'] = [{'name': a} for a in raw_artists]
+                original_tracks_map[track_id] = normalized
 
         tracks = []
         for i, t in enumerate(tracks_json):
