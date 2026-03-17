@@ -445,6 +445,7 @@ class MusicDatabase:
             self._add_automation_notify_columns(cursor)
             self._add_automation_system_column(cursor)
             self._add_automation_then_actions_column(cursor)
+            self._add_automation_group_name_column(cursor)
 
             # Library issues — user-reported problems with tracks/albums/artists
             cursor.execute("""
@@ -519,6 +520,17 @@ class MusicDatabase:
                 logger.info("Added is_system column to automations table")
         except Exception as e:
             logger.error(f"Error adding automation system column: {e}")
+
+    def _add_automation_group_name_column(self, cursor):
+        """Add group_name column to automations table for folder-style grouping."""
+        try:
+            cursor.execute("PRAGMA table_info(automations)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'group_name' not in cols:
+                cursor.execute("ALTER TABLE automations ADD COLUMN group_name TEXT DEFAULT NULL")
+                logger.info("Added group_name column to automations table")
+        except Exception as e:
+            logger.error(f"Error adding automation group_name column: {e}")
 
     def _add_automation_then_actions_column(self, cursor):
         """Add then_actions column to automations table and migrate existing notify data."""
@@ -8322,15 +8334,15 @@ class MusicDatabase:
     def create_automation(self, name: str, trigger_type: str, trigger_config: str,
                           action_type: str, action_config: str, profile_id: int = 1,
                           notify_type: str = None, notify_config: str = '{}',
-                          then_actions: str = '[]'):
+                          then_actions: str = '[]', group_name: str = None):
         """Create a new automation. Returns the new automation ID or None."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT INTO automations (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions))
+                    INSERT INTO automations (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions, group_name))
                 conn.commit()
                 return cursor.lastrowid
         except Exception as e:
@@ -8377,7 +8389,7 @@ class MusicDatabase:
 
     def update_automation(self, automation_id: int, **kwargs) -> bool:
         """Update automation fields."""
-        allowed = {'name', 'enabled', 'trigger_type', 'trigger_config', 'action_type', 'action_config', 'next_run', 'notify_type', 'notify_config', 'last_result', 'is_system', 'then_actions'}
+        allowed = {'name', 'enabled', 'trigger_type', 'trigger_config', 'action_type', 'action_config', 'next_run', 'notify_type', 'notify_config', 'last_result', 'is_system', 'then_actions', 'group_name'}
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         if not updates:
             return False

@@ -55043,6 +55043,26 @@ const _autoIcons = {
     full_cleanup: '\uD83E\uDDF9',
 };
 
+// --- Inspiration Templates ---
+const AUTO_TEMPLATES = [
+    { icon: '\uD83D\uDD01', name: 'Playlist Auto-Sync Pipeline', desc: 'Refresh a mirrored playlist, discover new tracks, and sync to your server automatically.',
+      category: 'Sync', when: { type: 'schedule', config: { interval: 6, unit: 'hours' } }, do: { type: 'refresh_mirrored', config: {} }, then: [] },
+    { icon: '\uD83D\uDD14', name: 'New Release Monitor', desc: 'Scan your watchlist for new releases every 12 hours.',
+      category: 'Monitor', when: { type: 'schedule', config: { interval: 12, unit: 'hours' } }, do: { type: 'scan_watchlist', config: {} }, then: [] },
+    { icon: '\uD83C\uDF19', name: 'Nightly Wishlist Processor', desc: 'Process your wishlist at 3 AM every night while you sleep.',
+      category: 'Sync', when: { type: 'daily_time', config: { time: '03:00' } }, do: { type: 'process_wishlist', config: {} }, then: [] },
+    { icon: '\uD83D\uDD0D', name: 'Discovery Pipeline', desc: 'Auto-discover tracks when a new playlist is mirrored.',
+      category: 'Sync', when: { type: 'mirrored_playlist_created', config: {} }, do: { type: 'discover_playlist', config: {} }, then: [] },
+    { icon: '\uD83D\uDCBE', name: 'Weekly Library Backup', desc: 'Back up your database every Sunday at 4 AM.',
+      category: 'Maintenance', when: { type: 'weekly_time', config: { days: ['sunday'], time: '04:00' } }, do: { type: 'backup_database', config: {} }, then: [] },
+    { icon: '\uD83E\uDDF9', name: 'Post-Batch Cleanup', desc: 'Run a full cleanup after any batch download completes.',
+      category: 'Maintenance', when: { type: 'batch_complete', config: {} }, do: { type: 'full_cleanup', config: {} }, then: [] },
+    { icon: '\u274C', name: 'Download Failure Alert', desc: 'Get notified via Discord when a download fails.',
+      category: 'Monitor', when: { type: 'download_failed', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'discord_webhook', config: {} }] },
+    { icon: '\uD83E\uDDF9', name: 'Full Library Maintenance', desc: 'Run full cleanup every Saturday at 5 AM — dedup, quarantine, wishlist tidy.',
+      category: 'Maintenance', when: { type: 'weekly_time', config: { days: ['saturday'], time: '05:00' } }, do: { type: 'full_cleanup', config: {} }, then: [] },
+];
+
 // --- Load & Render List ---
 
 function _buildAutomationSection(id, label, automations, useGrid) {
@@ -55097,8 +55117,21 @@ async function loadAutomations() {
         if (systemAutos.length) {
             list.appendChild(_buildAutomationSection('auto-section-system', 'System', systemAutos, true));
         }
-        if (userAutos.length) {
-            list.appendChild(_buildAutomationSection('auto-section-custom', 'My Automations', userAutos, false));
+
+        // Inspiration / Templates section
+        list.appendChild(_buildTemplatesSection());
+
+        // User automations — split by group
+        const groups = [...new Set(userAutos.filter(a => a.group_name).map(a => a.group_name))].sort();
+        const ungrouped = userAutos.filter(a => !a.group_name);
+        groups.forEach(g => {
+            const groupAutos = userAutos.filter(a => a.group_name === g);
+            if (groupAutos.length) {
+                list.appendChild(_buildAutomationSection('auto-section-group-' + g.replace(/\W+/g, '_'), '\uD83D\uDCC1 ' + g, groupAutos, true));
+            }
+        });
+        if (ungrouped.length) {
+            list.appendChild(_buildAutomationSection('auto-section-custom', 'My Automations', ungrouped, true));
         }
 
         // Stats summary bar
@@ -55113,6 +55146,9 @@ async function loadAutomations() {
                 <span class="auto-stat"><strong>${custom}</strong> Custom</span>
             `;
         }
+
+        // Filter bar — show when 6+ automations
+        _initAutoFilterBar(automations);
         // Catch up on current automation progress
         try {
             const progRes = await fetch('/api/automations/progress');
@@ -55125,10 +55161,210 @@ async function loadAutomations() {
     }
 }
 
+// --- Templates Section ---
+function _buildTemplatesSection() {
+    const section = document.createElement('div');
+    section.className = 'automations-section';
+    section.id = 'auto-section-templates';
+    const collapsed = localStorage.getItem('auto_section_auto-section-templates') === '1';
+    if (collapsed) section.classList.add('collapsed');
+    const header = document.createElement('div');
+    header.className = 'automations-section-header';
+    header.innerHTML = `
+        <span class="section-chevron">&#9660;</span>
+        <span class="section-label">Inspiration</span>
+        <span class="section-count">${AUTO_TEMPLATES.length}</span>
+        <span class="section-line"></span>
+    `;
+    header.onclick = () => {
+        section.classList.toggle('collapsed');
+        localStorage.setItem('auto_section_auto-section-templates', section.classList.contains('collapsed') ? '1' : '0');
+    };
+    const body = document.createElement('div');
+    body.className = 'automations-section-body';
+    const grid = document.createElement('div');
+    grid.className = 'automations-grid';
+    AUTO_TEMPLATES.forEach((t, i) => {
+        const card = document.createElement('div');
+        card.className = 'auto-template-card';
+        const trigLabel = _autoFormatTrigger(t.when.type, t.when.config);
+        const actLabel = _autoFormatAction(t.do.type);
+        card.innerHTML = `
+            <div class="auto-template-icon">${t.icon}</div>
+            <div class="auto-template-info">
+                <div class="auto-template-name">${_esc(t.name)}</div>
+                <div class="auto-template-desc">${_esc(t.desc)}</div>
+                <div class="auto-template-flow">
+                    <span class="flow-trigger">${_esc(trigLabel)}</span>
+                    <span class="flow-arrow">&rarr;</span>
+                    <span class="flow-action">${_esc(actLabel)}</span>
+                    ${t.then.length ? t.then.map(th => `<span class="flow-arrow">&rarr;</span><span class="flow-notify">${_esc(_autoFormatNotify(th.type))}</span>`).join('') : ''}
+                </div>
+            </div>
+            <button class="auto-template-use" onclick="event.stopPropagation(); useTemplate(${i})">Use</button>
+        `;
+        card.onclick = () => useTemplate(i);
+        grid.appendChild(card);
+    });
+    body.appendChild(grid);
+    section.appendChild(header);
+    section.appendChild(body);
+    return section;
+}
+
+async function useTemplate(index) {
+    const t = AUTO_TEMPLATES[index];
+    if (!t) return;
+    await showAutomationBuilder();
+    document.getElementById('builder-name').value = t.name;
+    _autoBuilder.when = { type: t.when.type, config: JSON.parse(JSON.stringify(t.when.config)) };
+    _autoBuilder.do = { type: t.do.type, config: JSON.parse(JSON.stringify(t.do.config)) };
+    _autoBuilder.then = t.then.map(th => ({ type: th.type, config: JSON.parse(JSON.stringify(th.config)) }));
+    _renderBuilderSidebar();
+    _renderBuilderCanvas();
+}
+
+// --- Filter Bar ---
+function _initAutoFilterBar(automations) {
+    const bar = document.getElementById('auto-filter-bar');
+    if (!bar) return;
+    if (automations.length < 7) { bar.style.display = 'none'; return; }
+    bar.style.display = '';
+
+    // Populate trigger dropdown
+    const trigSel = document.getElementById('auto-filter-trigger');
+    const actSel = document.getElementById('auto-filter-action');
+    const trigTypes = [...new Set(automations.map(a => a.trigger_type))].sort();
+    const actTypes = [...new Set(automations.map(a => a.action_type))].sort();
+    const prevTrig = trigSel.value;
+    const prevAct = actSel.value;
+    trigSel.innerHTML = '<option value="">All Triggers</option>' + trigTypes.map(t =>
+        `<option value="${_escAttr(t)}">${_esc(_autoFormatTrigger(t, {}))}</option>`).join('');
+    actSel.innerHTML = '<option value="">All Actions</option>' + actTypes.map(t =>
+        `<option value="${_escAttr(t)}">${_esc(_autoFormatAction(t))}</option>`).join('');
+    trigSel.value = prevTrig;
+    actSel.value = prevAct;
+
+    // Bind events (use a flag to avoid double-binding)
+    if (!bar.dataset.bound) {
+        bar.dataset.bound = '1';
+        document.getElementById('auto-filter-search').addEventListener('input', _filterAutomations);
+        trigSel.addEventListener('change', _filterAutomations);
+        actSel.addEventListener('change', _filterAutomations);
+    }
+    _filterAutomations();
+}
+
+function _filterAutomations() {
+    const q = (document.getElementById('auto-filter-search').value || '').toLowerCase().trim();
+    const trigFilter = document.getElementById('auto-filter-trigger').value;
+    const actFilter = document.getElementById('auto-filter-action').value;
+    const cards = document.querySelectorAll('#automations-list .automation-card');
+    let visible = 0;
+    cards.forEach(card => {
+        const name = (card.querySelector('.automation-name')?.textContent || '').toLowerCase();
+        const trig = card.querySelector('.flow-trigger')?.textContent || '';
+        const act = card.querySelector('.flow-action')?.textContent || '';
+        // Match search text against name, trigger label, action label
+        const matchQ = !q || name.includes(q) || trig.toLowerCase().includes(q) || act.toLowerCase().includes(q);
+        // Match trigger/action type filters using data attributes
+        const matchTrig = !trigFilter || card.dataset.triggerType === trigFilter;
+        const matchAct = !actFilter || card.dataset.actionType === actFilter;
+        const show = matchQ && matchTrig && matchAct;
+        card.style.display = show ? '' : 'none';
+        if (show) visible++;
+    });
+    const countEl = document.getElementById('auto-filter-count');
+    if (countEl) {
+        countEl.textContent = (q || trigFilter || actFilter) ? `${visible} of ${cards.length}` : '';
+    }
+}
+
+// --- Group Dropdown ---
+let _activeGroupDropdown = null;
+
+function _showGroupDropdown(event, autoId, currentGroup) {
+    // Close any existing dropdown
+    _closeGroupDropdown();
+
+    const btn = event.currentTarget;
+    const card = btn.closest('.automation-card');
+    if (!card) return;
+
+    // Collect all existing group names from visible cards
+    const allGroups = new Set();
+    document.querySelectorAll('#automations-list .automation-card .automation-group-btn[data-group]').forEach(b => {
+        const g = b.dataset.group;
+        if (g) allGroups.add(g);
+    });
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'auto-group-dropdown';
+
+    let html = '';
+    if (currentGroup) {
+        html += `<div class="auto-group-option ungroup" onclick="_assignGroup(${autoId}, null)">Remove from group</div>`;
+        html += '<div class="auto-group-divider"></div>';
+    }
+    allGroups.forEach(g => {
+        const isActive = g === currentGroup;
+        html += `<div class="auto-group-option${isActive ? ' active' : ''}" onclick="_assignGroup(${autoId}, '${_escAttr(g)}')">${_esc(g)}</div>`;
+    });
+    if (allGroups.size) html += '<div class="auto-group-divider"></div>';
+    html += `<input class="auto-group-input" placeholder="New group name..." onkeydown="if(event.key==='Enter'){_assignGroup(${autoId}, this.value.trim()); event.preventDefault();}">`;
+
+    dropdown.innerHTML = html;
+
+    // Position dropdown on document.body to avoid overflow:hidden clipping
+    const rect = btn.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.right = (window.innerWidth - rect.right) + 'px';
+    dropdown.style.left = 'auto';
+    document.body.appendChild(dropdown);
+    _activeGroupDropdown = dropdown;
+
+    // Focus the input
+    setTimeout(() => dropdown.querySelector('.auto-group-input')?.focus(), 50);
+
+    // Close on outside click
+    const handler = (e) => {
+        if (!dropdown.contains(e.target) && e.target !== btn) {
+            _closeGroupDropdown();
+            document.removeEventListener('click', handler, true);
+        }
+    };
+    setTimeout(() => document.addEventListener('click', handler, true), 10);
+}
+
+function _closeGroupDropdown() {
+    if (_activeGroupDropdown) {
+        _activeGroupDropdown.remove();
+        _activeGroupDropdown = null;
+    }
+}
+
+async function _assignGroup(autoId, groupName) {
+    _closeGroupDropdown();
+    try {
+        const res = await fetch('/api/automations/' + autoId, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ group_name: groupName || null })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        showToast(groupName ? `Moved to "${groupName}"` : 'Removed from group', 'success');
+        await loadAutomations();
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
 function renderAutomationCard(a) {
     const card = document.createElement('div');
     card.className = 'automation-card' + (a.enabled ? '' : ' disabled') + (a.is_system ? ' system' : '');
     card.dataset.id = a.id;
+    card.dataset.triggerType = a.trigger_type || '';
+    card.dataset.actionType = a.action_type || '';
     const tIcon = _autoIcons[a.trigger_type] || '\u2699\uFE0F';
     const aIcon = _autoIcons[a.action_type] || '\u2699\uFE0F';
     const tl = tIcon + ' ' + _autoFormatTrigger(a.trigger_type, a.trigger_config);
@@ -55143,6 +55379,10 @@ function renderAutomationCard(a) {
     if (a.run_count) metaParts.push('<span class="auto-runs-link" onclick="event.stopPropagation(); showAutomationHistory(' + a.id + ', \'' + _escAttr(a.name) + '\', \'' + _escAttr(a.action_type || '') + '\')" title="View run history">Runs: ' + a.run_count + '</span>');
     if (a.last_error) metaParts.push('Error: ' + _esc(a.last_error));
 
+    const dupeBtn = a.is_system ? '' :
+        `<button class="automation-dupe-btn" title="Duplicate" onclick="event.stopPropagation(); duplicateAutomation(${a.id})">&#128203;</button>`;
+    const groupBtn = a.is_system ? '' :
+        `<button class="automation-group-btn${a.group_name ? ' grouped' : ''}" data-group="${_escAttr(a.group_name || '')}" title="${a.group_name ? 'Group: ' + _escAttr(a.group_name) : 'Assign group'}" onclick="event.stopPropagation(); _showGroupDropdown(event, ${a.id}, ${a.group_name ? "'" + _escAttr(a.group_name) + "'" : 'null'})">&#128193;</button>`;
     const deleteBtn = a.is_system ? '' :
         `<button class="automation-delete-btn" title="Delete" onclick="event.stopPropagation(); deleteAutomation(${a.id}, '${_escAttr(a.name)}')">&#128465;</button>`;
 
@@ -55166,6 +55406,8 @@ function renderAutomationCard(a) {
                 <span class="toggle-slider"></span>
             </label>
             <button class="automation-edit-btn" title="Edit" onclick="event.stopPropagation(); showAutomationBuilder(${a.id})">&#9881;</button>
+            ${dupeBtn}
+            ${groupBtn}
             ${deleteBtn}
         </div>
     `;
@@ -55257,6 +55499,16 @@ async function deleteAutomation(id, name) {
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         showToast('Automation deleted', 'success');
+        await loadAutomations();
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
+async function duplicateAutomation(id) {
+    try {
+        const res = await fetch('/api/automations/' + id + '/duplicate', { method: 'POST' });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        showToast('Automation duplicated', 'success');
         await loadAutomations();
     } catch (err) { showToast('Error: ' + err.message, 'error'); }
 }
@@ -55562,11 +55814,15 @@ async function saveAutomation() {
     const delayVal = delayEl ? parseInt(delayEl.value) : 0;
     if (delayVal > 0) actionConfig.delay = delayVal;
 
+    const groupInput = document.getElementById('builder-group-name');
+    const groupName = groupInput ? groupInput.value.trim() : '';
+
     const body = {
         name,
         trigger_type: _autoBuilder.when.type, trigger_config: triggerConfig,
         action_type: _autoBuilder.do.type, action_config: actionConfig,
         then_actions: thenActions,
+        group_name: groupName || null,
     };
 
     try {
@@ -55599,6 +55855,16 @@ async function showAutomationBuilder(editId) {
     _autoSpotifyAuthenticated = false;
     _autoBuilder = { editId: editId || null, when: null, do: null, then: [], isSystem: false };
 
+    // Populate group datalist from existing automations
+    try {
+        const allRes = await fetch('/api/automations');
+        const allAutos = await allRes.json();
+        const groupSet = new Set();
+        if (Array.isArray(allAutos)) allAutos.forEach(a => { if (a.group_name) groupSet.add(a.group_name); });
+        const datalist = document.getElementById('builder-group-list');
+        if (datalist) datalist.innerHTML = [...groupSet].sort().map(g => `<option value="${_escAttr(g)}">`).join('');
+    } catch (e) {}
+
     // If editing, load automation data
     if (editId) {
         try {
@@ -55606,6 +55872,8 @@ async function showAutomationBuilder(editId) {
             const a = await res.json();
             if (a.error) throw new Error(a.error);
             document.getElementById('builder-name').value = a.name || '';
+            const groupInput = document.getElementById('builder-group-name');
+            if (groupInput) groupInput.value = a.group_name || '';
             _autoBuilder.when = { type: a.trigger_type, config: a.trigger_config || {} };
             _autoBuilder.do = { type: a.action_type, config: a.action_config || {} };
             // Load then_actions array
@@ -55620,10 +55888,14 @@ async function showAutomationBuilder(editId) {
         } catch (err) { showToast('Failed to load automation', 'error'); return; }
     } else {
         document.getElementById('builder-name').value = '';
+        const groupInput = document.getElementById('builder-group-name');
+        if (groupInput) groupInput.value = '';
     }
 
-    // System automations: lock the name field
+    // System automations: lock the name field and hide group
     document.getElementById('builder-name').readOnly = _autoBuilder.isSystem;
+    const groupEl = document.getElementById('builder-group-name');
+    if (groupEl) groupEl.style.display = _autoBuilder.isSystem ? 'none' : '';
 
     _renderBuilderSidebar();
     _renderBuilderCanvas();

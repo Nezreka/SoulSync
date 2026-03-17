@@ -4790,8 +4790,9 @@ def create_automation():
             if cycle:
                 return jsonify({"error": f"Signal cycle detected: {' → '.join(cycle)}. This would cause an infinite loop."}), 400
 
+        group_name = data.get('group_name') or None
         db = get_database()
-        auto_id = db.create_automation(name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions_json)
+        auto_id = db.create_automation(name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions_json, group_name)
         if auto_id is None:
             return jsonify({"error": "Failed to create automation"}), 500
 
@@ -4864,6 +4865,8 @@ def update_automation_endpoint(automation_id):
             update_fields['notify_type'] = data['notify_type'] or None
         if 'notify_config' in data and 'then_actions' not in data:
             update_fields['notify_config'] = json.dumps(data['notify_config'])
+        if 'group_name' in data:
+            update_fields['group_name'] = data['group_name'] or None
 
         if not update_fields:
             return jsonify({"error": "No fields to update"}), 400
@@ -4925,6 +4928,38 @@ def delete_automation_endpoint(automation_id):
         return jsonify({"success": True})
     except Exception as e:
         logger.error(f"Error deleting automation: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/automations/<int:automation_id>/duplicate', methods=['POST'])
+def duplicate_automation_endpoint(automation_id):
+    """Duplicate an automation. System automations cannot be duplicated."""
+    try:
+        db = get_database()
+        auto = db.get_automation(automation_id)
+        if not auto:
+            return jsonify({"error": "Automation not found"}), 404
+        if auto.get('is_system'):
+            return jsonify({"error": "System automations cannot be duplicated"}), 403
+        profile_id = session.get('profile_id', 1)
+        new_id = db.create_automation(
+            name=f"{auto['name']} (Copy)",
+            trigger_type=auto['trigger_type'],
+            trigger_config=auto.get('trigger_config', '{}'),
+            action_type=auto['action_type'],
+            action_config=auto.get('action_config', '{}'),
+            profile_id=profile_id,
+            notify_type=auto.get('notify_type'),
+            notify_config=auto.get('notify_config', '{}'),
+            then_actions=auto.get('then_actions', '[]'),
+            group_name=auto.get('group_name'),
+        )
+        if new_id is None:
+            return jsonify({"error": "Failed to duplicate automation"}), 500
+        if automation_engine:
+            automation_engine.schedule_automation(new_id)
+        return jsonify({"success": True, "id": new_id})
+    except Exception as e:
+        logger.error(f"Error duplicating automation: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/automations/<int:automation_id>/toggle', methods=['POST'])
