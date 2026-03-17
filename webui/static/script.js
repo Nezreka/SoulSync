@@ -34453,9 +34453,9 @@ function closeWatchlistModal() {
 
 /**
  * Populate the linked provider section in the watchlist config modal.
- * Shows which Spotify/iTunes artist is linked and allows changing it.
+ * Shows which Spotify/iTunes/Deezer artist is linked and allows changing it.
  */
-function _populateLinkedProviderSection(artistId, artistName, spotifyId, itunesId, artistInfo) {
+function _populateLinkedProviderSection(artistId, artistName, spotifyId, itunesId, artistInfo, deezerId) {
     const section = document.getElementById('watchlist-linked-provider-section');
     const content = document.getElementById('watchlist-linked-provider-content');
     if (!section || !content) return;
@@ -34463,8 +34463,9 @@ function _populateLinkedProviderSection(artistId, artistName, spotifyId, itunesI
     // Determine which providers are linked
     const hasSpotify = !!spotifyId;
     const hasItunes = !!itunesId;
+    const hasDeezer = !!deezerId;
 
-    if (!hasSpotify && !hasItunes) {
+    if (!hasSpotify && !hasItunes && !hasDeezer) {
         section.style.display = 'none';
         return;
     }
@@ -34495,6 +34496,9 @@ function _populateLinkedProviderSection(artistId, artistName, spotifyId, itunesI
     }
     if (hasItunes) {
         html += `<span class="watchlist-provider-badge itunes">iTunes</span>`;
+    }
+    if (hasDeezer) {
+        html += `<span class="watchlist-provider-badge deezer">Deezer</span>`;
     }
     html += `</div>`;
 
@@ -34570,12 +34574,14 @@ async function _searchLinkedProviderArtists(currentArtistId, watchlistName) {
             const img = a.image_url || '';
             const genres = (a.genres || []).slice(0, 2).join(', ');
             const pop = a.popularity || 0;
+            const followers = a.followers || 0;
+            const popMeta = pop > 0 ? `Pop: ${pop}` : followers > 0 ? `${followers.toLocaleString()} fans` : '';
             html += `<div class="watchlist-linked-search-result" data-id="${a.id}" data-name="${escapeHtml(a.name)}">
                 ${img ? `<img src="${img}" alt="" class="watchlist-linked-result-img">` :
                     `<div class="watchlist-linked-result-img-placeholder">🎵</div>`}
                 <div class="watchlist-linked-result-info">
                     <div class="watchlist-linked-result-name">${escapeHtml(a.name)}</div>
-                    <div class="watchlist-linked-result-meta">${genres ? escapeHtml(genres) + ' · ' : ''}Pop: ${pop}</div>
+                    <div class="watchlist-linked-result-meta">${genres ? escapeHtml(genres) : ''}${genres && popMeta ? ' · ' : ''}${popMeta}</div>
                 </div>
                 <button class="watchlist-linked-select-btn">Select</button>
             </div>`;
@@ -34603,8 +34609,16 @@ async function _searchLinkedProviderArtists(currentArtistId, watchlistName) {
  * Link a watchlist artist to a new provider artist.
  */
 async function _linkProviderArtist(currentArtistId, newProviderId, newProviderName) {
-    // Determine provider type from ID format
-    const provider = /^\d+$/.test(newProviderId) ? 'itunes' : 'spotify';
+    // Determine provider from active metadata source
+    // Spotify IDs are alphanumeric (e.g. "4Z8W4fKeB5YxbusRsdQVPb"), iTunes/Deezer are numeric
+    let provider;
+    if (/^\d+$/.test(newProviderId)) {
+        // Numeric ID — check configured fallback source to distinguish iTunes from Deezer
+        const fallbackSrc = document.getElementById('metadata-fallback-source')?.value || 'itunes';
+        provider = fallbackSrc === 'deezer' ? 'deezer' : 'itunes';
+    } else {
+        provider = 'spotify';
+    }
 
     try {
         const response = await fetch(`/api/watchlist/artist/${currentArtistId}/link-provider`, {
@@ -34652,10 +34666,10 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
             return;
         }
 
-        const { config, artist, spotify_artist_id, itunes_artist_id, watchlist_name } = data;
+        const { config, artist, spotify_artist_id, itunes_artist_id, deezer_artist_id, watchlist_name } = data;
 
         // Populate linked provider section (use DB watchlist_name for mismatch comparison)
-        _populateLinkedProviderSection(artistId, watchlist_name || artistName, spotify_artist_id, itunes_artist_id, artist);
+        _populateLinkedProviderSection(artistId, watchlist_name || artistName, spotify_artist_id, itunes_artist_id, artist, deezer_artist_id);
 
         // Check if global override is active
         let globalOverrideActive = false;
