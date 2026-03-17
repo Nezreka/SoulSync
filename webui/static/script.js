@@ -51607,6 +51607,7 @@ function updateRepairStatusFromData(data) {
 let _repairCurrentTab = 'jobs';
 let _repairFindingsPage = 0;
 let _repairSelectedFindings = new Set();
+let _repairFindingsTotal = 0;
 const REPAIR_FINDINGS_PAGE_SIZE = 30;
 let _repairJobsCache = {}; // Cache job data for help modal
 
@@ -52154,8 +52155,11 @@ async function loadRepairFindings() {
         const items = data.items || [];
 
         _repairSelectedFindings.clear();
+        _repairFindingsTotal = data.total || 0;
         const bulkBar = document.getElementById('repair-findings-bulk');
         if (bulkBar) bulkBar.style.display = 'none';
+        const selectAllCb = document.getElementById('repair-select-all-cb');
+        if (selectAllCb) { selectAllCb.checked = false; selectAllCb.indeterminate = false; }
 
         if (items.length === 0) {
             container.innerHTML = `<div class="repair-empty-state">
@@ -52537,8 +52541,88 @@ function toggleFindingSelect(id, checked) {
     if (checked) _repairSelectedFindings.add(id);
     else _repairSelectedFindings.delete(id);
 
+    _updateFindingsBulkBar();
+}
+
+function _updateFindingsBulkBar() {
     const bulkBar = document.getElementById('repair-findings-bulk');
-    if (bulkBar) bulkBar.style.display = _repairSelectedFindings.size > 0 ? '' : 'none';
+    const count = _repairSelectedFindings.size;
+    if (bulkBar) bulkBar.style.display = count > 0 ? '' : 'none';
+    const countEl = document.getElementById('repair-bulk-count');
+    if (countEl) countEl.textContent = count > 0 ? `${count} selected` : '';
+
+    // Show "Fix All (N)" when all on page are selected and there are more pages
+    const fixAllBtn = document.getElementById('repair-fix-all-btn');
+    if (fixAllBtn && _repairFindingsTotal > 0) {
+        const allPageSelected = count > 0 && count >= document.querySelectorAll('.repair-finding-card').length;
+        fixAllBtn.style.display = (allPageSelected && _repairFindingsTotal > count) ? '' : 'none';
+        fixAllBtn.textContent = `Fix All ${_repairFindingsTotal}`;
+    }
+
+    // Sync "Select All" checkbox
+    const selectAllCb = document.getElementById('repair-select-all-cb');
+    if (selectAllCb) {
+        const totalOnPage = document.querySelectorAll('.repair-finding-card').length;
+        selectAllCb.checked = totalOnPage > 0 && count >= totalOnPage;
+        selectAllCb.indeterminate = count > 0 && count < totalOnPage;
+    }
+}
+
+function toggleSelectAllFindings(checked) {
+    const checkboxes = document.querySelectorAll('.repair-finding-select input[type="checkbox"]');
+    checkboxes.forEach(cb => {
+        cb.checked = checked;
+        const card = cb.closest('.repair-finding-card');
+        if (card) {
+            const id = parseInt(card.dataset.id);
+            if (checked) _repairSelectedFindings.add(id);
+            else _repairSelectedFindings.delete(id);
+        }
+    });
+    _updateFindingsBulkBar();
+}
+
+async function fixAllMatchingFindings() {
+    const jobFilter = document.getElementById('repair-findings-job-filter');
+    const severityFilter = document.getElementById('repair-findings-severity-filter');
+    const jobId = jobFilter ? jobFilter.value : '';
+    const severity = severityFilter ? severityFilter.value : '';
+
+    const scopeLabel = jobId ? jobId.replace(/_/g, ' ') : 'all jobs';
+    if (!await showConfirmDialog({
+        title: 'Fix All Findings',
+        message: `Apply fixes to all ${_repairFindingsTotal} pending fixable findings for ${scopeLabel}? This may delete files or remove database entries depending on finding type.`,
+        confirmText: 'Fix All',
+        destructive: true
+    })) return;
+
+    showToast(`Fixing ${_repairFindingsTotal} findings...`, 'info');
+
+    try {
+        const body = {};
+        if (jobId) body.job_id = jobId;
+        if (severity) body.severity = severity;
+
+        const response = await fetch('/api/repair/findings/bulk-fix', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const result = await response.json();
+        if (result.success) {
+            showToast(`Fixed ${result.fixed}${result.failed ? `, ${result.failed} failed` : ''} of ${result.total}`, result.fixed > 0 ? 'success' : 'error');
+        } else {
+            showToast(result.error || 'Bulk fix failed', 'error');
+        }
+    } catch (error) {
+        console.error('Error in bulk fix:', error);
+        showToast('Error applying bulk fix', 'error');
+    }
+
+    _repairSelectedFindings.clear();
+    loadRepairFindingsDashboard();
+    loadRepairFindings();
+    updateRepairStatus();
 }
 
 function renderRepairFindingsPagination(total, currentPage) {

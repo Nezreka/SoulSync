@@ -5794,9 +5794,15 @@
                             <option value="dismissed">Dismissed</option>
                         </select>
                     </div>
+                    <label class="repair-select-all" title="Select all on this page">
+                        <input type="checkbox" id="repair-select-all-cb" onchange="toggleSelectAllFindings(this.checked)">
+                        <span>Select All</span>
+                    </label>
                     <div class="repair-findings-bulk" id="repair-findings-bulk" style="display:none;">
+                        <span class="repair-bulk-count" id="repair-bulk-count"></span>
                         <button class="repair-bulk-btn fix" onclick="bulkFixFindings()">Fix Selected</button>
                         <button class="repair-bulk-btn" onclick="bulkRepairAction('dismiss')">Dismiss Selected</button>
+                        <button class="repair-bulk-btn fix-all" id="repair-fix-all-btn" style="display:none;" onclick="fixAllMatchingFindings()">Fix All</button>
                     </div>
                     <button class="repair-clear-btn" onclick="clearRepairFindings()" title="Clear findings matching current filters">Clear Findings</button>
                 </div>

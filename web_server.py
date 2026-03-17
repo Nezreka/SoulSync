@@ -39306,6 +39306,31 @@ def repair_finding_dismiss(finding_id):
         logger.error(f"Error dismissing finding {finding_id}: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/repair/findings/bulk-fix', methods=['POST'])
+def repair_findings_bulk_fix():
+    """Bulk fix all pending fixable findings matching filters"""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        data = request.get_json(silent=True) or {}
+        job_id = data.get('job_id') or None
+        severity = data.get('severity') or None
+        finding_ids = data.get('ids') or None
+
+        result = repair_worker.bulk_fix_findings(
+            job_id=job_id, severity=severity, finding_ids=finding_ids
+        )
+        return jsonify({
+            'success': True,
+            'fixed': result.get('fixed', 0),
+            'failed': result.get('failed', 0),
+            'total': result.get('total', 0)
+        }), 200
+    except Exception as e:
+        logger.error(f"Error bulk fixing findings: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/repair/findings/bulk', methods=['POST'])
 def repair_findings_bulk():
     """Bulk resolve or dismiss findings"""
