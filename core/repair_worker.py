@@ -1043,6 +1043,55 @@ class RepairWorker:
             if conn:
                 conn.close()
 
+    def bulk_fix_findings(self, job_id: str = None, severity: str = None,
+                          finding_ids: List[int] = None) -> dict:
+        """Fix all pending fixable findings matching filters. Returns {fixed, failed, skipped}."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+
+            # Build query for pending fixable findings
+            fixable_types = ('dead_file', 'orphan_file', 'track_number_mismatch',
+                             'missing_cover_art', 'metadata_gap', 'duplicate_tracks', 'mbid_mismatch')
+            placeholders = ','.join(['?'] * len(fixable_types))
+            where_parts = [f"finding_type IN ({placeholders})", "status = 'pending'"]
+            params = list(fixable_types)
+
+            if finding_ids:
+                id_placeholders = ','.join(['?'] * len(finding_ids))
+                where_parts.append(f"id IN ({id_placeholders})")
+                params.extend(finding_ids)
+            if job_id:
+                where_parts.append("job_id = ?")
+                params.append(job_id)
+            if severity:
+                where_parts.append("severity = ?")
+                params.append(severity)
+
+            where = f"WHERE {' AND '.join(where_parts)}"
+            cursor.execute(f"SELECT id FROM repair_findings {where}", params)
+            ids_to_fix = [row[0] for row in cursor.fetchall()]
+            conn.close()
+            conn = None
+
+            fixed = 0
+            failed = 0
+            for fid in ids_to_fix:
+                result = self.fix_finding(fid)
+                if result.get('success'):
+                    fixed += 1
+                else:
+                    failed += 1
+
+            return {'fixed': fixed, 'failed': failed, 'total': len(ids_to_fix)}
+        except Exception as e:
+            logger.error("Error bulk fixing findings: %s", e, exc_info=True)
+            return {'fixed': 0, 'failed': 0, 'total': 0, 'error': str(e)}
+        finally:
+            if conn:
+                conn.close()
+
     def bulk_update_findings(self, finding_ids: List[int], action: str) -> int:
         """Bulk resolve or dismiss findings. Returns count updated."""
         conn = None

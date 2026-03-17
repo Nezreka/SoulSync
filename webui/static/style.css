@@ -41158,9 +41158,33 @@ tr.tag-diff-same {
     font-weight: 600;
 }
 
+.repair-select-all {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    user-select: none;
+}
+.repair-select-all input[type="checkbox"] {
+    accent-color: rgb(var(--accent-rgb, 99, 102, 241));
+    cursor: pointer;
+}
+.repair-select-all:hover {
+    color: rgba(255, 255, 255, 0.9);
+}
+
 .repair-findings-bulk {
     display: flex;
+    align-items: center;
     gap: 6px;
+}
+
+.repair-bulk-count {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    margin-right: 4px;
 }
 
 .repair-bulk-btn {
@@ -41188,6 +41212,16 @@ tr.tag-diff-same {
 
 .repair-bulk-btn.fix:hover {
     background: rgba(var(--accent-rgb, 99, 102, 241), 0.2);
+}
+
+.repair-bulk-btn.fix-all {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.3);
+    color: #fbbf24;
+    font-weight: 600;
+}
+.repair-bulk-btn.fix-all:hover {
+    background: rgba(245, 158, 11, 0.22);
 }
 
 .repair-clear-btn {
