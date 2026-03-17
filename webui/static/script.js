@@ -5562,8 +5562,8 @@ async function loadHydrabaseComparisons() {
                         <div style="color: #aaa;">${comp.spotify?.tracks || 0}T / ${comp.spotify?.artists || 0}A / ${comp.spotify?.albums || 0}Al</div>
                     </div>
                     <div style="padding: 6px 8px; border-radius: 6px; background: rgba(251, 93, 93, 0.15); border: 1px solid rgba(251, 93, 93, 0.3);">
-                        <div style="color: #fb5d5d; font-weight: 600; margin-bottom: 2px;">iTunes</div>
-                        <div style="color: #aaa;">${comp.itunes?.tracks || 0}T / ${comp.itunes?.artists || 0}A / ${comp.itunes?.albums || 0}Al</div>
+                        <div style="color: #fb5d5d; font-weight: 600; margin-bottom: 2px;">${comp.fallback_source === 'deezer' ? 'Deezer' : 'iTunes'}</div>
+                        <div style="color: #aaa;">${(comp.fallback || comp.itunes)?.tracks || 0}T / ${(comp.fallback || comp.itunes)?.artists || 0}A / ${(comp.fallback || comp.itunes)?.albums || 0}Al</div>
                     </div>
                 </div>
             </div>`;
