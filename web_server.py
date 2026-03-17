@@ -12153,7 +12153,8 @@ def search_match():
                         "name": artist.name,
                         "image_url": getattr(artist, 'image_url', None),
                         "genres": getattr(artist, 'genres', []),
-                        "popularity": getattr(artist, 'popularity', 0)
+                        "popularity": getattr(artist, 'popularity', 0),
+                        "followers": getattr(artist, 'followers', 0)
                     },
                     "confidence": confidence
                 })
@@ -31095,20 +31096,21 @@ def watchlist_artist_config(artist_id):
                 SELECT include_albums, include_eps, include_singles,
                        include_live, include_remixes, include_acoustic, include_compilations,
                        artist_name, image_url, spotify_artist_id, itunes_artist_id,
-                       last_scan_timestamp, date_added, include_instrumentals
+                       last_scan_timestamp, date_added, include_instrumentals, deezer_artist_id
                 FROM watchlist_artists
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ?
-            """, (artist_id, artist_id))
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+            """, (artist_id, artist_id, artist_id))
             result = cursor.fetchone()
             conn.close()
 
             if not result:
                 return jsonify({"success": False, "error": "Artist not found in watchlist"}), 404
-            
+
             # Determine if this is an iTunes or Spotify artist
             is_itunes_artist = artist_id.isdigit()
             spotify_id = result[9]  # spotify_artist_id from query
             itunes_id = result[10]  # itunes_artist_id from query
+            deezer_id = result[14]  # deezer_artist_id from query
 
             # Get artist info from Spotify (only for Spotify artists)
             artist_info = None
@@ -31145,9 +31147,9 @@ def watchlist_artist_config(artist_id):
                 cur2.execute("""
                     SELECT banner_url, summary, style, mood, label, genres
                     FROM artists
-                    WHERE spotify_artist_id = ? OR itunes_artist_id = ?
+                    WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
                     LIMIT 1
-                """, (artist_id, artist_id))
+                """, (artist_id, artist_id, artist_id))
                 lib_row = cur2.fetchone()
                 if lib_row:
                     artist_info['banner_url'] = lib_row[0]
@@ -31167,10 +31169,10 @@ def watchlist_artist_config(artist_id):
                     SELECT rr.album_name, rr.release_date, rr.album_cover_url, rr.track_count
                     FROM recent_releases rr
                     JOIN watchlist_artists wa ON rr.watchlist_artist_id = wa.id
-                    WHERE wa.spotify_artist_id = ? OR wa.itunes_artist_id = ?
+                    WHERE wa.spotify_artist_id = ? OR wa.itunes_artist_id = ? OR wa.deezer_artist_id = ?
                     ORDER BY rr.release_date DESC
                     LIMIT 6
-                """, (artist_id, artist_id))
+                """, (artist_id, artist_id, artist_id))
                 releases = [
                     {
                         'album_name': r[0],
@@ -31205,6 +31207,7 @@ def watchlist_artist_config(artist_id):
                 "recent_releases": releases,
                 "spotify_artist_id": spotify_id,
                 "itunes_artist_id": itunes_id,
+                "deezer_artist_id": deezer_id,
                 "watchlist_name": result[7],  # Original stored watchlist artist name
             })
 
@@ -31235,11 +31238,11 @@ def watchlist_artist_config(artist_id):
                     include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
                     include_instrumentals = ?,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ?
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
                   int(include_instrumentals),
-                  artist_id, artist_id))
+                  artist_id, artist_id, artist_id))
             conn.commit()
 
             if cursor.rowcount == 0:

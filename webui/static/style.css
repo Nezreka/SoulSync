@@ -14095,6 +14095,12 @@ body {
     border: 1px solid rgba(252, 60, 68, 0.3);
 }
 
+.watchlist-provider-badge.deezer {
+    background: rgba(162, 56, 255, 0.15);
+    color: #a238ff;
+    border: 1px solid rgba(162, 56, 255, 0.3);
+}
+
 .watchlist-linked-mismatch-warning {
     margin-top: 6px;
     font-size: 12px;
