@@ -23300,8 +23300,19 @@ body {
 
 .discovery-fix-modal-content {
     padding: 24px;
-    overflow-y: auto;
+    overflow: hidden;
     flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.discovery-fix-modal-content .search-results-section {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .source-track-info {
@@ -23310,6 +23321,7 @@ body {
     border-radius: 12px;
     padding: 16px;
     margin-bottom: 24px;
+    flex-shrink: 0;
 }
 
 .source-track-info h3 {
@@ -23348,6 +23360,7 @@ body {
 
 .search-inputs-section {
     margin-bottom: 24px;
+    flex-shrink: 0;
 }
 
 .search-inputs-section h3 {
@@ -23424,7 +23437,8 @@ body {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 400px;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
 }
 
