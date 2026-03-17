@@ -55015,6 +55015,7 @@ let _autoBlocks = null; // cached block definitions from /api/automations/blocks
 let _autoBuilder = { editId: null, when: null, do: null, then: [], isSystem: false };
 
 let _autoMirroredPlaylists = null; // cached mirrored playlist list
+let _autoSpotifyAuthenticated = false; // whether Spotify is authed (for refresh filtering)
 
 const _autoIcons = {
     schedule: '\u23F1\uFE0F', daily_time: '\u{1F570}\uFE0F', weekly_time: '\uD83D\uDCC5', app_started: '\uD83D\uDE80', track_downloaded: '\u2B07\uFE0F', batch_complete: '\u2705',
@@ -55595,6 +55596,7 @@ async function showAutomationBuilder(editId) {
     }
 
     _autoMirroredPlaylists = null; // invalidate so it re-fetches
+    _autoSpotifyAuthenticated = false;
     _autoBuilder = { editId: editId || null, when: null, do: null, then: [], isSystem: false };
 
     // If editing, load automation data
@@ -55867,7 +55869,7 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         const allChecked = config.all ? ' checked' : '';
         return `<div class="config-row">
             <label>Playlist</label>
-            <select id="cfg-${slotKey}-playlist_id" class="mirrored-playlist-select" data-value="${_escAttr(config.playlist_id || '')}">
+            <select id="cfg-${slotKey}-playlist_id" class="mirrored-playlist-select" data-block-type="refresh_mirrored" data-value="${_escAttr(config.playlist_id || '')}">
                 <option value="">Loading...</option>
             </select>
         </div>
@@ -56078,14 +56080,29 @@ async function _autoLoadMirroredSelects() {
     if (!_autoMirroredPlaylists) {
         try {
             const res = await fetch('/api/mirrored-playlists/list');
-            _autoMirroredPlaylists = await res.json();
-        } catch (e) { _autoMirroredPlaylists = []; }
+            const data = await res.json();
+            // New format returns { playlists, spotify_authenticated }
+            if (Array.isArray(data)) {
+                // Backward compat: old format was plain array
+                _autoMirroredPlaylists = data;
+                _autoSpotifyAuthenticated = false;
+            } else {
+                _autoMirroredPlaylists = data.playlists || [];
+                _autoSpotifyAuthenticated = data.spotify_authenticated || false;
+            }
+        } catch (e) { _autoMirroredPlaylists = []; _autoSpotifyAuthenticated = false; }
     }
 
     selects.forEach(sel => {
         const savedValue = sel.dataset.value || '';
+        const isRefresh = sel.dataset.blockType === 'refresh_mirrored';
         sel.innerHTML = '<option value="">-- Select playlist --</option>';
         _autoMirroredPlaylists.forEach(p => {
+            // For refresh selects: hide file playlists, hide spotify (library) if not authed
+            if (isRefresh) {
+                if (p.source === 'file' || p.source === 'beatport') return;
+                if (p.source === 'spotify' && !_autoSpotifyAuthenticated) return;
+            }
             sel.innerHTML += `<option value="${p.id}"${String(p.id) === savedValue ? ' selected' : ''}>${_esc(p.name)}</option>`;
         });
     });

@@ -488,6 +488,9 @@ def _register_automation_handlers():
         else:
             return {'status': 'error', 'reason': 'No playlist specified'}
 
+        # Filter out sources that can't be refreshed (no external API)
+        playlists = [pl for pl in playlists if pl.get('source', '') not in ('file', 'beatport')]
+
         refreshed = 0
         errors = []
         for idx, pl in enumerate(playlists):
@@ -565,6 +568,43 @@ def _register_automation_handlers():
                         except Exception as e:
                             logger.warning(f"Spotify public scraper fallback failed for {source_id}: {e}")
 
+                elif source == 'spotify_public':
+                    # source_playlist_id is an MD5 hash; extract actual Spotify ID from stored description (URL)
+                    try:
+                        from core.spotify_public_scraper import parse_spotify_url, scrape_spotify_embed
+                        spotify_url = pl.get('description', '')
+                        parsed = parse_spotify_url(spotify_url) if spotify_url else None
+                        if parsed:
+                            embed_data = scrape_spotify_embed(parsed['type'], parsed['id'])
+                            if embed_data and not embed_data.get('error') and embed_data.get('tracks'):
+                                tracks = []
+                                for t in embed_data['tracks']:
+                                    artist_names = [a['name'] for a in t.get('artists', [])]
+                                    artist_name = artist_names[0] if artist_names else ''
+                                    track_dict = {
+                                        'track_name': t.get('name', ''),
+                                        'artist_name': artist_name,
+                                        'album_name': '',
+                                        'duration_ms': t.get('duration_ms', 0),
+                                        'source_track_id': t.get('id', ''),
+                                    }
+                                    if t.get('id'):
+                                        track_dict['extra_data'] = json.dumps({
+                                            'discovered': True,
+                                            'provider': 'spotify',
+                                            'confidence': 1.0,
+                                            'matched_data': {
+                                                'id': t['id'],
+                                                'name': t.get('name', ''),
+                                                'artists': t.get('artists', []),
+                                                'album': '',
+                                                'duration_ms': t.get('duration_ms', 0),
+                                            }
+                                        })
+                                    tracks.append(track_dict)
+                    except Exception as e:
+                        logger.warning(f"Spotify public playlist refresh failed for {source_id}: {e}")
+
                 elif source == 'deezer':
                     try:
                         from core.deezer_client import DeezerClient
@@ -599,7 +639,8 @@ def _register_automation_handlers():
                             })
 
                 elif source == 'youtube':
-                    yt_url = f"https://www.youtube.com/playlist?list={source_id}"
+                    # source_playlist_id is now a deterministic hash; use stored description (original URL) for refresh
+                    yt_url = pl.get('description', '') or f"https://www.youtube.com/playlist?list={source_id}"
                     playlist_data = parse_youtube_playlist(yt_url)
                     if playlist_data and playlist_data.get('tracks'):
                         tracks = []
@@ -5129,9 +5170,13 @@ def get_mirrored_playlists_list():
         database = get_database()
         profile_id = get_current_profile_id()
         playlists = database.get_mirrored_playlists(profile_id=profile_id)
-        return jsonify([{"id": p['id'], "name": p['name']} for p in playlists])
+        spotify_authed = bool(spotify_client and spotify_client.is_spotify_authenticated())
+        return jsonify({
+            "playlists": [{"id": p['id'], "name": p['name'], "source": p.get('source', '')} for p in playlists],
+            "spotify_authenticated": spotify_authed
+        })
     except Exception as e:
-        return jsonify([]), 200
+        return jsonify({"playlists": [], "spotify_authenticated": False}), 200
 
 @app.route('/api/test-connection', methods=['POST'])
 def test_connection_endpoint():
