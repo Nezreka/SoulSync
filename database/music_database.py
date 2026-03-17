@@ -6516,10 +6516,12 @@ class MusicDatabase:
                 return [{
                     'album_spotify_id': row['album_spotify_id'],
                     'album_itunes_id': row['album_itunes_id'] if 'album_itunes_id' in row_keys else None,
+                    'album_deezer_id': row['album_deezer_id'] if 'album_deezer_id' in row_keys else None,
                     'album_name': row['album_name'],
                     'artist_name': row['artist_name'],
                     'artist_spotify_id': row['artist_spotify_id'],
                     'artist_itunes_id': row['artist_itunes_id'] if 'artist_itunes_id' in row_keys else None,
+                    'artist_deezer_id': row['artist_deezer_id'] if 'artist_deezer_id' in row_keys else None,
                     'album_cover_url': row['album_cover_url'],
                     'release_date': row['release_date'],
                     'album_type': row['album_type'],

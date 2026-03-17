@@ -103,12 +103,16 @@ class PersonalizedPlaylistsService:
     def _get_active_source(self) -> str:
         """
         Determine which music source is active for discovery.
-        Returns 'spotify' if Spotify is authenticated, 'itunes' otherwise.
+        Returns 'spotify' if Spotify is authenticated, otherwise the configured fallback ('itunes' or 'deezer').
         """
         if self.spotify_client and hasattr(self.spotify_client, 'is_spotify_authenticated'):
             if self.spotify_client.is_spotify_authenticated():
                 return 'spotify'
-        return 'itunes'
+        try:
+            from config.settings import config_manager
+            return config_manager.get('metadata.fallback_source', 'itunes') or 'itunes'
+        except Exception:
+            return 'itunes'
 
     def _build_track_dict(self, row, source: str) -> Dict:
         """Build a standardized track dictionary from a database row."""
@@ -124,9 +128,10 @@ class PersonalizedPlaylistsService:
                 track_data = None
 
         return {
-            'track_id': row.get('spotify_track_id') or row.get('itunes_track_id'),
+            'track_id': row.get('spotify_track_id') or row.get('itunes_track_id') or row.get('deezer_track_id'),
             'spotify_track_id': row.get('spotify_track_id'),
             'itunes_track_id': row.get('itunes_track_id'),
+            'deezer_track_id': row.get('deezer_track_id'),
             'track_name': row.get('track_name', 'Unknown'),
             'artist_name': row.get('artist_name', 'Unknown'),
             'album_name': row.get('album_name', 'Unknown'),
@@ -872,7 +877,8 @@ class PersonalizedPlaylistsService:
                 return {'tracks': [], 'error': 'Must provide 1-5 seed artists'}
 
             use_spotify = self.spotify_client and self.spotify_client.sp
-            logger.info(f"Building custom playlist from {len(seed_artist_ids)} seed artists (source: {'spotify' if use_spotify else 'itunes'})")
+            active_source = 'spotify' if use_spotify else self._get_active_source()
+            logger.info(f"Building custom playlist from {len(seed_artist_ids)} seed artists (source: {active_source})")
 
             # Step 1: Get similar artists for each seed
             all_similar_artists = []
