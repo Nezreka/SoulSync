@@ -25743,8 +25743,13 @@ def _run_tidal_discovery_worker(playlist_id):
                     # Spotify: Function returns (Track, raw_data, confidence)
                     track_obj, raw_track_data, match_confidence = track_result
                     album_obj = raw_track_data.get('album', {}) if raw_track_data else {}
+                    # Ensure album has a name — fall back to track_obj.album if raw_data was missing
+                    if isinstance(album_obj, dict) and not album_obj.get('name') and track_obj.album:
+                        album_obj['name'] = track_obj.album
+                    elif not album_obj and track_obj.album:
+                        album_obj = {'name': track_obj.album}
                     # Extract image URL from album data or track object
-                    _album_images = album_obj.get('images', [])
+                    _album_images = album_obj.get('images', []) if isinstance(album_obj, dict) else []
                     _image_url = _album_images[0].get('url', '') if _album_images else (getattr(track_obj, 'image_url', '') or '')
 
                     match_data = {
@@ -26700,8 +26705,13 @@ def _run_deezer_discovery_worker(playlist_id):
                     # Spotify: Function returns (Track, raw_data, confidence)
                     track_obj, raw_track_data, match_confidence = track_result
                     album_obj = raw_track_data.get('album', {}) if raw_track_data else {}
+                    # Ensure album has a name — fall back to track_obj.album if raw_data was missing
+                    if isinstance(album_obj, dict) and not album_obj.get('name') and track_obj.album:
+                        album_obj['name'] = track_obj.album
+                    elif not album_obj and track_obj.album:
+                        album_obj = {'name': track_obj.album}
                     # Extract image URL from album data or track object
-                    _album_images = album_obj.get('images', [])
+                    _album_images = album_obj.get('images', []) if isinstance(album_obj, dict) else []
                     _image_url = _album_images[0].get('url', '') if _album_images else (getattr(track_obj, 'image_url', '') or '')
 
                     match_data = {
@@ -27519,8 +27529,13 @@ def _run_spotify_public_discovery_worker(url_hash):
                     # Spotify: Function returns (Track, raw_data, confidence)
                     track_obj, raw_track_data, match_confidence = track_result
                     album_obj = raw_track_data.get('album', {}) if raw_track_data else {}
+                    # Ensure album has a name — fall back to track_obj.album if raw_data was missing
+                    if isinstance(album_obj, dict) and not album_obj.get('name') and track_obj.album:
+                        album_obj['name'] = track_obj.album
+                    elif not album_obj and track_obj.album:
+                        album_obj = {'name': track_obj.album}
                     # Extract image URL from album data or track object
-                    _album_images = album_obj.get('images', [])
+                    _album_images = album_obj.get('images', []) if isinstance(album_obj, dict) else []
                     _image_url = _album_images[0].get('url', '') if _album_images else (getattr(track_obj, 'image_url', '') or '')
 
                     match_data = {

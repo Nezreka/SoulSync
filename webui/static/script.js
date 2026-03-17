@@ -11076,7 +11076,8 @@ async function selectWishlistCategory(category) {
                     }
                 }
 
-                const albumName = spotifyData?.album?.name || 'Unknown Album';
+                const rawAlbum = spotifyData?.album;
+                const albumName = (typeof rawAlbum === 'string' ? rawAlbum : rawAlbum?.name) || 'Unknown Album';
 
                 // Handle both object format {name: '...'} and sanitized string format
                 let artistName = 'Unknown Artist';
