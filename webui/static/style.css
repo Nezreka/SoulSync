@@ -5727,40 +5727,236 @@ body {
         inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
+/* ── Watchlist & Wishlist Hero Buttons ── */
+.watchlist-button,
 .wishlist-button {
-    background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, rgb(var(--accent-light-rgb)) 100%);
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 12px 20px;
+    overflow: visible;
+    background: rgba(18, 18, 22, 0.85);
+    backdrop-filter: blur(16px) saturate(1.4);
+    color: #e0e0e0;
+    border: none;
+    border-radius: 22px;
+    z-index: 0;
 }
 
-.wishlist-button:hover {
-    background: linear-gradient(135deg, rgb(var(--accent-light-rgb)) 0%, rgb(var(--accent-neon-rgb)) 100%);
+/* Animated gradient border using border-image-like technique */
+.watchlist-button::before,
+.wishlist-button::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 22px;
+    padding: 1.5px;
+    -webkit-mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: 1;
 }
 
-/* Wishlist button states based on count */
-.wishlist-button.wishlist-inactive {
-    background: linear-gradient(135deg, #404040 0%, #505050 100%);
-    color: #888888;
+.watchlist-button::before {
+    background: linear-gradient(
+        135deg,
+        #ff8f00, #ffc107, #ffd54f, #ffab00, #ffc107, #ff8f00
+    );
+    background-size: 300% 300%;
+    animation: heroBorderFlow 4s ease infinite;
 }
 
-.wishlist-button.wishlist-inactive:hover {
-    background: linear-gradient(135deg, #505050 0%, #666666 100%);
-    color: #999999;
+.wishlist-button::before {
+    background: linear-gradient(
+        135deg,
+        rgb(var(--accent-rgb)),
+        rgb(var(--accent-light-rgb)),
+        rgb(var(--accent-neon-rgb)),
+        rgb(var(--accent-rgb)),
+        rgb(var(--accent-light-rgb)),
+        rgb(var(--accent-rgb))
+    );
+    background-size: 300% 300%;
+    animation: heroBorderFlow 4s ease infinite;
+    animation-delay: 2s;
 }
 
-.wishlist-button.wishlist-active {
-    background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, rgb(var(--accent-light-rgb)) 100%);
-    color: #000000;
+@keyframes heroBorderFlow {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
 }
 
-.wishlist-button.wishlist-active:hover {
-    background: linear-gradient(135deg, rgb(var(--accent-light-rgb)) 0%, rgb(var(--accent-neon-rgb)) 100%);
-}
-
+/* Outer glow */
 .watchlist-button {
-    background: linear-gradient(135deg, #ffc107 0%, #ffca28 100%);
+    box-shadow: 0 0 14px rgba(255, 193, 7, 0.12), 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.wishlist-button {
+    box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.12), 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
 .watchlist-button:hover {
-    background: linear-gradient(135deg, #ffca28 0%, #ffd54f 100%);
+    box-shadow: 0 0 24px rgba(255, 193, 7, 0.25), 0 4px 20px rgba(0, 0, 0, 0.4);
+    transform: translateY(-1px);
+}
+
+.wishlist-button:hover {
+    box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.25), 0 4px 20px rgba(0, 0, 0, 0.4);
+    transform: translateY(-1px);
+}
+
+/* Icon */
+.hero-btn-icon {
+    font-size: 16px;
+    line-height: 1;
+}
+
+/* Label */
+.hero-btn-label {
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+/* Watchlist text color tint */
+.watchlist-button .hero-btn-label {
+    color: #ffd54f;
+}
+
+.wishlist-button .hero-btn-label {
+    color: rgb(var(--accent-light-rgb));
+}
+
+/* Count badge */
+.hero-btn-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 11px;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    transition: all 0.3s ease;
+}
+
+.watchlist-button .hero-btn-badge {
+    background: rgba(255, 193, 7, 0.15);
+    color: #ffc107;
+    border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+.wishlist-button .hero-btn-badge {
+    background: rgba(var(--accent-rgb), 0.15);
+    color: rgb(var(--accent-light-rgb));
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+}
+
+.hero-btn-badge.has-items {
+    animation: badgePulse 2s ease-in-out infinite;
+}
+
+.watchlist-button .hero-btn-badge.has-items {
+    background: rgba(255, 193, 7, 0.25);
+    border-color: rgba(255, 193, 7, 0.5);
+}
+
+.wishlist-button .hero-btn-badge.has-items {
+    background: rgba(var(--accent-rgb), 0.25);
+    border-color: rgba(var(--accent-rgb), 0.5);
+}
+
+@keyframes badgePulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.12); }
+}
+
+/* Shimmer sweep — clipped inside button */
+.hero-btn-shimmer {
+    position: absolute;
+    inset: 0;
+    border-radius: 22px;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.hero-btn-shimmer::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    animation: shimmerSweep 5s ease-in-out infinite;
+}
+
+.watchlist-button .hero-btn-shimmer::after {
+    background: linear-gradient(
+        105deg,
+        transparent 30%,
+        rgba(255, 193, 7, 0.1) 50%,
+        transparent 70%
+    );
+}
+
+.wishlist-button .hero-btn-shimmer::after {
+    background: linear-gradient(
+        105deg,
+        transparent 30%,
+        rgba(var(--accent-rgb), 0.1) 50%,
+        transparent 70%
+    );
+    animation-delay: 2.5s;
+}
+
+@keyframes shimmerSweep {
+    0%, 100% { left: -100%; }
+    40%, 60% { left: 100%; }
+}
+
+/* ── Wishlist inactive state ── */
+.wishlist-button.wishlist-inactive {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.wishlist-button.wishlist-inactive::before {
+    background: linear-gradient(135deg, #444, #555, #444);
+    background-size: 100% 100%;
+    animation: none;
+}
+
+.wishlist-button.wishlist-inactive .hero-btn-label {
+    color: #777;
+}
+
+.wishlist-button.wishlist-inactive .hero-btn-badge {
+    background: rgba(255, 255, 255, 0.06);
+    color: #666;
+    border-color: rgba(255, 255, 255, 0.1);
+    animation: none;
+}
+
+.wishlist-button.wishlist-inactive .hero-btn-shimmer {
+    display: none;
+}
+
+.wishlist-button.wishlist-inactive:hover {
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.08), 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+/* Active wishlist just uses the normal accent styles above */
+.wishlist-button.wishlist-active {
+    /* already styled by default .wishlist-button rules */
 }
 
 /* Service Status Grid */
