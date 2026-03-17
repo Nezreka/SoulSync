@@ -56,6 +56,19 @@ class DeadFileCleanerJob(RepairJob):
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
 
+        # Safety: abort if transfer folder doesn't exist — prevents mass false positives
+        if not context.transfer_folder or not os.path.isdir(context.transfer_folder):
+            logger.error("Transfer folder not found: %s — aborting dead file scan to avoid false positives",
+                         context.transfer_folder)
+            result.errors += 1
+            if context.report_progress:
+                context.report_progress(
+                    phase='Aborted — transfer folder not found',
+                    log_line=f'Transfer folder does not exist: {context.transfer_folder}',
+                    log_type='error'
+                )
+            return result
+
         # Fetch all tracks with file paths, joining to get artist/album names
         tracks = []
         conn = None
