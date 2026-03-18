@@ -1092,8 +1092,8 @@
 
                         <!-- Beatport Tab Content -->
                         <div class="sync-tab-content" id="beatport-tab-content">
-                            <!-- Beatport Nested Tabs -->
-                            <div class="beatport-tabs">
+                            <!-- Beatport Nested Tabs (hidden — Browse is the only view) -->
+                            <div class="beatport-tabs" style="display: none;">
                                 <button class="beatport-tab-button active" data-beatport-tab="rebuild">
                                     <span class="tab-icon rebuild-icon"></span> Browse
                                 </button>
@@ -1560,6 +1560,9 @@
                                         </button>
                                     </div>
                                 </div>
+
+                                <!-- Beatport Download Bubbles -->
+                                <div id="beatport-downloads-section" class="artist-downloads-section" style="display: none;"></div>
 
                                 <!-- Top 10 Lists Section -->
                                 <div class="beatport-top10-section">
