@@ -207,9 +207,11 @@ class DuplicateDetectorJob(RepairJob):
 
 
 def _normalize(text: str) -> str:
-    """Normalize text for fuzzy comparison."""
+    """Normalize text for fuzzy comparison.
+
+    Keeps parenthetical content (remixes, live, etc.) so that similarity
+    thresholds can distinguish 'title' from 'title xxx remix'.
+    """
     t = text.lower()
-    t = re.sub(r'\(.*?\)', '', t)
-    t = re.sub(r'\[.*?\]', '', t)
-    t = re.sub(r'[^a-z0-9 ]', '', t)
+    t = re.sub(r'[^a-z0-9() ]', '', t)
     return t.strip()
