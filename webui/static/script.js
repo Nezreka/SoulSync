@@ -55960,11 +55960,18 @@ function _showGroupDropdown(event, autoId, currentGroup) {
     // Position dropdown on document.body to avoid overflow:hidden clipping
     const rect = btn.getBoundingClientRect();
     dropdown.style.position = 'fixed';
-    dropdown.style.top = (rect.bottom + 4) + 'px';
     dropdown.style.right = (window.innerWidth - rect.right) + 'px';
     dropdown.style.left = 'auto';
     document.body.appendChild(dropdown);
     _activeGroupDropdown = dropdown;
+
+    // Open upward if not enough room below
+    const dropdownHeight = dropdown.offsetHeight;
+    if (rect.bottom + 4 + dropdownHeight > window.innerHeight && rect.top - 4 - dropdownHeight > 0) {
+        dropdown.style.top = (rect.top - 4 - dropdownHeight) + 'px';
+    } else {
+        dropdown.style.top = (rect.bottom + 4) + 'px';
+    }
 
     // Focus the input
     setTimeout(() => dropdown.querySelector('.auto-group-input')?.focus(), 50);
