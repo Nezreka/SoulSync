@@ -290,14 +290,14 @@ class WishlistService:
                 
                 # Look for Spotify metadata in the result
                 if hasattr(slskd_result, 'artist') and hasattr(slskd_result, 'title'):
-                    # Reconstruct basic Spotify track structure
+                    album_name = getattr(slskd_result, 'album', '') or getattr(slskd_result, 'title', 'Unknown Album')
                     return {
                         'id': f"reconstructed_{hash(f'{slskd_result.artist}_{slskd_result.title}')}",
                         'name': getattr(slskd_result, 'title', 'Unknown Track'),
                         'artists': [{'name': getattr(slskd_result, 'artist', 'Unknown Artist')}],
-                        'album': {'name': getattr(slskd_result, 'album', 'Unknown Album')},
-                        'duration_ms': 0,  # Unknown
-                        'reconstructed': True  # Mark as reconstructed data
+                        'album': {'name': album_name, 'images': [], 'album_type': 'single', 'total_tracks': 1},
+                        'duration_ms': 0,
+                        'reconstructed': True
                     }
             
             # If no Spotify data found, try to reconstruct from available info
@@ -321,16 +321,17 @@ class WishlistService:
             if hasattr(spotify_track, 'title') and hasattr(spotify_track, 'artist') and not hasattr(spotify_track, 'id'):
                 logger.info("DEBUG: Detected TrackResult object, converting...")
                 # Handle TrackResult objects - these don't have Spotify IDs
+                album_name = getattr(spotify_track, 'album', '') or getattr(spotify_track, 'title', 'Unknown Album')
                 result = {
                     'id': f"trackresult_{hash(f'{spotify_track.artist}_{spotify_track.title}')}",
                     'name': getattr(spotify_track, 'title', 'Unknown Track'),
                     'artists': [{'name': getattr(spotify_track, 'artist', 'Unknown Artist')}],
-                    'album': {'name': getattr(spotify_track, 'album', 'Unknown Album')},
-                    'duration_ms': 0,  # TrackResult doesn't have duration
+                    'album': {'name': album_name, 'images': [], 'album_type': 'single', 'total_tracks': 1},
+                    'duration_ms': 0,
                     'preview_url': None,
                     'external_urls': {},
                     'popularity': 0,
-                    'source': 'trackresult'  # Mark as reconstructed from TrackResult
+                    'source': 'trackresult'
                 }
                 logger.info(f"DEBUG: TrackResult converted successfully: {result['name']} by {result['artists'][0]['name']}")
                 return result

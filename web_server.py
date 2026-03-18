@@ -20758,8 +20758,14 @@ def _ensure_spotify_track_format(track_info):
         album.setdefault('name', 'Unknown Album')
     else:
         album = {
-            'name': str(album_data) if album_data else 'Unknown Album'
+            'name': str(album_data) if album_data else track_info.get('name', 'Unknown Album'),
+            'album_type': 'single',
+            'total_tracks': 1,
+            'release_date': '',
         }
+    album.setdefault('images', [])
+    album.setdefault('album_type', 'album')
+    album.setdefault('total_tracks', 0)
 
     # Build proper Spotify track structure
     spotify_track = {
@@ -29494,12 +29500,22 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
             track_id = t.get('id', '')
             if track_id:
                 normalized = dict(t)
-                # Normalize album to dict format
+                # Normalize album to dict format, preserving images and metadata
                 raw_album = normalized.get('album', '')
                 if isinstance(raw_album, str):
-                    normalized['album'] = {'name': raw_album} if raw_album else {'name': 'Unknown Album'}
+                    normalized['album'] = {
+                        'name': raw_album or normalized.get('name', 'Unknown Album'),
+                        'images': [], 'album_type': 'single', 'total_tracks': 1, 'release_date': ''
+                    }
                 elif not isinstance(raw_album, dict):
-                    normalized['album'] = {'name': str(raw_album) if raw_album else 'Unknown Album'}
+                    normalized['album'] = {
+                        'name': str(raw_album) if raw_album else normalized.get('name', 'Unknown Album'),
+                        'images': [], 'album_type': 'single', 'total_tracks': 1, 'release_date': ''
+                    }
+                else:
+                    # Dict — ensure required keys exist
+                    raw_album.setdefault('name', 'Unknown Album')
+                    raw_album.setdefault('images', [])
                 # Normalize artists to list of dicts
                 raw_artists = normalized.get('artists', [])
                 if raw_artists and isinstance(raw_artists[0], str):
@@ -38064,11 +38080,19 @@ def convert_beatport_results_to_spotify_tracks(discovery_results):
             })
         elif result.get('spotify_track') and result.get('status_class') == 'found':
             # Build from individual fields (automatic discovery format)
+            album_val = result.get('spotify_album', '')
+            album_dict = album_val if isinstance(album_val, dict) else {
+                'name': album_val or result.get('spotify_track', 'Unknown Album'),
+                'album_type': 'single',
+                'images': [],
+                'release_date': '',
+                'total_tracks': 1,
+            }
             spotify_tracks.append({
                 'id': result.get('spotify_id', 'unknown'),
                 'name': result.get('spotify_track', 'Unknown Track'),
                 'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
-                'album': result.get('spotify_album', 'Unknown Album'),
+                'album': album_dict,
                 'source': 'beatport'
             })
 
