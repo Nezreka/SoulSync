@@ -12090,7 +12090,7 @@ async function startMissingTracksProcess(playlistId) {
 
         // If this is an artist album download, use album name and include full context
         // Match 'artist_album_', 'enhanced_search_album_', 'enhanced_search_track_', 'discover_album_', and 'seasonal_album_' prefixes
-        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('enhanced_search_track_') || playlistId.startsWith('discover_album_') || playlistId.startsWith('seasonal_album_') || playlistId.startsWith('spotify_library_') || playlistId.startsWith('issue_download_') || playlistId.startsWith('library_redownload_')) {
+        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('enhanced_search_track_') || playlistId.startsWith('discover_album_') || playlistId.startsWith('seasonal_album_') || playlistId.startsWith('spotify_library_') || playlistId.startsWith('issue_download_') || playlistId.startsWith('library_redownload_') || playlistId.startsWith('beatport_release_')) {
             requestBody.playlist_name = process.album?.name || process.playlist.name;
             requestBody.is_album_download = true;
             requestBody.album_context = process.album;   // Full Spotify album object
@@ -24221,24 +24221,9 @@ async function handleHomepageChartTypeClick(chartType, chartEndpoint, chartName)
     }
 
     try {
-        // Check if we already have a card for this specific chart type (following genre page pattern)
-        const existingState = Object.values(beatportChartStates).find(state =>
-            state.chart && state.chart.name === chartConfig.name && state.chart.chart_type === `homepage_${chartType}`
-        );
-
-        if (existingState) {
-            console.log(`🔄 Found existing Beatport card for ${chartConfig.name}, opening existing modal`);
-            handleBeatportCardClick(existingState.chart.hash);
-            return;
-        }
-
-        // Create a chart hash for state management (following genre page pattern)
-        const chartHash = `homepage_${chartType}_${Date.now()}`;
-
         showToast(`Loading ${chartConfig.name}...`, 'info');
         showLoadingOverlay(`Loading ${chartConfig.name}...`);
 
-        // Fetch tracks from the specific endpoint (following genre page pattern)
         const response = await fetch(`${chartConfig.endpoint}?limit=${chartConfig.limit}`);
         if (!response.ok) {
             throw new Error(`Failed to fetch ${chartConfig.name}: ${response.status}`);
@@ -24249,31 +24234,9 @@ async function handleHomepageChartTypeClick(chartType, chartEndpoint, chartName)
             throw new Error(`No tracks found in ${chartConfig.name}`);
         }
 
-        // Create chart data object for playlist card (following genre page pattern)
-        const chartData = {
-            hash: chartHash,
-            name: chartConfig.name,
-            chart_type: `homepage_${chartType}`,
-            track_count: data.tracks.length,
-            tracks: data.tracks.map(track => ({
-                name: track.title || 'Unknown Title',
-                artists: [track.artist || 'Unknown Artist'],
-                album: chartConfig.name,
-                duration_ms: 0,
-                external_urls: { beatport: track.url || '' },
-                source: 'beatport'
-            }))
-        };
-
-        // Add card to container (in background, like YouTube does - following genre page pattern)
-        console.log(`🃏 Creating Beatport playlist card for: ${chartConfig.name}`);
-        addBeatportCardToContainer(chartData);
-
-        // Automatically open discovery modal (like when you click a YouTube or Tidal card in fresh state - following genre page pattern)
+        console.log(`✅ Fetched ${data.tracks.length} tracks from ${chartConfig.name}`);
         hideLoadingOverlay();
-        handleBeatportCardClick(chartHash);
-
-        console.log(`✅ Created Beatport card and opened discovery modal for ${chartConfig.name}`);
+        openBeatportChartAsDownloadModal(data.tracks, chartConfig.name, null);
 
     } catch (error) {
         console.error(`❌ Error loading ${chartConfig.name}:`, error);
@@ -24547,55 +24510,28 @@ async function handleRebuildHypeTop10Click() {
 // The old handleRebuildHeroSliderClick function has been removed in favor of individual release discovery
 
 async function handleRebuildChartClick(trackDataKey, chartName, chartType) {
+    if (_beatportModalOpening) return;
+    _beatportModalOpening = true;
+    setTimeout(() => { _beatportModalOpening = false; }, 2000);
+
     try {
-        // Create chart hash (following Browse Charts pattern)
-        const chartHash = `${chartType}_${Date.now()}`;
-
-        // Check if we already have an existing state (following Browse Charts pattern)
-        const existingState = Object.values(beatportChartStates).find(state =>
-            state.chart && state.chart.name === chartName && state.chart.chart_type === chartType
-        );
-
-        if (existingState) {
-            console.log(`🔄 Found existing ${chartName} card, opening existing modal`);
-            // Use existing card click handler (following Browse Charts pattern)
-            handleBeatportCardClick(existingState.chart.hash);
-            return;
-        }
-
-        // Get track data from rebuild page data (instead of API scraping)
+        // Get basic track data from DOM
         const trackData = await getRebuildPageTrackData(trackDataKey);
         if (!trackData || trackData.length === 0) {
             throw new Error(`No track data found for ${chartName}`);
         }
 
-        // Transform rebuild data to Browse Charts format EXACTLY
-        const chartData = {
-            hash: chartHash,
-            name: chartName,
-            chart_type: chartType,
-            track_count: trackData.length,
-            tracks: trackData.map(track => ({
-                name: cleanTrackText(track.title || 'Unknown Title'),
-                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
-                album: chartName,
-                duration_ms: 0,
-                external_urls: { beatport: track.url || '' },
-                source: 'beatport'
-            }))
-        };
+        console.log(`✅ Got ${trackData.length} tracks from ${chartName}, enriching one-by-one...`);
+        showLoadingOverlay(`Fetching track metadata... (0/${trackData.length})`);
 
-        // Follow Browse Charts pattern EXACTLY:
-        // 1. Add card to container (creates playlist card)
-        console.log(`🃏 Creating Beatport playlist card for: ${chartData.name}`);
-        addBeatportCardToContainer(chartData);
+        const enrichedTracks = await _enrichTracksWithProgress(trackData, chartName);
 
-        // 2. Automatically open discovery modal (like when you click a card in fresh state)
-        handleBeatportCardClick(chartHash);
-
-        console.log(`✅ Created ${chartName} card and opened discovery modal`);
+        console.log(`✅ Enriched ${enrichedTracks.length} tracks`);
+        hideLoadingOverlay();
+        openBeatportChartAsDownloadModal(enrichedTracks, chartName, null);
 
     } catch (error) {
+        hideLoadingOverlay();
         console.error(`❌ Error handling ${chartName} click:`, error);
         showToast(`Error loading ${chartName}: ${error.message}`, 'error');
     }
@@ -25398,23 +25334,8 @@ async function handleBeatportChartClick(chartType, chartId, chartName, chartEndp
     console.log(`🎵 Beatport chart clicked: ${chartType} - ${chartId} - ${chartName}`);
 
     try {
-        // Check if we already have a card for this chart
-        const existingState = Object.values(beatportChartStates).find(state =>
-            state.chart && state.chart.name === chartName && state.chart.chart_type === chartType
-        );
-
-        if (existingState) {
-            console.log(`🔄 Found existing Beatport card for ${chartName}, opening existing modal`);
-            handleBeatportCardClick(existingState.chart.hash);
-            return;
-        }
-
-        // First, create a chart hash for state management
-        const chartHash = `${chartType}_${chartId}_${Date.now()}`;
-
-        // Load chart data from backend using the specific endpoint
-        console.log(`🔍 Loading ${chartName} tracks from ${chartEndpoint}...`);
         showToast(`Loading ${chartName}...`, 'info');
+        showLoadingOverlay(`Loading ${chartName}...`);
 
         const response = await fetch(`${chartEndpoint}?limit=100`);
         if (!response.ok) {
@@ -25426,32 +25347,13 @@ async function handleBeatportChartClick(chartType, chartId, chartName, chartEndp
             throw new Error(`No tracks found in ${chartName}`);
         }
 
-        // Create chart data object
-        const chartData = {
-            hash: chartHash,
-            name: chartName,
-            chart_type: chartType,
-            track_count: data.tracks.length,
-            tracks: data.tracks.map(track => ({
-                name: track.title || 'Unknown Title',
-                artists: [track.artist || 'Unknown Artist'],
-                album: chartName,
-                duration_ms: 0,
-                external_urls: { beatport: track.url || '' },
-                source: 'beatport'
-            }))
-        };
-
-        // Add card to container (in background, like YouTube does)
-        addBeatportCardToContainer(chartData);
-
-        // Automatically open discovery modal (like when you click a YouTube or Tidal card in fresh state)
-        handleBeatportCardClick(chartHash);
-
-        console.log(`✅ Created Beatport card and opened discovery modal for ${chartName}`);
+        console.log(`✅ Fetched ${data.tracks.length} tracks from ${chartName}`);
+        hideLoadingOverlay();
+        openBeatportChartAsDownloadModal(data.tracks, chartName, null);
 
     } catch (error) {
         console.error(`❌ Error handling Beatport chart click:`, error);
+        hideLoadingOverlay();
         showToast(`Error loading ${chartName || chartId}: ${error.message}`, 'error');
     }
 }
@@ -25900,32 +25802,14 @@ function setupDJChartItemHandlers() {
 
             console.log(`🎧 DJ Chart clicked: ${chartName}`);
 
-            // Check if state already exists by name and type (follow same pattern as homepage Beatport cards)
-            const existingState = Object.values(beatportChartStates).find(state =>
-                state.chart && state.chart.name === chartName && state.chart.chart_type === 'dj-chart'
-            );
-
-            if (existingState) {
-                console.log(`🔄 Found existing DJ chart state for ${chartName}, opening existing modal`);
-                handleBeatportCardClick(existingState.chart.hash);
-                return;
-            }
-
             try {
                 showToast(`Loading ${chartName}...`, 'info');
                 showLoadingOverlay(`Loading ${chartName}...`);
 
-                // Extract tracks from the DJ chart
                 const response = await fetch('/api/beatport/chart/extract', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        chart_url: chartUrl,
-                        chart_name: chartName,
-                        limit: 100
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chart_url: chartUrl, chart_name: chartName, limit: 100 })
                 });
 
                 if (!response.ok) {
@@ -25933,53 +25817,13 @@ function setupDJChartItemHandlers() {
                 }
 
                 const data = await response.json();
-                if (data.success && data.tracks && data.tracks.length > 0) {
-                    console.log(`✅ Extracted ${data.tracks.length} tracks from DJ chart: ${chartName}`);
-
-                    // Generate a unique hash for state management (following homepage pattern)
-                    const chartHash = `dj_chart_${Date.now()}`;
-
-                    // Create chart data in the format expected by the state system
-                    const chartData = {
-                        hash: chartHash,
-                        name: chartName,
-                        chart_type: 'dj-chart',
-                        track_count: data.tracks.length,
-                        tracks: data.tracks.map(track => ({
-                            name: track.title || 'Unknown Title',
-                            artists: [track.artist || 'Unknown Artist'],
-                            album: chartName,
-                            duration_ms: 0,
-                            external_urls: { spotify: null },
-                            preview_url: null,
-                            popularity: 0,
-                            explicit: false,
-                            track_number: track.position || 1,
-                            disc_number: 1,
-                            id: `dj_chart_${chartHash}_${track.position || Math.random()}`,
-                            uri: null,
-                            type: 'track',
-                            is_local: false,
-                            source: 'beatport_dj_chart'
-                        }))
-                    };
-
-                    // Create state in beatportChartStates (follow same pattern as other Beatport cards)
-                    beatportChartStates[chartHash] = {
-                        chart: chartData,
-                        phase: 'fresh',
-                        cardElement: null, // Will be set when actual card is created
-                        discovery_results: [],
-                        discoveryProgress: 0
-                    };
-
-                    // Use the same click handler as other Beatport cards
-                    hideLoadingOverlay();
-                    handleBeatportCardClick(chartHash);
-
-                } else {
+                if (!data.success || !data.tracks || data.tracks.length === 0) {
                     throw new Error('No tracks found in chart');
                 }
+
+                console.log(`✅ Extracted ${data.tracks.length} tracks from DJ chart: ${chartName}`);
+                hideLoadingOverlay();
+                openBeatportChartAsDownloadModal(data.tracks, chartName, null);
 
             } catch (error) {
                 console.error('❌ Error extracting DJ chart tracks:', error);
@@ -26000,32 +25844,14 @@ function setupFeaturedChartItemHandlers() {
 
             console.log(`⭐ Featured Chart clicked: ${chartName}`);
 
-            // Check if state already exists by name and type (follow same pattern as homepage Beatport cards)
-            const existingState = Object.values(beatportChartStates).find(state =>
-                state.chart && state.chart.name === chartName && state.chart.chart_type === 'featured-chart'
-            );
-
-            if (existingState) {
-                console.log(`🔄 Found existing Featured chart state for ${chartName}, opening existing modal`);
-                handleBeatportCardClick(existingState.chart.hash);
-                return;
-            }
-
             try {
                 showToast(`Loading ${chartName}...`, 'info');
                 showLoadingOverlay(`Loading ${chartName}...`);
 
-                // Extract tracks from the Featured chart
                 const response = await fetch('/api/beatport/chart/extract', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        chart_url: chartUrl,
-                        chart_name: chartName,
-                        limit: 100
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chart_url: chartUrl, chart_name: chartName, limit: 100 })
                 });
 
                 if (!response.ok) {
@@ -26033,53 +25859,13 @@ function setupFeaturedChartItemHandlers() {
                 }
 
                 const data = await response.json();
-                if (data.success && data.tracks && data.tracks.length > 0) {
-                    console.log(`✅ Extracted ${data.tracks.length} tracks from Featured chart: ${chartName}`);
-
-                    // Generate a unique hash for state management (following homepage pattern)
-                    const chartHash = `featured_chart_${Date.now()}`;
-
-                    // Create chart data in the format expected by the state system
-                    const chartData = {
-                        hash: chartHash,
-                        name: chartName,
-                        chart_type: 'featured-chart',
-                        track_count: data.tracks.length,
-                        tracks: data.tracks.map(track => ({
-                            name: track.title || 'Unknown Title',
-                            artists: [track.artist || 'Unknown Artist'],
-                            album: chartName,
-                            duration_ms: 0,
-                            external_urls: { spotify: null },
-                            preview_url: null,
-                            popularity: 0,
-                            explicit: false,
-                            track_number: track.position || 1,
-                            disc_number: 1,
-                            id: `featured_chart_${chartHash}_${track.position || Math.random()}`,
-                            uri: null,
-                            type: 'track',
-                            is_local: false,
-                            source: 'beatport_featured_chart'
-                        }))
-                    };
-
-                    // Create state in beatportChartStates (follow same pattern as other Beatport cards)
-                    beatportChartStates[chartHash] = {
-                        chart: chartData,
-                        phase: 'fresh',
-                        cardElement: null, // Will be set when actual card is created
-                        discovery_results: [],
-                        discoveryProgress: 0
-                    };
-
-                    // Use the same click handler as other Beatport cards
-                    hideLoadingOverlay();
-                    handleBeatportCardClick(chartHash);
-
-                } else {
+                if (!data.success || !data.tracks || data.tracks.length === 0) {
                     throw new Error('No tracks found in chart');
                 }
+
+                console.log(`✅ Extracted ${data.tracks.length} tracks from Featured chart: ${chartName}`);
+                hideLoadingOverlay();
+                openBeatportChartAsDownloadModal(data.tracks, chartName, null);
 
             } catch (error) {
                 console.error('❌ Error extracting Featured chart tracks:', error);
@@ -26100,74 +25886,31 @@ function setupNewChartItemHandlers(genreSlug, genreId, genreName) {
             const chartUrl = item.dataset.chartUrl;
 
             console.log(`🎵 Chart clicked: ${chartName} by ${chartArtist}`);
-            console.log(`🔗 Chart URL: ${chartUrl}`);
 
             const fullChartName = `${chartName} (${genreName})`;
-
-            // Check if state already exists by name and type (follow same pattern as homepage Beatport cards)
-            const existingState = Object.values(beatportChartStates).find(state =>
-                state.chart && state.chart.name === fullChartName && state.chart.chart_type === 'individual_chart'
-            );
-
-            if (existingState) {
-                console.log(`🔄 Found existing individual chart state for ${fullChartName}, opening existing modal`);
-                handleBeatportCardClick(existingState.chart.hash);
-                return;
-            }
 
             try {
                 showToast(`Loading ${chartName}...`, 'info');
                 showLoadingOverlay(`Loading ${chartName}...`);
 
-                // Use the new chart extraction endpoint with the actual chart URL
                 const response = await fetch('/api/beatport/chart/extract', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        chart_url: chartUrl,
-                        chart_name: chartName,
-                        limit: 100
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chart_url: chartUrl, chart_name: chartName, limit: 100 })
                 });
+
                 if (!response.ok) {
                     throw new Error(`Failed to fetch chart content: ${response.status}`);
                 }
 
                 const data = await response.json();
                 if (!data.success || !data.tracks || data.tracks.length === 0) {
-                    throw new Error(`No tracks found in chart`);
+                    throw new Error('No tracks found in chart');
                 }
 
-                // Generate a unique hash for state management (following homepage pattern)
-                const chartHash = `individual_chart_${Date.now()}`;
-
-                // Create chart data object for playlist card
-                const chartData = {
-                    hash: chartHash,
-                    name: fullChartName,
-                    chart_type: 'individual_chart',
-                    track_count: data.tracks.length,
-                    tracks: data.tracks.map(track => ({
-                        name: track.title || 'Unknown Title',
-                        artists: [track.artist || 'Unknown Artist'],
-                        album: fullChartName,
-                        duration_ms: 0,
-                        external_urls: { beatport: track.url || chartUrl },
-                        source: 'beatport'
-                    }))
-                };
-
-                // Add card to container (in background, like YouTube does)
-                console.log(`🃏 Creating Beatport playlist card for: ${fullChartName}`);
-                addBeatportCardToContainer(chartData);
-
-                // Automatically open discovery modal
+                console.log(`✅ Extracted ${data.tracks.length} tracks from ${fullChartName}`);
                 hideLoadingOverlay();
-                handleBeatportCardClick(chartHash);
-
-                console.log(`✅ Created Beatport card and opened discovery modal for ${fullChartName}`);
+                openBeatportChartAsDownloadModal(data.tracks, fullChartName, null);
 
             } catch (error) {
                 console.error(`❌ Error loading chart: ${error.message}`);
@@ -26328,62 +26071,31 @@ function setupGenreChartItemHandlers(genreSlug, genreId, genreName) {
             const chartUrl = item.dataset.chartUrl;
 
             console.log(`🎵 Chart clicked: ${chartName} by ${chartArtist}`);
-            console.log(`🔗 Chart URL: ${chartUrl}`);
+
+            const fullChartName = `${chartName} (${genreName})`;
 
             try {
-                // Create a virtual chart data object
-                const chartHash = `individual_chart_${genreSlug}_${Date.now()}`;
-                const fullChartName = `${chartName} (${genreName})`;
-
                 showToast(`Loading ${chartName}...`, 'info');
                 showLoadingOverlay(`Loading ${chartName}...`);
 
-                // Use the new chart extraction endpoint with the actual chart URL
                 const response = await fetch('/api/beatport/chart/extract', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        chart_url: chartUrl,
-                        chart_name: chartName,
-                        limit: 100
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chart_url: chartUrl, chart_name: chartName, limit: 100 })
                 });
+
                 if (!response.ok) {
                     throw new Error(`Failed to fetch chart content: ${response.status}`);
                 }
 
                 const data = await response.json();
                 if (!data.success || !data.tracks || data.tracks.length === 0) {
-                    throw new Error(`No tracks found in chart`);
+                    throw new Error('No tracks found in chart');
                 }
 
-                // Create chart data object for playlist card
-                const chartData = {
-                    hash: chartHash,
-                    name: fullChartName,
-                    chart_type: 'individual_chart',
-                    track_count: data.tracks.length,
-                    tracks: data.tracks.map(track => ({
-                        name: track.title || 'Unknown Title',
-                        artists: [track.artist || 'Unknown Artist'],
-                        album: fullChartName,
-                        duration_ms: 0,
-                        external_urls: { beatport: track.url || chartUrl },
-                        source: 'beatport'
-                    }))
-                };
-
-                // Add card to container (in background, like YouTube does)
-                console.log(`🃏 Creating Beatport playlist card for: ${fullChartName}`);
-                addBeatportCardToContainer(chartData);
-
-                // Automatically open discovery modal
+                console.log(`✅ Extracted ${data.tracks.length} tracks from ${fullChartName}`);
                 hideLoadingOverlay();
-                handleBeatportCardClick(chartHash);
-
-                console.log(`✅ Created Beatport card and opened discovery modal for ${fullChartName}`);
+                openBeatportChartAsDownloadModal(data.tracks, fullChartName, null);
 
             } catch (error) {
                 console.error(`❌ Error loading chart: ${error.message}`);
@@ -26459,24 +26171,9 @@ async function handleGenreChartTypeClick(genreSlug, genreId, genreName, chartTyp
     }
 
     try {
-        // Check if we already have a card for this specific chart type
-        const existingState = Object.values(beatportChartStates).find(state =>
-            state.chart && state.chart.name === chartConfig.name && state.chart.chart_type === `genre_${chartType}`
-        );
-
-        if (existingState) {
-            console.log(`🔄 Found existing Beatport card for ${chartConfig.name}, opening existing modal`);
-            handleBeatportCardClick(existingState.chart.hash);
-            return;
-        }
-
-        // Create a chart hash for state management
-        const chartHash = `genre_${chartType}_${genreSlug}_${genreId}_${Date.now()}`;
-
         showToast(`Loading ${chartConfig.name}...`, 'info');
         showLoadingOverlay(`Loading ${chartConfig.name}...`);
 
-        // Fetch tracks from the specific endpoint
         const response = await fetch(`${chartConfig.endpoint}?limit=${chartConfig.limit}`);
         if (!response.ok) {
             throw new Error(`Failed to fetch ${chartConfig.name}: ${response.status}`);
@@ -26487,31 +26184,9 @@ async function handleGenreChartTypeClick(genreSlug, genreId, genreName, chartTyp
             throw new Error(`No tracks found in ${chartConfig.name}`);
         }
 
-        // Create chart data object for playlist card
-        const chartData = {
-            hash: chartHash,
-            name: chartConfig.name,
-            chart_type: `genre_${chartType}`,
-            track_count: data.tracks.length,
-            tracks: data.tracks.map(track => ({
-                name: track.title || 'Unknown Title',
-                artists: [track.artist || 'Unknown Artist'],
-                album: chartConfig.name,
-                duration_ms: 0,
-                external_urls: { beatport: track.url || '' },
-                source: 'beatport'
-            }))
-        };
-
-        // Add card to container (in background, like YouTube does)
-        console.log(`🃏 Creating Beatport playlist card for: ${chartConfig.name}`);
-        addBeatportCardToContainer(chartData);
-
-        // Automatically open discovery modal (like when you click a YouTube or Tidal card in fresh state)
+        console.log(`✅ Fetched ${data.tracks.length} tracks from ${chartConfig.name}`);
         hideLoadingOverlay();
-        handleBeatportCardClick(chartHash);
-
-        console.log(`✅ Created Beatport card and opened discovery modal for ${chartConfig.name}`);
+        openBeatportChartAsDownloadModal(data.tracks, chartConfig.name, null);
 
     } catch (error) {
         console.error(`❌ Error loading ${chartConfig.name}:`, error);
@@ -31879,7 +31554,7 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
  * Open download missing tracks modal specifically for artist albums
  * Similar to openDownloadMissingModalForYouTube but for artist albums
  */
-async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, spotifyTracks, album, artist, showLoadingOverlayParam = true) {
+async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, spotifyTracks, album, artist, showLoadingOverlayParam = true, contextType = 'artist_album') {
     if (showLoadingOverlayParam) {
         showLoadingOverlay('Loading album...');
     }
@@ -31933,8 +31608,13 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
         albumType: album.album_type
     };
 
-    // Generate hero section for artist album context
-    const heroContext = {
+    // Generate hero section — 'artist_album' for releases, 'playlist' for charts/compilations
+    const heroContext = contextType === 'playlist' ? {
+        type: 'playlist',
+        playlist: { name: playlistName, owner: 'Beatport' },
+        trackCount: spotifyTracks.length,
+        playlistId: virtualPlaylistId
+    } : {
         type: 'artist_album',
         artist: artist,
         album: album,
@@ -31944,7 +31624,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
 
     // Use the exact same modal HTML structure as the existing modals
     modal.innerHTML = `
-        <div class="download-missing-modal-content" data-context="artist_album">
+        <div class="download-missing-modal-content" data-context="${contextType}">
             <div class="download-missing-modal-header">
                 ${generateDownloadModalHeroSection(heroContext)}
             </div>
@@ -32019,11 +31699,17 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
-                    <div class="force-download-toggle-container" style="margin-bottom: 0px;">
+                    <div class="force-download-toggle-container" style="margin-bottom: 0px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start;">
                         <label class="force-download-toggle">
                             <input type="checkbox" id="force-download-all-${virtualPlaylistId}">
                             <span>Force Download All</span>
                         </label>
+                        ${contextType === 'playlist' ? `
+                        <label class="force-download-toggle">
+                            <input type="checkbox" id="playlist-folder-mode-${virtualPlaylistId}">
+                            <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
+                        </label>
+                        ` : ''}
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
@@ -42857,95 +42543,184 @@ function showTop10ReleasesError(errorMessage) {
  * Handle click on individual Top 10 Release card - create discovery process for single release
  */
 async function handleBeatportReleaseCardClick(cardElement, release) {
+    if (_beatportModalOpening) return;
+    _beatportModalOpening = true;
+
     console.log(`💿 Individual release card clicked: ${release.title} by ${release.artist}`);
 
     if (!release.url || release.url === '#') {
+        _beatportModalOpening = false;
         showToast('No release URL available', 'error');
         return;
     }
 
     try {
-        // Create unique identifiers for this release
-        const releaseHash = `release_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        const chartName = `${release.title} - ${release.artist}`;
-
         showToast(`Loading ${release.title}...`, 'info');
         showLoadingOverlay(`Getting tracks from ${release.title}...`);
 
-        // Check if we already have a card for this release
-        const existingState = Object.values(beatportChartStates).find(state =>
-            state.chart &&
-            state.chart.name === chartName &&
-            state.chart.chart_type === 'individual_release'
-        );
-
-        if (existingState) {
-            console.log(`🔄 Found existing card for ${release.title}, opening existing modal`);
-            hideLoadingOverlay();
-            handleBeatportCardClick(existingState.chart.hash);
-            return;
-        }
-
-        // Get track data from this single release
-        console.log(`🎵 Fetching tracks from release: ${release.url}`);
-        const response = await fetch('/api/beatport/scrape-releases', {
+        // Fetch structured release metadata for direct download modal
+        console.log(`🎵 Fetching release metadata: ${release.url}`);
+        const response = await fetch('/api/beatport/release-metadata', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                release_urls: [release.url],
-                source_name: `Top 10 Release: ${release.title}`
-            })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ release_url: release.url })
         });
 
         const data = await response.json();
 
         if (!data.success || !data.tracks || data.tracks.length === 0) {
-            throw new Error('No tracks found in this release');
+            throw new Error(data.error || 'No tracks found in this release');
         }
 
-        console.log(`✅ Successfully fetched ${data.tracks.length} tracks from ${release.title}`);
+        console.log(`✅ Got ${data.tracks.length} tracks from ${data.album.name}`);
 
-        // Transform to standard chart format (following the exact pattern from handleRebuildChartClick)
-        const chartData = {
-            hash: releaseHash,
-            name: chartName,
-            chart_type: 'individual_release',
-            track_count: data.tracks.length,
-            tracks: data.tracks.map(track => ({
-                name: cleanTrackText(track.title || 'Unknown Title'),
-                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
-                album: chartName,
-                duration_ms: 0,
-                external_urls: { beatport: track.url || '' },
-                source: 'beatport',
-                // Include release metadata
-                release_title: release.title,
-                release_artist: release.artist,
-                release_label: release.label,
-                release_image: release.image_url
-            }))
-        };
+        // Format artists as array of strings for compatibility with download modal
+        const formattedTracks = data.tracks.map(track => ({
+            ...track,
+            artists: track.artists.map(a => typeof a === 'object' ? a.name : a)
+        }));
 
-        // Create Beatport playlist card (following the exact pattern)
-        addBeatportCardToContainer(chartData);
+        const virtualPlaylistId = `beatport_release_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const playlistName = data.album.name;
 
-        // Automatically open discovery modal (following the exact pattern)
+        // Open download modal directly - same as clicking an album on the Artists page
+        await openDownloadMissingModalForArtistAlbum(
+            virtualPlaylistId,
+            playlistName,
+            formattedTracks,
+            data.album,
+            data.artist,
+            false
+        );
+
         hideLoadingOverlay();
-        handleBeatportCardClick(releaseHash);
-
-        console.log(`✅ Created individual release card and opened discovery modal for ${release.title}`);
+        _beatportModalOpening = false;
+        console.log(`✅ Opened download modal for ${playlistName}`);
 
     } catch (error) {
         console.error(`❌ Error handling release click for ${release.title}:`, error);
         hideLoadingOverlay();
+        _beatportModalOpening = false;
         showToast(`Error loading ${release.title}: ${error.message}`, 'error');
     }
 }
 
 /**
- * Handle click on individual chart card - create discovery process for chart tracks
+ * Convert scraped Beatport tracks into download-modal-compatible format and open the modal.
+ * Used by all chart/playlist handlers (Top 100, Hype 100, Featured Charts, DJ Charts, genre charts).
+ * Charts open as compilations — each track is searched independently on Soulseek.
+ */
+// Guard against multiple rapid clicks opening duplicate modals
+let _beatportModalOpening = false;
+
+/**
+ * Enrich tracks one-by-one via the backend, updating the loading overlay with progress.
+ * Returns the enriched tracks array.
+ */
+async function _enrichTracksWithProgress(tracks, chartName) {
+    const enrichedTracks = [];
+    for (let i = 0; i < tracks.length; i++) {
+        const track = tracks[i];
+        const overlayText = document.querySelector('#loading-overlay .loading-message');
+        if (overlayText) {
+            overlayText.textContent = `Fetching track metadata... (${i + 1}/${tracks.length}) ${track.title || ''}`;
+        }
+
+        try {
+            const resp = await fetch('/api/beatport/enrich-tracks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tracks: [track] })
+            });
+            const data = await resp.json();
+            if (data.success && data.tracks && data.tracks.length > 0) {
+                enrichedTracks.push(data.tracks[0]);
+            } else {
+                enrichedTracks.push(track);
+            }
+        } catch (e) {
+            console.warn(`⚠️ Failed to enrich track ${i + 1}:`, e);
+            enrichedTracks.push(track);
+        }
+    }
+    return enrichedTracks;
+}
+
+function parseBeatportDuration(raw) {
+    if (!raw) return 0;
+    if (typeof raw === 'string' && raw.includes(':')) {
+        const parts = raw.split(':');
+        return (parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10)) * 1000 || 0;
+    }
+    return (parseInt(raw, 10) || 0) * 1000;
+}
+
+function openBeatportChartAsDownloadModal(tracks, chartName, chartImage) {
+    if (_beatportModalOpening) return;
+    _beatportModalOpening = true;
+    setTimeout(() => { _beatportModalOpening = false; }, 500);
+
+    const albumObj = {
+        id: `beatport_chart_${Date.now()}`,
+        name: chartName,
+        album_type: 'compilation',
+        images: chartImage ? [{ url: chartImage }] : [],
+        total_tracks: tracks.length
+    };
+
+    const formattedTracks = tracks.map((track, index) => {
+        // Use per-track release metadata if available (from JSON extraction)
+        const hasRelease = track.release_name && track.release_name.length > 0;
+        const trackAlbum = hasRelease ? {
+            id: `beatport_release_${track.release_id || index}`,
+            name: cleanTrackText(track.release_name),
+            album_type: 'single',
+            images: track.release_image ? [{ url: track.release_image }] : [],
+            release_date: track.release_date || '',
+            total_tracks: 1
+        } : albumObj;
+
+        // Combine title + mix_name
+        let trackName = cleanTrackText(track.title || 'Unknown Title');
+        if (track.mix_name && track.mix_name.toLowerCase() !== 'original mix') {
+            trackName = `${trackName} (${cleanTrackText(track.mix_name)})`;
+        }
+
+        // Split combined artist string into individual names for proper folder structure
+        const rawArtist = cleanTrackText(track.artist || 'Unknown Artist');
+        const artistList = rawArtist.includes(',')
+            ? rawArtist.split(',').map(a => a.trim()).filter(a => a)
+            : [rawArtist];
+
+        return {
+            id: `beatport_chart_${index}`,
+            name: trackName,
+            artists: artistList,
+            duration_ms: parseBeatportDuration(track.duration),
+            track_number: index + 1,
+            disc_number: 1,
+            album: trackAlbum
+        };
+    });
+
+    const virtualPlaylistId = `beatport_chart_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Compilation artist
+    const artistObj = { id: 'beatport_various', name: 'Various Artists' };
+
+    openDownloadMissingModalForArtistAlbum(
+        virtualPlaylistId,
+        chartName,
+        formattedTracks,
+        albumObj,
+        artistObj,
+        false,
+        'playlist'
+    );
+}
+
+/**
+ * Handle click on individual chart card - open download modal directly
  */
 async function handleBeatportChartCardClick(cardElement, chart) {
     console.log(`📊 Individual chart card clicked: ${chart.name} by ${chart.creator}`);
@@ -42956,34 +42731,13 @@ async function handleBeatportChartCardClick(cardElement, chart) {
     }
 
     try {
-        // Create unique identifiers for this chart
-        const chartHash = `chart_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const chartName = `${chart.name} - ${chart.creator}`;
-
         showToast(`Loading ${chart.name}...`, 'info');
         showLoadingOverlay(`Getting tracks from ${chart.name}...`);
 
-        // Check if we already have a card for this chart
-        const existingState = Object.values(beatportChartStates).find(state =>
-            state.chart &&
-            state.chart.name === chartName &&
-            state.chart.chart_type === 'individual_chart'
-        );
-
-        if (existingState) {
-            console.log(`🔄 Found existing card for ${chart.name}, opening existing modal`);
-            hideLoadingOverlay();
-            handleBeatportCardClick(existingState.chart.hash);
-            return;
-        }
-
-        // Get track data from this chart URL (charts contain multiple tracks)
-        console.log(`📊 Fetching tracks from chart: ${chart.url}`);
         const response = await fetch('/api/beatport/chart/extract', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 chart_url: chart.url,
                 chart_name: `Featured Chart: ${chart.name}`,
@@ -42997,36 +42751,9 @@ async function handleBeatportChartCardClick(cardElement, chart) {
             throw new Error('No tracks found in this chart');
         }
 
-        console.log(`✅ Successfully fetched ${data.tracks.length} tracks from ${chart.name}`);
-
-        // Transform to standard chart format (following the exact pattern)
-        const chartData = {
-            hash: chartHash,
-            name: chartName,
-            chart_type: 'individual_chart',
-            track_count: data.tracks.length,
-            tracks: data.tracks.map(track => ({
-                name: cleanTrackText(track.title || 'Unknown Title'),
-                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
-                album: chartName,
-                duration_ms: 0,
-                external_urls: { beatport: track.url || '' },
-                source: 'beatport',
-                // Include chart metadata
-                chart_name: chart.name,
-                chart_creator: chart.creator,
-                chart_image: chart.image
-            }))
-        };
-
-        // Create Beatport playlist card (following the exact pattern)
-        addBeatportCardToContainer(chartData);
-
-        // Automatically open discovery modal (following the exact pattern)
+        console.log(`✅ Fetched ${data.tracks.length} tracks from ${chart.name}`);
         hideLoadingOverlay();
-        handleBeatportCardClick(chartHash);
-
-        console.log(`✅ Created individual chart card and opened discovery modal for ${chart.name}`);
+        openBeatportChartAsDownloadModal(data.tracks, chartName, chart.image);
 
     } catch (error) {
         console.error(`❌ Error handling chart click for ${chart.name}:`, error);
@@ -43036,7 +42763,7 @@ async function handleBeatportChartCardClick(cardElement, chart) {
 }
 
 /**
- * Handle click on individual DJ chart card - create discovery process for DJ chart tracks
+ * Handle click on individual DJ chart card - open download modal directly
  */
 async function handleBeatportDJChartCardClick(cardElement, chart) {
     console.log(`🎧 Individual DJ chart card clicked: ${chart.name} by ${chart.creator}`);
@@ -43047,34 +42774,13 @@ async function handleBeatportDJChartCardClick(cardElement, chart) {
     }
 
     try {
-        // Create unique identifiers for this DJ chart
-        const chartHash = `dj_chart_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const chartName = `${chart.name} - ${chart.creator}`;
-
         showToast(`Loading ${chart.name}...`, 'info');
         showLoadingOverlay(`Getting tracks from ${chart.name}...`);
 
-        // Check if we already have a card for this DJ chart
-        const existingState = Object.values(beatportChartStates).find(state =>
-            state.chart &&
-            state.chart.name === chartName &&
-            state.chart.chart_type === 'individual_dj_chart'
-        );
-
-        if (existingState) {
-            console.log(`🔄 Found existing card for ${chart.name}, opening existing modal`);
-            hideLoadingOverlay();
-            handleBeatportCardClick(existingState.chart.hash);
-            return;
-        }
-
-        // Get track data from this DJ chart URL
-        console.log(`🎧 Fetching tracks from DJ chart: ${chart.url}`);
         const response = await fetch('/api/beatport/chart/extract', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 chart_url: chart.url,
                 chart_name: `DJ Chart: ${chart.name}`,
@@ -43088,36 +42794,9 @@ async function handleBeatportDJChartCardClick(cardElement, chart) {
             throw new Error('No tracks found in this DJ chart');
         }
 
-        console.log(`✅ Successfully fetched ${data.tracks.length} tracks from ${chart.name}`);
-
-        // Transform to standard chart format (following the exact pattern)
-        const chartData = {
-            hash: chartHash,
-            name: chartName,
-            chart_type: 'individual_dj_chart',
-            track_count: data.tracks.length,
-            tracks: data.tracks.map(track => ({
-                name: cleanTrackText(track.title || 'Unknown Title'),
-                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
-                album: chartName,
-                duration_ms: 0,
-                external_urls: { beatport: track.url || '' },
-                source: 'beatport',
-                // Include DJ chart metadata
-                chart_name: chart.name,
-                chart_creator: chart.creator,
-                chart_image: chart.image
-            }))
-        };
-
-        // Create Beatport playlist card (following the exact pattern)
-        addBeatportCardToContainer(chartData);
-
-        // Automatically open discovery modal (following the exact pattern)
+        console.log(`✅ Fetched ${data.tracks.length} tracks from ${chart.name}`);
         hideLoadingOverlay();
-        handleBeatportCardClick(chartHash);
-
-        console.log(`✅ Created individual DJ chart card and opened discovery modal for ${chart.name}`);
+        openBeatportChartAsDownloadModal(data.tracks, chartName, chart.image);
 
     } catch (error) {
         console.error(`❌ Error handling DJ chart click for ${chart.name}:`, error);
@@ -43127,73 +42806,33 @@ async function handleBeatportDJChartCardClick(cardElement, chart) {
 }
 
 /**
- * Handle click on Beatport Top 100 button - create discovery process for top 100 tracks
+ * Handle click on Beatport Top 100 button - open download modal directly
  */
 async function handleBeatportTop100Click() {
+    if (_beatportModalOpening) return;
+    _beatportModalOpening = true;
+    setTimeout(() => { _beatportModalOpening = false; }, 2000);
+
     console.log('💯 Beatport Top 100 button clicked');
 
     try {
-        // Create unique identifiers for this chart
-        const chartHash = `beatport_top100_${Date.now()}`;
-        const chartName = 'Beatport Top 100';
+        showLoadingOverlay('Scraping Beatport Top 100...');
 
-        showToast('Loading Beatport Top 100...', 'info');
-        showLoadingOverlay('Getting Beatport Top 100 tracks...');
-
-        // Check if we already have a card for Beatport Top 100
-        const existingState = Object.values(beatportChartStates).find(state =>
-            state.chart &&
-            state.chart.name === chartName &&
-            state.chart.chart_type === 'beatport_top100'
-        );
-
-        if (existingState) {
-            console.log('🔄 Found existing Beatport Top 100 card, opening existing modal');
-            hideLoadingOverlay();
-            handleBeatportCardClick(existingState.chart.hash);
-            return;
-        }
-
-        // Get track data from Beatport Top 100 API
-        console.log('💯 Fetching tracks from Beatport Top 100');
-        const response = await fetch('/api/beatport/top-100', {
-            method: 'GET'
-        });
-
+        // Fetch track list without enrichment (fast)
+        const response = await fetch('/api/beatport/top-100?enrich=false', { method: 'GET' });
         const data = await response.json();
 
         if (!data.success || !data.tracks || data.tracks.length === 0) {
             throw new Error('No tracks found in Beatport Top 100');
         }
 
-        console.log(`✅ Successfully fetched ${data.tracks.length} tracks from Beatport Top 100`);
+        console.log(`✅ Fetched ${data.tracks.length} tracks, enriching one-by-one...`);
 
-        // Transform to standard chart format (following the exact pattern)
-        const chartData = {
-            hash: chartHash,
-            name: chartName,
-            chart_type: 'beatport_top100',
-            track_count: data.tracks.length,
-            tracks: data.tracks.map(track => ({
-                name: cleanTrackText(track.title || 'Unknown Title'),
-                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
-                album: chartName,
-                duration_ms: 0,
-                external_urls: { beatport: track.url || '' },
-                source: 'beatport',
-                // Include position info if available
-                position: track.position || track.rank
-            }))
-        };
+        // Enrich one-by-one with live progress
+        const enrichedTracks = await _enrichTracksWithProgress(data.tracks, 'Beatport Top 100');
 
-        // Create Beatport playlist card (following the exact pattern)
-        addBeatportCardToContainer(chartData);
-
-        // Automatically open discovery modal (following the exact pattern)
         hideLoadingOverlay();
-        handleBeatportCardClick(chartHash);
-
-        console.log('✅ Created Beatport Top 100 card and opened discovery modal');
+        openBeatportChartAsDownloadModal(enrichedTracks, 'Beatport Top 100', null);
 
     } catch (error) {
         console.error('❌ Error handling Beatport Top 100 click:', error);
@@ -43203,73 +42842,33 @@ async function handleBeatportTop100Click() {
 }
 
 /**
- * Handle click on Hype Top 100 button - create discovery process for hype top 100 tracks
+ * Handle click on Hype Top 100 button - open download modal directly
  */
 async function handleHypeTop100Click() {
+    if (_beatportModalOpening) return;
+    _beatportModalOpening = true;
+    setTimeout(() => { _beatportModalOpening = false; }, 2000);
+
     console.log('🔥 Hype Top 100 button clicked');
 
     try {
-        // Create unique identifiers for this chart
-        const chartHash = `hype_top100_${Date.now()}`;
-        const chartName = 'Hype Top 100';
+        showLoadingOverlay('Scraping Hype Top 100...');
 
-        showToast('Loading Hype Top 100...', 'info');
-        showLoadingOverlay('Getting Hype Top 100 tracks...');
-
-        // Check if we already have a card for Hype Top 100
-        const existingState = Object.values(beatportChartStates).find(state =>
-            state.chart &&
-            state.chart.name === chartName &&
-            state.chart.chart_type === 'hype_top100'
-        );
-
-        if (existingState) {
-            console.log('🔄 Found existing Hype Top 100 card, opening existing modal');
-            hideLoadingOverlay();
-            handleBeatportCardClick(existingState.chart.hash);
-            return;
-        }
-
-        // Get track data from Hype Top 100 API
-        console.log('🔥 Fetching tracks from Hype Top 100');
-        const response = await fetch('/api/beatport/hype-top-100', {
-            method: 'GET'
-        });
-
+        // Fetch track list without enrichment (fast)
+        const response = await fetch('/api/beatport/hype-top-100?enrich=false', { method: 'GET' });
         const data = await response.json();
 
         if (!data.success || !data.tracks || data.tracks.length === 0) {
             throw new Error('No tracks found in Hype Top 100');
         }
 
-        console.log(`✅ Successfully fetched ${data.tracks.length} tracks from Hype Top 100`);
+        console.log(`✅ Fetched ${data.tracks.length} tracks, enriching one-by-one...`);
 
-        // Transform to standard chart format (following the exact pattern)
-        const chartData = {
-            hash: chartHash,
-            name: chartName,
-            chart_type: 'hype_top100',
-            track_count: data.tracks.length,
-            tracks: data.tracks.map(track => ({
-                name: cleanTrackText(track.title || 'Unknown Title'),
-                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
-                album: chartName,
-                duration_ms: 0,
-                external_urls: { beatport: track.url || '' },
-                source: 'beatport',
-                // Include position info if available
-                position: track.position || track.rank
-            }))
-        };
+        // Enrich one-by-one with live progress
+        const enrichedTracks = await _enrichTracksWithProgress(data.tracks, 'Hype Top 100');
 
-        // Create Beatport playlist card (following the exact pattern)
-        addBeatportCardToContainer(chartData);
-
-        // Automatically open discovery modal (following the exact pattern)
         hideLoadingOverlay();
-        handleBeatportCardClick(chartHash);
-
-        console.log('✅ Created Hype Top 100 card and opened discovery modal');
+        openBeatportChartAsDownloadModal(enrichedTracks, 'Hype Top 100', null);
 
     } catch (error) {
         console.error('❌ Error handling Hype Top 100 click:', error);
@@ -44366,55 +43965,28 @@ async function handleGenreHypeTop10Click() {
  * Handle genre chart click (based on main page handleRebuildChartClick)
  */
 async function handleGenreChartClick(trackDataKey, chartName, chartType) {
+    if (_beatportModalOpening) return;
+    _beatportModalOpening = true;
+    setTimeout(() => { _beatportModalOpening = false; }, 2000);
+
     try {
-        // Create chart hash (following main page pattern)
-        const chartHash = `${chartType}_${Date.now()}`;
-
-        // Check if we already have an existing state (following main page pattern)
-        const existingState = Object.values(beatportChartStates).find(state =>
-            state.chart && state.chart.name === chartName && state.chart.chart_type === chartType
-        );
-
-        if (existingState) {
-            console.log(`🔄 Found existing ${chartName} card, opening existing modal`);
-            // Use existing card click handler (following main page pattern)
-            handleBeatportCardClick(existingState.chart.hash);
-            return;
-        }
-
-        // Extract track data from DOM cards (exact same pattern as main page)
+        // Extract track data from DOM cards
         const trackData = await getGenrePageTrackData(trackDataKey);
         if (!trackData || trackData.length === 0) {
             throw new Error(`No track data found for ${chartName}`);
         }
 
-        // Transform DOM data to Browse Charts format EXACTLY like main page
-        const chartData = {
-            hash: chartHash,
-            name: chartName,
-            chart_type: chartType,
-            track_count: trackData.length,
-            tracks: trackData.map(track => ({
-                name: cleanTrackText(track.title || 'Unknown Title'),
-                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
-                album: chartName,
-                duration_ms: 0,
-                external_urls: { beatport: track.url || '' },
-                source: 'beatport'
-            }))
-        };
+        console.log(`✅ Got ${trackData.length} tracks from ${chartName}, enriching one-by-one...`);
+        showLoadingOverlay(`Fetching track metadata... (0/${trackData.length})`);
 
-        // Follow main page pattern EXACTLY:
-        // 1. Add card to container (creates playlist card)
-        console.log(`🃏 Creating Beatport playlist card for: ${chartData.name}`);
-        addBeatportCardToContainer(chartData);
+        const enrichedTracks = await _enrichTracksWithProgress(trackData, chartName);
 
-        // 2. Automatically open discovery modal (like when you click a card in fresh state)
-        handleBeatportCardClick(chartHash);
-
-        console.log(`✅ Created ${chartName} card and opened discovery modal`);
+        console.log(`✅ Enriched ${enrichedTracks.length} tracks`);
+        hideLoadingOverlay();
+        openBeatportChartAsDownloadModal(enrichedTracks, chartName, null);
 
     } catch (error) {
+        hideLoadingOverlay();
         console.error(`❌ Error handling ${chartName} click:`, error);
         showToast(`Error loading ${chartName}: ${error.message}`, 'error');
     }
@@ -44472,88 +44044,37 @@ async function getGenrePageTrackData(trackDataKey) {
  * Handle genre-specific Top 100 button click - create discovery process for genre top 100 tracks
  */
 async function handleGenreTop100Click(genreSlug, genreId, genreName) {
+    if (_beatportModalOpening) return;
+    _beatportModalOpening = true;
+    setTimeout(() => { _beatportModalOpening = false; }, 2000);
+
     console.log(`💯 Genre Top 100 button clicked for ${genreName}`);
 
+    const chartName = `${genreName} Top 100`;
+
     try {
-        // Create unique identifiers for this chart
-        const chartHash = `${genreSlug}_top100_${Date.now()}`;
-        const chartName = `${genreName} Top 100`;
+        showLoadingOverlay(`Scraping ${chartName}...`);
 
-        showToast(`Loading ${genreName} Top 100...`, 'info');
-        showLoadingOverlay(`Getting ${genreName} Top 100 tracks...`);
-
-        // Check if we already have a card for this genre's Top 100
-        const existingState = Object.values(beatportChartStates).find(state =>
-            state.chart &&
-            state.chart.name === chartName &&
-            state.chart.chart_type === 'genre_top100'
-        );
-
-        if (existingState) {
-            console.log(`🔄 Found existing ${genreName} Top 100 card, opening existing modal`);
-            hideLoadingOverlay();
-            handleBeatportCardClick(existingState.chart.hash);
-            return;
-        }
-
-        // Construct the genre top 100 URL: genre URL + /top-100
-        const genreTop100Url = `https://www.beatport.com/genre/${genreSlug}/${genreId}/top-100`;
-        console.log(`💯 Fetching tracks from ${genreTop100Url}`);
-
-        // Get track data from genre top 100 page
-        const response = await fetch('/api/beatport/scrape-releases', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                release_urls: [genreTop100Url],
-                source_name: chartName
-            })
-        });
-
+        // Use the genre tracks endpoint without enrichment
+        const response = await fetch(`/api/beatport/genre/${genreSlug}/${genreId}/tracks?enrich=false`, { method: 'GET' });
         const data = await response.json();
 
         if (!data.success || !data.tracks || data.tracks.length === 0) {
-            throw new Error(`No tracks found in ${genreName} Top 100`);
+            throw new Error(`No tracks found in ${chartName}`);
         }
 
-        console.log(`✅ Successfully fetched ${data.tracks.length} tracks from ${genreName} Top 100`);
+        console.log(`✅ Fetched ${data.tracks.length} tracks, enriching one-by-one...`);
 
-        // Transform to standard chart format (following the exact pattern)
-        const chartData = {
-            hash: chartHash,
-            name: chartName,
-            chart_type: 'genre_top100',
-            track_count: data.tracks.length,
-            tracks: data.tracks.map(track => ({
-                name: cleanTrackText(track.title || 'Unknown Title'),
-                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
-                album: chartName,
-                duration_ms: 0,
-                external_urls: { beatport: track.url || '' },
-                source: 'beatport',
-                // Include genre metadata
-                genre_slug: genreSlug,
-                genre_id: genreId,
-                genre_name: genreName,
-                position: track.position || track.rank
-            }))
-        };
+        // Enrich one-by-one with live progress
+        const enrichedTracks = await _enrichTracksWithProgress(data.tracks, chartName);
 
-        // Create Beatport playlist card (following the exact pattern)
-        addBeatportCardToContainer(chartData);
-
-        // Automatically open discovery modal (following the exact pattern)
         hideLoadingOverlay();
-        handleBeatportCardClick(chartHash);
-
-        console.log(`✅ Created ${genreName} Top 100 card and opened discovery modal`);
+        openBeatportChartAsDownloadModal(enrichedTracks, chartName, null);
 
     } catch (error) {
-        console.error(`❌ Error handling ${genreName} Top 100 click:`, error);
+        console.error(`❌ Error handling ${chartName} click:`, error);
         hideLoadingOverlay();
-        showToast(`Error loading ${genreName} Top 100: ${error.message}`, 'error');
+        showToast(`Error loading ${chartName}: ${error.message}`, 'error');
     }
 }
 
@@ -44675,89 +44196,62 @@ function addGenreTop10ReleasesInteractivity(releases) {
  * Handle click on individual genre Top 10 Release card (exact parity with main page)
  */
 async function handleGenreReleaseCardClick(cardElement, release) {
+    if (_beatportModalOpening) return;
+    _beatportModalOpening = true;
+
     console.log(`💿 Individual genre release card clicked: ${release.title} by ${release.artist}`);
 
     if (!release.url || release.url === '#') {
+        _beatportModalOpening = false;
         showToast('No release URL available', 'error');
         return;
     }
 
     try {
-        // Create unique identifiers for this release
-        const releaseHash = `genre_release_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        const chartName = `${release.title} - ${release.artist}`;
-
         showToast(`Loading ${release.title}...`, 'info');
         showLoadingOverlay(`Getting tracks from ${release.title}...`);
 
-        // Check if we already have a card for this release
-        const existingState = Object.values(beatportChartStates).find(state =>
-            state.chart &&
-            state.chart.name === chartName &&
-            state.chart.chart_type === 'individual_release'
-        );
-
-        if (existingState) {
-            console.log(`🔄 Found existing card for ${release.title}, opening existing modal`);
-            hideLoadingOverlay();
-            handleBeatportCardClick(existingState.chart.hash);
-            return;
-        }
-
-        // Get track data from this single release (exact same API call as main page)
-        console.log(`🎵 Fetching tracks from release: ${release.url}`);
-        const response = await fetch('/api/beatport/scrape-releases', {
+        // Fetch structured release metadata for direct download modal
+        console.log(`🎵 Fetching release metadata: ${release.url}`);
+        const response = await fetch('/api/beatport/release-metadata', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                release_urls: [release.url],
-                source_name: `Genre Top 10 Release: ${release.title}`
-            })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ release_url: release.url })
         });
 
         const data = await response.json();
 
         if (!data.success || !data.tracks || data.tracks.length === 0) {
-            throw new Error('No tracks found in this release');
+            throw new Error(data.error || 'No tracks found in this release');
         }
 
-        console.log(`✅ Successfully fetched ${data.tracks.length} tracks from ${release.title}`);
+        console.log(`✅ Got ${data.tracks.length} tracks from ${data.album.name}`);
 
-        // Transform to standard chart format (exact same pattern as main page)
-        const chartData = {
-            hash: releaseHash,
-            name: chartName,
-            chart_type: 'individual_release',
-            track_count: data.tracks.length,
-            tracks: data.tracks.map(track => ({
-                name: cleanTrackText(track.title || 'Unknown Title'),
-                artists: [cleanTrackText(track.artist || 'Unknown Artist')],
-                album: chartName,
-                duration_ms: 0,
-                external_urls: { beatport: track.url || '' },
-                source: 'beatport',
-                // Include release metadata
-                release_title: release.title,
-                release_artist: release.artist,
-                release_label: release.label,
-                release_image: release.image_url
-            }))
-        };
+        const formattedTracks = data.tracks.map(track => ({
+            ...track,
+            artists: track.artists.map(a => typeof a === 'object' ? a.name : a)
+        }));
 
-        // Create Beatport playlist card (exact same pattern as main page)
-        addBeatportCardToContainer(chartData);
+        const virtualPlaylistId = `beatport_release_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const playlistName = data.album.name;
 
-        // Automatically open discovery modal (exact same pattern as main page)
+        await openDownloadMissingModalForArtistAlbum(
+            virtualPlaylistId,
+            playlistName,
+            formattedTracks,
+            data.album,
+            data.artist,
+            false
+        );
+
         hideLoadingOverlay();
-        handleBeatportCardClick(releaseHash);
-
-        console.log(`✅ Created individual release card and opened discovery modal for ${release.title}`);
+        _beatportModalOpening = false;
+        console.log(`✅ Opened download modal for ${playlistName}`);
 
     } catch (error) {
         console.error(`❌ Error handling release click for ${release.title}:`, error);
         hideLoadingOverlay();
+        _beatportModalOpening = false;
         showToast(`Error loading ${release.title}: ${error.message}`, 'error');
     }
 }

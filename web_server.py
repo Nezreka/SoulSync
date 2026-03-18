@@ -14883,22 +14883,23 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
     track_info = context.get("track_info", {})
     if track_info and track_info.get('id'):
         # Spotify track IDs are alphanumeric strings; iTunes IDs are numeric
+        # Beatport IDs (beatport_*) are neither — skip them for external ID tagging
         track_id = str(track_info['id'])
         if track_id.isdigit():
             metadata['itunes_track_id'] = track_id
-        else:
+        elif not track_id.startswith('beatport_'):
             metadata['spotify_track_id'] = track_id
     if artist.get('id'):
         artist_id = str(artist['id'])
         if artist_id.isdigit():
             metadata['itunes_artist_id'] = artist_id
-        else:
+        elif not artist_id.startswith('beatport_'):
             metadata['spotify_artist_id'] = artist_id
     if spotify_album and spotify_album.get('id'):
         album_id = str(spotify_album['id'])
         if album_id.isdigit():
             metadata['itunes_album_id'] = album_id
-        else:
+        elif not album_id.startswith('beatport_'):
             metadata['spotify_album_id'] = album_id
 
     # Summary log for debugging metadata issues (e.g. wrong album_artist / track_number)
@@ -16684,14 +16685,14 @@ def _record_retag_download(context, spotify_artist, album_info, final_path):
     album_name = album_info.get('album_name', '') if album_info else (
         original_search.get('spotify_clean_title', 'Unknown'))
 
-    # Determine album IDs (Spotify vs iTunes)
+    # Determine album IDs (Spotify vs iTunes) — skip beatport_ prefixed IDs
     spotify_album_id = None
     itunes_album_id = None
     if spotify_album:
         album_id_raw = str(spotify_album.get('id', ''))
         if album_id_raw and album_id_raw.isdigit():
             itunes_album_id = album_id_raw
-        elif album_id_raw:
+        elif album_id_raw and not album_id_raw.startswith('beatport_'):
             spotify_album_id = album_id_raw
 
     image_url = album_info.get('album_image_url') if album_info else None
@@ -16718,14 +16719,14 @@ def _record_retag_download(context, spotify_artist, album_info, final_path):
         album_info.get('clean_track_name', 'Unknown Track') if album_info else 'Unknown Track')
     file_format = os.path.splitext(str(final_path))[1].lstrip('.').lower()
 
-    # Track IDs (Spotify vs iTunes)
+    # Track IDs (Spotify vs iTunes) — skip beatport_ prefixed IDs
     spotify_track_id = None
     itunes_track_id = None
     if track_info and track_info.get('id'):
         tid = str(track_info['id'])
         if tid.isdigit():
             itunes_track_id = tid
-        else:
+        elif not tid.startswith('beatport_'):
             spotify_track_id = tid
 
     # Avoid duplicate track entries
@@ -34931,6 +34932,7 @@ def get_beatport_genre_tracks(genre_slug, genre_id):
 
         # Get query parameters
         limit = int(request.args.get('limit', '100'))
+        enrich = request.args.get('enrich', 'true').lower() != 'false'
 
         # Create genre dict for scraper
         genre = {
@@ -34940,7 +34942,7 @@ def get_beatport_genre_tracks(genre_slug, genre_id):
         }
 
         # Scrape tracks for this genre
-        tracks = scraper.scrape_genre_charts(genre, limit=limit)
+        tracks = scraper.scrape_genre_charts(genre, limit=limit, enrich=enrich)
 
         logger.info(f"✅ Successfully scraped {len(tracks)} tracks for {genre_slug}")
 
@@ -35596,9 +35598,10 @@ def get_beatport_top_100():
 
         # Get query parameters
         limit = int(request.args.get('limit', '100'))
+        enrich = request.args.get('enrich', 'true').lower() != 'false'
 
         # Scrape Top 100
-        tracks = scraper.scrape_top_100(limit=limit)
+        tracks = scraper.scrape_top_100(limit=limit, enrich=enrich)
 
         logger.info(f"✅ Successfully scraped {len(tracks)} tracks from Beatport Top 100")
 
@@ -35669,9 +35672,10 @@ def get_beatport_hype_top_100():
 
         # Get query parameters
         limit = int(request.args.get('limit', '100'))
+        enrich = request.args.get('enrich', 'true').lower() != 'false'
 
         # Scrape Hype Top 100 using improved method
-        tracks = scraper.scrape_hype_top_100(limit=limit)
+        tracks = scraper.scrape_hype_top_100(limit=limit, enrich=enrich)
 
         logger.info(f"✅ Successfully scraped {len(tracks)} tracks from Beatport Hype Top 100")
 
@@ -35987,6 +35991,97 @@ def scrape_beatport_releases():
             "tracks": [],
             "track_count": 0
         }), 500
+
+@app.route('/api/beatport/release-metadata', methods=['POST'])
+def get_beatport_release_metadata():
+    """Fetch structured release metadata for direct download modal (skip discovery)"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No JSON data provided"}), 400
+
+        release_url = data.get('release_url', '')
+        if not release_url:
+            return jsonify({"success": False, "error": "No release_url provided"}), 400
+
+        logger.info(f"🎯 API request for release metadata: {release_url}")
+
+        scraper = BeatportUnifiedScraper()
+        result = scraper.get_release_metadata(release_url)
+
+        if not result.get('success'):
+            return jsonify(result), 404
+
+        # Apply text cleaning
+        album = result['album']
+        artist = result['artist']
+        album['name'] = clean_beatport_text(album['name'])
+        artist['name'] = clean_beatport_text(artist['name'])
+
+        for track in result['tracks']:
+            track['name'] = clean_beatport_text(track['name'])
+            for a in track.get('artists', []):
+                a['name'] = clean_beatport_text(a['name'])
+            # Update the embedded album name too
+            track['album']['name'] = album['name']
+
+        logger.info(f"✅ Release metadata: {album['name']} by {artist['name']} ({len(result['tracks'])} tracks)")
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"❌ Error getting release metadata: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/beatport/enrich-tracks', methods=['POST'])
+def enrich_beatport_tracks():
+    """Enrich basic track data (from DOM extraction) by visiting each track's page"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No JSON data provided"}), 400
+
+        tracks = data.get('tracks', [])
+        if not tracks:
+            return jsonify({"success": False, "error": "No tracks provided"}), 400
+
+        enrichment_id = data.get('enrichment_id', str(uuid.uuid4()))
+
+        logger.info(f"🎯 Enriching {len(tracks)} Beatport tracks with per-track metadata (id: {enrichment_id})")
+
+        def on_progress(completed, total, track_name):
+            socketio.emit('beatport:enrich_progress', {
+                'enrichment_id': enrichment_id,
+                'completed': completed,
+                'total': total,
+                'current_track': track_name
+            })
+
+        scraper = BeatportUnifiedScraper()
+        enriched = scraper.enrich_chart_tracks(tracks, progress_callback=on_progress)
+
+        # Apply text cleaning
+        for track in enriched:
+            if track.get('title'):
+                track['title'] = clean_beatport_text(track['title'])
+            if track.get('artist'):
+                track['artist'] = clean_beatport_text(track['artist'])
+            if track.get('release_name'):
+                track['release_name'] = clean_beatport_text(track['release_name'])
+            if track.get('label'):
+                track['label'] = clean_beatport_text(track['label'])
+
+        logger.info(f"✅ Enriched {len(enriched)} tracks")
+
+        return jsonify({"success": True, "tracks": enriched})
+
+    except Exception as e:
+        logger.error(f"❌ Error enriching tracks: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/beatport/homepage/featured-charts', methods=['GET'])
 def get_beatport_homepage_featured_charts():
