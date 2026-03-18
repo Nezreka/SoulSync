@@ -1364,13 +1364,13 @@ class DatabaseUpdateWorker(QThread):
                                         if seen_track_ids is not None:
                                             seen_track_ids.add(track_id_str)
 
-                                        # Deep scan: skip tracks already in DB to preserve enrichment
-                                        if skip_existing_tracks and self.database.track_exists_by_server(track_id_str, self.server_type):
-                                            skipped_count += 1
-                                            continue
-
+                                        # Deep scan: always call insert_or_update to refresh file_path
+                                        # and other server-provided fields. UPDATE preserves enrichment.
+                                        is_existing = skip_existing_tracks and self.database.track_exists_by_server(track_id_str, self.server_type)
                                         track_success = self.database.insert_or_update_media_track(track, alb_id, art_id, server_source=self.server_type)
-                                        if track_success:
+                                        if is_existing:
+                                            skipped_count += 1
+                                        elif track_success:
                                             track_count += 1
                                     except Exception as e:
                                         logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
@@ -1382,7 +1382,7 @@ class DatabaseUpdateWorker(QThread):
                         logger.warning(f"Failed to process album '{getattr(album, 'title', 'Unknown')}': {e}")
 
             if skip_existing_tracks:
-                details = f"{album_count} albums, {track_count} new tracks ({skipped_count} existing skipped)"
+                details = f"{album_count} albums, {track_count} new tracks ({skipped_count} existing updated)"
             else:
                 details = f"Updated with {album_count} albums, {track_count} tracks"
             return True, details, album_count, track_count
