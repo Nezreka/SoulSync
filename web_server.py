@@ -39221,15 +39221,14 @@ def get_spotify_artist_discography(artist_name):
                 'album_type': album.album_type.lower()
             }
 
-            # Categorize based on album type and track count
-            album_type = album.album_type.lower()
+            # Categorize based on album_type from source (Spotify/iTunes/Deezer)
+            album_type = album.album_type.lower() if album.album_type else 'album'
 
-            if album_type == 'single' or track_count <= 3:
+            if album_type == 'single':
                 singles.append(release_data)
-            elif album_type == 'ep' or (track_count >= 4 and track_count <= 6):
+            elif album_type == 'ep':
                 eps.append(release_data)
             elif album_type == 'compilation':
-                # Compilations go with albums
                 albums.append(release_data)
             else:
                 albums.append(release_data)
