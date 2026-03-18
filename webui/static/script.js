@@ -18155,8 +18155,10 @@ async function loadLibraryHistory() {
 }
 
 function renderHistoryEntry(entry) {
-    const thumb = entry.thumb_url
-        ? `<img src="${escapeHtml(entry.thumb_url)}" class="library-history-thumb" loading="lazy">`
+    // Server import thumb_urls are relative paths (e.g. /library/metadata/...) — use placeholder
+    const hasValidThumb = entry.thumb_url && (entry.thumb_url.startsWith('http://') || entry.thumb_url.startsWith('https://'));
+    const thumb = hasValidThumb
+        ? `<img src="${escapeHtml(entry.thumb_url)}" class="library-history-thumb" loading="lazy" onerror="this.outerHTML='<div class=\\'library-history-thumb-placeholder\\'>${entry.event_type === 'download' ? '📥' : '📚'}</div>'">`
         : `<div class="library-history-thumb-placeholder">${entry.event_type === 'download' ? '📥' : '📚'}</div>`;
 
     let badge = '';
@@ -18215,6 +18217,411 @@ function changeHistoryPage(newPage) {
     if (newPage < 1) return;
     _libraryHistoryState.page = newPage;
     loadLibraryHistory();
+}
+
+// ── Sync History Modal ──────────────────────────────────────────────
+const _syncHistoryState = { source: null, page: 1, limit: 20 };
+
+function openSyncHistoryModal() {
+    const overlay = document.getElementById('sync-history-overlay');
+    if (overlay) {
+        overlay.classList.remove('hidden');
+        _syncHistoryState.page = 1;
+        _syncHistoryState.source = null;
+        loadSyncHistory();
+    }
+}
+
+function closeSyncHistoryModal() {
+    const overlay = document.getElementById('sync-history-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+function switchSyncHistoryTab(source) {
+    _syncHistoryState.source = source;
+    _syncHistoryState.page = 1;
+    document.querySelectorAll('.sync-history-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.source === (source || 'all'));
+    });
+    loadSyncHistory();
+}
+
+async function loadSyncHistory() {
+    const { source, page, limit } = _syncHistoryState;
+    const list = document.getElementById('sync-history-list');
+    const tabsContainer = document.getElementById('sync-history-tabs');
+    if (!list) return;
+    list.innerHTML = '<div class="sync-history-loading">Loading...</div>';
+
+    try {
+        const params = new URLSearchParams({ page, limit });
+        if (source) params.set('source', source);
+        const resp = await fetch(`/api/sync/history?${params}`);
+        const data = await resp.json();
+
+        // Build tabs from stats
+        if (tabsContainer && data.stats) {
+            const totalCount = Object.values(data.stats).reduce((a, b) => a + b, 0);
+            const sourceLabels = {
+                spotify: 'Spotify', beatport: 'Beatport', youtube: 'YouTube',
+                tidal: 'Tidal', deezer: 'Deezer', wishlist: 'Wishlist',
+                library: 'Library', discover: 'Discover', listenbrainz: 'ListenBrainz',
+                spotify_public: 'Spotify Public', mirrored: 'Mirrored'
+            };
+            let tabsHtml = `<button class="sync-history-tab ${!source ? 'active' : ''}" data-source="all" onclick="switchSyncHistoryTab(null)">All <span class="sync-history-tab-count">${totalCount}</span></button>`;
+            for (const [src, count] of Object.entries(data.stats).sort((a, b) => b[1] - a[1])) {
+                const label = sourceLabels[src] || src;
+                const isActive = source === src ? ' active' : '';
+                tabsHtml += `<button class="sync-history-tab${isActive}" data-source="${src}" onclick="switchSyncHistoryTab('${src}')">${label} <span class="sync-history-tab-count">${count}</span></button>`;
+            }
+            tabsContainer.innerHTML = tabsHtml;
+        }
+
+        if (!data.entries || data.entries.length === 0) {
+            list.innerHTML = '<div class="sync-history-empty">No sync history yet. Completed syncs will appear here.</div>';
+            return;
+        }
+
+        list.innerHTML = data.entries.map(renderSyncHistoryEntry).join('');
+        renderSyncHistoryPagination(data.total, page, limit);
+    } catch (err) {
+        console.error('Error loading sync history:', err);
+        list.innerHTML = '<div class="sync-history-empty">Error loading sync history</div>';
+    }
+}
+
+function renderSyncHistoryEntry(entry) {
+    const thumb = entry.thumb_url
+        ? `<img src="${escapeHtml(entry.thumb_url)}" class="sync-history-thumb" loading="lazy" onerror="this.outerHTML='<div class=\\'sync-history-thumb-placeholder\\'>&#x1F4E5;</div>'">`
+        : `<div class="sync-history-thumb-placeholder">${_syncSourceIcon(entry.source)}</div>`;
+
+    const sourceBadge = `<span class="sync-history-source-badge ${entry.source}">${escapeHtml(entry.source)}</span>`;
+
+    const title = entry.playlist_name || 'Unknown';
+    const meta = [entry.artist_name, entry.album_name].filter(Boolean).join(' — ') || entry.sync_type;
+
+    // Stats
+    let statsHtml = '';
+    if (entry.completed_at) {
+        const parts = [];
+        if (entry.tracks_found > 0) parts.push(`<span class="sync-history-stat found">${entry.tracks_found} found</span>`);
+        if (entry.tracks_downloaded > 0) parts.push(`<span class="sync-history-stat downloaded">${entry.tracks_downloaded} downloaded</span>`);
+        if (entry.tracks_failed > 0) parts.push(`<span class="sync-history-stat failed">${entry.tracks_failed} failed</span>`);
+        if (parts.length === 0) parts.push(`<span class="sync-history-stat found">${entry.total_tracks} in library</span>`);
+        statsHtml = `<div class="sync-history-stats">${parts.join('')}</div>`;
+    } else {
+        statsHtml = `<div class="sync-history-stats"><span class="sync-history-stat pending">In progress</span></div>`;
+    }
+
+    const timeStr = formatHistoryTime(entry.started_at);
+
+    return `<div class="sync-history-entry-wrapper" id="sync-history-wrapper-${entry.id}">
+        <div class="sync-history-entry">
+            ${thumb}
+            <div class="sync-history-entry-text">
+                <div class="sync-history-entry-title">${escapeHtml(title)}</div>
+                <div class="sync-history-entry-meta">${escapeHtml(meta)}</div>
+            </div>
+            ${sourceBadge}
+            ${statsHtml}
+            <div class="sync-history-entry-time">${timeStr}</div>
+            <button class="sync-history-delete-btn" onclick="deleteSyncHistoryEntry(${entry.id})" title="Delete this entry">&times;</button>
+            <button class="sync-history-resync-btn" id="resync-btn-${entry.id}" onclick="retriggerSync(${entry.id})" title="Re-sync this playlist">Re-sync</button>
+        </div>
+        <div class="sync-history-live-progress" id="sync-history-progress-${entry.id}" style="display:none;">
+            <div class="sync-history-progress-bar-container">
+                <div class="sync-history-progress-bar-fill" id="sync-history-bar-${entry.id}"></div>
+            </div>
+            <div class="sync-history-progress-text">
+                <span class="sync-history-progress-step" id="sync-history-step-${entry.id}">Starting sync...</span>
+                <div class="sync-history-progress-stats">
+                    <span class="matched" id="sync-history-matched-${entry.id}">0 matched</span>
+                    <span class="failed" id="sync-history-failed-${entry.id}">0 failed</span>
+                </div>
+                <button class="sync-history-cancel-btn" id="sync-history-cancel-${entry.id}" onclick="cancelSyncHistoryResync(${entry.id})">Cancel</button>
+            </div>
+        </div>
+    </div>`;
+}
+
+function _syncSourceIcon(source) {
+    const icons = {
+        spotify: '&#x1F3B5;', beatport: '&#x1F3B6;', youtube: '&#x25B6;',
+        tidal: '&#x1F30A;', deezer: '&#x1F3A7;', wishlist: '&#x2B50;',
+        library: '&#x1F4DA;', discover: '&#x1F50D;', mirrored: '&#x1F517;',
+        listenbrainz: '&#x1F3A7;', spotify_public: '&#x1F3B5;'
+    };
+    return icons[source] || '&#x1F4E5;';
+}
+
+function renderSyncHistoryPagination(total, page, limit) {
+    const pagination = document.getElementById('sync-history-pagination');
+    if (!pagination) return;
+    const totalPages = Math.ceil(total / limit);
+    if (totalPages <= 1) { pagination.innerHTML = ''; return; }
+    pagination.innerHTML = `
+        <button class="sync-history-page-btn" onclick="changeSyncHistoryPage(${page - 1})" ${page <= 1 ? 'disabled' : ''}>Prev</button>
+        <span class="sync-history-page-info">Page ${page} of ${totalPages}</span>
+        <button class="sync-history-page-btn" onclick="changeSyncHistoryPage(${page + 1})" ${page >= totalPages ? 'disabled' : ''}>Next</button>
+    `;
+}
+
+function changeSyncHistoryPage(newPage) {
+    if (newPage < 1) return;
+    _syncHistoryState.page = newPage;
+    loadSyncHistory();
+}
+
+// Track active re-syncs from history
+let _activeSyncHistoryResyncs = {};
+
+// Sources that do server playlist sync (match to media server) vs download (Soulseek download)
+const _serverSyncSources = new Set(['spotify', 'tidal', 'deezer', 'youtube', 'mirrored', 'listenbrainz', 'spotify_public', 'beatport']);
+const _downloadSyncSources = new Set(['discover', 'library', 'wishlist']);
+
+async function retriggerSync(entryId) {
+    try {
+        const resp = await fetch(`/api/sync/history/${entryId}`);
+        const data = await resp.json();
+
+        if (!data.success || !data.entry) {
+            showToast('Failed to load sync data', 'error');
+            return;
+        }
+
+        const entry = data.entry;
+
+        // Determine if this is a download-type sync or a server-sync-type
+        const isDownloadSync = entry.is_album_download || _downloadSyncSources.has(entry.source);
+        const isServerSync = _serverSyncSources.has(entry.source) && !entry.is_album_download;
+
+        if (isDownloadSync) {
+            // Download syncs open the download modal (existing behavior)
+            closeSyncHistoryModal();
+
+            const virtualPlaylistId = entry.playlist_id || `resync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const albumObj = entry.album_context || {
+                id: `resync_album_${entryId}`,
+                name: entry.playlist_name,
+                album_type: entry.sync_type === 'album' ? 'album' : 'compilation',
+                images: entry.thumb_url ? [{ url: entry.thumb_url }] : [],
+                total_tracks: entry.total_tracks
+            };
+            const artistObj = entry.artist_context || { id: 'resync_artist', name: 'Various Artists' };
+            const contextType = entry.sync_type === 'album' ? 'artist_album' : 'playlist';
+
+            await openDownloadMissingModalForArtistAlbum(
+                virtualPlaylistId, entry.playlist_name, entry.tracks,
+                albumObj, artistObj, false, contextType
+            );
+        } else {
+            // Server sync — start sync and show live progress in the card
+            await _startSyncHistoryResync(entryId, entry);
+        }
+    } catch (err) {
+        console.error('Error re-triggering sync:', err);
+        showToast('Error loading sync data', 'error');
+    }
+}
+
+async function _startSyncHistoryResync(entryId, entry) {
+    // Disable the re-sync button
+    const btn = document.getElementById(`resync-btn-${entryId}`);
+    if (btn) { btn.disabled = true; btn.textContent = 'Syncing...'; }
+
+    // Show the progress area
+    const wrapper = document.getElementById(`sync-history-wrapper-${entryId}`);
+    const progressArea = document.getElementById(`sync-history-progress-${entryId}`);
+    if (wrapper) wrapper.classList.add('syncing');
+    if (progressArea) progressArea.style.display = '';
+
+    // Build a unique sync playlist ID for this re-sync
+    const syncPlaylistId = `resync_${entryId}_${Date.now()}`;
+
+    // Prepare tracks for the sync API
+    const tracks = (entry.tracks || []).map(t => {
+        const artists = Array.isArray(t.artists)
+            ? (typeof t.artists[0] === 'object' ? t.artists.map(a => a.name || a) : t.artists)
+            : [t.artists || 'Unknown Artist'];
+        const albumName = typeof t.album === 'object' ? (t.album?.name || '') : (t.album || '');
+        return {
+            id: t.id || '',
+            name: t.name || '',
+            artists: artists,
+            album: albumName,
+            duration_ms: t.duration_ms || 0,
+            popularity: t.popularity || 0
+        };
+    });
+
+    try {
+        const response = await fetch('/api/sync/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                playlist_id: syncPlaylistId,
+                playlist_name: entry.playlist_name,
+                tracks: tracks
+            })
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+            showToast(`Sync failed: ${result.error || 'Unknown error'}`, 'error');
+            _cleanupSyncHistoryResync(entryId);
+            return;
+        }
+
+        // Store active re-sync state
+        _activeSyncHistoryResyncs[entryId] = { syncPlaylistId, entryId };
+
+        // Start polling for progress
+        _pollSyncHistoryProgress(entryId, syncPlaylistId);
+
+    } catch (err) {
+        console.error('Error starting re-sync:', err);
+        showToast('Failed to start sync', 'error');
+        _cleanupSyncHistoryResync(entryId);
+    }
+}
+
+function _pollSyncHistoryProgress(entryId, syncPlaylistId) {
+    const pollInterval = setInterval(async () => {
+        try {
+            const resp = await fetch(`/api/sync/status/${syncPlaylistId}`);
+            if (!resp.ok) {
+                clearInterval(pollInterval);
+                _cleanupSyncHistoryResync(entryId, 'error');
+                return;
+            }
+            const state = await resp.json();
+
+            if (state.status === 'syncing' || state.status === 'starting') {
+                const progress = state.progress || {};
+                const matched = progress.matched_tracks || 0;
+                const failed = progress.failed_tracks || 0;
+                const total = progress.total_tracks || 0;
+                const step = progress.current_step || 'Processing';
+                const currentTrack = progress.current_track || '';
+                const processed = matched + failed;
+                const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+                const bar = document.getElementById(`sync-history-bar-${entryId}`);
+                const stepEl = document.getElementById(`sync-history-step-${entryId}`);
+                const matchedEl = document.getElementById(`sync-history-matched-${entryId}`);
+                const failedEl = document.getElementById(`sync-history-failed-${entryId}`);
+
+                if (bar) bar.style.width = `${percent}%`;
+                if (stepEl) stepEl.textContent = currentTrack ? `${step} — ${currentTrack}` : step;
+                if (matchedEl) matchedEl.textContent = `${matched} matched`;
+                if (failedEl) failedEl.textContent = `${failed} failed`;
+
+            } else if (state.status === 'finished') {
+                clearInterval(pollInterval);
+                const progress = state.progress || state.result || {};
+                const matched = progress.matched_tracks || 0;
+                const failed = progress.failed_tracks || 0;
+                const total = progress.total_tracks || 0;
+                const synced = progress.synced_tracks || 0;
+
+                const bar = document.getElementById(`sync-history-bar-${entryId}`);
+                const stepEl = document.getElementById(`sync-history-step-${entryId}`);
+                const matchedEl = document.getElementById(`sync-history-matched-${entryId}`);
+                const failedEl = document.getElementById(`sync-history-failed-${entryId}`);
+
+                if (bar) bar.style.width = '100%';
+                if (stepEl) stepEl.textContent = `Sync complete — ${matched}/${total} matched, ${synced} synced`;
+                if (matchedEl) matchedEl.textContent = `${matched} matched`;
+                if (failedEl) failedEl.textContent = `${failed} failed`;
+
+                // Hide cancel button
+                const cancelBtn = document.getElementById(`sync-history-cancel-${entryId}`);
+                if (cancelBtn) cancelBtn.style.display = 'none';
+
+                showToast(`Re-sync complete: ${matched}/${total} matched`, 'success');
+
+                // Auto-collapse after 5 seconds
+                setTimeout(() => _cleanupSyncHistoryResync(entryId, 'finished'), 5000);
+
+            } else if (state.status === 'cancelled' || state.status === 'error') {
+                clearInterval(pollInterval);
+                const stepEl = document.getElementById(`sync-history-step-${entryId}`);
+                if (stepEl) stepEl.textContent = state.status === 'cancelled' ? 'Sync cancelled' : `Sync error: ${state.error || 'Unknown'}`;
+
+                const cancelBtn = document.getElementById(`sync-history-cancel-${entryId}`);
+                if (cancelBtn) cancelBtn.style.display = 'none';
+
+                setTimeout(() => _cleanupSyncHistoryResync(entryId, state.status), 3000);
+            }
+        } catch (err) {
+            console.error('Error polling sync status:', err);
+            clearInterval(pollInterval);
+            _cleanupSyncHistoryResync(entryId, 'error');
+        }
+    }, 2000);
+
+    // Store interval so cancel can clear it
+    if (_activeSyncHistoryResyncs[entryId]) {
+        _activeSyncHistoryResyncs[entryId].pollInterval = pollInterval;
+    }
+}
+
+async function cancelSyncHistoryResync(entryId) {
+    const active = _activeSyncHistoryResyncs[entryId];
+    if (!active) return;
+
+    try {
+        await fetch('/api/sync/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ playlist_id: active.syncPlaylistId })
+        });
+
+        const stepEl = document.getElementById(`sync-history-step-${entryId}`);
+        if (stepEl) stepEl.textContent = 'Cancelling...';
+
+    } catch (err) {
+        console.error('Error cancelling sync:', err);
+        showToast('Failed to cancel sync', 'error');
+    }
+}
+
+function _cleanupSyncHistoryResync(entryId, finalStatus) {
+    const active = _activeSyncHistoryResyncs[entryId];
+    if (active && active.pollInterval) {
+        clearInterval(active.pollInterval);
+    }
+    delete _activeSyncHistoryResyncs[entryId];
+
+    const wrapper = document.getElementById(`sync-history-wrapper-${entryId}`);
+    const progressArea = document.getElementById(`sync-history-progress-${entryId}`);
+    const btn = document.getElementById(`resync-btn-${entryId}`);
+
+    if (wrapper) wrapper.classList.remove('syncing');
+    if (progressArea) progressArea.style.display = 'none';
+    if (btn) { btn.disabled = false; btn.textContent = 'Re-sync'; }
+}
+
+async function deleteSyncHistoryEntry(entryId) {
+    try {
+        const resp = await fetch(`/api/sync/history/${entryId}`, { method: 'DELETE' });
+        const data = await resp.json();
+        if (data.success) {
+            const wrapper = document.getElementById(`sync-history-wrapper-${entryId}`);
+            if (wrapper) {
+                wrapper.style.transition = 'opacity 0.2s ease, max-height 0.3s ease';
+                wrapper.style.opacity = '0';
+                wrapper.style.maxHeight = wrapper.offsetHeight + 'px';
+                requestAnimationFrame(() => { wrapper.style.maxHeight = '0'; wrapper.style.overflow = 'hidden'; });
+                setTimeout(() => wrapper.remove(), 300);
+            }
+        } else {
+            showToast('Failed to delete entry', 'error');
+        }
+    } catch (err) {
+        console.error('Error deleting sync history entry:', err);
+        showToast('Failed to delete entry', 'error');
+    }
 }
 
 // ── Metadata Cache Modal ────────────────────────────────────────────

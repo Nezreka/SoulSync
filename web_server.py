@@ -21241,6 +21241,9 @@ def _on_download_completed(batch_id, task_id, success=True):
                 batch['phase'] = 'complete'
                 batch['completion_time'] = time.time()  # Track when batch completed
 
+                # Record sync history completion
+                _record_sync_history_completion(batch_id, batch)
+
                 # Add activity for batch completion
                 playlist_name = batch.get('playlist_name', 'Unknown Playlist')
                 failed_count = len(batch.get('permanently_failed_tracks', []))
@@ -21465,6 +21468,14 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
         # PHASE 2: TRANSITION TO DOWNLOAD (if necessary)
         if not missing_tracks:
             print(f"✅ Analysis for batch {batch_id} complete. No missing tracks.")
+
+            # Record sync history — all tracks found, nothing to download
+            tracks_found = sum(1 for r in analysis_results if r.get('found'))
+            try:
+                db_sh = MusicDatabase()
+                db_sh.update_sync_history_completion(batch_id, tracks_found=tracks_found, tracks_downloaded=0, tracks_failed=0)
+            except Exception:
+                pass
 
             is_auto_batch = False
             with tasks_lock:
@@ -24083,8 +24094,169 @@ def cleanup_batch():
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================
+# == SYNC HISTORY API ==
+# ===============================
+
+@app.route('/api/sync/history', methods=['GET'])
+def get_sync_history():
+    """Get paginated sync history."""
+    try:
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 20))
+        source = request.args.get('source') or None
+
+        db = MusicDatabase()
+        entries, total = db.get_sync_history(source=source, page=page, limit=limit)
+        stats = db.get_sync_history_stats()
+
+        # Parse artist/album names from JSON context for display
+        for entry in entries:
+            if entry.get('artist_context'):
+                try:
+                    ac = json.loads(entry['artist_context'])
+                    entry['artist_name'] = ac.get('name', '')
+                except:
+                    entry['artist_name'] = ''
+            else:
+                entry['artist_name'] = ''
+            if entry.get('album_context'):
+                try:
+                    alc = json.loads(entry['album_context'])
+                    entry['album_name'] = alc.get('name', '')
+                except:
+                    entry['album_name'] = ''
+            else:
+                entry['album_name'] = ''
+            # Remove raw JSON from list response
+            entry.pop('artist_context', None)
+            entry.pop('album_context', None)
+
+        return jsonify({"success": True, "entries": entries, "total": total,
+                        "page": page, "limit": limit, "stats": stats})
+    except Exception as e:
+        logger.error(f"Error getting sync history: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/sync/history/<int:entry_id>', methods=['GET'])
+def get_sync_history_entry(entry_id):
+    """Get a single sync history entry with full cached data for re-trigger."""
+    try:
+        db = MusicDatabase()
+        entry = db.get_sync_history_entry(entry_id)
+        if not entry:
+            return jsonify({"success": False, "error": "Entry not found"}), 404
+
+        # Parse JSON fields
+        entry['tracks'] = json.loads(entry['tracks_json']) if entry.get('tracks_json') else []
+        entry['artist_context'] = json.loads(entry['artist_context']) if entry.get('artist_context') else None
+        entry['album_context'] = json.loads(entry['album_context']) if entry.get('album_context') else None
+        entry.pop('tracks_json', None)
+
+        return jsonify({"success": True, "entry": entry})
+    except Exception as e:
+        logger.error(f"Error getting sync history entry: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/sync/history/<int:entry_id>', methods=['DELETE'])
+def delete_sync_history_entry_api(entry_id):
+    """Delete a sync history entry."""
+    try:
+        db = MusicDatabase()
+        deleted = db.delete_sync_history_entry(entry_id)
+        return jsonify({"success": deleted})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ===============================
 # == UNIFIED MISSING TRACKS API ==
 # ===============================
+
+def _detect_sync_source(playlist_id):
+    """Derive the sync source from the playlist_id prefix."""
+    prefix_map = [
+        # Mirrored playlists go through YouTube discovery, so youtube_mirrored_ must be checked first
+        ('auto_mirror_', 'mirrored'), ('youtube_mirrored_', 'mirrored'),
+        ('youtube_', 'youtube'), ('beatport_', 'beatport'),
+        ('tidal_', 'tidal'), ('deezer_', 'deezer'), ('listenbrainz_', 'listenbrainz'),
+        ('spotify_public_', 'spotify_public'), ('discover_album_', 'discover'),
+        ('seasonal_album_', 'discover'), ('library_redownload_', 'library'),
+        ('issue_download_', 'library'), ('artist_album_', 'spotify'),
+        ('enhanced_search_', 'spotify'), ('spotify_library_', 'spotify'),
+        ('beatport_release_', 'beatport'), ('beatport_chart_', 'beatport'),
+        ('beatport_top100_', 'beatport'), ('beatport_hype100_', 'beatport'),
+        ('beatport_sync_', 'beatport'),
+    ]
+    for prefix, source in prefix_map:
+        if playlist_id.startswith(prefix):
+            return source
+    if playlist_id == 'wishlist':
+        return 'wishlist'
+    return 'spotify'
+
+def _record_sync_history_start(batch_id, playlist_id, playlist_name, tracks,
+                                is_album_download, album_context, artist_context,
+                                playlist_folder_mode):
+    """Record a sync start to the database."""
+    try:
+        source = _detect_sync_source(playlist_id)
+        if playlist_id == 'wishlist':
+            sync_type = 'wishlist'
+        elif is_album_download:
+            sync_type = 'album'
+        else:
+            sync_type = 'playlist'
+
+        # Extract thumb URL from album context or first track
+        thumb_url = None
+        if album_context:
+            images = album_context.get('images', [])
+            if images and isinstance(images, list) and len(images) > 0:
+                thumb_url = images[0].get('url') if isinstance(images[0], dict) else images[0]
+            if not thumb_url:
+                thumb_url = album_context.get('image_url')
+        if not thumb_url and tracks:
+            first_album = tracks[0].get('album', {})
+            if isinstance(first_album, dict):
+                imgs = first_album.get('images', [])
+                if imgs and isinstance(imgs, list) and len(imgs) > 0:
+                    thumb_url = imgs[0].get('url') if isinstance(imgs[0], dict) else imgs[0]
+
+        db = MusicDatabase()
+        db.add_sync_history_entry(
+            batch_id=batch_id,
+            playlist_id=playlist_id,
+            playlist_name=playlist_name,
+            source=source,
+            sync_type=sync_type,
+            tracks_json=json.dumps(tracks, ensure_ascii=False),
+            artist_context=json.dumps(artist_context, ensure_ascii=False) if artist_context else None,
+            album_context=json.dumps(album_context, ensure_ascii=False) if album_context else None,
+            thumb_url=thumb_url,
+            total_tracks=len(tracks),
+            is_album_download=is_album_download,
+            playlist_folder_mode=playlist_folder_mode
+        )
+    except Exception as e:
+        logger.warning(f"Failed to record sync history start: {e}")
+
+def _record_sync_history_completion(batch_id, batch):
+    """Update sync history with completion stats.
+    NOTE: Called from within tasks_lock context — do NOT acquire tasks_lock here."""
+    try:
+        analysis_results = batch.get('analysis_results', [])
+        tracks_found = sum(1 for r in analysis_results if r.get('found'))
+        queue = batch.get('queue', [])
+        completed_count = 0
+        failed_count = len(batch.get('permanently_failed_tracks', []))
+        # Already inside tasks_lock — safe to read download_tasks directly
+        for task_id in queue:
+            if task_id in download_tasks and download_tasks[task_id].get('status') == 'completed':
+                completed_count += 1
+
+        db = MusicDatabase()
+        db.update_sync_history_completion(batch_id, tracks_found, completed_count, failed_count)
+    except Exception as e:
+        logger.warning(f"Failed to record sync history completion: {e}")
 
 @app.route('/api/playlists/<playlist_id>/start-missing-process', methods=['POST'])
 def start_missing_tracks_process(playlist_id):
@@ -24151,6 +24323,11 @@ def start_missing_tracks_process(playlist_id):
             'album_context': album_context,
             'artist_context': artist_context
         }
+
+    # Record sync history
+    _record_sync_history_start(batch_id, playlist_id, playlist_name, tracks,
+                               is_album_download, album_context, artist_context,
+                               playlist_folder_mode)
 
     # Link YouTube playlist to download process if this is a YouTube playlist
     if playlist_id.startswith('youtube_'):
@@ -29276,6 +29453,28 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
     print(f"🚀 [TIMING] _run_sync_task STARTED for playlist '{playlist_name}' at {time.strftime('%H:%M:%S')}")
     print(f"📊 Received {len(tracks_json)} tracks from frontend")
 
+    # Record sync history start (skip for re-syncs triggered from history)
+    _is_resync = playlist_id.startswith('resync_')
+    _resync_entry_id = None
+    sync_batch_id = f"sync_{playlist_id}_{int(time.time())}"
+    if _is_resync:
+        # Extract the original entry ID from resync_{entryId}_{timestamp}
+        try:
+            _resync_entry_id = int(playlist_id.split('_')[1])
+        except (IndexError, ValueError):
+            pass
+    else:
+        _record_sync_history_start(
+            batch_id=sync_batch_id,
+            playlist_id=playlist_id,
+            playlist_name=playlist_name,
+            tracks=tracks_json,
+            is_album_download=False,
+            album_context=None,
+            artist_context=None,
+            playlist_folder_mode=False
+        )
+
     try:
         # Recreate a Playlist object from the JSON data sent by the frontend
         # This avoids needing to re-fetch it from Spotify
@@ -29553,6 +29752,20 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
                 "result": result_dict
             }
         print(f"🏁 Sync finished for {playlist_id} - state updated")
+
+        # Record sync history completion
+        try:
+            matched = getattr(result, 'matched_tracks', 0)
+            failed = getattr(result, 'failed_tracks', 0)
+            synced = getattr(result, 'synced_tracks', 0)
+            db = MusicDatabase()
+            if _is_resync and _resync_entry_id:
+                # Re-sync: update the original entry's timestamp and stats (moves it to top)
+                db.refresh_sync_history_entry(_resync_entry_id, matched, synced, failed)
+            else:
+                db.update_sync_history_completion(sync_batch_id, matched, synced, failed)
+        except Exception as e:
+            logger.warning(f"Failed to record sync history completion: {e}")
 
         if automation_id:
             matched = getattr(result, 'matched_tracks', 0)
