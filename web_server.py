@@ -39796,6 +39796,7 @@ try:
     transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
     repair_worker = RepairWorker(database=repair_db, transfer_folder=transfer_path)
     repair_worker.set_config_manager(config_manager)
+    repair_worker.set_metadata_enhancer(_enhance_file_metadata)
 
     # --- Repair Job Progress Tracking (live progress like automation cards) ---
     repair_job_progress_states = {}   # job_id (str) -> state dict

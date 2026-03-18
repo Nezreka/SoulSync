@@ -125,10 +125,20 @@ class AlbumCompletenessJob(RepairJob):
                         for item in api_tracks['items']:
                             tn = item.get('track_number')
                             if tn and tn not in owned_numbers:
+                                # Extract artist names from Spotify track data
+                                track_artists = []
+                                for a in item.get('artists', []):
+                                    if isinstance(a, dict):
+                                        track_artists.append(a.get('name', ''))
+                                    elif isinstance(a, str):
+                                        track_artists.append(a)
                                 missing_tracks.append({
                                     'track_number': tn,
                                     'name': item.get('name', ''),
                                     'disc_number': item.get('disc_number', 1),
+                                    'spotify_track_id': item.get('id', ''),
+                                    'duration_ms': item.get('duration_ms', 0),
+                                    'artists': track_artists,
                                 })
                 except Exception as e:
                     logger.debug("Error getting album tracks for %s: %s", spotify_album_id, e)
