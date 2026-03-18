@@ -2090,6 +2090,22 @@ body {
     grid-template-columns: 1fr 1fr;
     gap: 4px 16px;
 }
+.tag-embed-grid {
+    gap: 8px 16px;
+}
+.tag-embed-label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+}
+.tag-embed-desc {
+    display: block;
+    width: 100%;
+    font-size: 0.75em;
+    opacity: 0.5;
+    margin-top: -2px;
+    margin-left: 22px;
+}
 
 /* Read-only Fields */
 .readonly-field {
