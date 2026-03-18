@@ -1859,6 +1859,28 @@ beatport_data_cache = {
     'cache_lock': threading.Lock()
 }
 
+# --- Beatport Enrichment Cache ---
+# Cache enriched track data (per-track page visits) to avoid re-scraping on repeat chart clicks.
+# Keyed by track URL, expires after 2 hours.
+_beatport_enrichment_cache = {}
+_beatport_enrichment_lock = threading.Lock()
+_BEATPORT_ENRICHMENT_TTL = 7200  # 2 hours in seconds
+
+def get_cached_enrichment(track_url):
+    """Return cached enrichment data for a track URL, or None if missing/expired."""
+    with _beatport_enrichment_lock:
+        entry = _beatport_enrichment_cache.get(track_url)
+        if entry and (time.time() - entry['ts']) < _BEATPORT_ENRICHMENT_TTL:
+            return dict(entry['data'])  # shallow copy — prevent callers from mutating cache
+        elif entry:
+            del _beatport_enrichment_cache[track_url]
+    return None
+
+def set_cached_enrichment(track_url, data):
+    """Store enrichment data for a track URL."""
+    with _beatport_enrichment_lock:
+        _beatport_enrichment_cache[track_url] = {'data': dict(data), 'ts': time.time()}
+
 def get_cached_beatport_data(section_type, data_key, genre_slug=None):
     """
     Get Beatport data from cache if valid, otherwise return None.
@@ -30446,6 +30468,152 @@ def hydrate_search_bubbles():
             'error': str(e)
         }), 500
 
+@app.route('/api/beatport_bubbles/snapshot', methods=['POST'])
+def save_beatport_bubble_snapshot():
+    """Saves a snapshot of current Beatport download bubble state for persistence."""
+    try:
+        from datetime import datetime
+
+        data = request.json
+        if not data or 'bubbles' not in data:
+            return jsonify({'success': False, 'error': 'No bubble data provided'}), 400
+
+        bubbles = data['bubbles']
+
+        db = get_database()
+        db.save_bubble_snapshot('beatport_bubbles', bubbles, profile_id=get_current_profile_id())
+
+        bubble_count = len(bubbles)
+        print(f"📸 Saved Beatport bubble snapshot: {bubble_count} charts")
+
+        return jsonify({
+            'success': True,
+            'message': f'Snapshot saved with {bubble_count} Beatport bubbles',
+            'timestamp': datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        print(f"❌ Error saving Beatport bubble snapshot: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/beatport_bubbles/hydrate', methods=['GET'])
+def hydrate_beatport_bubbles():
+    """Loads Beatport download bubbles with live status from snapshot."""
+    try:
+        from datetime import datetime, timedelta
+
+        db = get_database()
+        snapshot = db.get_bubble_snapshot('beatport_bubbles', profile_id=get_current_profile_id())
+
+        if not snapshot:
+            return jsonify({
+                'success': True,
+                'bubbles': {},
+                'message': 'No snapshots found'
+            })
+
+        saved_bubbles = snapshot['data']
+        snapshot_time = snapshot['timestamp']
+
+        # Clean up old snapshots (older than 48 hours)
+        try:
+            if snapshot_time:
+                snapshot_dt = datetime.fromisoformat(snapshot_time.replace('Z', '+00:00'))
+                cutoff = datetime.now() - timedelta(hours=48)
+                if snapshot_dt < cutoff:
+                    print(f"🧹 Cleaning up old Beatport snapshot from {snapshot_time}")
+                    db.delete_bubble_snapshot('beatport_bubbles', profile_id=get_current_profile_id())
+                    return jsonify({
+                        'success': True,
+                        'bubbles': {},
+                        'message': 'Old snapshot cleaned up'
+                    })
+        except ValueError as e:
+            print(f"⚠️ Error checking Beatport snapshot age: {e}")
+
+        # Get current active download processes for live status
+        current_processes = {}
+        try:
+            with tasks_lock:
+                for batch_id, batch_data in download_batches.items():
+                    if batch_data.get('phase') not in ['complete', 'error', 'cancelled']:
+                        playlist_id = batch_data.get('playlist_id')
+                        if playlist_id:
+                            current_processes[playlist_id] = {
+                                'status': 'in_progress',
+                                'batch_id': batch_id,
+                                'phase': batch_data.get('phase')
+                            }
+        except Exception as e:
+            print(f"⚠️ Error fetching active processes for Beatport hydration: {e}")
+
+        # If no active processes exist, app likely restarted — clean up
+        if not current_processes:
+            print(f"🧹 No active processes found - cleaning up Beatport snapshot")
+            db.delete_bubble_snapshot('beatport_bubbles', profile_id=get_current_profile_id())
+            return jsonify({
+                'success': True,
+                'bubbles': {},
+                'message': 'No active processes - returning empty bubbles'
+            })
+
+        # Update bubble statuses with live data
+        hydrated_bubbles = {}
+        for chart_key, bubble_data in saved_bubbles.items():
+            hydrated_bubble = {
+                'chart': bubble_data['chart'],
+                'downloads': []
+            }
+
+            for download in bubble_data.get('downloads', []):
+                virtual_playlist_id = download['virtualPlaylistId']
+
+                if virtual_playlist_id in current_processes:
+                    live_status = 'in_progress'
+                else:
+                    live_status = 'view_results'
+
+                hydrated_bubble['downloads'].append({
+                    'virtualPlaylistId': virtual_playlist_id,
+                    'status': live_status,
+                    'startTime': download.get('startTime', datetime.now().isoformat())
+                })
+
+            if hydrated_bubble['downloads']:
+                hydrated_bubbles[chart_key] = hydrated_bubble
+
+        bubble_count = len(hydrated_bubbles)
+        active_count = sum(1 for b in hydrated_bubbles.values()
+                          for d in b['downloads'] if d['status'] == 'in_progress')
+        completed_count = sum(1 for b in hydrated_bubbles.values()
+                             for d in b['downloads'] if d['status'] == 'view_results')
+
+        print(f"🔄 Hydrated {bubble_count} Beatport bubbles: {active_count} active, {completed_count} completed")
+
+        return jsonify({
+            'success': True,
+            'bubbles': hydrated_bubbles,
+            'stats': {
+                'total_charts': bubble_count,
+                'active_downloads': active_count,
+                'completed_downloads': completed_count
+            }
+        })
+
+    except Exception as e:
+        print(f"❌ Error hydrating Beatport bubbles: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 # --- Profile API Endpoints ---
 
 @app.route('/api/profiles', methods=['GET'])
@@ -36264,19 +36432,55 @@ def enrich_beatport_tracks():
 
         logger.info(f"🎯 Enriching {len(tracks)} Beatport tracks with per-track metadata (id: {enrichment_id})")
 
-        def on_progress(completed, total, track_name):
+        # --- Check enrichment cache ---
+        cached_results = {}   # index -> enriched track data
+        uncached_tracks = []  # tracks that need scraping
+        uncached_indices = [] # original indices of uncached tracks
+
+        for i, track in enumerate(tracks):
+            url = track.get('url') or track.get('track_url') or ''
+            if url:
+                cached = get_cached_enrichment(url)
+                if cached:
+                    cached_results[i] = cached
+                    continue
+            uncached_tracks.append(track)
+            uncached_indices.append(i)
+
+        cache_hits = len(cached_results)
+        cache_misses = len(uncached_tracks)
+        cache_size = len(_beatport_enrichment_cache)
+        logger.info(f"📦 Enrichment cache: {cache_hits} hits, {cache_misses} misses (cache has {cache_size} entries)")
+        if cache_misses > 0 and cache_size > 0:
+            sample_input_url = (uncached_tracks[0].get('url') or uncached_tracks[0].get('track_url') or 'NO_URL')
+            sample_cached_url = next(iter(_beatport_enrichment_cache), 'EMPTY')
+            logger.info(f"📦 Cache debug — input URL: {sample_input_url[:80]} | cached URL: {sample_cached_url[:80]}")
+
+        # Emit instant progress for cached tracks
+        if cache_hits > 0:
             socketio.emit('beatport:enrich_progress', {
                 'enrichment_id': enrichment_id,
-                'completed': completed,
-                'total': total,
-                'current_track': track_name
+                'completed': cache_hits,
+                'total': len(tracks),
+                'current_track': f'{cache_hits} tracks (cached)'
             })
 
-        scraper = BeatportUnifiedScraper()
-        enriched = scraper.enrich_chart_tracks(tracks, progress_callback=on_progress)
+        # --- Enrich uncached tracks ---
+        newly_enriched = []
+        if uncached_tracks:
+            def on_progress(completed, total, track_name):
+                socketio.emit('beatport:enrich_progress', {
+                    'enrichment_id': enrichment_id,
+                    'completed': cache_hits + completed,
+                    'total': len(tracks),
+                    'current_track': track_name
+                })
 
-        # Apply text cleaning
-        for track in enriched:
+            scraper = BeatportUnifiedScraper()
+            newly_enriched = scraper.enrich_chart_tracks(uncached_tracks, progress_callback=on_progress)
+
+        # --- Apply text cleaning and cache newly enriched tracks ---
+        def clean_track(track):
             if track.get('title'):
                 track['title'] = clean_beatport_text(track['title'])
             if track.get('artist'):
@@ -36285,10 +36489,30 @@ def enrich_beatport_tracks():
                 track['release_name'] = clean_beatport_text(track['release_name'])
             if track.get('label'):
                 track['label'] = clean_beatport_text(track['label'])
+            return track
 
-        logger.info(f"✅ Enriched {len(enriched)} tracks")
+        for track in newly_enriched:
+            clean_track(track)
+            url = track.get('url') or track.get('track_url') or ''
+            if url:
+                set_cached_enrichment(url, track)
 
-        return jsonify({"success": True, "tracks": enriched})
+        # --- Merge results in original order ---
+        merged = [None] * len(tracks)
+        for idx, data in cached_results.items():
+            merged[idx] = data
+        for j, idx in enumerate(uncached_indices):
+            if j < len(newly_enriched):
+                merged[idx] = newly_enriched[j]
+
+        # Fill any gaps with original track data (safety)
+        for i in range(len(merged)):
+            if merged[i] is None:
+                merged[i] = tracks[i]
+
+        logger.info(f"✅ Enriched {len(merged)} tracks ({cache_hits} cached, {cache_misses} scraped)")
+
+        return jsonify({"success": True, "tracks": merged})
 
     except Exception as e:
         logger.error(f"❌ Error enriching tracks: {e}")

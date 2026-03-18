@@ -93,6 +93,11 @@ let downloadsUpdateTimeout = null; // Debounce downloads section updates
 // --- Search Downloads Management State ---
 let searchDownloadBubbles = {}; // Track search download bubbles: artistName -> { artist, downloads: [] }
 let searchDownloadModalOpen = false; // Track if search download modal is open
+
+// --- Beatport Downloads Management State ---
+let beatportDownloadBubbles = {}; // Track Beatport download bubbles: chartKey -> { chart: { name, image }, downloads: [] }
+let beatportDownloadsUpdateTimeout = null; // Debounce Beatport downloads section updates
+
 let artistsSearchTimeout = null;
 let artistsSearchController = null;
 let artistCompletionController = null; // Track ongoing completion check to cancel when navigating away
@@ -7610,6 +7615,9 @@ async function loadInitialData() {
         // Load discover download state
         await hydrateDiscoverDownloadsFromSnapshot();
 
+        // Load Beatport bubble state
+        await hydrateBeatportBubblesFromSnapshot();
+
         // Navigate to user's home page (or dashboard for admin)
         const homePage = getProfileHomePage();
         if (homePage !== 'dashboard') {
@@ -10576,6 +10584,13 @@ async function closeDownloadMissingModal(playlistId) {
             console.log(`🧹 [MODAL CLOSE] Cleaning up search download for completed modal: ${playlistId}`);
             cleanupSearchDownload(playlistId);
             console.log(`✅ [MODAL CLOSE] Search download cleanup completed for: ${playlistId}`);
+        }
+
+        // Clean up Beatport download if this is a beatport chart playlist
+        if (playlistId.startsWith('beatport_chart_')) {
+            console.log(`🧹 [MODAL CLOSE] Cleaning up Beatport download for completed modal: ${playlistId}`);
+            cleanupBeatportDownload(playlistId);
+            console.log(`✅ [MODAL CLOSE] Beatport download cleanup completed for: ${playlistId}`);
         }
 
         // Remove from discover download sidebar if this is a discover page download
@@ -21263,8 +21278,11 @@ function updateDashboardDownloads() {
         searchDownloadBubbles[name].downloads.length > 0
     );
     const activeDiscover = Object.keys(discoverDownloads);
+    const activeBeatport = Object.keys(beatportDownloadBubbles).filter(key =>
+        beatportDownloadBubbles[key].downloads.length > 0
+    );
 
-    const totalCount = activeArtists.length + activeSearch.length + activeDiscover.length;
+    const totalCount = activeArtists.length + activeSearch.length + activeDiscover.length + activeBeatport.length;
 
     if (totalCount === 0) {
         section.style.display = 'none';
@@ -21317,6 +21335,20 @@ function updateDashboardDownloads() {
             </div>`;
     }
 
+    // --- Beatport group ---
+    if (activeBeatport.length > 0) {
+        html += `
+            <div class="dashboard-downloads-group">
+                <div class="dashboard-downloads-group-header">
+                    <span class="dashboard-downloads-group-label">Beatport</span>
+                    <span class="dashboard-downloads-group-count">${activeBeatport.length}</span>
+                </div>
+                <div class="dashboard-bubble-container">
+                    ${activeBeatport.map(key => createBeatportBubbleCard(beatportDownloadBubbles[key])).join('')}
+                </div>
+            </div>`;
+    }
+
     container.innerHTML = html;
 
     // Post-render: attach artist bubble click handlers + dynamic glow
@@ -21327,6 +21359,19 @@ function updateDashboardDownloads() {
             const artist = artistDownloadBubbles[artistId].artist;
             if (artist.image_url) {
                 extractImageColors(artist.image_url, (colors) => {
+                    applyDynamicGlow(card, colors);
+                });
+            }
+        }
+    });
+    // Beatport bubble click handlers + glow
+    activeBeatport.forEach(chartKey => {
+        const card = container.querySelector(`.artist-bubble-card[data-chart-key="${chartKey}"]`);
+        if (card) {
+            card.addEventListener('click', () => openBeatportBubbleModal(chartKey));
+            const chartImage = beatportDownloadBubbles[chartKey].chart.image;
+            if (chartImage) {
+                extractImageColors(chartImage, (colors) => {
                     applyDynamicGlow(card, colors);
                 });
             }
@@ -32385,6 +32430,7 @@ function updateArtistDownloadsSection() {
     downloadsUpdateTimeout = setTimeout(() => {
         showArtistDownloadsSection();
         showLibraryDownloadsSection();
+        showBeatportDownloadsSection();
         updateDashboardDownloads();
     }, 300); // 300ms debounce
 }
@@ -33700,6 +33746,324 @@ function bulkCompleteArtistDownloads(artistId) {
     });
 
     showToast(`Completed ${completedDownloads.length} downloads for ${artistBubbleData.artist.name}`, 'success');
+}
+
+// ========================================
+// Beatport Download Bubbles
+// ========================================
+
+/**
+ * Register a new Beatport chart download for bubble management
+ */
+function registerBeatportDownload(chartName, chartImage, virtualPlaylistId) {
+    console.log(`📝 Registering Beatport download: ${chartName}`);
+
+    // Use chart name as key (sanitised)
+    const chartKey = chartName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+
+    if (!beatportDownloadBubbles[chartKey]) {
+        beatportDownloadBubbles[chartKey] = {
+            chart: { name: chartName, image: chartImage || '' },
+            downloads: []
+        };
+    }
+
+    beatportDownloadBubbles[chartKey].downloads.push({
+        virtualPlaylistId: virtualPlaylistId,
+        status: 'in_progress',
+        startTime: new Date()
+    });
+
+    updateBeatportDownloadsSection();
+    saveBeatportBubbleSnapshot();
+    monitorBeatportDownload(chartKey, virtualPlaylistId);
+}
+
+/**
+ * Debounced update for Beatport downloads section
+ */
+function updateBeatportDownloadsSection() {
+    if (beatportDownloadsUpdateTimeout) {
+        clearTimeout(beatportDownloadsUpdateTimeout);
+    }
+    beatportDownloadsUpdateTimeout = setTimeout(() => {
+        showBeatportDownloadsSection();
+        updateDashboardDownloads();
+    }, 300);
+}
+
+/**
+ * Render Beatport download bubbles on the Beatport page
+ */
+function showBeatportDownloadsSection() {
+    const downloadsSection = document.getElementById('beatport-downloads-section');
+    if (!downloadsSection) return;
+
+    const activeCharts = Object.keys(beatportDownloadBubbles).filter(key =>
+        beatportDownloadBubbles[key].downloads.length > 0
+    );
+
+    if (activeCharts.length === 0) {
+        downloadsSection.style.display = 'none';
+        return;
+    }
+
+    downloadsSection.style.display = 'block';
+    downloadsSection.innerHTML = `
+        <div class="artist-downloads-header">
+            <h3 class="artist-downloads-title">Beatport Downloads</h3>
+            <p class="artist-downloads-subtitle">Active chart download processes</p>
+        </div>
+        <div class="artist-bubble-container" id="beatport-bubble-container">
+            ${activeCharts.map(key => createBeatportBubbleCard(beatportDownloadBubbles[key])).join('')}
+        </div>
+    `;
+
+    // Attach click handlers + glow
+    activeCharts.forEach(chartKey => {
+        const card = downloadsSection.querySelector(`[data-chart-key="${chartKey}"]`);
+        if (card) {
+            card.addEventListener('click', () => openBeatportBubbleModal(chartKey));
+            const chartImage = beatportDownloadBubbles[chartKey].chart.image;
+            if (chartImage) {
+                extractImageColors(chartImage, (colors) => {
+                    applyDynamicGlow(card, colors);
+                });
+            }
+        }
+    });
+}
+
+/**
+ * Create HTML for a Beatport bubble card (reuses artist bubble CSS)
+ */
+function createBeatportBubbleCard(bubbleData) {
+    const { chart, downloads } = bubbleData;
+    const chartKey = chart.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+    const activeCount = downloads.filter(d => d.status === 'in_progress').length;
+    const completedCount = downloads.filter(d => d.status === 'view_results').length;
+    const allCompleted = activeCount === 0 && completedCount > 0;
+
+    const backgroundStyle = chart.image
+        ? `background-image: url('${chart.image}');`
+        : `background: linear-gradient(135deg, rgba(0, 210, 120, 0.3) 0%, rgba(0, 170, 100, 0.2) 100%);`;
+
+    return `
+        <div class="artist-bubble-card ${allCompleted ? 'all-completed' : ''}"
+             data-chart-key="${chartKey}"
+             title="Click to manage downloads for ${escapeHtml(chart.name)}">
+            <div class="artist-bubble-image" style="${backgroundStyle}"></div>
+            <div class="artist-bubble-overlay"></div>
+            <div class="artist-bubble-content">
+                <div class="artist-bubble-name">${escapeHtml(chart.name)}</div>
+                <div class="artist-bubble-status">
+                    ${activeCount > 0 ? `${activeCount} active` : ''}
+                    ${completedCount > 0 ? `${completedCount} completed` : ''}
+                </div>
+            </div>
+            ${allCompleted ? `
+                <div class="bulk-complete-indicator"
+                     onclick="event.stopPropagation(); bulkCompleteBeatportDownloads('${chartKey}')"
+                     title="Complete all downloads">
+                    <span class="bulk-complete-icon">✅</span>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+/**
+ * Monitor a Beatport download for completion
+ */
+function monitorBeatportDownload(chartKey, virtualPlaylistId) {
+    const checkStatus = () => {
+        const process = activeDownloadProcesses[virtualPlaylistId];
+        if (!process || !beatportDownloadBubbles[chartKey]) return;
+
+        const download = beatportDownloadBubbles[chartKey].downloads.find(d => d.virtualPlaylistId === virtualPlaylistId);
+        if (!download) return;
+
+        if (process.status === 'complete' && download.status === 'in_progress') {
+            download.status = 'view_results';
+            console.log(`✅ Beatport download completed for ${beatportDownloadBubbles[chartKey].chart.name}`);
+
+            updateBeatportDownloadsSection();
+            saveBeatportBubbleSnapshot();
+
+            const allCompleted = beatportDownloadBubbles[chartKey].downloads.every(d => d.status === 'view_results');
+            if (allCompleted) {
+                console.log(`🟢 All Beatport downloads completed for ${beatportDownloadBubbles[chartKey].chart.name}`);
+                setTimeout(updateBeatportDownloadsSection, 100);
+            }
+        }
+
+        if (process.status !== 'complete') {
+            setTimeout(checkStatus, 2000);
+        }
+    };
+
+    setTimeout(checkStatus, 1000);
+}
+
+/**
+ * Open the download modal for a Beatport chart bubble
+ */
+function openBeatportBubbleModal(chartKey) {
+    const bubbleData = beatportDownloadBubbles[chartKey];
+    if (!bubbleData) return;
+
+    // Find the first download with an active modal
+    for (const download of bubbleData.downloads) {
+        const process = activeDownloadProcesses[download.virtualPlaylistId];
+        if (process && process.modalElement) {
+            process.modalElement.style.display = 'flex';
+            if (process.status === 'complete') {
+                showToast('Review download results and click "Close" to finish.', 'info');
+            }
+            return;
+        }
+    }
+
+    showToast('No active download modal found for this chart', 'info');
+}
+
+/**
+ * Bulk complete all downloads for a Beatport chart
+ */
+function bulkCompleteBeatportDownloads(chartKey) {
+    console.log(`🎯 Bulk completing Beatport downloads for chart: ${chartKey}`);
+
+    const bubbleData = beatportDownloadBubbles[chartKey];
+    if (!bubbleData) return;
+
+    const completedDownloads = bubbleData.downloads.filter(d => d.status === 'view_results');
+    if (completedDownloads.length === 0) {
+        showToast('No completed downloads to close', 'info');
+        return;
+    }
+
+    completedDownloads.forEach(download => {
+        const process = activeDownloadProcesses[download.virtualPlaylistId];
+        if (process && process.modalElement) {
+            closeDownloadMissingModal(download.virtualPlaylistId);
+        } else {
+            cleanupBeatportDownload(download.virtualPlaylistId);
+        }
+    });
+
+    showToast(`Completed ${completedDownloads.length} downloads for ${bubbleData.chart.name}`, 'success');
+}
+
+/**
+ * Clean up a Beatport download when its modal is closed
+ */
+function cleanupBeatportDownload(virtualPlaylistId) {
+    console.log(`🔍 [CLEANUP] Looking for Beatport download to cleanup: ${virtualPlaylistId}`);
+
+    for (const chartKey in beatportDownloadBubbles) {
+        const downloads = beatportDownloadBubbles[chartKey].downloads;
+        const downloadIndex = downloads.findIndex(d => d.virtualPlaylistId === virtualPlaylistId);
+
+        if (downloadIndex !== -1) {
+            downloads.splice(downloadIndex, 1);
+            console.log(`🧹 [CLEANUP] Removed Beatport download from ${chartKey}. Remaining: ${downloads.length}`);
+
+            if (downloads.length === 0) {
+                delete beatportDownloadBubbles[chartKey];
+                console.log(`🧹 [CLEANUP] No more downloads - removed Beatport bubble: ${chartKey}`);
+            }
+
+            updateBeatportDownloadsSection();
+            saveBeatportBubbleSnapshot();
+            return;
+        }
+    }
+}
+
+// --- Beatport Bubble Snapshot System ---
+
+let beatportSnapshotSaveTimeout = null;
+
+async function saveBeatportBubbleSnapshot() {
+    if (beatportSnapshotSaveTimeout) {
+        clearTimeout(beatportSnapshotSaveTimeout);
+    }
+
+    beatportSnapshotSaveTimeout = setTimeout(async () => {
+        try {
+            const bubbleCount = Object.keys(beatportDownloadBubbles).length;
+            if (bubbleCount === 0) return;
+
+            const cleanBubbles = {};
+            for (const [chartKey, bubbleData] of Object.entries(beatportDownloadBubbles)) {
+                cleanBubbles[chartKey] = {
+                    chart: bubbleData.chart,
+                    downloads: bubbleData.downloads.map(d => ({
+                        virtualPlaylistId: d.virtualPlaylistId,
+                        status: d.status,
+                        startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime
+                    }))
+                };
+            }
+
+            const response = await fetch('/api/beatport_bubbles/snapshot', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bubbles: cleanBubbles })
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                console.log(`✅ Beatport bubble snapshot saved: ${bubbleCount} charts`);
+            }
+        } catch (error) {
+            console.error('❌ Error saving Beatport bubble snapshot:', error);
+        }
+    }, 1000);
+}
+
+async function hydrateBeatportBubblesFromSnapshot() {
+    try {
+        console.log('🔄 Loading Beatport bubble snapshot from backend...');
+
+        const response = await fetch('/api/beatport_bubbles/hydrate');
+        const data = await response.json();
+
+        if (!data.success) {
+            console.error('❌ Failed to load Beatport bubble snapshot:', data.error);
+            return;
+        }
+
+        const bubbles = data.bubbles || {};
+        if (Object.keys(bubbles).length === 0) {
+            console.log('ℹ️ No Beatport bubbles to hydrate');
+            return;
+        }
+
+        beatportDownloadBubbles = {};
+
+        for (const [chartKey, bubbleData] of Object.entries(bubbles)) {
+            beatportDownloadBubbles[chartKey] = {
+                chart: bubbleData.chart,
+                downloads: bubbleData.downloads.map(d => ({
+                    virtualPlaylistId: d.virtualPlaylistId,
+                    status: d.status,
+                    startTime: new Date(d.startTime)
+                }))
+            };
+
+            for (const download of bubbleData.downloads) {
+                if (download.status === 'in_progress') {
+                    monitorBeatportDownload(chartKey, download.virtualPlaylistId);
+                }
+            }
+        }
+
+        updateBeatportDownloadsSection();
+        console.log(`✅ Hydrated ${Object.keys(beatportDownloadBubbles).length} Beatport download bubbles`);
+    } catch (error) {
+        console.error('❌ Error hydrating Beatport bubbles:', error);
+    }
 }
 
 /**
@@ -43208,36 +43572,46 @@ async function handleBeatportReleaseCardClick(cardElement, release) {
 let _beatportModalOpening = false;
 
 /**
- * Enrich tracks one-by-one via the backend, updating the loading overlay with progress.
+ * Enrich tracks via a single batch request to the backend.
+ * Progress is reported via WebSocket (beatport:enrich_progress) and updates the loading overlay.
  * Returns the enriched tracks array.
  */
 async function _enrichTracksWithProgress(tracks, chartName) {
-    const enrichedTracks = [];
-    for (let i = 0; i < tracks.length; i++) {
-        const track = tracks[i];
+    const enrichmentId = `enrich_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+    // Listen for WebSocket progress updates to drive the loading overlay
+    const progressHandler = (data) => {
+        if (data.enrichment_id !== enrichmentId) return;
         const overlayText = document.querySelector('#loading-overlay .loading-message');
         if (overlayText) {
-            overlayText.textContent = `Fetching track metadata... (${i + 1}/${tracks.length}) ${track.title || ''}`;
+            overlayText.textContent = `Fetching track metadata... (${data.completed}/${data.total}) ${data.current_track || ''}`;
         }
+    };
+    if (typeof socket !== 'undefined' && socket) {
+        socket.on('beatport:enrich_progress', progressHandler);
+    }
 
-        try {
-            const resp = await fetch('/api/beatport/enrich-tracks', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tracks: [track] })
-            });
-            const data = await resp.json();
-            if (data.success && data.tracks && data.tracks.length > 0) {
-                enrichedTracks.push(data.tracks[0]);
-            } else {
-                enrichedTracks.push(track);
-            }
-        } catch (e) {
-            console.warn(`⚠️ Failed to enrich track ${i + 1}:`, e);
-            enrichedTracks.push(track);
+    try {
+        const resp = await fetch('/api/beatport/enrich-tracks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tracks, enrichment_id: enrichmentId })
+        });
+        const data = await resp.json();
+
+        if (data.success && data.tracks) {
+            return data.tracks;
+        }
+        console.warn('⚠️ Enrichment failed, returning original tracks');
+        return tracks;
+    } catch (e) {
+        console.warn('⚠️ Failed to enrich tracks:', e);
+        return tracks;
+    } finally {
+        if (typeof socket !== 'undefined' && socket) {
+            socket.off('beatport:enrich_progress', progressHandler);
         }
     }
-    return enrichedTracks;
 }
 
 function parseBeatportDuration(raw) {
@@ -43250,9 +43624,9 @@ function parseBeatportDuration(raw) {
 }
 
 function openBeatportChartAsDownloadModal(tracks, chartName, chartImage) {
-    if (_beatportModalOpening) return;
-    _beatportModalOpening = true;
-    setTimeout(() => { _beatportModalOpening = false; }, 500);
+    // Note: callers already guard against double-clicks via _beatportModalOpening.
+    // Reset the flag here so the modal can open even after fast (cached) enrichment.
+    _beatportModalOpening = false;
 
     const albumObj = {
         id: `beatport_chart_${Date.now()}`,
@@ -43311,6 +43685,9 @@ function openBeatportChartAsDownloadModal(tracks, chartName, chartImage) {
         false,
         'playlist'
     );
+
+    // Register Beatport download bubble
+    registerBeatportDownload(chartName, chartImage, virtualPlaylistId);
 }
 
 /**
