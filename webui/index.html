@@ -5703,7 +5703,17 @@
             <div class="mcache-modal-header">
                 <h3 class="mcache-modal-title">Metadata Cache Browser</h3>
                 <div class="mcache-modal-header-actions">
-                    <button class="mcache-btn-clear" onclick="clearMetadataCache()" title="Clear all cached data">Clear</button>
+                    <div class="mcache-clear-dropdown" id="mcache-clear-dropdown">
+                        <button class="mcache-btn-clear" onclick="toggleMcacheClearDropdown(event)" title="Clear cached data">Clear ▾</button>
+                        <div class="mcache-clear-dropdown-menu" id="mcache-clear-dropdown-menu">
+                            <button onclick="clearMetadataCacheBySource('spotify')"><span class="mcache-source-badge spotify" style="margin-right:6px">spotify</span>Clear Spotify</button>
+                            <button onclick="clearMetadataCacheBySource('itunes')"><span class="mcache-source-badge itunes" style="margin-right:6px">itunes</span>Clear iTunes</button>
+                            <button onclick="clearMetadataCacheBySource('deezer')"><span class="mcache-source-badge deezer" style="margin-right:6px">deezer</span>Clear Deezer</button>
+                            <button onclick="clearMetadataCacheBySource('beatport')"><span class="mcache-source-badge beatport" style="margin-right:6px">beatport</span>Clear Beatport</button>
+                            <div style="border-top:1px solid rgba(255,255,255,0.08);margin:4px 0"></div>
+                            <button onclick="clearMetadataCache()">Clear All</button>
+                        </div>
+                    </div>
                     <button class="mcache-modal-close" onclick="closeMetadataCacheModal()">&times;</button>
                 </div>
             </div>
@@ -5719,6 +5729,10 @@
                 <div class="mcache-stat-pill">
                     <span class="mcache-stat-pill-label">Deezer</span>
                     <span class="mcache-stat-pill-value" id="mcache-browse-deezer-count">0</span>
+                </div>
+                <div class="mcache-stat-pill">
+                    <span class="mcache-stat-pill-label">Beatport</span>
+                    <span class="mcache-stat-pill-value" id="mcache-browse-beatport-count">0</span>
                 </div>
                 <div class="mcache-stat-pill">
                     <span class="mcache-stat-pill-label">Total Hits</span>
@@ -5741,6 +5755,7 @@
                     <option value="spotify">Spotify</option>
                     <option value="itunes">iTunes</option>
                     <option value="deezer">Deezer</option>
+                    <option value="beatport">Beatport</option>
                 </select>
                 <select class="mcache-sort-filter" id="mcache-sort-filter" onchange="loadMetadataCacheBrowse()">
                     <option value="last_accessed_at">Recently Accessed</option>

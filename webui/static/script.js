@@ -18102,9 +18102,9 @@ async function loadMetadataCacheStats() {
         const tracksEl = document.getElementById('mcache-stat-tracks');
         const hitsEl = document.getElementById('mcache-stat-hits');
 
-        if (artistsEl) artistsEl.textContent = (stats.artists?.spotify || 0) + (stats.artists?.itunes || 0) + (stats.artists?.deezer || 0);
-        if (albumsEl) albumsEl.textContent = (stats.albums?.spotify || 0) + (stats.albums?.itunes || 0) + (stats.albums?.deezer || 0);
-        if (tracksEl) tracksEl.textContent = (stats.tracks?.spotify || 0) + (stats.tracks?.itunes || 0) + (stats.tracks?.deezer || 0);
+        if (artistsEl) artistsEl.textContent = (stats.artists?.spotify || 0) + (stats.artists?.itunes || 0) + (stats.artists?.deezer || 0) + (stats.artists?.beatport || 0);
+        if (albumsEl) albumsEl.textContent = (stats.albums?.spotify || 0) + (stats.albums?.itunes || 0) + (stats.albums?.deezer || 0) + (stats.albums?.beatport || 0);
+        if (tracksEl) tracksEl.textContent = (stats.tracks?.spotify || 0) + (stats.tracks?.itunes || 0) + (stats.tracks?.deezer || 0) + (stats.tracks?.beatport || 0);
         if (hitsEl) hitsEl.textContent = stats.total_hits || 0;
     } catch (e) {
         // Silently fail — cache may not be initialized yet
@@ -18856,9 +18856,11 @@ async function loadMetadataCacheBrowseStats() {
         const spotifyTotal = (stats.artists?.spotify || 0) + (stats.albums?.spotify || 0) + (stats.tracks?.spotify || 0);
         const itunesTotal = (stats.artists?.itunes || 0) + (stats.albums?.itunes || 0) + (stats.tracks?.itunes || 0);
         const deezerTotal = (stats.artists?.deezer || 0) + (stats.albums?.deezer || 0) + (stats.tracks?.deezer || 0);
+        const beatportTotal = (stats.artists?.beatport || 0) + (stats.albums?.beatport || 0) + (stats.tracks?.beatport || 0);
         el('mcache-browse-spotify-count', spotifyTotal);
         el('mcache-browse-itunes-count', itunesTotal);
         el('mcache-browse-deezer-count', deezerTotal);
+        el('mcache-browse-beatport-count', beatportTotal);
         el('mcache-browse-hits', stats.total_hits || 0);
         el('mcache-browse-searches', stats.searches || 0);
     } catch (e) { /* ignore */ }
@@ -18959,7 +18961,7 @@ function renderMetadataCacheGrid(items, entityType) {
         }
 
         return `
-            <div class="mcache-card" onclick="openMetadataCacheDetail('${source}', '${entityType}', '${item.entity_id}')">
+            <div class="mcache-card" onclick="openMetadataCacheDetail('${source}', '${entityType}', '${encodeURIComponent(item.entity_id)}')">
                 <div class="mcache-card-top">
                     ${imageHtml}
                     <div class="mcache-card-info">
@@ -19126,8 +19128,26 @@ function closeMetadataCacheDetail() {
     if (modal) modal.style.display = 'none';
 }
 
+function toggleMcacheClearDropdown(event) {
+    event.stopPropagation();
+    const menu = document.getElementById('mcache-clear-dropdown-menu');
+    if (!menu) return;
+    const isOpen = menu.style.display === 'block';
+    menu.style.display = isOpen ? 'none' : 'block';
+    if (!isOpen) {
+        const closeHandler = (e) => {
+            if (!e.target.closest('#mcache-clear-dropdown')) {
+                menu.style.display = 'none';
+                document.removeEventListener('click', closeHandler);
+            }
+        };
+        setTimeout(() => document.addEventListener('click', closeHandler), 0);
+    }
+}
+
 async function clearMetadataCache() {
-    if (!confirm('Clear all cached metadata? This will remove all cached API responses from Spotify and iTunes.')) return;
+    if (!confirm('Clear ALL cached metadata? This removes all cached API responses.')) return;
+    document.getElementById('mcache-clear-dropdown-menu').style.display = 'none';
 
     try {
         const response = await fetch('/api/metadata-cache/clear', { method: 'DELETE' });
@@ -19142,6 +19162,26 @@ async function clearMetadataCache() {
         }
     } catch (e) {
         showToast('Error clearing cache', 'error');
+    }
+}
+
+async function clearMetadataCacheBySource(source) {
+    if (!confirm(`Clear all ${source} cached metadata?`)) return;
+    document.getElementById('mcache-clear-dropdown-menu').style.display = 'none';
+
+    try {
+        const response = await fetch(`/api/metadata-cache/clear?source=${source}`, { method: 'DELETE' });
+        const data = await response.json();
+        if (data.success) {
+            showToast(`Cleared ${data.cleared} ${source} cache entries`, 'success');
+            loadMetadataCacheBrowseStats();
+            loadMetadataCacheBrowse();
+            loadMetadataCacheStats();
+        } else {
+            showToast(`Failed to clear ${source} cache`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error clearing ${source} cache`, 'error');
     }
 }
 
@@ -26434,12 +26474,12 @@ function setupDJChartItemHandlers() {
 
             try {
                 showToast(`Loading ${chartName}...`, 'info');
-                showLoadingOverlay(`Loading ${chartName}...`);
+                showLoadingOverlay(`Scraping ${chartName}...`);
 
                 const response = await fetch('/api/beatport/chart/extract', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chart_url: chartUrl, chart_name: chartName, limit: 100 })
+                    body: JSON.stringify({ chart_url: chartUrl, chart_name: chartName, limit: 100, enrich: false })
                 });
 
                 if (!response.ok) {
@@ -26451,9 +26491,11 @@ function setupDJChartItemHandlers() {
                     throw new Error('No tracks found in chart');
                 }
 
-                console.log(`✅ Extracted ${data.tracks.length} tracks from DJ chart: ${chartName}`);
+                console.log(`✅ Extracted ${data.tracks.length} raw tracks from DJ chart, enriching...`);
+                const enrichedTracks = await _enrichTracksWithProgress(data.tracks, chartName);
+
                 hideLoadingOverlay();
-                openBeatportChartAsDownloadModal(data.tracks, chartName, null);
+                openBeatportChartAsDownloadModal(enrichedTracks, chartName, null);
 
             } catch (error) {
                 console.error('❌ Error extracting DJ chart tracks:', error);
@@ -26476,12 +26518,12 @@ function setupFeaturedChartItemHandlers() {
 
             try {
                 showToast(`Loading ${chartName}...`, 'info');
-                showLoadingOverlay(`Loading ${chartName}...`);
+                showLoadingOverlay(`Scraping ${chartName}...`);
 
                 const response = await fetch('/api/beatport/chart/extract', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chart_url: chartUrl, chart_name: chartName, limit: 100 })
+                    body: JSON.stringify({ chart_url: chartUrl, chart_name: chartName, limit: 100, enrich: false })
                 });
 
                 if (!response.ok) {
@@ -26493,9 +26535,11 @@ function setupFeaturedChartItemHandlers() {
                     throw new Error('No tracks found in chart');
                 }
 
-                console.log(`✅ Extracted ${data.tracks.length} tracks from Featured chart: ${chartName}`);
+                console.log(`✅ Extracted ${data.tracks.length} raw tracks from Featured chart, enriching...`);
+                const enrichedTracks = await _enrichTracksWithProgress(data.tracks, chartName);
+
                 hideLoadingOverlay();
-                openBeatportChartAsDownloadModal(data.tracks, chartName, null);
+                openBeatportChartAsDownloadModal(enrichedTracks, chartName, null);
 
             } catch (error) {
                 console.error('❌ Error extracting Featured chart tracks:', error);
@@ -26521,12 +26565,12 @@ function setupNewChartItemHandlers(genreSlug, genreId, genreName) {
 
             try {
                 showToast(`Loading ${chartName}...`, 'info');
-                showLoadingOverlay(`Loading ${chartName}...`);
+                showLoadingOverlay(`Scraping ${chartName}...`);
 
                 const response = await fetch('/api/beatport/chart/extract', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chart_url: chartUrl, chart_name: chartName, limit: 100 })
+                    body: JSON.stringify({ chart_url: chartUrl, chart_name: chartName, limit: 100, enrich: false })
                 });
 
                 if (!response.ok) {
@@ -26538,9 +26582,11 @@ function setupNewChartItemHandlers(genreSlug, genreId, genreName) {
                     throw new Error('No tracks found in chart');
                 }
 
-                console.log(`✅ Extracted ${data.tracks.length} tracks from ${fullChartName}`);
+                console.log(`✅ Extracted ${data.tracks.length} raw tracks from ${fullChartName}, enriching...`);
+                const enrichedTracks = await _enrichTracksWithProgress(data.tracks, fullChartName);
+
                 hideLoadingOverlay();
-                openBeatportChartAsDownloadModal(data.tracks, fullChartName, null);
+                openBeatportChartAsDownloadModal(enrichedTracks, fullChartName, null);
 
             } catch (error) {
                 console.error(`❌ Error loading chart: ${error.message}`);
@@ -26706,12 +26752,12 @@ function setupGenreChartItemHandlers(genreSlug, genreId, genreName) {
 
             try {
                 showToast(`Loading ${chartName}...`, 'info');
-                showLoadingOverlay(`Loading ${chartName}...`);
+                showLoadingOverlay(`Scraping ${chartName}...`);
 
                 const response = await fetch('/api/beatport/chart/extract', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chart_url: chartUrl, chart_name: chartName, limit: 100 })
+                    body: JSON.stringify({ chart_url: chartUrl, chart_name: chartName, limit: 100, enrich: false })
                 });
 
                 if (!response.ok) {
@@ -26723,9 +26769,11 @@ function setupGenreChartItemHandlers(genreSlug, genreId, genreName) {
                     throw new Error('No tracks found in chart');
                 }
 
-                console.log(`✅ Extracted ${data.tracks.length} tracks from ${fullChartName}`);
+                console.log(`✅ Extracted ${data.tracks.length} raw tracks from ${fullChartName}, enriching...`);
+                const enrichedTracks = await _enrichTracksWithProgress(data.tracks, fullChartName);
+
                 hideLoadingOverlay();
-                openBeatportChartAsDownloadModal(data.tracks, fullChartName, null);
+                openBeatportChartAsDownloadModal(enrichedTracks, fullChartName, null);
 
             } catch (error) {
                 console.error(`❌ Error loading chart: ${error.message}`);
@@ -43592,18 +43640,6 @@ let _beatportModalOpening = false;
 async function _enrichTracksWithProgress(tracks, chartName) {
     const enrichmentId = `enrich_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
 
-    // Listen for WebSocket progress updates to drive the loading overlay
-    const progressHandler = (data) => {
-        if (data.enrichment_id !== enrichmentId) return;
-        const overlayText = document.querySelector('#loading-overlay .loading-message');
-        if (overlayText) {
-            overlayText.textContent = `Fetching track metadata... (${data.completed}/${data.total}) ${data.current_track || ''}`;
-        }
-    };
-    if (typeof socket !== 'undefined' && socket) {
-        socket.on('beatport:enrich_progress', progressHandler);
-    }
-
     try {
         const resp = await fetch('/api/beatport/enrich-tracks', {
             method: 'POST',
@@ -43612,18 +43648,44 @@ async function _enrichTracksWithProgress(tracks, chartName) {
         });
         const data = await resp.json();
 
+        // Synchronous path — all tracks were cached, results returned inline
         if (data.success && data.tracks) {
             return data.tracks;
         }
+
+        // Async path — poll for progress until done
+        if (data.success && data.async) {
+            while (true) {
+                await new Promise(r => setTimeout(r, 800));
+                try {
+                    const progressResp = await fetch(`/api/beatport/enrich-progress/${enrichmentId}?_=${Date.now()}`);
+                    const progress = await progressResp.json();
+                    if (!progress.success) break;
+
+                    // Update loading overlay with live progress
+                    const overlayText = document.querySelector('#loading-overlay .loading-message');
+                    if (overlayText) {
+                        overlayText.textContent = `Fetching track metadata... (${progress.completed}/${progress.total}) ${progress.current_track || ''}`;
+                    }
+
+                    if (progress.done) {
+                        if (progress.tracks) {
+                            return progress.tracks;
+                        }
+                        console.warn('⚠️ Async enrichment failed:', progress.error);
+                        return tracks;
+                    }
+                } catch (pollErr) {
+                    console.warn('⚠️ Progress poll error:', pollErr);
+                }
+            }
+        }
+
         console.warn('⚠️ Enrichment failed, returning original tracks');
         return tracks;
     } catch (e) {
         console.warn('⚠️ Failed to enrich tracks:', e);
         return tracks;
-    } finally {
-        if (typeof socket !== 'undefined' && socket) {
-            socket.off('beatport:enrich_progress', progressHandler);
-        }
     }
 }
 
@@ -43717,7 +43779,7 @@ async function handleBeatportChartCardClick(cardElement, chart) {
     try {
         const chartName = `${chart.name} - ${chart.creator}`;
         showToast(`Loading ${chart.name}...`, 'info');
-        showLoadingOverlay(`Getting tracks from ${chart.name}...`);
+        showLoadingOverlay(`Scraping ${chart.name}...`);
 
         const response = await fetch('/api/beatport/chart/extract', {
             method: 'POST',
@@ -43725,7 +43787,8 @@ async function handleBeatportChartCardClick(cardElement, chart) {
             body: JSON.stringify({
                 chart_url: chart.url,
                 chart_name: `Featured Chart: ${chart.name}`,
-                limit: 100
+                limit: 100,
+                enrich: false
             })
         });
 
@@ -43735,9 +43798,11 @@ async function handleBeatportChartCardClick(cardElement, chart) {
             throw new Error('No tracks found in this chart');
         }
 
-        console.log(`✅ Fetched ${data.tracks.length} tracks from ${chart.name}`);
+        console.log(`✅ Fetched ${data.tracks.length} raw tracks from ${chart.name}, enriching...`);
+        const enrichedTracks = await _enrichTracksWithProgress(data.tracks, chartName);
+
         hideLoadingOverlay();
-        openBeatportChartAsDownloadModal(data.tracks, chartName, chart.image);
+        openBeatportChartAsDownloadModal(enrichedTracks, chartName, chart.image);
 
     } catch (error) {
         console.error(`❌ Error handling chart click for ${chart.name}:`, error);
@@ -43760,7 +43825,7 @@ async function handleBeatportDJChartCardClick(cardElement, chart) {
     try {
         const chartName = `${chart.name} - ${chart.creator}`;
         showToast(`Loading ${chart.name}...`, 'info');
-        showLoadingOverlay(`Getting tracks from ${chart.name}...`);
+        showLoadingOverlay(`Scraping ${chart.name}...`);
 
         const response = await fetch('/api/beatport/chart/extract', {
             method: 'POST',
@@ -43768,7 +43833,8 @@ async function handleBeatportDJChartCardClick(cardElement, chart) {
             body: JSON.stringify({
                 chart_url: chart.url,
                 chart_name: `DJ Chart: ${chart.name}`,
-                limit: 100
+                limit: 100,
+                enrich: false
             })
         });
 
@@ -43778,9 +43844,11 @@ async function handleBeatportDJChartCardClick(cardElement, chart) {
             throw new Error('No tracks found in this DJ chart');
         }
 
-        console.log(`✅ Fetched ${data.tracks.length} tracks from ${chart.name}`);
+        console.log(`✅ Fetched ${data.tracks.length} raw tracks from ${chart.name}, enriching...`);
+        const enrichedTracks = await _enrichTracksWithProgress(data.tracks, chartName);
+
         hideLoadingOverlay();
-        openBeatportChartAsDownloadModal(data.tracks, chartName, chart.image);
+        openBeatportChartAsDownloadModal(enrichedTracks, chartName, chart.image);
 
     } catch (error) {
         console.error(`❌ Error handling DJ chart click for ${chart.name}:`, error);

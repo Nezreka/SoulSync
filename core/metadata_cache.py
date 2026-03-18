@@ -612,6 +612,8 @@ class MetadataCache:
             return self._extract_itunes_fields(entity_type, raw_data)
         elif source == 'deezer':
             return self._extract_deezer_fields(entity_type, raw_data)
+        elif source == 'beatport':
+            return self._extract_beatport_fields(entity_type, raw_data)
         return {'name': str(raw_data.get('name', raw_data.get('trackName', '')))}
 
     def _extract_spotify_fields(self, entity_type: str, data: dict) -> dict:
@@ -777,6 +779,30 @@ class MetadataCache:
             urls = {}
             if data.get('trackViewUrl'):
                 urls['itunes'] = data['trackViewUrl']
+            fields['external_urls'] = json.dumps(urls)
+
+        return fields
+
+    def _extract_beatport_fields(self, entity_type: str, data: dict) -> dict:
+        """Extract fields from Beatport enriched track data."""
+        fields = {}
+
+        if entity_type == 'track':
+            fields['name'] = data.get('title', '')
+            fields['artist_name'] = data.get('artist', '')
+            fields['album_name'] = data.get('release_name', '')
+            fields['album_id'] = data.get('release_id', '')
+            fields['image_url'] = data.get('release_image', '')
+            fields['label'] = data.get('label', '')
+            fields['release_date'] = data.get('release_date', '')
+            # Beatport duration is in seconds, convert to ms
+            duration = data.get('duration', 0)
+            fields['duration_ms'] = int(duration) * 1000 if duration else 0
+            fields['track_number'] = data.get('position')
+            fields['genres'] = json.dumps([data['genre']]) if data.get('genre') else '[]'
+            urls = {}
+            if data.get('url'):
+                urls['beatport'] = data['url']
             fields['external_urls'] = json.dumps(urls)
 
         return fields

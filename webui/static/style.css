@@ -40180,6 +40180,46 @@ tr.tag-diff-same {
     border-color: rgba(239, 68, 68, 0.35);
 }
 
+.mcache-clear-dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+.mcache-clear-dropdown-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background: #1e1e2e;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 4px;
+    min-width: 180px;
+    z-index: 1000;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.mcache-clear-dropdown-menu button {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background 0.15s;
+    white-space: nowrap;
+}
+
+.mcache-clear-dropdown-menu button:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+}
+
 .mcache-modal-close {
     background: none;
     border: none;
@@ -40440,6 +40480,16 @@ tr.tag-diff-same {
 .mcache-source-badge.itunes {
     background: rgba(252, 60, 68, 0.15);
     color: #fc3c44;
+}
+
+.mcache-source-badge.deezer {
+    background: rgba(160, 55, 255, 0.15);
+    color: #a037ff;
+}
+
+.mcache-source-badge.beatport {
+    background: rgba(0, 210, 120, 0.15);
+    color: #00d278;
 }
 
 .mcache-card-cache-info {
