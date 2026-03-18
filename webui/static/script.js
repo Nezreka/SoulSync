@@ -4880,6 +4880,9 @@ async function loadSettingsData() {
         document.getElementById('embed-album-art').checked = settings.metadata_enhancement?.embed_album_art !== false;
         document.getElementById('cover-art-download').checked = settings.metadata_enhancement?.cover_art_download !== false;
         document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
+        // Load service master toggles
+        document.getElementById('embed-spotify').checked = settings.spotify?.embed_tags !== false;
+        document.getElementById('embed-itunes').checked = settings.itunes?.embed_tags !== false;
         document.getElementById('embed-musicbrainz').checked = settings.musicbrainz?.embed_tags !== false;
         document.getElementById('embed-deezer').checked = settings.deezer?.embed_tags !== false;
         document.getElementById('embed-audiodb').checked = settings.audiodb?.embed_tags !== false;
@@ -4887,16 +4890,18 @@ async function loadSettingsData() {
         document.getElementById('embed-qobuz').checked = settings.qobuz?.embed_tags !== false;
         document.getElementById('embed-lastfm').checked = settings.lastfm?.embed_tags !== false;
         document.getElementById('embed-genius').checked = settings.genius?.embed_tags !== false;
-        document.getElementById('tag-musicbrainz-ids').checked = settings.metadata_enhancement?.tags?.musicbrainz_ids !== false;
-        document.getElementById('tag-release-info').checked = settings.metadata_enhancement?.tags?.release_info !== false;
-        document.getElementById('tag-source-ids').checked = settings.metadata_enhancement?.tags?.source_ids !== false;
-        document.getElementById('tag-isrc').checked = settings.metadata_enhancement?.tags?.isrc !== false;
-        document.getElementById('tag-bpm').checked = settings.metadata_enhancement?.tags?.bpm !== false;
-        document.getElementById('tag-mood-style').checked = settings.metadata_enhancement?.tags?.mood_style !== false;
-        document.getElementById('tag-copyright-label').checked = settings.metadata_enhancement?.tags?.copyright_label !== false;
-        document.getElementById('tag-genre-merge').checked = settings.metadata_enhancement?.tags?.genre_merge !== false;
-        document.getElementById('tag-urls').checked = settings.metadata_enhancement?.tags?.urls !== false;
-        document.getElementById('tag-quality').checked = settings.metadata_enhancement?.tags?.quality !== false;
+        // Load per-tag toggles from data-config attributes
+        document.querySelectorAll('[data-config]').forEach(cb => {
+            const path = cb.dataset.config.split('.');
+            let val = settings;
+            for (const key of path) { val = val?.[key]; }
+            cb.checked = val !== false;
+        });
+        // Apply service disabled state to child tags
+        ['spotify','itunes','musicbrainz','deezer','audiodb','tidal','qobuz','lastfm','genius'].forEach(svc => {
+            const master = document.getElementById('embed-' + svc);
+            if (master) toggleServiceTags(master, svc);
+        });
         document.getElementById('post-processing-options').style.display = settings.metadata_enhancement?.enabled !== false ? 'block' : 'none';
 
         // Populate File Organization settings
@@ -5637,6 +5642,51 @@ async function hydrabaseSendRaw(textareaId) {
     }
 }
 
+// ── Tag embedding accordion helpers ──
+function toggleTagGroup(header) {
+    const body = header.nextElementSibling;
+    const arrow = header.querySelector('.tag-group-arrow');
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        arrow.classList.add('open');
+    } else {
+        body.style.display = 'none';
+        arrow.classList.remove('open');
+    }
+}
+
+function toggleServiceTags(masterCheckbox, serviceName) {
+    const group = masterCheckbox.closest('.tag-service-group');
+    if (!group) return;
+    const body = group.querySelector('.tag-service-body');
+    if (!body) return;
+    const childCheckboxes = body.querySelectorAll('input[type="checkbox"]');
+    childCheckboxes.forEach(cb => {
+        const label = cb.closest('.checkbox-label');
+        if (masterCheckbox.checked) {
+            if (label) label.classList.remove('disabled-tag');
+            cb.disabled = false;
+        } else {
+            if (label) label.classList.add('disabled-tag');
+            cb.disabled = true;
+        }
+    });
+}
+
+function _collectServiceTags(serviceName) {
+    const tags = {};
+    document.querySelectorAll(`[data-config^="${serviceName}.tags."]`).forEach(cb => {
+        const key = cb.dataset.config.split('.').pop();
+        tags[key] = cb.checked;
+    });
+    return tags;
+}
+
+function _getTagConfig(path) {
+    const el = document.querySelector(`[data-config="${path}"]`);
+    return el ? el.checked : true;
+}
+
 async function saveSettings(quiet = false) {
     // Validate file organization templates before saving
     const validationErrors = validateFileOrganizationTemplates();
@@ -5664,7 +5714,8 @@ async function saveSettings(quiet = false) {
             client_id: document.getElementById('tidal-client-id').value,
             client_secret: document.getElementById('tidal-client-secret').value,
             redirect_uri: document.getElementById('tidal-redirect-uri').value,
-            embed_tags: document.getElementById('embed-tidal').checked
+            embed_tags: document.getElementById('embed-tidal').checked,
+            tags: _collectServiceTags('tidal')
         },
         plex: {
             base_url: document.getElementById('plex-url').value,
@@ -5699,14 +5750,18 @@ async function saveSettings(quiet = false) {
         },
         lastfm: {
             api_key: document.getElementById('lastfm-api-key').value,
-            embed_tags: document.getElementById('embed-lastfm').checked
+            embed_tags: document.getElementById('embed-lastfm').checked,
+            tags: _collectServiceTags('lastfm')
         },
         genius: {
             access_token: document.getElementById('genius-access-token').value,
-            embed_tags: document.getElementById('embed-genius').checked
+            embed_tags: document.getElementById('embed-genius').checked,
+            tags: _collectServiceTags('genius')
         },
         itunes: {
-            country: document.getElementById('itunes-country').value || 'US'
+            country: document.getElementById('itunes-country').value || 'US',
+            embed_tags: document.getElementById('embed-itunes').checked,
+            tags: _collectServiceTags('itunes')
         },
         metadata: {
             fallback_source: document.getElementById('metadata-fallback-source').value || 'itunes'
@@ -5724,7 +5779,8 @@ async function saveSettings(quiet = false) {
         },
         qobuz: {
             quality: document.getElementById('qobuz-quality').value || 'lossless',
-            embed_tags: document.getElementById('embed-qobuz').checked
+            embed_tags: document.getElementById('embed-qobuz').checked,
+            tags: _collectServiceTags('qobuz')
         },
         database: {
             max_workers: parseInt(document.getElementById('max-workers').value)
@@ -5735,26 +5791,25 @@ async function saveSettings(quiet = false) {
             cover_art_download: document.getElementById('cover-art-download').checked,
             lrclib_enabled: document.getElementById('lrclib-enabled').checked,
             tags: {
-                musicbrainz_ids: document.getElementById('tag-musicbrainz-ids').checked,
-                release_info: document.getElementById('tag-release-info').checked,
-                source_ids: document.getElementById('tag-source-ids').checked,
-                isrc: document.getElementById('tag-isrc').checked,
-                bpm: document.getElementById('tag-bpm').checked,
-                mood_style: document.getElementById('tag-mood-style').checked,
-                copyright_label: document.getElementById('tag-copyright-label').checked,
-                genre_merge: document.getElementById('tag-genre-merge').checked,
-                urls: document.getElementById('tag-urls').checked,
-                quality: document.getElementById('tag-quality').checked
+                quality_tag: _getTagConfig('metadata_enhancement.tags.quality_tag'),
+                genre_merge: _getTagConfig('metadata_enhancement.tags.genre_merge')
             }
         },
+        spotify: {
+            embed_tags: document.getElementById('embed-spotify').checked,
+            tags: _collectServiceTags('spotify')
+        },
         musicbrainz: {
-            embed_tags: document.getElementById('embed-musicbrainz').checked
+            embed_tags: document.getElementById('embed-musicbrainz').checked,
+            tags: _collectServiceTags('musicbrainz')
         },
         deezer: {
-            embed_tags: document.getElementById('embed-deezer').checked
+            embed_tags: document.getElementById('embed-deezer').checked,
+            tags: _collectServiceTags('deezer')
         },
         audiodb: {
-            embed_tags: document.getElementById('embed-audiodb').checked
+            embed_tags: document.getElementById('embed-audiodb').checked,
+            tags: _collectServiceTags('audiodb')
         },
         file_organization: {
             enabled: document.getElementById('file-organization-enabled').checked,

@@ -14718,7 +14718,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
 
             # ── Embed audio quality tag ──
             quality = context.get('_audio_quality', '')
-            if quality and config_manager.get('metadata_enhancement.tags.quality', True) is not False:
+            if quality and config_manager.get('metadata_enhancement.tags.quality_tag', True) is not False:
                 if isinstance(audio_file.tags, ID3):
                     audio_file.tags.add(TXXX(encoding=3, desc='QUALITY', text=[quality]))
                 elif isinstance(audio_file, (FLAC, OggVorbis)):
@@ -14967,19 +14967,53 @@ def _embed_source_ids(audio_file, metadata: dict):
     Operates on a non-easy-mode MutagenFile object (caller must save).
     """
     try:
-        # ── Tag category config (all default to True) ──
-        tag_cfg = {
-            'musicbrainz_ids': config_manager.get('metadata_enhancement.tags.musicbrainz_ids', True) is not False,
-            'release_info': config_manager.get('metadata_enhancement.tags.release_info', True) is not False,
-            'source_ids': config_manager.get('metadata_enhancement.tags.source_ids', True) is not False,
-            'isrc': config_manager.get('metadata_enhancement.tags.isrc', True) is not False,
-            'bpm': config_manager.get('metadata_enhancement.tags.bpm', True) is not False,
-            'mood_style': config_manager.get('metadata_enhancement.tags.mood_style', True) is not False,
-            'copyright_label': config_manager.get('metadata_enhancement.tags.copyright_label', True) is not False,
-            'genre_merge': config_manager.get('metadata_enhancement.tags.genre_merge', True) is not False,
-            'urls': config_manager.get('metadata_enhancement.tags.urls', True) is not False,
-            'quality': config_manager.get('metadata_enhancement.tags.quality', True) is not False,
+        # ── Per-tag config: maps internal tag name → config path ──
+        # Each tag can be individually toggled via {service}.tags.{tag_name}
+        _TAG_CONFIG = {
+            # Spotify (from metadata, no API call)
+            'SPOTIFY_TRACK_ID': 'spotify.tags.track_id',
+            'SPOTIFY_ARTIST_ID': 'spotify.tags.artist_id',
+            'SPOTIFY_ALBUM_ID': 'spotify.tags.album_id',
+            # iTunes (from metadata, no API call)
+            'ITUNES_TRACK_ID': 'itunes.tags.track_id',
+            'ITUNES_ARTIST_ID': 'itunes.tags.artist_id',
+            'ITUNES_ALBUM_ID': 'itunes.tags.album_id',
+            # MusicBrainz IDs
+            'MUSICBRAINZ_RECORDING_ID': 'musicbrainz.tags.recording_id',
+            'MUSICBRAINZ_ARTIST_ID': 'musicbrainz.tags.artist_id',
+            'MUSICBRAINZ_RELEASE_ID': 'musicbrainz.tags.release_id',
+            'MUSICBRAINZ_RELEASEGROUPID': 'musicbrainz.tags.release_group_id',
+            'MUSICBRAINZ_ALBUMARTISTID': 'musicbrainz.tags.album_artist_id',
+            'MUSICBRAINZ_RELEASETRACKID': 'musicbrainz.tags.release_track_id',
+            # MusicBrainz Release Info
+            'RELEASETYPE': 'musicbrainz.tags.release_type',
+            'ORIGINALDATE': 'musicbrainz.tags.original_date',
+            'RELEASESTATUS': 'musicbrainz.tags.release_status',
+            'RELEASECOUNTRY': 'musicbrainz.tags.release_country',
+            'BARCODE': 'musicbrainz.tags.barcode',
+            'MEDIA': 'musicbrainz.tags.media',
+            'TOTALDISCS': 'musicbrainz.tags.total_discs',
+            'CATALOGNUMBER': 'musicbrainz.tags.catalog_number',
+            'SCRIPT': 'musicbrainz.tags.script',
+            'ASIN': 'musicbrainz.tags.asin',
+            # Deezer
+            'DEEZER_TRACK_ID': 'deezer.tags.track_id',
+            'DEEZER_ARTIST_ID': 'deezer.tags.artist_id',
+            # AudioDB
+            'AUDIODB_TRACK_ID': 'audiodb.tags.track_id',
+            # Tidal
+            'TIDAL_TRACK_ID': 'tidal.tags.track_id',
+            'TIDAL_ARTIST_ID': 'tidal.tags.artist_id',
+            # Qobuz
+            'QOBUZ_TRACK_ID': 'qobuz.tags.track_id',
+            'QOBUZ_ARTIST_ID': 'qobuz.tags.artist_id',
+            # Genius
+            'GENIUS_TRACK_ID': 'genius.tags.track_id',
         }
+
+        def _tag_enabled(config_path):
+            """Check if an individual tag is enabled (defaults to True)."""
+            return config_manager.get(config_path, True) is not False
 
         # ── Helper: normalize + compare names (same logic as enrichment workers) ──
         from difflib import SequenceMatcher
@@ -14991,18 +15025,20 @@ def _embed_source_ids(audio_file, metadata: dict):
 
         # ── 1. Collect Spotify / iTunes IDs already in metadata ──
         id_tags = {}
-        if metadata.get('spotify_track_id'):
-            id_tags['SPOTIFY_TRACK_ID'] = metadata['spotify_track_id']
-        if metadata.get('spotify_artist_id'):
-            id_tags['SPOTIFY_ARTIST_ID'] = metadata['spotify_artist_id']
-        if metadata.get('spotify_album_id'):
-            id_tags['SPOTIFY_ALBUM_ID'] = metadata['spotify_album_id']
-        if metadata.get('itunes_track_id'):
-            id_tags['ITUNES_TRACK_ID'] = metadata['itunes_track_id']
-        if metadata.get('itunes_artist_id'):
-            id_tags['ITUNES_ARTIST_ID'] = metadata['itunes_artist_id']
-        if metadata.get('itunes_album_id'):
-            id_tags['ITUNES_ALBUM_ID'] = metadata['itunes_album_id']
+        if config_manager.get('spotify.embed_tags', True) is not False:
+            if metadata.get('spotify_track_id'):
+                id_tags['SPOTIFY_TRACK_ID'] = metadata['spotify_track_id']
+            if metadata.get('spotify_artist_id'):
+                id_tags['SPOTIFY_ARTIST_ID'] = metadata['spotify_artist_id']
+            if metadata.get('spotify_album_id'):
+                id_tags['SPOTIFY_ALBUM_ID'] = metadata['spotify_album_id']
+        if config_manager.get('itunes.embed_tags', True) is not False:
+            if metadata.get('itunes_track_id'):
+                id_tags['ITUNES_TRACK_ID'] = metadata['itunes_track_id']
+            if metadata.get('itunes_artist_id'):
+                id_tags['ITUNES_ARTIST_ID'] = metadata['itunes_artist_id']
+            if metadata.get('itunes_album_id'):
+                id_tags['ITUNES_ALBUM_ID'] = metadata['itunes_album_id']
 
         # ── 2a. MusicBrainz lookup for MBID, genres, and ISRC ──
         # The global rate limiter in musicbrainz_client.py serializes all API
@@ -15082,7 +15118,7 @@ def _embed_source_ids(audio_file, metadata: dict):
 
         # ── 2a-2. MusicBrainz release details (release group, barcode, media, etc.) ──
         # One API call per release, cached across all tracks on the same album.
-        if _rc_mbid and (tag_cfg['release_info'] or tag_cfg['musicbrainz_ids']):
+        if _rc_mbid:
             try:
                 mb_service_for_detail = mb_worker.mb_service if mb_worker else None
                 if mb_service_for_detail:
@@ -15361,26 +15397,11 @@ def _embed_source_ids(audio_file, metadata: dict):
         if not id_tags and not deezer_bpm and not deezer_isrc and not audiodb_mood and not audiodb_style:
             return
 
-        # ── 3. Filter tags by category config, then write ──
-        _MB_ID_TAGS = {'MUSICBRAINZ_RECORDING_ID', 'MUSICBRAINZ_ARTIST_ID', 'MUSICBRAINZ_RELEASE_ID',
-                       'MUSICBRAINZ_RELEASEGROUPID', 'MUSICBRAINZ_ALBUMARTISTID',
-                       'MUSICBRAINZ_RELEASETRACKID'}
-        _SOURCE_ID_TAGS = {'SPOTIFY_TRACK_ID', 'SPOTIFY_ARTIST_ID', 'SPOTIFY_ALBUM_ID',
-                           'ITUNES_TRACK_ID', 'ITUNES_ARTIST_ID', 'ITUNES_ALBUM_ID',
-                           'DEEZER_TRACK_ID', 'DEEZER_ARTIST_ID', 'AUDIODB_TRACK_ID',
-                           'TIDAL_TRACK_ID', 'TIDAL_ARTIST_ID', 'QOBUZ_TRACK_ID',
-                           'QOBUZ_ARTIST_ID', 'GENIUS_TRACK_ID'}
-        _RELEASE_INFO_TAGS = {'RELEASETYPE', 'RELEASESTATUS', 'RELEASECOUNTRY', 'MEDIA',
-                              'BARCODE', 'CATALOGNUMBER', 'ORIGINALDATE', 'TOTALDISCS', 'SCRIPT',
-                              'ASIN'}
-
+        # ── 3. Filter tags by per-tag config, then write ──
         filtered_tags = {}
         for tag_name, value in id_tags.items():
-            if tag_name in _MB_ID_TAGS and not tag_cfg['musicbrainz_ids']:
-                continue
-            if tag_name in _SOURCE_ID_TAGS and not tag_cfg['source_ids']:
-                continue
-            if tag_name in _RELEASE_INFO_TAGS and not tag_cfg['release_info']:
+            config_path = _TAG_CONFIG.get(tag_name)
+            if config_path and not _tag_enabled(config_path):
                 continue
             filtered_tags[tag_name] = value
 
@@ -15462,7 +15483,7 @@ def _embed_source_ids(audio_file, metadata: dict):
             print(f"🔗 Embedded IDs: {', '.join(written)}")
 
         # ── 3b. Write BPM tag (from Deezer) ──
-        if tag_cfg['bpm'] and deezer_bpm and deezer_bpm > 0:
+        if _tag_enabled('deezer.tags.bpm') and deezer_bpm and deezer_bpm > 0:
             bpm_int = int(deezer_bpm)
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TBPM(encoding=3, text=[str(bpm_int)]))
@@ -15473,7 +15494,7 @@ def _embed_source_ids(audio_file, metadata: dict):
             print(f"🥁 BPM: {bpm_int}")
 
         # ── 3c. Write mood tag (from AudioDB) ──
-        if tag_cfg['mood_style'] and audiodb_mood:
+        if _tag_enabled('audiodb.tags.mood') and audiodb_mood:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TXXX(encoding=3, desc='MOOD', text=[audiodb_mood]))
             elif isinstance(audio_file, (FLAC, OggVorbis)):
@@ -15483,7 +15504,7 @@ def _embed_source_ids(audio_file, metadata: dict):
             print(f"🎭 Mood: {audiodb_mood}")
 
         # ── 3d. Write style tag (from AudioDB) ──
-        if tag_cfg['mood_style'] and audiodb_style:
+        if _tag_enabled('audiodb.tags.style') and audiodb_style:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TXXX(encoding=3, desc='STYLE', text=[audiodb_style]))
             elif isinstance(audio_file, (FLAC, OggVorbis)):
@@ -15493,8 +15514,10 @@ def _embed_source_ids(audio_file, metadata: dict):
             print(f"🎨 Style: {audiodb_style}")
 
         # ── 4. Merge genres (Spotify + MusicBrainz + AudioDB + Last.fm) and overwrite tag ──
-        if tag_cfg['genre_merge']:
-            enrichment_genres = mb_genres + ([audiodb_genre] if audiodb_genre else []) + lastfm_tags
+        if _tag_enabled('metadata_enhancement.tags.genre_merge'):
+            enrichment_genres = (mb_genres if _tag_enabled('musicbrainz.tags.genres') else []) + \
+                                ([audiodb_genre] if audiodb_genre and _tag_enabled('audiodb.tags.genre') else []) + \
+                                (lastfm_tags if _tag_enabled('lastfm.tags.genres') else [])
             if enrichment_genres:
                 spotify_genres = [g.strip() for g in metadata.get('genre', '').split(',') if g.strip()]
                 seen = set()
@@ -15517,34 +15540,44 @@ def _embed_source_ids(audio_file, metadata: dict):
                         audio_file['\xa9gen'] = [genre_string]
                     print(f"🎶 Genres merged: {genre_string}")
 
-        # ── 5. Write ISRC if available (MusicBrainz → Deezer → Tidal → Qobuz fallback) ──
-        if tag_cfg['isrc']:
-            final_isrc = isrc or deezer_isrc or tidal_isrc or qobuz_isrc
-            if final_isrc:
-                if isinstance(audio_file.tags, ID3):
-                    audio_file.tags.add(TSRC(encoding=3, text=[final_isrc]))
-                elif isinstance(audio_file, (FLAC, OggVorbis)):
-                    audio_file['ISRC'] = [final_isrc]
-                elif isinstance(audio_file, MP4):
-                    audio_file['----:com.apple.iTunes:ISRC'] = [MP4FreeForm(final_isrc.encode('utf-8'))]
-                source = "MusicBrainz" if isrc else "Deezer" if deezer_isrc else "Tidal" if tidal_isrc else "Qobuz"
-                print(f"🔖 ISRC ({source}): {final_isrc}")
+        # ── 5. Write ISRC if available (per-source fallback chain) ──
+        _isrc_candidates = []
+        if isrc and _tag_enabled('musicbrainz.tags.isrc'):
+            _isrc_candidates.append(('MusicBrainz', isrc))
+        if deezer_isrc and _tag_enabled('deezer.tags.isrc'):
+            _isrc_candidates.append(('Deezer', deezer_isrc))
+        if tidal_isrc and _tag_enabled('tidal.tags.isrc'):
+            _isrc_candidates.append(('Tidal', tidal_isrc))
+        if qobuz_isrc and _tag_enabled('qobuz.tags.isrc'):
+            _isrc_candidates.append(('Qobuz', qobuz_isrc))
+        if _isrc_candidates:
+            source, final_isrc = _isrc_candidates[0]
+            if isinstance(audio_file.tags, ID3):
+                audio_file.tags.add(TSRC(encoding=3, text=[final_isrc]))
+            elif isinstance(audio_file, (FLAC, OggVorbis)):
+                audio_file['ISRC'] = [final_isrc]
+            elif isinstance(audio_file, MP4):
+                audio_file['----:com.apple.iTunes:ISRC'] = [MP4FreeForm(final_isrc.encode('utf-8'))]
+            print(f"🔖 ISRC ({source}): {final_isrc}")
 
         # ── 6. Write copyright tag (Tidal → Qobuz fallback) ──
-        if tag_cfg['copyright_label']:
-            final_copyright = tidal_copyright or qobuz_copyright
-            if final_copyright:
-                if isinstance(audio_file.tags, ID3):
-                    audio_file.tags.add(TCOP(encoding=3, text=[final_copyright]))
-                elif isinstance(audio_file, (FLAC, OggVorbis)):
-                    audio_file['COPYRIGHT'] = [final_copyright]
-                elif isinstance(audio_file, MP4):
-                    audio_file['cprt'] = [final_copyright]
-                source = "Tidal" if tidal_copyright else "Qobuz"
-                print(f"©️ Copyright ({source}): {final_copyright[:60]}")
+        _copyright_candidates = []
+        if tidal_copyright and _tag_enabled('tidal.tags.copyright'):
+            _copyright_candidates.append(('Tidal', tidal_copyright))
+        if qobuz_copyright and _tag_enabled('qobuz.tags.copyright'):
+            _copyright_candidates.append(('Qobuz', qobuz_copyright))
+        if _copyright_candidates:
+            source, final_copyright = _copyright_candidates[0]
+            if isinstance(audio_file.tags, ID3):
+                audio_file.tags.add(TCOP(encoding=3, text=[final_copyright]))
+            elif isinstance(audio_file, (FLAC, OggVorbis)):
+                audio_file['COPYRIGHT'] = [final_copyright]
+            elif isinstance(audio_file, MP4):
+                audio_file['cprt'] = [final_copyright]
+            print(f"©️ Copyright ({source}): {final_copyright[:60]}")
 
         # ── 7. Write label/publisher tag (from Qobuz) ──
-        if tag_cfg['copyright_label'] and qobuz_label:
+        if _tag_enabled('qobuz.tags.label') and qobuz_label:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TPUB(encoding=3, text=[qobuz_label]))
             elif isinstance(audio_file, (FLAC, OggVorbis)):
@@ -15554,7 +15587,7 @@ def _embed_source_ids(audio_file, metadata: dict):
             print(f"🏷️ Label (Qobuz): {qobuz_label}")
 
         # ── 8. Write Last.fm and Genius URLs as custom tags ──
-        if tag_cfg['urls'] and lastfm_url:
+        if _tag_enabled('lastfm.tags.url') and lastfm_url:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TXXX(encoding=3, desc='LASTFM_URL', text=[lastfm_url]))
             elif isinstance(audio_file, (FLAC, OggVorbis)):
@@ -15562,7 +15595,7 @@ def _embed_source_ids(audio_file, metadata: dict):
             elif isinstance(audio_file, MP4):
                 audio_file['----:com.apple.iTunes:LASTFM_URL'] = [MP4FreeForm(lastfm_url.encode('utf-8'))]
 
-        if tag_cfg['urls'] and genius_url:
+        if _tag_enabled('genius.tags.url') and genius_url:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TXXX(encoding=3, desc='GENIUS_URL', text=[genius_url]))
             elif isinstance(audio_file, (FLAC, OggVorbis)):

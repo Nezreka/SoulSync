@@ -4350,103 +4350,189 @@
                                         </div>
                                     </div>
 
-                                    <!-- Metadata Services -->
+                                    <!-- Tag Embedding — per-tag toggles grouped by source -->
                                     <div class="post-processing-section">
-                                        <div class="post-processing-section-title">Metadata Services</div>
-                                        <small class="settings-hint" style="margin-bottom: 8px; display: block;">Choose which services embed IDs, genres, and metadata into your files during download</small>
+                                        <div class="post-processing-section-title">Tag Embedding</div>
+                                        <small class="settings-hint" style="margin-bottom: 8px; display: block;">Toggle a service to enable/disable all its tags, or expand to control individual tags.</small>
 
-                                        <div class="post-processing-grid">
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="embed-musicbrainz" checked>
-                                                MusicBrainz
-                                            </label>
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="embed-deezer" checked>
-                                                Deezer
-                                            </label>
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="embed-audiodb" checked>
-                                                AudioDB
-                                            </label>
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="embed-tidal" checked>
-                                                Tidal
-                                            </label>
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="embed-qobuz" checked>
-                                                Qobuz
-                                            </label>
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="embed-lastfm" checked>
-                                                Last.fm
-                                            </label>
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="embed-genius" checked>
-                                                Genius
-                                            </label>
+                                        <!-- Spotify -->
+                                        <div class="tag-service-group">
+                                            <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                <span class="tag-group-arrow">&#9654;</span>
+                                                <label class="checkbox-label" onclick="event.stopPropagation()">
+                                                    <input type="checkbox" id="embed-spotify" checked onchange="toggleServiceTags(this, 'spotify')"> Spotify
+                                                </label>
+                                                <span class="tag-service-count">3 tags</span>
+                                            </div>
+                                            <div class="tag-service-body" style="display:none;">
+                                                <label class="checkbox-label"><input type="checkbox" data-config="spotify.tags.track_id" checked> Track ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="spotify.tags.artist_id" checked> Artist ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="spotify.tags.album_id" checked> Album ID</label>
+                                            </div>
                                         </div>
-                                    </div>
 
-                                    <!-- Tags to Embed -->
-                                    <div class="post-processing-section">
-                                        <div class="post-processing-section-title">Tags to Embed</div>
-                                        <small class="settings-hint" style="margin-bottom: 8px; display: block;">Choose which tag categories are written into your audio files. All enabled by default.</small>
-
-                                        <div class="post-processing-grid tag-embed-grid">
-                                            <label class="checkbox-label tag-embed-label">
-                                                <input type="checkbox" id="tag-musicbrainz-ids" checked>
-                                                MusicBrainz IDs
-                                                <small class="tag-embed-desc">Recording, Artist, Album, Release Group, Album Artist, Release Track</small>
-                                            </label>
-                                            <label class="checkbox-label tag-embed-label">
-                                                <input type="checkbox" id="tag-release-info" checked>
-                                                Release Info
-                                                <small class="tag-embed-desc">Original Date, Type, Status, Country, Media, Barcode, Catalog #, ASIN</small>
-                                            </label>
-                                            <label class="checkbox-label tag-embed-label">
-                                                <input type="checkbox" id="tag-source-ids" checked>
-                                                Source IDs
-                                                <small class="tag-embed-desc">Spotify, iTunes, Deezer, AudioDB, Tidal, Qobuz, Genius</small>
-                                            </label>
-                                            <label class="checkbox-label tag-embed-label">
-                                                <input type="checkbox" id="tag-isrc" checked>
-                                                ISRC
-                                                <small class="tag-embed-desc">International Standard Recording Code</small>
-                                            </label>
-                                            <label class="checkbox-label tag-embed-label">
-                                                <input type="checkbox" id="tag-bpm" checked>
-                                                BPM
-                                                <small class="tag-embed-desc">Beats per minute from Deezer</small>
-                                            </label>
-                                            <label class="checkbox-label tag-embed-label">
-                                                <input type="checkbox" id="tag-mood-style" checked>
-                                                Mood & Style
-                                                <small class="tag-embed-desc">Mood and Style from AudioDB</small>
-                                            </label>
-                                            <label class="checkbox-label tag-embed-label">
-                                                <input type="checkbox" id="tag-copyright-label" checked>
-                                                Copyright & Label
-                                                <small class="tag-embed-desc">Copyright from Tidal/Qobuz, Label from Qobuz</small>
-                                            </label>
-                                            <label class="checkbox-label tag-embed-label">
-                                                <input type="checkbox" id="tag-genre-merge" checked>
-                                                Genre Merging
-                                                <small class="tag-embed-desc">Merge genres from Spotify + MB + AudioDB + Last.fm</small>
-                                            </label>
-                                            <label class="checkbox-label tag-embed-label">
-                                                <input type="checkbox" id="tag-urls" checked>
-                                                URLs
-                                                <small class="tag-embed-desc">Last.fm and Genius URLs</small>
-                                            </label>
-                                            <label class="checkbox-label tag-embed-label">
-                                                <input type="checkbox" id="tag-quality" checked>
-                                                Quality
-                                                <small class="tag-embed-desc">Audio quality (e.g. FLAC, MP3-320)</small>
-                                            </label>
+                                        <!-- iTunes -->
+                                        <div class="tag-service-group">
+                                            <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                <span class="tag-group-arrow">&#9654;</span>
+                                                <label class="checkbox-label" onclick="event.stopPropagation()">
+                                                    <input type="checkbox" id="embed-itunes" checked onchange="toggleServiceTags(this, 'itunes')"> iTunes
+                                                </label>
+                                                <span class="tag-service-count">3 tags</span>
+                                            </div>
+                                            <div class="tag-service-body" style="display:none;">
+                                                <label class="checkbox-label"><input type="checkbox" data-config="itunes.tags.track_id" checked> Track ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="itunes.tags.artist_id" checked> Artist ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="itunes.tags.album_id" checked> Album ID</label>
+                                            </div>
                                         </div>
-                                        <small class="settings-hint" style="margin-top: 6px; display: block;">
-                                            MusicBrainz IDs and Release Info require MusicBrainz service enabled above.
-                                        </small>
+
+                                        <!-- MusicBrainz -->
+                                        <div class="tag-service-group">
+                                            <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                <span class="tag-group-arrow">&#9654;</span>
+                                                <label class="checkbox-label" onclick="event.stopPropagation()">
+                                                    <input type="checkbox" id="embed-musicbrainz" checked onchange="toggleServiceTags(this, 'musicbrainz')"> MusicBrainz
+                                                </label>
+                                                <span class="tag-service-count">18 tags</span>
+                                            </div>
+                                            <div class="tag-service-body" style="display:none;">
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.recording_id" checked> Recording ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.artist_id" checked> Artist ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.release_id" checked> Release ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.release_group_id" checked> Release Group ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.album_artist_id" checked> Album Artist ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.release_track_id" checked> Release Track ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.release_type" checked> Release Type</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.original_date" checked> Original Date</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.release_status" checked> Release Status</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.release_country" checked> Release Country</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.barcode" checked> Barcode</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.media" checked> Media</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.total_discs" checked> Total Discs</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.catalog_number" checked> Catalog Number</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.script" checked> Script</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.asin" checked> ASIN</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.isrc" checked> ISRC</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="musicbrainz.tags.genres" checked> Genres</label>
+                                            </div>
+                                        </div>
+
+                                        <!-- Deezer -->
+                                        <div class="tag-service-group">
+                                            <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                <span class="tag-group-arrow">&#9654;</span>
+                                                <label class="checkbox-label" onclick="event.stopPropagation()">
+                                                    <input type="checkbox" id="embed-deezer" checked onchange="toggleServiceTags(this, 'deezer')"> Deezer
+                                                </label>
+                                                <span class="tag-service-count">4 tags</span>
+                                            </div>
+                                            <div class="tag-service-body" style="display:none;">
+                                                <label class="checkbox-label"><input type="checkbox" data-config="deezer.tags.track_id" checked> Track ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="deezer.tags.artist_id" checked> Artist ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="deezer.tags.bpm" checked> BPM</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="deezer.tags.isrc" checked> ISRC</label>
+                                            </div>
+                                        </div>
+
+                                        <!-- AudioDB -->
+                                        <div class="tag-service-group">
+                                            <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                <span class="tag-group-arrow">&#9654;</span>
+                                                <label class="checkbox-label" onclick="event.stopPropagation()">
+                                                    <input type="checkbox" id="embed-audiodb" checked onchange="toggleServiceTags(this, 'audiodb')"> AudioDB
+                                                </label>
+                                                <span class="tag-service-count">4 tags</span>
+                                            </div>
+                                            <div class="tag-service-body" style="display:none;">
+                                                <label class="checkbox-label"><input type="checkbox" data-config="audiodb.tags.track_id" checked> Track ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="audiodb.tags.mood" checked> Mood</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="audiodb.tags.style" checked> Style</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="audiodb.tags.genre" checked> Genre</label>
+                                            </div>
+                                        </div>
+
+                                        <!-- Tidal -->
+                                        <div class="tag-service-group">
+                                            <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                <span class="tag-group-arrow">&#9654;</span>
+                                                <label class="checkbox-label" onclick="event.stopPropagation()">
+                                                    <input type="checkbox" id="embed-tidal" checked onchange="toggleServiceTags(this, 'tidal')"> Tidal
+                                                </label>
+                                                <span class="tag-service-count">4 tags</span>
+                                            </div>
+                                            <div class="tag-service-body" style="display:none;">
+                                                <label class="checkbox-label"><input type="checkbox" data-config="tidal.tags.track_id" checked> Track ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="tidal.tags.artist_id" checked> Artist ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="tidal.tags.isrc" checked> ISRC</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="tidal.tags.copyright" checked> Copyright</label>
+                                            </div>
+                                        </div>
+
+                                        <!-- Qobuz -->
+                                        <div class="tag-service-group">
+                                            <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                <span class="tag-group-arrow">&#9654;</span>
+                                                <label class="checkbox-label" onclick="event.stopPropagation()">
+                                                    <input type="checkbox" id="embed-qobuz" checked onchange="toggleServiceTags(this, 'qobuz')"> Qobuz
+                                                </label>
+                                                <span class="tag-service-count">5 tags</span>
+                                            </div>
+                                            <div class="tag-service-body" style="display:none;">
+                                                <label class="checkbox-label"><input type="checkbox" data-config="qobuz.tags.track_id" checked> Track ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="qobuz.tags.artist_id" checked> Artist ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="qobuz.tags.isrc" checked> ISRC</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="qobuz.tags.copyright" checked> Copyright</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="qobuz.tags.label" checked> Label</label>
+                                            </div>
+                                        </div>
+
+                                        <!-- Last.fm -->
+                                        <div class="tag-service-group">
+                                            <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                <span class="tag-group-arrow">&#9654;</span>
+                                                <label class="checkbox-label" onclick="event.stopPropagation()">
+                                                    <input type="checkbox" id="embed-lastfm" checked onchange="toggleServiceTags(this, 'lastfm')"> Last.fm
+                                                </label>
+                                                <span class="tag-service-count">2 tags</span>
+                                            </div>
+                                            <div class="tag-service-body" style="display:none;">
+                                                <label class="checkbox-label"><input type="checkbox" data-config="lastfm.tags.genres" checked> Genres</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="lastfm.tags.url" checked> URL</label>
+                                            </div>
+                                        </div>
+
+                                        <!-- Genius -->
+                                        <div class="tag-service-group">
+                                            <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                <span class="tag-group-arrow">&#9654;</span>
+                                                <label class="checkbox-label" onclick="event.stopPropagation()">
+                                                    <input type="checkbox" id="embed-genius" checked onchange="toggleServiceTags(this, 'genius')"> Genius
+                                                </label>
+                                                <span class="tag-service-count">2 tags</span>
+                                            </div>
+                                            <div class="tag-service-body" style="display:none;">
+                                                <label class="checkbox-label"><input type="checkbox" data-config="genius.tags.track_id" checked> Track ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="genius.tags.url" checked> URL</label>
+                                            </div>
+                                        </div>
+
+                                        <!-- General -->
+                                        <div class="tag-service-group">
+                                            <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                <span class="tag-group-arrow">&#9654;</span>
+                                                <label class="checkbox-label" style="pointer-events:none;">General</label>
+                                                <span class="tag-service-count">2 tags</span>
+                                            </div>
+                                            <div class="tag-service-body" style="display:none;">
+                                                <label class="checkbox-label"><input type="checkbox" data-config="metadata_enhancement.tags.quality_tag" checked> Quality
+                                                    <small class="tag-embed-desc">Audio quality (e.g. FLAC, MP3-320)</small>
+                                                </label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="metadata_enhancement.tags.genre_merge" checked> Genre Merging
+                                                    <small class="tag-embed-desc">Merge genres from Spotify + enabled sources</small>
+                                                </label>
+                                            </div>
+                                        </div>
                                     </div>
 
                                     <div class="form-group">

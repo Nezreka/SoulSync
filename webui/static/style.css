@@ -2090,13 +2090,60 @@ body {
     grid-template-columns: 1fr 1fr;
     gap: 4px 16px;
 }
-.tag-embed-grid {
-    gap: 8px 16px;
+/* Tag service group accordion */
+.tag-service-group {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    margin-bottom: 6px;
+    overflow: hidden;
 }
-.tag-embed-label {
+.tag-service-header {
     display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.02);
+    transition: background 0.15s;
+    user-select: none;
+}
+.tag-service-header:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+.tag-group-arrow {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.4);
+    transition: transform 0.15s;
+    flex-shrink: 0;
+    width: 12px;
+}
+.tag-group-arrow.open {
+    transform: rotate(90deg);
+}
+.tag-service-header .checkbox-label {
+    margin: 0;
+    font-weight: 500;
+    font-size: 13px;
+}
+.tag-service-count {
+    margin-left: auto;
+    font-size: 11px;
+    opacity: 0.4;
+}
+.tag-service-body {
+    padding: 6px 12px 10px 32px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+.tag-service-body .checkbox-label {
+    font-size: 12px;
+    margin-bottom: 3px;
+}
+.tag-service-body .checkbox-label input[type="checkbox"] {
+    margin-right: 6px;
+}
+.tag-service-body .checkbox-label.disabled-tag {
+    opacity: 0.35;
+    pointer-events: none;
 }
 .tag-embed-desc {
     display: block;
