@@ -332,8 +332,28 @@ class LibraryReorganizeJob(RepairJob):
 
         # Pre-load album years from DB for files missing year tags
         db_album_years = {}  # (artist, album) -> year string
-        if '$year' in (album_template + single_template):
+        needs_year = '$year' in (album_template + single_template)
+        if needs_year:
             db_album_years = self._load_album_years(context.db)
+
+        # API fallback: find (artist, album) pairs still missing year, batch-lookup
+        if needs_year and db_album_years is not None:
+            missing_pairs = set()
+            for fpath, tags in file_tags.items():
+                year = tags.get('year', '')
+                if year:
+                    continue
+                artist = tags.get('artist', '') or tags.get('albumartist', '')
+                album = tags.get('album', '') or tags.get('title', '')
+                if not artist or not album:
+                    continue
+                key = (artist.lower(), album.lower())
+                if key not in db_album_years:
+                    missing_pairs.add((artist, album))
+
+            if missing_pairs:
+                api_years = self._lookup_years_from_api(context, missing_pairs)
+                db_album_years.update(api_years)
 
         # Track claimed destinations to detect in-batch collisions
         claimed_destinations = set()
@@ -636,12 +656,18 @@ class LibraryReorganizeJob(RepairJob):
         return default
 
     def _load_album_years(self, db) -> dict:
-        """Load all album years from DB in one query. Returns {(artist_lower, album_lower): year_str}."""
+        """Load all album years from DB. Returns {(artist_lower, album_lower): year_str}.
+
+        Checks the main albums table first, then falls back to discovery_pool
+        release_date for tracks that were playlist-synced without year metadata.
+        """
         years = {}
         conn = None
         try:
             conn = db._get_connection()
             cursor = conn.cursor()
+
+            # Source 1: albums table (most authoritative)
             cursor.execute("""
                 SELECT ar.name, al.title, al.year
                 FROM albums al
@@ -653,11 +679,101 @@ class LibraryReorganizeJob(RepairJob):
                 if artist_name and album_title and year:
                     key = (artist_name.lower(), album_title.lower())
                     years[key] = str(year)[:4]
+
+            # Source 2: discovery_pool release_date (covers playlist-synced tracks)
+            try:
+                cursor.execute("""
+                    SELECT artist_name, album_name, release_date
+                    FROM discovery_pool
+                    WHERE release_date IS NOT NULL AND release_date != ''
+                """)
+                for row in cursor.fetchall():
+                    artist_name, album_name, release_date = row
+                    if artist_name and album_name and release_date:
+                        key = (artist_name.lower(), album_name.lower())
+                        if key not in years:  # Don't override albums table
+                            year_str = str(release_date)[:4]
+                            if len(year_str) == 4 and year_str.isdigit():
+                                years[key] = year_str
+            except Exception:
+                pass  # discovery_pool may not exist on all installs
+
         except Exception as e:
             logger.debug("Failed to load album years from DB: %s", e)
         finally:
             if conn:
                 conn.close()
+        return years
+
+    def _lookup_years_from_api(self, context, missing_pairs) -> dict:
+        """Batch-lookup release years from Spotify/iTunes/Deezer for albums not found in DB.
+
+        Args:
+            context: JobContext with spotify_client, config_manager
+            missing_pairs: set of (artist, album) tuples needing year lookup
+
+        Returns:
+            dict of {(artist_lower, album_lower): year_str}
+        """
+        years = {}
+        if not missing_pairs:
+            return years
+
+        # Determine which client to use
+        search_client = None
+        source_name = 'unknown'
+        if context.spotify_client and hasattr(context.spotify_client, 'search_albums'):
+            try:
+                if context.spotify_client.is_spotify_authenticated():
+                    search_client = context.spotify_client
+                    source_name = 'Spotify'
+            except Exception:
+                pass
+
+        if not search_client:
+            # Try fallback (iTunes/Deezer)
+            try:
+                from core.metadata_service import _create_fallback_client
+                search_client = _create_fallback_client()
+                source_name = 'fallback'
+            except Exception:
+                pass
+
+        if not search_client or not hasattr(search_client, 'search_albums'):
+            return years
+
+        # Cap lookups to avoid excessive API calls
+        max_lookups = 50
+        pairs_list = list(missing_pairs)[:max_lookups]
+        logger.info("Looking up %d album years from %s API", len(pairs_list), source_name)
+
+        if context.report_progress:
+            context.report_progress(
+                phase=f'Looking up {len(pairs_list)} album years from {source_name}...',
+                log_line=f'Fetching release years for {len(pairs_list)} albums',
+                log_type='info'
+            )
+
+        for artist, album in pairs_list:
+            if context.check_stop():
+                break
+            try:
+                results = search_client.search_albums(f"{artist} {album}", limit=3)
+                if results:
+                    for r in results:
+                        release_date = getattr(r, 'release_date', '') or ''
+                        if release_date and len(release_date) >= 4:
+                            year_str = release_date[:4]
+                            if year_str.isdigit():
+                                key = (artist.lower(), album.lower())
+                                years[key] = year_str
+                                break
+                import time
+                time.sleep(0.1)  # Rate limit courtesy
+            except Exception as e:
+                logger.debug("API year lookup failed for %s - %s: %s", artist, album, e)
+
+        logger.info("API year lookup: found %d/%d years", len(years), len(pairs_list))
         return years
 
     def _update_db_path(self, db, old_path: str, new_path: str, transfer_folder: str = ''):
