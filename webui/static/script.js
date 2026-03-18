@@ -18624,6 +18624,175 @@ async function deleteSyncHistoryEntry(entryId) {
     }
 }
 
+// ── Sync Playlist to Server (from Download Modal) ──────────────────
+
+// Track active modal syncs
+let _activeModalSyncs = {};
+
+function _isBeatportPlaylistId(id) {
+    return id.startsWith('beatport_chart_') || id.startsWith('beatport_top100_') || id.startsWith('beatport_hype100_');
+}
+
+async function syncPlaylistToServer(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process) { showToast('No playlist data found', 'error'); return; }
+
+    // Disable the sync button
+    const btn = document.getElementById(`sync-server-btn-${playlistId}`);
+    if (btn) { btn.disabled = true; btn.textContent = 'Syncing...'; }
+
+    // Show progress area
+    const progressArea = document.getElementById(`modal-sync-progress-${playlistId}`);
+    if (progressArea) progressArea.style.display = '';
+
+    const syncPlaylistId = `beatport_sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const playlistName = process.playlist?.name || 'Beatport Playlist';
+
+    // Format tracks for the sync API
+    const tracks = (process.tracks || []).map(t => {
+        const artists = Array.isArray(t.artists)
+            ? (typeof t.artists[0] === 'object' ? t.artists.map(a => a.name || a) : t.artists)
+            : [t.artists || 'Unknown Artist'];
+        const albumName = typeof t.album === 'object' ? (t.album?.name || '') : (t.album || '');
+        return {
+            id: t.id || '',
+            name: t.name || '',
+            artists: artists,
+            album: albumName,
+            duration_ms: t.duration_ms || 0,
+            popularity: t.popularity || 0
+        };
+    });
+
+    try {
+        const response = await fetch('/api/sync/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                playlist_id: syncPlaylistId,
+                playlist_name: playlistName,
+                tracks: tracks
+            })
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+            showToast(`Sync failed: ${result.error || 'Unknown error'}`, 'error');
+            _cleanupModalSync(playlistId);
+            return;
+        }
+
+        _activeModalSyncs[playlistId] = { syncPlaylistId };
+        _pollModalSyncProgress(playlistId, syncPlaylistId);
+
+    } catch (err) {
+        console.error('Error starting playlist sync:', err);
+        showToast('Failed to start sync', 'error');
+        _cleanupModalSync(playlistId);
+    }
+}
+
+function _pollModalSyncProgress(playlistId, syncPlaylistId) {
+    const pollInterval = setInterval(async () => {
+        try {
+            const resp = await fetch(`/api/sync/status/${syncPlaylistId}`);
+            if (!resp.ok) { clearInterval(pollInterval); _cleanupModalSync(playlistId, 'error'); return; }
+            const state = await resp.json();
+
+            const bar = document.getElementById(`modal-sync-bar-${playlistId}`);
+            const stepEl = document.getElementById(`modal-sync-step-${playlistId}`);
+            const matchedEl = document.getElementById(`modal-sync-matched-${playlistId}`);
+            const failedEl = document.getElementById(`modal-sync-failed-${playlistId}`);
+
+            if (state.status === 'syncing' || state.status === 'starting') {
+                const p = state.progress || {};
+                const matched = p.matched_tracks || 0;
+                const failed = p.failed_tracks || 0;
+                const total = p.total_tracks || 0;
+                const step = p.current_step || 'Processing';
+                const currentTrack = p.current_track || '';
+                const processed = matched + failed;
+                const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+                if (bar) bar.style.width = `${percent}%`;
+                if (stepEl) stepEl.textContent = currentTrack ? `${step} — ${currentTrack}` : step;
+                if (matchedEl) matchedEl.textContent = `${matched} matched`;
+                if (failedEl) failedEl.textContent = `${failed} failed`;
+
+            } else if (state.status === 'finished') {
+                clearInterval(pollInterval);
+                const p = state.progress || state.result || {};
+                const matched = p.matched_tracks || 0;
+                const failed = p.failed_tracks || 0;
+                const total = p.total_tracks || 0;
+                const synced = p.synced_tracks || 0;
+
+                if (bar) bar.style.width = '100%';
+                if (stepEl) stepEl.textContent = `Sync complete — ${matched}/${total} matched, ${synced} synced`;
+                if (matchedEl) matchedEl.textContent = `${matched} matched`;
+                if (failedEl) failedEl.textContent = `${failed} failed`;
+
+                const cancelBtn = document.getElementById(`modal-sync-cancel-${playlistId}`);
+                if (cancelBtn) cancelBtn.style.display = 'none';
+
+                showToast(`Server sync complete: ${matched}/${total} matched`, 'success');
+
+                // Re-enable sync button after a delay
+                setTimeout(() => _cleanupModalSync(playlistId, 'finished'), 5000);
+
+            } else if (state.status === 'cancelled' || state.status === 'error') {
+                clearInterval(pollInterval);
+                if (stepEl) stepEl.textContent = state.status === 'cancelled' ? 'Sync cancelled' : `Sync error`;
+                const cancelBtn = document.getElementById(`modal-sync-cancel-${playlistId}`);
+                if (cancelBtn) cancelBtn.style.display = 'none';
+                setTimeout(() => _cleanupModalSync(playlistId, state.status), 3000);
+            }
+        } catch (err) {
+            console.error('Error polling modal sync status:', err);
+            clearInterval(pollInterval);
+            _cleanupModalSync(playlistId, 'error');
+        }
+    }, 2000);
+
+    if (_activeModalSyncs[playlistId]) {
+        _activeModalSyncs[playlistId].pollInterval = pollInterval;
+    }
+}
+
+async function cancelModalSync(playlistId) {
+    const active = _activeModalSyncs[playlistId];
+    if (!active) return;
+
+    try {
+        await fetch('/api/sync/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ playlist_id: active.syncPlaylistId })
+        });
+        const stepEl = document.getElementById(`modal-sync-step-${playlistId}`);
+        if (stepEl) stepEl.textContent = 'Cancelling...';
+    } catch (err) {
+        console.error('Error cancelling modal sync:', err);
+    }
+}
+
+function _cleanupModalSync(playlistId, finalStatus) {
+    const active = _activeModalSyncs[playlistId];
+    if (active && active.pollInterval) clearInterval(active.pollInterval);
+    delete _activeModalSyncs[playlistId];
+
+    const progressArea = document.getElementById(`modal-sync-progress-${playlistId}`);
+    const btn = document.getElementById(`sync-server-btn-${playlistId}`);
+
+    if (finalStatus === 'finished') {
+        // Keep progress visible but hide after fade
+        if (progressArea) setTimeout(() => { progressArea.style.display = 'none'; }, 300);
+    } else {
+        if (progressArea) progressArea.style.display = 'none';
+    }
+    if (btn) { btn.disabled = false; btn.textContent = 'Sync to Server'; }
+}
+
 // ── Metadata Cache Modal ────────────────────────────────────────────
 let _mcacheCurrentTab = 'artist';
 let _mcachePage = 0;
@@ -32121,6 +32290,10 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
                     </button>
+                    ${_isBeatportPlaylistId(virtualPlaylistId) ? `
+                    <button class="download-control-btn sync-to-server-btn" id="sync-server-btn-${virtualPlaylistId}" onclick="syncPlaylistToServer('${virtualPlaylistId}')">
+                        Sync to Server
+                    </button>` : ''}
                     <button class="download-control-btn" id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
                         Add to Wishlist
                     </button>
@@ -32133,6 +32306,20 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                         📋 Export as M3U
                     </button>
                     <button class="download-control-btn secondary" onclick="closeDownloadMissingModal('${virtualPlaylistId}')">Close</button>
+                </div>
+            </div>
+            <!-- Sync to server live progress (below footer, hidden by default) -->
+            <div class="modal-sync-progress-area" id="modal-sync-progress-${virtualPlaylistId}" style="display:none;">
+                <div class="modal-sync-progress-bar-bg">
+                    <div class="modal-sync-progress-bar-fill" id="modal-sync-bar-${virtualPlaylistId}"></div>
+                </div>
+                <div class="modal-sync-progress-info">
+                    <span class="modal-sync-step" id="modal-sync-step-${virtualPlaylistId}">Starting sync...</span>
+                    <div class="modal-sync-stats">
+                        <span class="matched" id="modal-sync-matched-${virtualPlaylistId}">0 matched</span>
+                        <span class="failed" id="modal-sync-failed-${virtualPlaylistId}">0 failed</span>
+                    </div>
+                    <button class="modal-sync-cancel-btn" id="modal-sync-cancel-${virtualPlaylistId}" onclick="cancelModalSync('${virtualPlaylistId}')">Cancel</button>
                 </div>
             </div>
         </div>
