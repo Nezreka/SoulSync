@@ -99,7 +99,11 @@ class SeasonalDiscoveryService:
         """Determine active music source (matches _get_active_discovery_source in web_server)"""
         if self.spotify_client and self.spotify_client.is_spotify_authenticated():
             return 'spotify'
-        return 'itunes'
+        try:
+            from core.metadata_service import _get_configured_fallback_source
+            return _get_configured_fallback_source()
+        except Exception:
+            return 'itunes'
 
     def _ensure_database_schema(self):
         """Create seasonal content tables if they don't exist"""
