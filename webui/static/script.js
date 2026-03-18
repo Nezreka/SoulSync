@@ -4829,6 +4829,7 @@ async function loadSettingsData() {
         document.getElementById('soulseek-api-key').value = settings.soulseek?.api_key || '';
         document.getElementById('soulseek-search-timeout').value = settings.soulseek?.search_timeout || 60;
         document.getElementById('soulseek-search-timeout-buffer').value = settings.soulseek?.search_timeout_buffer || 15;
+        document.getElementById('soulseek-min-peer-speed').value = settings.soulseek?.min_peer_upload_speed || 0;
 
         // Populate ListenBrainz settings
         document.getElementById('listenbrainz-base-url').value = settings.listenbrainz?.base_url || '';
@@ -5675,7 +5676,8 @@ async function saveSettings(quiet = false) {
             download_path: document.getElementById('download-path').value,
             transfer_path: document.getElementById('transfer-path').value,
             search_timeout: parseInt(document.getElementById('soulseek-search-timeout').value) || 60,
-            search_timeout_buffer: parseInt(document.getElementById('soulseek-search-timeout-buffer').value) || 15
+            search_timeout_buffer: parseInt(document.getElementById('soulseek-search-timeout-buffer').value) || 15,
+            min_peer_upload_speed: parseInt(document.getElementById('soulseek-min-peer-speed').value) || 0
         },
         listenbrainz: {
             base_url: document.getElementById('listenbrainz-base-url').value,
