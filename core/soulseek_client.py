@@ -51,14 +51,14 @@ class SearchResult:
         elif self.free_upload_slots > 0:
             base_score += 0.05
 
-        # Upload speed (tiered)
-        if self.upload_speed >= 5000:
+        # Upload speed in bytes/sec (tiered)
+        if self.upload_speed >= 5_000_000:      # ~5 MB/s / 40 Mbps
             base_score += 0.15
-        elif self.upload_speed >= 1000:
+        elif self.upload_speed >= 1_000_000:    # ~1 MB/s / 8 Mbps
             base_score += 0.10
-        elif self.upload_speed >= 500:
+        elif self.upload_speed >= 500_000:      # ~500 KB/s / 4 Mbps
             base_score += 0.05
-        elif self.upload_speed < 100:
+        elif self.upload_speed < 100_000:       # ~100 KB/s / 800 kbps
             base_score -= 0.05
 
         # Queue length (graduated penalty)
@@ -184,14 +184,14 @@ class AlbumResult:
         elif self.free_upload_slots > 0:
             base_score += 0.05
 
-        # Upload speed (tiered)
-        if self.upload_speed >= 5000:
+        # Upload speed in bytes/sec (tiered)
+        if self.upload_speed >= 5_000_000:      # ~5 MB/s / 40 Mbps
             base_score += 0.15
-        elif self.upload_speed >= 1000:
+        elif self.upload_speed >= 1_000_000:    # ~1 MB/s / 8 Mbps
             base_score += 0.10
-        elif self.upload_speed >= 500:
+        elif self.upload_speed >= 500_000:      # ~500 KB/s / 4 Mbps
             base_score += 0.05
-        elif self.upload_speed < 100:
+        elif self.upload_speed < 100_000:       # ~100 KB/s / 800 kbps
             base_score -= 0.05
 
         # Queue length (graduated penalty)
@@ -478,7 +478,7 @@ class SoulseekClient:
                     upload_speed=response_data.get('uploadSpeed', 0),
                     queue_length=response_data.get('queueLength', 0)
                 )
-                
+
                 all_tracks.append(track)
                 
                 # Group tracks by album path for album detection
@@ -646,8 +646,8 @@ class SoulseekClient:
             return [], []
 
         # Get timeout from config if not specified
+        from config.settings import config_manager
         if timeout is None:
-            from config.settings import config_manager
             timeout = config_manager.get('soulseek.search_timeout', 60)
 
         # Apply rate limiting before search
@@ -656,12 +656,16 @@ class SoulseekClient:
         try:
             logger.info(f"Starting search for: '{query}' (slskd timeout: {timeout}s)")
 
+            # Get minimum peer upload speed from config (stored as Mbps, API expects bytes/sec)
+            min_speed_mbps = config_manager.get('soulseek.min_peer_upload_speed', 0) or 0
+            min_speed_bytes = int(min_speed_mbps) * 125000  # 1 Mbps = 125000 bytes/sec
+
             search_data = {
                 'searchText': query,
                 'timeout': timeout * 1000,  # slskd expects milliseconds
                 'filterResponses': True,
                 'minimumResponseFileCount': 1,
-                'minimumPeerUploadSpeed': 0
+                'minimumPeerUploadSpeed': min_speed_bytes
             }
             
             logger.debug(f"Search data: {search_data}")
