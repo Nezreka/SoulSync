@@ -7181,6 +7181,46 @@ body {
 .sync-history-cancel-btn:hover {
     background: rgba(244, 67, 54, 0.2); border-color: rgba(244, 67, 54, 0.5);
 }
+/* Sync to Server button in download modal */
+.sync-to-server-btn {
+    background: rgba(30, 136, 229, 0.15) !important; color: #42a5f5 !important;
+    border: 1px solid rgba(30, 136, 229, 0.3) !important;
+}
+.sync-to-server-btn:hover {
+    background: rgba(30, 136, 229, 0.25) !important; border-color: rgba(30, 136, 229, 0.5) !important;
+}
+.sync-to-server-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+/* Sync progress area at bottom of download modal */
+.modal-sync-progress-area {
+    padding: 10px 16px; background: rgba(30, 136, 229, 0.05);
+    border-top: 1px solid rgba(30, 136, 229, 0.15); border-radius: 0 0 12px 12px;
+}
+.modal-sync-progress-bar-bg {
+    height: 4px; background: rgba(255, 255, 255, 0.08); border-radius: 4px;
+    overflow: hidden; margin-bottom: 8px;
+}
+.modal-sync-progress-bar-fill {
+    height: 100%; background: #42a5f5; border-radius: 4px;
+    transition: width 0.3s ease; width: 0%;
+}
+.modal-sync-progress-info {
+    display: flex; align-items: center; gap: 10px; font-size: 11px;
+}
+.modal-sync-step {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; color: rgba(255, 255, 255, 0.5);
+}
+.modal-sync-stats { display: flex; gap: 8px; flex-shrink: 0; }
+.modal-sync-stats .matched { color: #4caf50; font-size: 11px; }
+.modal-sync-stats .failed { color: #f44336; font-size: 11px; }
+.modal-sync-cancel-btn {
+    font-size: 10px; font-weight: 600; color: #f44336;
+    background: rgba(244, 67, 54, 0.1); border: 1px solid rgba(244, 67, 54, 0.25);
+    border-radius: 4px; padding: 3px 8px; cursor: pointer; flex-shrink: 0;
+}
+.modal-sync-cancel-btn:hover {
+    background: rgba(244, 67, 54, 0.2); border-color: rgba(244, 67, 54, 0.5);
+}
 .sync-history-empty {
     text-align: center; padding: 48px 24px; color: rgba(255, 255, 255, 0.3); font-size: 14px;
 }
