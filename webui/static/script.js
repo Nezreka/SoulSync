@@ -4887,6 +4887,16 @@ async function loadSettingsData() {
         document.getElementById('embed-qobuz').checked = settings.qobuz?.embed_tags !== false;
         document.getElementById('embed-lastfm').checked = settings.lastfm?.embed_tags !== false;
         document.getElementById('embed-genius').checked = settings.genius?.embed_tags !== false;
+        document.getElementById('tag-musicbrainz-ids').checked = settings.metadata_enhancement?.tags?.musicbrainz_ids !== false;
+        document.getElementById('tag-release-info').checked = settings.metadata_enhancement?.tags?.release_info !== false;
+        document.getElementById('tag-source-ids').checked = settings.metadata_enhancement?.tags?.source_ids !== false;
+        document.getElementById('tag-isrc').checked = settings.metadata_enhancement?.tags?.isrc !== false;
+        document.getElementById('tag-bpm').checked = settings.metadata_enhancement?.tags?.bpm !== false;
+        document.getElementById('tag-mood-style').checked = settings.metadata_enhancement?.tags?.mood_style !== false;
+        document.getElementById('tag-copyright-label').checked = settings.metadata_enhancement?.tags?.copyright_label !== false;
+        document.getElementById('tag-genre-merge').checked = settings.metadata_enhancement?.tags?.genre_merge !== false;
+        document.getElementById('tag-urls').checked = settings.metadata_enhancement?.tags?.urls !== false;
+        document.getElementById('tag-quality').checked = settings.metadata_enhancement?.tags?.quality !== false;
         document.getElementById('post-processing-options').style.display = settings.metadata_enhancement?.enabled !== false ? 'block' : 'none';
 
         // Populate File Organization settings
@@ -5723,7 +5733,19 @@ async function saveSettings(quiet = false) {
             enabled: document.getElementById('metadata-enabled').checked,
             embed_album_art: document.getElementById('embed-album-art').checked,
             cover_art_download: document.getElementById('cover-art-download').checked,
-            lrclib_enabled: document.getElementById('lrclib-enabled').checked
+            lrclib_enabled: document.getElementById('lrclib-enabled').checked,
+            tags: {
+                musicbrainz_ids: document.getElementById('tag-musicbrainz-ids').checked,
+                release_info: document.getElementById('tag-release-info').checked,
+                source_ids: document.getElementById('tag-source-ids').checked,
+                isrc: document.getElementById('tag-isrc').checked,
+                bpm: document.getElementById('tag-bpm').checked,
+                mood_style: document.getElementById('tag-mood-style').checked,
+                copyright_label: document.getElementById('tag-copyright-label').checked,
+                genre_merge: document.getElementById('tag-genre-merge').checked,
+                urls: document.getElementById('tag-urls').checked,
+                quality: document.getElementById('tag-quality').checked
+            }
         },
         musicbrainz: {
             embed_tags: document.getElementById('embed-musicbrainz').checked

@@ -2867,6 +2867,8 @@ album_name_cache = {}  # album_key -> cached_final_name
 # to split one album into multiple entries.
 _mb_release_cache = {}  # (album_lower, artist_lower) -> mbid_string_or_empty
 _mb_release_cache_lock = threading.Lock()
+_mb_release_detail_cache = {}  # mbid -> release detail dict from get_release()
+_mb_release_detail_cache_lock = threading.Lock()
 
 def _prepare_stream_task(track_data):
     """
@@ -14528,7 +14530,7 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
 # METADATA & COVER ART HELPERS (Ported from downloads.py)
 # ===================================================================
 from mutagen import File as MutagenFile
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, TPOS, TXXX, APIC, UFID, TSRC, TBPM, TCOP, TPUB
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, TPOS, TXXX, APIC, UFID, TSRC, TBPM, TCOP, TPUB, TMED, TDOR
 from mutagen.flac import FLAC, Picture
 from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 from mutagen.oggvorbis import OggVorbis
@@ -14716,7 +14718,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
 
             # ── Embed audio quality tag ──
             quality = context.get('_audio_quality', '')
-            if quality:
+            if quality and config_manager.get('metadata_enhancement.tags.quality', True) is not False:
                 if isinstance(audio_file.tags, ID3):
                     audio_file.tags.add(TXXX(encoding=3, desc='QUALITY', text=[quality]))
                 elif isinstance(audio_file, (FLAC, OggVorbis)):
@@ -14965,6 +14967,20 @@ def _embed_source_ids(audio_file, metadata: dict):
     Operates on a non-easy-mode MutagenFile object (caller must save).
     """
     try:
+        # ── Tag category config (all default to True) ──
+        tag_cfg = {
+            'musicbrainz_ids': config_manager.get('metadata_enhancement.tags.musicbrainz_ids', True) is not False,
+            'release_info': config_manager.get('metadata_enhancement.tags.release_info', True) is not False,
+            'source_ids': config_manager.get('metadata_enhancement.tags.source_ids', True) is not False,
+            'isrc': config_manager.get('metadata_enhancement.tags.isrc', True) is not False,
+            'bpm': config_manager.get('metadata_enhancement.tags.bpm', True) is not False,
+            'mood_style': config_manager.get('metadata_enhancement.tags.mood_style', True) is not False,
+            'copyright_label': config_manager.get('metadata_enhancement.tags.copyright_label', True) is not False,
+            'genre_merge': config_manager.get('metadata_enhancement.tags.genre_merge', True) is not False,
+            'urls': config_manager.get('metadata_enhancement.tags.urls', True) is not False,
+            'quality': config_manager.get('metadata_enhancement.tags.quality', True) is not False,
+        }
+
         # ── Helper: normalize + compare names (same logic as enrichment workers) ──
         from difflib import SequenceMatcher
         def _names_match(a: str, b: str, threshold: float = 0.75) -> bool:
@@ -14994,6 +15010,7 @@ def _embed_source_ids(audio_file, metadata: dict):
         # via _api_call_lock, so no pause/resume needed.
         recording_mbid = None
         artist_mbid = None
+        _rc_mbid = ''
         mb_genres = []
         isrc = None
         track_title = metadata.get('title', '')
@@ -15062,6 +15079,82 @@ def _embed_source_ids(audio_file, metadata: dict):
                     print("⚠️ MusicBrainz worker not available, skipping MBID lookup")
             except Exception as e:
                 print(f"⚠️ MusicBrainz lookup failed (non-fatal): {e}")
+
+        # ── 2a-2. MusicBrainz release details (release group, barcode, media, etc.) ──
+        # One API call per release, cached across all tracks on the same album.
+        if _rc_mbid and (tag_cfg['release_info'] or tag_cfg['musicbrainz_ids']):
+            try:
+                mb_service_for_detail = mb_worker.mb_service if mb_worker else None
+                if mb_service_for_detail:
+                    with _mb_release_detail_cache_lock:
+                        release_detail = _mb_release_detail_cache.get(_rc_mbid)
+                    if release_detail is None:
+                        release_detail = mb_service_for_detail.mb_client.get_release(
+                            _rc_mbid, includes=['release-groups', 'labels', 'media', 'artist-credits', 'recordings']
+                        ) or {}
+                        with _mb_release_detail_cache_lock:
+                            _mb_release_detail_cache[_rc_mbid] = release_detail
+                    if release_detail:
+                        rg = release_detail.get('release-group', {})
+                        if rg.get('id'):
+                            id_tags['MUSICBRAINZ_RELEASEGROUPID'] = rg['id']
+                        ac = release_detail.get('artist-credit', [])
+                        if ac and isinstance(ac[0], dict):
+                            aa_artist = ac[0].get('artist', {})
+                            if aa_artist.get('id'):
+                                id_tags['MUSICBRAINZ_ALBUMARTISTID'] = aa_artist['id']
+                        primary_type = rg.get('primary-type', '')
+                        if primary_type:
+                            id_tags['RELEASETYPE'] = primary_type
+                        orig_date = rg.get('first-release-date', '')
+                        if orig_date:
+                            id_tags['ORIGINALDATE'] = orig_date
+                        status = release_detail.get('status', '')
+                        if status:
+                            id_tags['RELEASESTATUS'] = status
+                        country = release_detail.get('country', '')
+                        if country:
+                            id_tags['RELEASECOUNTRY'] = country
+                        barcode = release_detail.get('barcode', '')
+                        if barcode:
+                            id_tags['BARCODE'] = barcode
+                        media_list = release_detail.get('media', [])
+                        if media_list:
+                            media_format = media_list[0].get('format', '')
+                            if media_format:
+                                id_tags['MEDIA'] = media_format
+                            id_tags['TOTALDISCS'] = str(len(media_list))
+                        label_info = release_detail.get('label-info', [])
+                        if label_info and isinstance(label_info[0], dict):
+                            cat_num = label_info[0].get('catalog-number', '')
+                            if cat_num:
+                                id_tags['CATALOGNUMBER'] = cat_num
+                        text_rep = release_detail.get('text-representation', {})
+                        if isinstance(text_rep, dict) and text_rep.get('script'):
+                            id_tags['SCRIPT'] = text_rep['script']
+                        asin = release_detail.get('asin', '')
+                        if asin:
+                            id_tags['ASIN'] = asin
+                        # Release Track ID — match by disc + track position
+                        _trk_num = metadata.get('track_number')
+                        _disc_num = metadata.get('disc_number') or 1
+                        if _trk_num and media_list:
+                            try:
+                                _trk_num_int = int(_trk_num)
+                                _disc_num_int = int(_disc_num)
+                                for medium in media_list:
+                                    if medium.get('position', 1) == _disc_num_int:
+                                        for mtrack in (medium.get('tracks') or medium.get('track-list', [])):
+                                            if mtrack.get('position') == _trk_num_int and mtrack.get('id'):
+                                                id_tags['MUSICBRAINZ_RELEASETRACKID'] = mtrack['id']
+                                                break
+                                        break
+                            except (ValueError, TypeError):
+                                pass
+                        print(f"🎵 MusicBrainz release details: type={primary_type or '?'}, "
+                              f"country={country or '?'}, media={id_tags.get('MEDIA', '?')}")
+            except Exception as e:
+                print(f"⚠️ MusicBrainz release detail lookup failed (non-fatal): {e}")
 
         # ── 2b. Deezer lookup for BPM, ISRC fallback, and source IDs ──
         deezer_bpm = None
@@ -15268,52 +15361,100 @@ def _embed_source_ids(audio_file, metadata: dict):
         if not id_tags and not deezer_bpm and not deezer_isrc and not audiodb_mood and not audiodb_style:
             return
 
-        # ── 3. Write all tags into the file ──
+        # ── 3. Filter tags by category config, then write ──
+        _MB_ID_TAGS = {'MUSICBRAINZ_RECORDING_ID', 'MUSICBRAINZ_ARTIST_ID', 'MUSICBRAINZ_RELEASE_ID',
+                       'MUSICBRAINZ_RELEASEGROUPID', 'MUSICBRAINZ_ALBUMARTISTID',
+                       'MUSICBRAINZ_RELEASETRACKID'}
+        _SOURCE_ID_TAGS = {'SPOTIFY_TRACK_ID', 'SPOTIFY_ARTIST_ID', 'SPOTIFY_ALBUM_ID',
+                           'ITUNES_TRACK_ID', 'ITUNES_ARTIST_ID', 'ITUNES_ALBUM_ID',
+                           'DEEZER_TRACK_ID', 'DEEZER_ARTIST_ID', 'AUDIODB_TRACK_ID',
+                           'TIDAL_TRACK_ID', 'TIDAL_ARTIST_ID', 'QOBUZ_TRACK_ID',
+                           'QOBUZ_ARTIST_ID', 'GENIUS_TRACK_ID'}
+        _RELEASE_INFO_TAGS = {'RELEASETYPE', 'RELEASESTATUS', 'RELEASECOUNTRY', 'MEDIA',
+                              'BARCODE', 'CATALOGNUMBER', 'ORIGINALDATE', 'TOTALDISCS', 'SCRIPT',
+                              'ASIN'}
+
+        filtered_tags = {}
+        for tag_name, value in id_tags.items():
+            if tag_name in _MB_ID_TAGS and not tag_cfg['musicbrainz_ids']:
+                continue
+            if tag_name in _SOURCE_ID_TAGS and not tag_cfg['source_ids']:
+                continue
+            if tag_name in _RELEASE_INFO_TAGS and not tag_cfg['release_info']:
+                continue
+            filtered_tags[tag_name] = value
+
+        # ── 3a. Write ID tags (MusicBrainz, source IDs, release info) ──
         written = []
+
+        # Format-specific tag name mappings for Picard-compatible output
+        _ID3_TAG_MAP = {
+            'MUSICBRAINZ_RECORDING_ID': ('UFID', 'http://musicbrainz.org'),
+            'MUSICBRAINZ_ARTIST_ID': ('TXXX', 'MusicBrainz Artist Id'),
+            'MUSICBRAINZ_RELEASE_ID': ('TXXX', 'MusicBrainz Album Id'),
+            'MUSICBRAINZ_RELEASEGROUPID': ('TXXX', 'MusicBrainz Release Group Id'),
+            'MUSICBRAINZ_ALBUMARTISTID': ('TXXX', 'MusicBrainz Album Artist Id'),
+            'MUSICBRAINZ_RELEASETRACKID': ('TXXX', 'MusicBrainz Release Track Id'),
+            'RELEASETYPE': ('TXXX', 'MusicBrainz Album Type'),
+            'RELEASESTATUS': ('TXXX', 'MusicBrainz Album Status'),
+            'RELEASECOUNTRY': ('TXXX', 'MusicBrainz Album Release Country'),
+            'ORIGINALDATE': ('TDOR', None),
+            'MEDIA': ('TMED', None),
+        }
+        _VORBIS_TAG_MAP = {
+            'MUSICBRAINZ_RECORDING_ID': 'MUSICBRAINZ_TRACKID',
+            'MUSICBRAINZ_ARTIST_ID': 'MUSICBRAINZ_ARTISTID',
+            'MUSICBRAINZ_RELEASE_ID': 'MUSICBRAINZ_ALBUMID',
+            'MUSICBRAINZ_RELEASEGROUPID': 'MUSICBRAINZ_RELEASEGROUPID',
+            'MUSICBRAINZ_ALBUMARTISTID': 'MUSICBRAINZ_ALBUMARTISTID',
+            'MUSICBRAINZ_RELEASETRACKID': 'MUSICBRAINZ_RELEASETRACKID',
+        }
+        _MP4_TAG_MAP = {
+            'MUSICBRAINZ_RECORDING_ID': 'MusicBrainz Track Id',
+            'MUSICBRAINZ_ARTIST_ID': 'MusicBrainz Artist Id',
+            'MUSICBRAINZ_RELEASE_ID': 'MusicBrainz Album Id',
+            'MUSICBRAINZ_RELEASEGROUPID': 'MusicBrainz Release Group Id',
+            'MUSICBRAINZ_ALBUMARTISTID': 'MusicBrainz Album Artist Id',
+            'MUSICBRAINZ_RELEASETRACKID': 'MusicBrainz Release Track Id',
+            'RELEASETYPE': 'MusicBrainz Album Type',
+            'RELEASESTATUS': 'MusicBrainz Album Status',
+            'RELEASECOUNTRY': 'MusicBrainz Album Release Country',
+        }
 
         # MP3 (ID3)
         if isinstance(audio_file.tags, ID3):
-            for tag_name, value in id_tags.items():
-                if tag_name == 'MUSICBRAINZ_RECORDING_ID':
-                    audio_file.tags.add(UFID(owner='http://musicbrainz.org', data=value.encode('ascii')))
-                    written.append('UFID:http://musicbrainz.org')
-                elif tag_name == 'MUSICBRAINZ_ARTIST_ID':
-                    audio_file.tags.add(TXXX(encoding=3, desc='MusicBrainz Artist Id', text=[value]))
-                    written.append('TXXX:MusicBrainz Artist Id')
-                elif tag_name == 'MUSICBRAINZ_RELEASE_ID':
-                    audio_file.tags.add(TXXX(encoding=3, desc='MusicBrainz Album Id', text=[value]))
-                    written.append('TXXX:MusicBrainz Album Id')
+            for tag_name, value in filtered_tags.items():
+                id3_spec = _ID3_TAG_MAP.get(tag_name)
+                if id3_spec:
+                    frame_type, desc = id3_spec
+                    if frame_type == 'UFID':
+                        audio_file.tags.add(UFID(owner=desc, data=value.encode('ascii')))
+                        written.append(f'UFID:{desc}')
+                    elif frame_type == 'TDOR':
+                        audio_file.tags.add(TDOR(encoding=3, text=[value]))
+                        written.append('TDOR')
+                    elif frame_type == 'TMED':
+                        audio_file.tags.add(TMED(encoding=3, text=[value]))
+                        written.append('TMED')
+                    else:  # TXXX
+                        audio_file.tags.add(TXXX(encoding=3, desc=desc, text=[value]))
+                        written.append(f'TXXX:{desc}')
                 else:
                     audio_file.tags.add(TXXX(encoding=3, desc=tag_name, text=[str(value)]))
                     written.append(f'TXXX:{tag_name}')
 
         # FLAC / OGG Vorbis
         elif isinstance(audio_file, (FLAC, OggVorbis)):
-            for tag_name, value in id_tags.items():
-                if tag_name == 'MUSICBRAINZ_RECORDING_ID':
-                    audio_file['MUSICBRAINZ_TRACKID'] = [value]
-                    written.append('MUSICBRAINZ_TRACKID')
-                elif tag_name == 'MUSICBRAINZ_ARTIST_ID':
-                    audio_file['MUSICBRAINZ_ARTISTID'] = [value]
-                    written.append('MUSICBRAINZ_ARTISTID')
-                elif tag_name == 'MUSICBRAINZ_RELEASE_ID':
-                    audio_file['MUSICBRAINZ_ALBUMID'] = [value]
-                    written.append('MUSICBRAINZ_ALBUMID')
-                else:
-                    audio_file[tag_name] = [str(value)]
-                    written.append(tag_name)
+            for tag_name, value in filtered_tags.items():
+                vorbis_key = _VORBIS_TAG_MAP.get(tag_name, tag_name)
+                audio_file[vorbis_key] = [str(value)]
+                written.append(vorbis_key)
 
         # MP4 (M4A/AAC)
         elif isinstance(audio_file, MP4):
-            for tag_name, value in id_tags.items():
-                if tag_name == 'MUSICBRAINZ_RECORDING_ID':
-                    key = '----:com.apple.iTunes:MusicBrainz Track Id'
-                elif tag_name == 'MUSICBRAINZ_ARTIST_ID':
-                    key = '----:com.apple.iTunes:MusicBrainz Artist Id'
-                elif tag_name == 'MUSICBRAINZ_RELEASE_ID':
-                    key = '----:com.apple.iTunes:MusicBrainz Album Id'
-                else:
-                    key = f'----:com.apple.iTunes:{tag_name}'
+            for tag_name, value in filtered_tags.items():
+                mp4_desc = _MP4_TAG_MAP.get(tag_name, tag_name)
+                key = f'----:com.apple.iTunes:{mp4_desc}'
                 audio_file[key] = [MP4FreeForm(str(value).encode('utf-8'))]
                 written.append(key)
 
@@ -15321,7 +15462,7 @@ def _embed_source_ids(audio_file, metadata: dict):
             print(f"🔗 Embedded IDs: {', '.join(written)}")
 
         # ── 3b. Write BPM tag (from Deezer) ──
-        if deezer_bpm and deezer_bpm > 0:
+        if tag_cfg['bpm'] and deezer_bpm and deezer_bpm > 0:
             bpm_int = int(deezer_bpm)
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TBPM(encoding=3, text=[str(bpm_int)]))
@@ -15332,7 +15473,7 @@ def _embed_source_ids(audio_file, metadata: dict):
             print(f"🥁 BPM: {bpm_int}")
 
         # ── 3c. Write mood tag (from AudioDB) ──
-        if audiodb_mood:
+        if tag_cfg['mood_style'] and audiodb_mood:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TXXX(encoding=3, desc='MOOD', text=[audiodb_mood]))
             elif isinstance(audio_file, (FLAC, OggVorbis)):
@@ -15342,7 +15483,7 @@ def _embed_source_ids(audio_file, metadata: dict):
             print(f"🎭 Mood: {audiodb_mood}")
 
         # ── 3d. Write style tag (from AudioDB) ──
-        if audiodb_style:
+        if tag_cfg['mood_style'] and audiodb_style:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TXXX(encoding=3, desc='STYLE', text=[audiodb_style]))
             elif isinstance(audio_file, (FLAC, OggVorbis)):
@@ -15352,55 +15493,58 @@ def _embed_source_ids(audio_file, metadata: dict):
             print(f"🎨 Style: {audiodb_style}")
 
         # ── 4. Merge genres (Spotify + MusicBrainz + AudioDB + Last.fm) and overwrite tag ──
-        enrichment_genres = mb_genres + ([audiodb_genre] if audiodb_genre else []) + lastfm_tags
-        if enrichment_genres:
-            spotify_genres = [g.strip() for g in metadata.get('genre', '').split(',') if g.strip()]
-            seen = set()
-            merged = []
-            for g in spotify_genres + enrichment_genres:
-                key = g.strip().lower()
-                if key and key not in seen:
-                    seen.add(key)
-                    merged.append(g.strip().title())
-                if len(merged) >= 5:
-                    break
+        if tag_cfg['genre_merge']:
+            enrichment_genres = mb_genres + ([audiodb_genre] if audiodb_genre else []) + lastfm_tags
+            if enrichment_genres:
+                spotify_genres = [g.strip() for g in metadata.get('genre', '').split(',') if g.strip()]
+                seen = set()
+                merged = []
+                for g in spotify_genres + enrichment_genres:
+                    key = g.strip().lower()
+                    if key and key not in seen:
+                        seen.add(key)
+                        merged.append(g.strip().title())
+                    if len(merged) >= 5:
+                        break
 
-            if merged:
-                genre_string = ', '.join(merged)
-                if isinstance(audio_file.tags, ID3):
-                    audio_file.tags.add(TCON(encoding=3, text=[genre_string]))
-                elif isinstance(audio_file, (FLAC, OggVorbis)):
-                    audio_file['GENRE'] = [genre_string]
-                elif isinstance(audio_file, MP4):
-                    audio_file['\xa9gen'] = [genre_string]
-                print(f"🎶 Genres merged: {genre_string}")
+                if merged:
+                    genre_string = ', '.join(merged)
+                    if isinstance(audio_file.tags, ID3):
+                        audio_file.tags.add(TCON(encoding=3, text=[genre_string]))
+                    elif isinstance(audio_file, (FLAC, OggVorbis)):
+                        audio_file['GENRE'] = [genre_string]
+                    elif isinstance(audio_file, MP4):
+                        audio_file['\xa9gen'] = [genre_string]
+                    print(f"🎶 Genres merged: {genre_string}")
 
         # ── 5. Write ISRC if available (MusicBrainz → Deezer → Tidal → Qobuz fallback) ──
-        final_isrc = isrc or deezer_isrc or tidal_isrc or qobuz_isrc
-        if final_isrc:
-            if isinstance(audio_file.tags, ID3):
-                audio_file.tags.add(TSRC(encoding=3, text=[final_isrc]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)):
-                audio_file['ISRC'] = [final_isrc]
-            elif isinstance(audio_file, MP4):
-                audio_file['----:com.apple.iTunes:ISRC'] = [MP4FreeForm(final_isrc.encode('utf-8'))]
-            source = "MusicBrainz" if isrc else "Deezer" if deezer_isrc else "Tidal" if tidal_isrc else "Qobuz"
-            print(f"🔖 ISRC ({source}): {final_isrc}")
+        if tag_cfg['isrc']:
+            final_isrc = isrc or deezer_isrc or tidal_isrc or qobuz_isrc
+            if final_isrc:
+                if isinstance(audio_file.tags, ID3):
+                    audio_file.tags.add(TSRC(encoding=3, text=[final_isrc]))
+                elif isinstance(audio_file, (FLAC, OggVorbis)):
+                    audio_file['ISRC'] = [final_isrc]
+                elif isinstance(audio_file, MP4):
+                    audio_file['----:com.apple.iTunes:ISRC'] = [MP4FreeForm(final_isrc.encode('utf-8'))]
+                source = "MusicBrainz" if isrc else "Deezer" if deezer_isrc else "Tidal" if tidal_isrc else "Qobuz"
+                print(f"🔖 ISRC ({source}): {final_isrc}")
 
         # ── 6. Write copyright tag (Tidal → Qobuz fallback) ──
-        final_copyright = tidal_copyright or qobuz_copyright
-        if final_copyright:
-            if isinstance(audio_file.tags, ID3):
-                audio_file.tags.add(TCOP(encoding=3, text=[final_copyright]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)):
-                audio_file['COPYRIGHT'] = [final_copyright]
-            elif isinstance(audio_file, MP4):
-                audio_file['cprt'] = [final_copyright]
-            source = "Tidal" if tidal_copyright else "Qobuz"
-            print(f"©️ Copyright ({source}): {final_copyright[:60]}")
+        if tag_cfg['copyright_label']:
+            final_copyright = tidal_copyright or qobuz_copyright
+            if final_copyright:
+                if isinstance(audio_file.tags, ID3):
+                    audio_file.tags.add(TCOP(encoding=3, text=[final_copyright]))
+                elif isinstance(audio_file, (FLAC, OggVorbis)):
+                    audio_file['COPYRIGHT'] = [final_copyright]
+                elif isinstance(audio_file, MP4):
+                    audio_file['cprt'] = [final_copyright]
+                source = "Tidal" if tidal_copyright else "Qobuz"
+                print(f"©️ Copyright ({source}): {final_copyright[:60]}")
 
         # ── 7. Write label/publisher tag (from Qobuz) ──
-        if qobuz_label:
+        if tag_cfg['copyright_label'] and qobuz_label:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TPUB(encoding=3, text=[qobuz_label]))
             elif isinstance(audio_file, (FLAC, OggVorbis)):
@@ -15410,7 +15554,7 @@ def _embed_source_ids(audio_file, metadata: dict):
             print(f"🏷️ Label (Qobuz): {qobuz_label}")
 
         # ── 8. Write Last.fm and Genius URLs as custom tags ──
-        if lastfm_url:
+        if tag_cfg['urls'] and lastfm_url:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TXXX(encoding=3, desc='LASTFM_URL', text=[lastfm_url]))
             elif isinstance(audio_file, (FLAC, OggVorbis)):
@@ -15418,7 +15562,7 @@ def _embed_source_ids(audio_file, metadata: dict):
             elif isinstance(audio_file, MP4):
                 audio_file['----:com.apple.iTunes:LASTFM_URL'] = [MP4FreeForm(lastfm_url.encode('utf-8'))]
 
-        if genius_url:
+        if tag_cfg['urls'] and genius_url:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TXXX(encoding=3, desc='GENIUS_URL', text=[genius_url]))
             elif isinstance(audio_file, (FLAC, OggVorbis)):
