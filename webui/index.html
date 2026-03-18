@@ -988,9 +988,14 @@
             <div class="page" id="sync-page">
                 <!-- Header -->
                 <div class="sync-header">
-                    <h2 class="sync-title"><img src="/static/sync.png" class="page-header-icon" alt=""><span>Playlist Sync</span></h2>
-                    <p class="sync-subtitle">Synchronize your Spotify, Tidal, and YouTube playlists with your media
-                        server</p>
+                    <div class="sync-header-row">
+                        <div>
+                            <h2 class="sync-title"><img src="/static/sync.png" class="page-header-icon" alt=""><span>Playlist Sync</span></h2>
+                            <p class="sync-subtitle">Synchronize your Spotify, Tidal, and YouTube playlists with your media
+                                server</p>
+                        </div>
+                        <button class="sync-history-btn" onclick="openSyncHistoryModal()" title="View sync history">Sync History</button>
+                    </div>
                 </div>
 
                 <!-- Main two-column content area -->
@@ -5673,6 +5678,19 @@
             </div>
             <div class="library-history-list" id="library-history-list"></div>
             <div class="library-history-pagination" id="library-history-pagination"></div>
+        </div>
+    </div>
+
+    <!-- Sync History Modal -->
+    <div class="modal-overlay hidden" id="sync-history-overlay" onclick="if(event.target===this)closeSyncHistoryModal()">
+        <div class="sync-history-modal">
+            <div class="sync-history-modal-header">
+                <h3>Sync History</h3>
+                <button class="sync-history-modal-close" onclick="closeSyncHistoryModal()">&times;</button>
+            </div>
+            <div class="sync-history-tabs" id="sync-history-tabs"></div>
+            <div class="sync-history-list" id="sync-history-list"></div>
+            <div class="sync-history-pagination" id="sync-history-pagination"></div>
         </div>
     </div>
 

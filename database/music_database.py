@@ -491,6 +491,32 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_event_type ON library_history (event_type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_created_at ON library_history (created_at DESC)")
 
+            # Sync history table — tracks the last 100 sync operations with cached context for re-trigger
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sync_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    batch_id TEXT NOT NULL,
+                    playlist_id TEXT,
+                    playlist_name TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    sync_type TEXT NOT NULL,
+                    artist_context TEXT,
+                    album_context TEXT,
+                    tracks_json TEXT NOT NULL,
+                    total_tracks INTEGER DEFAULT 0,
+                    tracks_found INTEGER DEFAULT 0,
+                    tracks_downloaded INTEGER DEFAULT 0,
+                    tracks_failed INTEGER DEFAULT 0,
+                    thumb_url TEXT,
+                    is_album_download INTEGER DEFAULT 0,
+                    playlist_folder_mode INTEGER DEFAULT 0,
+                    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sh_started_at ON sync_history (started_at DESC)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sh_source ON sync_history (source)")
+
             conn.commit()
             logger.info("Database initialized successfully")
             
@@ -8082,6 +8108,132 @@ class MusicDatabase:
         except Exception as e:
             logger.debug(f"Error getting library history stats: {e}")
             return {'downloads': 0, 'imports': 0}
+
+    # ── Sync History ──────────────────────────────────────────────
+
+    def add_sync_history_entry(self, batch_id, playlist_id, playlist_name, source, sync_type,
+                               tracks_json, artist_context=None, album_context=None,
+                               thumb_url=None, total_tracks=0, is_album_download=False,
+                               playlist_folder_mode=False):
+        """Record a new sync operation to sync_history."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO sync_history (batch_id, playlist_id, playlist_name, source, sync_type,
+                    tracks_json, artist_context, album_context, thumb_url, total_tracks,
+                    is_album_download, playlist_folder_mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (batch_id, playlist_id, playlist_name, source, sync_type,
+                  tracks_json, artist_context, album_context, thumb_url, total_tracks,
+                  int(is_album_download), int(playlist_folder_mode)))
+            conn.commit()
+            # Cap at 100 entries
+            cursor.execute("""
+                DELETE FROM sync_history WHERE id NOT IN (
+                    SELECT id FROM sync_history ORDER BY started_at DESC LIMIT 100
+                )
+            """)
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.debug(f"Error adding sync history entry: {e}")
+            return False
+
+    def update_sync_history_completion(self, batch_id, tracks_found=0, tracks_downloaded=0, tracks_failed=0):
+        """Update a sync_history entry with completion stats."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE sync_history SET tracks_found = ?, tracks_downloaded = ?,
+                    tracks_failed = ?, completed_at = CURRENT_TIMESTAMP
+                WHERE batch_id = ?
+            """, (tracks_found, tracks_downloaded, tracks_failed, batch_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug(f"Error updating sync history completion: {e}")
+            return False
+
+    def refresh_sync_history_entry(self, entry_id, tracks_found=0, tracks_downloaded=0, tracks_failed=0):
+        """Update an existing sync_history entry with new stats and reset timestamps to move it to the top."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE sync_history SET tracks_found = ?, tracks_downloaded = ?,
+                    tracks_failed = ?, started_at = CURRENT_TIMESTAMP,
+                    completed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (tracks_found, tracks_downloaded, tracks_failed, entry_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug(f"Error refreshing sync history entry: {e}")
+            return False
+
+    def get_sync_history(self, source=None, page=1, limit=20):
+        """Return (entries, total) for sync_history, newest first. Full tracks_json excluded from list."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            where = "WHERE source = ?" if source else ""
+            params = [source] if source else []
+
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM sync_history {where}", params)
+            total = cursor.fetchone()['cnt']
+
+            offset = (page - 1) * limit
+            cursor.execute(f"""
+                SELECT id, batch_id, playlist_id, playlist_name, source, sync_type,
+                       artist_context, album_context, thumb_url, total_tracks,
+                       tracks_found, tracks_downloaded, tracks_failed,
+                       is_album_download, playlist_folder_mode, started_at, completed_at
+                FROM sync_history {where}
+                ORDER BY started_at DESC
+                LIMIT ? OFFSET ?
+            """, params + [limit, offset])
+            entries = [dict(row) for row in cursor.fetchall()]
+            return entries, total
+        except Exception as e:
+            logger.error(f"Error querying sync history: {e}")
+            return [], 0
+
+    def get_sync_history_entry(self, entry_id):
+        """Return a single sync_history row with full tracks_json (for re-trigger)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM sync_history WHERE id = ?", (entry_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting sync history entry: {e}")
+            return None
+
+    def delete_sync_history_entry(self, entry_id):
+        """Delete a single sync_history entry."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM sync_history WHERE id = ?", (entry_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug(f"Error deleting sync history entry: {e}")
+            return False
+
+    def get_sync_history_stats(self):
+        """Return counts grouped by source."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT source, COUNT(*) as cnt FROM sync_history GROUP BY source")
+            return {row['source']: row['cnt'] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.debug(f"Error getting sync history stats: {e}")
+            return {}
 
     def api_get_recently_added(self, entity_type: str = "albums", limit: int = 50) -> List[Dict[str, Any]]:
         """Get recently added entities, ordered by created_at DESC."""
