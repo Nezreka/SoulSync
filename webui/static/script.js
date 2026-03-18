@@ -52734,7 +52734,7 @@ async function loadRepairFindings() {
 
         // Finding types that have an automated fix action
         const fixableTypes = {
-            dead_file: 'Remove Entry',
+            dead_file: 'Re-download',
             orphan_file: 'Delete File',
             track_number_mismatch: 'Fix',
             missing_cover_art: 'Apply Art',
@@ -52747,7 +52747,7 @@ async function loadRepairFindings() {
             const icon = severityIcons[f.severity] || 'ℹ️';
             const age = formatCacheAge(f.created_at);
             const actionLabels = {
-                removed_db_entry: 'Entry Removed', deleted_file: 'File Deleted',
+                removed_db_entry: 'Entry Removed', added_to_wishlist: 'Wishlisted', deleted_file: 'File Deleted',
                 already_gone: 'Already Gone', fixed_track_number: 'Track # Fixed',
                 applied_cover_art: 'Art Applied', applied_metadata: 'Metadata Applied',
                 removed_duplicates: 'Duplicates Removed',
