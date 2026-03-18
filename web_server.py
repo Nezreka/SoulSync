@@ -41190,18 +41190,18 @@ def _build_watchlist_count_payload(profile_id=1):
     }
 
 def _emit_service_status_loop():
-    """Background thread that pushes service status every 10 seconds."""
+    """Background thread that pushes service status every 5 seconds."""
     while True:
-        socketio.sleep(10)
+        socketio.sleep(5)
         try:
             socketio.emit('status:update', _build_status_payload())
         except Exception as e:
             logger.debug(f"Error emitting service status: {e}")
 
 def _emit_watchlist_count_loop():
-    """Background thread that pushes watchlist count every 30 seconds to each profile room."""
+    """Background thread that pushes watchlist count every 10 seconds to each profile room."""
     while True:
-        socketio.sleep(30)
+        socketio.sleep(10)
         try:
             database = get_database()
             profiles = database.get_all_profiles()
@@ -41282,9 +41282,9 @@ def _emit_system_stats_loop():
             logger.debug(f"Error emitting system stats: {e}")
 
 def _emit_activity_feed_loop():
-    """Background thread that pushes activity feed every 5 seconds."""
+    """Background thread that pushes activity feed every 2 seconds."""
     while True:
-        socketio.sleep(5)
+        socketio.sleep(2)
         try:
             with activity_feed_lock:
                 activities = activity_feed[-10:][::-1]
@@ -41293,9 +41293,9 @@ def _emit_activity_feed_loop():
             logger.debug(f"Error emitting activity feed: {e}")
 
 def _emit_db_stats_loop():
-    """Background thread that pushes database stats every 30 seconds."""
+    """Background thread that pushes database stats every 10 seconds."""
     while True:
-        socketio.sleep(30)
+        socketio.sleep(10)
         try:
             db = get_database()
             stats = db.get_database_info_for_server()
@@ -41304,9 +41304,9 @@ def _emit_db_stats_loop():
             logger.debug(f"Error emitting db stats: {e}")
 
 def _emit_wishlist_count_loop():
-    """Background thread that pushes wishlist count every 30 seconds to each profile room."""
+    """Background thread that pushes wishlist count every 10 seconds to each profile room."""
     while True:
-        socketio.sleep(30)
+        socketio.sleep(10)
         try:
             from core.wishlist_service import get_wishlist_service
             ws = get_wishlist_service()

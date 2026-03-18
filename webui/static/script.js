@@ -1896,7 +1896,7 @@ function initApp() {
     // Start global service status polling for sidebar (works on all pages)
     // Initial fetch for immediate data, then setInterval as fallback when WebSocket is disconnected
     fetchAndUpdateServiceStatus();
-    setInterval(fetchAndUpdateServiceStatus, 10000); // Every 10 seconds (no-op when WebSocket active)
+    setInterval(fetchAndUpdateServiceStatus, 5000); // Every 5 seconds (no-op when WebSocket active)
 
     // Check for updates on load and every hour
     checkForUpdates();
@@ -2008,8 +2008,8 @@ function initializeWatchlist() {
     // Update watchlist count initially
     updateWatchlistButtonCount();
 
-    // Update count every 30 seconds
-    setInterval(updateWatchlistButtonCount, 30000);
+    // Update count every 10 seconds
+    setInterval(updateWatchlistButtonCount, 10000);
 
     console.log('Watchlist system initialized');
 }
@@ -21228,9 +21228,9 @@ async function loadDashboardData() {
     // Initial load of stats
     await fetchAndUpdateDbStats();
 
-    // Start periodic refresh of stats (every 30 seconds)
+    // Start periodic refresh of stats (every 10 seconds)
     stopDbStatsPolling(); // Ensure no duplicates
-    dbStatsInterval = setInterval(fetchAndUpdateDbStats, 30000);
+    dbStatsInterval = setInterval(fetchAndUpdateDbStats, 10000);
 
     // Initial load of discovery pool stats for the tool card
     loadDiscoveryPoolStats();
@@ -21241,9 +21241,9 @@ async function loadDashboardData() {
     // Initial load of wishlist count
     await updateWishlistCount();
 
-    // Start periodic refresh of wishlist count (every 30 seconds, matching GUI behavior)
+    // Start periodic refresh of wishlist count (every 10 seconds)
     stopWishlistCountPolling(); // Ensure no duplicates
-    wishlistCountInterval = setInterval(updateWishlistCount, 30000);
+    wishlistCountInterval = setInterval(updateWishlistCount, 10000);
 
     // Initial load of service status and system statistics
     await fetchAndUpdateServiceStatus();
@@ -21256,8 +21256,8 @@ async function loadDashboardData() {
     // Initial load of activity feed
     await fetchAndUpdateActivityFeed();
 
-    // Start periodic refresh of activity feed (every 5 seconds for responsiveness)
-    setInterval(fetchAndUpdateActivityFeed, 5000);
+    // Start periodic refresh of activity feed (every 2 seconds for responsiveness)
+    setInterval(fetchAndUpdateActivityFeed, 2000);
 
     // Start periodic toast checking (every 3 seconds)
     setInterval(checkForActivityToasts, 3000);
