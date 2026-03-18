@@ -803,19 +803,98 @@ class RepairWorker:
         return handler(entity_type, entity_id, file_path, details)
 
     def _fix_dead_file(self, entity_type, entity_id, file_path, details):
-        """Remove the dead track entry from the database."""
+        """Add dead file track to wishlist for re-download, then remove the dead DB entry."""
         if not entity_id:
             return {'success': False, 'error': 'No track ID associated with this finding'}
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
+
+            # Fetch full track + album + artist data from DB
+            cursor.execute("""
+                SELECT t.id, t.title, t.track_number, t.duration, t.bitrate,
+                       t.spotify_track_id, t.itunes_track_id, t.deezer_id, t.isrc,
+                       ar.name AS artist_name, ar.spotify_artist_id,
+                       al.title AS album_title, al.spotify_album_id,
+                       al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
+                FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                LEFT JOIN albums al ON al.id = t.album_id
+                WHERE t.id = ?
+            """, (entity_id,))
+            row = cursor.fetchone()
+
+            if not row:
+                return {'success': False, 'error': 'Track not found in database'}
+
+            track_name = row['title'] or details.get('title', 'Unknown')
+            artist_name = row['artist_name'] or details.get('artist', 'Unknown Artist')
+            album_title = row['album_title'] or details.get('album', '')
+
+            # Best available ID for wishlist (spotify preferred, then itunes, deezer, fallback)
+            wishlist_id = (row['spotify_track_id']
+                           or row['itunes_track_id']
+                           or row['deezer_id']
+                           or f"redownload_{entity_id}")
+
+            # Build album images list
+            album_images = []
+            album_thumb = row['album_thumb'] or details.get('album_thumb_url')
+            if album_thumb:
+                album_images = [{'url': album_thumb}]
+
+            # Build wishlist-compatible track data
+            spotify_track_data = {
+                'id': wishlist_id,
+                'name': track_name,
+                'artists': [{'name': artist_name}],
+                'album': {
+                    'name': album_title or track_name,
+                    'id': row['spotify_album_id'] or '',
+                    'release_date': str(row['year']) if row['year'] else '',
+                    'images': album_images,
+                    'album_type': row['record_type'] or 'album',
+                    'total_tracks': row['track_count'] or 0,
+                    'artists': [{'name': artist_name}],
+                },
+                'duration_ms': row['duration'] or 0,
+                'track_number': row['track_number'] or 1,
+                'disc_number': 1,
+                'explicit': False,
+                'external_urls': {},
+                'popularity': 0,
+                'preview_url': None,
+                'uri': f"spotify:track:{row['spotify_track_id']}" if row['spotify_track_id'] else '',
+                'is_local': False,
+            }
+
+            source_info = {
+                'original_path': file_path or details.get('original_path', ''),
+                'album_title': album_title,
+                'artist': artist_name,
+                'reason': 'dead_file_redownload',
+            }
+
+            added = self.db.add_to_wishlist(
+                spotify_track_data,
+                failure_reason='Dead file — re-download requested',
+                source_type='redownload',
+                source_info=source_info,
+            )
+
+            if not added:
+                return {'success': False, 'error': 'Failed to add to wishlist (may already exist)'}
+
+            # Remove dead track entry from DB
             cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
             conn.commit()
-            if cursor.rowcount > 0:
-                return {'success': True, 'action': 'removed_db_entry',
-                        'message': 'Removed dead track entry from database'}
-            return {'success': False, 'error': 'Track not found in database'}
+
+            return {'success': True, 'action': 'added_to_wishlist',
+                    'message': f'Added "{track_name}" to wishlist for re-download'}
+        except Exception as e:
+            logger.error("Dead file re-download failed for track %s: %s", entity_id, e)
+            return {'success': False, 'error': str(e)}
         finally:
             if conn:
                 conn.close()
