@@ -7675,6 +7675,9 @@ async function loadSyncData() {
 
     // Render saved URL histories for YouTube, Deezer, Spotify Link tabs
     initUrlHistories();
+
+    // Refresh Beatport download bubbles (navigation trigger, like showArtistDownloadsSection in artists page)
+    showBeatportDownloadsSection();
 }
 
 async function checkForActiveProcesses() {
@@ -10586,8 +10589,8 @@ async function closeDownloadMissingModal(playlistId) {
             console.log(`✅ [MODAL CLOSE] Search download cleanup completed for: ${playlistId}`);
         }
 
-        // Clean up Beatport download if this is a beatport chart playlist
-        if (playlistId.startsWith('beatport_chart_')) {
+        // Clean up Beatport download if this is a beatport chart or release playlist
+        if (playlistId.startsWith('beatport_chart_') || playlistId.startsWith('beatport_release_')) {
             console.log(`🧹 [MODAL CLOSE] Cleaning up Beatport download for completed modal: ${playlistId}`);
             cleanupBeatportDownload(playlistId);
             console.log(`✅ [MODAL CLOSE] Beatport download cleanup completed for: ${playlistId}`);
@@ -24000,6 +24003,11 @@ function initializeSyncPage() {
             if (tabId === 'mirrored' && !mirroredPlaylistsLoaded) {
                 loadMirroredPlaylists();
             }
+
+            // Refresh Beatport download bubbles when switching to the Beatport tab
+            if (tabId === 'beatport') {
+                showBeatportDownloadsSection();
+            }
         });
     });
 
@@ -24073,6 +24081,7 @@ function initializeSyncPage() {
                 initializeBeatportHypePicksSlider();
                 initializeBeatportChartsSlider();
                 initializeBeatportDJSlider();
+                showBeatportDownloadsSection();
             }
         });
     });
@@ -43550,6 +43559,10 @@ async function handleBeatportReleaseCardClick(cardElement, release) {
             data.artist,
             false
         );
+
+        // Register Beatport download bubble for releases (albums, EPs, singles)
+        const releaseImage = (data.album.images && data.album.images.length > 0) ? data.album.images[0].url : (release.image_url || '');
+        registerBeatportDownload(playlistName, releaseImage, virtualPlaylistId);
 
         hideLoadingOverlay();
         _beatportModalOpening = false;
