@@ -3367,6 +3367,9 @@ def run_service_test(service, test_config):
             except Exception as e:
                 return False, f"Navidrome connection error: {str(e)}"
         elif service == "soulseek":
+            if soulseek_client is None:
+                return False, "Download orchestrator failed to initialize. Check server logs for startup errors."
+
             # Test the orchestrator's configured download source (not just Soulseek)
             download_mode = config_manager.get('download_source.mode', 'soulseek')
 
