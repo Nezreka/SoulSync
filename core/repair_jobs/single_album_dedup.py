@@ -51,7 +51,7 @@ class SingleAlbumDedupJob(RepairJob):
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT t.id, t.title, ar.name, al.title, al.album_type, al.total_tracks,
+                SELECT t.id, t.title, ar.name, al.title, al.record_type, al.track_count,
                        t.file_path, t.bitrate, t.duration, al.thumb_url, ar.thumb_url,
                        t.track_number
                 FROM tracks t

@@ -330,6 +330,11 @@ class LibraryReorganizeJob(RepairJob):
             max_disc = max((file_tags[fp].get('disc_number', 1) for fp in fpaths), default=1)
             album_total_discs[key] = max_disc
 
+        # Pre-load album years from DB for files missing year tags
+        db_album_years = {}  # (artist, album) -> year string
+        if '$year' in (album_template + single_template):
+            db_album_years = self._load_album_years(context.db)
+
         # Track claimed destinations to detect in-batch collisions
         claimed_destinations = set()
         # Track src_dir -> dest_dir for post-pass sidecar cleanup
@@ -365,6 +370,12 @@ class LibraryReorganizeJob(RepairJob):
             track_number = tags.get('track_number', 1) or 1
             disc_number = tags.get('disc_number', 1) or 1
             year = tags.get('year', '')
+
+            # Fallback: if file tags have no year, try the DB album year
+            if not year and db_album_years:
+                year = db_album_years.get((artist.lower(), (album or title).lower()), '')
+                if not year:
+                    year = db_album_years.get((albumartist.lower(), (album or title).lower()), '')
 
             # Read quality for $quality template variable
             quality = _get_audio_quality(fpath)
@@ -623,6 +634,31 @@ class LibraryReorganizeJob(RepairJob):
         if context.config_manager:
             return context.config_manager.get(f'repair.jobs.{self.job_id}.settings.{key}', default)
         return default
+
+    def _load_album_years(self, db) -> dict:
+        """Load all album years from DB in one query. Returns {(artist_lower, album_lower): year_str}."""
+        years = {}
+        conn = None
+        try:
+            conn = db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT ar.name, al.title, al.year
+                FROM albums al
+                JOIN artists ar ON ar.id = al.artist_id
+                WHERE al.year IS NOT NULL AND al.year != 0
+            """)
+            for row in cursor.fetchall():
+                artist_name, album_title, year = row
+                if artist_name and album_title and year:
+                    key = (artist_name.lower(), album_title.lower())
+                    years[key] = str(year)[:4]
+        except Exception as e:
+            logger.debug("Failed to load album years from DB: %s", e)
+        finally:
+            if conn:
+                conn.close()
+        return years
 
     def _update_db_path(self, db, old_path: str, new_path: str, transfer_folder: str = ''):
         """Update file_path in the tracks table when a file is moved.
