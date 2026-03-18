@@ -52659,6 +52659,7 @@ async function loadRepairFindings() {
             missing_cover_art: 'Apply Art',
             metadata_gap: 'Apply',
             duplicate_tracks: 'Keep Best',
+            incomplete_album: 'Auto-Fill',
         };
 
         container.innerHTML = items.map(f => {
