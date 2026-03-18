@@ -1859,27 +1859,8 @@ beatport_data_cache = {
     'cache_lock': threading.Lock()
 }
 
-# --- Beatport Enrichment Cache ---
-# Cache enriched track data (per-track page visits) to avoid re-scraping on repeat chart clicks.
-# Keyed by track URL, expires after 2 hours.
-_beatport_enrichment_cache = {}
-_beatport_enrichment_lock = threading.Lock()
-_BEATPORT_ENRICHMENT_TTL = 7200  # 2 hours in seconds
 
-def get_cached_enrichment(track_url):
-    """Return cached enrichment data for a track URL, or None if missing/expired."""
-    with _beatport_enrichment_lock:
-        entry = _beatport_enrichment_cache.get(track_url)
-        if entry and (time.time() - entry['ts']) < _BEATPORT_ENRICHMENT_TTL:
-            return dict(entry['data'])  # shallow copy — prevent callers from mutating cache
-        elif entry:
-            del _beatport_enrichment_cache[track_url]
-    return None
 
-def set_cached_enrichment(track_url, data):
-    """Store enrichment data for a track URL."""
-    with _beatport_enrichment_lock:
-        _beatport_enrichment_cache[track_url] = {'data': dict(data), 'ts': time.time()}
 
 def get_cached_beatport_data(section_type, data_key, genre_slug=None):
     """
@@ -19672,7 +19653,7 @@ def metadata_cache_browse():
         logger.error(f"Error browsing metadata cache: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/metadata-cache/entity/<source>/<entity_type>/<entity_id>', methods=['GET'])
+@app.route('/api/metadata-cache/entity/<source>/<entity_type>/<path:entity_id>', methods=['GET'])
 def metadata_cache_entity_detail(source, entity_type, entity_id):
     """Get detailed view of a single cached entity."""
     try:
@@ -35360,14 +35341,31 @@ def extract_beatport_chart_tracks():
                 "count": 0
             }), 400
 
+        enrich = data.get('enrich', True)
+
         logger.info(f"🔍 API request to extract tracks from chart: {chart_name}")
         logger.info(f"🔗 Chart URL: {chart_url}")
 
         # Initialize the Beatport scraper
         scraper = BeatportUnifiedScraper()
 
-        # Extract tracks from the specific chart URL
-        tracks = scraper.extract_tracks_from_chart(chart_url, chart_name, limit)
+        if enrich:
+            # Full extraction + enrichment (legacy synchronous path)
+            tracks = scraper.extract_tracks_from_chart(chart_url, chart_name, limit)
+        else:
+            # Extract raw track list only (no per-track enrichment)
+            soup = scraper.get_page(chart_url)
+            tracks = []
+            if soup:
+                tracks = scraper.extract_tracks_from_chart_table(soup, chart_name, limit)
+                if len(tracks) < 10:
+                    general_tracks = scraper.extract_tracks_from_page(soup, f"New Chart: {chart_name}", limit)
+                    if len(general_tracks) > len(tracks):
+                        tracks = general_tracks
+                if len(tracks) < 10:
+                    table_tracks = scraper.extract_tracks_from_table_format(soup, chart_name, limit)
+                    if len(table_tracks) > len(tracks):
+                        tracks = table_tracks
 
         logger.info(f"✅ Successfully extracted {len(tracks)} tracks from chart: {chart_name}")
 
@@ -36416,9 +36414,13 @@ def get_beatport_release_metadata():
         logger.error(f"Full traceback: {traceback.format_exc()}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+# Active enrichment tasks — progress tracked here, polled by frontend
+_enrichment_tasks = {}  # enrichment_id -> {completed, total, current_track, done, tracks, error}
+_enrichment_tasks_lock = threading.Lock()
+
 @app.route('/api/beatport/enrich-tracks', methods=['POST'])
 def enrich_beatport_tracks():
-    """Enrich basic track data (from DOM extraction) by visiting each track's page"""
+    """Start Beatport track enrichment. Returns immediately; poll /enrich-progress for updates."""
     try:
         data = request.get_json()
         if not data:
@@ -36432,15 +36434,18 @@ def enrich_beatport_tracks():
 
         logger.info(f"🎯 Enriching {len(tracks)} Beatport tracks with per-track metadata (id: {enrichment_id})")
 
-        # --- Check enrichment cache ---
-        cached_results = {}   # index -> enriched track data
-        uncached_tracks = []  # tracks that need scraping
-        uncached_indices = [] # original indices of uncached tracks
+        # --- Check enrichment cache (fast, do before spawning background) ---
+        cached_results = {}
+        uncached_tracks = []
+        uncached_indices = []
+
+        from core.metadata_cache import get_metadata_cache
+        mcache = get_metadata_cache()
 
         for i, track in enumerate(tracks):
             url = track.get('url') or track.get('track_url') or ''
             if url:
-                cached = get_cached_enrichment(url)
+                cached = mcache.get_entity('beatport', 'track', url)
                 if cached:
                     cached_results[i] = cached
                     continue
@@ -36449,76 +36454,124 @@ def enrich_beatport_tracks():
 
         cache_hits = len(cached_results)
         cache_misses = len(uncached_tracks)
-        cache_size = len(_beatport_enrichment_cache)
-        logger.info(f"📦 Enrichment cache: {cache_hits} hits, {cache_misses} misses (cache has {cache_size} entries)")
-        if cache_misses > 0 and cache_size > 0:
-            sample_input_url = (uncached_tracks[0].get('url') or uncached_tracks[0].get('track_url') or 'NO_URL')
-            sample_cached_url = next(iter(_beatport_enrichment_cache), 'EMPTY')
-            logger.info(f"📦 Cache debug — input URL: {sample_input_url[:80]} | cached URL: {sample_cached_url[:80]}")
+        logger.info(f"📦 Enrichment cache: {cache_hits} hits, {cache_misses} misses")
 
-        # Emit instant progress for cached tracks
-        if cache_hits > 0:
-            socketio.emit('beatport:enrich_progress', {
-                'enrichment_id': enrichment_id,
+        # All cached — return immediately (no background task needed)
+        if cache_misses == 0:
+            merged = [None] * len(tracks)
+            for idx, d in cached_results.items():
+                merged[idx] = d
+            for i in range(len(merged)):
+                if merged[i] is None:
+                    merged[i] = tracks[i]
+            return jsonify({"success": True, "tracks": merged})
+
+        # --- Initialize progress tracker and start background task ---
+        with _enrichment_tasks_lock:
+            _enrichment_tasks[enrichment_id] = {
                 'completed': cache_hits,
                 'total': len(tracks),
-                'current_track': f'{cache_hits} tracks (cached)'
-            })
+                'current_track': f'{cache_hits} tracks (cached)' if cache_hits > 0 else '',
+                'done': False,
+                'tracks': None,
+                'error': None,
+            }
 
-        # --- Enrich uncached tracks ---
-        newly_enriched = []
-        if uncached_tracks:
-            def on_progress(completed, total, track_name):
-                socketio.emit('beatport:enrich_progress', {
-                    'enrichment_id': enrichment_id,
-                    'completed': cache_hits + completed,
-                    'total': len(tracks),
-                    'current_track': track_name
-                })
+        def _run_enrichment():
+            try:
+                def on_progress(completed, total, track_name):
+                    new_completed = cache_hits + completed
+                    with _enrichment_tasks_lock:
+                        task = _enrichment_tasks.get(enrichment_id)
+                        if task:
+                            task['completed'] = new_completed
+                            task['current_track'] = track_name
+                        else:
+                            logger.warning(f"⚠️ on_progress: task {enrichment_id} not found in _enrichment_tasks!")
 
-            scraper = BeatportUnifiedScraper()
-            newly_enriched = scraper.enrich_chart_tracks(uncached_tracks, progress_callback=on_progress)
+                scraper = BeatportUnifiedScraper()
+                newly_enriched = scraper.enrich_chart_tracks(uncached_tracks, progress_callback=on_progress)
 
-        # --- Apply text cleaning and cache newly enriched tracks ---
-        def clean_track(track):
-            if track.get('title'):
-                track['title'] = clean_beatport_text(track['title'])
-            if track.get('artist'):
-                track['artist'] = clean_beatport_text(track['artist'])
-            if track.get('release_name'):
-                track['release_name'] = clean_beatport_text(track['release_name'])
-            if track.get('label'):
-                track['label'] = clean_beatport_text(track['label'])
-            return track
+                # Clean and cache
+                for track in newly_enriched:
+                    if track.get('title'):
+                        track['title'] = clean_beatport_text(track['title'])
+                    if track.get('artist'):
+                        track['artist'] = clean_beatport_text(track['artist'])
+                    if track.get('release_name'):
+                        track['release_name'] = clean_beatport_text(track['release_name'])
+                    if track.get('label'):
+                        track['label'] = clean_beatport_text(track['label'])
+                    url = track.get('url') or track.get('track_url') or ''
+                    if url:
+                        mcache.store_entity('beatport', 'track', url, track)
 
-        for track in newly_enriched:
-            clean_track(track)
-            url = track.get('url') or track.get('track_url') or ''
-            if url:
-                set_cached_enrichment(url, track)
+                # Merge in original order
+                merged = [None] * len(tracks)
+                for idx, d in cached_results.items():
+                    merged[idx] = d
+                for j, idx in enumerate(uncached_indices):
+                    if j < len(newly_enriched):
+                        merged[idx] = newly_enriched[j]
+                for i in range(len(merged)):
+                    if merged[i] is None:
+                        merged[i] = tracks[i]
 
-        # --- Merge results in original order ---
-        merged = [None] * len(tracks)
-        for idx, data in cached_results.items():
-            merged[idx] = data
-        for j, idx in enumerate(uncached_indices):
-            if j < len(newly_enriched):
-                merged[idx] = newly_enriched[j]
+                logger.info(f"✅ Enriched {len(merged)} tracks ({cache_hits} cached, {cache_misses} scraped)")
 
-        # Fill any gaps with original track data (safety)
-        for i in range(len(merged)):
-            if merged[i] is None:
-                merged[i] = tracks[i]
+                with _enrichment_tasks_lock:
+                    task = _enrichment_tasks.get(enrichment_id)
+                    if task:
+                        task['done'] = True
+                        task['tracks'] = merged
+                        task['completed'] = len(tracks)
 
-        logger.info(f"✅ Enriched {len(merged)} tracks ({cache_hits} cached, {cache_misses} scraped)")
+            except Exception as e:
+                logger.error(f"❌ Error enriching tracks: {e}")
+                import traceback
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                with _enrichment_tasks_lock:
+                    task = _enrichment_tasks.get(enrichment_id)
+                    if task:
+                        task['done'] = True
+                        task['error'] = str(e)
+                        task['tracks'] = tracks  # Return originals as fallback
 
-        return jsonify({"success": True, "tracks": merged})
+        threading.Thread(target=_run_enrichment, daemon=True).start()
+
+        return jsonify({"success": True, "enrichment_id": enrichment_id, "async": True})
 
     except Exception as e:
-        logger.error(f"❌ Error enriching tracks: {e}")
+        logger.error(f"❌ Error starting enrichment: {e}")
         import traceback
         logger.error(f"Full traceback: {traceback.format_exc()}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/beatport/enrich-progress/<enrichment_id>', methods=['GET'])
+def get_enrichment_progress(enrichment_id):
+    """Poll enrichment progress. Returns current state; includes tracks when done."""
+    with _enrichment_tasks_lock:
+        task = _enrichment_tasks.get(enrichment_id)
+        if not task:
+            return jsonify({"success": False, "error": "Unknown enrichment ID"}), 404
+
+        result = {
+            'success': True,
+            'completed': task['completed'],
+            'total': task['total'],
+            'current_track': task['current_track'],
+            'done': task['done'],
+        }
+        if task['done']:
+            result['tracks'] = task['tracks']
+            result['error'] = task['error']
+            # Clean up — task is finished
+            del _enrichment_tasks[enrichment_id]
+
+        resp = jsonify(result)
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
 
 @app.route('/api/beatport/homepage/featured-charts', methods=['GET'])
 def get_beatport_homepage_featured_charts():

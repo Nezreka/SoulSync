@@ -1133,15 +1133,16 @@ class BeatportUnifiedScraper:
                         enriched.append(rich)
                         if (i + 1) <= 3 or (i + 1) % 25 == 0:
                             print(f"   ✅ [{i+1}/{total}] {rich.get('artist', '?')} - {rich.get('title', '?')} | {rich.get('release_name', 'no release')}")
-                        continue
-
-                enriched.append(track)
+                    else:
+                        enriched.append(track)
+                else:
+                    enriched.append(track)
 
             except Exception as e:
                 print(f"   ⚠️ [{i+1}/{total}] Error enriching track: {e}")
                 enriched.append(track)
 
-            # Report progress
+            # Report progress (always runs — success, failure, or exception)
             if progress_callback:
                 track_name = track.get('title', 'Unknown')
                 progress_callback(i + 1, total, track_name)
