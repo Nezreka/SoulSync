@@ -72,6 +72,7 @@ let artistsPageState = {
     searchQuery: '',
     searchResults: [],
     selectedArtist: null,
+    sourceOverride: null, // Set when navigating from an alternate search tab
     artistDiscography: {
         albums: [],
         singles: []
@@ -6799,6 +6800,18 @@ function initializeSearchModeToggle() {
     let debounceTimer = null;
     let abortController = null;
 
+    // Multi-source search state
+    let _enhancedSearchData = null;   // Full response with all sources
+    let _activeSearchSource = null;   // Currently displayed source tab
+    let _altSourceController = null;  // AbortController for alternate source fetches
+
+    const SOURCE_LABELS = {
+        spotify: { text: 'Spotify', tabClass: 'enh-tab-spotify', badgeClass: 'enh-badge-spotify' },
+        itunes: { text: 'Apple Music', tabClass: 'enh-tab-itunes', badgeClass: 'enh-badge-itunes' },
+        deezer: { text: 'Deezer', tabClass: 'enh-tab-deezer', badgeClass: 'enh-badge-deezer' },
+        hydrabase: { text: 'Hydrabase', tabClass: 'enh-tab-hydrabase', badgeClass: 'enh-badge-hydrabase' },
+    };
+
     // Live search with debouncing
     if (enhancedInput) {
         enhancedInput.addEventListener('input', (e) => {
@@ -6905,11 +6918,25 @@ function initializeSearchModeToggle() {
         emptyState.classList.add('hidden');
         resultsContainer.classList.add('hidden');
 
-        // Abort previous request
+        // Abort previous requests (primary + alternates)
         if (abortController) {
             abortController.abort();
         }
+        if (_altSourceController) {
+            _altSourceController.abort();
+        }
         abortController = new AbortController();
+        _altSourceController = new AbortController();
+
+        // Initialize multi-source state early so alternate fetches can write to it
+        _enhancedSearchData = { db_artists: [], primary_source: null, sources: {} };
+
+        // Fire ALL source fetches immediately in parallel with the primary endpoint.
+        // Don't guess which is primary — the main endpoint response will tell us.
+        // If an alternate duplicates the primary, it just overwrites with same data.
+        for (const srcName of ['spotify', 'itunes', 'deezer']) {
+            _fetchAlternateSource(srcName, query);
+        }
 
         try {
             const response = await fetch('/api/enhanced-search', {
@@ -6924,7 +6951,21 @@ function initializeSearchModeToggle() {
             const data = await response.json();
             console.log('Enhanced results:', data);
 
-            // Calculate total
+            // Store multi-source state
+            const primarySource = data.primary_source || data.metadata_source || 'spotify';
+            _activeSearchSource = primarySource;
+            _enhancedSearchData = _enhancedSearchData || {};
+            _enhancedSearchData.db_artists = data.db_artists;
+            _enhancedSearchData.primary_source = primarySource;
+            if (!_enhancedSearchData.sources) _enhancedSearchData.sources = {};
+            _enhancedSearchData.sources[primarySource] = {
+                artists: data.spotify_artists || [],
+                albums: data.spotify_albums || [],
+                tracks: data.spotify_tracks || [],
+                available: true,
+            };
+
+            // Calculate total from primary source
             const total = (data.db_artists?.length || 0) +
                 (data.spotify_artists?.length || 0) +
                 (data.spotify_albums?.length || 0) +
@@ -6936,6 +6977,7 @@ function initializeSearchModeToggle() {
             if (total === 0) {
                 emptyState.classList.remove('hidden');
             } else {
+                renderSourceTabs(_enhancedSearchData);
                 renderDropdownResults(data);
                 resultsContainer.classList.remove('hidden');
             }
@@ -6950,11 +6992,10 @@ function initializeSearchModeToggle() {
     }
 
     function renderDropdownResults(data) {
-        // Determine source badge
-        const metadataSource = data.metadata_source || 'spotify';
-        const sourceBadge = metadataSource === 'hydrabase'
-            ? { text: 'Hydrabase', class: 'enh-badge-hydrabase' }
-            : { text: 'Spotify', class: 'enh-badge-spotify' };
+        // Determine source badge from active tab (not just primary)
+        const displaySource = _activeSearchSource || data.metadata_source || 'spotify';
+        const sourceInfo = SOURCE_LABELS[displaySource] || SOURCE_LABELS.spotify;
+        const sourceBadge = { text: sourceInfo.text, class: sourceInfo.badgeClass };
 
         // Render DB Artists
         renderCompactSection(
@@ -6989,7 +7030,8 @@ function initializeSearchModeToggle() {
                 meta: 'Artist',
                 badge: sourceBadge,
                 onClick: async () => {
-                    console.log(`🎵 Opening Spotify artist detail: ${artist.name} (ID: ${artist.id})`);
+                    const sourceOverride = _activeSearchSource;
+                    console.log(`🎵 Opening artist detail: ${artist.name} (ID: ${artist.id}, source: ${sourceOverride})`);
                     hideDropdown();
 
                     // Navigate to Artists page
@@ -6998,8 +7040,8 @@ function initializeSearchModeToggle() {
                     // Small delay to let the page load
                     await new Promise(resolve => setTimeout(resolve, 100));
 
-                    // Load the artist details (same pattern as discover page)
-                    await selectArtistForDetail(artist);
+                    // Load the artist details with source context
+                    await selectArtistForDetail(artist, { source: sourceOverride });
                 }
             })
         );
@@ -7063,6 +7105,92 @@ function initializeSearchModeToggle() {
         lazyLoadEnhancedSearchArtistImages();
     }
 
+    async function _fetchAlternateSource(sourceName, query) {
+        try {
+            const response = await fetch(`/api/enhanced-search/source/${sourceName}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query }),
+                signal: _altSourceController?.signal,
+            });
+            if (!response.ok) return;
+            const result = await response.json();
+            if (!result.available) return;
+
+            // Store in multi-source state
+            if (_enhancedSearchData) {
+                _enhancedSearchData.sources[sourceName] = result;
+                // Re-render tabs if primary has loaded (primary_source is set)
+                if (_enhancedSearchData.primary_source) {
+                    renderSourceTabs(_enhancedSearchData);
+                }
+            }
+        } catch (e) {
+            if (e.name !== 'AbortError') {
+                console.debug(`Alternate source ${sourceName} failed:`, e);
+            }
+        }
+    }
+
+    function renderSourceTabs(data) {
+        const tabBar = document.getElementById('enh-source-tabs');
+        if (!tabBar) return;
+
+        const sources = data.sources || {};
+        const primary = data.primary_source || 'spotify';
+
+        // Build tab list: primary first, then alternates sorted alphabetically
+        const sourceNames = Object.keys(sources).filter(s => sources[s].available);
+        if (sourceNames.length <= 1) {
+            tabBar.classList.add('hidden');
+            tabBar.innerHTML = '';
+            return;
+        }
+
+        // Primary tab first, then others
+        const ordered = [primary, ...sourceNames.filter(s => s !== primary).sort()];
+
+        tabBar.innerHTML = ordered.map(name => {
+            const info = SOURCE_LABELS[name] || { text: name, tabClass: '' };
+            const src = sources[name] || {};
+            const count = (src.artists?.length || 0) + (src.albums?.length || 0) + (src.tracks?.length || 0);
+            const isActive = name === _activeSearchSource;
+            return `<button class="enh-source-tab ${info.tabClass} ${isActive ? 'active' : ''}"
+                            onclick="window._switchEnhSourceTab('${name}')"
+                            data-source="${name}">
+                        ${info.text}<span class="enh-tab-count">(${count})</span>
+                    </button>`;
+        }).join('');
+
+        tabBar.classList.remove('hidden');
+    }
+
+    // Expose tab switch globally (onclick from HTML)
+    window._switchEnhSourceTab = function(sourceName) {
+        if (!_enhancedSearchData || !_enhancedSearchData.sources) return;
+        const src = _enhancedSearchData.sources[sourceName];
+        if (!src) return;
+
+        _activeSearchSource = sourceName;
+
+        // Update tab active states
+        document.querySelectorAll('.enh-source-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.source === sourceName);
+        });
+
+        // Build data in the shape renderDropdownResults expects
+        const viewData = {
+            db_artists: _enhancedSearchData.db_artists,
+            spotify_artists: src.artists || [],
+            spotify_albums: src.albums || [],
+            spotify_tracks: src.tracks || [],
+            metadata_source: sourceName,
+        };
+
+        renderDropdownResults(viewData);
+        resultsContainer.classList.remove('hidden');
+    };
+
     // Lazy load artist images for enhanced search results
     async function lazyLoadEnhancedSearchArtistImages() {
         const artistLists = [
@@ -7083,7 +7211,10 @@ function initializeSearchModeToggle() {
                 if (!artistId) continue;
 
                 try {
-                    const response = await fetch(`/api/artist/${artistId}/image`);
+                    const imgUrl = _activeSearchSource && _activeSearchSource !== 'spotify'
+                        ? `/api/artist/${artistId}/image?source=${_activeSearchSource}`
+                        : `/api/artist/${artistId}/image`;
+                    const response = await fetch(imgUrl);
                     const data = await response.json();
 
                     if (data.success && data.image_url) {
@@ -7239,8 +7370,11 @@ function initializeSearchModeToggle() {
         showLoadingOverlay('Loading album...');
 
         try {
-            // Fetch full album data with tracks (Hydrabase or Spotify)
+            // Fetch full album data with tracks — pass source for correct routing
             const albumParams = new URLSearchParams({ name: album.name || '', artist: album.artist || '' });
+            if (_activeSearchSource && _activeSearchSource !== 'spotify') {
+                albumParams.set('source', _activeSearchSource);
+            }
             const response = await fetch(`/api/spotify/album/${album.id}?${albumParams}`);
 
             if (!response.ok) {
@@ -30856,7 +30990,7 @@ function createArtistCardHTML(artist) {
 /**
  * Select an artist and show their discography
  */
-async function selectArtistForDetail(artist) {
+async function selectArtistForDetail(artist, options = {}) {
     console.log(`🎤 Selected artist: ${artist.name}`);
 
     // Cancel any ongoing completion check from previous artist
@@ -30876,6 +31010,7 @@ async function selectArtistForDetail(artist) {
     // Update state
     artistsPageState.selectedArtist = artist;
     artistsPageState.currentView = 'detail';
+    artistsPageState.sourceOverride = options.source || null;
 
     // Show detail state
     showArtistDetailState();
@@ -30884,7 +31019,7 @@ async function selectArtistForDetail(artist) {
     updateArtistDetailHeader(artist);
 
     // Load discography (pass artist name for cross-source fallback)
-    await loadArtistDiscography(artist.id, artist.name);
+    await loadArtistDiscography(artist.id, artist.name, options.source);
 }
 
 /**
@@ -30892,16 +31027,19 @@ async function selectArtistForDetail(artist) {
  * @param {string} artistId - Artist ID (Spotify or iTunes format)
  * @param {string} [artistName] - Optional artist name for fallback searches
  */
-async function loadArtistDiscography(artistId, artistName = null) {
-    console.log(`💿 Loading discography for artist: ${artistId} (name: ${artistName})`);
+async function loadArtistDiscography(artistId, artistName = null, sourceOverride = null) {
+    console.log(`💿 Loading discography for artist: ${artistId} (name: ${artistName}, source: ${sourceOverride || 'auto'})`);
+
+    // Use source-prefixed cache key to avoid ID collisions between sources
+    const cacheKey = sourceOverride ? `${sourceOverride}:${artistId}` : artistId;
 
     // Check cache first
-    if (artistsPageState.cache.discography[artistId]) {
+    if (artistsPageState.cache.discography[cacheKey]) {
         console.log('📦 Using cached discography');
-        const cachedDiscography = artistsPageState.cache.discography[artistId];
+        const cachedDiscography = artistsPageState.cache.discography[cacheKey];
         displayArtistDiscography(cachedDiscography);
 
-        // Load similar artists in parallel (don't wait)
+        // Load similar artists in parallel (don't wait) — always uses primary source
         loadSimilarArtists(artistsPageState.selectedArtist?.name).catch(err => {
             console.error('❌ Error loading similar artists:', err);
         });
@@ -30915,11 +31053,12 @@ async function loadArtistDiscography(artistId, artistName = null) {
         // Show loading states
         showDiscographyLoading();
 
-        // Build URL with optional artist name for fallback
+        // Build URL with optional artist name and source override for fallback
         let url = `/api/artist/${artistId}/discography`;
-        if (artistName) {
-            url += `?artist_name=${encodeURIComponent(artistName)}`;
-        }
+        const params = new URLSearchParams();
+        if (artistName) params.set('artist_name', artistName);
+        if (sourceOverride) params.set('source', sourceOverride);
+        if (params.toString()) url += `?${params.toString()}`;
 
         // Call the real API endpoint
         const response = await fetch(url);
@@ -30955,8 +31094,8 @@ async function loadArtistDiscography(artistId, artistName = null) {
 
         console.log(`✅ Loaded ${discography.albums.length} albums and ${discography.singles.length} singles`);
 
-        // Cache the results
-        artistsPageState.cache.discography[artistId] = discography;
+        // Cache the results (use source-prefixed key if source override active)
+        artistsPageState.cache.discography[cacheKey] = discography;
         artistsPageState.artistDiscography = discography;
 
         // Display results
@@ -32366,6 +32505,9 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
 
         // Fetch album tracks from backend (pass name/artist for Hydrabase support)
         const _aat1 = new URLSearchParams({ name: album.name || '', artist: artist.name || '' });
+        if (artistsPageState.sourceOverride) {
+            _aat1.set('source', artistsPageState.sourceOverride);
+        }
         const response = await fetch(`/api/artist/${artist.id}/album/${album.id}/tracks?${_aat1}`);
 
         if (!response.ok) {

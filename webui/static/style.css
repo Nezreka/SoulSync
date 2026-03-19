@@ -27803,6 +27803,51 @@ body {
 }
 
 /* Dropdown Sections - Enhanced with Premium Design */
+/* Source tabs for multi-source search */
+.enh-source-tabs {
+    display: flex;
+    gap: 6px;
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    margin-bottom: 4px;
+}
+
+.enh-source-tab {
+    padding: 5px 14px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 0.78em;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.enh-source-tab:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.enh-source-tab.active {
+    background: var(--accent-color, #1db954);
+    border-color: var(--accent-color, #1db954);
+    color: #fff;
+    font-weight: 600;
+}
+
+.enh-source-tab .enh-tab-count {
+    margin-left: 5px;
+    opacity: 0.7;
+    font-weight: 400;
+}
+
+.enh-source-tab.enh-tab-spotify.active { background: #1db954; border-color: #1db954; }
+.enh-source-tab.enh-tab-itunes.active { background: #fc3c44; border-color: #fc3c44; }
+.enh-source-tab.enh-tab-deezer.active { background: #a238ff; border-color: #a238ff; }
+.enh-source-tab.enh-tab-hydrabase.active { background: #00b4d8; border-color: #00b4d8; }
+
 .enh-dropdown-section {
     margin-bottom: 16px;
     background: linear-gradient(135deg,

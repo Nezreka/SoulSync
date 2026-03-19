@@ -6759,18 +6759,27 @@ def search_music():
 @app.route('/api/enhanced-search', methods=['POST'])
 def enhanced_search():
     """
-    Unified search across Spotify and local database for enhanced search mode.
-    Returns categorized results: DB artists, Spotify artists, albums, and tracks.
+    Unified search across metadata sources and local database for enhanced search mode.
+    Returns categorized results: DB artists, source artists, albums, and tracks.
+
+    Fires parallel queries against all available sources (Spotify, iTunes, Deezer)
+    and returns results keyed by source, plus backward-compatible top-level keys
+    mapped from the primary source.
     """
     data = request.get_json()
     query = data.get('query', '').strip()
+
+    empty_source = {"artists": [], "albums": [], "tracks": [], "available": False}
 
     if not query:
         return jsonify({
             "db_artists": [],
             "spotify_artists": [],
             "spotify_albums": [],
-            "spotify_tracks": []
+            "spotify_tracks": [],
+            "sources": {},
+            "primary_source": "spotify",
+            "metadata_source": "spotify"
         })
 
     logger.info(f"Enhanced search initiated for: '{query}'")
@@ -6785,129 +6794,174 @@ def enhanced_search():
             image_url = None
             if hasattr(artist, 'thumb_url') and artist.thumb_url:
                 image_url = fix_artist_image_url(artist.thumb_url)
-
             db_artists.append({
                 "id": artist.id,
                 "name": artist.name,
                 "image_url": image_url
             })
-            logger.debug(f"DB Artist: {artist.name}, thumb_url: {artist.thumb_url if hasattr(artist, 'thumb_url') else None}, fixed_url: {image_url}")
 
-        spotify_artists = []
-        spotify_albums = []
-        spotify_tracks = []
-        metadata_source = "spotify"
+        # ── Determine primary source and search it synchronously ──
+        primary_source = "spotify"
+        primary_results = empty_source
 
         if _is_hydrabase_active():
-            # ── Hydrabase is primary metadata source ──
-            metadata_source = "hydrabase"
+            primary_source = "hydrabase"
             try:
-                artist_objs = hydrabase_client.search_artists(query, limit=10)
-                for artist in artist_objs:
-                    spotify_artists.append({
-                        "id": artist.id,
-                        "name": artist.name,
-                        "image_url": artist.image_url
-                    })
-
-                album_objs = hydrabase_client.search_albums(query, limit=10)
-                for album in album_objs:
-                    artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'
-                    spotify_albums.append({
-                        "id": album.id,
-                        "name": album.name,
-                        "artist": artist_name,
-                        "image_url": album.image_url,
-                        "release_date": album.release_date,
-                        "total_tracks": album.total_tracks,
-                        "album_type": album.album_type
-                    })
-
-                track_objs = hydrabase_client.search_tracks(query, limit=10)
-                for track in track_objs:
-                    artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
-                    spotify_tracks.append({
-                        "id": track.id,
-                        "name": track.name,
-                        "artist": artist_name,
-                        "album": track.album,
-                        "duration_ms": track.duration_ms,
-                        "image_url": track.image_url,
-                        "release_date": track.release_date
-                    })
-
-                logger.info(f"Hydrabase search results: {len(spotify_artists)} artists, {len(spotify_albums)} albums, {len(spotify_tracks)} tracks")
-
-                # Fire off background comparison with pre-computed Hydrabase counts
+                primary_results = _enhanced_search_source(query, hydrabase_client)
+                # Fire off background comparison
                 _run_background_comparison(query, hydrabase_counts={
-                    'tracks': len(track_objs),
-                    'artists': len(artist_objs),
-                    'albums': len(album_objs)
+                    'tracks': len(primary_results['tracks']),
+                    'artists': len(primary_results['artists']),
+                    'albums': len(primary_results['albums'])
                 })
-
             except Exception as e:
-                logger.error(f"Hydrabase search failed, falling back to Spotify/iTunes: {e}")
-                metadata_source = "spotify"
-                spotify_artists = []
-                spotify_albums = []
-                spotify_tracks = []
+                logger.error(f"Hydrabase search failed: {e}")
+                primary_source = "spotify"
+                primary_results = empty_source
 
-        if metadata_source != "hydrabase":
-            # ── Standard Spotify/iTunes path ──
+        if primary_source != "hydrabase":
             # Mirror to Hydrabase worker (fire-and-forget)
             if hydrabase_worker and dev_mode_enabled:
                 hydrabase_worker.enqueue(query, 'track')
                 hydrabase_worker.enqueue(query, 'album')
                 hydrabase_worker.enqueue(query, 'artists')
 
-            if spotify_client and spotify_client.is_authenticated():
-                artist_objs = spotify_client.search_artists(query, limit=10)
-                for artist in artist_objs:
-                    spotify_artists.append({
-                        "id": artist.id,
-                        "name": artist.name,
-                        "image_url": artist.image_url
-                    })
+            # Search primary source synchronously — use is_spotify_authenticated()
+            # (is_authenticated() always returns True because fallback is always available)
+            if spotify_client and spotify_client.is_spotify_authenticated():
+                try:
+                    primary_results = _enhanced_search_source(query, spotify_client)
+                    primary_source = "spotify"
+                except Exception as e:
+                    logger.debug(f"Spotify search failed: {e}")
 
-                album_objs = spotify_client.search_albums(query, limit=10)
-                for album in album_objs:
-                    artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'
-                    spotify_albums.append({
-                        "id": album.id,
-                        "name": album.name,
-                        "artist": artist_name,
-                        "image_url": album.image_url,
-                        "release_date": album.release_date,
-                        "total_tracks": album.total_tracks,
-                        "album_type": album.album_type
-                    })
+            # If Spotify unavailable, use configured fallback as primary
+            if primary_results is empty_source:
+                fb_source = _get_metadata_fallback_source()
+                try:
+                    primary_results = _enhanced_search_source(query, _get_metadata_fallback_client())
+                    primary_source = fb_source
+                except Exception as e:
+                    logger.debug(f"Fallback ({fb_source}) search failed: {e}")
 
-                track_objs = spotify_client.search_tracks(query, limit=10)
-                for track in track_objs:
-                    artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
-                    spotify_tracks.append({
-                        "id": track.id,
-                        "name": track.name,
-                        "artist": artist_name,
-                        "album": track.album,
-                        "duration_ms": track.duration_ms,
-                        "image_url": track.image_url,
-                        "release_date": track.release_date
-                    })
+        # Determine which alternate sources are available (for frontend to fetch async)
+        spotify_available = bool(spotify_client and spotify_client.is_spotify_authenticated())
+        alternate_sources = []
+        if primary_source != 'spotify' and spotify_available:
+            alternate_sources.append('spotify')
+        if primary_source != 'itunes':
+            alternate_sources.append('itunes')
+        if primary_source != 'deezer':
+            alternate_sources.append('deezer')
 
-        logger.info(f"Enhanced search results ({metadata_source}): {len(db_artists)} DB artists, {len(spotify_artists)} artists, {len(spotify_albums)} albums, {len(spotify_tracks)} tracks")
+        logger.info(f"Enhanced search results ({primary_source}): {len(db_artists)} DB artists, "
+                     f"{len(primary_results['artists'])} artists, {len(primary_results['albums'])} albums, "
+                     f"{len(primary_results['tracks'])} tracks | "
+                     f"Alt sources available: {alternate_sources}")
 
         return jsonify({
+            # Backward compat — same shape as before
             "db_artists": db_artists,
-            "spotify_artists": spotify_artists,
-            "spotify_albums": spotify_albums,
-            "spotify_tracks": spotify_tracks,
-            "metadata_source": metadata_source
+            "spotify_artists": primary_results["artists"],
+            "spotify_albums": primary_results["albums"],
+            "spotify_tracks": primary_results["tracks"],
+            "metadata_source": primary_source,
+            # New multi-source data
+            "primary_source": primary_source,
+            "alternate_sources": alternate_sources,
         })
 
     except Exception as e:
         logger.error(f"Enhanced search error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+def _enhanced_search_source(query, client):
+    """Search a single metadata source and return normalized results dict."""
+    artists = []
+    albums = []
+    tracks = []
+
+    try:
+        artist_objs = client.search_artists(query, limit=10)
+        for artist in artist_objs:
+            artists.append({
+                "id": artist.id,
+                "name": artist.name,
+                "image_url": artist.image_url
+            })
+    except Exception as e:
+        logger.debug(f"Artist search failed for {type(client).__name__}: {e}")
+
+    try:
+        album_objs = client.search_albums(query, limit=10)
+        for album in album_objs:
+            artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'
+            albums.append({
+                "id": album.id,
+                "name": album.name,
+                "artist": artist_name,
+                "image_url": album.image_url,
+                "release_date": album.release_date,
+                "total_tracks": album.total_tracks,
+                "album_type": album.album_type
+            })
+    except Exception as e:
+        logger.debug(f"Album search failed for {type(client).__name__}: {e}")
+
+    try:
+        track_objs = client.search_tracks(query, limit=10)
+        for track in track_objs:
+            artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
+            tracks.append({
+                "id": track.id,
+                "name": track.name,
+                "artist": artist_name,
+                "album": track.album,
+                "duration_ms": track.duration_ms,
+                "image_url": track.image_url,
+                "release_date": track.release_date
+            })
+    except Exception as e:
+        logger.debug(f"Track search failed for {type(client).__name__}: {e}")
+
+    return {"artists": artists, "albums": albums, "tracks": tracks, "available": True}
+
+
+@app.route('/api/enhanced-search/source/<source_name>', methods=['POST'])
+def enhanced_search_source(source_name):
+    """Fetch search results from a specific alternate metadata source.
+
+    Called asynchronously by the frontend after the primary search returns.
+    Each source tab fires its own request so slow sources don't block fast ones.
+    """
+    if source_name not in ('spotify', 'itunes', 'deezer'):
+        return jsonify({"error": f"Unknown source: {source_name}"}), 400
+
+    data = request.get_json()
+    query = (data.get('query', '') if data else '').strip()
+    if not query:
+        return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
+
+    try:
+        client = None
+        if source_name == 'spotify':
+            if spotify_client and spotify_client.is_spotify_authenticated():
+                client = spotify_client
+            else:
+                return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
+        elif source_name == 'itunes':
+            from core.itunes_client import iTunesClient
+            client = iTunesClient()
+        elif source_name == 'deezer':
+            client = _get_deezer_client()
+
+        result = _enhanced_search_source(query, client)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Enhanced search source ({source_name}) error: {e}")
+        return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
+
 
 @app.route('/api/enhanced-search/stream-track', methods=['POST'])
 def stream_enhanced_search_track():
@@ -8700,7 +8754,19 @@ def get_artist_image(artist_id):
         if artist_id.startswith('soul_'):
             return jsonify({"success": True, "image_url": None})
 
-        if spotify_client and spotify_client.is_spotify_authenticated():
+        # Source override from multi-source search tabs
+        source_override = request.args.get('source', '')
+
+        if source_override == 'itunes':
+            from core.itunes_client import iTunesClient
+            client = iTunesClient()
+            image_url = client._get_artist_image_from_albums(artist_id)
+            return jsonify({"success": True, "image_url": image_url})
+        elif source_override == 'deezer':
+            client = _get_deezer_client()
+            image_url = client._get_artist_image_from_albums(artist_id)
+            return jsonify({"success": True, "image_url": image_url})
+        elif spotify_client and spotify_client.is_spotify_authenticated() and source_override != 'itunes':
             # Use Spotify directly
             artist_data = spotify_client.sp.artist(artist_id)
             if artist_data and artist_data.get('images'):
@@ -8722,6 +8788,8 @@ def get_artist_discography(artist_id):
     try:
         # Get optional artist name for fallback searches
         artist_name = request.args.get('artist_name', '')
+        # Optional source override from multi-source search tabs
+        source_override = request.args.get('source', '')
 
         # Mirror to Hydrabase P2P network
         if hydrabase_worker and dev_mode_enabled and artist_name:
@@ -8734,13 +8802,57 @@ def get_artist_discography(artist_id):
         fallback_client = _get_metadata_fallback_client()
         fallback_source = _get_metadata_fallback_source()
 
-        print(f"🎤 Fetching discography for artist: {artist_id} (name: {artist_name}, spotify: {spotify_available})")
+        print(f"🎤 Fetching discography for artist: {artist_id} (name: {artist_name}, spotify: {spotify_available}, source_override: {source_override or 'auto'})")
 
         albums = []
         active_source = None
 
-        # Try Hydrabase first when active
-        if _is_hydrabase_active() and artist_name:
+        # Source override: when user clicked from a specific search tab, use that source directly
+        if source_override and source_override in ('spotify', 'itunes', 'deezer'):
+            try:
+                if source_override == 'spotify' and spotify_available:
+                    albums = spotify_client.get_artist_albums(artist_id, album_type='album,single')
+                    if albums:
+                        active_source = 'spotify'
+                elif source_override == 'itunes':
+                    from core.itunes_client import iTunesClient
+                    itunes_cl = iTunesClient()
+                    albums = itunes_cl.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                    if albums:
+                        active_source = 'itunes'
+                elif source_override == 'deezer':
+                    deezer_cl = _get_deezer_client()
+                    albums = deezer_cl.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                    if albums:
+                        active_source = 'deezer'
+
+                # If direct ID lookup failed but we have artist name, search by name
+                if not albums and artist_name:
+                    if source_override == 'itunes':
+                        from core.itunes_client import iTunesClient
+                        cl = iTunesClient()
+                    elif source_override == 'deezer':
+                        cl = _get_deezer_client()
+                    elif source_override == 'spotify' and spotify_available:
+                        cl = spotify_client
+                    else:
+                        cl = None
+
+                    if cl:
+                        search_artists = cl.search_artists(artist_name, limit=5)
+                        if search_artists:
+                            best = next((a for a in search_artists if a.name.lower() == artist_name.lower()), search_artists[0])
+                            albums = cl.get_artist_albums(best.id, album_type='album,single', limit=50)
+                            if albums:
+                                active_source = source_override
+
+                if albums:
+                    print(f"📊 Got {len(albums)} albums from {active_source} (source override)")
+            except Exception as e:
+                print(f"Source override ({source_override}) lookup failed: {e}")
+
+        # Try Hydrabase first when active (and no source override)
+        if not albums and _is_hydrabase_active() and artist_name:
             try:
                 albums = hydrabase_client.search_discography(artist_name, limit=50)
                 if albums:
@@ -8975,10 +9087,19 @@ def get_artist_album_tracks(artist_id, album_id):
         if not spotify_client or not spotify_client.is_authenticated():
             return jsonify({"error": "Spotify not authenticated"}), 401
 
-        print(f"🎵 Fetching tracks for album: {album_id} by artist: {artist_id}")
+        # Source override: when user navigated from a specific search tab
+        source_override = request.args.get('source', '')
+        client = spotify_client
+        if source_override == 'itunes':
+            from core.itunes_client import iTunesClient
+            client = iTunesClient()
+        elif source_override == 'deezer':
+            client = _get_deezer_client()
+
+        print(f"🎵 Fetching tracks for album: {album_id} by artist: {artist_id} (source: {source_override or 'auto'})")
 
         # Get album information first
-        album_data = spotify_client.get_album(album_id)
+        album_data = client.get_album(album_id)
         resolved_album_id = album_id
 
         # If direct lookup failed, the album_id might be a database ID — resolve it
@@ -8986,13 +9107,13 @@ def get_artist_album_tracks(artist_id, album_id):
             resolved_album_id = _resolve_db_album_id(album_id, artist_id)
             if resolved_album_id and resolved_album_id != album_id:
                 print(f"🔄 Resolved DB album ID {album_id} -> external ID {resolved_album_id}")
-                album_data = spotify_client.get_album(resolved_album_id)
+                album_data = client.get_album(resolved_album_id)
 
         if not album_data:
             return jsonify({"error": "Album not found"}), 404
 
         # Get album tracks
-        tracks_data = spotify_client.get_album_tracks(resolved_album_id)
+        tracks_data = client.get_album_tracks(resolved_album_id)
         if not tracks_data or 'items' not in tracks_data:
             return jsonify({"error": "No tracks found for album"}), 404
         
@@ -24951,10 +25072,21 @@ def get_album_tracks(album_id):
         except Exception as e:
             logger.warning(f"Hydrabase album_tracks failed for '{album_id}', falling back to Spotify: {e}")
 
+    # Source override: when user clicked from a specific search tab
+    source_override = request.args.get('source', '')
+
     if not spotify_client or not spotify_client.is_authenticated():
         return jsonify({"error": "Spotify not authenticated."}), 401
     try:
-        album_data = spotify_client.get_album(album_id)
+        # Use explicit source client when overridden (prevents numeric ID misrouting)
+        client = spotify_client
+        if source_override == 'itunes':
+            from core.itunes_client import iTunesClient
+            client = iTunesClient()
+        elif source_override == 'deezer':
+            client = _get_deezer_client()
+
+        album_data = client.get_album(album_id)
         if not album_data:
             return jsonify({"error": "Album not found"}), 404
 
@@ -24963,7 +25095,7 @@ def get_album_tracks(album_id):
 
         # If no tracks in album data (iTunes format), fetch them separately
         if not tracks:
-            tracks_data = spotify_client.get_album_tracks(album_id)
+            tracks_data = client.get_album_tracks(album_id)
             if tracks_data and 'items' in tracks_data:
                 tracks = tracks_data['items']
 
