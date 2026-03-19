@@ -6993,7 +6993,8 @@ def stream_enhanced_search_track():
                     logger.info(f"✅ Found {len(tracks_result)} results for query: '{query}'")
 
                     # Use matching engine to find best match
-                    best_matches = matching_engine.find_best_slskd_matches_enhanced(temp_track, tracks_result)
+                    _max_q = config_manager.get('soulseek.max_peer_queue', 0) or 0
+                    best_matches = matching_engine.find_best_slskd_matches_enhanced(temp_track, tracks_result, max_peer_queue=_max_q)
 
                     if best_matches:
                         # Get the first (best) result
@@ -20683,7 +20684,8 @@ def get_valid_candidates(results, spotify_track, query):
     if not results: 
         return []
     # Uses the existing, powerful matching engine for scoring
-    initial_candidates = matching_engine.find_best_slskd_matches_enhanced(spotify_track, results)
+    _max_q = config_manager.get('soulseek.max_peer_queue', 0) or 0
+    initial_candidates = matching_engine.find_best_slskd_matches_enhanced(spotify_track, results, max_peer_queue=_max_q)
     if not initial_candidates:
         return []
 
@@ -23318,8 +23320,9 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
             task_start_time = task.get('status_change_time', current_time)
             task_age = current_time - task_start_time
 
-            # If task has been running for more than 10 minutes, check if file completed
-            if task_age > 600 and task['status'] in ['downloading', 'queued', 'searching']:
+            # If task has been running too long, check if file completed
+            _dl_timeout = config_manager.get('soulseek.download_timeout', 600) or 600
+            if task_age > _dl_timeout and task['status'] in ['downloading', 'queued', 'searching']:
                 stuck_state = task['status']
                 task_filename = task.get('filename') or (task.get('track_info') or {}).get('filename')
 

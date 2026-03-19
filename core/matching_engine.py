@@ -867,32 +867,45 @@ class MusicMatchingEngine:
 
         return adjusted_confidence, version_type
     
-    def find_best_slskd_matches_enhanced(self, spotify_track: SpotifyTrack, slskd_results: List[TrackResult]) -> List[TrackResult]:
+    def find_best_slskd_matches_enhanced(self, spotify_track: SpotifyTrack, slskd_results: List[TrackResult],
+                                          max_peer_queue: int = 0) -> List[TrackResult]:
         """
         Enhanced version of find_best_slskd_matches with version-aware scoring.
         Returns candidates sorted by adjusted confidence (preferring originals).
+
+        Args:
+            max_peer_queue: Skip peers with queue longer than this (0 = no limit)
         """
         if not slskd_results:
             return []
+
+        # Apply queue filter if configured
+        if max_peer_queue > 0:
+            filtered = [r for r in slskd_results if r.queue_length <= max_peer_queue]
+            # Fall back to unfiltered if everything got removed (rare files)
+            if filtered:
+                slskd_results = filtered
 
         scored_results = []
         for slskd_track in slskd_results:
             # Use enhanced confidence calculation
             confidence, version_type = self.calculate_slskd_match_confidence_enhanced(spotify_track, slskd_track)
-            
+
             # Store the adjusted confidence and version info
             slskd_track.confidence = confidence
             slskd_track.version_type = getattr(slskd_track, 'version_type', 'original')
             scored_results.append(slskd_track)
 
-        # Sort by confidence score (descending), then by version preference, then by size
+        # Sort by confidence, version preference, peer quality, then file size
         def sort_key(r):
             # Primary: confidence score
             # Secondary: prefer originals (original=0, others=penalty value for tie-breaking)
             version_priority = 0.0 if r.version_type == 'original' else getattr(r, 'version_penalty', 0.1)
-            # Tertiary: file size
-            return (r.confidence, -version_priority, r.size)
-        
+            # Tertiary: peer quality (upload speed, queue, free slots)
+            peer_quality = r.quality_score
+            # Quaternary: file size
+            return (r.confidence, -version_priority, peer_quality, r.size)
+
         sorted_results = sorted(scored_results, key=sort_key, reverse=True)
 
         # Filter out very low-confidence results

@@ -3934,6 +3934,24 @@
                                         </select>
                                         <small class="settings-hint">Ignore search results from peers with upload speed below this threshold</small>
                                     </div>
+                                    <div class="form-group">
+                                        <label>Max Peer Queue Length:</label>
+                                        <select id="soulseek-max-peer-queue">
+                                            <option value="0">No limit</option>
+                                            <option value="5">5</option>
+                                            <option value="10">10</option>
+                                            <option value="20">20</option>
+                                            <option value="50">50</option>
+                                            <option value="100">100</option>
+                                        </select>
+                                        <small class="settings-hint">Skip peers with a queue longer than this (prefers peers with shorter queues regardless)</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Download Timeout (minutes):</label>
+                                        <input type="number" id="soulseek-download-timeout" placeholder="10" min="2"
+                                            max="60" value="10">
+                                        <small class="settings-hint">Abandon stuck downloads after this many minutes</small>
+                                    </div>
                                     <div class="form-actions" style="margin-top: 8px;">
                                         <button class="test-button" onclick="testConnection('soulseek')">Test Soulseek Connection</button>
                                     </div>

@@ -360,7 +360,9 @@ class ConfigManager:
                 "slskd_url": "",
                 "api_key": "",
                 "download_path": "./downloads",
-                "transfer_path": "./Transfer"
+                "transfer_path": "./Transfer",
+                "max_peer_queue": 0,
+                "download_timeout": 600
             },
             "download_source": {
                 "mode": "soulseek",  # Options: "soulseek", "youtube", "tidal", "qobuz", "hifi", "hybrid"
