@@ -1709,7 +1709,8 @@ class RepairWorker:
 
             # Build query for pending fixable findings
             fixable_types = ('dead_file', 'orphan_file', 'track_number_mismatch',
-                             'missing_cover_art', 'metadata_gap', 'duplicate_tracks', 'mbid_mismatch',
+                             'missing_cover_art', 'metadata_gap', 'duplicate_tracks',
+                             'single_album_redundant', 'mbid_mismatch',
                              'incomplete_album')
             placeholders = ','.join(['?'] * len(fixable_types))
             where_parts = [f"finding_type IN ({placeholders})", "status = 'pending'"]

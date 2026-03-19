@@ -42,8 +42,8 @@ class DuplicateDetectorJob(RepairJob):
         result = JobResult()
 
         settings = self._get_settings(context)
-        title_threshold = settings.get('title_similarity', 0.85)
-        artist_threshold = settings.get('artist_similarity', 0.80)
+        title_threshold = float(settings.get('title_similarity', 0.85))
+        artist_threshold = float(settings.get('artist_similarity', 0.80))
         ignore_cross_album = settings.get('ignore_cross_album', True)
 
         # Fetch all tracks with artist/album names via JOIN
