@@ -42983,3 +42983,723 @@ tr.tag-diff-same {
     color: #fff;
     font-weight: 500;
 }
+
+/* =====================================================
+   SETTINGS PAGE — Modern Tabbed Redesign (stg- prefix)
+   ===================================================== */
+
+/* Tab bar */
+.stg-tabbar {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 12px;
+    margin-bottom: 24px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    width: fit-content;
+}
+.stg-tabbar::-webkit-scrollbar { display: none; }
+
+.stg-tab {
+    padding: 9px 20px;
+    border-radius: 9px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 0.85em;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    font-family: inherit;
+}
+.stg-tab:hover {
+    color: rgba(255, 255, 255, 0.75);
+    background: rgba(255, 255, 255, 0.04);
+}
+.stg-tab.active {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font-weight: 600;
+}
+
+/* Body — single centered column */
+.stg-body {
+    max-width: 820px;
+    width: 100%;
+}
+
+/* Panel visibility */
+.stg-panel { display: none; }
+.stg-panel.active { display: block; }
+
+/* Section header — clean divider */
+.stg-section-title {
+    font-size: 0.72em;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.35);
+    padding: 20px 0 8px;
+    margin: 0;
+    border: none;
+}
+.stg-section-title:first-child { padding-top: 0; }
+
+/* Setting row — label left, control right */
+.stg-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 13px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    min-height: 48px;
+}
+.stg-row:last-child { border-bottom: none; }
+
+.stg-row-info {
+    flex: 1;
+    min-width: 0;
+}
+.stg-row-label {
+    font-size: 0.9em;
+    color: rgba(255, 255, 255, 0.88);
+    font-weight: 400;
+    line-height: 1.3;
+}
+.stg-row-desc {
+    font-size: 0.78em;
+    color: rgba(255, 255, 255, 0.35);
+    margin-top: 2px;
+    line-height: 1.4;
+}
+.stg-row-control {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.stg-row-control input[type="text"],
+.stg-row-control input[type="password"],
+.stg-row-control input[type="number"],
+.stg-row-control input[type="url"] {
+    width: 280px;
+    max-width: 100%;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.88em;
+    font-family: inherit;
+    transition: border-color 0.2s;
+}
+.stg-row-control input:focus {
+    border-color: var(--accent-color, #1db954);
+    outline: none;
+}
+.stg-row-control select {
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.88em;
+    font-family: inherit;
+    cursor: pointer;
+    min-width: 160px;
+}
+.stg-row-control select:focus {
+    border-color: var(--accent-color, #1db954);
+    outline: none;
+}
+
+/* Service accordion (API services, expandable sections) */
+.stg-service {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.stg-service:last-child { border-bottom: none; }
+
+.stg-service-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: background 0.15s;
+    user-select: none;
+}
+.stg-service-header:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+.stg-service-name {
+    font-size: 0.9em;
+    color: rgba(255, 255, 255, 0.88);
+    font-weight: 500;
+}
+.stg-service-chevron {
+    color: rgba(255, 255, 255, 0.25);
+    transition: transform 0.2s;
+    font-size: 0.8em;
+}
+.stg-service.expanded .stg-service-chevron {
+    transform: rotate(90deg);
+}
+.stg-service-body {
+    display: none;
+    padding: 0 16px 16px;
+}
+.stg-service.expanded .stg-service-body {
+    display: block;
+}
+
+/* Card container — subtle grouping for related settings */
+.stg-card {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    margin-bottom: 16px;
+    overflow: hidden;
+}
+
+/* Action buttons in settings */
+.stg-actions {
+    display: flex;
+    gap: 8px;
+    padding: 8px 16px 14px;
+}
+.stg-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 0.82em;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.stg-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+.stg-btn-primary {
+    background: var(--accent-color, #1db954);
+    border-color: var(--accent-color, #1db954);
+    color: #fff;
+    font-weight: 500;
+}
+.stg-btn-primary:hover {
+    filter: brightness(1.15);
+}
+
+/* Toggle switch (replaces checkbox for booleans) */
+.stg-toggle {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    flex-shrink: 0;
+}
+.stg-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+.stg-toggle-track {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 11px;
+    cursor: pointer;
+    transition: background 0.25s;
+}
+.stg-toggle-track::after {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 18px;
+    height: 18px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.25s;
+}
+.stg-toggle input:checked + .stg-toggle-track {
+    background: var(--accent-color, #1db954);
+}
+.stg-toggle input:checked + .stg-toggle-track::after {
+    transform: translateX(18px);
+}
+
+/* ── Settings page layout override — transform old layout ── */
+
+/* Center everything in a single column */
+#settings-page .settings-content {
+    flex-direction: column;
+    align-items: center;
+    max-width: 100% !important;
+    margin: 0 auto;
+}
+
+/* Tab bar centered */
+#settings-page .stg-tabbar {
+    margin: 0 auto 28px;
+}
+
+/* Columns become single centered column */
+#settings-page .settings-columns {
+    flex-direction: column;
+    max-width: 760px;
+    width: 100%;
+    gap: 0;
+    margin: 0 auto;
+    margin-bottom: 0;
+}
+
+#settings-page .settings-left-column,
+#settings-page .settings-right-column,
+#settings-page .settings-third-column {
+    min-width: unset;
+    width: 100%;
+    gap: 0;
+}
+
+/* Kill glassmorphic cards — flat, no bg, no borders, no shadows */
+#settings-page .settings-group {
+    background: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin-bottom: 0;
+    position: relative;
+    overflow: visible;
+}
+/* Kill the accent gradient bar at top of cards */
+#settings-page .settings-group::before {
+    display: none !important;
+}
+/* Kill hover effects on cards */
+#settings-page .settings-group:hover {
+    border-color: transparent !important;
+    box-shadow: none !important;
+}
+
+/* Section titles — clean, readable, no pseudo-element bar */
+#settings-page .settings-group > h3 {
+    font-size: 0.82em;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 36px 0 14px;
+    padding-left: 0;
+    padding-right: 0;
+    margin: 0;
+    margin-bottom: 0;
+    margin-top: 0;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    position: relative;
+}
+/* Kill the accent underline on h3 */
+#settings-page .settings-group > h3::after {
+    display: none !important;
+}
+#settings-page .settings-group:first-child > h3 { padding-top: 4px; }
+
+/* ── Form rows — label left, control right, help text wraps below ── */
+#settings-page .form-group {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    padding: 14px 0 !important;
+    margin: 0 !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+}
+#settings-page .form-group:last-child { border-bottom: none; }
+
+#settings-page .form-group > label {
+    font-size: 0.9em;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 400;
+    white-space: nowrap;
+    margin: 0;
+    flex-shrink: 0;
+}
+
+#settings-page .form-group > input[type="text"],
+#settings-page .form-group > input[type="password"],
+#settings-page .form-group > input[type="number"],
+#settings-page .form-group > input[type="url"] {
+    flex: 1;
+    max-width: 340px;
+    padding: 9px 14px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.88em;
+    font-family: inherit;
+    margin: 0;
+    transition: border-color 0.2s, background 0.2s;
+}
+#settings-page .form-group > input:hover {
+    background: rgba(255, 255, 255, 0.07);
+}
+#settings-page .form-group > input:focus {
+    border-color: var(--accent-color, #1db954);
+    background: rgba(255, 255, 255, 0.08);
+    outline: none;
+}
+
+#settings-page .form-group > select,
+#settings-page select {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    padding: 9px 36px 9px 14px;
+    background: rgba(255, 255, 255, 0.05);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='rgba(255,255,255,0.4)' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.88em;
+    font-family: inherit;
+    cursor: pointer;
+    min-width: 180px;
+    margin: 0;
+    transition: border-color 0.2s, background-color 0.2s;
+}
+#settings-page select:hover {
+    background-color: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+#settings-page select:focus {
+    border-color: var(--accent-color, #1db954);
+    outline: none;
+    background-color: rgba(255, 255, 255, 0.08);
+}
+#settings-page select option {
+    background: #1e1e2e;
+    color: #fff;
+    padding: 8px;
+}
+
+/* ── API service frames — subtle grouped cards ── */
+#settings-page .api-service-frame {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    margin: 6px 0;
+    padding: 0 !important;
+    overflow: hidden;
+    transition: border-color 0.2s;
+}
+#settings-page .api-service-frame:hover {
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+#settings-page .api-service-frame .service-title {
+    padding: 14px 18px !important;
+    margin: 0 !important;
+    font-size: 0.9em !important;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.85);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    letter-spacing: 0.02em;
+}
+
+#settings-page .api-service-frame .form-group {
+    padding: 10px 18px !important;
+}
+
+#settings-page .api-service-frame .callback-info {
+    padding: 2px 18px 12px;
+}
+
+#settings-page .api-service-frame .form-actions {
+    padding: 4px 18px 14px;
+    display: flex;
+    gap: 8px;
+}
+
+/* Callback / hint text */
+#settings-page .callback-info .callback-help,
+#settings-page .callback-info .callback-label,
+#settings-page .settings-hint,
+#settings-page .setting-help-text {
+    font-size: 0.8em;
+    color: rgba(255, 255, 255, 0.3);
+    line-height: 1.5;
+}
+#settings-page .callback-info .callback-url {
+    font-size: 0.82em;
+    color: rgba(255, 255, 255, 0.5);
+    font-family: monospace;
+}
+
+/* ── Server toggles — pill buttons ── */
+#settings-page .server-toggle-container {
+    padding: 12px 0;
+    display: flex;
+    gap: 8px;
+}
+#settings-page .server-toggle-btn {
+    border-radius: 10px;
+    padding: 10px 20px;
+    font-size: 0.85em;
+    transition: all 0.2s;
+}
+#settings-page .server-config-container {
+    padding: 0;
+}
+
+/* ── Buttons — unified flat style ── */
+#settings-page .test-button,
+#settings-page .detect-button,
+#settings-page .auth-button {
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 0.84em;
+    font-family: inherit;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+#settings-page .test-button:hover,
+#settings-page .detect-button:hover,
+#settings-page .auth-button:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Test buttons row */
+#settings-page .api-test-buttons {
+    padding: 16px 0;
+    gap: 8px;
+    display: flex;
+    flex-wrap: wrap;
+}
+
+/* ── Quality section ── */
+#settings-page .quality-tier {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    margin-bottom: 10px;
+    transition: border-color 0.2s;
+}
+#settings-page .quality-tier:hover {
+    border-color: rgba(255, 255, 255, 0.08);
+}
+#settings-page .preset-button {
+    border-radius: 8px;
+    font-size: 0.84em;
+    padding: 8px 18px;
+}
+#settings-page .quality-presets {
+    padding: 8px 0 16px;
+}
+
+/* ── Checkbox labels — full-width rows ── */
+#settings-page .checkbox-label {
+    padding: 13px 0 !important;
+    display: flex !important;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+    margin: 0 !important;
+    cursor: pointer;
+    font-size: 0.9em;
+    color: rgba(255, 255, 255, 0.8);
+}
+#settings-page .checkbox-label:last-child { border-bottom: none; }
+
+/* ── Tag service groups ── */
+#settings-page .tag-service-group {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    margin-bottom: 6px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+}
+#settings-page .tag-service-group:hover {
+    border-color: rgba(255, 255, 255, 0.08);
+}
+#settings-page .tag-service-header {
+    padding: 12px 18px;
+}
+#settings-page .tag-service-body {
+    padding: 0 18px 12px;
+}
+
+/* ── Save button — centered, sticky feel ── */
+#settings-page .settings-actions {
+    max-width: 760px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 24px 0 16px;
+}
+#settings-page .settings-actions .save-button {
+    width: 100%;
+    padding: 12px;
+    border-radius: 10px;
+    font-size: 0.92em;
+    font-weight: 600;
+}
+
+/* ── Path input groups (dir paths with Unlock buttons) ── */
+#settings-page .path-input-group {
+    flex: 1;
+    max-width: 340px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+#settings-page .path-input-group input {
+    flex: 1;
+    padding: 9px 14px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.88em;
+    font-family: inherit;
+}
+#settings-page .browse-button {
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 0.82em;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.6);
+    transform: none;
+}
+#settings-page .browse-button:hover {
+    transform: none;
+    box-shadow: none;
+}
+
+/* ── Form groups with hint text — wrap to next line under the row ── */
+#settings-page .form-group:has(> small.settings-hint) {
+    flex-wrap: wrap;
+}
+#settings-page .form-group > small.settings-hint,
+#settings-page .form-group > .settings-hint {
+    flex-basis: 100%;
+    font-size: 0.78em;
+    color: rgba(255, 255, 255, 0.25);
+    margin-top: -2px;
+    padding-bottom: 2px;
+    line-height: 1.4;
+}
+
+/* ── Template path inputs — full width since labels are long ── */
+#settings-page .form-group > input[type="text"][id^="template-"] {
+    flex: 1;
+    max-width: 420px;
+}
+
+/* ── Setting help text — always wraps to its own line ── */
+#settings-page .setting-help-text {
+    width: 100%;
+    flex-basis: 100%;
+    display: block;
+    padding: 2px 0 4px;
+    font-size: 0.8em;
+    color: rgba(255, 255, 255, 0.25);
+    line-height: 1.5;
+    margin: 0;
+}
+/* Standalone help text (not inside a form-group) — add separator */
+#settings-page .settings-group > .setting-help-text {
+    padding: 6px 0 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+}
+/* Inline status spans — keep inline */
+#settings-page span.setting-help-text {
+    display: inline;
+    width: auto;
+    flex-basis: auto;
+    padding: 0;
+}
+
+/* ── Download source containers ── */
+#settings-page #soulseek-settings-container,
+#settings-page #tidal-download-settings-container,
+#settings-page #qobuz-settings-container,
+#settings-page #hifi-download-settings-container,
+#settings-page #youtube-settings-container,
+#settings-page #hybrid-settings-container {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 4px 18px;
+    margin: 8px 0;
+}
+
+/* ── Path inputs with lock buttons ── */
+#settings-page .form-group .path-input-wrapper {
+    flex: 1;
+    max-width: 340px;
+}
+
+/* ── Accent color picker ── */
+#settings-page .accent-color-selector {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+    /* Tab bar scrolls horizontally */
+    #settings-page .stg-tabbar {
+        width: 100%;
+        border-radius: 0;
+        margin-bottom: 16px;
+        justify-content: flex-start;
+    }
+    .stg-tab { padding: 8px 14px; font-size: 0.8em; }
+    /* Content fills screen */
+    #settings-page .settings-columns { max-width: 100% !important; padding: 0 8px; }
+    /* Form rows stack vertically */
+    #settings-page .form-group {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 8px !important;
+        padding: 12px 0 !important;
+    }
+    #settings-page .form-group > input[type="text"],
+    #settings-page .form-group > input[type="password"],
+    #settings-page .form-group > input[type="number"],
+    #settings-page .form-group > input[type="url"],
+    #settings-page .form-group > select { max-width: 100% !important; width: 100% !important; }
+    /* Path input groups full width */
+    #settings-page .path-input-group { max-width: 100%; width: 100%; }
+    /* Source containers */
+    #settings-page [id$="-settings-container"],
+    #settings-page [id$="-download-settings-container"] { padding: 4px 12px !important; }
+    /* API service frames */
+    #settings-page .api-service-frame .form-group { padding: 8px 12px !important; }
+    #settings-page .api-service-frame .callback-info { padding: 2px 12px 10px; }
+    #settings-page .api-service-frame .form-actions { padding: 4px 12px 12px; }
+    /* Save button */
+    #settings-page .settings-actions { padding: 16px 8px; }
+    #settings-page .settings-actions .save-button { width: 100%; }
+    /* Section titles */
+    #settings-page .settings-group > h3 { padding: 24px 0 10px; }
+}

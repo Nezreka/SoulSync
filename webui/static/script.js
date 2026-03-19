@@ -2256,6 +2256,7 @@ async function loadPageData(pageId) {
                 await loadSettingsData();
                 await loadQualityProfile();
                 loadApiKeys();
+                switchSettingsTab('connections');
                 break;
             case 'import':
                 initializeImportPage();
@@ -4850,6 +4851,30 @@ function validateFileOrganizationTemplates() {
     }
 
     return errors;
+}
+
+// Settings redesign — tab switching + service accordions
+function switchSettingsTab(tab) {
+    // Update tab bar
+    document.querySelectorAll('.stg-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    // Show/hide settings groups by data-stg attribute
+    document.querySelectorAll('#settings-page .settings-group[data-stg]').forEach(g => {
+        g.style.display = g.dataset.stg === tab ? '' : 'none';
+    });
+    // Also hide/show the column wrappers if they're empty in this tab
+    document.querySelectorAll('#settings-page .settings-left-column, #settings-page .settings-right-column, #settings-page .settings-third-column').forEach(col => {
+        const hasVisible = Array.from(col.querySelectorAll('.settings-group[data-stg]')).some(g => g.style.display !== 'none');
+        col.style.display = hasVisible ? '' : 'none';
+    });
+    // Re-apply conditional visibility (quality profile, source containers, etc.)
+    if (typeof updateDownloadSourceUI === 'function') {
+        try { updateDownloadSourceUI(); } catch(e) {}
+    }
+}
+
+function toggleStgService(el) {
+    const service = el.closest('.stg-service');
+    if (service) service.classList.toggle('expanded');
 }
 
 async function loadSettingsData() {
