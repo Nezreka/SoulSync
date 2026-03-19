@@ -5272,6 +5272,15 @@ class MusicDatabase:
                 else:
                     artist_name = 'Unknown Artist'
 
+                # Ensure album is a proper dict — repair if needed so display doesn't break
+                album = spotify_track_data.get('album')
+                if not album or not isinstance(album, dict):
+                    spotify_track_data['album'] = {'name': track_name, 'images': []}
+                    logger.info(f"Wishlist add: no album info for '{track_name}', using track name as fallback")
+                elif not album.get('name') or album.get('name') in ('Unknown Album', ''):
+                    album['name'] = track_name
+                    logger.info(f"Wishlist add: missing album name for '{track_name}', using track name as fallback")
+
                 # Check for duplicates by track name + artist (not just Spotify ID)
                 # This prevents adding the same track multiple times with different IDs or edge cases
                 cursor.execute("""
