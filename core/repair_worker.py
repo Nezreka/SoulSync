@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 from difflib import SequenceMatcher
@@ -796,6 +797,7 @@ class RepairWorker:
             'single_album_redundant': self._fix_single_album_redundant,
             'mbid_mismatch': self._fix_mbid_mismatch,
             'incomplete_album': self._fix_incomplete_album,
+            'path_mismatch': self._fix_path_mismatch,
         }
         handler = handlers.get(finding_type)
         if not handler:
@@ -1678,6 +1680,102 @@ class RepairWorker:
         except Exception as e:
             logger.warning("Retagging failed for '%s' (file still placed): %s", file_path, e)
 
+    def _fix_path_mismatch(self, entity_type, entity_id, file_path, details):
+        """Move a file from its current location to the expected template path."""
+        rel_from = details.get('from', '')
+        rel_to = details.get('to', '')
+        if not rel_from or not rel_to:
+            return {'success': False, 'error': 'Missing from/to paths in finding details'}
+
+        transfer = self.transfer_folder
+        src = os.path.normpath(os.path.join(transfer, rel_from))
+        dst = os.path.normpath(os.path.join(transfer, rel_to))
+
+        # Safety: both paths must be inside transfer folder
+        transfer_norm = os.path.normpath(transfer)
+        if not src.startswith(transfer_norm + os.sep) or not dst.startswith(transfer_norm + os.sep):
+            return {'success': False, 'error': 'Path escapes transfer folder'}
+
+        if not os.path.isfile(src):
+            # Source may have been moved already — check if destination already exists
+            if os.path.isfile(dst):
+                return {'success': True, 'action': 'already_moved', 'message': 'File already at expected location'}
+            return {'success': False, 'error': f'Source file not found: {rel_from}'}
+
+        if os.path.exists(dst) and not os.path.samefile(src, dst):
+            return {'success': False, 'error': 'Destination already exists (different file)'}
+
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+
+            # Case rename on case-insensitive FS
+            if sys.platform in ('win32', 'darwin') and os.path.exists(dst):
+                tmp = dst + '.tmp_rename'
+                shutil.move(src, tmp)
+                shutil.move(tmp, dst)
+            else:
+                shutil.move(src, dst)
+
+            # Move sidecar files (.lrc, cover art, etc.)
+            src_dir = os.path.dirname(src)
+            dst_dir = os.path.dirname(dst)
+            src_stem = os.path.splitext(os.path.basename(src))[0]
+            dst_stem = os.path.splitext(os.path.basename(dst))[0]
+            sidecar_exts = {'.lrc', '.jpg', '.jpeg', '.png', '.nfo', '.txt', '.cue'}
+            for ext in sidecar_exts:
+                sidecar_src = os.path.join(src_dir, src_stem + ext)
+                if os.path.isfile(sidecar_src):
+                    sidecar_dst = os.path.join(dst_dir, dst_stem + ext)
+                    if not os.path.exists(sidecar_dst):
+                        try:
+                            shutil.move(sidecar_src, sidecar_dst)
+                        except Exception:
+                            pass
+
+            # Update DB file path
+            conn = None
+            try:
+                conn = self.db._get_connection()
+                cursor = conn.cursor()
+                # Try exact match
+                cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?", (dst, src))
+                if cursor.rowcount == 0:
+                    cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
+                                   (dst, os.path.normpath(src)))
+                if cursor.rowcount == 0:
+                    # Suffix match for cross-environment paths (Docker vs host)
+                    try:
+                        rel_suffix = os.path.relpath(src, transfer).replace('\\', '/')
+                        escaped = rel_suffix.replace('^', '^^').replace('%', '^%').replace('_', '^_')
+                        cursor.execute(
+                            "UPDATE tracks SET file_path = ? WHERE file_path LIKE ? ESCAPE '^'",
+                            (dst, '%/' + escaped))
+                    except Exception:
+                        pass
+                conn.commit()
+            except Exception as e:
+                logger.debug("DB path update failed for %s: %s", src, e)
+            finally:
+                if conn:
+                    conn.close()
+
+            # Clean up empty source directories
+            parent = os.path.dirname(src)
+            for _ in range(5):
+                if (parent and os.path.isdir(parent)
+                        and os.path.normpath(parent) != transfer_norm
+                        and not os.listdir(parent)):
+                    os.rmdir(parent)
+                    parent = os.path.dirname(parent)
+                else:
+                    break
+
+            return {'success': True, 'action': 'moved_file',
+                    'message': f'Moved to {rel_to}'}
+        except Exception as e:
+            logger.error("Failed to move %s -> %s: %s", src, dst, e)
+            return {'success': False, 'error': str(e)}
+
     def dismiss_finding(self, finding_id: int) -> bool:
         """Dismiss a finding."""
         conn = None
@@ -1711,7 +1809,7 @@ class RepairWorker:
             fixable_types = ('dead_file', 'orphan_file', 'track_number_mismatch',
                              'missing_cover_art', 'metadata_gap', 'duplicate_tracks',
                              'single_album_redundant', 'mbid_mismatch',
-                             'incomplete_album')
+                             'incomplete_album', 'path_mismatch')
             placeholders = ','.join(['?'] * len(fixable_types))
             where_parts = [f"finding_type IN ({placeholders})", "status = 'pending'"]
             params = list(fixable_types)

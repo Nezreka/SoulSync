@@ -11,6 +11,7 @@ Safety design:
 - Moves are always within the transfer folder; cannot escape to parent dirs.
 """
 
+import json
 import os
 import re
 import shutil
@@ -697,6 +698,52 @@ class LibraryReorganizeJob(RepairJob):
                                 years[key] = year_str
             except Exception:
                 pass  # discovery_pool may not exist on all installs
+
+            # Source 3: recent_releases (watchlist artist releases)
+            try:
+                cursor.execute("""
+                    SELECT wa.artist_name, rr.album_name, rr.release_date
+                    FROM recent_releases rr
+                    JOIN watchlist_artists wa ON wa.id = rr.watchlist_artist_id
+                    WHERE rr.release_date IS NOT NULL AND rr.release_date != ''
+                """)
+                for row in cursor.fetchall():
+                    artist_name, album_name, release_date = row
+                    if artist_name and album_name and release_date:
+                        key = (artist_name.lower(), album_name.lower())
+                        if key not in years:
+                            year_str = str(release_date)[:4]
+                            if len(year_str) == 4 and year_str.isdigit():
+                                years[key] = year_str
+            except Exception:
+                pass  # recent_releases may not exist on all installs
+
+            # Source 4: wishlist tracks (spotify_data JSON contains release date)
+            try:
+                cursor.execute("""
+                    SELECT spotify_data FROM wishlist_tracks
+                    WHERE spotify_data IS NOT NULL AND spotify_data != ''
+                """)
+                for row in cursor.fetchall():
+                    try:
+                        data = json.loads(row[0])
+                        artist_name = ''
+                        if data.get('artists'):
+                            a = data['artists'][0]
+                            artist_name = a.get('name', '') if isinstance(a, dict) else str(a)
+                        album_data = data.get('album', {})
+                        album_name = album_data.get('name', '') if isinstance(album_data, dict) else ''
+                        release_date = album_data.get('release_date', '') if isinstance(album_data, dict) else ''
+                        if artist_name and album_name and release_date:
+                            key = (artist_name.lower(), album_name.lower())
+                            if key not in years:
+                                year_str = str(release_date)[:4]
+                                if len(year_str) == 4 and year_str.isdigit():
+                                    years[key] = year_str
+                    except (ValueError, KeyError, TypeError):
+                        continue
+            except Exception:
+                pass  # wishlist_tracks may not exist or have different schema
 
         except Exception as e:
             logger.debug("Failed to load album years from DB: %s", e)
