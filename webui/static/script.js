@@ -5708,7 +5708,9 @@ async function saveSettings(quiet = false) {
         spotify: {
             client_id: document.getElementById('spotify-client-id').value,
             client_secret: document.getElementById('spotify-client-secret').value,
-            redirect_uri: document.getElementById('spotify-redirect-uri').value
+            redirect_uri: document.getElementById('spotify-redirect-uri').value,
+            embed_tags: document.getElementById('embed-spotify').checked,
+            tags: _collectServiceTags('spotify')
         },
         tidal: {
             client_id: document.getElementById('tidal-client-id').value,
@@ -5794,10 +5796,6 @@ async function saveSettings(quiet = false) {
                 quality_tag: _getTagConfig('metadata_enhancement.tags.quality_tag'),
                 genre_merge: _getTagConfig('metadata_enhancement.tags.genre_merge')
             }
-        },
-        spotify: {
-            embed_tags: document.getElementById('embed-spotify').checked,
-            tags: _collectServiceTags('spotify')
         },
         musicbrainz: {
             embed_tags: document.getElementById('embed-musicbrainz').checked,
@@ -6238,7 +6236,9 @@ function updateStatusDisplays() {
 
 async function authenticateSpotify() {
     try {
-        showLoadingOverlay('Starting Spotify authentication...');
+        showLoadingOverlay('Saving credentials and starting Spotify authentication...');
+        // Save settings first to ensure client_id/client_secret are persisted
+        await saveSettings();
         showToast('Spotify authentication started', 'success');
         window.open('/auth/spotify', '_blank');
     } catch (error) {
@@ -6387,10 +6387,10 @@ function formatRateLimitDuration(seconds) {
 
 async function authenticateTidal() {
     try {
-        showLoadingOverlay('Starting Tidal authentication...');
-        // This would trigger the OAuth flow
+        showLoadingOverlay('Saving credentials and starting Tidal authentication...');
+        // Save settings first to ensure credentials are persisted
+        await saveSettings();
         showToast('Tidal authentication started', 'success');
-        // In a real implementation, this would open the OAuth URL
         window.open('/auth/tidal', '_blank');
     } catch (error) {
         console.error('Error authenticating Tidal:', error);

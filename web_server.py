@@ -5858,8 +5858,19 @@ def auth_tidal():
             tidal_oauth_state["code_verifier"] = temp_tidal_client.code_verifier
             tidal_oauth_state["code_challenge"] = temp_tidal_client.code_challenge
         
+        # Dynamically set redirect_uri based on how the user is accessing the app
+        request_host = request.host.split(':')[0]
+        if request_host not in ('127.0.0.1', 'localhost'):
+            dynamic_redirect = f"http://{request_host}:8889/tidal/callback"
+            temp_tidal_client.redirect_uri = dynamic_redirect
+            print(f"🔗 Tidal redirect_uri updated for remote access: {dynamic_redirect}")
+
+        # Store PKCE + redirect_uri for callback to use the same values
+        with tidal_oauth_lock:
+            tidal_oauth_state["redirect_uri"] = temp_tidal_client.redirect_uri
+
         print(f"🔐 Stored PKCE - verifier: {temp_tidal_client.code_verifier[:20]}... challenge: {temp_tidal_client.code_challenge[:20]}...")
-        
+
         # Create OAuth URL
         import urllib.parse
         params = {
@@ -6083,10 +6094,12 @@ def tidal_callback():
         # Create a temporary client for the token exchange
         temp_tidal_client = TidalClient()
 
-        # Restore PKCE values from the auth request (matches HTTPServer handler logic)
+        # Restore PKCE values and redirect_uri from the auth request
         with tidal_oauth_lock:
             temp_tidal_client.code_verifier = tidal_oauth_state["code_verifier"]
             temp_tidal_client.code_challenge = tidal_oauth_state["code_challenge"]
+            if "redirect_uri" in tidal_oauth_state:
+                temp_tidal_client.redirect_uri = tidal_oauth_state["redirect_uri"]
 
         success = temp_tidal_client.fetch_token_from_code(auth_code)
         
