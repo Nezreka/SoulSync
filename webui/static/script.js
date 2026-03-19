@@ -15392,12 +15392,19 @@ async function searchDiscoveryFix() {
     resultsContainer.innerHTML = `<div class="loading">🔍 Searching ${sourceLabel}...</div>`;
 
     try {
-        // Build search query
-        const query = `${artistInput} ${trackInput}`.trim();
+        // Build search params — send track and artist separately for field-specific filtering
+        const params = new URLSearchParams();
+        if (trackInput) params.set('track', trackInput);
+        if (artistInput) params.set('artist', artistInput);
+        if (!trackInput && !artistInput) {
+            resultsContainer.innerHTML = '<div class="no-results">Enter a track name or artist.</div>';
+            return;
+        }
+        params.set('limit', '50');
 
         // Call appropriate search API based on discovery source
         const searchEndpoint = useFallback ? '/api/itunes/search_tracks' : '/api/spotify/search_tracks';
-        const response = await fetch(`${searchEndpoint}?query=${encodeURIComponent(query)}&limit=20`);
+        const response = await fetch(`${searchEndpoint}?${params.toString()}`);
         const data = await response.json();
 
         if (data.error) {
@@ -55496,8 +55503,9 @@ async function searchPoolFix() {
     const resultsContainer = document.getElementById('pool-fix-results');
     if (!trackInput || !resultsContainer) return;
 
-    const query = `${artistInput.value.trim()} ${trackInput.value.trim()}`.trim();
-    if (!query) {
+    const trackVal = trackInput.value.trim();
+    const artistVal = artistInput.value.trim();
+    if (!trackVal && !artistVal) {
         resultsContainer.innerHTML = '<div class="pool-empty">Enter a search term</div>';
         return;
     }
@@ -55505,7 +55513,11 @@ async function searchPoolFix() {
     resultsContainer.innerHTML = '<div class="pool-empty">Searching...</div>';
 
     try {
-        const res = await fetch(`/api/spotify/search_tracks?query=${encodeURIComponent(query)}&limit=20`);
+        const params = new URLSearchParams();
+        if (trackVal) params.set('track', trackVal);
+        if (artistVal) params.set('artist', artistVal);
+        params.set('limit', '50');
+        const res = await fetch(`/api/spotify/search_tracks?${params.toString()}`);
         const data = await res.json();
         const tracks = data.tracks || [];
 

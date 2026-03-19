@@ -955,7 +955,8 @@ class SpotifyClient:
 
         if use_spotify:
             # Check Spotify cache
-            cached_results = cache.get_search_results('spotify', 'track', query, min(limit, 10))
+            effective_limit = min(limit, 50)  # Spotify API max is 50
+            cached_results = cache.get_search_results('spotify', 'track', query, effective_limit)
             if cached_results is not None:
                 tracks = []
                 for raw in cached_results:
@@ -967,7 +968,7 @@ class SpotifyClient:
                     return tracks
 
             try:
-                results = self.sp.search(q=query, type='track', limit=min(limit, 10))
+                results = self.sp.search(q=query, type='track', limit=effective_limit)
                 tracks = []
                 raw_items = results['tracks']['items']
 
@@ -979,7 +980,7 @@ class SpotifyClient:
                 entries = [(td.get('id'), td) for td in raw_items if td.get('id')]
                 if entries:
                     cache.store_entities_bulk('spotify', 'track', entries)
-                    cache.store_search_results('spotify', 'track', query, min(limit, 10),
+                    cache.store_search_results('spotify', 'track', query, effective_limit,
                                                [td.get('id') for td in raw_items if td.get('id')])
 
                 return tracks

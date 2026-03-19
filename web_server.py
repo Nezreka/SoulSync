@@ -25069,10 +25069,23 @@ def search_spotify_tracks():
             return jsonify({"error": "Spotify not authenticated."}), 401
 
     try:
-        query = request.args.get('query', '').strip()
+        # Support field-specific search params (track, artist) or legacy combined query
+        track_q = request.args.get('track', '').strip()
+        artist_q = request.args.get('artist', '').strip()
+        legacy_query = request.args.get('query', '').strip()
         limit = int(request.args.get('limit', 20))
 
-        if not query:
+        # Build Spotify field-filtered query
+        if track_q or artist_q:
+            parts = []
+            if track_q:
+                parts.append(f'track:{track_q}')
+            if artist_q:
+                parts.append(f'artist:{artist_q}')
+            query = ' '.join(parts)
+        elif legacy_query:
+            query = legacy_query
+        else:
             return jsonify({"error": "Query parameter is required"}), 400
 
         if use_hydrabase:
@@ -25101,10 +25114,22 @@ def search_spotify_tracks():
 def search_itunes_tracks():
     """Search for tracks on iTunes - used by discovery fix modal when iTunes is the source"""
     try:
-        query = request.args.get('query', '').strip()
+        # Support field-specific search params or legacy combined query
+        track_q = request.args.get('track', '').strip()
+        artist_q = request.args.get('artist', '').strip()
+        legacy_query = request.args.get('query', '').strip()
         limit = int(request.args.get('limit', 20))
 
-        if not query:
+        if track_q or artist_q:
+            parts = []
+            if track_q:
+                parts.append(track_q)
+            if artist_q:
+                parts.append(artist_q)
+            query = ' '.join(parts)
+        elif legacy_query:
+            query = legacy_query
+        else:
             return jsonify({"error": "Query parameter is required"}), 400
 
         use_hydrabase = _is_hydrabase_active()
