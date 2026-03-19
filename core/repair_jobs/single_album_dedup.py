@@ -105,16 +105,16 @@ class SingleAlbumDedupJob(RepairJob):
                 'artist_thumb_url': artist_thumb or None,
             }
 
-            # Classify: single = album_type 'single' or total_tracks <= 3
-            # EPs (4-6 tracks) are borderline — only flag as "single" if explicitly typed
+            # Classify: only actual singles — EPs are intentional multi-track releases
+            # that should stay complete (removing tracks would break the EP and
+            # conflict with album completeness checks)
             is_single = (
                 entry['album_type'] == 'single' or
-                (entry['album_type'] == 'ep' and entry['total_tracks'] <= 6) or
-                (entry['album_type'] not in ('album', 'compilation') and entry['total_tracks'] <= 3)
+                (entry['album_type'] not in ('album', 'compilation', 'ep') and entry['total_tracks'] <= 2)
             )
             if is_single:
                 singles.append(entry)
-            elif entry['total_tracks'] > 3:
+            elif entry['total_tracks'] > 2:
                 album_tracks.append(entry)
 
         logger.info("Single/Album dedup: %d singles/EPs, %d album tracks", len(singles), len(album_tracks))
