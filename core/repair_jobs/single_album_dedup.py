@@ -42,8 +42,8 @@ class SingleAlbumDedupJob(RepairJob):
         result = JobResult()
 
         settings = self._get_settings(context)
-        title_threshold = settings.get('title_similarity', 0.85)
-        artist_threshold = settings.get('artist_similarity', 0.80)
+        title_threshold = float(settings.get('title_similarity', 0.85))
+        artist_threshold = float(settings.get('artist_similarity', 0.80))
 
         # Fetch all tracks with album type info
         conn = None
@@ -257,7 +257,10 @@ class SingleAlbumDedupJob(RepairJob):
 
 
 _VERSION_KEYWORDS = re.compile(
-    r'(live|acoustic|remix|demo|instrumental|radio edit|extended|karaoke|a\s?cappella)',
+    r'\b(live|acoustic|remix|remixed|demo|instrumental|radio edit|extended|karaoke|'
+    r'a\s?cappella|remaster(?:ed)?|deluxe|bonus|stripped|unplugged|orchestral|'
+    r'sped up|slowed|reverb|clean|explicit|mono|stereo|alternate|alt\.?\s*(?:version|mix)|'
+    r'club mix|dub mix|vip mix|edit)\b',
     re.IGNORECASE,
 )
 
