@@ -39249,6 +39249,33 @@ def get_spotify_artist_discography(artist_name):
             else:
                 albums.append(release_data)
 
+        # Deduplicate variant releases (Explicit/Clean, Standard/Deluxe)
+        def _dedup_releases(releases):
+            import re
+            _VARIANT_RE = re.compile(
+                r'\s*[\(\[](explicit|clean|deluxe|deluxe edition|standard edition|'
+                r'clean version|explicit version|remastered|bonus track version)[\)\]]'
+                r'|\s*-\s*(explicit|clean|deluxe edition|single)\s*$',
+                re.IGNORECASE
+            )
+            groups = {}
+            for r in releases:
+                norm = _VARIANT_RE.sub('', r['title']).strip().lower()
+                key = (norm, r.get('year'))
+                if key not in groups:
+                    groups[key] = r
+                else:
+                    existing = groups[key]
+                    # Prefer: more tracks > explicit > longer title (deluxe)
+                    if (r.get('track_count', 0) > existing.get('track_count', 0) or
+                        '(explicit' in r['title'].lower()):
+                        groups[key] = r
+            return list(groups.values())
+
+        albums = _dedup_releases(albums)
+        eps = _dedup_releases(eps)
+        singles = _dedup_releases(singles)
+
         print(f"📀 Categorized Spotify releases - Albums: {len(albums)}, EPs: {len(eps)}, Singles: {len(singles)}")
 
         return {
