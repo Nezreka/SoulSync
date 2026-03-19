@@ -22599,6 +22599,10 @@ def _download_track_worker(task_id, batch_id=None):
                 _store_batch_source(batch_id, used_username, used_filename)
             return
 
+        # === STAGING CHECK: Check staging folder for existing file before searching ===
+        if _try_staging_match(task_id, batch_id, track):
+            return
+
         # Initialize task state tracking (like GUI's parallel_search_tracking)
         with tasks_lock:
             if task_id in download_tasks:
@@ -23073,6 +23077,185 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
     # All candidates failed
     print(f"❌ [Modal Worker] All {len(candidates)} candidates failed for '{track.name}'")
     return False
+
+# ── Staging folder match cache (per-batch, avoids re-scanning for every track) ──
+_staging_cache = {}  # batch_id -> list of {full_path, title, artist, album, extension}
+_staging_cache_lock = threading.Lock()
+
+STAGING_AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
+
+
+def _get_staging_file_cache(batch_id):
+    """Scan staging folder once per batch and cache the results."""
+    with _staging_cache_lock:
+        if batch_id in _staging_cache:
+            return _staging_cache[batch_id]
+
+    staging_path = _get_staging_path()
+    if not os.path.isdir(staging_path):
+        with _staging_cache_lock:
+            _staging_cache[batch_id] = []
+        return []
+
+    files = []
+    for root, _dirs, filenames in os.walk(staging_path):
+        for fname in filenames:
+            ext = os.path.splitext(fname)[1].lower()
+            if ext not in STAGING_AUDIO_EXTENSIONS:
+                continue
+            full_path = os.path.join(root, fname)
+            rel_path = os.path.relpath(full_path, staging_path)
+
+            # Read tags first (most reliable)
+            title, artist, album = None, None, None
+            try:
+                from mutagen import File as MutagenFile
+                tags = MutagenFile(full_path, easy=True)
+                if tags:
+                    title = (tags.get('title') or [None])[0]
+                    artist = (tags.get('artist') or [None])[0]
+                    album = (tags.get('album') or [None])[0]
+            except Exception:
+                pass
+
+            # Fallback to filename parsing
+            if not title:
+                parsed = _parse_filename_metadata(rel_path)
+                title = parsed.get('title') or os.path.splitext(fname)[0]
+                if not artist:
+                    artist = parsed.get('artist')
+                if not album:
+                    album = parsed.get('album')
+
+            files.append({
+                'full_path': full_path,
+                'title': title or '',
+                'artist': artist or '',
+                'album': album or '',
+                'extension': ext,
+            })
+
+    print(f"📂 [Staging] Scanned {len(files)} audio files in staging folder")
+    with _staging_cache_lock:
+        _staging_cache[batch_id] = files
+    return files
+
+
+def _try_staging_match(task_id, batch_id, track):
+    """Check if a matching file exists in the staging folder before downloading.
+
+    Returns True if a match was found and the file was moved to the transfer folder.
+    Returns False to fall through to normal download.
+    """
+    staging_files = _get_staging_file_cache(batch_id or task_id)
+    if not staging_files:
+        return False
+
+    track_title = track.name or ''
+    track_artist = track.artists[0] if track.artists else ''
+
+    if not track_title:
+        return False
+
+    from difflib import SequenceMatcher
+    normalize = matching_engine.normalize_string
+    norm_title = normalize(track_title)
+    norm_artist = normalize(track_artist)
+
+    best_match = None
+    best_score = 0.0
+
+    for sf in staging_files:
+        sf_norm_title = normalize(sf['title'])
+        sf_norm_artist = normalize(sf['artist'])
+
+        if not sf_norm_title:
+            continue
+
+        # Title similarity (primary)
+        title_sim = SequenceMatcher(None, norm_title, sf_norm_title).ratio()
+        if title_sim < 0.80:
+            continue
+
+        # Artist similarity (secondary)
+        artist_sim = 0.0
+        if norm_artist and sf_norm_artist:
+            artist_sim = SequenceMatcher(None, norm_artist, sf_norm_artist).ratio()
+        elif not norm_artist and not sf_norm_artist:
+            artist_sim = 0.5  # Both unknown — neutral
+        elif norm_artist and not sf_norm_artist:
+            artist_sim = 0.3  # Staging file lacks artist — partial credit if title is strong
+        elif sf_norm_artist and not norm_artist:
+            artist_sim = 0.3  # Track lacks artist — same partial credit
+
+        # Combined score: title-weighted (these are user-curated staging files)
+        # If artist info is available, require it to match. If not, lean on title.
+        if norm_artist and sf_norm_artist:
+            combined = (title_sim * 0.55) + (artist_sim * 0.45)
+        else:
+            combined = (title_sim * 0.80) + (artist_sim * 0.20)
+
+        if combined > best_score:
+            best_score = combined
+            best_match = sf
+
+    # Require high confidence to avoid false positives
+    if not best_match or best_score < 0.75:
+        return False
+
+    print(f"📂 [Staging] Match found for '{track_title}' by '{track_artist}': "
+          f"{os.path.basename(best_match['full_path'])} (score: {best_score:.2f})")
+
+    # Copy the file to the transfer folder
+    try:
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+        dest_filename = os.path.basename(best_match['full_path'])
+        dest_path = os.path.join(transfer_dir, dest_filename)
+        os.makedirs(transfer_dir, exist_ok=True)
+
+        # Don't overwrite existing files
+        if os.path.exists(dest_path):
+            base, ext = os.path.splitext(dest_filename)
+            dest_path = os.path.join(transfer_dir, f"{base}_staging{ext}")
+
+        import shutil
+        shutil.copy2(best_match['full_path'], dest_path)
+        print(f"📂 [Staging] Copied to transfer: {dest_path}")
+
+        # Mark task as completed with staging context
+        with tasks_lock:
+            if task_id in download_tasks:
+                download_tasks[task_id]['status'] = 'post_processing'
+                download_tasks[task_id]['filename'] = dest_path
+                download_tasks[task_id]['username'] = 'staging'
+                download_tasks[task_id]['staging_match'] = True
+
+        # Run post-processing (tagging, AcoustID verification, path building)
+        context_key = f"staging_{task_id}"
+        with tasks_lock:
+            track_info = download_tasks.get(task_id, {}).get('track_info', {})
+        context = {
+            'track_info': track_info,
+            'original_search_result': {
+                'title': track_title,
+                'artist': track_artist,
+                'spotify_clean_title': track_title,
+            },
+            'staging_source': True,
+        }
+
+        # Store context in the matched downloads context store (used by post-processing)
+        with matched_context_lock:
+            matched_downloads_context[context_key] = context
+
+        # Trigger post-processing which handles tagging, path building, and DB insertion
+        _post_process_matched_download_with_verification(context_key, context, dest_path, task_id, batch_id)
+        return True
+
+    except Exception as e:
+        print(f"❌ [Staging] Failed to use staging file: {e}")
+        return False
+
 
 def _try_source_reuse(task_id, batch_id, track):
     """
