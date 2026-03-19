@@ -58,11 +58,15 @@ def _sanitize_filename(filename: str) -> str:
 
 
 def _sanitize_context_values(context: dict) -> dict:
-    """Sanitize all string values for path safety."""
+    """Sanitize all string values for path safety.
+
+    Empty strings are preserved so that template cleanup regexes can
+    remove surrounding decorators (e.g. ``($year)`` → ``()`` → removed).
+    """
     sanitized = {}
     for key, value in context.items():
         if isinstance(value, str):
-            sanitized[key] = _sanitize_filename(value)
+            sanitized[key] = _sanitize_filename(value) if value else ''
         else:
             sanitized[key] = value
     return sanitized
