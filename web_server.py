@@ -13793,10 +13793,9 @@ def parse_youtube_playlist(url):
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
-            'extract_flat': True,  # Only extract basic info, no individual video metadata
-            'flat_playlist': True,  # Extract all playlist entries without hitting API for each video
+            'extract_flat': 'in_playlist',  # Only extract basic info, no individual video metadata
             'skip_download': True,  # Don't download, just extract IDs and basic info
-            # Remove all limits to get complete playlist
+            'lazy_playlist': False,  # Force full playlist resolution (prevents ~100 entry cap)
         }
         
         tracks = []
@@ -13811,7 +13810,7 @@ def parse_youtube_playlist(url):
             
             playlist_name = playlist_info.get('title', 'Unknown Playlist')
             playlist_id = playlist_info.get('id', 'unknown_id')
-            entries = playlist_info.get('entries', [])
+            entries = list(playlist_info.get('entries', []) or [])
             
             print(f"🎵 Found YouTube playlist: '{playlist_name}' with {len(entries)} entries")
             
