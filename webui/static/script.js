@@ -55765,24 +55765,198 @@ const _autoIcons = {
 };
 
 // --- Inspiration Templates ---
-const AUTO_TEMPLATES = [
-    { icon: '\uD83D\uDD01', name: 'Playlist Auto-Sync Pipeline', desc: 'Refresh a mirrored playlist, discover new tracks, and sync to your server automatically.',
-      category: 'Sync', when: { type: 'schedule', config: { interval: 6, unit: 'hours' } }, do: { type: 'refresh_mirrored', config: {} }, then: [] },
-    { icon: '\uD83D\uDD14', name: 'New Release Monitor', desc: 'Scan your watchlist for new releases every 12 hours.',
-      category: 'Monitor', when: { type: 'schedule', config: { interval: 12, unit: 'hours' } }, do: { type: 'scan_watchlist', config: {} }, then: [] },
-    { icon: '\uD83C\uDF19', name: 'Nightly Wishlist Processor', desc: 'Process your wishlist at 3 AM every night while you sleep.',
-      category: 'Sync', when: { type: 'daily_time', config: { time: '03:00' } }, do: { type: 'process_wishlist', config: {} }, then: [] },
-    { icon: '\uD83D\uDD0D', name: 'Discovery Pipeline', desc: 'Auto-discover tracks when a new playlist is mirrored.',
-      category: 'Sync', when: { type: 'mirrored_playlist_created', config: {} }, do: { type: 'discover_playlist', config: {} }, then: [] },
-    { icon: '\uD83D\uDCBE', name: 'Weekly Library Backup', desc: 'Back up your database every Sunday at 4 AM.',
-      category: 'Maintenance', when: { type: 'weekly_time', config: { days: ['sunday'], time: '04:00' } }, do: { type: 'backup_database', config: {} }, then: [] },
-    { icon: '\uD83E\uDDF9', name: 'Post-Batch Cleanup', desc: 'Run a full cleanup after any batch download completes.',
-      category: 'Maintenance', when: { type: 'batch_complete', config: {} }, do: { type: 'full_cleanup', config: {} }, then: [] },
-    { icon: '\u274C', name: 'Download Failure Alert', desc: 'Get notified via Discord when a download fails.',
-      category: 'Monitor', when: { type: 'download_failed', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'discord_webhook', config: {} }] },
-    { icon: '\uD83E\uDDF9', name: 'Full Library Maintenance', desc: 'Run full cleanup every Saturday at 5 AM — dedup, quarantine, wishlist tidy.',
-      category: 'Maintenance', when: { type: 'weekly_time', config: { days: ['saturday'], time: '05:00' } }, do: { type: 'full_cleanup', config: {} }, then: [] },
+// --- Automation Hub Data ---
+
+const AUTO_HUB_RECIPES = [
+    // Sync & Playlists
+    { id: 'spotify-auto-sync', icon: '\uD83D\uDD01', name: 'Spotify Playlist Auto-Sync', desc: 'Refresh all mirrored playlists every 6 hours to keep them in sync with Spotify.',
+      category: 'Sync', difficulty: 'beginner', when: { type: 'schedule', config: { interval: 6, unit: 'hours' } }, do: { type: 'refresh_mirrored', config: {} }, then: [] },
+    { id: 'release-radar-pipeline', icon: '\uD83D\uDCE1', name: 'Release Radar Pipeline', desc: 'Every Friday, refresh mirrored playlists, discover new tracks, then sync. Chain 3 automations for a full pipeline.',
+      category: 'Sync', difficulty: 'intermediate', when: { type: 'weekly_time', config: { days: ['friday'], time: '18:00' } }, do: { type: 'refresh_mirrored', config: {} }, then: [],
+      chain: ['Refresh Mirrored', 'Discover Playlist', 'Sync Playlist'], note: 'Create 3 separate automations and chain them with signals for the full pipeline.' },
+    { id: 'discover-weekly-grab', icon: '\uD83C\uDFB5', name: 'Discover Weekly Grab', desc: 'Every Monday, refresh your mirrored Discover Weekly to capture the new playlist before Spotify replaces it.',
+      category: 'Sync', difficulty: 'beginner', when: { type: 'weekly_time', config: { days: ['monday'], time: '08:00' } }, do: { type: 'refresh_mirrored', config: {} }, then: [] },
+    { id: 'playlist-change-watcher', icon: '\uD83D\uDD14', name: 'Playlist Change Watcher', desc: 'Get a Discord notification whenever any tracked playlist changes.',
+      category: 'Sync', difficulty: 'beginner', when: { type: 'playlist_changed', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'discord_webhook', config: {} }] },
+    { id: 'new-mirror-discovery', icon: '\uD83D\uDD0D', name: 'New Mirror Auto-Discovery', desc: 'Automatically discover tracks when you mirror a new playlist.',
+      category: 'Sync', difficulty: 'beginner', when: { type: 'mirrored_playlist_created', config: {} }, do: { type: 'discover_playlist', config: {} }, then: [] },
+    // New Music Discovery
+    { id: 'complete-new-release', icon: '\uD83D\uDE80', name: 'Complete New Release Pipeline', desc: 'Full hands-free chain: scan watchlist \u2192 process wishlist \u2192 quality scan \u2192 notify. Requires 3 automations linked by signals.',
+      category: 'Discovery', difficulty: 'advanced', when: { type: 'schedule', config: { interval: 12, unit: 'hours' } }, do: { type: 'scan_watchlist', config: {} }, then: [{ type: 'fire_signal', config: { signal_name: 'watchlist_done' } }],
+      chain: ['Scan Watchlist', '\u26A1 watchlist_done', 'Process Wishlist', '\u26A1 wishlist_done', 'Quality Scan', 'Discord'],
+      note: 'Create 3 automations: (1) Schedule\u2192Scan Watchlist\u2192fire watchlist_done, (2) Signal watchlist_done\u2192Process Wishlist\u2192fire wishlist_done, (3) Signal wishlist_done\u2192Quality Scan\u2192Discord.' },
+    { id: 'new-release-monitor', icon: '\uD83D\uDD14', name: 'New Release Monitor', desc: 'Scan your watchlist for new releases every 12 hours.',
+      category: 'Discovery', difficulty: 'beginner', when: { type: 'schedule', config: { interval: 12, unit: 'hours' } }, do: { type: 'scan_watchlist', config: {} }, then: [] },
+    { id: 'artist-watch-alert', icon: '\uD83C\uDFA4', name: 'Artist Watch Alert', desc: 'Get a Telegram notification when you add a new artist to your watchlist.',
+      category: 'Discovery', difficulty: 'beginner', when: { type: 'watchlist_artist_added', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'telegram', config: {} }] },
+    { id: 'discovery-pool-refresh', icon: '\uD83C\uDF10', name: 'Discovery Pool Refresh', desc: 'Refresh the discovery pool every night at 2 AM with fresh recommendations.',
+      category: 'Discovery', difficulty: 'beginner', when: { type: 'daily_time', config: { time: '02:00' } }, do: { type: 'update_discovery_pool', config: {} }, then: [] },
+    { id: 'nightly-wishlist', icon: '\uD83C\uDF19', name: 'Nightly Wishlist Processor', desc: 'Process your wishlist at 3 AM every night while you sleep.',
+      category: 'Discovery', difficulty: 'beginner', when: { type: 'daily_time', config: { time: '03:00' } }, do: { type: 'process_wishlist', config: {} }, then: [] },
+    // Library Maintenance
+    { id: 'full-library-maintenance', icon: '\uD83E\uDDF9', name: 'Full Library Maintenance', desc: 'Run full cleanup every Saturday at 5 AM \u2014 dedup, quarantine, wishlist tidy.',
+      category: 'Maintenance', difficulty: 'intermediate', when: { type: 'weekly_time', config: { days: ['saturday'], time: '05:00' } }, do: { type: 'full_cleanup', config: {} }, then: [] },
+    { id: 'post-batch-cleanup', icon: '\uD83E\uDDF9', name: 'Post-Batch Cleanup', desc: 'Run a full cleanup after any batch download completes.',
+      category: 'Maintenance', difficulty: 'beginner', when: { type: 'batch_complete', config: {} }, do: { type: 'full_cleanup', config: {} }, then: [] },
+    { id: 'weekly-db-backup', icon: '\uD83D\uDCBE', name: 'Weekly Database Backup', desc: 'Back up your database every Sunday at 4 AM.',
+      category: 'Maintenance', difficulty: 'beginner', when: { type: 'weekly_time', config: { days: ['sunday'], time: '04:00' } }, do: { type: 'backup_database', config: {} }, then: [] },
+    { id: 'quality-assurance', icon: '\u2705', name: 'Quality Assurance Pipeline', desc: 'After a library scan completes, run a quality scan and fire a signal when done.',
+      category: 'Maintenance', difficulty: 'intermediate', when: { type: 'library_scan_completed', config: {} }, do: { type: 'start_quality_scan', config: {} }, then: [{ type: 'fire_signal', config: { signal_name: 'quality_done' } }] },
+    { id: 'import-cleanup', icon: '\uD83D\uDCE5', name: 'Import Cleanup', desc: 'Automatically scan the library after an import completes to keep things tidy.',
+      category: 'Maintenance', difficulty: 'intermediate', when: { type: 'import_completed', config: {} }, do: { type: 'scan_library', config: {} }, then: [] },
+    // Notifications & Alerts
+    { id: 'download-failure-alert', icon: '\u274C', name: 'Download Failure Alert', desc: 'Get notified via Discord when a download fails.',
+      category: 'Alerts', difficulty: 'beginner', when: { type: 'download_failed', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'discord_webhook', config: {} }] },
+    { id: 'quarantine-alert', icon: '\u26A0\uFE0F', name: 'Quarantine Alert', desc: 'Get a Pushbullet alert when a file is quarantined.',
+      category: 'Alerts', difficulty: 'beginner', when: { type: 'download_quarantined', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'pushbullet', config: {} }] },
+    { id: 'batch-complete-notify', icon: '\uD83C\uDFC1', name: 'Batch Complete Notification', desc: 'Get a Telegram message when a batch download finishes.',
+      category: 'Alerts', difficulty: 'beginner', when: { type: 'batch_complete', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'telegram', config: {} }] },
+    // Power User Chains
+    { id: 'full-hands-free', icon: '\uD83E\uDD16', name: 'Full Hands-Free Pipeline', desc: 'The ultimate automation chain: scan \u2192 process \u2192 download \u2192 clean \u2192 notify. Requires 5 automations linked by signals.',
+      category: 'Chains', difficulty: 'advanced', when: { type: 'schedule', config: { interval: 12, unit: 'hours' } }, do: { type: 'scan_watchlist', config: {} }, then: [{ type: 'fire_signal', config: { signal_name: 'scan_done' } }],
+      chain: ['Scan Watchlist', '\u26A1 scan_done', 'Process Wishlist', '\u26A1 process_done', 'Full Cleanup', '\u26A1 cleanup_done', 'Quality Scan', 'Discord'],
+      note: 'Build 4-5 automations, each firing a signal for the next step. Start small and add stages.' },
+    { id: 'staggered-nightly', icon: '\uD83C\uDF03', name: 'Staggered Nightly Pipeline', desc: 'Spread tasks across the night: 1 AM scan, 2 AM process, 3 AM cleanup, 4 AM backup.',
+      category: 'Chains', difficulty: 'intermediate', when: { type: 'daily_time', config: { time: '01:00' } }, do: { type: 'scan_watchlist', config: {} }, then: [],
+      chain: ['1:00 Scan', '2:00 Process', '3:00 Cleanup', '4:00 Backup'],
+      note: 'Create 4 daily_time automations at staggered hours. No signals needed \u2014 just timing.' },
 ];
+
+const AUTO_HUB_GUIDES = [
+    { id: 'auto-sync-playlists', icon: '\uD83D\uDD01', title: 'Auto-Sync Your Spotify Playlists', subtitle: 'Mirror a Spotify playlist and schedule automatic refreshes.', difficulty: 'beginner',
+      steps: [
+          'Go to the <strong>Playlists</strong> page and find a Spotify playlist you want to track.',
+          'Click <strong>Mirror Playlist</strong> to create a local copy.',
+          'Go to <strong>Automations</strong> and click <strong>New Automation</strong>.',
+          'Set WHEN to <strong>Schedule \u2192 Every 6 hours</strong>.',
+          'Set DO to <strong>Refresh Mirrored Playlists</strong>.',
+          'Save and enable \u2014 your playlist will now stay in sync automatically.'
+      ], relatedRecipes: ['spotify-auto-sync', 'discover-weekly-grab'] },
+    { id: 'discord-download-alerts', icon: '\uD83D\uDCE2', title: 'Get Discord Alerts for Downloads', subtitle: 'Set up Discord webhook notifications for download events.', difficulty: 'beginner',
+      steps: [
+          'In Discord, go to your channel\'s settings \u2192 <strong>Integrations \u2192 Webhooks</strong>.',
+          'Create a webhook and copy the URL.',
+          'In SoulSync, go to <strong>Settings \u2192 Notifications</strong> and paste the Discord webhook URL.',
+          'Go to <strong>Automations \u2192 New Automation</strong>.',
+          'Set WHEN to <strong>Download Failed</strong> (or any event), DO to <strong>Notify Only</strong>, THEN to <strong>Discord</strong>.'
+      ], relatedRecipes: ['download-failure-alert', 'batch-complete-notify'] },
+    { id: 'hands-free-pipeline', icon: '\uD83E\uDD16', title: 'Build a Hands-Free Library Pipeline', subtitle: 'Chain watchlist scanning, wishlist processing, and cleanup with signals.', difficulty: 'intermediate',
+      steps: [
+          'Create Automation 1: <strong>Schedule (12h) \u2192 Scan Watchlist</strong>, THEN fire signal <code>scan_done</code>.',
+          'Create Automation 2: <strong>Signal scan_done \u2192 Process Wishlist</strong>, THEN fire signal <code>process_done</code>.',
+          'Create Automation 3: <strong>Signal process_done \u2192 Full Cleanup</strong>.',
+          'Enable all three automations.',
+          'Test by manually running Automation 1 \u2014 watch the chain execute.',
+          'Add a THEN notification (Discord/Telegram) to the last automation for completion alerts.',
+          'Adjust the schedule interval based on how often you want new music checked.'
+      ], relatedRecipes: ['complete-new-release', 'full-hands-free'] },
+    { id: 'signal-chains', icon: '\u26A1', title: 'Set Up Signal Chains', subtitle: 'Use fire_signal and signal_received to link automations together.', difficulty: 'advanced',
+      steps: [
+          'Understand the concept: <strong>fire_signal</strong> is a THEN action that emits a named signal. <strong>signal_received</strong> is a WHEN trigger that listens for it.',
+          'In your first automation, add a THEN action \u2192 <strong>Fire Signal</strong> and name it (e.g., <code>step1_done</code>).',
+          'Create a second automation with WHEN \u2192 <strong>Signal Received</strong> \u2192 signal name <code>step1_done</code>.',
+          'The second automation will fire automatically when the first one completes.',
+          'Chain up to 5 levels deep (safety limit). SoulSync detects cycles automatically.',
+          'Use descriptive signal names like <code>watchlist_scanned</code> or <code>cleanup_finished</code>.'
+      ], relatedRecipes: ['quality-assurance', 'complete-new-release'] },
+    { id: 'nightly-maintenance', icon: '\uD83C\uDF19', title: 'Schedule Nightly Maintenance', subtitle: 'Set up backup, cleanup, and quality scans to run overnight.', difficulty: 'intermediate',
+      steps: [
+          'Create a <strong>Daily Time (04:00) \u2192 Backup Database</strong> automation.',
+          'Create a <strong>Weekly Time (Saturday, 05:00) \u2192 Full Cleanup</strong> automation.',
+          'Create a <strong>Daily Time (02:00) \u2192 Update Discovery Pool</strong> automation.',
+          'Stagger times by at least 1 hour to avoid resource contention.',
+          'Add Discord/Telegram notifications to any you want alerts for.'
+      ], relatedRecipes: ['weekly-db-backup', 'full-library-maintenance', 'staggered-nightly'] },
+];
+
+const AUTO_HUB_TIPS = [
+    { icon: '\u26A1', title: 'Signal Chaining 101', body: '<strong>fire_signal</strong> (a THEN action) emits a named event. <strong>signal_received</strong> (a WHEN trigger) listens for it. This lets you chain automations: when one finishes, the next starts automatically.', tag: 'Signals' },
+    { icon: '\u23F0', title: 'Stagger Your Schedules', body: 'If you have multiple timed automations, space them at least 1 hour apart. Running scan, process, and cleanup at the same time creates resource contention and can slow everything down.', tag: 'Performance' },
+    { icon: '\uD83C\uDFAF', title: 'Use Conditions to Filter', body: 'Add conditions to event triggers to only fire on specific artists, formats, or quality levels. For example, trigger only when a downloaded track\'s artist matches "Radiohead".', tag: 'Filtering' },
+    { icon: '\uD83D\uDCC1', title: 'Group Related Automations', body: 'Use the Group dropdown when creating automations to organize them. Groups like "Nightly", "Notifications", or "Pipeline" make it easy to find and manage related automations.', tag: 'Organization' },
+    { icon: '\uD83D\uDD04', title: 'Avoid Chain Loops', body: 'SoulSync has built-in cycle detection, but it\'s good practice to design signal names carefully. If A fires signal X and B listens for X and fires Y, make sure nothing fires X again downstream.', tag: 'Safety' },
+    { icon: '\uD83D\uDCDA', title: 'Stack THEN Actions', body: 'Each automation supports up to 3 THEN actions. Combine notification channels (Discord + Telegram) with a fire_signal to both notify yourself and trigger the next automation.', tag: 'Power' },
+    { icon: '\u2699\uFE0F', title: 'System vs Custom', body: 'System automations handle core tasks like Spotify enrichment and are managed automatically. Create custom automations to extend their behavior \u2014 trigger on their completion events.', tag: 'Basics' },
+    { icon: '\uD83E\uDDEA', title: 'Test with Notify Only', body: 'Set DO to <strong>Notify Only</strong> when testing a new trigger. You\'ll see when it fires without any side effects. Once you\'re confident in the timing, switch to the real action.', tag: 'Testing' },
+];
+
+const AUTO_HUB_REFERENCE = {
+    triggers: [
+        { group: 'Time-Based', items: [
+            { type: 'schedule', label: 'Schedule', desc: 'Repeating interval (e.g., every 6 hours)' },
+            { type: 'daily_time', label: 'Daily Time', desc: 'Every day at a specific time (e.g., 03:00)' },
+            { type: 'weekly_time', label: 'Weekly Time', desc: 'Specific days + time (e.g., Saturday at 05:00)' },
+        ]},
+        { group: 'Download Events', items: [
+            { type: 'track_downloaded', label: 'Track Downloaded', desc: 'Fires when a single track download completes' },
+            { type: 'batch_complete', label: 'Batch Complete', desc: 'Fires when a batch download job finishes' },
+            { type: 'download_failed', label: 'Download Failed', desc: 'Fires when a download fails or errors out' },
+            { type: 'download_quarantined', label: 'File Quarantined', desc: 'Fires when a downloaded file is quarantined for quality issues' },
+        ]},
+        { group: 'Watchlist & Wishlist', items: [
+            { type: 'watchlist_new_release', label: 'New Release Found', desc: 'Fires when a watched artist has a new release' },
+            { type: 'watchlist_scan_completed', label: 'Watchlist Scan Done', desc: 'Fires after a full watchlist scan completes' },
+            { type: 'watchlist_artist_added', label: 'Artist Watched', desc: 'Fires when a new artist is added to the watchlist' },
+            { type: 'watchlist_artist_removed', label: 'Artist Unwatched', desc: 'Fires when an artist is removed from the watchlist' },
+            { type: 'wishlist_item_added', label: 'Wishlist Item Added', desc: 'Fires when a new item is added to the wishlist' },
+            { type: 'wishlist_processing_completed', label: 'Wishlist Processed', desc: 'Fires after the wishlist processor completes a run' },
+        ]},
+        { group: 'Playlists', items: [
+            { type: 'playlist_synced', label: 'Playlist Synced', desc: 'Fires when a playlist sync operation completes' },
+            { type: 'playlist_changed', label: 'Playlist Changed', desc: 'Fires when a tracked playlist has changes detected' },
+            { type: 'mirrored_playlist_created', label: 'Playlist Mirrored', desc: 'Fires when a new mirrored playlist is created' },
+            { type: 'discovery_completed', label: 'Discovery Complete', desc: 'Fires when playlist discovery finishes' },
+        ]},
+        { group: 'Library & System', items: [
+            { type: 'app_started', label: 'App Started', desc: 'Fires once when SoulSync starts up' },
+            { type: 'import_completed', label: 'Import Complete', desc: 'Fires when a library import operation finishes' },
+            { type: 'library_scan_completed', label: 'Library Scan Done', desc: 'Fires after a full library scan completes' },
+            { type: 'quality_scan_completed', label: 'Quality Scan Done', desc: 'Fires when a quality scan finishes' },
+            { type: 'duplicate_scan_completed', label: 'Duplicate Scan Done', desc: 'Fires when the duplicate scanner finishes' },
+            { type: 'database_update_completed', label: 'Database Updated', desc: 'Fires after a database update operation' },
+        ]},
+        { group: 'Signals', items: [
+            { type: 'signal_received', label: 'Signal Received', desc: 'Fires when a named signal is emitted by another automation\'s fire_signal THEN action' },
+        ]},
+    ],
+    actions: [
+        { group: 'Downloads & Sync', items: [
+            { type: 'process_wishlist', label: 'Process Wishlist', desc: 'Download all pending wishlist items' },
+            { type: 'refresh_mirrored', label: 'Refresh Mirrored', desc: 'Refresh all mirrored playlists from their sources' },
+            { type: 'sync_playlist', label: 'Sync Playlist', desc: 'Sync a specific playlist to your library' },
+            { type: 'discover_playlist', label: 'Discover Playlist', desc: 'Run track discovery on mirrored playlists' },
+            { type: 'scan_watchlist', label: 'Scan Watchlist', desc: 'Check watched artists for new releases' },
+            { type: 'update_discovery_pool', label: 'Update Discovery', desc: 'Refresh the discovery pool with new recommendations' },
+        ]},
+        { group: 'Library Tools', items: [
+            { type: 'scan_library', label: 'Scan Library', desc: 'Full scan of local music library files' },
+            { type: 'start_quality_scan', label: 'Quality Scan', desc: 'Check library tracks for quality issues' },
+            { type: 'start_database_update', label: 'Update Database', desc: 'Run a database update/maintenance operation' },
+            { type: 'backup_database', label: 'Backup Database', desc: 'Create a backup of the music database' },
+        ]},
+        { group: 'Cleanup', items: [
+            { type: 'full_cleanup', label: 'Full Cleanup', desc: 'Run all cleanup tasks: dedup, quarantine, wishlist tidy' },
+            { type: 'run_duplicate_cleaner', label: 'Duplicate Cleaner', desc: 'Find and handle duplicate tracks' },
+            { type: 'clear_quarantine', label: 'Clear Quarantine', desc: 'Remove all quarantined files' },
+            { type: 'cleanup_wishlist', label: 'Clean Wishlist', desc: 'Remove completed/invalid wishlist items' },
+            { type: 'clean_search_history', label: 'Clean Search History', desc: 'Clear old search history entries' },
+            { type: 'clean_completed_downloads', label: 'Clean Downloads', desc: 'Remove completed download records' },
+        ]},
+        { group: 'Other', items: [
+            { type: 'notify_only', label: 'Notify Only', desc: 'No action \u2014 just trigger THEN notifications. Great for testing.' },
+        ]},
+    ],
+    thenActions: [
+        { group: 'Notifications', items: [
+            { type: 'discord_webhook', label: 'Discord Webhook', desc: 'Send a message to a Discord channel via webhook' },
+            { type: 'telegram', label: 'Telegram', desc: 'Send a message to a Telegram chat via bot' },
+            { type: 'pushbullet', label: 'Pushbullet', desc: 'Send a push notification via Pushbullet' },
+        ]},
+        { group: 'Chaining', items: [
+            { type: 'fire_signal', label: 'Fire Signal', desc: 'Emit a named signal that other automations can listen for with signal_received' },
+        ]},
+    ],
+};
 
 // --- Load & Render List ---
 
@@ -55839,8 +56013,8 @@ async function loadAutomations() {
             list.appendChild(_buildAutomationSection('auto-section-system', 'System', systemAutos, true));
         }
 
-        // Inspiration / Templates section
-        list.appendChild(_buildTemplatesSection());
+        // Automation Hub section
+        list.appendChild(_buildAutomationHub());
 
         // User automations — split by group
         const groups = [...new Set(userAutos.filter(a => a.group_name).map(a => a.group_name))].sort();
@@ -55882,59 +56056,297 @@ async function loadAutomations() {
     }
 }
 
-// --- Templates Section ---
-function _buildTemplatesSection() {
+// --- Automation Hub ---
+
+function _buildAutomationHub() {
     const section = document.createElement('div');
     section.className = 'automations-section';
-    section.id = 'auto-section-templates';
-    const collapsed = localStorage.getItem('auto_section_auto-section-templates') === '1';
+    section.id = 'auto-section-hub';
+    const collapsed = localStorage.getItem('auto_section_auto-section-hub') === '1';
     if (collapsed) section.classList.add('collapsed');
     const header = document.createElement('div');
     header.className = 'automations-section-header';
     header.innerHTML = `
         <span class="section-chevron">&#9660;</span>
-        <span class="section-label">Inspiration</span>
-        <span class="section-count">${AUTO_TEMPLATES.length}</span>
+        <span class="section-label">Automation Hub</span>
+        <span class="section-count">${AUTO_HUB_RECIPES.length} recipes</span>
         <span class="section-line"></span>
     `;
     header.onclick = () => {
         section.classList.toggle('collapsed');
-        localStorage.setItem('auto_section_auto-section-templates', section.classList.contains('collapsed') ? '1' : '0');
+        localStorage.setItem('auto_section_auto-section-hub', section.classList.contains('collapsed') ? '1' : '0');
     };
     const body = document.createElement('div');
     body.className = 'automations-section-body';
-    const grid = document.createElement('div');
-    grid.className = 'automations-grid';
-    AUTO_TEMPLATES.forEach((t, i) => {
-        const card = document.createElement('div');
-        card.className = 'auto-template-card';
-        const trigLabel = _autoFormatTrigger(t.when.type, t.when.config);
-        const actLabel = _autoFormatAction(t.do.type);
-        card.innerHTML = `
-            <div class="auto-template-icon">${t.icon}</div>
-            <div class="auto-template-info">
-                <div class="auto-template-name">${_esc(t.name)}</div>
-                <div class="auto-template-desc">${_esc(t.desc)}</div>
-                <div class="auto-template-flow">
-                    <span class="flow-trigger">${_esc(trigLabel)}</span>
-                    <span class="flow-arrow">&rarr;</span>
-                    <span class="flow-action">${_esc(actLabel)}</span>
-                    ${t.then.length ? t.then.map(th => `<span class="flow-arrow">&rarr;</span><span class="flow-notify">${_esc(_autoFormatNotify(th.type))}</span>`).join('') : ''}
-                </div>
-            </div>
-            <button class="auto-template-use" onclick="event.stopPropagation(); useTemplate(${i})">Use</button>
-        `;
-        card.onclick = () => useTemplate(i);
-        grid.appendChild(card);
+
+    const activeTab = localStorage.getItem('auto_hub_tab') || 'recipes';
+    const tabs = [
+        { id: 'recipes', label: 'Recipes' },
+        { id: 'guides', label: 'Quick Start' },
+        { id: 'tips', label: 'Tips' },
+        { id: 'reference', label: 'Reference' },
+    ];
+
+    const tabBar = document.createElement('div');
+    tabBar.className = 'auto-hub-tabs';
+    tabs.forEach(t => {
+        const btn = document.createElement('button');
+        btn.className = 'auto-hub-tab' + (t.id === activeTab ? ' active' : '');
+        btn.textContent = t.label;
+        btn.dataset.tab = t.id;
+        btn.onclick = (e) => { e.stopPropagation(); _switchHubTab(t.id, body); };
+        tabBar.appendChild(btn);
     });
-    body.appendChild(grid);
+    body.appendChild(tabBar);
+
+    // Build all tab contents
+    const recipesPane = _buildHubRecipes();
+    recipesPane.id = 'auto-hub-pane-recipes';
+    recipesPane.className = 'auto-hub-tab-content' + (activeTab === 'recipes' ? ' active' : '');
+    body.appendChild(recipesPane);
+
+    const guidesPane = _buildHubGuides();
+    guidesPane.id = 'auto-hub-pane-guides';
+    guidesPane.className = 'auto-hub-tab-content' + (activeTab === 'guides' ? ' active' : '');
+    body.appendChild(guidesPane);
+
+    const tipsPane = _buildHubTips();
+    tipsPane.id = 'auto-hub-pane-tips';
+    tipsPane.className = 'auto-hub-tab-content' + (activeTab === 'tips' ? ' active' : '');
+    body.appendChild(tipsPane);
+
+    const refPane = _buildHubReference();
+    refPane.id = 'auto-hub-pane-reference';
+    refPane.className = 'auto-hub-tab-content' + (activeTab === 'reference' ? ' active' : '');
+    body.appendChild(refPane);
+
     section.appendChild(header);
     section.appendChild(body);
     return section;
 }
 
-async function useTemplate(index) {
-    const t = AUTO_TEMPLATES[index];
+function _switchHubTab(tabId, bodyEl) {
+    const container = bodyEl || document.querySelector('#auto-section-hub .automations-section-body');
+    if (!container) return;
+    container.querySelectorAll('.auto-hub-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
+    container.querySelectorAll('.auto-hub-tab-content').forEach(p => p.classList.toggle('active', p.id === 'auto-hub-pane-' + tabId));
+    localStorage.setItem('auto_hub_tab', tabId);
+}
+
+function _buildHubRecipes() {
+    const pane = document.createElement('div');
+    const categories = ['All', 'Sync', 'Discovery', 'Maintenance', 'Alerts', 'Chains'];
+    const difficulties = ['All', 'Beginner', 'Intermediate', 'Advanced'];
+
+    let activeCat = 'All', activeDiff = 'All';
+
+    // Category filters
+    const catFilters = document.createElement('div');
+    catFilters.className = 'auto-hub-filters';
+    categories.forEach(c => {
+        const pill = document.createElement('button');
+        pill.className = 'auto-hub-filter-pill' + (c === 'All' ? ' active' : '');
+        pill.textContent = c;
+        pill.dataset.filter = c;
+        pill.dataset.filterType = 'category';
+        pill.onclick = () => {
+            activeCat = c;
+            catFilters.querySelectorAll('.auto-hub-filter-pill').forEach(p => p.classList.toggle('active', p.dataset.filter === c));
+            filterRecipes();
+        };
+        catFilters.appendChild(pill);
+    });
+    pane.appendChild(catFilters);
+
+    // Difficulty filters
+    const diffFilters = document.createElement('div');
+    diffFilters.className = 'auto-hub-filters';
+    difficulties.forEach(d => {
+        const pill = document.createElement('button');
+        pill.className = 'auto-hub-filter-pill' + (d === 'All' ? ' active' : '');
+        pill.textContent = d;
+        pill.dataset.filter = d;
+        pill.dataset.filterType = 'difficulty';
+        pill.onclick = () => {
+            activeDiff = d;
+            diffFilters.querySelectorAll('.auto-hub-filter-pill').forEach(p => p.classList.toggle('active', p.dataset.filter === d));
+            filterRecipes();
+        };
+        diffFilters.appendChild(pill);
+    });
+    pane.appendChild(diffFilters);
+
+    const grid = document.createElement('div');
+    grid.className = 'auto-hub-recipes-grid';
+
+    AUTO_HUB_RECIPES.forEach(r => {
+        const card = document.createElement('div');
+        card.className = 'auto-hub-recipe-card';
+        card.dataset.category = r.category;
+        card.dataset.difficulty = r.difficulty;
+
+        const trigLabel = _autoFormatTrigger(r.when.type, r.when.config);
+        const actLabel = _autoFormatAction(r.do.type);
+
+        let chainHTML = '';
+        if (r.chain) {
+            chainHTML = '<div class="auto-hub-recipe-chain">' + r.chain.map((step, i) => {
+                let cls = 'flow-action';
+                if (i === 0) cls = 'flow-trigger';
+                else if (step.startsWith('\u26A1')) cls = 'flow-notify';
+                return (i > 0 ? '<span class="flow-arrow">&rarr;</span>' : '') +
+                    `<span class="${cls}">${_esc(step)}</span>`;
+            }).join('') + '</div>';
+        } else {
+            chainHTML = `<div class="auto-hub-recipe-chain">
+                <span class="flow-trigger">${_esc(trigLabel)}</span>
+                <span class="flow-arrow">&rarr;</span>
+                <span class="flow-action">${_esc(actLabel)}</span>
+                ${r.then.length ? r.then.map(th => `<span class="flow-arrow">&rarr;</span><span class="flow-notify">${_esc(_autoFormatNotify(th.type))}</span>`).join('') : ''}
+            </div>`;
+        }
+
+        card.innerHTML = `
+            <div class="auto-hub-recipe-header">
+                <div class="auto-hub-recipe-icon">${r.icon}</div>
+                <div class="auto-hub-recipe-name">${_esc(r.name)}</div>
+                <span class="auto-hub-badge ${r.difficulty}">${_esc(r.difficulty)}</span>
+            </div>
+            <div class="auto-hub-recipe-desc">${_esc(r.desc)}</div>
+            ${chainHTML}
+            ${r.note ? `<div class="auto-hub-recipe-note">${_esc(r.note)}</div>` : ''}
+            <button class="auto-hub-recipe-use" onclick="event.stopPropagation(); useHubRecipe('${r.id}')">Use This</button>
+        `;
+        card.onclick = () => useHubRecipe(r.id);
+        grid.appendChild(card);
+    });
+    pane.appendChild(grid);
+
+    function filterRecipes() {
+        grid.querySelectorAll('.auto-hub-recipe-card').forEach(card => {
+            const catMatch = activeCat === 'All' || card.dataset.category === activeCat;
+            const diffMatch = activeDiff === 'All' || card.dataset.difficulty === activeDiff.toLowerCase();
+            card.style.display = (catMatch && diffMatch) ? '' : 'none';
+        });
+    }
+
+    return pane;
+}
+
+function _buildHubGuides() {
+    const pane = document.createElement('div');
+
+    const callout = document.createElement('div');
+    callout.className = 'auto-hub-callout';
+    callout.innerHTML = '<span class="auto-hub-callout-icon">\uD83D\uDCA1</span><span>Click any guide to expand step-by-step instructions. Related recipes let you jump straight to a pre-filled template.</span>';
+    pane.appendChild(callout);
+
+    AUTO_HUB_GUIDES.forEach(g => {
+        const card = document.createElement('div');
+        card.className = 'auto-hub-guide-card';
+
+        const headerEl = document.createElement('div');
+        headerEl.className = 'auto-hub-guide-header';
+        headerEl.innerHTML = `
+            <span class="auto-hub-guide-icon">${g.icon}</span>
+            <span class="auto-hub-guide-title">${_esc(g.title)}</span>
+            <span class="auto-hub-badge ${g.difficulty}">${_esc(g.difficulty)}</span>
+            <span class="auto-hub-guide-chevron">&#9660;</span>
+        `;
+        headerEl.onclick = () => card.classList.toggle('expanded');
+        card.appendChild(headerEl);
+
+        const bodyEl = document.createElement('div');
+        bodyEl.className = 'auto-hub-guide-body';
+        bodyEl.innerHTML = `
+            <div class="auto-hub-guide-subtitle">${_esc(g.subtitle)}</div>
+            <ol class="auto-hub-steps">${g.steps.map(s => `<li>${s}</li>`).join('')}</ol>
+            ${g.relatedRecipes.length ? `
+                <div class="auto-hub-guide-related">
+                    <span class="auto-hub-guide-related-label">Related:</span>
+                    ${g.relatedRecipes.map(rId => {
+                        const recipe = AUTO_HUB_RECIPES.find(r => r.id === rId);
+                        return recipe ? `<button class="auto-hub-guide-related-link" onclick="event.stopPropagation(); useHubRecipe('${rId}')">${recipe.icon} ${_esc(recipe.name)}</button>` : '';
+                    }).join('')}
+                </div>
+            ` : ''}
+        `;
+        card.appendChild(bodyEl);
+        pane.appendChild(card);
+    });
+
+    return pane;
+}
+
+function _buildHubTips() {
+    const pane = document.createElement('div');
+
+    const callout = document.createElement('div');
+    callout.className = 'auto-hub-callout';
+    callout.innerHTML = '<span class="auto-hub-callout-icon">\u2728</span><span>Power-user tips to get the most out of your automations.</span>';
+    pane.appendChild(callout);
+
+    const grid = document.createElement('div');
+    grid.className = 'auto-hub-tips-grid';
+    AUTO_HUB_TIPS.forEach(t => {
+        const card = document.createElement('div');
+        card.className = 'auto-hub-tip-card';
+        card.innerHTML = `
+            <div class="auto-hub-tip-header">
+                <span class="auto-hub-tip-icon">${t.icon}</span>
+                <span class="auto-hub-tip-title">${_esc(t.title)}</span>
+                <span class="auto-hub-tip-tag">${_esc(t.tag)}</span>
+            </div>
+            <div class="auto-hub-tip-body">${t.body}</div>
+        `;
+        grid.appendChild(card);
+    });
+    pane.appendChild(grid);
+    return pane;
+}
+
+function _buildHubReference() {
+    const pane = document.createElement('div');
+    const sections = [
+        { label: 'Triggers (WHEN)', data: AUTO_HUB_REFERENCE.triggers },
+        { label: 'Actions (DO)', data: AUTO_HUB_REFERENCE.actions },
+        { label: 'Then Actions (THEN)', data: AUTO_HUB_REFERENCE.thenActions },
+    ];
+
+    sections.forEach(sec => {
+        const totalItems = sec.data.reduce((n, g) => n + g.items.length, 0);
+        const group = document.createElement('div');
+        group.className = 'auto-hub-ref-group';
+
+        const header = document.createElement('div');
+        header.className = 'auto-hub-ref-group-header';
+        header.innerHTML = `
+            <span class="auto-hub-ref-group-label">${_esc(sec.label)}</span>
+            <span class="auto-hub-ref-group-count">${totalItems}</span>
+            <span class="auto-hub-ref-chevron">&#9660;</span>
+        `;
+        header.onclick = () => group.classList.toggle('expanded');
+        group.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'auto-hub-ref-body';
+        sec.data.forEach(sub => {
+            body.innerHTML += `<div class="auto-hub-ref-subheader">${_esc(sub.group)}</div>`;
+            let tableHTML = '<table class="auto-hub-table"><thead><tr><th>Type</th><th>Description</th></tr></thead><tbody>';
+            sub.items.forEach(item => {
+                tableHTML += `<tr><td>${_esc(item.label)}</td><td>${_esc(item.desc)}</td></tr>`;
+            });
+            tableHTML += '</tbody></table>';
+            body.innerHTML += tableHTML;
+        });
+        group.appendChild(body);
+        pane.appendChild(group);
+    });
+    return pane;
+}
+
+async function useHubRecipe(recipeId) {
+    const t = AUTO_HUB_RECIPES.find(r => r.id === recipeId);
     if (!t) return;
     await showAutomationBuilder();
     document.getElementById('builder-name').value = t.name;
@@ -55943,6 +56355,9 @@ async function useTemplate(index) {
     _autoBuilder.then = t.then.map(th => ({ type: th.type, config: JSON.parse(JSON.stringify(th.config)) }));
     _renderBuilderSidebar();
     _renderBuilderCanvas();
+    if (t.note) {
+        showToast(t.note, 'info');
+    }
 }
 
 // --- Filter Bar ---
