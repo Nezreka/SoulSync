@@ -172,6 +172,92 @@ function resolveConfirmDialog(result) {
     }
 }
 
+/**
+ * Nuclear confirmation dialog for mass-destructive operations.
+ * User must type an exact phrase to proceed.
+ */
+function showWitnessMeDialog(orphanCount) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+
+        overlay.innerHTML = `
+            <div style="background:var(--bg-secondary, #1e1e2e);border:2px solid #e74c3c;border-radius:12px;padding:28px;max-width:480px;width:90%;color:var(--text-primary, #fff);font-family:inherit;">
+                <h3 style="margin:0 0 8px;color:#e74c3c;font-size:1.2em;">Mass Deletion Warning</h3>
+                <p style="margin:0 0 12px;font-size:0.95em;opacity:0.9;">
+                    You are about to <strong>permanently delete ${orphanCount.toLocaleString()} files</strong> from your disk.
+                </p>
+                <p style="margin:0 0 12px;font-size:0.9em;opacity:0.75;">
+                    This many orphans usually means a path mismatch between your database and filesystem
+                    — not actual orphan files. A previous user lost their entire library this way.
+                </p>
+                <p style="margin:0 0 6px;font-size:0.9em;opacity:0.9;">
+                    To confirm you understand the risk, type <strong style="color:#e74c3c;">witness me</strong> below:
+                </p>
+                <input type="text" id="witness-me-input" autocomplete="off" spellcheck="false"
+                       placeholder="Type the phrase here..."
+                       style="width:100%;padding:10px;border:1px solid #555;border-radius:6px;background:var(--bg-primary, #111);color:var(--text-primary, #fff);font-size:1em;margin:8px 0 16px;box-sizing:border-box;">
+                <div style="display:flex;gap:10px;justify-content:flex-end;">
+                    <button id="witness-cancel" style="padding:8px 20px;border:1px solid #555;border-radius:6px;background:transparent;color:var(--text-primary, #fff);cursor:pointer;font-size:0.9em;">
+                        Cancel
+                    </button>
+                    <button id="witness-confirm" disabled
+                            style="padding:8px 20px;border:none;border-radius:6px;background:#555;color:#888;cursor:not-allowed;font-size:0.9em;font-weight:600;transition:all 0.2s;">
+                        Delete Files
+                    </button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        const input = overlay.querySelector('#witness-me-input');
+        const confirmBtn = overlay.querySelector('#witness-confirm');
+        const cancelBtn = overlay.querySelector('#witness-cancel');
+
+        input.addEventListener('input', () => {
+            const match = input.value.trim().toLowerCase() === 'witness me';
+            confirmBtn.disabled = !match;
+            confirmBtn.style.background = match ? '#e74c3c' : '#555';
+            confirmBtn.style.color = match ? '#fff' : '#888';
+            confirmBtn.style.cursor = match ? 'pointer' : 'not-allowed';
+        });
+
+        confirmBtn.addEventListener('click', () => {
+            document.body.removeChild(overlay);
+            resolve(true);
+        });
+
+        cancelBtn.addEventListener('click', () => {
+            document.body.removeChild(overlay);
+            resolve(false);
+        });
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                document.body.removeChild(overlay);
+                resolve(false);
+            }
+        });
+
+        setTimeout(() => input.focus(), 100);
+    });
+}
+
+const MASS_ORPHAN_THRESHOLD = 20;
+
+function _isMassOrphanFix(jobId, count) {
+    if (count <= MASS_ORPHAN_THRESHOLD) return false;
+    // Only trigger if mass_orphan flag is actually set on visible findings
+    // (flag is set by backend when >50% of files are orphans — likely path mismatch)
+    if (jobId === 'orphan_file_detector' || !jobId) {
+        const massCards = document.querySelectorAll('.repair-finding-card[data-mass-orphan="true"]');
+        if (massCards.length > 0) return true;
+    }
+    return false;
+}
+
 // ===============================
 // WEBSOCKET CONNECTION MANAGER
 // ===============================
@@ -52848,7 +52934,7 @@ async function loadRepairFindings() {
             const filePath = f.file_path || d.original_path || d.file_path || '';
             const fixLabel = fixableTypes[f.finding_type];
 
-            return `<div class="repair-finding-card ${f.severity}" data-id="${f.id}">
+            return `<div class="repair-finding-card ${f.severity}" data-id="${f.id}" data-job-id="${f.job_id}" data-mass-orphan="${!!(d.mass_orphan)}">
                 <div class="repair-finding-main" onclick="toggleFindingDetail(${f.id})">
                     <div class="repair-finding-select" onclick="event.stopPropagation()">
                         <input type="checkbox" onchange="toggleFindingSelect(${f.id}, this.checked)">
@@ -53227,13 +53313,18 @@ async function fixAllMatchingFindings() {
     const jobId = jobFilter ? jobFilter.value : '';
     const severity = severityFilter ? severityFilter.value : '';
 
-    const scopeLabel = jobId ? jobId.replace(/_/g, ' ') : 'all jobs';
-    if (!await showConfirmDialog({
-        title: 'Fix All Findings',
-        message: `Apply fixes to all ${_repairFindingsTotal} pending fixable findings for ${scopeLabel}? This may delete files or remove database entries depending on finding type.`,
-        confirmText: 'Fix All',
-        destructive: true
-    })) return;
+    // Mass orphan safety gate
+    if (_isMassOrphanFix(jobId, _repairFindingsTotal)) {
+        if (!await showWitnessMeDialog(_repairFindingsTotal)) return;
+    } else {
+        const scopeLabel = jobId ? jobId.replace(/_/g, ' ') : 'all jobs';
+        if (!await showConfirmDialog({
+            title: 'Fix All Findings',
+            message: `Apply fixes to all ${_repairFindingsTotal} pending fixable findings for ${scopeLabel}? This may delete files or remove database entries depending on finding type.`,
+            confirmText: 'Fix All',
+            destructive: true
+        })) return;
+    }
 
     showToast(`Fixing ${_repairFindingsTotal} findings...`, 'info');
 
@@ -53375,6 +53466,20 @@ async function bulkRepairAction(action) {
 async function bulkFixFindings() {
     if (_repairSelectedFindings.size === 0) return;
     const ids = Array.from(_repairSelectedFindings);
+
+    // Mass orphan safety gate — check if selected findings include mass-orphan flagged cards
+    const selectedOrphanCards = ids.filter(id => {
+        const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
+        return card && card.dataset.jobId === 'orphan_file_detector';
+    });
+    if (selectedOrphanCards.length > MASS_ORPHAN_THRESHOLD) {
+        const hasMassFlag = ids.some(id => {
+            const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
+            return card && card.dataset.massOrphan === 'true';
+        });
+        if (hasMassFlag && !await showWitnessMeDialog(selectedOrphanCards.length)) return;
+    }
+
     let fixed = 0, failed = 0;
     showToast(`Fixing ${ids.length} findings...`, 'info');
 
