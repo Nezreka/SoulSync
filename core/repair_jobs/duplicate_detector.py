@@ -24,7 +24,9 @@ class DuplicateDetectorJob(RepairJob):
         '(file path, format, bitrate) so you can decide which to keep.\n\n'
         'Settings:\n'
         '- Title Similarity: How closely titles must match to be considered duplicates (0.0 - 1.0)\n'
-        '- Artist Similarity: How closely artist names must match (0.0 - 1.0)'
+        '- Artist Similarity: How closely artist names must match (0.0 - 1.0)\n'
+        '- Ignore Cross-Album: When enabled, tracks on different albums are not flagged as duplicates '
+        '(keeps your albums complete even if the same song appears on multiple albums)'
     )
     icon = 'repair-icon-duplicate'
     default_enabled = False
@@ -32,6 +34,7 @@ class DuplicateDetectorJob(RepairJob):
     default_settings = {
         'title_similarity': 0.85,
         'artist_similarity': 0.80,
+        'ignore_cross_album': True,
     }
     auto_fix = False
 
@@ -41,6 +44,7 @@ class DuplicateDetectorJob(RepairJob):
         settings = self._get_settings(context)
         title_threshold = settings.get('title_similarity', 0.85)
         artist_threshold = settings.get('artist_similarity', 0.80)
+        ignore_cross_album = settings.get('ignore_cross_album', True)
 
         # Fetch all tracks with artist/album names via JOIN
         tracks = []
@@ -138,6 +142,10 @@ class DuplicateDetectorJob(RepairJob):
                     # Compare artists
                     artist_sim = SequenceMatcher(None, t1['norm_artist'], t2['norm_artist']).ratio()
                     if artist_sim < artist_threshold:
+                        continue
+
+                    # Skip cross-album duplicates — same song on different albums is intentional
+                    if ignore_cross_album and t1['album'] and t2['album'] and t1['album'] != t2['album']:
                         continue
 
                     group.append(t2)
