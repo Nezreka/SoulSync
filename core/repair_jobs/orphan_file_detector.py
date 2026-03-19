@@ -81,6 +81,8 @@ class OrphanFileDetectorJob(RepairJob):
         if context.report_progress:
             context.report_progress(phase=f'Checking {total} files...', total=total)
 
+        orphan_files = []
+
         for i, fpath in enumerate(audio_files):
             if context.check_stop():
                 return result
@@ -107,40 +109,61 @@ class OrphanFileDetectorJob(RepairJob):
                     break
 
             if not is_known:
-                # This file is an orphan — create finding
-                if context.report_progress:
-                    context.report_progress(
-                        log_line=f'Orphan: {os.path.basename(fpath)}',
-                        log_type='skip'
-                    )
-                try:
-                    stat = os.stat(fpath)
-                    ext = os.path.splitext(fpath)[1].lower().lstrip('.')
-                    if context.create_finding:
-                        context.create_finding(
-                            job_id=self.job_id,
-                            finding_type='orphan_file',
-                            severity='info',
-                            entity_type='file',
-                            entity_id=None,
-                            file_path=fpath,
-                            title=f'Orphan file: {os.path.basename(fpath)}',
-                            description=f'Audio file in transfer folder is not tracked in the database',
-                            details={
-                                'file_size': stat.st_size,
-                                'format': ext,
-                                'modified': time.strftime('%Y-%m-%d %H:%M:%S',
-                                                          time.localtime(stat.st_mtime)),
-                                'folder': os.path.dirname(fpath),
-                            }
-                        )
-                        result.findings_created += 1
-                except Exception as e:
-                    logger.debug("Error creating orphan finding for %s: %s", fpath, e)
-                    result.errors += 1
+                orphan_files.append(fpath)
 
             if context.update_progress and (i + 1) % 50 == 0:
                 context.update_progress(i + 1, total)
+
+        # Safety check: if most files look like orphans, it's probably a path
+        # mismatch between the DB and filesystem — not actual orphans.
+        orphan_ratio = len(orphan_files) / total if total else 0
+        mass_orphan = orphan_ratio > 0.5 and len(orphan_files) > 20
+
+        if mass_orphan:
+            logger.warning(
+                "Mass orphan warning: %d of %d files (%.0f%%) flagged as orphans — "
+                "this likely indicates a DB path mismatch, not actual orphans",
+                len(orphan_files), total, orphan_ratio * 100
+            )
+
+        for fpath in orphan_files:
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f'Orphan: {os.path.basename(fpath)}',
+                    log_type='skip'
+                )
+            try:
+                stat = os.stat(fpath)
+                ext = os.path.splitext(fpath)[1].lower().lstrip('.')
+                if context.create_finding:
+                    context.create_finding(
+                        job_id=self.job_id,
+                        finding_type='orphan_file',
+                        severity='warning' if mass_orphan else 'info',
+                        entity_type='file',
+                        entity_id=None,
+                        file_path=fpath,
+                        title=f'Orphan file: {os.path.basename(fpath)}',
+                        description=(
+                            'Audio file in transfer folder is not tracked in the database. '
+                            'WARNING: Mass orphan detection triggered — this may be a path '
+                            'mismatch, not actual orphans. Verify before deleting!'
+                        ) if mass_orphan else (
+                            'Audio file in transfer folder is not tracked in the database'
+                        ),
+                        details={
+                            'file_size': stat.st_size,
+                            'format': ext,
+                            'modified': time.strftime('%Y-%m-%d %H:%M:%S',
+                                                      time.localtime(stat.st_mtime)),
+                            'folder': os.path.dirname(fpath),
+                            'mass_orphan': mass_orphan,
+                        }
+                    )
+                    result.findings_created += 1
+            except Exception as e:
+                logger.debug("Error creating orphan finding for %s: %s", fpath, e)
+                result.errors += 1
 
         if context.update_progress:
             context.update_progress(total, total)
