@@ -36,7 +36,7 @@ class AlbumCompletenessJob(RepairJob):
         settings = self._get_settings(context)
         min_tracks = settings.get('min_tracks_for_check', 3)
 
-        # Fetch albums with spotify_album_id that have enough tracks to check
+        # Fetch all albums with a spotify_album_id — filter by expected track count in the loop
         albums = []
         conn = None
         try:
@@ -50,8 +50,7 @@ class AlbumCompletenessJob(RepairJob):
                 LEFT JOIN tracks t ON t.album_id = al.id
                 WHERE al.spotify_album_id IS NOT NULL AND al.spotify_album_id != ''
                 GROUP BY al.id
-                HAVING actual_count >= ?
-            """, (min_tracks,))
+            """)
             albums = cursor.fetchall()
         except Exception as e:
             logger.error("Error fetching albums: %s", e, exc_info=True)
@@ -97,6 +96,13 @@ class AlbumCompletenessJob(RepairJob):
                         expected_total = album_data.get('total_tracks', 0)
                 except Exception:
                     pass
+
+            # Skip singles/EPs based on expected track count (not local count)
+            if expected_total and expected_total < min_tracks:
+                result.skipped += 1
+                if context.update_progress and (i + 1) % 5 == 0:
+                    context.update_progress(i + 1, total)
+                continue
 
             if not expected_total or actual_count >= expected_total:
                 result.skipped += 1
