@@ -3470,12 +3470,20 @@
                     </div>
                 </div>
                 <div class="settings-content">
-                    <!-- Two Column Layout -->
+                    <!-- Category Tab Bar -->
+                    <div class="stg-tabbar">
+                        <button class="stg-tab active" data-tab="connections" onclick="switchSettingsTab('connections')">Connections</button>
+                        <button class="stg-tab" data-tab="downloads" onclick="switchSettingsTab('downloads')">Downloads</button>
+                        <button class="stg-tab" data-tab="library" onclick="switchSettingsTab('library')">Library</button>
+                        <button class="stg-tab" data-tab="appearance" onclick="switchSettingsTab('appearance')">Appearance</button>
+                        <button class="stg-tab" data-tab="advanced" onclick="switchSettingsTab('advanced')">Advanced</button>
+                    </div>
+                    <!-- Settings Panels -->
                     <div class="settings-columns">
                         <!-- Left Column - API Configuration -->
                         <div class="settings-left-column">
                             <!-- API Configuration -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="connections">
                                 <h3>API Configuration</h3>
 
                                 <!-- Spotify Settings -->
@@ -3686,7 +3694,7 @@
                             </div>
 
                             <!-- Server Connections -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="connections">
                                 <h3>Server Connections</h3>
 
                                 <!-- Server Toggle Buttons -->
@@ -3818,7 +3826,7 @@
                         <!-- Right Column - Download Settings, Database, Metadata, Logging -->
                         <div class="settings-right-column">
                             <!-- Download Settings -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="downloads">
                                 <h3>Download Settings</h3>
                                 <div class="setting-help-text">
                                     These are container-internal paths. Only modify them if you know what you're doing — incorrect values will break downloads.
@@ -4101,7 +4109,7 @@
                             </div>
 
                             <!-- Quality Profile Settings (Soulseek only) -->
-                            <div class="settings-group" id="quality-profile-section">
+                            <div class="settings-group" id="quality-profile-section" data-stg="downloads">
                                 <h3>🎵 Quality Profile</h3>
 
                                 <!-- Presets -->
@@ -4282,7 +4290,7 @@
                             </div>
 
                             <!-- File Organization Settings -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="library">
                                 <h3>📁 File Organization</h3>
 
                                 <div class="form-group">
@@ -4335,7 +4343,7 @@
                             </div>
 
                             <!-- Metadata Enhancement Settings -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="library">
                                 <h3>🎵 Post-Processing</h3>
 
                                 <div class="form-group">
@@ -4564,7 +4572,7 @@
                             </div>
 
                             <!-- Post-Download Conversion Settings -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="library">
                                 <h3>📀 Post-Download Conversion</h3>
 
                                 <div class="form-group">
@@ -4615,7 +4623,7 @@
                             </div>
 
                             <!-- Discovery Settings -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="advanced">
                                 <h3>🔍 Discovery Pool Settings</h3>
 
                                 <div class="form-group">
@@ -4653,7 +4661,7 @@
                         <!-- Third Column - Database, Metadata, Playlist Sync, Logging -->
                         <div class="settings-third-column">
                             <!-- UI Appearance -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="appearance">
                                 <h3>UI Appearance</h3>
                                 <div class="form-group">
                                     <label>Accent Color:</label>
@@ -4705,7 +4713,7 @@
                             </div>
 
                             <!-- Database Settings -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="advanced">
                                 <h3>Database Settings</h3>
 
                                 <div class="form-group">
@@ -4728,7 +4736,7 @@
 
 
                             <!-- Content Filter Settings -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="library">
                                 <h3>🔞 Content Filter</h3>
 
                                 <div class="form-group">
@@ -4745,7 +4753,7 @@
 
 
                             <!-- M3U Export Settings -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="library">
                                 <h3>📋 M3U Playlist Export</h3>
 
                                 <div class="form-group">
@@ -4760,7 +4768,7 @@
                             </div>
 
                             <!-- Playlist Sync Settings -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="library">
                                 <h3>Playlist Sync Settings</h3>
 
                                 <div class="form-group">
@@ -4772,7 +4780,7 @@
                             </div>
 
                             <!-- Logging Information (Read-only) -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="advanced">
                                 <h3>Logging Information</h3>
 
                                 <div class="form-group">
@@ -4787,7 +4795,7 @@
                             </div>
 
                             <!-- SoulSync API Keys -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="advanced">
                                 <h3>SoulSync API</h3>
                                 <div class="api-service-frame">
                                     <h4 class="service-title" style="color: #64ffda;">REST API Keys</h4>
@@ -4824,7 +4832,7 @@
                             </div>
 
                             <!-- Developer Mode -->
-                            <div class="settings-group">
+                            <div class="settings-group" data-stg="advanced">
                                 <h3>🔧 Developer Mode</h3>
                                 <div class="form-group">
                                     <label>Password:</label>
