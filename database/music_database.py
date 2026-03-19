@@ -8220,6 +8220,22 @@ class MusicDatabase:
             logger.error(f"Error querying sync history: {e}")
             return [], 0
 
+    def get_latest_sync_history_by_playlist(self, playlist_id):
+        """Return the most recent sync_history row for a given playlist_id."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM sync_history
+                WHERE playlist_id = ?
+                ORDER BY started_at DESC LIMIT 1
+            """, (playlist_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.debug(f"Error getting latest sync history by playlist: {e}")
+            return None
+
     def get_sync_history_entry(self, entry_id):
         """Return a single sync_history row with full tracks_json (for re-trigger)."""
         try:

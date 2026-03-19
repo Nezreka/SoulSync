@@ -757,32 +757,6 @@ def _register_automation_handlers():
             if extra.get('discovered') and extra.get('matched_data'):
                 current_discovered += 1
 
-        # Smart skip: only re-sync if something could have changed
-        # Skip when: same discovered count, same total, AND last sync already matched all discovered tracks
-        # Re-sync when: new tracks discovered, tracks added/removed, or last sync had unmatched tracks
-        #   (unmatched = discovered but not on server — wishlist may have downloaded them since)
-        sync_id_key = f"auto_mirror_{playlist_id}"
-        try:
-            sync_statuses = _load_sync_status_file()
-            last_status = sync_statuses.get(sync_id_key, {})
-            last_matched = last_status.get('matched_tracks', -1)
-            last_discovered = last_status.get('discovered_tracks', -1)
-            last_total = last_status.get('total_tracks', -1)
-
-            if (last_discovered == current_discovered and
-                last_total == len(tracks) and
-                last_matched >= current_discovered):
-                # All discovered tracks were already matched on server last time — nothing to do
-                _update_automation_progress(auto_id,
-                    log_line=f'All {current_discovered} tracks already synced — skipping',
-                    log_type='skip')
-                return {
-                    'status': 'skipped',
-                    'reason': f'All {current_discovered} tracks already synced',
-                }
-        except Exception:
-            pass  # If we can't read last status, just run the sync
-
         # Convert mirrored tracks to format expected by _run_sync_task
         # Use discovered metadata when available, skip undiscovered tracks
         tracks_json = []
@@ -813,11 +787,6 @@ def _register_automation_handlers():
                 # NOT discovered — skip to prevent garbage in wishlist
                 skipped_count += 1
 
-        _update_automation_progress(auto_id, progress=50,
-            phase=f'Syncing "{pl["name"]}"',
-            log_line=f'{len(tracks_json)} discovered, {skipped_count} skipped',
-            log_type='info' if tracks_json else 'skip')
-
         if not tracks_json:
             _update_automation_progress(auto_id,
                 log_line=f'No discovered tracks — {skipped_count} need discovery first', log_type='skip')
@@ -826,6 +795,37 @@ def _register_automation_handlers():
                 'reason': f'No discovered tracks to sync ({skipped_count} tracks need discovery first)',
                 'skipped_tracks': str(skipped_count),
             }
+
+        # Preflight: hash the track list and compare against last sync
+        # Skip if the exact same set of tracks was already synced and all matched
+        import hashlib
+        track_ids_str = ','.join(sorted(t.get('id', '') for t in tracks_json))
+        tracks_hash = hashlib.md5(track_ids_str.encode()).hexdigest()
+
+        sync_id_key = f"auto_mirror_{playlist_id}"
+        try:
+            sync_statuses = _load_sync_status_file()
+            last_status = sync_statuses.get(sync_id_key, {})
+            last_hash = last_status.get('tracks_hash', '')
+            last_matched = last_status.get('matched_tracks', -1)
+
+            if (last_hash == tracks_hash and
+                last_matched >= len(tracks_json)):
+                # Exact same tracks, all matched last time — nothing to do
+                _update_automation_progress(auto_id,
+                    log_line=f'All {len(tracks_json)} tracks unchanged since last sync — skipping',
+                    log_type='skip')
+                return {
+                    'status': 'skipped',
+                    'reason': f'All {len(tracks_json)} tracks unchanged since last sync',
+                }
+        except Exception:
+            pass  # If we can't read last status, just run the sync
+
+        _update_automation_progress(auto_id, progress=50,
+            phase=f'Syncing "{pl["name"]}"',
+            log_line=f'{len(tracks_json)} discovered, {skipped_count} skipped',
+            log_type='info')
 
         sync_id = f"auto_mirror_{playlist_id}"
         _update_automation_progress(auto_id, progress=90,
@@ -24401,7 +24401,9 @@ def _detect_sync_source(playlist_id):
 def _record_sync_history_start(batch_id, playlist_id, playlist_name, tracks,
                                 is_album_download, album_context, artist_context,
                                 playlist_folder_mode):
-    """Record a sync start to the database."""
+    """Record a sync start to the database.
+    If a previous sync history entry exists for the same playlist_id, update it
+    instead of creating a duplicate."""
     try:
         source = _detect_sync_source(playlist_id)
         if playlist_id == 'wishlist':
@@ -24427,6 +24429,33 @@ def _record_sync_history_start(batch_id, playlist_id, playlist_name, tracks,
                     thumb_url = imgs[0].get('url') if isinstance(imgs[0], dict) else imgs[0]
 
         db = MusicDatabase()
+
+        # Check for existing entry with same playlist_id — update instead of duplicating
+        existing = db.get_latest_sync_history_by_playlist(playlist_id)
+        if existing:
+            try:
+                conn = db._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE sync_history
+                    SET batch_id = ?, playlist_name = ?, source = ?, sync_type = ?,
+                        tracks_json = ?, artist_context = ?, album_context = ?,
+                        thumb_url = ?, total_tracks = ?, is_album_download = ?,
+                        playlist_folder_mode = ?, started_at = CURRENT_TIMESTAMP,
+                        completed_at = NULL, tracks_found = 0, tracks_downloaded = 0, tracks_failed = 0
+                    WHERE id = ?
+                """, (batch_id, playlist_name, source, sync_type,
+                      json.dumps(tracks, ensure_ascii=False),
+                      json.dumps(artist_context, ensure_ascii=False) if artist_context else None,
+                      json.dumps(album_context, ensure_ascii=False) if album_context else None,
+                      thumb_url, len(tracks), int(is_album_download), int(playlist_folder_mode),
+                      existing['id']))
+                conn.commit()
+                logger.info(f"Updated existing sync history entry {existing['id']} for '{playlist_name}'")
+                return
+            except Exception as e:
+                logger.warning(f"Failed to update existing sync history, creating new: {e}")
+
         db.add_sync_history_entry(
             batch_id=batch_id,
             playlist_id=playlist_id,
@@ -24676,8 +24705,8 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
             'snapshot_id': snapshot_id,
             'last_synced': now.isoformat()
         }
-        # Store match counts for smart-skip on scheduled syncs
-        for key in ('matched_tracks', 'total_tracks', 'discovered_tracks'):
+        # Store match counts and track hash for smart-skip on scheduled syncs
+        for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash'):
             if key in kwargs:
                 status[key] = kwargs[key]
         sync_statuses[playlist_id] = status
@@ -30003,12 +30032,16 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
         except Exception:
             pass
 
-        # Save sync status with match counts for smart-skip on next scheduled sync
+        # Save sync status with match counts and track hash for smart-skip on next scheduled sync
+        import hashlib as _hl
+        _track_ids_str = ','.join(sorted(t.get('id', '') for t in tracks_json))
+        _tracks_hash = _hl.md5(_track_ids_str.encode()).hexdigest()
         snapshot_id = getattr(playlist, 'snapshot_id', None)
         _update_and_save_sync_status(playlist_id, playlist_name, playlist.owner, snapshot_id,
             matched_tracks=getattr(result, 'matched_tracks', 0),
             total_tracks=getattr(result, 'total_tracks', 0),
-            discovered_tracks=len(tracks_json))
+            discovered_tracks=len(tracks_json),
+            tracks_hash=_tracks_hash)
 
     except Exception as e:
         print(f"❌ SYNC FAILED for {playlist_id}: {e}")
