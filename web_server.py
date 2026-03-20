@@ -17802,6 +17802,90 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔍 Multi-Source Search Tabs",
+                "description": "View search results from Spotify, iTunes, and Deezer side by side",
+                "features": [
+                    "• Enhanced search now fires parallel queries against all available metadata sources",
+                    "• Switchable tabs above results — click to view results from Spotify, Apple Music, or Deezer",
+                    "• Tabs load progressively — primary source shows instantly, alternates appear as they complete",
+                    "• Click an artist or album from any tab to browse that source's data temporarily",
+                    "• Downloads use the metadata from whichever source tab you're viewing",
+                    "• Similar artists always use your primary source — no accidental cross-source mixing"
+                ]
+            },
+            {
+                "title": "👥 Per-Profile Service Credentials",
+                "description": "Each profile can connect their own Spotify, Tidal, and media server library",
+                "features": [
+                    "• Non-admin profiles can enter their own Spotify credentials and authenticate their own account",
+                    "• Per-profile Tidal authentication — connect your own Tidal account through the shared app",
+                    "• Per-profile media server library selection — choose which Plex library or Jellyfin user playlists sync to",
+                    "• Tabbed personal settings modal: Music Services, Server, and Scrobbling tabs",
+                    "• Server tab auto-detects active server and shows library name dropdowns (not raw IDs)",
+                    "• All credentials encrypted. Admin users see zero change — fully backwards compatible"
+                ]
+            },
+            {
+                "title": "⚙️ Modern Settings Redesign",
+                "description": "Settings page rebuilt with tabbed single-column layout",
+                "features": [
+                    "• Horizontal tab bar: Connections, Downloads, Library, Appearance, Advanced",
+                    "• Single centered column replaces 3-column wall of cards",
+                    "• Clean row layout — label left, control right",
+                    "• Custom styled dropdowns with SVG arrows and hover states",
+                    "• Mobile responsive — rows stack, tab bar scrolls"
+                ]
+            },
+            {
+                "title": "🔄 Hybrid N-Source Download Priority",
+                "description": "Hybrid mode now supports all 5 download sources with drag-to-reorder priority",
+                "features": [
+                    "• Enable/disable any combination of Soulseek, YouTube, Tidal, Qobuz, and HiFi",
+                    "• Up/down arrows to reorder source priority — downloads try each enabled source in order",
+                    "• Source icons with toggle switches and priority numbers",
+                    "• Configurable download timeout and max peer queue length for Soulseek",
+                    "• Peer quality (upload speed, free slots, queue length) now factors into result ranking"
+                ]
+            },
+            {
+                "title": "🚀 Automation Hub Pipelines",
+                "description": "One-click deployment of multi-automation pipelines",
+                "features": [
+                    "• 11 pre-built pipelines: Release Radar, Discovery Weekly, Playlist Auto-Sync, Nightly Operations, and more",
+                    "• Each pipeline deploys 2-5 linked automations with signal chaining in one click",
+                    "• Visual pipeline cards with connected flow nodes and accent-colored design",
+                    "• Pipeline detail modal shows full WHEN/DO/THEN breakdown for each automation",
+                    "• Deploy prompts for notification config (Discord/Telegram/Pushbullet) when pipeline includes alerts"
+                ]
+            },
+            {
+                "title": "📂 Staging Folder Pre-Download Check",
+                "description": "Check your staging folder for existing files before downloading",
+                "features": [
+                    "• Before searching Soulseek/YouTube, checks the staging folder for a matching file",
+                    "• Tag-based matching (Mutagen) with filename parsing fallback",
+                    "• On match, copies the file to transfer and runs normal post-processing",
+                    "• Staging scan cached per batch — only scans once for the entire download"
+                ]
+            },
+            {
+                "title": "🛡️ Library Safety & Repair Fixes",
+                "description": "Critical fixes for library maintenance jobs and safety guards",
+                "features": [
+                    "• Mass orphan safety guard — 'witness me' confirmation required when >50% of files flagged as orphans",
+                    "• Tag-based orphan fallback — reads file metadata before marking as orphan to prevent false positives",
+                    "• Album Completeness expanded to support iTunes and Deezer (was Spotify-only)",
+                    "• Album Completeness min completion % filter — skip playlist imports, catch real failed downloads",
+                    "• Fix Track Number Repair returning 400 on fix (entity_id was NULL for file-based findings)",
+                    "• Fix Library Reorganize producing (_) in paths when year is empty",
+                    "• Fix Fix All ignoring Single/Album Dedup findings",
+                    "• Fix enrichment workers looping infinitely on tracks with NULL IDs",
+                    "• Fix Tidal token refresh hammering API when credentials removed",
+                    "• Fix YouTube playlist parsing capped at ~100 tracks",
+                    "• Allow re-sync from download_complete state with Rediscover button"
+                ]
+            },
+            {
                 "title": "🎵 Deezer Metadata Source",
                 "description": "Deezer added as a configurable free metadata fallback alongside iTunes/Apple Music",
                 "features": [
