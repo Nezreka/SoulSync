@@ -46,6 +46,7 @@ class OrphanFileDetectorJob(RepairJob):
         # of depth 1-3 (filename, album/filename, artist/album/filename) which
         # covers all realistic path-prefix mismatches.
         known_suffixes = set()
+        known_titles = set()  # (title_lower, artist_lower) for tag-based fallback
         conn = None
         try:
             conn = context.db._get_connection()
@@ -57,6 +58,18 @@ class OrphanFileDetectorJob(RepairJob):
                 for depth in range(1, min(4, len(parts) + 1)):
                     suffix = '/'.join(parts[-depth:]).lower()
                     known_suffixes.add(suffix)
+
+            # Build title+artist set for tag-based fallback matching
+            cursor.execute("""
+                SELECT t.title, ar.name FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                WHERE t.title IS NOT NULL AND t.title != ''
+            """)
+            for row in cursor.fetchall():
+                title = (row[0] or '').lower().strip()
+                artist = (row[1] or '').lower().strip()
+                if title:
+                    known_titles.add((title, artist))
         except Exception as e:
             logger.error("Error reading known file paths from DB: %s", e, exc_info=True)
             result.errors += 1
@@ -107,6 +120,20 @@ class OrphanFileDetectorJob(RepairJob):
                 if suffix in known_suffixes:
                     is_known = True
                     break
+
+            # Fallback: read file tags and check if title+artist exists in DB
+            # Catches path mismatches where the file is tracked but under a different path
+            if not is_known and known_titles:
+                try:
+                    from mutagen import File as MutagenFile
+                    audio = MutagenFile(fpath, easy=True)
+                    if audio:
+                        file_title = ((audio.get('title') or [None])[0] or '').lower().strip()
+                        file_artist = ((audio.get('artist') or [None])[0] or '').lower().strip()
+                        if file_title and (file_title, file_artist) in known_titles:
+                            is_known = True
+                except Exception:
+                    pass
 
             if not is_known:
                 orphan_files.append(fpath)
