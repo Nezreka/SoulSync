@@ -5319,6 +5319,7 @@ function moveHybridSource(srcId, direction) {
     _hybridSourceOrder = _hybridVisualOrder.filter(id => _hybridSourceEnabled[id] !== false);
     buildHybridSourceList();
     updateDownloadSourceUI();
+    debouncedAutoSaveSettings();
 }
 
 function toggleHybridSource(srcId, enabled) {
@@ -5329,6 +5330,7 @@ function toggleHybridSource(srcId, enabled) {
     }
     buildHybridSourceList();
     updateDownloadSourceUI();
+    debouncedAutoSaveSettings();
 }
 
 function _syncHybridOrderFromDOM() {
@@ -5359,6 +5361,8 @@ function getHybridOrder() {
 
 function loadHybridSourceOrder(settings) {
     const order = settings.download_source?.hybrid_order;
+    const sourceStatus = settings._source_status || {};
+
     if (order && Array.isArray(order) && order.length > 0) {
         _hybridSourceOrder = order;
         _hybridSourceEnabled = {};
@@ -5375,6 +5379,19 @@ function loadHybridSourceOrder(settings) {
             _hybridSourceEnabled[src.id] = src.id === primary || src.id === secondary;
         }
     }
+
+    // Auto-disable sources that aren't configured on the server
+    let changed = false;
+    for (const src of HYBRID_SOURCES) {
+        if (_hybridSourceEnabled[src.id] && sourceStatus[src.id] === false) {
+            _hybridSourceEnabled[src.id] = false;
+            changed = true;
+        }
+    }
+    if (changed) {
+        _hybridSourceOrder = _hybridSourceOrder.filter(id => _hybridSourceEnabled[id] !== false);
+    }
+
     _hybridVisualOrder = null; // Reset so buildHybridSourceList rebuilds it
     buildHybridSourceList();
 }

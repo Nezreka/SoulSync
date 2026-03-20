@@ -4530,7 +4530,13 @@ def handle_settings():
             return jsonify({"success": False, "error": str(e)}), 500
     else:  # GET request
         try:
-            return jsonify(config_manager.config_data)
+            data = dict(config_manager.config_data)
+            # Include which download sources are configured so the UI can auto-disable unconfigured ones
+            try:
+                data['_source_status'] = download_orchestrator.get_source_status()
+            except Exception:
+                pass
+            return jsonify(data)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
