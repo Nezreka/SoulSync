@@ -34001,10 +34001,13 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 16px;
     width: 90%;
-    max-width: 460px;
+    max-width: 500px;
+    max-height: 85vh;
     box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
     animation: ps-slide-up 0.25s ease;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 @keyframes ps-slide-up {
     from { opacity: 0; transform: translateY(20px) scale(0.97); }
@@ -34043,16 +34046,57 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
     color: rgba(255, 255, 255, 0.9);
 }
 .personal-settings-body {
-    padding: 20px 22px 24px;
+    padding: 0;
+    overflow-y: auto;
+    flex: 1;
 }
 
-/* LB Section within Personal Settings */
+/* Tab bar within personal settings */
+.ps-tabbar {
+    display: flex;
+    gap: 2px;
+    padding: 12px 22px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(0, 0, 0, 0.15);
+}
+.ps-tab {
+    padding: 8px 16px 10px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 0.82em;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+.ps-tab:hover {
+    color: rgba(255, 255, 255, 0.7);
+}
+.ps-tab.active {
+    color: #fff;
+    border-bottom-color: var(--accent-color, #1db954);
+    font-weight: 600;
+}
+.ps-tab-content {
+    display: none;
+    padding: 18px 22px 22px;
+}
+.ps-tab-content.active {
+    display: block;
+}
+
+/* Section cards within Personal Settings */
 .ps-section {
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.05);
     border-radius: 12px;
     padding: 16px 18px;
+    margin-bottom: 12px;
 }
+.ps-section:last-child { margin-bottom: 0; }
 .ps-section-header {
     display: flex;
     align-items: center;
