@@ -3673,19 +3673,14 @@
                                         </select>
                                     </div>
                                     <div class="callback-info">
-                                        <div class="callback-help">When Spotify is not connected, this source provides artist, album, and track metadata. Both are free and require no API key.</div>
+                                        <div class="callback-help">When Spotify is not connected, this source provides artist, album, and track metadata. Hydrabase requires a connection configured above.</div>
                                     </div>
                                 </div>
 
                                 <!-- Hydrabase P2P Metadata -->
                                 <div class="api-service-frame" data-stg="connections">
                                     <h4 class="service-title" style="color: #00b4d8;">Hydrabase</h4>
-                                    <div class="form-group" style="margin-bottom: 8px;">
-                                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 0;">
-                                            <input type="checkbox" id="hydrabase-enabled" style="width: 16px; height: 16px;">
-                                            <span>Enable Hydrabase as metadata source</span>
-                                        </label>
-                                    </div>
+                                    <input type="hidden" id="hydrabase-enabled" value="false">
                                     <div class="form-group">
                                         <label>WebSocket URL:</label>
                                         <input type="text" id="hydrabase-url" placeholder="ws://localhost:4545">

@@ -31,6 +31,19 @@ def _create_fallback_client():
     if source == 'deezer':
         from core.deezer_client import DeezerClient
         return DeezerClient()
+    if source == 'hydrabase':
+        try:
+            from core.hydrabase_client import HydrabaseClient
+            # Hydrabase client is managed globally — try to import the running instance
+            import importlib
+            ws_module = importlib.import_module('web_server')
+            client = getattr(ws_module, 'hydrabase_client', None)
+            if client and client.is_connected():
+                return client
+        except Exception:
+            pass
+        # Hydrabase not available — fall back to iTunes
+        return iTunesClient()
     return iTunesClient()
 
 

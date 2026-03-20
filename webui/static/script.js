@@ -5469,10 +5469,30 @@ async function loadSettingsData() {
 
         // Populate Hydrabase settings
         const hbConfig = settings.hydrabase || {};
-        document.getElementById('hydrabase-enabled').checked = hbConfig.enabled || false;
         document.getElementById('hydrabase-url').value = hbConfig.url || '';
         document.getElementById('hydrabase-api-key').value = hbConfig.api_key || '';
         document.getElementById('hydrabase-auto-connect').checked = hbConfig.auto_connect || false;
+        // Check live connection status + add Hydrabase to fallback dropdown if connected
+        fetch('/api/hydrabase/status').then(r => r.json()).then(s => {
+            const btn = document.getElementById('hydrabase-connect-btn');
+            const statusEl = document.getElementById('hydrabase-settings-status');
+            if (s.connected) {
+                if (btn) btn.textContent = 'Disconnect';
+                if (statusEl) { statusEl.textContent = 'Connected'; statusEl.style.color = '#4caf50'; }
+                // Add Hydrabase to fallback source dropdown
+                const fbSelect = document.getElementById('metadata-fallback-source');
+                if (fbSelect && !fbSelect.querySelector('option[value="hydrabase"]')) {
+                    const opt = document.createElement('option');
+                    opt.value = 'hydrabase';
+                    opt.textContent = 'Hydrabase (P2P)';
+                    fbSelect.appendChild(opt);
+                }
+                // Restore selection if it was hydrabase
+                if ((settings.metadata?.fallback_source) === 'hydrabase') {
+                    fbSelect.value = 'hydrabase';
+                }
+            }
+        }).catch(() => {});
 
         // Populate Download settings (right column)
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
@@ -6107,7 +6127,16 @@ async function toggleHydrabaseFromSettings() {
             // Disconnect
             await fetch('/api/hydrabase/disconnect', { method: 'POST' });
             if (btn) btn.textContent = 'Connect';
-            if (statusEl) statusEl.textContent = 'Disconnected';
+            if (statusEl) { statusEl.textContent = 'Disconnected'; statusEl.style.color = 'rgba(255,255,255,0.4)'; }
+            // Remove from fallback dropdown + reset to iTunes if was selected
+            const fbSel2 = document.getElementById('metadata-fallback-source');
+            if (fbSel2) {
+                const hbOpt = fbSel2.querySelector('option[value="hydrabase"]');
+                if (hbOpt) {
+                    if (fbSel2.value === 'hydrabase') fbSel2.value = 'itunes';
+                    hbOpt.remove();
+                }
+            }
             showToast('Hydrabase disconnected', 'info');
         } else {
             // Connect
@@ -6119,7 +6148,15 @@ async function toggleHydrabaseFromSettings() {
             const data = await res.json();
             if (data.success) {
                 if (btn) btn.textContent = 'Disconnect';
-                if (statusEl) statusEl.textContent = 'Connected';
+                if (statusEl) { statusEl.textContent = 'Connected'; statusEl.style.color = '#4caf50'; }
+                // Add to fallback dropdown
+                const fbSel = document.getElementById('metadata-fallback-source');
+                if (fbSel && !fbSel.querySelector('option[value="hydrabase"]')) {
+                    const opt = document.createElement('option');
+                    opt.value = 'hydrabase';
+                    opt.textContent = 'Hydrabase (P2P)';
+                    fbSel.appendChild(opt);
+                }
                 showToast('Hydrabase connected', 'success');
             } else {
                 if (statusEl) statusEl.textContent = data.error || 'Connection failed';
@@ -6440,7 +6477,6 @@ async function saveSettings(quiet = false) {
             fallback_source: document.getElementById('metadata-fallback-source').value || 'itunes'
         },
         hydrabase: {
-            enabled: document.getElementById('hydrabase-enabled').checked,
             url: document.getElementById('hydrabase-url').value,
             api_key: document.getElementById('hydrabase-api-key').value,
             auto_connect: document.getElementById('hydrabase-auto-connect').checked
