@@ -323,9 +323,9 @@ class MusicBrainzWorker:
             # Count unattempted items
             cursor.execute("""
                 SELECT
-                    (SELECT COUNT(*) FROM artists WHERE musicbrainz_match_status IS NULL) +
-                    (SELECT COUNT(*) FROM albums WHERE musicbrainz_match_status IS NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE musicbrainz_match_status IS NULL)
+                    (SELECT COUNT(*) FROM artists WHERE musicbrainz_match_status IS NULL AND id IS NOT NULL) +
+                    (SELECT COUNT(*) FROM albums WHERE musicbrainz_match_status IS NULL AND id IS NOT NULL) +
+                    (SELECT COUNT(*) FROM tracks WHERE musicbrainz_match_status IS NULL AND id IS NOT NULL)
                 AS pending
             """)
 

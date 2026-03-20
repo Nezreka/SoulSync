@@ -572,9 +572,9 @@ class LastFMWorker:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
-                    (SELECT COUNT(*) FROM artists WHERE lastfm_match_status IS NULL) +
-                    (SELECT COUNT(*) FROM albums WHERE lastfm_match_status IS NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE lastfm_match_status IS NULL)
+                    (SELECT COUNT(*) FROM artists WHERE lastfm_match_status IS NULL AND id IS NOT NULL) +
+                    (SELECT COUNT(*) FROM albums WHERE lastfm_match_status IS NULL AND id IS NOT NULL) +
+                    (SELECT COUNT(*) FROM tracks WHERE lastfm_match_status IS NULL AND id IS NOT NULL)
                 AS pending
             """)
             row = cursor.fetchone()

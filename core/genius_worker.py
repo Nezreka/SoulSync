@@ -464,8 +464,8 @@ class GeniusWorker:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
-                    (SELECT COUNT(*) FROM artists WHERE genius_match_status IS NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE genius_match_status IS NULL)
+                    (SELECT COUNT(*) FROM artists WHERE genius_match_status IS NULL AND id IS NOT NULL) +
+                    (SELECT COUNT(*) FROM tracks WHERE genius_match_status IS NULL AND id IS NOT NULL)
                 AS pending
             """)
             row = cursor.fetchone()
