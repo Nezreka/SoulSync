@@ -1331,7 +1331,7 @@ class RepairWorker:
             return {'success': False, 'error': 'Missing album_id or missing_tracks in finding details'}
 
         # Phase 1: Gather context from existing album tracks
-        existing_tracks = self.db.get_tracks_by_album(int(album_id))
+        existing_tracks = self.db.get_tracks_by_album(album_id)
         if not existing_tracks:
             return {'success': False, 'error': 'No existing tracks found for this album — cannot determine album folder or quality'}
 
@@ -1392,7 +1392,7 @@ class RepairWorker:
             for cand in candidates:
                 if cand.id in existing_track_ids:
                     continue
-                if cand.album_id == int(album_id):
+                if str(cand.album_id) == str(album_id):
                     continue
 
                 # Fuzzy title match
