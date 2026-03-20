@@ -43896,6 +43896,7 @@ tr.tag-diff-same {
 #settings-page .detect-button,
 #settings-page .auth-button {
     padding: 8px 18px;
+    min-width: fit-content;
     border-radius: 8px;
     font-size: 0.84em;
     font-family: inherit;
