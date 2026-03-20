@@ -30465,7 +30465,7 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
         sync_service._original_tracks_map = original_tracks_map
 
         # Run the sync (this is a blocking call within this thread)
-        result = run_async(sync_service.sync_playlist(playlist, download_missing=False))
+        result = run_async(sync_service.sync_playlist(playlist, download_missing=False, profile_id=get_current_profile_id()))
 
         # Clear progress callback immediately to prevent race condition where a
         # late-firing progress callback overwrites the "finished" state below

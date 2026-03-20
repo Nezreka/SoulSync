@@ -54,8 +54,14 @@ class PlaylistSyncService:
         self._cancelled = False
         self.matching_engine = MusicMatchingEngine()
     
-    def _get_active_media_client(self):
-        """Get the active media client based on config settings"""
+    def _get_active_media_client(self, profile_id=None):
+        """Get the active media client based on config settings.
+
+        If profile_id is provided (or set on the instance via sync_playlist),
+        and that profile has a custom library selection, sets the library on
+        the client before returning.
+        """
+        profile_id = profile_id or getattr(self, '_active_profile_id', None)
         try:
             from config.settings import config_manager
             active_server = config_manager.get_active_media_server()
@@ -64,6 +70,9 @@ class PlaylistSyncService:
                 if not self.jellyfin_client:
                     logger.error("Jellyfin client not provided to sync service")
                     return None, "jellyfin"
+                # Apply per-profile Jellyfin library if set
+                if profile_id:
+                    self._apply_profile_library(profile_id, 'jellyfin', self.jellyfin_client)
                 return self.jellyfin_client, "jellyfin"
             elif active_server == "navidrome":
                 if not self.navidrome_client:
@@ -71,11 +80,38 @@ class PlaylistSyncService:
                     return None, "navidrome"
                 return self.navidrome_client, "navidrome"
             else:  # Default to Plex
+                # Apply per-profile Plex library if set
+                if profile_id:
+                    self._apply_profile_library(profile_id, 'plex', self.plex_client)
                 return self.plex_client, "plex"
         except Exception as e:
             logger.error(f"Error determining active media server: {e}")
             return self.plex_client, "plex"  # Fallback to Plex
     
+    def _apply_profile_library(self, profile_id, server_type, client):
+        """Apply per-profile library selection to a media client if configured."""
+        try:
+            from database.music_database import MusicDatabase
+            db = MusicDatabase()
+            libs = db.get_profile_server_library(profile_id)
+            if not libs:
+                return
+
+            if server_type == 'plex' and libs.get('plex_library_id'):
+                lib_name = libs['plex_library_id']
+                if hasattr(client, 'set_music_library_by_name'):
+                    client.set_music_library_by_name(lib_name)
+                    logger.info(f"Per-profile: set Plex library to '{lib_name}' for profile {profile_id}")
+            elif server_type == 'jellyfin':
+                if libs.get('jellyfin_user_id') and hasattr(client, 'user_id'):
+                    client.user_id = libs['jellyfin_user_id']
+                    logger.info(f"Per-profile: set Jellyfin user to '{libs['jellyfin_user_id']}' for profile {profile_id}")
+                if libs.get('jellyfin_library_id') and hasattr(client, 'music_library_id'):
+                    client.music_library_id = libs['jellyfin_library_id']
+                    logger.info(f"Per-profile: set Jellyfin library to '{libs['jellyfin_library_id']}' for profile {profile_id}")
+        except Exception as e:
+            logger.debug(f"Error applying profile library for profile {profile_id}: {e}")
+
     @property
     def is_syncing(self):
         """Check if any playlist is currently syncing"""
@@ -117,7 +153,8 @@ class PlaylistSyncService:
                 failed_tracks=failed_tracks
             ))
     
-    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False) -> SyncResult:
+    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None) -> SyncResult:
+        self._active_profile_id = profile_id
         # Check if THIS specific playlist is already syncing
         if playlist.name in self.syncing_playlists:
             logger.warning(f"Sync already in progress for playlist: {playlist.name}")
