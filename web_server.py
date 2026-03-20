@@ -15364,7 +15364,7 @@ def _embed_source_ids(audio_file, metadata: dict):
                         print(f"🎵 Deezer track matched: {dz_track_id}")
 
                         # Get full track details for BPM and ISRC
-                        dz_details = dz_client.get_track(dz_track_id)
+                        dz_details = dz_client.get_track_details(dz_track_id)
                         if dz_details:
                             bpm_val = dz_details.get('bpm')
                             if bpm_val and bpm_val > 0:

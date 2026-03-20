@@ -143,6 +143,18 @@ class GeniusWorker:
                     continue
 
                 self.current_item = item
+                # Guard: skip items with None/NULL IDs to prevent infinite enrichment loops
+                item_id = item.get('id') or item.get('artist_id') or item.get('album_id')
+                if item_id is None:
+                    logger.warning(f"Skipping {item.get('type', 'unknown')} with NULL id: {item.get('name', '?')} — marking as error")
+                    try:
+                        itype = item.get('type', '')
+                        table = 'artists' if 'artist' in itype else ('albums' if 'album' in itype else 'tracks')
+                        # Can't mark status without an ID — just skip
+                    except Exception:
+                        pass
+                    continue
+
                 self._process_item(item)
 
                 # Genius rate limiting is conservative (500ms per call) + lyrics scraping
@@ -167,7 +179,7 @@ class GeniusWorker:
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE genius_match_status IS NULL
+                WHERE genius_match_status IS NULL AND id IS NOT NULL
                 ORDER BY id ASC
                 LIMIT 1
             """)
@@ -180,7 +192,7 @@ class GeniusWorker:
                 SELECT t.id, t.title, ar.name AS artist_name
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.genius_match_status IS NULL
+                WHERE t.genius_match_status IS NULL AND t.id IS NOT NULL
                 ORDER BY t.id ASC
                 LIMIT 1
             """)

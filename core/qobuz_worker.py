@@ -151,6 +151,18 @@ class QobuzWorker:
                     continue
 
                 self.current_item = item
+                # Guard: skip items with None/NULL IDs to prevent infinite enrichment loops
+                item_id = item.get('id') or item.get('artist_id') or item.get('album_id')
+                if item_id is None:
+                    logger.warning(f"Skipping {item.get('type', 'unknown')} with NULL id: {item.get('name', '?')} — marking as error")
+                    try:
+                        itype = item.get('type', '')
+                        table = 'artists' if 'artist' in itype else ('albums' if 'album' in itype else 'tracks')
+                        # Can't mark status without an ID — just skip
+                    except Exception:
+                        pass
+                    continue
+
 
                 self._process_item(item)
 
@@ -174,7 +186,7 @@ class QobuzWorker:
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE qobuz_match_status IS NULL
+                WHERE qobuz_match_status IS NULL AND id IS NOT NULL
                 ORDER BY id ASC
                 LIMIT 1
             """)
@@ -187,7 +199,7 @@ class QobuzWorker:
                 SELECT a.id, a.title, ar.name AS artist_name, ar.qobuz_id AS artist_qobuz_id
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.qobuz_match_status IS NULL
+                WHERE a.qobuz_match_status IS NULL AND a.id IS NOT NULL
                 ORDER BY a.id ASC
                 LIMIT 1
             """)
@@ -200,7 +212,7 @@ class QobuzWorker:
                 SELECT t.id, t.title, ar.name AS artist_name, ar.qobuz_id AS artist_qobuz_id
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.qobuz_match_status IS NULL
+                WHERE t.qobuz_match_status IS NULL AND t.id IS NOT NULL
                 ORDER BY t.id ASC
                 LIMIT 1
             """)
