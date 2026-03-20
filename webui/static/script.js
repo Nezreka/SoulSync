@@ -1243,9 +1243,28 @@ async function openPersonalSettings() {
     body.innerHTML = '<div style="text-align:center;padding:20px;color:rgba(255,255,255,0.4);">Loading...</div>';
 
     try {
-        const res = await fetch('/api/profiles/me/listenbrainz');
-        const data = await res.json();
-        renderPersonalSettingsLB(data);
+        // Load all per-profile service data in parallel
+        const [lbRes, spotifyRes] = await Promise.all([
+            fetch('/api/profiles/me/listenbrainz'),
+            fetch('/api/profiles/me/spotify'),
+        ]);
+        const lbData = await lbRes.json();
+        const spotifyData = await spotifyRes.json();
+
+        // Build sections
+        body.innerHTML = '';
+        // Spotify + server library per-profile only shown for non-admin profiles
+        if (currentProfile && !currentProfile.is_admin) {
+            renderPersonalSettingsSpotify(body, spotifyData);
+            try {
+                const libRes = await fetch('/api/profiles/me/server-library');
+                const libData = await libRes.json();
+                renderPersonalSettingsServerLibrary(body, libData);
+            } catch (e) {
+                console.debug('Failed to load server library settings:', e);
+            }
+        }
+        renderPersonalSettingsLB(lbData);
     } catch (e) {
         body.innerHTML = '<div style="color:#ef4444;padding:16px;">Failed to load settings</div>';
     }
@@ -1254,6 +1273,215 @@ async function openPersonalSettings() {
 function closePersonalSettings() {
     const overlay = document.getElementById('personal-settings-overlay');
     if (overlay) overlay.style.display = 'none';
+}
+
+function renderPersonalSettingsSpotify(body, data) {
+    const hasCreds = data.has_credentials;
+    const clientId = data.client_id || '';
+
+    let contentHtml;
+    if (hasCreds) {
+        contentHtml = `
+            <div class="ps-connected-info">
+                <div class="ps-connected-icon">🟢</div>
+                <div class="ps-connected-details">
+                    <div class="ps-connected-username">Credentials configured</div>
+                    <div class="ps-connected-server">Client ID: ${escapeHtml(clientId.substring(0, 8))}...</div>
+                    <div class="ps-connected-source">Personal Spotify app</div>
+                </div>
+            </div>
+            <div class="ps-actions">
+                <button class="ps-btn ps-btn-primary" onclick="authenticatePersonalSpotify()">🔐 Authenticate</button>
+                <button class="ps-btn ps-btn-danger" onclick="disconnectPersonalSpotify()">Remove</button>
+            </div>
+        `;
+    } else {
+        contentHtml = `
+            <div class="ps-form-group">
+                <label>Client ID</label>
+                <input type="text" id="ps-spotify-client-id" placeholder="Your Spotify Client ID">
+            </div>
+            <div class="ps-form-group">
+                <label>Client Secret</label>
+                <input type="password" id="ps-spotify-client-secret" placeholder="Your Spotify Client Secret">
+            </div>
+            <div class="ps-form-group">
+                <label>Redirect URI <span style="font-weight:400;color:rgba(255,255,255,0.3)">(optional)</span></label>
+                <input type="text" id="ps-spotify-redirect-uri" placeholder="http://127.0.0.1:8888/callback">
+                <div class="ps-help-text">
+                    Create an app at <a href="https://developer.spotify.com/dashboard" target="_blank">developer.spotify.com</a> and add the redirect URI
+                </div>
+            </div>
+            <div id="ps-spotify-result"></div>
+            <div class="ps-actions">
+                <button class="ps-btn ps-btn-primary" onclick="savePersonalSpotify()">Save Credentials</button>
+            </div>
+        `;
+    }
+
+    const section = document.createElement('div');
+    section.id = 'ps-spotify-section';
+    section.innerHTML = `
+        <div class="ps-section">
+            <div class="ps-section-header">
+                <h4 class="ps-section-title">Spotify</h4>
+                <span class="ps-connection-badge ${hasCreds ? 'connected' : 'disconnected'}">
+                    <span class="ps-connection-dot"></span>
+                    ${hasCreds ? 'Configured' : 'Not configured'}
+                </span>
+            </div>
+            <div class="ps-help-text" style="margin-bottom:12px;">
+                Connect your own Spotify account to see your playlists instead of the admin's.
+            </div>
+            ${contentHtml}
+        </div>
+    `;
+
+    const existing = document.getElementById('ps-spotify-section');
+    if (existing) existing.replaceWith(section);
+    else body.appendChild(section);
+}
+
+async function savePersonalSpotify() {
+    const clientId = document.getElementById('ps-spotify-client-id')?.value?.trim();
+    const clientSecret = document.getElementById('ps-spotify-client-secret')?.value?.trim();
+    const redirectUri = document.getElementById('ps-spotify-redirect-uri')?.value?.trim();
+    const resultEl = document.getElementById('ps-spotify-result');
+
+    if (!clientId || !clientSecret) {
+        if (resultEl) resultEl.innerHTML = '<div style="color:#ef4444;font-size:12px;margin-top:8px;">Client ID and Secret are required</div>';
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/profiles/me/spotify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Spotify credentials saved', 'success');
+            openPersonalSettings(); // Reload to show connected state
+        } else {
+            if (resultEl) resultEl.innerHTML = `<div style="color:#ef4444;font-size:12px;margin-top:8px;">${data.error || 'Failed to save'}</div>`;
+        }
+    } catch (e) {
+        if (resultEl) resultEl.innerHTML = '<div style="color:#ef4444;font-size:12px;margin-top:8px;">Network error</div>';
+    }
+}
+
+async function authenticatePersonalSpotify() {
+    // Trigger OAuth flow with profile_id in state so callback knows which profile
+    window.open('/auth/spotify?profile_id=' + (currentProfile?.id || ''), '_blank');
+}
+
+function renderPersonalSettingsServerLibrary(body, data) {
+    const plexLib = data.plex_library_id || '';
+    const jellyfinUser = data.jellyfin_user_id || '';
+    const jellyfinLib = data.jellyfin_library_id || '';
+    const navidromeLib = data.navidrome_library_id || '';
+    const hasAny = plexLib || jellyfinUser || jellyfinLib || navidromeLib;
+
+    const section = document.createElement('div');
+    section.id = 'ps-server-library-section';
+    section.innerHTML = `
+        <div class="ps-section">
+            <div class="ps-section-header">
+                <h4 class="ps-section-title">Media Server Library</h4>
+                <span class="ps-connection-badge ${hasAny ? 'connected' : 'disconnected'}">
+                    <span class="ps-connection-dot"></span>
+                    ${hasAny ? 'Customized' : 'Using default'}
+                </span>
+            </div>
+            <div class="ps-help-text" style="margin-bottom:12px;">
+                Choose which library playlists sync to. Leave empty to use the admin's default.
+            </div>
+            <div class="ps-form-group">
+                <label>Plex Library ID</label>
+                <input type="text" id="ps-plex-library-id" value="${escapeHtml(plexLib)}" placeholder="Leave empty for default">
+            </div>
+            <div class="ps-form-group">
+                <label>Jellyfin User ID</label>
+                <input type="text" id="ps-jellyfin-user-id" value="${escapeHtml(jellyfinUser)}" placeholder="Leave empty for default">
+            </div>
+            <div class="ps-form-group">
+                <label>Jellyfin Library ID</label>
+                <input type="text" id="ps-jellyfin-library-id" value="${escapeHtml(jellyfinLib)}" placeholder="Leave empty for default">
+            </div>
+            <div class="ps-form-group">
+                <label>Navidrome Library ID</label>
+                <input type="text" id="ps-navidrome-library-id" value="${escapeHtml(navidromeLib)}" placeholder="Leave empty for default">
+            </div>
+            <div id="ps-server-result"></div>
+            <div class="ps-actions">
+                <button class="ps-btn ps-btn-primary" onclick="savePersonalServerLibrary()">Save</button>
+                ${hasAny ? '<button class="ps-btn ps-btn-danger" onclick="clearPersonalServerLibrary()">Reset to Default</button>' : ''}
+            </div>
+        </div>
+    `;
+
+    const existing = document.getElementById('ps-server-library-section');
+    if (existing) existing.replaceWith(section);
+    else body.appendChild(section);
+}
+
+async function savePersonalServerLibrary() {
+    const resultEl = document.getElementById('ps-server-result');
+    try {
+        // Save each server type that has a value
+        const plex = document.getElementById('ps-plex-library-id')?.value?.trim();
+        const jellyfinUser = document.getElementById('ps-jellyfin-user-id')?.value?.trim();
+        const jellyfinLib = document.getElementById('ps-jellyfin-library-id')?.value?.trim();
+        const navidrome = document.getElementById('ps-navidrome-library-id')?.value?.trim();
+
+        const saves = [];
+        if (plex !== undefined) saves.push(fetch('/api/profiles/me/server-library', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ server_type: 'plex', library_id: plex || null })
+        }));
+        if (jellyfinUser !== undefined || jellyfinLib !== undefined) saves.push(fetch('/api/profiles/me/server-library', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ server_type: 'jellyfin', user_id: jellyfinUser || null, library_id: jellyfinLib || null })
+        }));
+        if (navidrome !== undefined) saves.push(fetch('/api/profiles/me/server-library', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ server_type: 'navidrome', library_id: navidrome || null })
+        }));
+
+        await Promise.all(saves);
+        showToast('Server library settings saved', 'success');
+        openPersonalSettings();
+    } catch (e) {
+        if (resultEl) resultEl.innerHTML = '<div style="color:#ef4444;font-size:12px;margin-top:8px;">Failed to save</div>';
+    }
+}
+
+async function clearPersonalServerLibrary() {
+    try {
+        await Promise.all([
+            fetch('/api/profiles/me/server-library', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ server_type: 'plex', library_id: null }) }),
+            fetch('/api/profiles/me/server-library', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ server_type: 'jellyfin', user_id: null, library_id: null }) }),
+            fetch('/api/profiles/me/server-library', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ server_type: 'navidrome', library_id: null }) }),
+        ]);
+        showToast('Server library settings reset to default', 'info');
+        openPersonalSettings();
+    } catch (e) {
+        showToast('Error resetting settings', 'error');
+    }
+}
+
+async function disconnectPersonalSpotify() {
+    try {
+        const res = await fetch('/api/profiles/me/spotify', { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Spotify credentials removed — using shared config', 'info');
+            openPersonalSettings(); // Reload
+        }
+    } catch (e) {
+        showToast('Error removing credentials', 'error');
+    }
 }
 
 function renderPersonalSettingsLB(data) {
@@ -1321,7 +1549,9 @@ function renderPersonalSettingsLB(data) {
         contentHtml = tokenFormHtml;
     }
 
-    body.innerHTML = `
+    const section = document.createElement('div');
+    section.id = 'ps-listenbrainz-section';
+    section.innerHTML = `
         <div class="ps-section">
             <div class="ps-section-header">
                 <h4 class="ps-section-title">ListenBrainz</h4>
@@ -1333,6 +1563,10 @@ function renderPersonalSettingsLB(data) {
             ${contentHtml}
         </div>
     `;
+    // Replace existing or append
+    const existing = document.getElementById('ps-listenbrainz-section');
+    if (existing) existing.replaceWith(section);
+    else body.appendChild(section);
 }
 
 async function testPersonalListenBrainz() {
