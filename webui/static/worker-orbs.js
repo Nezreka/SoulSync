@@ -21,7 +21,7 @@
         { container: '.tidal-enrich-button-container',     color: [180, 180, 255] },
         { container: '.qobuz-enrich-button-container',     color: [1, 112, 239]  },
         { container: '.hydrabase-button-container',        color: [200, 200, 200] },
-        { container: '.repair-button-container',           color: [180, 130, 255] },
+        { container: '.repair-button-container',           color: [180, 130, 255], rainbow: true },
     ];
 
     const ORB_RADIUS = 7;
@@ -66,6 +66,7 @@
             orbs.push({
                 el,
                 color: def.color,
+                rainbow: def.rainbow || false,
                 index: i,
                 x: 0, y: 0,
                 vx: (Math.random() - 0.5) * 0.6,
@@ -116,9 +117,34 @@
         canvas.height = canvas.clientHeight;
     }
 
+    // ── Rainbow color cycle (matches repair button's CSS rainbow) ──
+
+    const RAINBOW = [
+        [255, 0, 0],
+        [255, 136, 0],
+        [255, 255, 0],
+        [0, 255, 0],
+        [0, 136, 255],
+        [136, 0, 255],
+    ];
+
+    function getRainbowColor(time) {
+        const t = ((time * 0.33) % 1 + 1) % 1; // ~3s cycle to match CSS 3s
+        const idx = t * RAINBOW.length;
+        const i = Math.floor(idx);
+        const f = idx - i;
+        const a = RAINBOW[i % RAINBOW.length];
+        const b = RAINBOW[(i + 1) % RAINBOW.length];
+        return [
+            Math.round(a[0] + (b[0] - a[0]) * f),
+            Math.round(a[1] + (b[1] - a[1]) * f),
+            Math.round(a[2] + (b[2] - a[2]) * f),
+        ];
+    }
+
     // ── Spark system ──
 
-    function emitSpark(orb) {
+    function emitSpark(orb, colorOverride) {
         if (sparks.length >= MAX_SPARKS) return;
         const angle = Math.random() * Math.PI * 2;
         const speed = 0.4 + Math.random() * 0.8;
@@ -129,7 +155,7 @@
             vy: Math.sin(angle) * speed,
             life: 1.0,           // 1.0 → 0.0
             decay: 0.012 + Math.random() * 0.012,
-            color: orb.color,
+            color: colorOverride || orb.color,
             radius: 1.5 + Math.random() * 1.5,
         });
     }
@@ -347,7 +373,7 @@
         // Emit sparks from active orbs
         for (const orb of visibleOrbs) {
             if (orb.active && Math.random() < SPARK_RATE) {
-                emitSpark(orb);
+                emitSpark(orb, orb.rainbow ? getRainbowColor(time) : null);
             }
         }
         updateSparks();
@@ -447,7 +473,7 @@
 
     function drawOrbs(ctx, visible, time) {
         for (const orb of visible) {
-            const [r, g, b] = orb.color;
+            const [r, g, b] = orb.rainbow ? getRainbowColor(time) : orb.color;
             const pulse = 0.5 + 0.5 * Math.sin(time * 2 + orb.phase);
 
             // Active orbs are larger and breathe — size oscillates
@@ -532,8 +558,8 @@
                     const baseAlpha = activePair ? 0.3 : (anyActive ? 0.2 : 0.15);
                     const alpha = (1 - dist / CONNECTION_DIST) * baseAlpha;
 
-                    const [r1, g1, b1] = a.color;
-                    const [r2, g2, b2] = b.color;
+                    const [r1, g1, b1] = a.rainbow ? getRainbowColor(time) : a.color;
+                    const [r2, g2, b2] = b.rainbow ? getRainbowColor(time) : b.color;
                     const mr = (r1 + r2) >> 1;
                     const mg = (g1 + g2) >> 1;
                     const mb = (b1 + b2) >> 1;
