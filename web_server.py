@@ -22448,8 +22448,26 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                     print(f"🔎 [Album Pre-flight] Searching Soulseek for complete album: '{artist_name} - {album_name}'")
 
                     slsk = soulseek_client.soulseek if hasattr(soulseek_client, 'soulseek') else soulseek_client
-                    album_query = f"{artist_name} {album_name}"
-                    track_results, album_results = run_async(slsk.search(album_query, timeout=30))
+
+                    # Try multiple query variations (banned keywords in artist/album name can return 0 results)
+                    album_queries = [f"{artist_name} {album_name}"]
+                    # Clean artist name (remove feat., parentheticals)
+                    clean_artist = re.sub(r'\s*\(.*?\)', '', artist_name).strip()
+                    clean_artist = re.sub(r'\s*(feat\.?|ft\.?|featuring)\s+.*$', '', clean_artist, flags=re.IGNORECASE).strip()
+                    if clean_artist != artist_name:
+                        album_queries.append(f"{clean_artist} {album_name}")
+                    # Album name only (some users file by album)
+                    album_queries.append(album_name)
+
+                    album_results = []
+                    track_results = []
+                    for aq in album_queries:
+                        _sr.info(f"[Album Pre-flight] Trying query: '{aq}'")
+                        track_results, album_results = run_async(slsk.search(aq, timeout=30))
+                        if album_results:
+                            _sr.info(f"[Album Pre-flight] Found {len(album_results)} album results with query: '{aq}'")
+                            break
+                        _sr.info(f"[Album Pre-flight] No album results for query: '{aq}'")
 
                     if album_results:
                         # Filter by quality preference
