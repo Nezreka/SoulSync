@@ -1442,18 +1442,35 @@ class RepairWorker:
             # Phase 4: Wishlist fallback
             if spotify_track_id:
                 try:
+                    # Build album images from finding thumb URL
+                    album_images = []
+                    album_thumb = details.get('album_thumb_url', '')
+                    if album_thumb:
+                        album_images = [{'url': album_thumb, 'height': 300, 'width': 300}]
+
                     wishlist_data = {
                         'id': spotify_track_id,
                         'name': track_name,
                         'artists': [{'name': a} for a in track_artists] if track_artists else [{'name': artist_name}],
-                        'album': {'name': album_title},
+                        'album': {
+                            'name': album_title,
+                            'id': spotify_album_id or details.get('itunes_album_id', '') or details.get('deezer_album_id', ''),
+                            'images': album_images,
+                            'release_date': '',
+                            'album_type': 'album',
+                            'total_tracks': details.get('expected_tracks', 0),
+                        },
                         'duration_ms': mt.get('duration_ms', 0),
+                        'track_number': track_number,
+                        'disc_number': disc_number,
                     }
                     source_info = {
                         'album_title': album_title,
                         'artist': artist_name,
                         'track_number': track_number,
+                        'disc_number': disc_number,
                         'spotify_album_id': spotify_album_id,
+                        'is_album': True,
                         'reason': 'album_completeness_auto_fill',
                     }
                     self.db.add_to_wishlist(
