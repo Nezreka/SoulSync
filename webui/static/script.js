@@ -13706,8 +13706,8 @@ function processModalStatusUpdate(playlistId, data) {
                     statusEl.dataset.errorMsg = task.error_message;
                     _ensureErrorTooltipListeners(statusEl);
                 }
-                // Make not_found cells clickable to review search candidates
-                if (task.status === 'not_found' && task.has_candidates) {
+                // Make not_found and failed cells clickable to review search candidates
+                if ((task.status === 'not_found' || task.status === 'failed') && task.has_candidates) {
                     statusEl.classList.add('has-candidates');
                     statusEl.dataset.taskId = task.task_id;
                     _ensureCandidatesClickListener(statusEl);
