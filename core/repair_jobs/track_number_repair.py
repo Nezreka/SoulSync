@@ -958,6 +958,7 @@ def _check_single_track(file_path: str, filename: str, api_tracks: List[Dict],
         'details': {
             'current_track_num': current_num,
             'correct_track_num': correct_num,
+            'total_tracks': total_tracks,
             'matched_title': matched_track.get('name', ''),
             'file_title': file_title or filename,
             'changes': changes,
