@@ -4481,7 +4481,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -4560,15 +4560,15 @@ _comparison_lock = threading.Lock()
 
 def _is_hydrabase_active():
     """Check if Hydrabase should be used as the primary metadata source.
-    Active when: (dev_mode OR hydrabase.enabled config) AND client connected."""
+    Active when: (dev_mode OR selected as fallback source) AND client connected."""
     try:
         if hydrabase_client is None or not hydrabase_client.is_connected():
             return False
         # Dev mode always enables Hydrabase (legacy behavior)
         if dev_mode_enabled:
             return True
-        # Config toggle: user enabled Hydrabase as metadata source
-        return config_manager.get('hydrabase.enabled', False)
+        # Selected as the fallback metadata source
+        return _get_metadata_fallback_source() == 'hydrabase'
     except (NameError, Exception):
         return False
 
@@ -4650,8 +4650,6 @@ def _run_background_comparison(query, hydrabase_counts=None):
 def hydrabase_connect():
     """Connect to a Hydrabase instance via WebSocket."""
     global _hydrabase_ws
-    if not dev_mode_enabled:
-        return jsonify({"success": False, "error": "Dev mode not active"}), 403
     data = request.get_json()
     url = data.get('url', '').strip()
     api_key = data.get('api_key', '').strip()
@@ -4694,8 +4692,10 @@ def hydrabase_disconnect():
                 pass
             _hydrabase_ws = None
     config_manager.set('hydrabase.auto_connect', False)
-    dev_mode_enabled = False
-    print("🧪 [Hydrabase] Disconnected — dev mode disabled")
+    # Only disable dev mode if not using Hydrabase as a regular fallback source
+    if _get_metadata_fallback_source() != 'hydrabase':
+        dev_mode_enabled = False
+    print("🧪 [Hydrabase] Disconnected")
     return jsonify({"success": True})
 
 @app.route('/api/hydrabase/status')
@@ -27441,7 +27441,7 @@ def _get_deezer_client():
     return _deezer_client_instance
 
 def _get_metadata_fallback_source():
-    """Get the configured metadata fallback source ('itunes' or 'deezer')."""
+    """Get the configured metadata fallback source ('itunes', 'deezer', or 'hydrabase')."""
     try:
         return config_manager.get('metadata.fallback_source', 'itunes') or 'itunes'
     except Exception:
@@ -27449,10 +27449,16 @@ def _get_metadata_fallback_source():
 
 def _get_metadata_fallback_client():
     """Get the active metadata fallback client based on settings.
-    Returns an iTunesClient or DeezerClient instance with identical interfaces."""
+    Returns an iTunesClient, DeezerClient, or HydrabaseClient instance with identical interfaces."""
     source = _get_metadata_fallback_source()
     if source == 'deezer':
         return _get_deezer_client()
+    if source == 'hydrabase':
+        if hydrabase_client and hydrabase_client.is_connected():
+            return hydrabase_client
+        # Hydrabase not connected — fall back to iTunes
+        from core.itunes_client import iTunesClient
+        return iTunesClient()
     from core.itunes_client import iTunesClient
     return iTunesClient()
 
@@ -40772,9 +40778,8 @@ try:
             timeout=10
         )
         _hydrabase_ws = _auto_ws
-        # Enable dev mode only if Hydrabase was previously in dev mode
-        # The config toggle (hydrabase.enabled) handles non-dev usage
-        if not _hydra_cfg.get('enabled'):
+        # Enable dev mode only if not using Hydrabase as a regular fallback source
+        if _get_metadata_fallback_source() != 'hydrabase':
             dev_mode_enabled = True
         print(f"✅ Hydrabase auto-connected to {_hydra_cfg['url']}")
 except Exception as e:
