@@ -152,10 +152,10 @@ class SpotifyWorker:
                 # We intentionally avoid calling is_spotify_authenticated() here
                 # because it makes an API probe that can re-trigger rate limits
                 # and lock users in an infinite rate-limit loop.
-                if not self.client.sp:
+                if not self.client.is_spotify_authenticated():
                     self.client.reload_config()
-                    if not self.client.sp:
-                        logger.debug("Spotify not configured, sleeping 30s...")
+                    if not self.client.is_spotify_authenticated():
+                        logger.debug("Spotify not authenticated, sleeping 30s...")
                         time.sleep(30)
                         continue
 
