@@ -18489,8 +18489,10 @@ def _process_wishlist_automatically(automation_id=None):
                     wishlist_auto_processing_timestamp = 0
                 return
 
-            # Use filtered tracks for processing
+            # Use filtered tracks for processing — stamp original index
             wishlist_tracks = filtered_tracks
+            for i, track in enumerate(wishlist_tracks):
+                track['_original_index'] = i
 
             # Create batch for automatic processing
             batch_id = str(uuid.uuid4())
@@ -19310,6 +19312,10 @@ def start_wishlist_missing_downloads():
 
             wishlist_tracks = filtered_tracks
             print(f"🔍 [Manual-Wishlist] Filtered to {len(wishlist_tracks)} tracks for category: {category}")
+
+        # Stamp original index on each track so task indices match frontend row order
+        for i, track in enumerate(wishlist_tracks):
+            track['_original_index'] = i
 
         # Add activity for wishlist download start
         add_activity_item("📥", "Wishlist Download Started", f"{len(wishlist_tracks)} tracks", "Now")
@@ -24923,6 +24929,11 @@ def start_missing_tracks_process(playlist_id):
             deezer_discovery_states[deezer_playlist_id]['phase'] = 'downloading'
             deezer_discovery_states[deezer_playlist_id]['converted_spotify_playlist_id'] = playlist_id
             print(f"🔗 Linked Deezer playlist {deezer_playlist_id} to download process {batch_id} (converted ID: {playlist_id})")
+
+    # Stamp original index to keep task indices aligned with frontend row order
+    for i, track in enumerate(tracks):
+        if '_original_index' not in track:
+            track['_original_index'] = i
 
     missing_download_executor.submit(_run_full_missing_tracks_process, batch_id, playlist_id, tracks)
 
