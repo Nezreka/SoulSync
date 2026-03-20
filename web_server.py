@@ -201,6 +201,67 @@ def get_current_profile_id() -> int:
     except AttributeError:
         return 1
 
+# ── Per-profile Spotify client cache ──
+_profile_spotify_clients = {}  # profile_id -> SpotifyClient
+_profile_spotify_lock = threading.Lock()
+
+def get_spotify_client_for_profile(profile_id=None):
+    """Get the Spotify client for the current profile.
+
+    If the profile has custom Spotify credentials, returns a dedicated
+    SpotifyClient instance (cached per profile). Otherwise returns the
+    global spotify_client.
+    """
+    if profile_id is None:
+        profile_id = get_current_profile_id()
+
+    # Admin (profile 1) always uses global client
+    if profile_id == 1:
+        return spotify_client
+
+    # Check if this profile has custom Spotify credentials
+    try:
+        db = get_database()
+        creds = db.get_profile_spotify(profile_id)
+        if not creds or not creds.get('client_id'):
+            return spotify_client  # No custom creds — use global
+    except Exception:
+        return spotify_client
+
+    # Check cache (don't hold lock during auth check — could block on network)
+    with _profile_spotify_lock:
+        cached = _profile_spotify_clients.get(profile_id)
+    if cached and cached.sp is not None:
+        return cached
+
+    # Create a new SpotifyClient for this profile
+    try:
+        from spotipy.oauth2 import SpotifyOAuth
+        import spotipy
+
+        auth_manager = SpotifyOAuth(
+            client_id=creds['client_id'],
+            client_secret=creds['client_secret'],
+            redirect_uri=creds.get('redirect_uri', 'http://127.0.0.1:8888/callback'),
+            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
+            cache_path=f'config/.spotify_cache_profile_{profile_id}'
+        )
+
+        # Create a bare SpotifyClient and immediately set the profile-specific
+        # spotipy instance (overwrites the global-config one from __init__)
+        profile_client = SpotifyClient()
+        profile_client.sp = spotipy.Spotify(auth_manager=auth_manager, retries=0, requests_timeout=15)
+        profile_client.user_id = None  # Will be fetched lazily
+
+        with _profile_spotify_lock:
+            _profile_spotify_clients[profile_id] = profile_client
+
+        logger.info(f"Created per-profile Spotify client for profile {profile_id}")
+        return profile_client
+    except Exception as e:
+        logger.error(f"Failed to create per-profile Spotify client for profile {profile_id}: {e}")
+        return spotify_client  # Fall back to global
+
 # Valid page IDs for profile permission validation
 VALID_PAGE_IDS = {'dashboard', 'sync', 'downloads', 'discover', 'artists', 'automations', 'library', 'import', 'settings', 'help'}
 
@@ -25057,10 +25118,11 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
 @app.route('/api/spotify/playlists', methods=['GET'])
 def get_spotify_playlists():
     """Fetches all user playlists from Spotify and enriches them with local sync status."""
-    if not spotify_client or not spotify_client.is_authenticated():
+    client = get_spotify_client_for_profile()
+    if not client or not client.is_authenticated():
         return jsonify({"error": "Spotify not authenticated."}), 401
     try:
-        playlists = spotify_client.get_user_playlists_metadata_only()
+        playlists = client.get_user_playlists_metadata_only()
         sync_statuses = _load_sync_status_file()
 
         playlist_data = []
