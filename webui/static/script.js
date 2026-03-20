@@ -56239,6 +56239,123 @@ const _autoIcons = {
 // --- Inspiration Templates ---
 // --- Automation Hub Data ---
 
+// ── Automation Hub: One-Click Pipeline Groups ──
+const AUTO_HUB_GROUPS = [
+    {
+        id: 'release-radar', icon: '📡', name: 'Release Radar Sync',
+        desc: 'Auto-sync your Release Radar playlist every Friday. Refreshes from Spotify, discovers metadata, syncs to your media server, and downloads missing tracks.',
+        category: 'Sync', badge: '4 automations', color: '#1db954',
+        steps: [
+            { label: 'Refresh', icon: '🔄', type: 'action' },
+            { label: 'Discover', icon: '🔍', type: 'action' },
+            { label: 'Sync', icon: '📋', type: 'action' },
+            { label: 'Download', icon: '📥', type: 'action' },
+        ],
+        automations: [
+            { name: 'Release Radar — Refresh', trigger_type: 'weekly_time', trigger_config: { days: ['friday'], time: '18:00' }, action_type: 'refresh_mirrored', action_config: { all: true }, then_actions: [{ type: 'fire_signal', config: { signal_name: 'rr_refreshed' } }], group_name: 'Release Radar' },
+            { name: 'Release Radar — Discover', trigger_type: 'signal_received', trigger_config: { signal_name: 'rr_refreshed' }, action_type: 'discover_playlist', action_config: { all: true }, then_actions: [{ type: 'fire_signal', config: { signal_name: 'rr_discovered' } }], group_name: 'Release Radar' },
+            { name: 'Release Radar — Sync', trigger_type: 'signal_received', trigger_config: { signal_name: 'rr_discovered' }, action_type: 'sync_playlist', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'rr_synced' } }], group_name: 'Release Radar' },
+            { name: 'Release Radar — Download', trigger_type: 'signal_received', trigger_config: { signal_name: 'rr_synced' }, action_type: 'process_wishlist', action_config: {}, then_actions: [], group_name: 'Release Radar', needs_notify: true },
+        ]
+    },
+    {
+        id: 'discovery-weekly', icon: '🎵', name: 'Discovery Weekly Sync',
+        desc: 'Capture your Discover Weekly every Monday before Spotify replaces it. Refreshes, discovers, syncs, and downloads the full playlist.',
+        category: 'Sync', badge: '4 automations', color: '#6366f1',
+        steps: [
+            { label: 'Refresh', icon: '🔄', type: 'action' },
+            { label: 'Discover', icon: '🔍', type: 'action' },
+            { label: 'Sync', icon: '📋', type: 'action' },
+            { label: 'Download', icon: '📥', type: 'action' },
+        ],
+        automations: [
+            { name: 'Discovery Weekly — Refresh', trigger_type: 'weekly_time', trigger_config: { days: ['monday'], time: '06:00' }, action_type: 'refresh_mirrored', action_config: { all: true }, then_actions: [{ type: 'fire_signal', config: { signal_name: 'dw_refreshed' } }], group_name: 'Discovery Weekly' },
+            { name: 'Discovery Weekly — Discover', trigger_type: 'signal_received', trigger_config: { signal_name: 'dw_refreshed' }, action_type: 'discover_playlist', action_config: { all: true }, then_actions: [{ type: 'fire_signal', config: { signal_name: 'dw_discovered' } }], group_name: 'Discovery Weekly' },
+            { name: 'Discovery Weekly — Sync', trigger_type: 'signal_received', trigger_config: { signal_name: 'dw_discovered' }, action_type: 'sync_playlist', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'dw_synced' } }], group_name: 'Discovery Weekly' },
+            { name: 'Discovery Weekly — Download', trigger_type: 'signal_received', trigger_config: { signal_name: 'dw_synced' }, action_type: 'process_wishlist', action_config: {}, then_actions: [], group_name: 'Discovery Weekly', needs_notify: true },
+        ]
+    },
+    {
+        id: 'playlist-auto-sync', icon: '🔄', name: 'Playlist Auto-Sync',
+        desc: 'Keep all mirrored playlists in sync. Refreshes every 6 hours, then discovers, syncs, and downloads any new tracks.',
+        category: 'Sync', badge: '4 automations', color: '#06b6d4',
+        steps: [
+            { label: 'Refresh', icon: '🔄', type: 'action' },
+            { label: 'Discover', icon: '🔍', type: 'action' },
+            { label: 'Sync', icon: '📋', type: 'action' },
+            { label: 'Download', icon: '📥', type: 'action' },
+        ],
+        automations: [
+            { name: 'Playlist Sync — Refresh', trigger_type: 'schedule', trigger_config: { interval: 6, unit: 'hours' }, action_type: 'refresh_mirrored', action_config: { all: true }, then_actions: [{ type: 'fire_signal', config: { signal_name: 'ps_refreshed' } }], group_name: 'Playlist Auto-Sync' },
+            { name: 'Playlist Sync — Discover', trigger_type: 'signal_received', trigger_config: { signal_name: 'ps_refreshed' }, action_type: 'discover_playlist', action_config: { all: true }, then_actions: [{ type: 'fire_signal', config: { signal_name: 'ps_discovered' } }], group_name: 'Playlist Auto-Sync' },
+            { name: 'Playlist Sync — Sync', trigger_type: 'signal_received', trigger_config: { signal_name: 'ps_discovered' }, action_type: 'sync_playlist', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'ps_synced' } }], group_name: 'Playlist Auto-Sync' },
+            { name: 'Playlist Sync — Download', trigger_type: 'signal_received', trigger_config: { signal_name: 'ps_synced' }, action_type: 'process_wishlist', action_config: {}, then_actions: [], group_name: 'Playlist Auto-Sync', needs_notify: true },
+        ]
+    },
+    {
+        id: 'new-music-pipeline', icon: '🚀', name: 'New Music Pipeline',
+        desc: 'Full hands-free new music workflow. Scans your watchlist for releases, downloads them, cleans up, and notifies you.',
+        category: 'Discovery', badge: '4 automations', color: '#f97316',
+        steps: [
+            { label: 'Scan Artists', icon: '🔍', type: 'action' },
+            { label: 'Download', icon: '📥', type: 'action' },
+            { label: 'Cleanup', icon: '🧹', type: 'action' },
+            { label: 'Notify', icon: '🔔', type: 'notify' },
+        ],
+        automations: [
+            { name: 'New Music — Scan Watchlist', trigger_type: 'schedule', trigger_config: { interval: 12, unit: 'hours' }, action_type: 'scan_watchlist', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'nm_scanned' } }], group_name: 'New Music Pipeline' },
+            { name: 'New Music — Download', trigger_type: 'signal_received', trigger_config: { signal_name: 'nm_scanned' }, action_type: 'process_wishlist', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'nm_downloaded' } }], group_name: 'New Music Pipeline' },
+            { name: 'New Music — Cleanup', trigger_type: 'signal_received', trigger_config: { signal_name: 'nm_downloaded' }, action_type: 'full_cleanup', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'nm_cleaned' } }], group_name: 'New Music Pipeline' },
+            { name: 'New Music — Notify', trigger_type: 'signal_received', trigger_config: { signal_name: 'nm_cleaned' }, action_type: 'notify_only', action_config: {}, then_actions: [], group_name: 'New Music Pipeline', needs_notify: true },
+        ]
+    },
+    {
+        id: 'nightly-ops', icon: '🌙', name: 'Nightly Operations',
+        desc: 'Staggered overnight maintenance: scan, download, cleanup, and backup while you sleep.',
+        category: 'Maintenance', badge: '4 automations', color: '#8b5cf6',
+        steps: [
+            { label: '1AM Scan', icon: '🔍', type: 'action' },
+            { label: '2AM Download', icon: '📥', type: 'action' },
+            { label: '3AM Cleanup', icon: '🧹', type: 'action' },
+            { label: '4AM Backup', icon: '💾', type: 'action' },
+        ],
+        automations: [
+            { name: 'Nightly — 1AM Scan', trigger_type: 'daily_time', trigger_config: { time: '01:00' }, action_type: 'scan_watchlist', action_config: {}, then_actions: [], group_name: 'Nightly Operations' },
+            { name: 'Nightly — 2AM Download', trigger_type: 'daily_time', trigger_config: { time: '02:00' }, action_type: 'process_wishlist', action_config: {}, then_actions: [], group_name: 'Nightly Operations' },
+            { name: 'Nightly — 3AM Cleanup', trigger_type: 'daily_time', trigger_config: { time: '03:00' }, action_type: 'full_cleanup', action_config: {}, then_actions: [], group_name: 'Nightly Operations' },
+            { name: 'Nightly — 4AM Backup', trigger_type: 'daily_time', trigger_config: { time: '04:00' }, action_type: 'backup_database', action_config: {}, then_actions: [], group_name: 'Nightly Operations' },
+        ]
+    },
+    {
+        id: 'download-monitor', icon: '📊', name: 'Download Monitor',
+        desc: 'Stay informed about your downloads. Get notified on failures, quarantined files, and completed batches.',
+        category: 'Alerts', badge: '3 automations', color: '#ef4444',
+        steps: [
+            { label: 'Failures', icon: '❌', type: 'notify' },
+            { label: 'Quarantine', icon: '⚠️', type: 'notify' },
+            { label: 'Complete', icon: '✅', type: 'notify' },
+        ],
+        automations: [
+            { name: 'Alert — Download Failed', trigger_type: 'download_failed', trigger_config: {}, action_type: 'notify_only', action_config: {}, then_actions: [], group_name: 'Download Monitor', needs_notify: true },
+            { name: 'Alert — File Quarantined', trigger_type: 'download_quarantined', trigger_config: {}, action_type: 'notify_only', action_config: {}, then_actions: [], group_name: 'Download Monitor', needs_notify: true },
+            { name: 'Alert — Batch Complete', trigger_type: 'batch_complete', trigger_config: {}, action_type: 'notify_only', action_config: {}, then_actions: [], group_name: 'Download Monitor', needs_notify: true },
+        ]
+    },
+    {
+        id: 'library-guardian', icon: '🛡️', name: 'Library Guardian',
+        desc: 'Protect your library quality. After scans, runs quality checks and notifies you of any issues found.',
+        category: 'Maintenance', badge: '2 automations', color: '#f59e0b',
+        steps: [
+            { label: 'Quality Scan', icon: '✅', type: 'action' },
+            { label: 'Notify', icon: '🔔', type: 'notify' },
+        ],
+        automations: [
+            { name: 'Guardian — Quality Check', trigger_type: 'library_scan_completed', trigger_config: {}, action_type: 'start_quality_scan', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'guardian_quality_done' } }], group_name: 'Library Guardian' },
+            { name: 'Guardian — Notify', trigger_type: 'signal_received', trigger_config: { signal_name: 'guardian_quality_done' }, action_type: 'notify_only', action_config: {}, then_actions: [], group_name: 'Library Guardian', needs_notify: true },
+        ]
+    },
+];
+
 const AUTO_HUB_RECIPES = [
     // Sync & Playlists
     { id: 'spotify-auto-sync', icon: '\uD83D\uDD01', name: 'Spotify Playlist Auto-Sync', desc: 'Refresh all mirrored playlists every 6 hours to keep them in sync with Spotify.',
@@ -56541,7 +56658,7 @@ function _buildAutomationHub() {
     header.innerHTML = `
         <span class="section-chevron">&#9660;</span>
         <span class="section-label">Automation Hub</span>
-        <span class="section-count">${AUTO_HUB_RECIPES.length} recipes</span>
+        <span class="section-count">${AUTO_HUB_GROUPS.length} pipelines · ${AUTO_HUB_RECIPES.length} recipes</span>
         <span class="section-line"></span>
     `;
     header.onclick = () => {
@@ -56551,9 +56668,10 @@ function _buildAutomationHub() {
     const body = document.createElement('div');
     body.className = 'automations-section-body';
 
-    const activeTab = localStorage.getItem('auto_hub_tab') || 'recipes';
+    const activeTab = localStorage.getItem('auto_hub_tab') || 'pipelines';
     const tabs = [
-        { id: 'recipes', label: 'Recipes' },
+        { id: 'pipelines', label: 'Pipelines' },
+        { id: 'recipes', label: 'Singles' },
         { id: 'guides', label: 'Quick Start' },
         { id: 'tips', label: 'Tips' },
         { id: 'reference', label: 'Reference' },
@@ -56572,6 +56690,11 @@ function _buildAutomationHub() {
     body.appendChild(tabBar);
 
     // Build all tab contents
+    const pipelinesPane = _buildHubPipelines();
+    pipelinesPane.id = 'auto-hub-pane-pipelines';
+    pipelinesPane.className = 'auto-hub-tab-content' + (activeTab === 'pipelines' ? ' active' : '');
+    body.appendChild(pipelinesPane);
+
     const recipesPane = _buildHubRecipes();
     recipesPane.id = 'auto-hub-pane-recipes';
     recipesPane.className = 'auto-hub-tab-content' + (activeTab === 'recipes' ? ' active' : '');
@@ -56603,6 +56726,126 @@ function _switchHubTab(tabId, bodyEl) {
     container.querySelectorAll('.auto-hub-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
     container.querySelectorAll('.auto-hub-tab-content').forEach(p => p.classList.toggle('active', p.id === 'auto-hub-pane-' + tabId));
     localStorage.setItem('auto_hub_tab', tabId);
+}
+
+function _buildHubPipelines() {
+    const pane = document.createElement('div');
+
+    const intro = document.createElement('div');
+    intro.className = 'auto-hub-pipeline-intro';
+    intro.innerHTML = 'One-click deployment — each pipeline creates multiple linked automations that work together.';
+    pane.appendChild(intro);
+
+    const grid = document.createElement('div');
+    grid.className = 'auto-hub-pipeline-grid';
+
+    AUTO_HUB_GROUPS.forEach(group => {
+        const card = document.createElement('div');
+        card.className = 'auto-hub-pipeline-card';
+        card.style.setProperty('--pipeline-color', group.color);
+
+        // Pipeline flow visualization
+        const stepsHtml = group.steps.map((step, i) => {
+            const nodeClass = step.type === 'notify' ? 'pipeline-node-notify' : 'pipeline-node-action';
+            return (i > 0 ? '<span class="pipeline-connector"></span>' : '') +
+                `<div class="pipeline-node ${nodeClass}">
+                    <span class="pipeline-node-icon">${step.icon}</span>
+                    <span class="pipeline-node-label">${step.label}</span>
+                </div>`;
+        }).join('');
+
+        card.innerHTML = `
+            <div class="pipeline-card-top">
+                <span class="pipeline-card-icon">${group.icon}</span>
+                <div class="pipeline-card-title-row">
+                    <div class="pipeline-card-name">${group.name}</div>
+                    <span class="pipeline-card-badge">${group.badge}</span>
+                </div>
+            </div>
+            <div class="pipeline-card-desc">${group.desc}</div>
+            <div class="pipeline-flow">${stepsHtml}</div>
+            <div class="pipeline-card-footer">
+                <button class="pipeline-deploy-btn" onclick="event.stopPropagation(); deployHubGroup('${group.id}')">Deploy Pipeline</button>
+            </div>
+        `;
+
+        card.addEventListener('click', (e) => {
+            if (e.target.closest('.pipeline-deploy-btn')) return;
+            showPipelineDetail(group.id);
+        });
+
+        grid.appendChild(card);
+    });
+
+    pane.appendChild(grid);
+    return pane;
+}
+
+function showPipelineDetail(groupId) {
+    const group = AUTO_HUB_GROUPS.find(g => g.id === groupId);
+    if (!group) return;
+
+    // Build automation detail list
+    const autoDetails = group.automations.map((auto, i) => {
+        const triggerLabel = _autoFormatTrigger(auto.trigger_type, auto.trigger_config);
+        const actionLabel = _autoFormatAction(auto.action_type);
+        const thenLabels = auto.then_actions.map(t => {
+            if (t.type === 'fire_signal') return `⚡ Signal: ${t.config.signal_name}`;
+            return _autoFormatNotify(t.type);
+        });
+        if (auto.needs_notify) thenLabels.push('🔔 Your notification');
+
+        return `
+            <div class="pipeline-detail-auto" style="--step-color: ${group.color}">
+                <div class="pipeline-detail-step-num">${i + 1}</div>
+                <div class="pipeline-detail-step-body">
+                    <div class="pipeline-detail-step-name">${auto.name}</div>
+                    <div class="pipeline-detail-step-flow">
+                        <span class="pipeline-detail-tag when">WHEN</span>
+                        <span class="pipeline-detail-tag-value">${_esc(triggerLabel)}</span>
+                        <span class="pipeline-detail-tag do">DO</span>
+                        <span class="pipeline-detail-tag-value">${_esc(actionLabel)}</span>
+                        ${thenLabels.length ? `<span class="pipeline-detail-tag then">THEN</span><span class="pipeline-detail-tag-value">${thenLabels.map(t => _esc(t)).join(', ')}</span>` : ''}
+                    </div>
+                </div>
+            </div>`;
+    }).join('');
+
+    // Build flow diagram
+    const flowHtml = group.steps.map((step, i) => {
+        const nodeClass = step.type === 'notify' ? 'pipeline-node-notify' : 'pipeline-node-action';
+        return (i > 0 ? '<span class="pipeline-connector"></span>' : '') +
+            `<div class="pipeline-node ${nodeClass}">
+                <span class="pipeline-node-icon">${step.icon}</span>
+                <span class="pipeline-node-label">${step.label}</span>
+            </div>`;
+    }).join('');
+
+    const overlay = document.createElement('div');
+    overlay.className = 'pipeline-detail-overlay';
+    overlay.innerHTML = `
+        <div class="pipeline-detail-modal" style="--pipeline-color: ${group.color}">
+            <button class="pipeline-detail-close" onclick="this.closest('.pipeline-detail-overlay').remove()">&times;</button>
+            <div class="pipeline-detail-header">
+                <span class="pipeline-detail-icon">${group.icon}</span>
+                <div>
+                    <div class="pipeline-detail-title">${group.name}</div>
+                    <div class="pipeline-detail-desc">${group.desc}</div>
+                </div>
+            </div>
+            <div class="pipeline-detail-flow" style="--pipeline-color: ${group.color}">${flowHtml}</div>
+            <div class="pipeline-detail-section-title">How It Works</div>
+            <div class="pipeline-detail-section-desc">This pipeline deploys ${group.automations.length} automations${group.automations.some(a => a.then_actions.some(t => t.type === 'fire_signal')) ? ' linked by signals — each step triggers the next automatically' : ' running on independent schedules'}.</div>
+            <div class="pipeline-detail-autos">${autoDetails}</div>
+            <button class="pipeline-deploy-btn" style="--pipeline-color: ${group.color}; margin-top: 8px;" onclick="this.closest('.pipeline-detail-overlay').remove(); deployHubGroup('${group.id}')">Deploy Pipeline</button>
+        </div>
+    `;
+
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
+    });
+
+    document.body.appendChild(overlay);
 }
 
 function _buildHubRecipes() {
@@ -56830,6 +57073,142 @@ async function useHubRecipe(recipeId) {
     if (t.note) {
         showToast(t.note, 'info');
     }
+}
+
+async function deployHubGroup(groupId) {
+    const group = AUTO_HUB_GROUPS.find(g => g.id === groupId);
+    if (!group) return;
+
+    // Check if any automations need notifications — prompt for config
+    const needsNotify = group.automations.some(a => a.needs_notify);
+    let notifyConfig = null;
+
+    if (needsNotify) {
+        notifyConfig = await _promptNotifyConfig(group.name);
+        if (notifyConfig === null) return; // User cancelled
+        if (notifyConfig === false) notifyConfig = null; // Skip notifications, still deploy
+    }
+
+    // Deploy all automations in the group
+    let created = 0, failed = 0;
+    for (const auto of group.automations) {
+        try {
+            const payload = {
+                name: auto.name,
+                trigger_type: auto.trigger_type,
+                trigger_config: auto.trigger_config,
+                action_type: auto.action_type,
+                action_config: auto.action_config,
+                then_actions: [...auto.then_actions],
+                group_name: auto.group_name,
+                enabled: true,
+            };
+
+            // Inject notification config for automations that need it
+            if (auto.needs_notify && notifyConfig) {
+                payload.then_actions.push(notifyConfig);
+            }
+
+            const response = await fetch('/api/automations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+
+            if (response.ok) {
+                created++;
+            } else {
+                const err = await response.json();
+                console.error(`Failed to create "${auto.name}":`, err);
+                failed++;
+            }
+        } catch (e) {
+            console.error(`Error creating "${auto.name}":`, e);
+            failed++;
+        }
+    }
+
+    if (created > 0) {
+        showToast(`Deployed "${group.name}" — ${created} automation${created > 1 ? 's' : ''} created${failed ? `, ${failed} failed` : ''}`, 'success');
+        loadAutomationsPage();
+    } else {
+        showToast(`Failed to deploy "${group.name}"`, 'error');
+    }
+}
+
+function _promptNotifyConfig(groupName) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+
+        overlay.innerHTML = `
+            <div style="background:var(--bg-secondary, #1e1e2e);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:28px;max-width:420px;width:90%;color:var(--text-primary, #fff);font-family:inherit;">
+                <h3 style="margin:0 0 6px;font-size:1.1em;">Configure Notifications</h3>
+                <p style="margin:0 0 18px;font-size:0.85em;opacity:0.5;">${groupName} includes notification steps. Choose how to get notified.</p>
+                <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
+                    <label style="font-size:0.85em;opacity:0.7;">Notification Type</label>
+                    <select id="deploy-notify-type" style="padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.9em;">
+                        <option value="discord_webhook">Discord Webhook</option>
+                        <option value="telegram">Telegram</option>
+                        <option value="pushbullet">Pushbullet</option>
+                        <option value="none">Skip Notifications</option>
+                    </select>
+                    <div id="deploy-notify-fields"></div>
+                </div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;">
+                    <button id="deploy-notify-cancel" style="padding:8px 20px;border:1px solid rgba(255,255,255,0.1);border-radius:8px;background:transparent;color:rgba(255,255,255,0.7);cursor:pointer;font-size:0.88em;">Cancel</button>
+                    <button id="deploy-notify-confirm" style="padding:8px 20px;border:none;border-radius:8px;background:var(--accent-color,#1db954);color:#fff;cursor:pointer;font-size:0.88em;font-weight:600;">Deploy</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        const typeSelect = overlay.querySelector('#deploy-notify-type');
+        const fieldsDiv = overlay.querySelector('#deploy-notify-fields');
+
+        function updateFields() {
+            const type = typeSelect.value;
+            if (type === 'discord_webhook') {
+                fieldsDiv.innerHTML = '<input id="deploy-notify-url" type="text" placeholder="Discord Webhook URL" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;">';
+            } else if (type === 'telegram') {
+                fieldsDiv.innerHTML = '<input id="deploy-notify-token" type="text" placeholder="Bot Token" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;"><input id="deploy-notify-chat" type="text" placeholder="Chat ID" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;">';
+            } else if (type === 'pushbullet') {
+                fieldsDiv.innerHTML = '<input id="deploy-notify-token" type="text" placeholder="Access Token" style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:0.88em;margin-top:6px;box-sizing:border-box;">';
+            } else {
+                fieldsDiv.innerHTML = '';
+            }
+        }
+        typeSelect.addEventListener('change', updateFields);
+        updateFields();
+
+        overlay.querySelector('#deploy-notify-cancel').addEventListener('click', () => {
+            document.body.removeChild(overlay);
+            resolve(null);
+        });
+
+        overlay.querySelector('#deploy-notify-confirm').addEventListener('click', () => {
+            const type = typeSelect.value;
+            let config = {};
+            if (type === 'discord_webhook') {
+                config = { webhook_url: (overlay.querySelector('#deploy-notify-url')?.value || '').trim() };
+            } else if (type === 'telegram') {
+                config = { bot_token: (overlay.querySelector('#deploy-notify-token')?.value || '').trim(), chat_id: (overlay.querySelector('#deploy-notify-chat')?.value || '').trim() };
+            } else if (type === 'pushbullet') {
+                config = { access_token: (overlay.querySelector('#deploy-notify-token')?.value || '').trim() };
+            } else {
+                document.body.removeChild(overlay);
+                resolve(false); // Skip notifications but still deploy
+                return;
+            }
+            document.body.removeChild(overlay);
+            resolve({ type, config });
+        });
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) { document.body.removeChild(overlay); resolve(null); }
+        });
+    });
 }
 
 // --- Filter Bar ---
