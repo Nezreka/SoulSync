@@ -3875,33 +3875,15 @@
 
                                 <!-- Hybrid Mode Settings (shown only when hybrid is selected) -->
                                 <div id="hybrid-settings-container" style="display: none;">
-                                    <div class="form-group">
-                                        <label>Primary Source:</label>
-                                        <select id="hybrid-primary-source" class="form-select" onchange="updateHybridSecondaryOptions()">
-                                            <option value="soulseek">Soulseek</option>
-                                            <option value="youtube">YouTube</option>
-                                            <option value="tidal">Tidal</option>
-                                            <option value="qobuz">Qobuz</option>
-                                            <option value="hifi">HiFi</option>
-                                        </select>
-                                        <div class="setting-help-text">
-                                            First source to try for downloads.
-                                        </div>
+                                    <div class="setting-help-text">
+                                        Drag to reorder source priority. Enable sources you want to use. Downloads try each enabled source in order.
                                     </div>
-                                    <div class="form-group">
-                                        <label>Fallback Source:</label>
-                                        <select id="hybrid-secondary-source" class="form-select" onchange="updateDownloadSourceUI()">
-                                            <option value="soulseek">Soulseek</option>
-                                            <option value="youtube">YouTube</option>
-                                            <option value="tidal">Tidal</option>
-                                            <option value="qobuz">Qobuz</option>
-                                            <option value="hifi">HiFi</option>
-                                        </select>
-                                        <div class="setting-help-text">
-                                            If the primary source finds nothing, try this source next.
-                                        </div>
+                                    <div class="hybrid-source-list" id="hybrid-source-list">
+                                        <!-- Populated by JS -->
                                     </div>
-
+                                    <!-- Hidden selects for backward compatibility with saveSettings -->
+                                    <select id="hybrid-primary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option></select>
+                                    <select id="hybrid-secondary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option></select>
                                 </div>
 
                                 <!-- Soulseek Settings (shown when soulseek is active source) -->

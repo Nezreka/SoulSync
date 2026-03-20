@@ -46,16 +46,21 @@ class DownloadOrchestrator:
         self.mode = config_manager.get('download_source.mode', 'soulseek')
         self.hybrid_primary = config_manager.get('download_source.hybrid_primary', 'soulseek')
         self.hybrid_secondary = config_manager.get('download_source.hybrid_secondary', 'youtube')
+        self.hybrid_order = config_manager.get('download_source.hybrid_order', [])
 
         logger.info(f"🎛️  Download Orchestrator initialized - Mode: {self.mode}")
         if self.mode == 'hybrid':
-            logger.info(f"   Primary: {self.hybrid_primary}, Fallback: {self.hybrid_secondary}")
+            if self.hybrid_order:
+                logger.info(f"   Source priority: {' → '.join(self.hybrid_order)}")
+            else:
+                logger.info(f"   Primary: {self.hybrid_primary}, Fallback: {self.hybrid_secondary}")
 
     def reload_settings(self):
         """Reload settings from config (call after settings change)"""
         self.mode = config_manager.get('download_source.mode', 'soulseek')
         self.hybrid_primary = config_manager.get('download_source.hybrid_primary', 'soulseek')
         self.hybrid_secondary = config_manager.get('download_source.hybrid_secondary', 'youtube')
+        self.hybrid_order = config_manager.get('download_source.hybrid_order', [])
 
         # Reload underlying client configs (SLSKD URL, API key, etc.)
         self.soulseek._setup_client()
@@ -80,7 +85,9 @@ class DownloadOrchestrator:
         elif self.mode == 'hifi':
             return self.hifi.is_configured()
         elif self.mode == 'hybrid':
-            return self.soulseek.is_configured() or self.youtube.is_configured() or self.tidal.is_configured() or self.qobuz.is_configured() or self.hifi.is_configured()
+            clients = {'soulseek': self.soulseek, 'youtube': self.youtube, 'tidal': self.tidal, 'qobuz': self.qobuz, 'hifi': self.hifi}
+            sources = self.hybrid_order if self.hybrid_order else [self.hybrid_primary, self.hybrid_secondary]
+            return any(clients[s].is_configured() for s in sources if s in clients)
 
         return False
 
@@ -153,30 +160,39 @@ class DownloadOrchestrator:
                 'qobuz': self.qobuz,
                 'hifi': self.hifi,
             }
-            primary = self.hybrid_primary if self.hybrid_primary in clients else 'soulseek'
-            secondary = self.hybrid_secondary if self.hybrid_secondary in clients else 'soulseek'
 
-            # Ensure secondary differs from primary
-            if secondary == primary:
-                # Pick first available source that isn't primary
-                secondary = next((name for name in clients if name != primary), 'soulseek')
+            # Build ordered source list: prefer hybrid_order, fall back to legacy primary/secondary
+            if self.hybrid_order:
+                source_order = [s for s in self.hybrid_order if s in clients]
+            else:
+                primary = self.hybrid_primary if self.hybrid_primary in clients else 'soulseek'
+                secondary = self.hybrid_secondary if self.hybrid_secondary in clients else 'soulseek'
+                if secondary == primary:
+                    secondary = next((name for name in clients if name != primary), 'soulseek')
+                source_order = [primary, secondary]
 
-            # Try primary source first
-            logger.info(f"🔍 Hybrid search - trying {primary} first: {query}")
-            tracks, albums = await clients[primary].search(query, timeout, progress_callback)
-            if tracks:
-                logger.info(f"✅ {primary} found {len(tracks)} tracks")
-                return (tracks, albums)
+            if not source_order:
+                source_order = ['soulseek']
 
-            # Try secondary fallback
-            logger.info(f"🔄 {primary} found nothing, trying {secondary} fallback")
-            tracks, albums = await clients[secondary].search(query, timeout, progress_callback)
-            if tracks:
-                logger.info(f"✅ {secondary} found {len(tracks)} tracks")
-                return (tracks, albums)
+            logger.info(f"🔍 Hybrid search ({' → '.join(source_order)}): {query}")
 
-            # Nothing found from either source
-            logger.warning(f"❌ Hybrid search: both {primary} and {secondary} found nothing for: {query}")
+            # Try each source in priority order
+            for i, source_name in enumerate(source_order):
+                try:
+                    if i == 0:
+                        logger.info(f"🔍 Trying {source_name} (priority {i+1}): {query}")
+                    else:
+                        logger.info(f"🔄 Trying {source_name} (priority {i+1}): {query}")
+
+                    tracks, albums = await clients[source_name].search(query, timeout, progress_callback)
+                    if tracks:
+                        logger.info(f"✅ {source_name} found {len(tracks)} tracks")
+                        return (tracks, albums)
+                except Exception as e:
+                    logger.warning(f"⚠️ {source_name} search failed: {e}")
+
+            # Nothing found from any source
+            logger.warning(f"❌ Hybrid search: all sources ({', '.join(source_order)}) found nothing for: {query}")
             return ([], [])
 
         # Fallback: empty results
