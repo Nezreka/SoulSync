@@ -5958,6 +5958,11 @@ def auth_tidal():
 
         print(f"🔐 Stored PKCE - verifier: {temp_tidal_client.code_verifier[:20]}... challenge: {temp_tidal_client.code_challenge[:20]}...")
 
+        # Store profile_id for per-profile auth
+        profile_id = request.args.get('profile_id', '')
+        with tidal_oauth_lock:
+            tidal_oauth_state["profile_id"] = profile_id if profile_id and profile_id != '1' else None
+
         # Create OAuth URL
         import urllib.parse
         params = {
@@ -6216,17 +6221,42 @@ def tidal_callback():
         # Create a temporary client for the token exchange
         temp_tidal_client = TidalClient()
 
-        # Restore PKCE values and redirect_uri from the auth request
+        # Restore PKCE values, redirect_uri, and profile_id from the auth request
+        profile_id_for_tidal = None
         with tidal_oauth_lock:
             temp_tidal_client.code_verifier = tidal_oauth_state["code_verifier"]
             temp_tidal_client.code_challenge = tidal_oauth_state["code_challenge"]
             if "redirect_uri" in tidal_oauth_state:
                 temp_tidal_client.redirect_uri = tidal_oauth_state["redirect_uri"]
+            profile_id_for_tidal = tidal_oauth_state.get("profile_id")
 
         success = temp_tidal_client.fetch_token_from_code(auth_code)
-        
+
         if success:
-            # Re-initialize the main global tidal_client instance with the new token
+            # Per-profile: store tokens on profile, don't touch global client
+            if profile_id_for_tidal:
+                try:
+                    profile_id_int = int(profile_id_for_tidal)
+                    db = get_database()
+                    # Store Tidal tokens on the profile
+                    from config.settings import config_manager as _cm
+                    enc_access = _cm._encrypt_value(temp_tidal_client.access_token) if temp_tidal_client.access_token else None
+                    enc_refresh = _cm._encrypt_value(temp_tidal_client.refresh_token) if temp_tidal_client.refresh_token else None
+                    with db._get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            UPDATE profiles
+                            SET tidal_access_token = ?, tidal_refresh_token = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        """, (enc_access, enc_refresh, profile_id_int))
+                        conn.commit()
+                    add_activity_item("✅", "Tidal Auth Complete", f"Profile {profile_id_int} authenticated with Tidal", "Now")
+                    return "<h1>✅ Tidal Authentication Successful!</h1><p>Your personal Tidal account is now connected. You can close this window.</p>"
+                except Exception as profile_err:
+                    print(f"⚠️ Per-profile Tidal auth failed, falling back to global: {profile_err}")
+
+            # Global: Re-initialize the main global tidal_client instance with the new token
             tidal_client = TidalClient()
             if tidal_enrichment_worker:
                 tidal_enrichment_worker.client = tidal_client
