@@ -130,6 +130,18 @@ class iTunesWorker:
                     continue
 
                 self.current_item = item
+                # Guard: skip items with None/NULL IDs to prevent infinite enrichment loops
+                item_id = item.get('id') or item.get('artist_id') or item.get('album_id')
+                if item_id is None:
+                    logger.warning(f"Skipping {item.get('type', 'unknown')} with NULL id: {item.get('name', '?')} — marking as error")
+                    try:
+                        itype = item.get('type', '')
+                        table = 'artists' if 'artist' in itype else ('albums' if 'album' in itype else 'tracks')
+                        # Can't mark status without an ID — just skip
+                    except Exception:
+                        pass
+                    continue
+
                 self._process_item(item)
 
                 # Sleep depends on item type — search items need more delay
@@ -158,7 +170,7 @@ class iTunesWorker:
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE itunes_match_status IS NULL
+                WHERE itunes_match_status IS NULL AND id IS NOT NULL
                 ORDER BY id ASC
                 LIMIT 1
             """)
@@ -174,7 +186,7 @@ class iTunesWorker:
                   AND ar.itunes_artist_id IS NOT NULL
                   AND EXISTS (
                       SELECT 1 FROM albums al
-                      WHERE al.artist_id = ar.id AND al.itunes_match_status IS NULL
+                      WHERE al.artist_id = ar.id AND al.itunes_match_status IS NULL AND al.id IS NOT NULL
                   )
                 ORDER BY ar.id ASC
                 LIMIT 1
@@ -198,7 +210,7 @@ class iTunesWorker:
                   AND al.itunes_album_id IS NOT NULL
                   AND EXISTS (
                       SELECT 1 FROM tracks t
-                      WHERE t.album_id = al.id AND t.itunes_match_status IS NULL
+                      WHERE t.album_id = al.id AND t.itunes_match_status IS NULL AND t.id IS NOT NULL
                   )
                 ORDER BY al.id ASC
                 LIMIT 1
@@ -219,7 +231,7 @@ class iTunesWorker:
                 SELECT a.id, a.title, ar.name AS artist_name
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.itunes_match_status IS NULL
+                WHERE a.itunes_match_status IS NULL AND a.id IS NOT NULL
                 ORDER BY a.id ASC
                 LIMIT 1
             """)
@@ -232,7 +244,7 @@ class iTunesWorker:
                 SELECT t.id, t.title, ar.name AS artist_name
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.itunes_match_status IS NULL
+                WHERE t.itunes_match_status IS NULL AND t.id IS NOT NULL
                 ORDER BY t.id ASC
                 LIMIT 1
             """)
@@ -717,7 +729,7 @@ class iTunesWorker:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT id, title, track_number FROM tracks
-                WHERE album_id = ? AND itunes_match_status IS NULL
+                WHERE album_id = ? AND itunes_match_status IS NULL AND id IS NOT NULL
                 ORDER BY id ASC
             """, (album_id,))
             return [{'id': row[0], 'title': row[1], 'track_number': row[2]} for row in cursor.fetchall()]
