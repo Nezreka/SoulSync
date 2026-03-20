@@ -5774,10 +5774,36 @@ def detect_soulseek_endpoint():
 @app.route('/auth/spotify')
 def auth_spotify():
     """
-    Initiates Spotify OAuth authentication flow
+    Initiates Spotify OAuth authentication flow.
+    Supports per-profile auth via ?profile_id= query param.
     """
     try:
-        # Create a fresh spotify client to trigger OAuth
+        profile_id = request.args.get('profile_id', '')
+
+        # Per-profile auth: use profile's own credentials
+        if profile_id and profile_id != '1':
+            try:
+                profile_id_int = int(profile_id)
+                db = get_database()
+                creds = db.get_profile_spotify(profile_id_int)
+                if creds and creds.get('client_id'):
+                    from spotipy.oauth2 import SpotifyOAuth
+                    redirect_uri = creds.get('redirect_uri') or config_manager.get_spotify_config().get('redirect_uri', 'http://127.0.0.1:8888/callback')
+                    auth_manager = SpotifyOAuth(
+                        client_id=creds['client_id'],
+                        client_secret=creds['client_secret'],
+                        redirect_uri=redirect_uri,
+                        scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
+                        cache_path=f'config/.spotify_cache_profile_{profile_id_int}',
+                        state=f'profile_{profile_id_int}'
+                    )
+                    auth_url = auth_manager.get_authorize_url()
+                    print(f"🎵 Per-profile Spotify auth initiated for profile {profile_id_int}")
+                    return redirect(auth_url)
+            except (ValueError, Exception) as e:
+                print(f"⚠️ Per-profile Spotify auth failed, falling back to global: {e}")
+
+        # Global auth (admin or fallback)
         temp_spotify_client = SpotifyClient()
         if temp_spotify_client.sp and temp_spotify_client.sp.auth_manager:
             # Get the authorization URL
@@ -6051,11 +6077,46 @@ def spotify_callback():
 
     print(f"🎵 Spotify callback received on port 8008 with authorization code")
 
+    # Check for per-profile state parameter
+    state = request.args.get('state', '')
+    profile_id_from_state = None
+    if state and state.startswith('profile_'):
+        try:
+            profile_id_from_state = int(state.replace('profile_', ''))
+            print(f"🎵 Per-profile callback detected for profile {profile_id_from_state}")
+        except ValueError:
+            pass
+
     try:
         from core.spotify_client import SpotifyClient
         from spotipy.oauth2 import SpotifyOAuth
         from config.settings import config_manager
 
+        # Per-profile callback: use profile's credentials
+        if profile_id_from_state and profile_id_from_state != 1:
+            db = get_database()
+            creds = db.get_profile_spotify(profile_id_from_state)
+            if creds and creds.get('client_id'):
+                redirect_uri = creds.get('redirect_uri') or config_manager.get_spotify_config().get('redirect_uri', 'http://127.0.0.1:8888/callback')
+                auth_manager = SpotifyOAuth(
+                    client_id=creds['client_id'],
+                    client_secret=creds['client_secret'],
+                    redirect_uri=redirect_uri,
+                    scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
+                    cache_path=f'config/.spotify_cache_profile_{profile_id_from_state}',
+                    state=f'profile_{profile_id_from_state}'
+                )
+                token_info = auth_manager.get_access_token(auth_code, as_dict=True)
+                if token_info:
+                    # Invalidate cached profile client so it gets recreated with new tokens
+                    with _profile_spotify_lock:
+                        _profile_spotify_clients.pop(profile_id_from_state, None)
+                    add_activity_item("✅", "Spotify Auth Complete", f"Profile {profile_id_from_state} authenticated with Spotify", "Now")
+                    return "<h1>Spotify Authentication Successful!</h1><p>Your personal Spotify account is now connected. You can close this window.</p>"
+                else:
+                    raise Exception("Failed to exchange authorization code for access token")
+
+        # Global callback (admin)
         config = config_manager.get_spotify_config()
         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
         print(f"🎵 Using redirect_uri for token exchange: {configured_uri}")
