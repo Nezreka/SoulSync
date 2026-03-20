@@ -406,6 +406,14 @@ class TidalClient:
             if not self.refresh_token:
                 logger.error("No Tidal refresh token available")
                 return False
+
+            if not self.client_id or not self.client_secret:
+                logger.debug("Tidal client_id/secret not configured — skipping token refresh")
+                # Clear stale tokens so we stop retrying
+                self.access_token = None
+                self.refresh_token = None
+                self.token_expires_at = 0
+                return False
             
             data = {
                 'grant_type': 'refresh_token',
@@ -493,10 +501,18 @@ class TidalClient:
         if self.access_token and time.time() < self.token_expires_at:
             return True
 
+        # Backoff: if refresh recently failed, don't retry for 5 minutes
+        if hasattr(self, '_refresh_failed_at') and self._refresh_failed_at:
+            if time.time() - self._refresh_failed_at < 300:
+                return False
+
         # Token expired but refresh token available — try silent refresh
         if self.access_token and self.refresh_token:
             logger.info("Tidal access token expired — attempting silent refresh...")
-            return self._refresh_access_token()
+            result = self._refresh_access_token()
+            if not result:
+                self._refresh_failed_at = time.time()
+            return result
 
         return False
     
