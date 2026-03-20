@@ -5467,6 +5467,13 @@ async function loadSettingsData() {
         // Populate Metadata source setting
         document.getElementById('metadata-fallback-source').value = settings.metadata?.fallback_source || 'itunes';
 
+        // Populate Hydrabase settings
+        const hbConfig = settings.hydrabase || {};
+        document.getElementById('hydrabase-enabled').checked = hbConfig.enabled || false;
+        document.getElementById('hydrabase-url').value = hbConfig.url || '';
+        document.getElementById('hydrabase-api-key').value = hbConfig.api_key || '';
+        document.getElementById('hydrabase-auto-connect').checked = hbConfig.auto_connect || false;
+
         // Populate Download settings (right column)
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
         document.getElementById('transfer-path').value = settings.soulseek?.transfer_path || './Transfer';
@@ -6077,6 +6084,54 @@ async function saveQualityProfile() {
 // END QUALITY PROFILE FUNCTIONS
 // ===============================
 
+async function toggleHydrabaseFromSettings() {
+    const statusEl = document.getElementById('hydrabase-settings-status');
+    const btn = document.getElementById('hydrabase-connect-btn');
+    const url = document.getElementById('hydrabase-url').value.trim();
+    const apiKey = document.getElementById('hydrabase-api-key').value.trim();
+
+    if (!url || !apiKey) {
+        if (statusEl) statusEl.textContent = 'URL and API Key required';
+        return;
+    }
+
+    // Save settings first
+    await saveSettings(true);
+
+    try {
+        // Check current status
+        const statusRes = await fetch('/api/hydrabase/status');
+        const statusData = await statusRes.json();
+
+        if (statusData.connected) {
+            // Disconnect
+            await fetch('/api/hydrabase/disconnect', { method: 'POST' });
+            if (btn) btn.textContent = 'Connect';
+            if (statusEl) statusEl.textContent = 'Disconnected';
+            showToast('Hydrabase disconnected', 'info');
+        } else {
+            // Connect
+            const res = await fetch('/api/hydrabase/connect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, api_key: apiKey })
+            });
+            const data = await res.json();
+            if (data.success) {
+                if (btn) btn.textContent = 'Disconnect';
+                if (statusEl) statusEl.textContent = 'Connected';
+                showToast('Hydrabase connected', 'success');
+            } else {
+                if (statusEl) statusEl.textContent = data.error || 'Connection failed';
+                showToast('Hydrabase connection failed', 'error');
+            }
+        }
+    } catch (e) {
+        if (statusEl) statusEl.textContent = 'Error';
+        showToast('Hydrabase connection error', 'error');
+    }
+}
+
 async function activateDevMode() {
     const password = document.getElementById('dev-mode-password').value;
     try {
@@ -6383,6 +6438,12 @@ async function saveSettings(quiet = false) {
         },
         metadata: {
             fallback_source: document.getElementById('metadata-fallback-source').value || 'itunes'
+        },
+        hydrabase: {
+            enabled: document.getElementById('hydrabase-enabled').checked,
+            url: document.getElementById('hydrabase-url').value,
+            api_key: document.getElementById('hydrabase-api-key').value,
+            auto_connect: document.getElementById('hydrabase-auto-connect').checked
         },
         download_source: {
             mode: document.getElementById('download-source-mode').value,

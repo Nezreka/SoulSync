@@ -3677,6 +3677,38 @@
                                     </div>
                                 </div>
 
+                                <!-- Hydrabase P2P Metadata -->
+                                <div class="api-service-frame" data-stg="connections">
+                                    <h4 class="service-title" style="color: #00b4d8;">Hydrabase</h4>
+                                    <div class="form-group" style="margin-bottom: 8px;">
+                                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 0;">
+                                            <input type="checkbox" id="hydrabase-enabled" style="width: 16px; height: 16px;">
+                                            <span>Enable Hydrabase as metadata source</span>
+                                        </label>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>WebSocket URL:</label>
+                                        <input type="text" id="hydrabase-url" placeholder="ws://localhost:4545">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>API Key:</label>
+                                        <input type="password" id="hydrabase-api-key" placeholder="Hydrabase API Key">
+                                    </div>
+                                    <div class="form-group" style="margin-bottom: 8px;">
+                                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 0;">
+                                            <input type="checkbox" id="hydrabase-auto-connect" style="width: 16px; height: 16px;">
+                                            <span>Auto-connect on startup</span>
+                                        </label>
+                                    </div>
+                                    <div class="callback-info">
+                                        <div class="callback-help">P2P metadata network. When enabled and connected, replaces Spotify/iTunes as the primary metadata source for searches.</div>
+                                    </div>
+                                    <div class="form-actions">
+                                        <button class="test-button" id="hydrabase-connect-btn" onclick="toggleHydrabaseFromSettings()">Connect</button>
+                                        <span id="hydrabase-settings-status" style="font-size: 0.82em; color: rgba(255,255,255,0.4); margin-left: 8px;"></span>
+                                    </div>
+                                </div>
+
                                 <!-- Test Connection Buttons -->
                                 <div class="api-test-buttons">
                                     <button class="test-button" onclick="testConnection('spotify')">Test
