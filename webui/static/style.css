@@ -43439,18 +43439,23 @@ tr.tag-diff-same {
     font-size: 0.85em;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     white-space: nowrap;
     font-family: inherit;
 }
 .stg-tab:hover {
-    color: rgba(255, 255, 255, 0.75);
-    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(255, 255, 255, 0.06);
+    transform: translateY(-1px);
+}
+.stg-tab:active {
+    transform: scale(0.97);
 }
 .stg-tab.active {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--accent-color, #1db954);
     color: #fff;
     font-weight: 600;
+    box-shadow: 0 2px 12px rgba(var(--accent-rgb, 29, 185, 84), 0.3);
 }
 
 /* Body — single centered column */
@@ -43557,11 +43562,12 @@ tr.tag-diff-same {
     justify-content: space-between;
     padding: 14px 16px;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background 0.2s, padding-left 0.2s;
     user-select: none;
 }
 .stg-service-header:hover {
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(255, 255, 255, 0.04);
+    padding-left: 20px;
 }
 .stg-service-name {
     font-size: 0.9em;
@@ -43575,6 +43581,10 @@ tr.tag-diff-same {
 }
 .stg-service.expanded .stg-service-chevron {
     transform: rotate(90deg);
+    color: var(--accent-color, #1db954);
+}
+.stg-service.expanded .stg-service-name {
+    color: #fff;
 }
 .stg-service-body {
     display: none;
@@ -43582,6 +43592,11 @@ tr.tag-diff-same {
 }
 .stg-service.expanded .stg-service-body {
     display: block;
+    animation: stgSlideIn 0.25s ease-out;
+}
+@keyframes stgSlideIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 /* Card container — subtle grouping for related settings */
@@ -43591,6 +43606,11 @@ tr.tag-diff-same {
     border-radius: 12px;
     margin-bottom: 16px;
     overflow: hidden;
+    transition: border-color 0.25s, box-shadow 0.25s;
+}
+.stg-card:hover {
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 2px 16px rgba(0, 0, 0, 0.15);
 }
 
 /* Action buttons in settings */
@@ -43613,6 +43633,12 @@ tr.tag-diff-same {
 .stg-btn:hover {
     background: rgba(255, 255, 255, 0.08);
     color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2);
+}
+.stg-btn:active {
+    transform: scale(0.97);
+    box-shadow: none;
 }
 .stg-btn-primary {
     background: var(--accent-color, #1db954);
@@ -43654,7 +43680,8 @@ tr.tag-diff-same {
     height: 18px;
     background: #fff;
     border-radius: 50%;
-    transition: transform 0.25s;
+    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 .stg-toggle input:checked + .stg-toggle-track {
     background: var(--accent-color, #1db954);
@@ -43717,7 +43744,7 @@ tr.tag-diff-same {
     box-shadow: none !important;
 }
 
-/* Section titles — clean, readable, no pseudo-element bar */
+/* Section titles — clean, readable, accent bar on hover */
 #settings-page .settings-group > h3 {
     font-size: 0.82em;
     font-weight: 600;
@@ -43725,20 +43752,29 @@ tr.tag-diff-same {
     text-transform: uppercase;
     color: rgba(255, 255, 255, 0.5);
     padding: 36px 0 14px;
-    padding-left: 0;
+    padding-left: 14px;
     padding-right: 0;
     margin: 0;
     margin-bottom: 0;
     margin-top: 0;
     border: none;
     border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    border-left: 3px solid transparent;
     position: relative;
+    transition: color 0.25s, border-color 0.25s;
 }
 /* Kill the accent underline on h3 */
 #settings-page .settings-group > h3::after {
     display: none !important;
 }
 #settings-page .settings-group:first-child > h3 { padding-top: 4px; }
+
+/* Active section — accent bar + brighter title when interacting */
+#settings-page .settings-group:hover > h3,
+#settings-page .settings-group:focus-within > h3 {
+    border-left-color: var(--accent-color, #1db954);
+    color: rgba(255, 255, 255, 0.85);
+}
 
 /* ── Form rows — label left, control right, help text wraps below ── */
 #settings-page .form-group {
@@ -43747,9 +43783,14 @@ tr.tag-diff-same {
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 8px 20px;
-    padding: 14px 0 !important;
+    padding: 14px 8px !important;
     margin: 0 !important;
     border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+    border-radius: 8px;
+    transition: background 0.2s;
+}
+#settings-page .form-group:hover {
+    background: rgba(255, 255, 255, 0.02);
 }
 #settings-page .form-group:last-child { border-bottom: none; }
 
@@ -43785,6 +43826,7 @@ tr.tag-diff-same {
     border-color: var(--accent-color, #1db954);
     background: rgba(255, 255, 255, 0.08);
     outline: none;
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 29, 185, 84), 0.12);
 }
 
 #settings-page .form-group > select,
@@ -43815,6 +43857,7 @@ tr.tag-diff-same {
     border-color: var(--accent-color, #1db954);
     outline: none;
     background-color: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 29, 185, 84), 0.12);
 }
 #settings-page select option {
     background: #1e1e2e;
@@ -43830,10 +43873,16 @@ tr.tag-diff-same {
     margin: 6px 0;
     padding: 0 !important;
     overflow: hidden;
-    transition: border-color 0.2s;
+    transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s;
 }
 #settings-page .api-service-frame:hover {
-    border-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    transform: translateY(-1px);
+}
+#settings-page .api-service-frame:focus-within {
+    border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.3);
+    box-shadow: 0 0 0 1px rgba(var(--accent-rgb, 29, 185, 84), 0.1), 0 4px 20px rgba(0, 0, 0, 0.15);
 }
 
 #settings-page .api-service-frame .service-title {
@@ -43885,7 +43934,14 @@ tr.tag-diff-same {
     border-radius: 10px;
     padding: 10px 20px;
     font-size: 0.85em;
-    transition: all 0.2s;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+#settings-page .server-toggle-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2);
+}
+#settings-page .server-toggle-btn:active {
+    transform: scale(0.97);
 }
 #settings-page .server-config-container {
     padding: 0;
@@ -43911,7 +43967,15 @@ tr.tag-diff-same {
 #settings-page .auth-button:hover {
     background: rgba(255, 255, 255, 0.1);
     color: #fff;
-    border-color: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2);
+}
+#settings-page .test-button:active,
+#settings-page .detect-button:active,
+#settings-page .auth-button:active {
+    transform: scale(0.97);
+    box-shadow: none;
 }
 
 /* Test buttons row */
@@ -43931,7 +43995,8 @@ tr.tag-diff-same {
     transition: border-color 0.2s;
 }
 #settings-page .quality-tier:hover {
-    border-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
 }
 #settings-page .preset-button {
     border-radius: 8px;
@@ -43944,15 +44009,21 @@ tr.tag-diff-same {
 
 /* ── Checkbox labels — full-width rows ── */
 #settings-page .checkbox-label {
-    padding: 13px 0 !important;
+    padding: 13px 8px !important;
     display: flex !important;
     align-items: center;
     gap: 12px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+    border-radius: 8px;
     margin: 0 !important;
     cursor: pointer;
     font-size: 0.9em;
     color: rgba(255, 255, 255, 0.8);
+    transition: background 0.2s, color 0.2s;
+}
+#settings-page .checkbox-label:hover {
+    background: rgba(255, 255, 255, 0.02);
+    color: #fff;
 }
 #settings-page .checkbox-label:last-child { border-bottom: none; }
 
@@ -43966,7 +44037,8 @@ tr.tag-diff-same {
     transition: border-color 0.2s;
 }
 #settings-page .tag-service-group:hover {
-    border-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
 }
 #settings-page .tag-service-header {
     padding: 12px 18px;
@@ -43988,6 +44060,15 @@ tr.tag-diff-same {
     border-radius: 10px;
     font-size: 0.92em;
     font-weight: 600;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+#settings-page .settings-actions .save-button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 20px rgba(var(--accent-rgb, 29, 185, 84), 0.35);
+}
+#settings-page .settings-actions .save-button:active {
+    transform: scale(0.99);
+    box-shadow: 0 2px 8px rgba(var(--accent-rgb, 29, 185, 84), 0.2);
 }
 
 /* ── Path input groups (dir paths with Unlock buttons) ── */
@@ -44078,6 +44159,16 @@ tr.tag-diff-same {
     border-radius: 12px;
     padding: 4px 18px;
     margin: 8px 0;
+    transition: border-color 0.25s, box-shadow 0.25s;
+}
+#settings-page #soulseek-settings-container:hover,
+#settings-page #tidal-download-settings-container:hover,
+#settings-page #qobuz-settings-container:hover,
+#settings-page #hifi-download-settings-container:hover,
+#settings-page #youtube-settings-container:hover,
+#settings-page #hybrid-settings-container:hover {
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 2px 16px rgba(0, 0, 0, 0.12);
 }
 
 /* ── Path inputs with lock buttons ── */
@@ -44104,9 +44195,16 @@ tr.tag-diff-same {
     transition: all 0.2s;
     user-select: none;
 }
-.hybrid-source-item:hover { border-color: rgba(255, 255, 255, 0.12); }
+.hybrid-source-item:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    transform: translateX(2px);
+}
 .hybrid-source-item.disabled {
     opacity: 0.35;
+}
+.hybrid-source-item.disabled:hover {
+    transform: none;
 }
 .hybrid-source-arrows {
     display: flex;
