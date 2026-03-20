@@ -1253,9 +1253,10 @@ async function openPersonalSettings() {
 
         // Build sections
         body.innerHTML = '';
-        // Spotify + server library per-profile only shown for non-admin profiles
+        // Spotify + Tidal + server library per-profile only shown for non-admin profiles
         if (currentProfile && !currentProfile.is_admin) {
             renderPersonalSettingsSpotify(body, spotifyData);
+            renderPersonalSettingsTidal(body);
             try {
                 const libRes = await fetch('/api/profiles/me/server-library');
                 const libData = await libRes.json();
@@ -1374,6 +1375,31 @@ async function savePersonalSpotify() {
 async function authenticatePersonalSpotify() {
     // Trigger OAuth flow with profile_id in state so callback knows which profile
     window.open('/auth/spotify?profile_id=' + (currentProfile?.id || ''), '_blank');
+}
+
+function renderPersonalSettingsTidal(body) {
+    const section = document.createElement('div');
+    section.id = 'ps-tidal-section';
+    section.innerHTML = `
+        <div class="ps-section">
+            <div class="ps-section-header">
+                <h4 class="ps-section-title">Tidal</h4>
+            </div>
+            <div class="ps-help-text" style="margin-bottom:12px;">
+                Connect your own Tidal account to see your playlists. Uses the admin's Tidal app credentials.
+            </div>
+            <div class="ps-actions">
+                <button class="ps-btn ps-btn-primary" onclick="authenticatePersonalTidal()">🔐 Authenticate Tidal</button>
+            </div>
+        </div>
+    `;
+    const existing = document.getElementById('ps-tidal-section');
+    if (existing) existing.replaceWith(section);
+    else body.appendChild(section);
+}
+
+function authenticatePersonalTidal() {
+    window.open('/auth/tidal?profile_id=' + (currentProfile?.id || ''), '_blank');
 }
 
 function renderPersonalSettingsServerLibrary(body, data) {
