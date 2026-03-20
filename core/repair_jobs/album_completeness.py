@@ -20,13 +20,17 @@ class AlbumCompletenessJob(RepairJob):
         'You can use the Download Missing feature from the album page to fill gaps.\n\n'
         'Settings:\n'
         '- Min Tracks For Check: Only check albums with at least this many expected tracks '
-        '(skips singles and EPs)'
+        '(skips singles and EPs)\n'
+        '- Min Completion %: Only flag albums where you already have at least this percentage '
+        'of tracks (e.g. 30% skips albums where you only have 1 track from a playlist import, '
+        'but catches albums where a download partially failed)'
     )
     icon = 'repair-icon-completeness'
     default_enabled = False
     default_interval_hours = 168
     default_settings = {
         'min_tracks_for_check': 3,
+        'min_completion_pct': 0,
     }
     auto_fix = False
 
@@ -35,6 +39,7 @@ class AlbumCompletenessJob(RepairJob):
 
         settings = self._get_settings(context)
         min_tracks = settings.get('min_tracks_for_check', 3)
+        min_completion_pct = settings.get('min_completion_pct', 0)
 
         # Fetch all albums with ANY external source ID — not just Spotify
         albums = []
@@ -147,6 +152,16 @@ class AlbumCompletenessJob(RepairJob):
                 if context.update_progress and (i + 1) % 5 == 0:
                     context.update_progress(i + 1, total)
                 continue
+
+            # Skip albums below minimum completion percentage
+            # (filters out "1 track from a playlist import" false positives)
+            if min_completion_pct > 0 and expected_total > 0:
+                completion = (actual_count / expected_total) * 100
+                if completion < min_completion_pct:
+                    result.skipped += 1
+                    if context.update_progress and (i + 1) % 5 == 0:
+                        context.update_progress(i + 1, total)
+                    continue
 
             # Album is incomplete — try to find which tracks are missing
             missing_tracks = self._find_missing_tracks(
