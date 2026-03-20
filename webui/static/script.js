@@ -56354,6 +56354,66 @@ const AUTO_HUB_GROUPS = [
             { name: 'Guardian — Notify', trigger_type: 'signal_received', trigger_config: { signal_name: 'guardian_quality_done' }, action_type: 'notify_only', action_config: {}, then_actions: [], group_name: 'Library Guardian', needs_notify: true },
         ]
     },
+    {
+        id: 'startup-recovery', icon: '⚡', name: 'Startup Recovery',
+        desc: 'Self-heal after a restart. Scans your library, processes pending wishlist items, and cleans up automatically.',
+        category: 'Maintenance', badge: '3 automations', color: '#14b8a6',
+        steps: [
+            { label: 'Scan Library', icon: '📚', type: 'action' },
+            { label: 'Process Wishlist', icon: '📥', type: 'action' },
+            { label: 'Cleanup', icon: '🧹', type: 'action' },
+        ],
+        automations: [
+            { name: 'Startup — Scan Library', trigger_type: 'app_started', trigger_config: {}, action_type: 'scan_library', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'startup_scanned' } }], group_name: 'Startup Recovery' },
+            { name: 'Startup — Process Wishlist', trigger_type: 'signal_received', trigger_config: { signal_name: 'startup_scanned' }, action_type: 'process_wishlist', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'startup_processed' } }], group_name: 'Startup Recovery' },
+            { name: 'Startup — Cleanup', trigger_type: 'signal_received', trigger_config: { signal_name: 'startup_processed' }, action_type: 'full_cleanup', action_config: {}, then_actions: [], group_name: 'Startup Recovery' },
+        ]
+    },
+    {
+        id: 'import-pipeline', icon: '📦', name: 'Import Pipeline',
+        desc: 'After importing files, automatically scans your library, runs a quality check, and notifies you when complete.',
+        category: 'Maintenance', badge: '3 automations', color: '#a855f7',
+        steps: [
+            { label: 'Scan Library', icon: '📚', type: 'action' },
+            { label: 'Quality Check', icon: '✅', type: 'action' },
+            { label: 'Notify', icon: '🔔', type: 'notify' },
+        ],
+        automations: [
+            { name: 'Import — Scan Library', trigger_type: 'import_completed', trigger_config: {}, action_type: 'scan_library', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'import_scanned' } }], group_name: 'Import Pipeline' },
+            { name: 'Import — Quality Check', trigger_type: 'signal_received', trigger_config: { signal_name: 'import_scanned' }, action_type: 'start_quality_scan', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'import_quality_done' } }], group_name: 'Import Pipeline' },
+            { name: 'Import — Notify', trigger_type: 'signal_received', trigger_config: { signal_name: 'import_quality_done' }, action_type: 'notify_only', action_config: {}, then_actions: [], group_name: 'Import Pipeline', needs_notify: true },
+        ]
+    },
+    {
+        id: 'weekly-deep-clean', icon: '✨', name: 'Weekly Deep Clean',
+        desc: 'Comprehensive weekly sweep: find duplicates, check quality, clean up, back up, and report results.',
+        category: 'Maintenance', badge: '5 automations', color: '#ec4899',
+        steps: [
+            { label: 'Duplicates', icon: '📋', type: 'action' },
+            { label: 'Quality', icon: '✅', type: 'action' },
+            { label: 'Cleanup', icon: '🧹', type: 'action' },
+            { label: 'Backup', icon: '💾', type: 'action' },
+            { label: 'Notify', icon: '🔔', type: 'notify' },
+        ],
+        automations: [
+            { name: 'Deep Clean — Duplicates', trigger_type: 'weekly_time', trigger_config: { days: ['sunday'], time: '02:00' }, action_type: 'run_duplicate_cleaner', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'dc_dedup_done' } }], group_name: 'Weekly Deep Clean' },
+            { name: 'Deep Clean — Quality', trigger_type: 'signal_received', trigger_config: { signal_name: 'dc_dedup_done' }, action_type: 'start_quality_scan', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'dc_quality_done' } }], group_name: 'Weekly Deep Clean' },
+            { name: 'Deep Clean — Cleanup', trigger_type: 'signal_received', trigger_config: { signal_name: 'dc_quality_done' }, action_type: 'full_cleanup', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'dc_cleanup_done' } }], group_name: 'Weekly Deep Clean' },
+            { name: 'Deep Clean — Backup', trigger_type: 'signal_received', trigger_config: { signal_name: 'dc_cleanup_done' }, action_type: 'backup_database', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'dc_backup_done' } }], group_name: 'Weekly Deep Clean' },
+            { name: 'Deep Clean — Notify', trigger_type: 'signal_received', trigger_config: { signal_name: 'dc_backup_done' }, action_type: 'notify_only', action_config: {}, then_actions: [], group_name: 'Weekly Deep Clean', needs_notify: true },
+        ]
+    },
+    {
+        id: 'beatport-fresh', icon: '🎧', name: 'Beatport Fresh',
+        desc: 'Keep your Beatport charts and playlists up to date with a daily cache refresh.',
+        category: 'Discovery', badge: '1 automation', color: '#84cc16',
+        steps: [
+            { label: 'Refresh Cache', icon: '🔄', type: 'action' },
+        ],
+        automations: [
+            { name: 'Beatport — Daily Refresh', trigger_type: 'daily_time', trigger_config: { time: '05:00' }, action_type: 'refresh_beatport_cache', action_config: {}, then_actions: [], group_name: 'Beatport Fresh' },
+        ]
+    },
 ];
 
 const AUTO_HUB_RECIPES = [
@@ -57130,7 +57190,7 @@ async function deployHubGroup(groupId) {
 
     if (created > 0) {
         showToast(`Deployed "${group.name}" — ${created} automation${created > 1 ? 's' : ''} created${failed ? `, ${failed} failed` : ''}`, 'success');
-        loadAutomationsPage();
+        loadAutomations();
     } else {
         showToast(`Failed to deploy "${group.name}"`, 'error');
     }
