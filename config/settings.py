@@ -444,7 +444,8 @@ class ConfigManager:
             "hydrabase": {
                 "url": "",
                 "api_key": "",
-                "auto_connect": False
+                "auto_connect": False,
+                "enabled": False
             },
             "content_filter": {
                 "allow_explicit": True

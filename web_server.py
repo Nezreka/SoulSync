@@ -4560,12 +4560,16 @@ _comparison_lock = threading.Lock()
 
 def _is_hydrabase_active():
     """Check if Hydrabase should be used as the primary metadata source.
-    Returns False when dev mode is off — no behavior change for normal users."""
+    Active when: (dev_mode OR hydrabase.enabled config) AND client connected."""
     try:
-        return (dev_mode_enabled
-                and hydrabase_client is not None
-                and hydrabase_client.is_connected())
-    except NameError:
+        if hydrabase_client is None or not hydrabase_client.is_connected():
+            return False
+        # Dev mode always enables Hydrabase (legacy behavior)
+        if dev_mode_enabled:
+            return True
+        # Config toggle: user enabled Hydrabase as metadata source
+        return config_manager.get('hydrabase.enabled', False)
+    except (NameError, Exception):
         return False
 
 def _run_background_comparison(query, hydrabase_counts=None):
@@ -40759,7 +40763,10 @@ try:
             timeout=10
         )
         _hydrabase_ws = _auto_ws
-        dev_mode_enabled = True
+        # Enable dev mode only if Hydrabase was previously in dev mode
+        # The config toggle (hydrabase.enabled) handles non-dev usage
+        if not _hydra_cfg.get('enabled'):
+            dev_mode_enabled = True
         print(f"✅ Hydrabase auto-connected to {_hydra_cfg['url']}")
 except Exception as e:
     print(f"⚠️ Hydrabase auto-reconnect failed: {e}")
