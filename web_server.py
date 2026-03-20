@@ -21592,17 +21592,18 @@ def _on_download_completed(batch_id, task_id, success=True):
                 successful_downloads = finished_count - failed_count
                 add_activity_item("✅", "Download Batch Complete", f"'{playlist_name}' - {successful_downloads} tracks downloaded", "Now")
 
-                # Emit batch_complete event for automation engine
-                try:
-                    if automation_engine:
-                        automation_engine.emit('batch_complete', {
-                            'playlist_name': playlist_name,
-                            'total_tracks': str(len(queue)),
-                            'completed_tracks': str(successful_downloads),
-                            'failed_tracks': str(failed_count),
-                        })
-                except Exception:
-                    pass
+                # Emit batch_complete event for automation engine (only if something downloaded)
+                if successful_downloads > 0:
+                    try:
+                        if automation_engine:
+                            automation_engine.emit('batch_complete', {
+                                'playlist_name': playlist_name,
+                                'total_tracks': str(len(queue)),
+                                'completed_tracks': str(successful_downloads),
+                                'failed_tracks': str(failed_count),
+                            })
+                    except Exception:
+                        pass
 
                 # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
                 playlist_id = batch.get('playlist_id')
@@ -24361,17 +24362,18 @@ def _check_batch_completion_v2(batch_id):
                     successful_downloads = finished_count - failed_count
                     add_activity_item("✅", "Download Batch Complete", f"'{playlist_name}' - {successful_downloads} tracks downloaded", "Now")
 
-                    # Emit batch_complete event for automation engine
-                    try:
-                        if automation_engine:
-                            automation_engine.emit('batch_complete', {
-                                'playlist_name': playlist_name,
-                                'total_tracks': str(len(queue)),
-                                'completed_tracks': str(successful_downloads),
-                                'failed_tracks': str(failed_count),
-                            })
-                    except Exception:
-                        pass
+                    # Emit batch_complete event for automation engine (only if something downloaded)
+                    if successful_downloads > 0:
+                        try:
+                            if automation_engine:
+                                automation_engine.emit('batch_complete', {
+                                    'playlist_name': playlist_name,
+                                    'total_tracks': str(len(queue)),
+                                    'completed_tracks': str(successful_downloads),
+                                    'failed_tracks': str(failed_count),
+                                })
+                        except Exception:
+                            pass
                 else:
                     print(f"✅ [Completion Check V2] Batch {batch_id} already marked complete - skipping duplicate processing")
                     return True  # Already complete
