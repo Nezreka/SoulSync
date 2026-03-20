@@ -355,6 +355,7 @@ class MusicDatabase:
             self._add_profile_support_v4(cursor)
             self._add_profile_settings(cursor)
             self._add_profile_listenbrainz_support(cursor)
+            self._add_profile_service_credentials(cursor)
 
             # Spotify library cache
             self._add_spotify_library_cache_table(cursor)
@@ -2580,6 +2581,158 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting profiles with ListenBrainz tokens: {e}")
             return []
+
+    # ── Per-profile service credentials (Spotify, Tidal, server library) ──
+
+    def _add_profile_service_credentials(self, cursor):
+        """Add per-profile Spotify, Tidal, and media server library columns to profiles table."""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_services_v1' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+
+            logger.info("Applying per-profile service credentials migration...")
+
+            columns = [
+                # Spotify per-profile
+                "ALTER TABLE profiles ADD COLUMN spotify_client_id TEXT DEFAULT NULL",
+                "ALTER TABLE profiles ADD COLUMN spotify_client_secret TEXT DEFAULT NULL",
+                "ALTER TABLE profiles ADD COLUMN spotify_redirect_uri TEXT DEFAULT NULL",
+                "ALTER TABLE profiles ADD COLUMN spotify_access_token TEXT DEFAULT NULL",
+                "ALTER TABLE profiles ADD COLUMN spotify_refresh_token TEXT DEFAULT NULL",
+                # Tidal per-profile
+                "ALTER TABLE profiles ADD COLUMN tidal_access_token TEXT DEFAULT NULL",
+                "ALTER TABLE profiles ADD COLUMN tidal_refresh_token TEXT DEFAULT NULL",
+                # Media server library selection per-profile
+                "ALTER TABLE profiles ADD COLUMN plex_library_id TEXT DEFAULT NULL",
+                "ALTER TABLE profiles ADD COLUMN jellyfin_user_id TEXT DEFAULT NULL",
+                "ALTER TABLE profiles ADD COLUMN jellyfin_library_id TEXT DEFAULT NULL",
+                "ALTER TABLE profiles ADD COLUMN navidrome_library_id TEXT DEFAULT NULL",
+            ]
+
+            for sql in columns:
+                try:
+                    cursor.execute(sql)
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value) VALUES ('profiles_services_v1', '1')
+            """)
+
+            logger.info("Per-profile service credentials migration completed")
+
+        except Exception as e:
+            logger.error(f"Error in per-profile service credentials migration: {e}")
+
+    def set_profile_spotify(self, profile_id: int, client_id: str, client_secret: str,
+                            redirect_uri: str = '') -> bool:
+        """Save Spotify API credentials for a profile (encrypted)."""
+        try:
+            from config.settings import config_manager
+            enc_id = config_manager._encrypt_value(client_id) if client_id else None
+            enc_secret = config_manager._encrypt_value(client_secret) if client_secret else None
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE profiles
+                    SET spotify_client_id = ?, spotify_client_secret = ?, spotify_redirect_uri = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (enc_id, enc_secret, redirect_uri or None, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting Spotify credentials for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_spotify(self, profile_id: int) -> Dict[str, Any]:
+        """Get decrypted Spotify credentials for a profile."""
+        try:
+            from config.settings import config_manager
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT spotify_client_id, spotify_client_secret, spotify_redirect_uri,
+                           spotify_access_token, spotify_refresh_token
+                    FROM profiles WHERE id = ?
+                """, (profile_id,))
+                row = cursor.fetchone()
+                if not row or not row[0]:
+                    return {}
+                return {
+                    'client_id': config_manager._decrypt_value(row[0]) if row[0] else '',
+                    'client_secret': config_manager._decrypt_value(row[1]) if row[1] else '',
+                    'redirect_uri': row[2] or '',
+                    'access_token': config_manager._decrypt_value(row[3]) if row[3] else '',
+                    'refresh_token': config_manager._decrypt_value(row[4]) if row[4] else '',
+                }
+        except Exception as e:
+            logger.error(f"Error getting Spotify credentials for profile {profile_id}: {e}")
+            return {}
+
+    def set_profile_spotify_tokens(self, profile_id: int, access_token: str, refresh_token: str) -> bool:
+        """Save Spotify OAuth tokens for a profile (from auth callback)."""
+        try:
+            from config.settings import config_manager
+            enc_access = config_manager._encrypt_value(access_token) if access_token else None
+            enc_refresh = config_manager._encrypt_value(refresh_token) if refresh_token else None
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE profiles
+                    SET spotify_access_token = ?, spotify_refresh_token = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (enc_access, enc_refresh, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting Spotify tokens for profile {profile_id}: {e}")
+            return False
+
+    def set_profile_server_library(self, profile_id: int, server_type: str,
+                                    library_id: str = None, user_id: str = None) -> bool:
+        """Save media server library/user selection for a profile."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if server_type == 'plex':
+                    cursor.execute("UPDATE profiles SET plex_library_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                   (library_id, profile_id))
+                elif server_type == 'jellyfin':
+                    cursor.execute("UPDATE profiles SET jellyfin_user_id = ?, jellyfin_library_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                   (user_id, library_id, profile_id))
+                elif server_type == 'navidrome':
+                    cursor.execute("UPDATE profiles SET navidrome_library_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                   (library_id, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting server library for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_server_library(self, profile_id: int) -> Dict[str, Any]:
+        """Get media server library/user selection for a profile."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT plex_library_id, jellyfin_user_id, jellyfin_library_id, navidrome_library_id
+                    FROM profiles WHERE id = ?
+                """, (profile_id,))
+                row = cursor.fetchone()
+                if not row:
+                    return {}
+                return {
+                    'plex_library_id': row[0],
+                    'jellyfin_user_id': row[1],
+                    'jellyfin_library_id': row[2],
+                    'navidrome_library_id': row[3],
+                }
+        except Exception as e:
+            logger.error(f"Error getting server library for profile {profile_id}: {e}")
+            return {}
 
     def _add_spotify_library_cache_table(self, cursor):
         """Create spotify_library_cache table for caching user's saved Spotify albums"""

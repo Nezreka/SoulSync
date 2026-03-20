@@ -31562,6 +31562,100 @@ def test_profile_listenbrainz():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# --- Per-Profile Service Credentials API ---
+
+@app.route('/api/profiles/me/spotify', methods=['GET'])
+def get_profile_spotify_creds():
+    """Get current profile's Spotify credentials (if set)"""
+    try:
+        profile_id = get_current_profile_id()
+        db = get_database()
+        creds = db.get_profile_spotify(profile_id)
+        return jsonify({
+            'success': True,
+            'has_credentials': bool(creds),
+            'client_id': creds.get('client_id', '') if creds else '',
+            'redirect_uri': creds.get('redirect_uri', '') if creds else '',
+            # Never return client_secret or tokens to frontend
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles/me/spotify', methods=['POST'])
+def save_profile_spotify_creds():
+    """Save Spotify API credentials for current profile"""
+    try:
+        data = request.json or {}
+        client_id = data.get('client_id', '').strip()
+        client_secret = data.get('client_secret', '').strip()
+        redirect_uri = data.get('redirect_uri', '').strip()
+
+        if not client_id or not client_secret:
+            return jsonify({'success': False, 'error': 'Client ID and Secret are required'}), 400
+
+        profile_id = get_current_profile_id()
+        db = get_database()
+        success = db.set_profile_spotify(profile_id, client_id, client_secret, redirect_uri)
+
+        if success:
+            return jsonify({'success': True})
+        return jsonify({'success': False, 'error': 'Failed to save credentials'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles/me/spotify', methods=['DELETE'])
+def delete_profile_spotify_creds():
+    """Clear Spotify credentials for current profile (revert to global)"""
+    try:
+        profile_id = get_current_profile_id()
+        db = get_database()
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE profiles
+                SET spotify_client_id = NULL, spotify_client_secret = NULL,
+                    spotify_redirect_uri = NULL, spotify_access_token = NULL,
+                    spotify_refresh_token = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (profile_id,))
+            conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles/me/server-library', methods=['GET'])
+def get_profile_server_library():
+    """Get current profile's media server library selection"""
+    try:
+        profile_id = get_current_profile_id()
+        db = get_database()
+        libs = db.get_profile_server_library(profile_id)
+        return jsonify({'success': True, **libs})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles/me/server-library', methods=['POST'])
+def save_profile_server_library():
+    """Save media server library/user selection for current profile"""
+    try:
+        data = request.json or {}
+        server_type = data.get('server_type', '')
+        library_id = data.get('library_id')
+        user_id = data.get('user_id')
+
+        if server_type not in ('plex', 'jellyfin', 'navidrome'):
+            return jsonify({'success': False, 'error': 'Invalid server type'}), 400
+
+        profile_id = get_current_profile_id()
+        db = get_database()
+        success = db.set_profile_server_library(profile_id, server_type, library_id, user_id)
+
+        if success:
+            return jsonify({'success': True})
+        return jsonify({'success': False, 'error': 'Failed to save library selection'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 # --- Watchlist API Endpoints ---
 
 @app.route('/api/watchlist/count', methods=['GET'])
