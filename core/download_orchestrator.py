@@ -91,6 +91,17 @@ class DownloadOrchestrator:
 
         return False
 
+    def get_source_status(self) -> dict:
+        """Return configured status for each download source."""
+        clients = {
+            'soulseek': self.soulseek,
+            'youtube': self.youtube,
+            'tidal': self.tidal,
+            'qobuz': self.qobuz,
+            'hifi': self.hifi,
+        }
+        return {name: client.is_configured() for name, client in clients.items()}
+
     async def check_connection(self) -> bool:
         """
         Test if download sources are accessible.
@@ -176,15 +187,20 @@ class DownloadOrchestrator:
 
             logger.info(f"🔍 Hybrid search ({' → '.join(source_order)}): {query}")
 
-            # Try each source in priority order
+            # Try each source in priority order (skip unconfigured ones)
             for i, source_name in enumerate(source_order):
+                client = clients[source_name]
+                if hasattr(client, 'is_configured') and not client.is_configured():
+                    logger.info(f"⏭️ Skipping {source_name} (not configured)")
+                    continue
+
                 try:
                     if i == 0:
                         logger.info(f"🔍 Trying {source_name} (priority {i+1}): {query}")
                     else:
                         logger.info(f"🔄 Trying {source_name} (priority {i+1}): {query}")
 
-                    tracks, albums = await clients[source_name].search(query, timeout, progress_callback)
+                    tracks, albums = await client.search(query, timeout, progress_callback)
                     if tracks:
                         logger.info(f"✅ {source_name} found {len(tracks)} tracks")
                         return (tracks, albums)
