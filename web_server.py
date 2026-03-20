@@ -4559,16 +4559,14 @@ _COMPARISON_MAX_ENTRIES = 50
 _comparison_lock = threading.Lock()
 
 def _is_hydrabase_active():
-    """Check if Hydrabase should be used as the primary metadata source.
-    Active when: (dev_mode OR selected as fallback source) AND client connected."""
+    """Check if Hydrabase should be used as the PRIMARY metadata source (replaces Spotify).
+    Only active in dev mode — the legacy 'Hydrabase replaces everything' behavior.
+    When selected as a fallback source, Hydrabase works through the normal fallback
+    path (_get_metadata_fallback_client) just like iTunes/Deezer — not as primary."""
     try:
         if hydrabase_client is None or not hydrabase_client.is_connected():
             return False
-        # Dev mode always enables Hydrabase (legacy behavior)
-        if dev_mode_enabled:
-            return True
-        # Selected as the fallback metadata source
-        return _get_metadata_fallback_source() == 'hydrabase'
+        return dev_mode_enabled
     except (NameError, Exception):
         return False
 
@@ -15357,85 +15355,70 @@ def _embed_source_ids(audio_file, metadata: dict):
             if metadata.get('itunes_album_id'):
                 id_tags['ITUNES_ALBUM_ID'] = metadata['itunes_album_id']
 
-        # ── 2a. MusicBrainz lookup for MBID, genres, and ISRC ──
-        # The global rate limiter in musicbrainz_client.py serializes all API
-        # calls (worker + any number of post-processing threads) to 1 req/sec
-        # via _api_call_lock, so no pause/resume needed.
-        recording_mbid = None
-        artist_mbid = None
-        _rc_mbid = ''
-        mb_genres = []
-        isrc = None
+        # Shared post-processing context for modular lookups
         track_title = metadata.get('title', '')
-        # Use album_artist (single primary artist) for MB lookup, not the
-        # comma-joined multi-artist field which would give bad search results
         artist_name = metadata.get('album_artist', '') or metadata.get('artist', '')
+        pp = {
+            'id_tags': id_tags,
+            'track_title': track_title,
+            'artist_name': artist_name,
+            'metadata': metadata,
+            'recording_mbid': None,
+            'artist_mbid': None,
+            'release_mbid': '',
+            'mb_genres': [],
+            'isrc': None,
+            'deezer_bpm': None, 'deezer_isrc': None,
+            'audiodb_mood': None, 'audiodb_style': None, 'audiodb_genre': None,
+            'tidal_isrc': None, 'tidal_copyright': None,
+            'qobuz_isrc': None, 'qobuz_copyright': None, 'qobuz_label': None,
+            'lastfm_tags': [], 'lastfm_url': None,
+            'genius_url': None,
+        }
 
-        if not config_manager.get('musicbrainz.embed_tags', True):
-            # Skip MB lookup, just write Spotify/iTunes IDs if any
-            pass
-        elif track_title and artist_name:
-            try:
-                mb_service = mb_worker.mb_service if mb_worker else None
-                if mb_service:
-                    result = mb_service.match_recording(track_title, artist_name)
-                    if result and result.get('mbid'):
-                        recording_mbid = result['mbid']
-                        id_tags['MUSICBRAINZ_RECORDING_ID'] = recording_mbid
-                        print(f"🎵 MusicBrainz recording matched: {recording_mbid}")
+        # Run each metadata source lookup in configured order
+        _pp_source_order = config_manager.get('metadata_enhancement.post_process_order', None)
+        if not _pp_source_order or not isinstance(_pp_source_order, list):
+            _pp_source_order = ['musicbrainz', 'deezer', 'audiodb', 'tidal', 'qobuz', 'lastfm', 'genius']
 
-                        # Lookup recording details for ISRC and genres
-                        details = mb_service.mb_client.get_recording(
-                            recording_mbid, includes=['isrcs', 'genres']
-                        )
-                        if details:
-                            isrcs = details.get('isrcs', [])
-                            if isrcs:
-                                isrc = isrcs[0]
-                            mb_genres = [
-                                g['name'] for g in sorted(
-                                    details.get('genres', []),
-                                    key=lambda x: x.get('count', 0),
-                                    reverse=True
-                                )
-                            ]
+        _pp_lookup_map = {
+            'musicbrainz': _pp_lookup_musicbrainz,
+            'deezer': _pp_lookup_deezer,
+            'audiodb': _pp_lookup_audiodb,
+            'tidal': _pp_lookup_tidal,
+            'qobuz': _pp_lookup_qobuz,
+            'lastfm': _pp_lookup_lastfm,
+            'genius': _pp_lookup_genius,
+        }
 
-                    # Use track artist (not album artist) for artist MBID tag
-                    track_artist_name = metadata.get('artist', '') or artist_name
-                    # For multi-artist tracks, use the first artist only
-                    if ', ' in track_artist_name:
-                        track_artist_name = track_artist_name.split(', ')[0]
-                    artist_result = mb_service.match_artist(track_artist_name)
-                    if artist_result and artist_result.get('mbid'):
-                        artist_mbid = artist_result['mbid']
-                        id_tags['MUSICBRAINZ_ARTIST_ID'] = artist_mbid
+        for source_name in _pp_source_order:
+            fn = _pp_lookup_map.get(source_name)
+            if fn:
+                fn(pp, _names_match)
 
-                    # Get release (album) MBID via thread-safe in-memory cache.
-                    # Without this, concurrent threads each call match_release
-                    # and get different release variants, splitting albums.
-                    album_name_for_mb = metadata.get('album', '')
-                    if album_name_for_mb:
-                        _rc_key = (album_name_for_mb.lower().strip(), artist_name.lower().strip())
-                        with _mb_release_cache_lock:
-                            if _rc_key in _mb_release_cache:
-                                _rc_mbid = _mb_release_cache[_rc_key]
-                            else:
-                                try:
-                                    _rc_result = mb_service.match_release(album_name_for_mb, artist_name)
-                                    _rc_mbid = _rc_result.get('mbid', '') if _rc_result else ''
-                                except Exception:
-                                    _rc_mbid = ''
-                                _mb_release_cache[_rc_key] = _rc_mbid
-                        if _rc_mbid:
-                            id_tags['MUSICBRAINZ_RELEASE_ID'] = _rc_mbid
-                else:
-                    print("⚠️ MusicBrainz worker not available, skipping MBID lookup")
-            except Exception as e:
-                print(f"⚠️ MusicBrainz lookup failed (non-fatal): {e}")
+        # Extract results from shared context after all lookups
+        recording_mbid = pp['recording_mbid']
+        artist_mbid = pp['artist_mbid']
+        _rc_mbid = pp['release_mbid']
+        mb_genres = pp['mb_genres']
+        isrc = pp['isrc']
+        deezer_bpm = pp['deezer_bpm']
+        deezer_isrc = pp['deezer_isrc']
+        audiodb_mood = pp['audiodb_mood']
+        audiodb_style = pp['audiodb_style']
+        audiodb_genre = pp['audiodb_genre']
+        tidal_isrc = pp['tidal_isrc']
+        tidal_copyright = pp['tidal_copyright']
+        qobuz_isrc = pp['qobuz_isrc']
+        qobuz_copyright = pp['qobuz_copyright']
+        qobuz_label = pp['qobuz_label']
+        lastfm_tags = pp['lastfm_tags']
+        lastfm_url = pp['lastfm_url']
+        genius_url = pp['genius_url']
+        id_tags = pp['id_tags']
 
-        # ── 2a-2. MusicBrainz release details (release group, barcode, media, etc.) ──
-        # One API call per release, cached across all tracks on the same album.
-        if _rc_mbid:
+        # (All source lookups now handled by _pp_lookup_* functions called via configurable order above)
+        if False:  # Dead code — old inline blocks preserved for reference during transition
             try:
                 mb_service_for_detail = mb_worker.mb_service if mb_worker else None
                 if mb_service_for_detail:
@@ -16022,6 +16005,322 @@ def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -
 
 
 # --- Post-Processing Logic ---
+# ── Modular post-processing metadata lookup functions ──
+# Each function receives a shared `pp` context dict and writes its results to it.
+# The orchestrator in _post_process_matched_download calls them in configurable order.
+
+def _pp_lookup_musicbrainz(pp, _names_match):
+    """MusicBrainz: recording MBID, artist MBID, release MBID, ISRC, genres, release details."""
+    if not config_manager.get('musicbrainz.embed_tags', True):
+        return
+    track_title = pp['track_title']
+    artist_name = pp['artist_name']
+    metadata = pp['metadata']
+    id_tags = pp['id_tags']
+    if not track_title or not artist_name:
+        return
+    try:
+        mb_service = mb_worker.mb_service if mb_worker else None
+        if not mb_service:
+            print("⚠️ MusicBrainz worker not available, skipping MBID lookup")
+            return
+        result = mb_service.match_recording(track_title, artist_name)
+        if result and result.get('mbid'):
+            pp['recording_mbid'] = result['mbid']
+            id_tags['MUSICBRAINZ_RECORDING_ID'] = pp['recording_mbid']
+            print(f"🎵 MusicBrainz recording matched: {pp['recording_mbid']}")
+            details = mb_service.mb_client.get_recording(pp['recording_mbid'], includes=['isrcs', 'genres'])
+            if details:
+                isrcs = details.get('isrcs', [])
+                if isrcs:
+                    pp['isrc'] = isrcs[0]
+                pp['mb_genres'] = [g['name'] for g in sorted(details.get('genres', []), key=lambda x: x.get('count', 0), reverse=True)]
+
+        track_artist_name = metadata.get('artist', '') or artist_name
+        if ', ' in track_artist_name:
+            track_artist_name = track_artist_name.split(', ')[0]
+        artist_result = mb_service.match_artist(track_artist_name)
+        if artist_result and artist_result.get('mbid'):
+            pp['artist_mbid'] = artist_result['mbid']
+            id_tags['MUSICBRAINZ_ARTIST_ID'] = pp['artist_mbid']
+
+        album_name_for_mb = metadata.get('album', '')
+        if album_name_for_mb:
+            _rc_key = (album_name_for_mb.lower().strip(), artist_name.lower().strip())
+            with _mb_release_cache_lock:
+                if _rc_key in _mb_release_cache:
+                    pp['release_mbid'] = _mb_release_cache[_rc_key]
+                else:
+                    try:
+                        _rc_result = mb_service.match_release(album_name_for_mb, artist_name)
+                        pp['release_mbid'] = _rc_result.get('mbid', '') if _rc_result else ''
+                    except Exception:
+                        pp['release_mbid'] = ''
+                    _mb_release_cache[_rc_key] = pp['release_mbid']
+            if pp['release_mbid']:
+                id_tags['MUSICBRAINZ_RELEASE_ID'] = pp['release_mbid']
+
+        # Release details (group, barcode, media, etc.)
+        if pp['release_mbid']:
+            with _mb_release_detail_cache_lock:
+                release_detail = _mb_release_detail_cache.get(pp['release_mbid'])
+            if release_detail is None:
+                release_detail = mb_service.mb_client.get_release(
+                    pp['release_mbid'], includes=['release-groups', 'labels', 'media', 'artist-credits', 'recordings']
+                ) or {}
+                with _mb_release_detail_cache_lock:
+                    _mb_release_detail_cache[pp['release_mbid']] = release_detail
+            if release_detail:
+                rg = release_detail.get('release-group', {})
+                if rg.get('id'): id_tags['MUSICBRAINZ_RELEASEGROUPID'] = rg['id']
+                ac = release_detail.get('artist-credit', [])
+                if ac and isinstance(ac[0], dict):
+                    aa = ac[0].get('artist', {})
+                    if aa.get('id'): id_tags['MUSICBRAINZ_ALBUMARTISTID'] = aa['id']
+                if rg.get('primary-type'): id_tags['RELEASETYPE'] = rg['primary-type']
+                if rg.get('first-release-date'): id_tags['ORIGINALDATE'] = rg['first-release-date']
+                if release_detail.get('status'): id_tags['RELEASESTATUS'] = release_detail['status']
+                if release_detail.get('country'): id_tags['RELEASECOUNTRY'] = release_detail['country']
+                if release_detail.get('barcode'): id_tags['BARCODE'] = release_detail['barcode']
+                media_list = release_detail.get('media', [])
+                if media_list:
+                    fmt = media_list[0].get('format', '')
+                    if fmt: id_tags['MEDIA'] = fmt
+                    id_tags['TOTALDISCS'] = str(len(media_list))
+                label_info = release_detail.get('label-info', [])
+                if label_info and isinstance(label_info[0], dict):
+                    cat = label_info[0].get('catalog-number', '')
+                    if cat: id_tags['CATALOGNUMBER'] = cat
+                text_rep = release_detail.get('text-representation', {})
+                if isinstance(text_rep, dict) and text_rep.get('script'):
+                    id_tags['SCRIPT'] = text_rep['script']
+                if release_detail.get('asin'): id_tags['ASIN'] = release_detail['asin']
+                _trk_num = metadata.get('track_number')
+                _disc_num = metadata.get('disc_number') or 1
+                if _trk_num and media_list:
+                    try:
+                        _trk_num_int, _disc_num_int = int(_trk_num), int(_disc_num)
+                        for medium in media_list:
+                            if medium.get('position', 1) == _disc_num_int:
+                                for mtrack in (medium.get('tracks') or medium.get('track-list', [])):
+                                    if mtrack.get('position') == _trk_num_int and mtrack.get('id'):
+                                        id_tags['MUSICBRAINZ_RELEASETRACKID'] = mtrack['id']
+                                        break
+                                break
+                    except (ValueError, TypeError):
+                        pass
+    except Exception as e:
+        print(f"⚠️ MusicBrainz lookup failed (non-fatal): {e}")
+
+
+def _pp_lookup_deezer(pp, _names_match):
+    """Deezer: BPM, ISRC fallback, track/artist IDs."""
+    if not config_manager.get('deezer.embed_tags', True):
+        return
+    track_title, artist_name = pp['track_title'], pp['artist_name']
+    id_tags = pp['id_tags']
+    if not track_title or not artist_name:
+        return
+    try:
+        dz_client = deezer_worker.client if deezer_worker else None
+        if not dz_client:
+            print("⚠️ Deezer worker not available, skipping Deezer lookup")
+            return
+        dz_result = dz_client.search_track(artist_name, track_title)
+        if dz_result and _names_match(dz_result.get('title', ''), track_title) and \
+           _names_match(dz_result.get('artist', {}).get('name', ''), artist_name):
+            dz_track_id = dz_result['id']
+            id_tags['DEEZER_TRACK_ID'] = str(dz_track_id)
+            dz_artist_id = dz_result.get('artist', {}).get('id')
+            if dz_artist_id:
+                id_tags['DEEZER_ARTIST_ID'] = str(dz_artist_id)
+            print(f"🎵 Deezer track matched: {dz_track_id}")
+            dz_details = dz_client.get_track_details(dz_track_id)
+            if dz_details:
+                bpm_val = dz_details.get('bpm')
+                if bpm_val and bpm_val > 0:
+                    pp['deezer_bpm'] = bpm_val
+                dz_isrc = dz_details.get('isrc')
+                if dz_isrc:
+                    pp['deezer_isrc'] = dz_isrc
+    except Exception as e:
+        print(f"⚠️ Deezer lookup failed (non-fatal): {e}")
+
+
+def _pp_lookup_audiodb(pp, _names_match):
+    """AudioDB: mood, style, genre, track ID, MusicBrainz ID fallbacks."""
+    if not config_manager.get('audiodb.embed_tags', True):
+        return
+    track_title, artist_name = pp['track_title'], pp['artist_name']
+    id_tags = pp['id_tags']
+    if not track_title or not artist_name:
+        return
+    try:
+        adb_client = audiodb_worker.client if audiodb_worker else None
+        if not adb_client:
+            print("⚠️ AudioDB worker not available, skipping AudioDB lookup")
+            return
+        adb_result = adb_client.search_track(artist_name, track_title)
+        if adb_result and _names_match(adb_result.get('strTrack', ''), track_title) and \
+           _names_match(adb_result.get('strArtist', ''), artist_name):
+            adb_track_id = adb_result.get('idTrack')
+            if adb_track_id:
+                id_tags['AUDIODB_TRACK_ID'] = str(adb_track_id)
+                print(f"🎵 AudioDB track matched: {adb_track_id}")
+            adb_mb_track = adb_result.get('strMusicBrainzID')
+            if adb_mb_track and 'MUSICBRAINZ_RECORDING_ID' not in id_tags:
+                id_tags['MUSICBRAINZ_RECORDING_ID'] = adb_mb_track
+                pp['recording_mbid'] = adb_mb_track
+                print(f"🎵 MusicBrainz recording ID from AudioDB fallback: {adb_mb_track}")
+            adb_mb_artist = adb_result.get('strMusicBrainzArtistID')
+            if adb_mb_artist and 'MUSICBRAINZ_ARTIST_ID' not in id_tags:
+                id_tags['MUSICBRAINZ_ARTIST_ID'] = adb_mb_artist
+                pp['artist_mbid'] = adb_mb_artist
+                print(f"🎵 MusicBrainz artist ID from AudioDB fallback: {adb_mb_artist}")
+            pp['audiodb_mood'] = adb_result.get('strMood') or None
+            pp['audiodb_style'] = adb_result.get('strStyle') or None
+            pp['audiodb_genre'] = adb_result.get('strGenre') or None
+    except Exception as e:
+        print(f"⚠️ AudioDB lookup failed (non-fatal): {e}")
+
+
+def _pp_lookup_tidal(pp, _names_match):
+    """Tidal: ISRC fallback, copyright, track/artist IDs."""
+    if not config_manager.get('tidal.embed_tags', True):
+        return
+    track_title, artist_name = pp['track_title'], pp['artist_name']
+    id_tags = pp['id_tags']
+    if not track_title or not artist_name:
+        return
+    try:
+        if not (tidal_client and tidal_client.is_authenticated()):
+            return
+        td_result = tidal_client.search_track(artist_name, track_title)
+        if td_result and _names_match(td_result.get('title', ''), track_title):
+            td_track_id = td_result.get('id')
+            if td_track_id:
+                id_tags['TIDAL_TRACK_ID'] = str(td_track_id)
+                print(f"🎵 Tidal track matched: {td_track_id}")
+            td_artist = td_result.get('artist', {})
+            if isinstance(td_artist, dict) and td_artist.get('id'):
+                id_tags['TIDAL_ARTIST_ID'] = str(td_artist['id'])
+            if td_track_id:
+                td_details = tidal_client.get_track(str(td_track_id))
+                if td_details:
+                    td_isrc = td_details.get('isrc')
+                    if td_isrc:
+                        pp['tidal_isrc'] = td_isrc
+                    td_copyright = td_details.get('copyright')
+                    if isinstance(td_copyright, dict):
+                        td_copyright = td_copyright.get('text', td_copyright.get('name', ''))
+                    if td_copyright:
+                        pp['tidal_copyright'] = td_copyright
+    except Exception as e:
+        print(f"⚠️ Tidal lookup failed (non-fatal): {e}")
+
+
+def _pp_lookup_qobuz(pp, _names_match):
+    """Qobuz: ISRC fallback, copyright, label, track/artist IDs."""
+    if not config_manager.get('qobuz.embed_tags', True):
+        return
+    track_title, artist_name = pp['track_title'], pp['artist_name']
+    id_tags = pp['id_tags']
+    if not track_title or not artist_name:
+        return
+    try:
+        qz_client = qobuz_enrichment_worker.client if qobuz_enrichment_worker else None
+        if not (qz_client and qz_client.is_authenticated()):
+            return
+        qz_result = qz_client.search_track(artist_name, track_title)
+        if qz_result:
+            qz_performer = (qz_result.get('performer') or {})
+            if not isinstance(qz_performer, dict):
+                qz_performer = {}
+            qz_artist_name = qz_performer.get('name', '')
+            if _names_match(qz_result.get('title', ''), track_title) and \
+               _names_match(qz_artist_name, artist_name):
+                qz_track_id = qz_result.get('id')
+                if qz_track_id:
+                    id_tags['QOBUZ_TRACK_ID'] = str(qz_track_id)
+                    print(f"🎵 Qobuz track matched: {qz_track_id}")
+                if isinstance(qz_performer, dict) and qz_performer.get('id'):
+                    id_tags['QOBUZ_ARTIST_ID'] = str(qz_performer['id'])
+                qz_isrc = qz_result.get('isrc')
+                if isinstance(qz_isrc, dict):
+                    qz_isrc = qz_isrc.get('value', qz_isrc.get('id', ''))
+                if qz_isrc:
+                    pp['qobuz_isrc'] = qz_isrc
+                qz_copyright = qz_result.get('copyright')
+                if isinstance(qz_copyright, dict):
+                    qz_copyright = qz_copyright.get('text', qz_copyright.get('name', ''))
+                if qz_copyright and isinstance(qz_copyright, str):
+                    pp['qobuz_copyright'] = qz_copyright
+                qz_album = qz_result.get('album', {})
+                if isinstance(qz_album, dict):
+                    qz_label_info = qz_album.get('label', {})
+                    if isinstance(qz_label_info, dict) and qz_label_info.get('name'):
+                        pp['qobuz_label'] = qz_label_info['name']
+    except Exception as e:
+        print(f"⚠️ Qobuz lookup failed (non-fatal): {e}")
+
+
+def _pp_lookup_lastfm(pp, _names_match):
+    """Last.fm: genre tags, track URL."""
+    if not config_manager.get('lastfm.embed_tags', True):
+        return
+    track_title, artist_name = pp['track_title'], pp['artist_name']
+    if not track_title or not artist_name:
+        return
+    try:
+        lf_client = lastfm_worker.client if lastfm_worker else None
+        if not lf_client:
+            return
+        lf_result = lf_client.get_track_info(artist_name, track_title)
+        if lf_result:
+            lf_url = lf_result.get('url')
+            if lf_url:
+                pp['lastfm_url'] = lf_url
+            lf_toptags = lf_result.get('toptags', {})
+            if isinstance(lf_toptags, dict):
+                tag_list = lf_toptags.get('tag', [])
+                if isinstance(tag_list, list):
+                    pp['lastfm_tags'] = [t.get('name', '') for t in tag_list if isinstance(t, dict) and t.get('name')]
+                elif isinstance(tag_list, dict) and tag_list.get('name'):
+                    pp['lastfm_tags'] = [tag_list['name']]
+            print(f"🎵 Last.fm track info found: {len(pp['lastfm_tags'])} tags")
+    except Exception as e:
+        print(f"⚠️ Last.fm lookup failed (non-fatal): {e}")
+
+
+def _pp_lookup_genius(pp, _names_match):
+    """Genius: track ID, URL."""
+    if not config_manager.get('genius.embed_tags', True):
+        return
+    track_title, artist_name = pp['track_title'], pp['artist_name']
+    id_tags = pp['id_tags']
+    if not track_title or not artist_name:
+        return
+    try:
+        import core.genius_client as _genius_module
+        if time.time() < _genius_module._rate_limit_until:
+            print("⏭️ Genius rate-limited, skipping (non-blocking)")
+            return
+        g_client = genius_worker.client if genius_worker else None
+        if not g_client:
+            return
+        g_result = g_client.search_song(artist_name, track_title)
+        if g_result:
+            g_id = g_result.get('id')
+            if g_id:
+                id_tags['GENIUS_TRACK_ID'] = str(g_id)
+                print(f"🎵 Genius song matched: {g_id}")
+            g_url = g_result.get('url')
+            if g_url:
+                pp['genius_url'] = g_url
+    except Exception as e:
+        print(f"⚠️ Genius lookup failed (non-fatal): {e}")
+
+
 def _post_process_matched_download_with_verification(context_key, context, file_path, task_id, batch_id):
     """
     NEW VERIFICATION WORKFLOW: Enhanced post-processing with file verification.
@@ -40778,9 +41077,8 @@ try:
             timeout=10
         )
         _hydrabase_ws = _auto_ws
-        # Enable dev mode only if not using Hydrabase as a regular fallback source
-        if _get_metadata_fallback_source() != 'hydrabase':
-            dev_mode_enabled = True
+        # Don't auto-enable dev mode — user must explicitly activate dev mode
+        # Auto-connect just establishes the WebSocket for fallback/search tab use
         print(f"✅ Hydrabase auto-connected to {_hydra_cfg['url']}")
 except Exception as e:
     print(f"⚠️ Hydrabase auto-reconnect failed: {e}")

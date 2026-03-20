@@ -414,7 +414,8 @@ class ConfigManager:
             },
             "metadata_enhancement": {
                 "enabled": True,
-                "embed_album_art": True
+                "embed_album_art": True,
+                "post_process_order": ["musicbrainz", "deezer", "audiodb", "tidal", "qobuz", "lastfm", "genius"]
             },
             "musicbrainz": {
                 "embed_tags": True
