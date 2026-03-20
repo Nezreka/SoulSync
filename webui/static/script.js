@@ -1251,21 +1251,71 @@ async function openPersonalSettings() {
         const lbData = await lbRes.json();
         const spotifyData = await spotifyRes.json();
 
-        // Build sections
         body.innerHTML = '';
-        // Spotify + Tidal + server library per-profile only shown for non-admin profiles
-        if (currentProfile && !currentProfile.is_admin) {
-            renderPersonalSettingsSpotify(body, spotifyData);
-            renderPersonalSettingsTidal(body);
-            try {
-                const libRes = await fetch('/api/profiles/me/server-library');
-                const libData = await libRes.json();
-                renderPersonalSettingsServerLibrary(body, libData);
-            } catch (e) {
-                console.debug('Failed to load server library settings:', e);
-            }
+        const isNonAdmin = currentProfile && !currentProfile.is_admin;
+
+        if (isNonAdmin) {
+            // Tabbed layout for non-admin with multiple sections
+            const tabs = [
+                { id: 'music', label: 'Music Services' },
+                { id: 'server', label: 'Server' },
+                { id: 'scrobble', label: 'Scrobbling' },
+            ];
+            const tabBar = document.createElement('div');
+            tabBar.className = 'ps-tabbar';
+            tabs.forEach((t, i) => {
+                const btn = document.createElement('button');
+                btn.className = 'ps-tab' + (i === 0 ? ' active' : '');
+                btn.textContent = t.label;
+                btn.onclick = () => {
+                    tabBar.querySelectorAll('.ps-tab').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    body.querySelectorAll('.ps-tab-content').forEach(c => c.classList.remove('active'));
+                    const target = document.getElementById(`ps-tab-${t.id}`);
+                    if (target) target.classList.add('active');
+                };
+                tabBar.appendChild(btn);
+            });
+            body.appendChild(tabBar);
+
+            // Music Services tab
+            const musicTab = document.createElement('div');
+            musicTab.id = 'ps-tab-music';
+            musicTab.className = 'ps-tab-content active';
+            renderPersonalSettingsSpotify(musicTab, spotifyData);
+            renderPersonalSettingsTidal(musicTab);
+            body.appendChild(musicTab);
+
+            // Server tab
+            const serverTab = document.createElement('div');
+            serverTab.id = 'ps-tab-server';
+            serverTab.className = 'ps-tab-content';
+            serverTab.innerHTML = '<div style="text-align:center;padding:20px;color:rgba(255,255,255,0.3);">Loading libraries...</div>';
+            body.appendChild(serverTab);
+            // Load server libraries async (don't block modal)
+            fetch('/api/profiles/me/server-library').then(r => r.json()).then(libData => {
+                serverTab.innerHTML = '';
+                renderPersonalSettingsServerLibrary(serverTab, libData);
+            }).catch(() => {
+                serverTab.innerHTML = '';
+                renderPersonalSettingsServerLibrary(serverTab, {});
+            });
+
+            // Scrobbling tab
+            const scrobbleTab = document.createElement('div');
+            scrobbleTab.id = 'ps-tab-scrobble';
+            scrobbleTab.className = 'ps-tab-content';
+            body.appendChild(scrobbleTab);
+            // Render LB into the scrobble tab
+            const origBody = body;
+            renderPersonalSettingsLB(lbData, scrobbleTab);
+        } else {
+            // Admin: just ListenBrainz, no tabs
+            const content = document.createElement('div');
+            content.style.padding = '18px 22px 22px';
+            body.appendChild(content);
+            renderPersonalSettingsLB(lbData, content);
         }
-        renderPersonalSettingsLB(lbData);
     } catch (e) {
         body.innerHTML = '<div style="color:#ef4444;padding:16px;">Failed to load settings</div>';
     }
@@ -1402,98 +1452,153 @@ function authenticatePersonalTidal() {
     window.open('/auth/tidal?profile_id=' + (currentProfile?.id || ''), '_blank');
 }
 
-function renderPersonalSettingsServerLibrary(body, data) {
-    const plexLib = data.plex_library_id || '';
-    const jellyfinUser = data.jellyfin_user_id || '';
-    const jellyfinLib = data.jellyfin_library_id || '';
-    const navidromeLib = data.navidrome_library_id || '';
-    const hasAny = plexLib || jellyfinUser || jellyfinLib || navidromeLib;
-
+async function renderPersonalSettingsServerLibrary(container, profileData) {
     const section = document.createElement('div');
     section.id = 'ps-server-library-section';
-    section.innerHTML = `
-        <div class="ps-section">
-            <div class="ps-section-header">
-                <h4 class="ps-section-title">Media Server Library</h4>
-                <span class="ps-connection-badge ${hasAny ? 'connected' : 'disconnected'}">
-                    <span class="ps-connection-dot"></span>
-                    ${hasAny ? 'Customized' : 'Using default'}
-                </span>
+
+    // Detect which server is active
+    let serverType = 'none';
+    let libraries = [];
+    let users = [];
+    const currentLib = profileData || {};
+
+    try {
+        // Try each server type to find the active one
+        const plexRes = await fetch('/api/plex/music-libraries');
+        if (plexRes.ok) {
+            const plexData = await plexRes.json();
+            if (plexData.libraries && plexData.libraries.length > 0) {
+                serverType = 'plex';
+                libraries = plexData.libraries;
+            }
+        }
+    } catch (e) {}
+
+    if (serverType === 'none') {
+        try {
+            const jellyRes = await fetch('/api/jellyfin/music-libraries');
+            if (jellyRes.ok) {
+                const jellyData = await jellyRes.json();
+                if (jellyData.libraries && jellyData.libraries.length > 0) {
+                    serverType = 'jellyfin';
+                    libraries = jellyData.libraries;
+                    users = jellyData.users || [];
+                }
+            }
+        } catch (e) {}
+    }
+
+    if (serverType === 'none') {
+        section.innerHTML = `
+            <div class="ps-section">
+                <div class="ps-section-header">
+                    <h4 class="ps-section-title">Media Server</h4>
+                </div>
+                <div class="ps-help-text">No media server connected. Ask your admin to configure Plex, Jellyfin, or Navidrome in Settings.</div>
             </div>
-            <div class="ps-help-text" style="margin-bottom:12px;">
-                Choose which library playlists sync to. Leave empty to use the admin's default.
+        `;
+    } else if (serverType === 'plex') {
+        const selectedLib = currentLib.plex_library_id || '';
+        const optionsHtml = libraries.map(lib => {
+            const name = lib.name || lib.title || lib;
+            const val = typeof lib === 'string' ? lib : (lib.name || lib.title);
+            return `<option value="${escapeHtml(val)}" ${val === selectedLib ? 'selected' : ''}>${escapeHtml(val)}</option>`;
+        }).join('');
+
+        section.innerHTML = `
+            <div class="ps-section">
+                <div class="ps-section-header">
+                    <h4 class="ps-section-title">Plex Library</h4>
+                    <span class="ps-connection-badge ${selectedLib ? 'connected' : 'disconnected'}">
+                        <span class="ps-connection-dot"></span>
+                        ${selectedLib ? 'Custom' : 'Default'}
+                    </span>
+                </div>
+                <div class="ps-help-text" style="margin-bottom:12px;">Choose which Plex music library your playlists sync to.</div>
+                <div class="ps-form-group">
+                    <label>Music Library</label>
+                    <select id="ps-plex-library-select">
+                        <option value="">Use admin default</option>
+                        ${optionsHtml}
+                    </select>
+                </div>
+                <div class="ps-actions">
+                    <button class="ps-btn ps-btn-primary" onclick="savePersonalServerLibrary()">Save</button>
+                </div>
             </div>
-            <div class="ps-form-group">
-                <label>Plex Library ID</label>
-                <input type="text" id="ps-plex-library-id" value="${escapeHtml(plexLib)}" placeholder="Leave empty for default">
+        `;
+    } else if (serverType === 'jellyfin') {
+        const selectedUser = currentLib.jellyfin_user_id || '';
+        const selectedLib = currentLib.jellyfin_library_id || '';
+
+        const userOpts = users.map(u => {
+            const uid = u.id || u.Id;
+            const uname = u.name || u.Name;
+            return `<option value="${escapeHtml(uid)}" ${uid === selectedUser ? 'selected' : ''}>${escapeHtml(uname)}</option>`;
+        }).join('');
+
+        const libOpts = libraries.map(lib => {
+            const lid = lib.key || lib.id || lib.Id;
+            const lname = lib.name || lib.Name || lib.title;
+            return `<option value="${escapeHtml(lid)}" ${lid === selectedLib ? 'selected' : ''}>${escapeHtml(lname)}</option>`;
+        }).join('');
+
+        section.innerHTML = `
+            <div class="ps-section">
+                <div class="ps-section-header">
+                    <h4 class="ps-section-title">Jellyfin</h4>
+                    <span class="ps-connection-badge ${selectedUser || selectedLib ? 'connected' : 'disconnected'}">
+                        <span class="ps-connection-dot"></span>
+                        ${selectedUser || selectedLib ? 'Custom' : 'Default'}
+                    </span>
+                </div>
+                <div class="ps-help-text" style="margin-bottom:12px;">Choose which Jellyfin user and library your playlists sync to.</div>
+                ${users.length ? `<div class="ps-form-group"><label>User</label><select id="ps-jellyfin-user-select"><option value="">Use admin default</option>${userOpts}</select></div>` : ''}
+                <div class="ps-form-group">
+                    <label>Music Library</label>
+                    <select id="ps-jellyfin-library-select">
+                        <option value="">Use admin default</option>
+                        ${libOpts}
+                    </select>
+                </div>
+                <div class="ps-actions">
+                    <button class="ps-btn ps-btn-primary" onclick="savePersonalServerLibrary()">Save</button>
+                </div>
             </div>
-            <div class="ps-form-group">
-                <label>Jellyfin User ID</label>
-                <input type="text" id="ps-jellyfin-user-id" value="${escapeHtml(jellyfinUser)}" placeholder="Leave empty for default">
-            </div>
-            <div class="ps-form-group">
-                <label>Jellyfin Library ID</label>
-                <input type="text" id="ps-jellyfin-library-id" value="${escapeHtml(jellyfinLib)}" placeholder="Leave empty for default">
-            </div>
-            <div class="ps-form-group">
-                <label>Navidrome Library ID</label>
-                <input type="text" id="ps-navidrome-library-id" value="${escapeHtml(navidromeLib)}" placeholder="Leave empty for default">
-            </div>
-            <div id="ps-server-result"></div>
-            <div class="ps-actions">
-                <button class="ps-btn ps-btn-primary" onclick="savePersonalServerLibrary()">Save</button>
-                ${hasAny ? '<button class="ps-btn ps-btn-danger" onclick="clearPersonalServerLibrary()">Reset to Default</button>' : ''}
-            </div>
-        </div>
-    `;
+        `;
+    }
 
     const existing = document.getElementById('ps-server-library-section');
     if (existing) existing.replaceWith(section);
-    else body.appendChild(section);
+    else container.appendChild(section);
 }
 
 async function savePersonalServerLibrary() {
-    const resultEl = document.getElementById('ps-server-result');
     try {
-        // Save each server type that has a value
-        const plex = document.getElementById('ps-plex-library-id')?.value?.trim();
-        const jellyfinUser = document.getElementById('ps-jellyfin-user-id')?.value?.trim();
-        const jellyfinLib = document.getElementById('ps-jellyfin-library-id')?.value?.trim();
-        const navidrome = document.getElementById('ps-navidrome-library-id')?.value?.trim();
+        const plexSelect = document.getElementById('ps-plex-library-select');
+        const jellyUserSelect = document.getElementById('ps-jellyfin-user-select');
+        const jellyLibSelect = document.getElementById('ps-jellyfin-library-select');
 
-        const saves = [];
-        if (plex !== undefined) saves.push(fetch('/api/profiles/me/server-library', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ server_type: 'plex', library_id: plex || null })
-        }));
-        if (jellyfinUser !== undefined || jellyfinLib !== undefined) saves.push(fetch('/api/profiles/me/server-library', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ server_type: 'jellyfin', user_id: jellyfinUser || null, library_id: jellyfinLib || null })
-        }));
-        if (navidrome !== undefined) saves.push(fetch('/api/profiles/me/server-library', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ server_type: 'navidrome', library_id: navidrome || null })
-        }));
+        if (plexSelect) {
+            await fetch('/api/profiles/me/server-library', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ server_type: 'plex', library_id: plexSelect.value || null })
+            });
+        }
+        if (jellyUserSelect || jellyLibSelect) {
+            await fetch('/api/profiles/me/server-library', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    server_type: 'jellyfin',
+                    user_id: jellyUserSelect?.value || null,
+                    library_id: jellyLibSelect?.value || null
+                })
+            });
+        }
 
-        await Promise.all(saves);
         showToast('Server library settings saved', 'success');
-        openPersonalSettings();
     } catch (e) {
-        if (resultEl) resultEl.innerHTML = '<div style="color:#ef4444;font-size:12px;margin-top:8px;">Failed to save</div>';
-    }
-}
-
-async function clearPersonalServerLibrary() {
-    try {
-        await Promise.all([
-            fetch('/api/profiles/me/server-library', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ server_type: 'plex', library_id: null }) }),
-            fetch('/api/profiles/me/server-library', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ server_type: 'jellyfin', user_id: null, library_id: null }) }),
-            fetch('/api/profiles/me/server-library', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ server_type: 'navidrome', library_id: null }) }),
-        ]);
-        showToast('Server library settings reset to default', 'info');
-        openPersonalSettings();
-    } catch (e) {
-        showToast('Error resetting settings', 'error');
+        showToast('Error saving settings', 'error');
     }
 }
 
@@ -1510,8 +1615,8 @@ async function disconnectPersonalSpotify() {
     }
 }
 
-function renderPersonalSettingsLB(data) {
-    const body = document.getElementById('personal-settings-body');
+function renderPersonalSettingsLB(data, container) {
+    const body = container || document.getElementById('personal-settings-body');
     const connected = data.connected;
     const username = data.username || '';
     const baseUrl = data.base_url || '';
