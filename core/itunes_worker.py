@@ -847,9 +847,9 @@ class iTunesWorker:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
-                    (SELECT COUNT(*) FROM artists WHERE itunes_match_status IS NULL) +
-                    (SELECT COUNT(*) FROM albums WHERE itunes_match_status IS NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE itunes_match_status IS NULL)
+                    (SELECT COUNT(*) FROM artists WHERE itunes_match_status IS NULL AND id IS NOT NULL) +
+                    (SELECT COUNT(*) FROM albums WHERE itunes_match_status IS NULL AND id IS NOT NULL) +
+                    (SELECT COUNT(*) FROM tracks WHERE itunes_match_status IS NULL AND id IS NOT NULL)
                 AS pending
             """)
             row = cursor.fetchone()

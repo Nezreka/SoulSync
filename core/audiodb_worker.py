@@ -558,9 +558,9 @@ class AudioDBWorker:
 
             cursor.execute("""
                 SELECT
-                    (SELECT COUNT(*) FROM artists WHERE audiodb_match_status IS NULL) +
-                    (SELECT COUNT(*) FROM albums WHERE audiodb_match_status IS NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE audiodb_match_status IS NULL)
+                    (SELECT COUNT(*) FROM artists WHERE audiodb_match_status IS NULL AND id IS NOT NULL) +
+                    (SELECT COUNT(*) FROM albums WHERE audiodb_match_status IS NULL AND id IS NOT NULL) +
+                    (SELECT COUNT(*) FROM tracks WHERE audiodb_match_status IS NULL AND id IS NOT NULL)
                 AS pending
             """)
 

@@ -631,9 +631,9 @@ class DeezerWorker:
 
             cursor.execute("""
                 SELECT
-                    (SELECT COUNT(*) FROM artists WHERE deezer_match_status IS NULL) +
-                    (SELECT COUNT(*) FROM albums WHERE deezer_match_status IS NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE deezer_match_status IS NULL)
+                    (SELECT COUNT(*) FROM artists WHERE deezer_match_status IS NULL AND id IS NOT NULL) +
+                    (SELECT COUNT(*) FROM albums WHERE deezer_match_status IS NULL AND id IS NOT NULL) +
+                    (SELECT COUNT(*) FROM tracks WHERE deezer_match_status IS NULL AND id IS NOT NULL)
                 AS pending
             """)
 

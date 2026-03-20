@@ -892,9 +892,9 @@ class SpotifyWorker:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
-                    (SELECT COUNT(*) FROM artists WHERE spotify_match_status IS NULL) +
-                    (SELECT COUNT(*) FROM albums WHERE spotify_match_status IS NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE spotify_match_status IS NULL)
+                    (SELECT COUNT(*) FROM artists WHERE spotify_match_status IS NULL AND id IS NOT NULL) +
+                    (SELECT COUNT(*) FROM albums WHERE spotify_match_status IS NULL AND id IS NOT NULL) +
+                    (SELECT COUNT(*) FROM tracks WHERE spotify_match_status IS NULL AND id IS NOT NULL)
                 AS pending
             """)
             row = cursor.fetchone()
