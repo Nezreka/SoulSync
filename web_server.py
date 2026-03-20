@@ -7002,6 +7002,8 @@ def enhanced_search():
 
         # Determine which alternate sources are available (for frontend to fetch async)
         spotify_available = bool(spotify_client and spotify_client.is_spotify_authenticated())
+        hydrabase_available = bool(hydrabase_client and hydrabase_client.is_connected()
+                                   and (dev_mode_enabled or config_manager.get('hydrabase.enabled', False)))
         alternate_sources = []
         if primary_source != 'spotify' and spotify_available:
             alternate_sources.append('spotify')
@@ -7009,6 +7011,8 @@ def enhanced_search():
             alternate_sources.append('itunes')
         if primary_source != 'deezer':
             alternate_sources.append('deezer')
+        if primary_source != 'hydrabase' and hydrabase_available:
+            alternate_sources.append('hydrabase')
 
         logger.info(f"Enhanced search results ({primary_source}): {len(db_artists)} DB artists, "
                      f"{len(primary_results['artists'])} artists, {len(primary_results['albums'])} albums, "
@@ -7091,7 +7095,7 @@ def enhanced_search_source(source_name):
     Called asynchronously by the frontend after the primary search returns.
     Each source tab fires its own request so slow sources don't block fast ones.
     """
-    if source_name not in ('spotify', 'itunes', 'deezer'):
+    if source_name not in ('spotify', 'itunes', 'deezer', 'hydrabase'):
         return jsonify({"error": f"Unknown source: {source_name}"}), 400
 
     data = request.get_json()
@@ -7111,6 +7115,11 @@ def enhanced_search_source(source_name):
             client = iTunesClient()
         elif source_name == 'deezer':
             client = _get_deezer_client()
+        elif source_name == 'hydrabase':
+            if hydrabase_client and hydrabase_client.is_connected():
+                client = hydrabase_client
+            else:
+                return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
 
         result = _enhanced_search_source(query, client)
         return jsonify(result)
