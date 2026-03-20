@@ -27036,8 +27036,8 @@ def start_tidal_sync(playlist_id):
         
         state = tidal_discovery_states[playlist_id]
         state['last_accessed'] = time.time()  # Update access time
-        
-        if state['phase'] not in ['discovered', 'sync_complete']:
+
+        if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
             return jsonify({"error": "Tidal playlist not ready for sync"}), 400
         
         # Convert discovery results to Spotify tracks format
@@ -27865,7 +27865,7 @@ def start_deezer_sync(playlist_id):
         state = deezer_discovery_states[playlist_id]
         state['last_accessed'] = time.time()
 
-        if state['phase'] not in ['discovered', 'sync_complete']:
+        if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
             return jsonify({"error": "Deezer playlist not ready for sync"}), 400
 
         # Convert discovery results to Spotify tracks format
@@ -28692,7 +28692,7 @@ def start_spotify_public_sync(url_hash):
         state = spotify_public_discovery_states[url_hash]
         state['last_accessed'] = time.time()
 
-        if state['phase'] not in ['discovered', 'sync_complete']:
+        if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
             return jsonify({"error": "Spotify Public playlist not ready for sync"}), 400
 
         # Convert discovery results to Spotify tracks format
@@ -29728,8 +29728,8 @@ def start_youtube_sync(url_hash):
         
         state = youtube_playlist_states[url_hash]
         state['last_accessed'] = time.time()  # Update access time
-        
-        if state['phase'] not in ['discovered', 'sync_complete']:
+
+        if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
             return jsonify({"error": "YouTube playlist not ready for sync"}), 400
         
         # Convert discovery results to Spotify tracks format
@@ -35448,7 +35448,7 @@ def start_listenbrainz_sync(playlist_mbid):
         state = listenbrainz_playlist_states[state_key]
         state['last_accessed'] = time.time()  # Update access time
 
-        if state['phase'] not in ['discovered', 'sync_complete']:
+        if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
             return jsonify({"error": "ListenBrainz playlist not ready for sync"}), 400
 
         # Convert discovery results to Spotify tracks format
@@ -37886,7 +37886,7 @@ def start_beatport_sync(url_hash):
 
         print(f"🎧 Beatport chart state: phase={state.get('phase')}, has_discovery_results={len(state.get('discovery_results', []))}")
 
-        if state['phase'] not in ['discovered', 'sync_complete']:
+        if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
             print(f"❌ Beatport chart not ready for sync: {state['phase']}")
             return jsonify({"error": "Beatport chart not ready for sync"}), 400
 

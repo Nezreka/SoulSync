@@ -29257,6 +29257,13 @@ function getModalActionButtons(urlHash, phase, state = null) {
                 }
             }
 
+            // Rediscover button — reset and re-run discovery (only for sources with reset endpoints)
+            if (isBeatport) {
+                buttons += `<button class="modal-btn modal-btn-secondary" onclick="resetBeatportChart('${urlHash}')">🔄 Rediscover</button>`;
+            } else if (!isListenBrainz && !isTidal && !isDeezer && !isSpotifyPublic) {
+                buttons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Rediscover</button>`;
+            }
+
             if (!buttons) {
                 buttons = `<div class="modal-info">ℹ️ No Spotify matches found. Discovery complete but no tracks could be matched.</div>`;
             }
@@ -29371,18 +29378,59 @@ function getModalActionButtons(urlHash, phase, state = null) {
                 }
             }
 
-            if (isListenBrainz) {
-                // ListenBrainz playlists don't need reset (they're read-only from ListenBrainz API)
-            } else if (isTidal) {
-                // Tidal doesn't have a reset function yet, but could be added
-                // syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetTidalPlaylist('${urlHash}')">🔄 Reset</button>`;
-            } else if (isBeatport) {
-                syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetBeatportChart('${urlHash}')">🔄 Reset</button>`;
-            } else {
-                syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Reset</button>`;
+            // Rediscover button (only for sources with reset endpoints)
+            if (isBeatport) {
+                syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetBeatportChart('${urlHash}')">🔄 Rediscover</button>`;
+            } else if (!isListenBrainz && !isTidal && !isDeezer && !isSpotifyPublic) {
+                syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Rediscover</button>`;
             }
 
             return syncCompleteButtons;
+
+        case 'download_complete':
+            // Same options as sync_complete — allow re-sync, download missing, and reset
+            let dlCompleteButtons = '';
+
+            if (hasSpotifyMatches) {
+                if (isListenBrainz) {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isTidal) {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isDeezer) {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isSpotifyPublic) {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else if (isBeatport) {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                } else {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubePlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
+                }
+            }
+
+            if (hasSpotifyMatches || hasConvertedPlaylistId) {
+                if (isListenBrainz) {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isTidal) {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startTidalDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isDeezer) {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startDeezerDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isSpotifyPublic) {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startSpotifyPublicDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else if (isBeatport) {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startBeatportDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                } else {
+                    dlCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDownloadMissing('${urlHash}')">🔍 Download Missing Tracks</button>`;
+                }
+            }
+
+            // Rediscover button (only for sources with reset endpoints)
+            if (isBeatport) {
+                dlCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetBeatportChart('${urlHash}')">🔄 Rediscover</button>`;
+            } else if (!isListenBrainz && !isTidal && !isDeezer && !isSpotifyPublic) {
+                dlCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Rediscover</button>`;
+            }
+
+            return dlCompleteButtons;
 
         default:
             return '';
