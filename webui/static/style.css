@@ -43657,6 +43657,115 @@ tr.tag-diff-same {
     max-width: 340px;
 }
 
+/* ── Hybrid source priority list (drag and drop) ── */
+.hybrid-source-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 0;
+}
+.hybrid-source-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    transition: all 0.2s;
+    user-select: none;
+}
+.hybrid-source-item:hover { border-color: rgba(255, 255, 255, 0.12); }
+.hybrid-source-item.disabled {
+    opacity: 0.35;
+}
+.hybrid-source-arrows {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex-shrink: 0;
+}
+.hybrid-arrow-btn {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.25);
+    font-size: 0.6em;
+    cursor: pointer;
+    padding: 1px 4px;
+    line-height: 1;
+    border-radius: 3px;
+    transition: all 0.15s;
+}
+.hybrid-arrow-btn:hover {
+    color: var(--accent-color, #1db954);
+    background: rgba(255, 255, 255, 0.06);
+}
+.hybrid-source-icon {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    border-radius: 4px;
+    object-fit: contain;
+}
+.hybrid-source-icon.emoji-icon {
+    font-size: 1.2em;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.hybrid-source-name {
+    flex: 1;
+    font-size: 0.9em;
+    color: rgba(255, 255, 255, 0.85);
+    font-weight: 500;
+}
+.hybrid-source-priority {
+    font-size: 0.75em;
+    color: rgba(255, 255, 255, 0.3);
+    font-weight: 600;
+    min-width: 18px;
+    text-align: center;
+}
+.hybrid-source-toggle {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    flex-shrink: 0;
+}
+.hybrid-source-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+.hybrid-source-toggle .toggle-track {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.25s;
+}
+.hybrid-source-toggle .toggle-track::after {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.25s;
+}
+.hybrid-source-toggle input:checked + .toggle-track {
+    background: var(--accent-color, #1db954);
+}
+.hybrid-source-toggle input:checked + .toggle-track::after {
+    transform: translateX(16px);
+}
+
 /* ── Accent color picker ── */
 #settings-page .accent-color-selector {
     display: flex;

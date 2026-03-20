@@ -366,8 +366,9 @@ class ConfigManager:
             },
             "download_source": {
                 "mode": "soulseek",  # Options: "soulseek", "youtube", "tidal", "qobuz", "hifi", "hybrid"
-                "hybrid_primary": "soulseek",  # Which source to try first in hybrid mode
-                "hybrid_secondary": "youtube",  # Fallback source if primary finds nothing
+                "hybrid_primary": "soulseek",  # Legacy: primary source for hybrid mode
+                "hybrid_secondary": "youtube",  # Legacy: fallback source for hybrid mode
+                "hybrid_order": [],  # Ordered list of sources for hybrid mode (overrides primary/secondary)
             },
             "tidal_download": {
                 "quality": "lossless",  # Options: "low", "high", "lossless", "hires"

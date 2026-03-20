@@ -4877,6 +4877,143 @@ function toggleStgService(el) {
     if (service) service.classList.toggle('expanded');
 }
 
+// ── Hybrid source priority list (drag-and-drop) ──
+const HYBRID_SOURCES = [
+    { id: 'soulseek', name: 'Soulseek', icon: 'https://raw.githubusercontent.com/slskd/slskd/master/docs/icon.png', emoji: '🎵' },
+    { id: 'youtube', name: 'YouTube', icon: 'https://www.svgrepo.com/show/13671/youtube.svg', emoji: '▶️' },
+    { id: 'tidal', name: 'Tidal', icon: 'https://www.svgrepo.com/show/519734/tidal.svg', emoji: '🌊' },
+    { id: 'qobuz', name: 'Qobuz', icon: 'https://www.svgrepo.com/show/504778/qobuz.svg', emoji: '🎧' },
+    { id: 'hifi', name: 'HiFi', icon: null, emoji: '🎶' },
+];
+
+let _hybridSourceOrder = ['soulseek', 'youtube'];
+let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false };
+let _hybridVisualOrder = null; // Full visual order including disabled sources
+
+function buildHybridSourceList() {
+    const container = document.getElementById('hybrid-source-list');
+    if (!container) return;
+
+    container.innerHTML = '';
+    // Build visual order: use persisted visual order, or enabled first + disabled at bottom
+    if (!_hybridVisualOrder) {
+        _hybridVisualOrder = [..._hybridSourceOrder];
+        for (const src of HYBRID_SOURCES) {
+            if (!_hybridVisualOrder.includes(src.id)) _hybridVisualOrder.push(src.id);
+        }
+    }
+    const allIds = _hybridVisualOrder;
+
+    allIds.forEach((srcId, idx) => {
+        const src = HYBRID_SOURCES.find(s => s.id === srcId);
+        if (!src) return;
+        const enabled = _hybridSourceEnabled[srcId] !== false;
+        const isInOrder = _hybridSourceOrder.includes(srcId);
+        const priorityNum = isInOrder && enabled ? _hybridSourceOrder.indexOf(srcId) + 1 : '';
+
+        const item = document.createElement('div');
+        item.className = `hybrid-source-item${enabled ? '' : ' disabled'}`;
+        item.draggable = true;
+        item.dataset.sourceId = srcId;
+
+        item.innerHTML = `
+            <span class="hybrid-source-arrows">
+                <button class="hybrid-arrow-btn" onclick="moveHybridSource('${srcId}', -1)" title="Move up">▲</button>
+                <button class="hybrid-arrow-btn" onclick="moveHybridSource('${srcId}', 1)" title="Move down">▼</button>
+            </span>
+            ${src.icon
+                ? `<img class="hybrid-source-icon" src="${src.icon}" alt="${src.name}" onerror="this.outerHTML='<span class=\\'hybrid-source-icon emoji-icon\\'>${src.emoji}</span>'">`
+                : `<span class="hybrid-source-icon emoji-icon">${src.emoji}</span>`
+            }
+            <span class="hybrid-source-name">${src.name}</span>
+            <span class="hybrid-source-priority">${priorityNum}</span>
+            <label class="hybrid-source-toggle">
+                <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleHybridSource('${srcId}', this.checked)">
+                <span class="toggle-track"></span>
+            </label>
+        `;
+
+        container.appendChild(item);
+    });
+
+    // Sync hidden selects for backward compat
+    _syncHybridHiddenSelects();
+}
+
+function moveHybridSource(srcId, direction) {
+    if (!_hybridVisualOrder) return;
+    const idx = _hybridVisualOrder.indexOf(srcId);
+    if (idx < 0) return;
+    const newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= _hybridVisualOrder.length) return;
+
+    // Swap in visual order
+    [_hybridVisualOrder[idx], _hybridVisualOrder[newIdx]] = [_hybridVisualOrder[newIdx], _hybridVisualOrder[idx]];
+
+    // Rebuild enabled order from visual order
+    _hybridSourceOrder = _hybridVisualOrder.filter(id => _hybridSourceEnabled[id] !== false);
+    buildHybridSourceList();
+    updateDownloadSourceUI();
+}
+
+function toggleHybridSource(srcId, enabled) {
+    _hybridSourceEnabled[srcId] = enabled;
+    // Rebuild enabled order from visual order so priority matches position
+    if (_hybridVisualOrder) {
+        _hybridSourceOrder = _hybridVisualOrder.filter(id => _hybridSourceEnabled[id] !== false);
+    }
+    buildHybridSourceList();
+    updateDownloadSourceUI();
+}
+
+function _syncHybridOrderFromDOM() {
+    const container = document.getElementById('hybrid-source-list');
+    if (!container) return;
+    const items = container.querySelectorAll('.hybrid-source-item');
+    const newOrder = [];
+    items.forEach(item => {
+        const id = item.dataset.sourceId;
+        if (_hybridSourceEnabled[id] !== false) {
+            newOrder.push(id);
+        }
+    });
+    _hybridSourceOrder = newOrder;
+}
+
+function _syncHybridHiddenSelects() {
+    // Keep hidden selects in sync for backward compat with saveSettings
+    const primary = document.getElementById('hybrid-primary-source');
+    const secondary = document.getElementById('hybrid-secondary-source');
+    if (primary && _hybridSourceOrder.length > 0) primary.value = _hybridSourceOrder[0];
+    if (secondary && _hybridSourceOrder.length > 1) secondary.value = _hybridSourceOrder[1];
+}
+
+function getHybridOrder() {
+    return _hybridSourceOrder.filter(s => _hybridSourceEnabled[s] !== false);
+}
+
+function loadHybridSourceOrder(settings) {
+    const order = settings.download_source?.hybrid_order;
+    if (order && Array.isArray(order) && order.length > 0) {
+        _hybridSourceOrder = order;
+        _hybridSourceEnabled = {};
+        for (const src of HYBRID_SOURCES) {
+            _hybridSourceEnabled[src.id] = order.includes(src.id);
+        }
+    } else {
+        // Legacy: fall back to primary/secondary
+        const primary = settings.download_source?.hybrid_primary || 'soulseek';
+        const secondary = settings.download_source?.hybrid_secondary || 'youtube';
+        _hybridSourceOrder = [primary, secondary];
+        _hybridSourceEnabled = {};
+        for (const src of HYBRID_SOURCES) {
+            _hybridSourceEnabled[src.id] = src.id === primary || src.id === secondary;
+        }
+    }
+    _hybridVisualOrder = null; // Reset so buildHybridSourceList rebuilds it
+    buildHybridSourceList();
+}
+
 async function loadSettingsData() {
     try {
         const response = await fetch(API.settings);
@@ -4972,9 +5109,7 @@ async function loadSettingsData() {
 
         // Populate Download Source settings
         document.getElementById('download-source-mode').value = settings.download_source?.mode || 'soulseek';
-        document.getElementById('hybrid-primary-source').value = settings.download_source?.hybrid_primary || 'soulseek';
-        document.getElementById('hybrid-secondary-source').value = settings.download_source?.hybrid_secondary || 'youtube';
-        updateHybridSecondaryOptions();
+        loadHybridSourceOrder(settings);
         document.getElementById('tidal-download-quality').value = settings.tidal_download?.quality || 'lossless';
         document.getElementById('qobuz-quality').value = settings.qobuz?.quality || 'lossless';
         document.getElementById('hifi-download-quality').value = settings.hifi_download?.quality || 'lossless';
@@ -5225,10 +5360,10 @@ function updateDownloadSourceUI() {
     // Determine which sources are active
     let activeSources = new Set();
     if (mode === 'hybrid') {
-        const primary = document.getElementById('hybrid-primary-source').value;
-        const secondary = document.getElementById('hybrid-secondary-source').value;
-        activeSources.add(primary);
-        activeSources.add(secondary);
+        const order = getHybridOrder();
+        for (const src of order) activeSources.add(src);
+        // Fallback: if no sources enabled, at least show soulseek
+        if (activeSources.size === 0) activeSources.add('soulseek');
     } else {
         activeSources.add(mode);
     }
@@ -5888,6 +6023,7 @@ async function saveSettings(quiet = false) {
             mode: document.getElementById('download-source-mode').value,
             hybrid_primary: document.getElementById('hybrid-primary-source').value,
             hybrid_secondary: document.getElementById('hybrid-secondary-source').value,
+            hybrid_order: getHybridOrder(),
         },
         tidal_download: {
             quality: document.getElementById('tidal-download-quality').value || 'lossless'

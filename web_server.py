@@ -6997,7 +6997,9 @@ def stream_enhanced_search_track():
         search_queries = []
         import re
 
-        if download_mode in ('youtube', 'tidal', 'qobuz', 'hifi') or (download_mode == 'hybrid' and config_manager.get('download_source.hybrid_primary') in ('youtube', 'tidal', 'qobuz', 'hifi')):
+        _hybrid_order = config_manager.get('download_source.hybrid_order', [])
+        _hybrid_first = _hybrid_order[0] if _hybrid_order else config_manager.get('download_source.hybrid_primary', 'soulseek')
+        if download_mode in ('youtube', 'tidal', 'qobuz', 'hifi') or (download_mode == 'hybrid' and _hybrid_first in ('youtube', 'tidal', 'qobuz', 'hifi')):
             # YouTube/Tidal mode: Include artist for better context
             # Primary query: Artist + Track
             if artist_name and track_name:
@@ -21876,8 +21878,10 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
         preflight_source = None
         preflight_tracks = None
         dl_source_mode = config_manager.get('download_source.mode', 'soulseek')
+        _dl_hybrid_order = config_manager.get('download_source.hybrid_order', [])
+        _dl_hybrid_first = _dl_hybrid_order[0] if _dl_hybrid_order else config_manager.get('download_source.hybrid_primary', 'soulseek')
         soulseek_is_source = dl_source_mode == 'soulseek' or (
-            dl_source_mode == 'hybrid' and config_manager.get('download_source.hybrid_primary', 'soulseek') == 'soulseek'
+            dl_source_mode == 'hybrid' and _dl_hybrid_first == 'soulseek'
         )
         if batch_is_album and batch_album_context and batch_artist_context and soulseek_is_source:
             artist_name = batch_artist_context.get('name', '')
