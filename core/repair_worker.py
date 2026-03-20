@@ -933,17 +933,76 @@ class RepairWorker:
             return {'success': False, 'error': f'Failed to delete file: {e}'}
 
     def _fix_track_number(self, entity_type, entity_id, file_path, details):
-        """Update track number in the database to the correct value."""
+        """Fix track number in file tags, rename file, and update DB."""
         correct_num = details.get('correct_track_num')
         if correct_num is None:
             return {'success': False, 'error': 'No correct track number in finding details'}
-        if not entity_id:
-            return {'success': False, 'error': 'No track ID associated with this finding'}
-        result = self.db.update_track_fields(int(entity_id), {'track_number': int(correct_num)})
-        if result.get('success'):
+
+        # If we have an entity_id (track DB ID), update DB directly
+        if entity_id:
+            try:
+                self.db.update_track_fields(int(entity_id), {'track_number': int(correct_num)})
+            except Exception as e:
+                logger.debug("DB track number update failed for entity %s: %s", entity_id, e)
+
+        # Fix the file tag (the primary fix — works even without entity_id)
+        if not file_path:
+            return {'success': False, 'error': 'No file path associated with this finding'}
+
+        # Resolve file path for cross-environment compat (Docker)
+        download_folder = None
+        if self._config_manager:
+            download_folder = self._config_manager.get('soulseek.download_path', '')
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder) or file_path
+
+        if not os.path.isfile(resolved):
+            return {'success': False, 'error': f'File not found: {os.path.basename(file_path)}'}
+
+        try:
+            from core.repair_jobs.track_number_repair import _fix_track_number_tag, _fix_filename_track_number
+
+            # Write corrected track number to file tags
+            total_tracks = details.get('total_tracks')
+            if not total_tracks:
+                # Fallback: read current total from file to preserve it
+                try:
+                    from core.repair_jobs.track_number_repair import _read_track_number_tag
+                    from mutagen import File as MutagenFile
+                    audio = MutagenFile(resolved)
+                    if audio:
+                        _, total_tracks = _read_track_number_tag(audio)
+                except Exception:
+                    pass
+            total_tracks = int(total_tracks or 0)
+            _fix_track_number_tag(resolved, int(correct_num), total_tracks)
+
+            # Rename file if it has a track number prefix
+            fname = os.path.basename(resolved)
+            new_path = _fix_filename_track_number(resolved, fname, int(correct_num))
+
+            # Update DB file path if renamed
+            if new_path:
+                conn = None
+                try:
+                    conn = self.db._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
+                                   (new_path, file_path))
+                    if cursor.rowcount == 0:
+                        cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
+                                       (new_path, resolved))
+                    conn.commit()
+                except Exception:
+                    pass
+                finally:
+                    if conn:
+                        conn.close()
+
             return {'success': True, 'action': 'fixed_track_number',
                     'message': f'Updated track number to {correct_num}'}
-        return {'success': False, 'error': result.get('error', 'Failed to update track number')}
+        except Exception as e:
+            logger.error("Error fixing track number for %s: %s", file_path, e)
+            return {'success': False, 'error': str(e)}
 
     def _fix_missing_cover_art(self, entity_type, entity_id, file_path, details):
         """Update album thumbnail URL from the found artwork."""
