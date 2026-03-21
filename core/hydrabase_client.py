@@ -32,7 +32,7 @@ class HydrabaseClient:
                              Same callable used by HydrabaseWorker.
         """
         self.get_ws_and_lock = get_ws_and_lock
-        self.timeout = 15  # seconds
+        self.timeout = 8  # seconds
         self.last_peer_count = None
         self.last_peer_count_time = None
 
@@ -121,19 +121,21 @@ class HydrabaseClient:
                     # Response has our nonce — definitely ours
                     if data.get('nonce') == nonce:
                         results = self._extract_results(data)
+                        logger.debug(f"Hydrabase matched nonce for ({request_type}, '{query}'): {len(results) if results else 0} results")
                         return results if results is not None else []
 
                     # Response has results but no nonce (server doesn't echo nonces)
                     if 'nonce' not in data:
                         results = self._extract_results(data)
                         if results is not None:
+                            logger.debug(f"Hydrabase no-nonce results for ({request_type}, '{query}'): {len(results)} results")
                             return results
                         # Stats-only message with no nonce — skip and recv again
                         logger.debug(f"Hydrabase draining non-result message for ({request_type}, '{query}')")
                         continue
 
                     # Has a nonce but not ours — stale response, skip it
-                    logger.debug(f"Hydrabase draining stale nonce response for ({request_type}, '{query}')")
+                    logger.debug(f"Hydrabase draining stale nonce {data.get('nonce')} (ours={nonce}) for ({request_type}, '{query}')")
 
         except Exception as e:
             logger.error(f"Hydrabase query failed ({request_type}, '{query}'): {e}")
@@ -166,13 +168,18 @@ class HydrabaseClient:
     # ==================== Track Methods ====================
 
     def search_tracks(self, query: str, limit: int = 20) -> List[Track]:
-        results = self._send_and_recv('track', query)
+        results = self._send_and_recv('tracks', query)
         if not results:
             return []
 
         tracks = []
         for item in results[:limit]:
             try:
+                ext_urls = dict(item.get('external_urls', {}) or {})
+                if item.get('soul_id'):
+                    ext_urls['hydrabase_soul_id'] = str(item['soul_id'])
+                if item.get('plugin_id'):
+                    ext_urls['hydrabase_plugin'] = item['plugin_id'].lower()
                 tracks.append(Track(
                     id=str(item.get('id', '')),
                     name=item.get('name', ''),
@@ -181,7 +188,7 @@ class HydrabaseClient:
                     duration_ms=item.get('duration_ms', 0),
                     popularity=item.get('popularity', 0),
                     preview_url=item.get('preview_url'),
-                    external_urls=item.get('external_urls'),
+                    external_urls=ext_urls,
                     image_url=item.get('image_url'),
                     release_date=self._normalize_release_date(item.get('release_date', ''))
                 ))
@@ -199,6 +206,11 @@ class HydrabaseClient:
         artists = []
         for item in results[:limit]:
             try:
+                ext_urls = dict(item.get('external_urls', {}) or {})
+                if item.get('soul_id'):
+                    ext_urls['hydrabase_soul_id'] = str(item['soul_id'])
+                if item.get('plugin_id'):
+                    ext_urls['hydrabase_plugin'] = item['plugin_id'].lower()
                 artists.append(Artist(
                     id=str(item.get('id', '')),
                     name=item.get('name', ''),
@@ -206,7 +218,7 @@ class HydrabaseClient:
                     genres=item.get('genres', []),
                     followers=item.get('followers', 0),
                     image_url=item.get('image_url'),
-                    external_urls=item.get('external_urls')
+                    external_urls=ext_urls
                 ))
             except Exception as e:
                 logger.debug(f"Skipping malformed Hydrabase artist: {e}")
@@ -215,22 +227,29 @@ class HydrabaseClient:
     # ==================== Album Methods ====================
 
     def search_albums(self, query: str, limit: int = 20) -> List[Album]:
-        results = self._send_and_recv('album', query)
+        results = self._send_and_recv('albums', query)
         if not results:
             return []
 
         albums = []
         for item in results[:limit]:
             try:
+                # Use the plugin's native ID (iTunes/Spotify) so downstream
+                # endpoints can look it up.  Carry soul_id in external_urls
+                # for Hydrabase-specific lookups (album.tracks).
+                ext_urls = dict(item.get('external_urls', {}) or {})
+                soul_id = item.get('soul_id', '')
+                if soul_id:
+                    ext_urls['hydrabase_soul_id'] = str(soul_id)
                 albums.append(Album(
-                    id=str(item.get('soul_id', item.get('id', ''))),
+                    id=str(item.get('id', soul_id)),
                     name=item.get('name', ''),
                     artists=self._normalize_artists(item.get('artists', [])),
                     release_date=self._normalize_release_date(item.get('release_date', '')),
                     total_tracks=item.get('total_tracks', 0),
                     album_type=item.get('album_type', 'album'),
                     image_url=item.get('image_url'),
-                    external_urls=item.get('external_urls')
+                    external_urls=ext_urls
                 ))
             except Exception as e:
                 logger.debug(f"Skipping malformed Hydrabase album: {e}")
@@ -240,22 +259,28 @@ class HydrabaseClient:
 
     def search_discography(self, artist_name: str, limit: int = 50) -> List[Album]:
         """Fetch an artist's discography (albums + singles) from Hydrabase."""
-        results = self._send_and_recv('discography', artist_name)
+        results = self._send_and_recv('artist.albums', artist_name)
+        if not results:
+            results = self._send_and_recv('discography', artist_name)
         if not results:
             return []
 
         albums = []
         for item in results[:limit]:
             try:
+                ext_urls = dict(item.get('external_urls', {}) or {})
+                soul_id = item.get('soul_id', '')
+                if soul_id:
+                    ext_urls['hydrabase_soul_id'] = str(soul_id)
                 albums.append(Album(
-                    id=str(item.get('soul_id', item.get('id', ''))),
+                    id=str(item.get('id', soul_id)),
                     name=item.get('name', ''),
                     artists=self._normalize_artists(item.get('artists', [])),
                     release_date=self._normalize_release_date(item.get('release_date', '')),
                     total_tracks=item.get('total_tracks', 0),
                     album_type=item.get('album_type', 'album'),
                     image_url=item.get('image_url'),
-                    external_urls=item.get('external_urls')
+                    external_urls=ext_urls
                 ))
             except Exception as e:
                 logger.debug(f"Skipping malformed Hydrabase discography album: {e}")
@@ -272,8 +297,7 @@ class HydrabaseClient:
         """
         results = self._send_and_recv('track.details', track_id)
         if not results:
-            # Fallback: search for the track ID directly
-            results = self._send_and_recv('track', track_id)
+            results = self._send_and_recv('tracks', track_id)
         if not results:
             return None
 
@@ -320,7 +344,7 @@ class HydrabaseClient:
         """
         results = self._send_and_recv('album.get', album_id)
         if not results:
-            results = self._send_and_recv('album', album_id)
+            results = self._send_and_recv('albums', album_id)
         if not results:
             return None
 
@@ -516,15 +540,19 @@ class HydrabaseClient:
                 item_type = item.get('album_type', 'album')
                 if type_filter and item_type not in type_filter:
                     continue
+                ext_urls = dict(item.get('external_urls', {}) or {})
+                soul_id = item.get('soul_id', '')
+                if soul_id:
+                    ext_urls['hydrabase_soul_id'] = str(soul_id)
                 albums.append(Album(
-                    id=str(item.get('soul_id', item.get('id', ''))),
+                    id=str(item.get('id', soul_id)),
                     name=item.get('name', ''),
                     artists=self._normalize_artists(item.get('artists', [])),
                     release_date=self._normalize_release_date(item.get('release_date', '')),
                     total_tracks=item.get('total_tracks', 0),
                     album_type=item_type,
                     image_url=item.get('image_url'),
-                    external_urls=item.get('external_urls'),
+                    external_urls=ext_urls,
                 ))
             except Exception as e:
                 logger.debug(f"Skipping malformed Hydrabase artist album: {e}")
