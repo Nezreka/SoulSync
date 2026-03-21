@@ -53802,7 +53802,7 @@ async function loadRepairFindings() {
         // Finding types that have an automated fix action
         const fixableTypes = {
             dead_file: 'Re-download',
-            orphan_file: 'Delete File',
+            orphan_file: 'Resolve',
             track_number_mismatch: 'Fix',
             missing_cover_art: 'Apply Art',
             metadata_gap: 'Apply',
