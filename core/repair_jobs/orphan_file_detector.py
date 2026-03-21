@@ -1,6 +1,7 @@
 """Orphan File Detector Job — finds files in the transfer folder not tracked in the DB."""
 
 import os
+import re
 import time
 
 from core.repair_jobs import register_job
@@ -46,8 +47,14 @@ class OrphanFileDetectorJob(RepairJob):
         # of depth 1-3 (filename, album/filename, artist/album/filename) which
         # covers all realistic path-prefix mismatches.
         known_suffixes = set()
-        known_titles = set()  # (title_lower, artist_lower) for tag-based fallback
+        known_titles = set()       # (title_lower, artist_lower) for exact match
+        known_titles_clean = set()  # (clean_title, clean_artist) for normalized match
         conn = None
+
+        def _strip_extras(s):
+            """Strip parentheticals/brackets for normalized comparison."""
+            return re.sub(r'\s*[\(\[][^)\]]*[\)\]]', '', s).strip()
+
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
@@ -59,7 +66,7 @@ class OrphanFileDetectorJob(RepairJob):
                     suffix = '/'.join(parts[-depth:]).lower()
                     known_suffixes.add(suffix)
 
-            # Build title+artist set for tag-based fallback matching
+            # Build title+artist sets for tag-based fallback matching
             cursor.execute("""
                 SELECT t.title, ar.name FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
@@ -70,6 +77,11 @@ class OrphanFileDetectorJob(RepairJob):
                 artist = (row[1] or '').lower().strip()
                 if title:
                     known_titles.add((title, artist))
+                    # Also store normalized version (stripped of feat., parentheticals, etc.)
+                    clean_t = _strip_extras(title)
+                    clean_a = _strip_extras(artist)
+                    if clean_t:
+                        known_titles_clean.add((clean_t, clean_a))
         except Exception as e:
             logger.error("Error reading known file paths from DB: %s", e, exc_info=True)
             result.errors += 1
@@ -122,7 +134,8 @@ class OrphanFileDetectorJob(RepairJob):
                     break
 
             # Fallback: read file tags and check if title+artist exists in DB
-            # Catches path mismatches where the file is tracked but under a different path
+            # Catches path mismatches where the file is tracked but under a different path.
+            # Uses both exact and normalized comparison to handle feat. suffixes, etc.
             if not is_known and known_titles:
                 try:
                     from mutagen import File as MutagenFile
@@ -130,8 +143,21 @@ class OrphanFileDetectorJob(RepairJob):
                     if audio:
                         file_title = ((audio.get('title') or [None])[0] or '').lower().strip()
                         file_artist = ((audio.get('artist') or [None])[0] or '').lower().strip()
-                        if file_title and (file_title, file_artist) in known_titles:
-                            is_known = True
+                        if file_title:
+                            # Exact match first (fast path)
+                            if (file_title, file_artist) in known_titles:
+                                is_known = True
+                            else:
+                                # Normalized match: strip (feat. X), [FLAC 16bit], etc.
+                                clean_title = _strip_extras(file_title)
+                                clean_artist = _strip_extras(file_artist)
+                                # Also try first artist only (handles "Gorillaz, Dennis Hopper" → "Gorillaz")
+                                first_artist = clean_artist.split(',')[0].strip() if clean_artist else ''
+                                if clean_title and (
+                                    (clean_title, clean_artist) in known_titles_clean or
+                                    (first_artist and (clean_title, first_artist) in known_titles_clean)
+                                ):
+                                    is_known = True
                 except Exception:
                     pass
 

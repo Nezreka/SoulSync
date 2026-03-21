@@ -53854,7 +53854,7 @@ async function loadRepairFindings() {
                     </div>
                     <div class="repair-finding-actions" onclick="event.stopPropagation()">
                         ${f.status === 'pending' ? `
-                            ${fixLabel ? `<button class="repair-finding-btn fix" onclick="fixRepairFinding(${f.id})" title="${fixLabel}">${_escFinding(fixLabel)}</button>` : ''}
+                            ${fixLabel ? `<button class="repair-finding-btn fix" onclick="fixRepairFinding(${f.id}, '${f.finding_type}')" title="${fixLabel}">${_escFinding(fixLabel)}</button>` : ''}
                             <button class="repair-finding-btn dismiss" onclick="dismissRepairFinding(${f.id})" title="Dismiss">&times;</button>
                         ` : ''}
                         <button class="repair-finding-expand-btn" data-finding="${f.id}" title="Details">&#9660;</button>
@@ -54221,12 +54221,20 @@ async function fixAllMatchingFindings() {
         })) return;
     }
 
+    // If fixing orphan files, prompt for action
+    let fixAction = null;
+    if (jobId === 'orphan_file_detector') {
+        fixAction = await _promptOrphanAction();
+        if (!fixAction) return;
+    }
+
     showToast(`Fixing ${_repairFindingsTotal} findings...`, 'info');
 
     try {
         const body = {};
         if (jobId) body.job_id = jobId;
         if (severity) body.severity = severity;
+        if (fixAction) body.fix_action = fixAction;
 
         const response = await fetch('/api/repair/findings/bulk-fix', {
             method: 'POST',
@@ -54287,7 +54295,14 @@ function renderRepairFindingsPagination(total, currentPage) {
     container.innerHTML = html;
 }
 
-async function fixRepairFinding(id) {
+async function fixRepairFinding(id, findingType) {
+    // Orphan files require user to choose an action
+    let fixAction = null;
+    if (findingType === 'orphan_file') {
+        fixAction = await _promptOrphanAction();
+        if (!fixAction) return; // User cancelled
+    }
+
     const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
     const fixBtn = card ? card.querySelector('.repair-finding-btn.fix') : null;
     let originalText = '';
@@ -54297,7 +54312,12 @@ async function fixRepairFinding(id) {
         fixBtn.textContent = '...';
     }
     try {
-        const response = await fetch(`/api/repair/findings/${id}/fix`, { method: 'POST' });
+        const body = fixAction ? { fix_action: fixAction } : {};
+        const response = await fetch(`/api/repair/findings/${id}/fix`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
         const result = await response.json();
         if (result.success) {
             showToast(result.message || 'Fixed successfully', 'success');
@@ -54315,6 +54335,39 @@ async function fixRepairFinding(id) {
             fixBtn.textContent = originalText;
         }
     }
+}
+
+function _promptOrphanAction() {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.cssText = 'display:flex;align-items:center;justify-content:center;z-index:10000;';
+        overlay.innerHTML = `
+            <div style="background:#1e1e2e;border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:28px;max-width:380px;width:90%;text-align:center;">
+                <div style="font-size:1.1em;font-weight:600;color:#fff;margin-bottom:8px;">Orphan File Action</div>
+                <div style="font-size:0.88em;color:rgba(255,255,255,0.6);margin-bottom:20px;">
+                    What would you like to do with this file?
+                </div>
+                <div style="display:flex;gap:10px;justify-content:center;">
+                    <button id="_orphan-staging" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(29,185,84,0.4);background:rgba(29,185,84,0.15);color:#1db954;font-weight:600;cursor:pointer;font-family:inherit;">
+                        Move to Staging
+                    </button>
+                    <button id="_orphan-delete" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.1);color:#ef4444;font-weight:500;cursor:pointer;font-family:inherit;">
+                        Delete
+                    </button>
+                </div>
+                <button id="_orphan-cancel" style="margin-top:12px;padding:6px 16px;border:none;background:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:0.82em;font-family:inherit;">
+                    Cancel
+                </button>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('#_orphan-staging').onclick = () => { overlay.remove(); resolve('staging'); };
+        overlay.querySelector('#_orphan-delete').onclick = () => { overlay.remove(); resolve('delete'); };
+        overlay.querySelector('#_orphan-cancel').onclick = () => { overlay.remove(); resolve(null); };
+        overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } };
+    });
 }
 
 async function resolveRepairFinding(id) {
@@ -54375,12 +54428,28 @@ async function bulkFixFindings() {
         if (hasMassFlag && !await showWitnessMeDialog(selectedOrphanCards.length)) return;
     }
 
+    // If any selected findings are orphan files, prompt for action once
+    let orphanFixAction = null;
+    if (selectedOrphanCards.length > 0) {
+        orphanFixAction = await _promptOrphanAction();
+        if (!orphanFixAction) return;
+    }
+
     let fixed = 0, failed = 0;
     showToast(`Fixing ${ids.length} findings...`, 'info');
 
     for (const id of ids) {
         try {
-            const response = await fetch(`/api/repair/findings/${id}/fix`, { method: 'POST' });
+            // Determine if this finding is an orphan that needs the action
+            const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
+            const isOrphan = card && card.dataset.jobId === 'orphan_file_detector';
+            const body = isOrphan && orphanFixAction ? { fix_action: orphanFixAction } : {};
+
+            const response = await fetch(`/api/repair/findings/${id}/fix`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
             const result = await response.json();
             if (result.success) fixed++;
             else failed++;
