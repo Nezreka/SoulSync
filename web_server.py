@@ -15380,6 +15380,7 @@ def _embed_source_ids(audio_file, metadata: dict):
             'qobuz_isrc': None, 'qobuz_copyright': None, 'qobuz_label': None,
             'lastfm_tags': [], 'lastfm_url': None,
             'genius_url': None,
+            'release_year': None,  # First source to find a year wins
         }
 
         # Run each metadata source lookup in configured order
@@ -15422,6 +15423,49 @@ def _embed_source_ids(audio_file, metadata: dict):
         lastfm_url = pp['lastfm_url']
         genius_url = pp['genius_url']
         id_tags = pp['id_tags']
+        release_year = pp['release_year']
+
+        # If metadata already has a date from Spotify context, use that as fallback
+        if not release_year and metadata.get('date'):
+            yr = str(metadata['date'])[:4]
+            if yr.isdigit():
+                release_year = yr
+
+        # Write release year to file tags if not already present
+        if release_year and 'ORIGINALDATE' not in id_tags:
+            id_tags['ORIGINALDATE'] = release_year
+        # If the file was written without a date tag, flag it for writing below
+        _needs_date_tag = release_year and not metadata.get('date')
+        if _needs_date_tag:
+            metadata['date'] = release_year
+
+        # Update DB album year if currently missing
+        if release_year:
+            try:
+                _pp_album_name = metadata.get('album', '')
+                _pp_artist_name = metadata.get('album_artist', '') or metadata.get('artist', '')
+                if _pp_album_name and _pp_artist_name:
+                    conn = database._get_connection()
+                    try:
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            UPDATE albums SET year = ?
+                            WHERE (year IS NULL OR year = 0)
+                              AND id IN (
+                                SELECT al.id FROM albums al
+                                JOIN artists ar ON ar.id = al.artist_id
+                                WHERE LOWER(al.title) = LOWER(?) AND LOWER(ar.name) = LOWER(?)
+                              )
+                        """, (int(release_year), _pp_album_name, _pp_artist_name))
+                        if cursor.rowcount > 0:
+                            conn.commit()
+                            print(f"📅 Updated album year to {release_year} in database")
+                        else:
+                            conn.rollback()
+                    finally:
+                        conn.close()
+            except Exception as e:
+                print(f"⚠️ Could not update album year in DB: {e}")
 
         # (All source lookups now handled by _pp_lookup_* functions called via configurable order above)
         if False:  # Dead code — old inline blocks preserved for reference during transition
@@ -15788,6 +15832,16 @@ def _embed_source_ids(audio_file, metadata: dict):
         if written:
             print(f"🔗 Embedded IDs: {', '.join(written)}")
 
+        # ── 3a½. Write date tag if discovered during lookups (initial write had no date) ──
+        if _needs_date_tag and release_year:
+            if isinstance(audio_file.tags, ID3):
+                audio_file.tags.add(TDRC(encoding=3, text=[release_year]))
+            elif isinstance(audio_file, (FLAC, OggVorbis)):
+                audio_file['date'] = [release_year]
+            elif isinstance(audio_file, MP4):
+                audio_file['\xa9day'] = [release_year]
+            print(f"📅 Date tag: {release_year}")
+
         # ── 3b. Write BPM tag (from Deezer) ──
         if _tag_enabled('deezer.tags.bpm') and deezer_bpm and deezer_bpm > 0:
             bpm_int = int(deezer_bpm)
@@ -16084,7 +16138,12 @@ def _pp_lookup_musicbrainz(pp, _names_match):
                     aa = ac[0].get('artist', {})
                     if aa.get('id'): id_tags['MUSICBRAINZ_ALBUMARTISTID'] = aa['id']
                 if rg.get('primary-type'): id_tags['RELEASETYPE'] = rg['primary-type']
-                if rg.get('first-release-date'): id_tags['ORIGINALDATE'] = rg['first-release-date']
+                if rg.get('first-release-date'):
+                    id_tags['ORIGINALDATE'] = rg['first-release-date']
+                    if not pp['release_year'] and len(rg['first-release-date']) >= 4:
+                        yr = rg['first-release-date'][:4]
+                        if yr.isdigit():
+                            pp['release_year'] = yr
                 if release_detail.get('status'): id_tags['RELEASESTATUS'] = release_detail['status']
                 if release_detail.get('country'): id_tags['RELEASECOUNTRY'] = release_detail['country']
                 if release_detail.get('barcode'): id_tags['BARCODE'] = release_detail['barcode']
@@ -16149,6 +16208,12 @@ def _pp_lookup_deezer(pp, _names_match):
                 dz_isrc = dz_details.get('isrc')
                 if dz_isrc:
                     pp['deezer_isrc'] = dz_isrc
+            # Release year from Deezer album
+            if not pp['release_year']:
+                dz_album = dz_result.get('album', {})
+                dz_release = (dz_album.get('release_date', '') if isinstance(dz_album, dict) else '') or ''
+                if len(dz_release) >= 4 and dz_release[:4].isdigit():
+                    pp['release_year'] = dz_release[:4]
     except Exception as e:
         print(f"⚠️ Deezer lookup failed (non-fatal): {e}")
 
@@ -16221,6 +16286,14 @@ def _pp_lookup_tidal(pp, _names_match):
                         td_copyright = td_copyright.get('text', td_copyright.get('name', ''))
                     if td_copyright:
                         pp['tidal_copyright'] = td_copyright
+            # Release year from Tidal album
+            if not pp['release_year']:
+                td_album = td_result.get('album', {})
+                td_release = ''
+                if isinstance(td_album, dict):
+                    td_release = str(td_album.get('release_date', '') or td_album.get('releaseDate', '') or '')
+                if len(td_release) >= 4 and td_release[:4].isdigit():
+                    pp['release_year'] = td_release[:4]
     except Exception as e:
         print(f"⚠️ Tidal lookup failed (non-fatal): {e}")
 
@@ -16266,6 +16339,17 @@ def _pp_lookup_qobuz(pp, _names_match):
                     qz_label_info = qz_album.get('label', {})
                     if isinstance(qz_label_info, dict) and qz_label_info.get('name'):
                         pp['qobuz_label'] = qz_label_info['name']
+                    # Release year from Qobuz album (prefer date string over Unix timestamp)
+                    if not pp['release_year']:
+                        qz_release = str(qz_album.get('release_date_original', '') or '')
+                        if not qz_release:
+                            # released_at is a Unix timestamp — convert to year
+                            qz_ts = qz_album.get('released_at')
+                            if qz_ts and isinstance(qz_ts, (int, float)) and qz_ts > 0:
+                                import datetime as _dt
+                                qz_release = str(_dt.datetime.utcfromtimestamp(qz_ts).year)
+                        if len(qz_release) >= 4 and qz_release[:4].isdigit():
+                            pp['release_year'] = qz_release[:4]
     except Exception as e:
         print(f"⚠️ Qobuz lookup failed (non-fatal): {e}")
 
