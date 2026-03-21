@@ -7681,7 +7681,10 @@ function initializeSearchModeToggle() {
                     await new Promise(resolve => setTimeout(resolve, 100));
 
                     // Load the artist details with source context
-                    await selectArtistForDetail(artist, { source: sourceOverride });
+                    await selectArtistForDetail(artist, {
+                        source: sourceOverride,
+                        plugin: artist.external_urls?.hydrabase_plugin,
+                    });
                 }
             })
         );
@@ -8014,6 +8017,10 @@ function initializeSearchModeToggle() {
             const albumParams = new URLSearchParams({ name: album.name || '', artist: album.artist || '' });
             if (_activeSearchSource && _activeSearchSource !== 'spotify') {
                 albumParams.set('source', _activeSearchSource);
+            }
+            // Pass Hydrabase plugin origin so server routes to correct client
+            if (album.external_urls?.hydrabase_plugin) {
+                albumParams.set('plugin', album.external_urls.hydrabase_plugin);
             }
             const response = await fetch(`/api/spotify/album/${album.id}?${albumParams}`);
 
@@ -31699,6 +31706,7 @@ async function selectArtistForDetail(artist, options = {}) {
     artistsPageState.selectedArtist = artist;
     artistsPageState.currentView = 'detail';
     artistsPageState.sourceOverride = options.source || null;
+    artistsPageState.pluginOverride = options.plugin || null;
 
     // Show detail state
     showArtistDetailState();
@@ -31707,7 +31715,7 @@ async function selectArtistForDetail(artist, options = {}) {
     updateArtistDetailHeader(artist);
 
     // Load discography (pass artist name for cross-source fallback)
-    await loadArtistDiscography(artist.id, artist.name, options.source);
+    await loadArtistDiscography(artist.id, artist.name, options.source, options.plugin);
 }
 
 /**
@@ -31715,7 +31723,7 @@ async function selectArtistForDetail(artist, options = {}) {
  * @param {string} artistId - Artist ID (Spotify or iTunes format)
  * @param {string} [artistName] - Optional artist name for fallback searches
  */
-async function loadArtistDiscography(artistId, artistName = null, sourceOverride = null) {
+async function loadArtistDiscography(artistId, artistName = null, sourceOverride = null, pluginOverride = null) {
     console.log(`💿 Loading discography for artist: ${artistId} (name: ${artistName}, source: ${sourceOverride || 'auto'})`);
 
     // Use source-prefixed cache key to avoid ID collisions between sources
@@ -31746,6 +31754,7 @@ async function loadArtistDiscography(artistId, artistName = null, sourceOverride
         const params = new URLSearchParams();
         if (artistName) params.set('artist_name', artistName);
         if (sourceOverride) params.set('source', sourceOverride);
+        if (pluginOverride) params.set('plugin', pluginOverride);
         if (params.toString()) url += `?${params.toString()}`;
 
         // Call the real API endpoint
@@ -33195,6 +33204,9 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
         const _aat1 = new URLSearchParams({ name: album.name || '', artist: artist.name || '' });
         if (artistsPageState.sourceOverride) {
             _aat1.set('source', artistsPageState.sourceOverride);
+        }
+        if (artistsPageState.pluginOverride) {
+            _aat1.set('plugin', artistsPageState.pluginOverride);
         }
         const response = await fetch(`/api/artist/${artist.id}/album/${album.id}/tracks?${_aat1}`);
 

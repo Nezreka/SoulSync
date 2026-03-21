@@ -6982,8 +6982,8 @@ def enhanced_search():
         if primary_source != "hydrabase":
             # Mirror to Hydrabase worker (fire-and-forget)
             if hydrabase_worker and dev_mode_enabled:
-                hydrabase_worker.enqueue(query, 'track')
-                hydrabase_worker.enqueue(query, 'album')
+                hydrabase_worker.enqueue(query, 'tracks')
+                hydrabase_worker.enqueue(query, 'albums')
                 hydrabase_worker.enqueue(query, 'artists')
 
             # Search primary source synchronously — use is_spotify_authenticated()
@@ -7051,7 +7051,8 @@ def _enhanced_search_source(query, client):
             artists.append({
                 "id": artist.id,
                 "name": artist.name,
-                "image_url": artist.image_url
+                "image_url": artist.image_url,
+                "external_urls": artist.external_urls or {},
             })
     except Exception as e:
         logger.debug(f"Artist search failed for {type(client).__name__}: {e}")
@@ -7067,10 +7068,11 @@ def _enhanced_search_source(query, client):
                 "image_url": album.image_url,
                 "release_date": album.release_date,
                 "total_tracks": album.total_tracks,
-                "album_type": album.album_type
+                "album_type": album.album_type,
+                "external_urls": album.external_urls or {},
             })
     except Exception as e:
-        logger.debug(f"Album search failed for {type(client).__name__}: {e}")
+        logger.warning(f"Album search failed for {type(client).__name__}: {e}", exc_info=True)
 
     try:
         track_objs = client.search_tracks(query, limit=10)
@@ -7083,10 +7085,11 @@ def _enhanced_search_source(query, client):
                 "album": track.album,
                 "duration_ms": track.duration_ms,
                 "image_url": track.image_url,
-                "release_date": track.release_date
+                "release_date": track.release_date,
+                "external_urls": track.external_urls or {},
             })
     except Exception as e:
-        logger.debug(f"Track search failed for {type(client).__name__}: {e}")
+        logger.warning(f"Track search failed for {type(client).__name__}: {e}", exc_info=True)
 
     return {"artists": artists, "albums": albums, "tracks": tracks, "available": True}
 
@@ -8936,6 +8939,19 @@ def get_artist_image(artist_id):
             client = _get_deezer_client()
             image_url = client._get_artist_image_from_albums(artist_id)
             return jsonify({"success": True, "image_url": image_url})
+        elif source_override == 'hydrabase':
+            # Route to the plugin that sourced the data
+            plugin = request.args.get('plugin', '').lower()
+            if plugin == 'deezer':
+                client = _get_deezer_client()
+                image_url = client._get_artist_image_from_albums(artist_id)
+            elif plugin == 'itunes' or artist_id.isdigit():
+                from core.itunes_client import iTunesClient
+                client = iTunesClient()
+                image_url = client._get_artist_image_from_albums(artist_id)
+            else:
+                image_url = None
+            return jsonify({"success": True, "image_url": image_url})
         elif spotify_client and spotify_client.is_spotify_authenticated() and source_override != 'itunes':
             # Use Spotify directly
             artist_data = spotify_client.sp.artist(artist_id)
@@ -8963,7 +8979,7 @@ def get_artist_discography(artist_id):
 
         # Mirror to Hydrabase P2P network
         if hydrabase_worker and dev_mode_enabled and artist_name:
-            hydrabase_worker.enqueue(artist_name, 'discography')
+            hydrabase_worker.enqueue(artist_name, 'artist.albums')
 
         # Determine which source to use
         spotify_available = spotify_client and spotify_client.is_spotify_authenticated()
@@ -8995,12 +9011,31 @@ def get_artist_discography(artist_id):
                     albums = deezer_cl.get_artist_albums(artist_id, album_type='album,single', limit=50)
                     if albums:
                         active_source = 'deezer'
+                elif source_override == 'hydrabase':
+                    plugin = request.args.get('plugin', '').lower()
+                    if plugin == 'deezer':
+                        hb_cl = _get_deezer_client()
+                    elif plugin == 'itunes' or artist_id.isdigit():
+                        from core.itunes_client import iTunesClient
+                        hb_cl = iTunesClient()
+                    else:
+                        hb_cl = spotify_client
+                    albums = hb_cl.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                    if albums:
+                        active_source = plugin or 'hydrabase'
 
                 # If direct ID lookup failed but we have artist name, search by name
                 if not albums and artist_name:
                     if source_override == 'itunes':
                         from core.itunes_client import iTunesClient
                         cl = iTunesClient()
+                    elif source_override == 'hydrabase':
+                        plugin = request.args.get('plugin', '').lower()
+                        if plugin == 'deezer':
+                            cl = _get_deezer_client()
+                        else:
+                            from core.itunes_client import iTunesClient
+                            cl = iTunesClient()
                     elif source_override == 'deezer':
                         cl = _get_deezer_client()
                     elif source_override == 'spotify' and spotify_available:
@@ -9263,6 +9298,13 @@ def get_artist_album_tracks(artist_id, album_id):
         if source_override == 'itunes':
             from core.itunes_client import iTunesClient
             client = iTunesClient()
+        elif source_override == 'hydrabase':
+            plugin = request.args.get('plugin', '').lower()
+            if plugin == 'deezer':
+                client = _get_deezer_client()
+            elif plugin == 'itunes' or album_id.isdigit():
+                from core.itunes_client import iTunesClient
+                client = iTunesClient()
         elif source_override == 'deezer':
             client = _get_deezer_client()
 
@@ -25939,6 +25981,16 @@ def get_album_tracks(album_id):
         if source_override == 'itunes':
             from core.itunes_client import iTunesClient
             client = iTunesClient()
+        elif source_override == 'hydrabase':
+            # Hydrabase IDs originate from whichever plugin the peer runs.
+            # 'plugin' param is authoritative; fall back to ID format detection.
+            plugin = request.args.get('plugin', '').lower()
+            if plugin == 'itunes' or (not plugin and album_id.isdigit()):
+                from core.itunes_client import iTunesClient
+                client = iTunesClient()
+            elif plugin == 'deezer':
+                client = _get_deezer_client()
+            # else: spotify (default)
         elif source_override == 'deezer':
             client = _get_deezer_client()
 
@@ -26082,7 +26134,7 @@ def search_spotify_tracks():
             tracks = hydrabase_client.search_tracks(query, limit=limit)
         else:
             if hydrabase_worker and dev_mode_enabled:
-                hydrabase_worker.enqueue(query, 'track')
+                hydrabase_worker.enqueue(query, 'tracks')
             tracks = spotify_client.search_tracks(query, limit=limit)
 
         tracks_dict = [{
@@ -26128,7 +26180,7 @@ def search_itunes_tracks():
             source = 'hydrabase'
         else:
             if hydrabase_worker and dev_mode_enabled:
-                hydrabase_worker.enqueue(query, 'track')
+                hydrabase_worker.enqueue(query, 'tracks')
             fallback_client = _get_metadata_fallback_client()
             tracks = fallback_client.search_tracks(query, limit=limit)
             source = _get_metadata_fallback_source()
@@ -41789,7 +41841,7 @@ def import_search_albums():
             albums = hydrabase_client.search_albums(query, limit=limit)
         else:
             if hydrabase_worker and dev_mode_enabled:
-                hydrabase_worker.enqueue(query, 'album')
+                hydrabase_worker.enqueue(query, 'albums')
             albums = spotify_client.search_albums(query, limit=limit)
 
         results = []
@@ -42148,7 +42200,7 @@ def import_search_tracks():
             tracks = hydrabase_client.search_tracks(query, limit=limit)
         else:
             if hydrabase_worker and dev_mode_enabled:
-                hydrabase_worker.enqueue(query, 'track')
+                hydrabase_worker.enqueue(query, 'tracks')
             tracks = spotify_client.search_tracks(query, limit=limit)
 
         results = []
