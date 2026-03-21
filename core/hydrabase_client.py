@@ -140,6 +140,21 @@ class HydrabaseClient:
             return None
 
     @staticmethod
+    def _normalize_artists(artists_raw) -> list:
+        """Normalize artists to a list of strings (Hydrabase may send dicts or strings)."""
+        if not artists_raw or not isinstance(artists_raw, list):
+            return []
+        result = []
+        for a in artists_raw:
+            if isinstance(a, str):
+                result.append(a)
+            elif isinstance(a, dict):
+                result.append(a.get('name', ''))
+            else:
+                result.append(str(a))
+        return [x for x in result if x]
+
+    @staticmethod
     def _normalize_release_date(date_str: str) -> str:
         """Strip time portion from ISO dates like '1995-01-01T08:00:00Z' -> '1995-01-01'."""
         if not date_str:
@@ -161,7 +176,7 @@ class HydrabaseClient:
                 tracks.append(Track(
                     id=str(item.get('id', '')),
                     name=item.get('name', ''),
-                    artists=item.get('artists', []),
+                    artists=self._normalize_artists(item.get('artists', [])),
                     album=item.get('album', ''),
                     duration_ms=item.get('duration_ms', 0),
                     popularity=item.get('popularity', 0),
@@ -210,7 +225,7 @@ class HydrabaseClient:
                 albums.append(Album(
                     id=str(item.get('soul_id', item.get('id', ''))),
                     name=item.get('name', ''),
-                    artists=item.get('artists', []),
+                    artists=self._normalize_artists(item.get('artists', [])),
                     release_date=self._normalize_release_date(item.get('release_date', '')),
                     total_tracks=item.get('total_tracks', 0),
                     album_type=item.get('album_type', 'album'),
@@ -235,7 +250,7 @@ class HydrabaseClient:
                 albums.append(Album(
                     id=str(item.get('soul_id', item.get('id', ''))),
                     name=item.get('name', ''),
-                    artists=item.get('artists', []),
+                    artists=self._normalize_artists(item.get('artists', [])),
                     release_date=self._normalize_release_date(item.get('release_date', '')),
                     total_tracks=item.get('total_tracks', 0),
                     album_type=item.get('album_type', 'album'),
@@ -376,7 +391,7 @@ class HydrabaseClient:
                 tracks.append(Track(
                     id=str(item.get('id', '')),
                     name=item.get('name', ''),
-                    artists=item.get('artists', []),
+                    artists=self._normalize_artists(item.get('artists', [])),
                     album=item.get('album', ''),
                     duration_ms=item.get('duration_ms', 0),
                     popularity=item.get('popularity', 0),
@@ -504,7 +519,7 @@ class HydrabaseClient:
                 albums.append(Album(
                     id=str(item.get('soul_id', item.get('id', ''))),
                     name=item.get('name', ''),
-                    artists=item.get('artists', []),
+                    artists=self._normalize_artists(item.get('artists', [])),
                     release_date=self._normalize_release_date(item.get('release_date', '')),
                     total_tracks=item.get('total_tracks', 0),
                     album_type=item_type,

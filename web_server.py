@@ -7006,8 +7006,7 @@ def enhanced_search():
 
         # Determine which alternate sources are available (for frontend to fetch async)
         spotify_available = bool(spotify_client and spotify_client.is_spotify_authenticated())
-        hydrabase_available = bool(hydrabase_client and hydrabase_client.is_connected()
-                                   and (dev_mode_enabled or config_manager.get('hydrabase.enabled', False)))
+        hydrabase_available = bool(hydrabase_client and hydrabase_client.is_connected())
         alternate_sources = []
         if primary_source != 'spotify' and spotify_available:
             alternate_sources.append('spotify')
