@@ -794,7 +794,7 @@ class LibraryReorganizeJob(RepairJob):
             return years
 
         # Cap lookups to avoid excessive API calls
-        max_lookups = 50
+        max_lookups = 200
         pairs_list = list(missing_pairs)[:max_lookups]
         logger.info("Looking up %d album years from %s API", len(pairs_list), source_name)
 
