@@ -246,8 +246,126 @@ class HydrabaseClient:
                 logger.debug(f"Skipping malformed Hydrabase discography album: {e}")
         return albums
 
+    # ==================== Detail Methods (Spotify-compatible dict format) ====================
+
+    def get_track_details(self, track_id: str) -> Optional[dict]:
+        """Get detailed track information including album data — Spotify-compatible dict.
+
+        Sends 'track.details' request.  If the server doesn't support it,
+        falls back to a track search by ID and builds the enhanced dict from
+        whatever we get back.
+        """
+        results = self._send_and_recv('track.details', track_id)
+        if not results:
+            # Fallback: search for the track ID directly
+            results = self._send_and_recv('track', track_id)
+        if not results:
+            return None
+
+        item = results[0] if results else None
+        if not item or not isinstance(item, dict):
+            return None
+
+        artists = item.get('artists', [])
+        primary_artist = artists[0] if artists else 'Unknown Artist'
+        if isinstance(primary_artist, dict):
+            primary_artist = primary_artist.get('name', 'Unknown Artist')
+
+        album_name = item.get('album', '') or item.get('album_name', '')
+        release_date = self._normalize_release_date(item.get('release_date', ''))
+
+        return {
+            'id': str(item.get('id', '')),
+            'name': item.get('name', ''),
+            'track_number': item.get('track_number', 0),
+            'disc_number': item.get('disc_number', 1),
+            'duration_ms': item.get('duration_ms', 0),
+            'explicit': item.get('explicit', False),
+            'artists': [primary_artist] if isinstance(primary_artist, str) else artists,
+            'primary_artist': primary_artist,
+            'album': {
+                'id': str(item.get('album_id', item.get('soul_id', ''))),
+                'name': album_name,
+                'total_tracks': item.get('total_tracks', 0),
+                'release_date': release_date,
+                'album_type': item.get('album_type', 'album'),
+                'artists': [primary_artist] if isinstance(primary_artist, str) else artists,
+            },
+            'is_album_track': (item.get('total_tracks', 0) or 0) > 1,
+            'image_url': item.get('image_url'),
+            'external_urls': item.get('external_urls', {}),
+            '_source': 'hydrabase',
+        }
+
+    def get_album(self, album_id: str, include_tracks: bool = True) -> Optional[dict]:
+        """Get album information with tracks — Spotify-compatible dict.
+
+        Sends 'album.get' request.  Falls back to 'album' search if the
+        server doesn't support the detailed endpoint.
+        """
+        results = self._send_and_recv('album.get', album_id)
+        if not results:
+            results = self._send_and_recv('album', album_id)
+        if not results:
+            return None
+
+        item = results[0] if results else None
+        if not item or not isinstance(item, dict):
+            return None
+
+        artists_raw = item.get('artists', [])
+        artist_dicts = []
+        for a in artists_raw:
+            if isinstance(a, dict):
+                artist_dicts.append(a)
+            elif isinstance(a, str):
+                artist_dicts.append({'name': a, 'id': ''})
+
+        image_url = item.get('image_url', '')
+        images = []
+        if image_url:
+            images = [
+                {'url': image_url, 'height': 600, 'width': 600},
+                {'url': image_url, 'height': 300, 'width': 300},
+            ]
+
+        release_date = self._normalize_release_date(item.get('release_date', ''))
+        total_tracks = item.get('total_tracks', 0)
+
+        album_type = item.get('album_type', 'album')
+        if not album_type or album_type == 'album':
+            if total_tracks and total_tracks <= 3:
+                album_type = 'single'
+            elif total_tracks and total_tracks <= 6:
+                album_type = 'ep'
+
+        album_result = {
+            'id': str(item.get('soul_id', item.get('id', ''))),
+            'name': item.get('name', ''),
+            'images': images,
+            'artists': artist_dicts,
+            'release_date': release_date,
+            'total_tracks': total_tracks,
+            'album_type': album_type,
+            'external_urls': item.get('external_urls', {}),
+            'uri': f"hydrabase:album:{item.get('soul_id', item.get('id', ''))}",
+            '_source': 'hydrabase',
+        }
+
+        if include_tracks:
+            tracks_data = self.get_album_tracks_dict(album_id)
+            if tracks_data and isinstance(tracks_data, dict) and 'items' in tracks_data:
+                album_result['tracks'] = tracks_data
+            else:
+                album_result['tracks'] = {'items': [], 'total': 0}
+
+        return album_result
+
     def get_album_tracks(self, album_id: str, limit: int = 50) -> List[Track]:
-        """Fetch tracks for an album from Hydrabase by soul_id."""
+        """Fetch tracks for an album — returns Track dataclass list.
+
+        Used by existing web_server.py endpoints that expect List[Track].
+        """
         results = self._send_and_recv('album.tracks', album_id)
         if not results:
             return []
@@ -272,6 +390,144 @@ class HydrabaseClient:
             except Exception as e:
                 logger.debug(f"Skipping malformed Hydrabase album track: {e}")
         return tracks
+
+    def get_album_tracks_dict(self, album_id: str, limit: int = 50) -> Optional[dict]:
+        """Fetch tracks for an album — Spotify-compatible dict format.
+
+        Returns {items: List[Dict], total: int, limit: int, next: None}.
+        Used by get_album() for Spotify-compatible interface parity.
+        """
+        results = self._send_and_recv('album.tracks', album_id)
+        if not results:
+            return None
+
+        tracks = []
+        for item in results[:limit]:
+            try:
+                artists_raw = item.get('artists', [])
+                artist_dicts = [{'name': a} if isinstance(a, str) else a for a in artists_raw]
+
+                tracks.append({
+                    'id': str(item.get('id', '')),
+                    'name': item.get('name', ''),
+                    'artists': artist_dicts,
+                    'album': {
+                        'id': str(album_id),
+                        'name': item.get('album', ''),
+                        'images': [{'url': item.get('image_url', ''), 'height': 300, 'width': 300}] if item.get('image_url') else [],
+                        'release_date': self._normalize_release_date(item.get('release_date', '')),
+                    },
+                    'duration_ms': item.get('duration_ms', 0),
+                    'track_number': item.get('track_number', 0),
+                    'disc_number': item.get('disc_number', 1),
+                    'explicit': item.get('explicit', False),
+                    'preview_url': item.get('preview_url'),
+                    'external_urls': item.get('external_urls', {}),
+                    'uri': f"hydrabase:track:{item.get('id', '')}",
+                    '_source': 'hydrabase',
+                })
+            except Exception as e:
+                logger.debug(f"Skipping malformed Hydrabase album track: {e}")
+
+        tracks.sort(key=lambda t: (t.get('disc_number', 1), t.get('track_number', 0)))
+
+        return {
+            'items': tracks,
+            'total': len(tracks),
+            'limit': limit,
+            'next': None,
+        }
+
+    def get_artist(self, artist_id: str) -> Optional[dict]:
+        """Get detailed artist info — Spotify-compatible dict.
+
+        Sends 'artist.get' request.  Falls back to 'artists' search if the
+        server doesn't support the detailed endpoint.
+        """
+        results = self._send_and_recv('artist.get', artist_id)
+        if not results:
+            results = self._send_and_recv('artists', artist_id)
+        if not results:
+            return None
+
+        item = results[0] if results else None
+        if not item or not isinstance(item, dict):
+            return None
+
+        image_url = item.get('image_url', '')
+        images = []
+        if image_url:
+            images = [
+                {'url': image_url, 'height': 600, 'width': 600},
+                {'url': image_url, 'height': 300, 'width': 300},
+            ]
+
+        genres = item.get('genres', [])
+        if not genres and item.get('genre'):
+            genres = [item['genre']]
+
+        return {
+            'id': str(item.get('id', '')),
+            'name': item.get('name', ''),
+            'images': images,
+            'genres': genres,
+            'popularity': item.get('popularity', 0),
+            'followers': {'total': item.get('followers', 0)},
+            'external_urls': item.get('external_urls', {}),
+            'uri': f"hydrabase:artist:{item.get('id', '')}",
+            '_source': 'hydrabase',
+        }
+
+    def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
+        """Get albums by artist — returns Album dataclass list.
+
+        Uses the discography endpoint under the hood since Hydrabase
+        indexes by artist name rather than ID.  Falls back to search_discography
+        if 'artist.albums' isn't supported.
+        """
+        results = self._send_and_recv('artist.albums', artist_id)
+        if not results:
+            # Fallback: try discography with the ID as a name query
+            results = self._send_and_recv('discography', artist_id)
+        if not results:
+            return []
+
+        # Filter by album_type if requested
+        type_filter = set(album_type.split(',')) if album_type else None
+
+        albums = []
+        for item in results[:limit]:
+            try:
+                item_type = item.get('album_type', 'album')
+                if type_filter and item_type not in type_filter:
+                    continue
+                albums.append(Album(
+                    id=str(item.get('soul_id', item.get('id', ''))),
+                    name=item.get('name', ''),
+                    artists=item.get('artists', []),
+                    release_date=self._normalize_release_date(item.get('release_date', '')),
+                    total_tracks=item.get('total_tracks', 0),
+                    album_type=item_type,
+                    image_url=item.get('image_url'),
+                    external_urls=item.get('external_urls'),
+                ))
+            except Exception as e:
+                logger.debug(f"Skipping malformed Hydrabase artist album: {e}")
+        return albums
+
+    def get_track_features(self, track_id: str) -> None:
+        """Audio features not available from Hydrabase."""
+        return None
+
+    # ==================== Interface parity ====================
+
+    def is_authenticated(self) -> bool:
+        """Matches iTunes/Deezer/Spotify interface — True if connected."""
+        return self.is_connected()
+
+    def reload_config(self):
+        """No-op for interface parity with iTunes/Deezer/Spotify."""
+        pass
 
     # ==================== Raw access (for comparison) ====================
 
