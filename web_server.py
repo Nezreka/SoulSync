@@ -13156,12 +13156,13 @@ def _parse_filename_metadata(filename: str) -> dict:
     
     # --- Logic from soulseek_client.py ---
     patterns = [
-        # Pattern: 01 - Artist - Title
+        # Pattern: 01 - Artist - Title (three-part with track number)
         r'^(?P<track_number>\d{1,2})\s*[-\.]\s*(?P<artist>.+?)\s*[-–]\s*(?P<title>.+)$',
+        # Pattern: 01 - Title (track number + title — must come before Artist - Title
+        # to prevent "08 - Kilburn Market Dub" matching as artist="08")
+        r'^(?P<track_number>\d{1,2})\s*[-\.]\s*(?P<title>.+)$',
         # Pattern: Artist - Title
         r'^(?P<artist>.+?)\s*[-–]\s*(?P<title>.+)$',
-        # Pattern: 01 - Title
-        r'^(?P<track_number>\d{1,2})\s*[-\.]\s*(?P<title>.+)$',
     ]
     
     for pattern in patterns:
@@ -13205,6 +13206,65 @@ def _parse_filename_metadata(filename: str) -> dict:
 
     print(f"🧠 Parsed Filename '{base_name}': Artist='{metadata['artist']}', Title='{metadata['title']}', Album='{metadata['album']}', Track#='{metadata['track_number']}'")
     return metadata
+
+
+def _read_staging_file_metadata(full_path: str, filename: str) -> dict:
+    """Read metadata from a staging file — tags first, filename parsing as fallback.
+
+    Returns dict with: title, artist, albumartist, album, track_number, disc_number.
+    Only falls back to filename parsing when BOTH title AND artist tags are empty.
+    """
+    meta = {
+        'title': None, 'artist': None, 'albumartist': None,
+        'album': None, 'track_number': None, 'disc_number': None,
+    }
+
+    # Phase 1: Read embedded tags (most reliable)
+    try:
+        from mutagen import File as MutagenFile
+        tags = MutagenFile(full_path, easy=True)
+        if tags:
+            def _first(tag_list):
+                if isinstance(tag_list, list) and tag_list:
+                    val = str(tag_list[0]).strip()
+                    return val if val else None
+                return None
+
+            meta['title'] = _first(tags.get('title'))
+            meta['artist'] = _first(tags.get('artist'))
+            meta['albumartist'] = _first(tags.get('albumartist'))
+            meta['album'] = _first(tags.get('album'))
+
+            tn = _first(tags.get('tracknumber'))
+            if tn:
+                try:
+                    meta['track_number'] = int(tn.split('/')[0])
+                except (ValueError, IndexError):
+                    pass
+
+            dn = _first(tags.get('discnumber'))
+            if dn:
+                try:
+                    meta['disc_number'] = int(dn.split('/')[0])
+                except (ValueError, IndexError):
+                    pass
+    except Exception:
+        pass
+
+    # Phase 2: Only fall back to filename parsing when tags are genuinely empty
+    if not meta['title'] and not meta['artist']:
+        parsed = _parse_filename_metadata(filename)
+        meta['title'] = parsed.get('title') or os.path.splitext(os.path.basename(filename))[0]
+        meta['artist'] = parsed.get('artist')
+        if not meta['track_number']:
+            meta['track_number'] = parsed.get('track_number')
+        if not meta['album']:
+            meta['album'] = parsed.get('album')
+    elif not meta['title']:
+        # Has artist tag but no title — use filename for title only
+        meta['title'] = os.path.splitext(os.path.basename(filename))[0]
+
+    return meta
 
 
 # ===================================================================
@@ -23814,32 +23874,13 @@ def _get_staging_file_cache(batch_id):
             full_path = os.path.join(root, fname)
             rel_path = os.path.relpath(full_path, staging_path)
 
-            # Read tags first (most reliable)
-            title, artist, album = None, None, None
-            try:
-                from mutagen import File as MutagenFile
-                tags = MutagenFile(full_path, easy=True)
-                if tags:
-                    title = (tags.get('title') or [None])[0]
-                    artist = (tags.get('artist') or [None])[0]
-                    album = (tags.get('album') or [None])[0]
-            except Exception:
-                pass
-
-            # Fallback to filename parsing
-            if not title:
-                parsed = _parse_filename_metadata(rel_path)
-                title = parsed.get('title') or os.path.splitext(fname)[0]
-                if not artist:
-                    artist = parsed.get('artist')
-                if not album:
-                    album = parsed.get('album')
+            meta = _read_staging_file_metadata(full_path, rel_path)
 
             files.append({
                 'full_path': full_path,
-                'title': title or '',
-                'artist': artist or '',
-                'album': album or '',
+                'title': meta['title'] or '',
+                'artist': meta['albumartist'] or meta['artist'] or '',
+                'album': meta['album'] or '',
                 'extension': ext,
             })
 
@@ -41715,41 +41756,17 @@ def import_staging_files():
                 full_path = os.path.join(root, fname)
                 rel_path = os.path.relpath(full_path, staging_path)
 
-                # Try reading tags
-                title, artist, album, track_number = None, None, None, None
-                try:
-                    from mutagen import File as MutagenFile
-                    tags = MutagenFile(full_path, easy=True)
-                    if tags:
-                        title = (tags.get('title') or [None])[0]
-                        artist = (tags.get('artist') or [None])[0]
-                        album = (tags.get('album') or [None])[0]
-                        tn = (tags.get('tracknumber') or [None])[0]
-                        if tn:
-                            try:
-                                track_number = int(str(tn).split('/')[0])
-                            except ValueError:
-                                pass
-                except Exception:
-                    pass
-
-                # Fallback to filename parsing
-                if not title:
-                    parsed = _parse_filename_metadata(fname)
-                    title = parsed.get('title') or os.path.splitext(fname)[0]
-                    if not artist:
-                        artist = parsed.get('artist')
-                    if not track_number:
-                        track_number = parsed.get('track_number')
+                meta = _read_staging_file_metadata(full_path, rel_path)
 
                 files.append({
                     'filename': fname,
                     'rel_path': rel_path,
                     'full_path': full_path,
-                    'title': title,
-                    'artist': artist or 'Unknown Artist',
-                    'album': album,
-                    'track_number': track_number,
+                    'title': meta['title'],
+                    'artist': meta['albumartist'] or meta['artist'] or 'Unknown Artist',
+                    'album': meta['album'],
+                    'track_number': meta['track_number'],
+                    'disc_number': meta['disc_number'],
                     'extension': ext
                 })
 
@@ -41758,6 +41775,70 @@ def import_staging_files():
         return jsonify({'success': True, 'files': files, 'staging_path': staging_path})
     except Exception as e:
         logger.error(f"Error scanning staging files: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/import/staging/groups', methods=['GET'])
+def import_staging_groups():
+    """Auto-detect album groups from staging files based on their tags.
+
+    Groups files by (album_tag, artist) where both are non-empty and at least 2 files share
+    the same album+artist combo. Returns groups sorted by file count descending.
+    """
+    try:
+        staging_path = _get_staging_path()
+        if not os.path.isdir(staging_path):
+            return jsonify({'success': True, 'groups': []})
+
+        # Scan files and group by album+artist tags
+        album_groups = {}  # (album_lower, artist_lower) -> {album, artist, files: []}
+        for root, _dirs, filenames in os.walk(staging_path):
+            for fname in filenames:
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in AUDIO_EXTENSIONS:
+                    continue
+                full_path = os.path.join(root, fname)
+                rel_path = os.path.relpath(full_path, staging_path)
+
+                meta = _read_staging_file_metadata(full_path, rel_path)
+                album = meta['album']
+                artist = meta['albumartist'] or meta['artist']
+                if not album or not artist:
+                    continue
+
+                key = (album.lower().strip(), artist.lower().strip())
+                if key not in album_groups:
+                    album_groups[key] = {
+                        'album': album.strip(),
+                        'artist': artist.strip(),
+                        'files': []
+                    }
+                album_groups[key]['files'].append({
+                    'filename': fname,
+                    'full_path': full_path,
+                    'title': meta['title'],
+                    'track_number': meta['track_number'],
+                })
+
+        # Only return groups with 2+ files
+        groups = []
+        for group in album_groups.values():
+            if len(group['files']) >= 2:
+                group['files'].sort(key=lambda f: f.get('track_number') or 999)
+                groups.append({
+                    'album': group['album'],
+                    'artist': group['artist'],
+                    'file_count': len(group['files']),
+                    'files': group['files'],
+                    'file_paths': [f['full_path'] for f in group['files']],
+                })
+
+        # Sort by file count descending
+        groups.sort(key=lambda g: g['file_count'], reverse=True)
+
+        return jsonify({'success': True, 'groups': groups})
+    except Exception as e:
+        logger.error(f"Error building staging groups: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -41870,6 +41951,8 @@ def import_album_match():
         album_id = data.get('album_id')
         album_name = data.get('album_name', '')
         album_artist = data.get('album_artist', '')
+        # Optional: only match specific files (from auto-group selection)
+        filter_file_paths = set(data.get('file_paths', []))
         if not album_id:
             return jsonify({'success': False, 'error': 'Missing album_id'}), 400
 
@@ -41948,48 +42031,33 @@ def import_album_match():
                     continue
                 full_path = os.path.join(root, fname)
 
-                title, artist, album_tag, track_number = None, None, None, None
-                try:
-                    from mutagen import File as MutagenFile
-                    tags = MutagenFile(full_path, easy=True)
-                    if tags:
-                        title = (tags.get('title') or [None])[0]
-                        artist = (tags.get('artist') or [None])[0]
-                        album_tag = (tags.get('album') or [None])[0]
-                        tn = (tags.get('tracknumber') or [None])[0]
-                        if tn:
-                            try:
-                                track_number = int(str(tn).split('/')[0])
-                            except ValueError:
-                                pass
-                except Exception:
-                    pass
-
-                if not title:
-                    parsed = _parse_filename_metadata(fname)
-                    title = parsed.get('title') or os.path.splitext(fname)[0]
-                    if not artist:
-                        artist = parsed.get('artist')
-                    if not track_number:
-                        track_number = parsed.get('track_number')
+                meta = _read_staging_file_metadata(full_path, fname)
 
                 staging_files.append({
                     'filename': fname,
                     'full_path': full_path,
-                    'title': title,
-                    'artist': artist,
-                    'album': album_tag,
-                    'track_number': track_number
+                    'title': meta['title'],
+                    'artist': meta['albumartist'] or meta['artist'],
+                    'album': meta['album'],
+                    'track_number': meta['track_number'],
+                    'disc_number': meta['disc_number'],
                 })
+
+        # Filter to specific files if requested (auto-group selection)
+        if filter_file_paths:
+            staging_files = [sf for sf in staging_files if sf['full_path'] in filter_file_paths]
 
         # Match each Spotify track to the best staging file
         matches = []
         used_files = set()
+        album_name_for_match = album_info.get('name', '')
 
         for sp_track in spotify_tracks:
             sp_name = sp_track.get('name', '')
             sp_number = sp_track.get('track_number', 0)
             sp_disc = sp_track.get('disc_number', 1)
+            sp_artists = sp_track.get('artists', [])
+            sp_artist_name = sp_artists[0]['name'] if sp_artists and isinstance(sp_artists[0], dict) else (sp_artists[0] if sp_artists else '')
 
             best_match = None
             best_score = 0.0
@@ -41999,19 +42067,40 @@ def import_album_match():
                     continue
 
                 score = 0.0
-                # Title similarity (weight 0.5)
+
+                # Title similarity (weight 0.45)
                 title_sim = matching_engine.similarity_score(
                     matching_engine.normalize_string(sp_name),
                     matching_engine.normalize_string(sf['title'] or '')
                 )
-                score += title_sim * 0.5
+                score += title_sim * 0.45
 
-                # Track number match (weight 0.5)
+                # Artist similarity (weight 0.15)
+                sf_artist = sf.get('artist') or ''
+                if sf_artist and sp_artist_name:
+                    artist_sim = matching_engine.similarity_score(
+                        matching_engine.normalize_string(sp_artist_name),
+                        matching_engine.normalize_string(sf_artist)
+                    )
+                    score += artist_sim * 0.15
+                else:
+                    score += 0.075  # neutral when no artist data
+
+                # Track number match (weight 0.30)
                 if sf['track_number'] and sp_number:
                     if sf['track_number'] == sp_number:
-                        score += 0.5
+                        score += 0.30
                     elif abs(sf['track_number'] - sp_number) <= 1:
-                        score += 0.2
+                        score += 0.12
+
+                # Album tag bonus (weight 0.10) — reward files whose album tag matches
+                sf_album = sf.get('album') or ''
+                if sf_album and album_name_for_match:
+                    album_sim = matching_engine.similarity_score(
+                        matching_engine.normalize_string(sf_album),
+                        matching_engine.normalize_string(album_name_for_match)
+                    )
+                    score += album_sim * 0.10
 
                 if score > best_score and score >= 0.4:
                     best_score = score
