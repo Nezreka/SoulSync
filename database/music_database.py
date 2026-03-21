@@ -356,6 +356,7 @@ class MusicDatabase:
             self._add_profile_settings(cursor)
             self._add_profile_listenbrainz_support(cursor)
             self._add_profile_service_credentials(cursor)
+            self._add_soul_id_columns(cursor)
 
             # Spotify library cache
             self._add_spotify_library_cache_table(cursor)
@@ -2624,6 +2625,42 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error in per-profile service credentials migration: {e}")
+
+    def _add_soul_id_columns(self, cursor):
+        """Add soul_id columns to artists, albums, and tracks tables."""
+        try:
+            # Artists: soul_id
+            cursor.execute("PRAGMA table_info(artists)")
+            artist_cols = [c[1] for c in cursor.fetchall()]
+            if 'soul_id' not in artist_cols:
+                cursor.execute("ALTER TABLE artists ADD COLUMN soul_id TEXT DEFAULT NULL")
+                logger.info("Added soul_id column to artists table")
+
+            # Albums: soul_id
+            cursor.execute("PRAGMA table_info(albums)")
+            album_cols = [c[1] for c in cursor.fetchall()]
+            if 'soul_id' not in album_cols:
+                cursor.execute("ALTER TABLE albums ADD COLUMN soul_id TEXT DEFAULT NULL")
+                logger.info("Added soul_id column to albums table")
+
+            # Tracks: soul_id (song-level) + album_soul_id (release-specific)
+            cursor.execute("PRAGMA table_info(tracks)")
+            track_cols = [c[1] for c in cursor.fetchall()]
+            if 'soul_id' not in track_cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN soul_id TEXT DEFAULT NULL")
+                logger.info("Added soul_id column to tracks table")
+            if 'album_soul_id' not in track_cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN album_soul_id TEXT DEFAULT NULL")
+                logger.info("Added album_soul_id column to tracks table")
+
+            # Indexes for lookups
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_soul_id ON artists (soul_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_soul_id ON albums (soul_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_soul_id ON tracks (soul_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_soul_id ON tracks (album_soul_id)")
+
+        except Exception as e:
+            logger.error(f"Error adding soul_id columns: {e}")
 
     def set_profile_spotify(self, profile_id: int, client_id: str, client_secret: str,
                             redirect_uri: str = '') -> bool:
@@ -7138,6 +7175,7 @@ class MusicDatabase:
                         a.genius_url,
                         a.tidal_id,
                         a.qobuz_id,
+                        a.soul_id,
                         COUNT(DISTINCT al.id) as album_count,
                         COUNT(DISTINCT t.id) as track_count
                     FROM artists a
@@ -7148,7 +7186,7 @@ class MusicDatabase:
                     WHERE {where_clause}
                         AND a.id = (SELECT MIN(a2.id) FROM artists a2
                                     WHERE a2.name = a.name AND a2.server_source = a.server_source)
-                    GROUP BY a.id, a.name, a.thumb_url, a.genres, a.musicbrainz_id, a.spotify_artist_id, a.itunes_artist_id, a.deezer_id, a.audiodb_id, a.lastfm_url, a.genius_url, a.tidal_id, a.qobuz_id
+                    GROUP BY a.id, a.name, a.thumb_url, a.genres, a.musicbrainz_id, a.spotify_artist_id, a.itunes_artist_id, a.deezer_id, a.audiodb_id, a.lastfm_url, a.genius_url, a.tidal_id, a.qobuz_id, a.soul_id
                     ORDER BY a.name COLLATE NOCASE
                     LIMIT ? OFFSET ?
                 """
@@ -7200,6 +7238,7 @@ class MusicDatabase:
                         'genius_url': row['genius_url'],
                         'tidal_id': row['tidal_id'],
                         'qobuz_id': row['qobuz_id'],
+                        'soul_id': row['soul_id'],
                         'album_count': row['album_count'] or 0,
                         'track_count': row['track_count'] or 0,
                         'is_watched': bool(is_watched)

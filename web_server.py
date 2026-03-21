@@ -41343,6 +41343,37 @@ def hydrabase_worker_resume():
 
 from core.repair_worker import RepairWorker
 
+# ===================================================================
+# SoulID Worker — generates deterministic soul IDs for library entities
+# ===================================================================
+soulid_worker = None
+try:
+    from core.soulid_worker import SoulIDWorker
+    from database.music_database import MusicDatabase
+    soulid_db = MusicDatabase()
+    soulid_worker = SoulIDWorker(database=soulid_db)
+    soulid_worker.start()
+    print("✅ SoulID worker initialized and started")
+except Exception as e:
+    print(f"⚠️ SoulID worker initialization failed: {e}")
+    soulid_worker = None
+
+@app.route('/api/soulid/status', methods=['GET'])
+def soulid_status():
+    """Get SoulID worker status for UI polling."""
+    try:
+        if soulid_worker is None:
+            return jsonify({
+                'enabled': False, 'running': False, 'paused': False, 'idle': False,
+                'current_item': None, 'stats': {}
+            })
+        return jsonify(soulid_worker.get_stats())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ===================================================================
+# Repair Worker — Library maintenance and repair jobs
+# ===================================================================
 repair_worker = None
 try:
     from database.music_database import MusicDatabase
@@ -42858,6 +42889,7 @@ def _emit_enrichment_status_loop():
         'tidal-enrichment': lambda: tidal_enrichment_worker,
         'qobuz-enrichment': lambda: qobuz_enrichment_worker,
         'hydrabase': lambda: hydrabase_worker,
+        'soulid': lambda: soulid_worker,
         'repair': lambda: repair_worker,
     }
     while True:
