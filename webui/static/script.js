@@ -54678,6 +54678,8 @@ async function importPageSearchAlbum() {
     if (!query) return;
 
     document.getElementById('import-page-suggestions').style.display = 'none';
+    const groupsEl = document.getElementById('import-page-auto-groups');
+    if (groupsEl) groupsEl.style.display = 'none';
     const grid = document.getElementById('import-page-album-results');
     grid.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">Searching...</div>';
 
@@ -54974,6 +54976,7 @@ function importPageResetAlbumSearch() {
     importPageState.albumData = null;
     importPageState.matchOverrides = {};
     importPageState.tapSelectedChip = null;
+    importPageState._autoGroupFilePaths = null;
 
     document.getElementById('import-page-album-search-section').classList.remove('hidden');
     document.getElementById('import-page-album-match-section').classList.add('hidden');
@@ -54983,7 +54986,12 @@ function importPageResetAlbumSearch() {
     document.getElementById('import-page-album-search-input').value = '';
     document.getElementById('import-page-album-clear-btn').classList.add('hidden');
 
+    // Re-show auto-groups
+    const groupsEl = document.getElementById('import-page-auto-groups');
+    if (groupsEl) groupsEl.style.display = '';
+
     // Refresh suggestions & staging
+    importPageLoadAutoGroups();
     importPageLoadSuggestions();
     importPageRefreshStaging();
 }
