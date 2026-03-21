@@ -54484,6 +54484,7 @@ function initializeImportPage() {
     if (!importPageState.initialized) {
         importPageState.initialized = true;
         importPageRefreshStaging();
+        importPageLoadAutoGroups();
         importPageLoadSuggestions();
     }
 }
@@ -54492,7 +54493,8 @@ async function importPageRefreshStaging() {
     // Clear finished jobs from the queue
     importPageClearFinishedJobs();
 
-    // Re-fetch suggestions (server rebuilds cache after imports)
+    // Re-fetch groups and suggestions (server rebuilds cache after imports)
+    importPageLoadAutoGroups();
     importPageLoadSuggestions();
 
     try {
@@ -54531,6 +54533,99 @@ function importPageSwitchTab(tab) {
 
     if (tab === 'singles' && importPageState.stagingFiles.length > 0) {
         importPageRenderSinglesList();
+    }
+}
+
+// --- Album Tab: Auto-Detected Groups (from file tags) ---
+
+async function importPageLoadAutoGroups() {
+    const grid = document.getElementById('import-page-suggestions-grid');
+    if (!grid) return;
+
+    try {
+        const resp = await fetch('/api/import/staging/groups');
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        if (!data.success || !data.groups || data.groups.length === 0) return;
+
+        // Build auto-groups section above suggestions
+        let groupsContainer = document.getElementById('import-page-auto-groups');
+        if (!groupsContainer) {
+            groupsContainer = document.createElement('div');
+            groupsContainer.id = 'import-page-auto-groups';
+            groupsContainer.style.marginBottom = '16px';
+            const suggestionsSection = document.getElementById('import-page-suggestions');
+            if (suggestionsSection) {
+                suggestionsSection.parentNode.insertBefore(groupsContainer, suggestionsSection);
+            } else {
+                grid.parentNode.insertBefore(groupsContainer, grid);
+            }
+        }
+
+        groupsContainer.innerHTML = `
+            <div style="font-size:0.82em;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:rgba(255,255,255,0.5);margin-bottom:10px;">
+                Auto-Detected Albums
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;">
+                ${data.groups.map((g, idx) => `
+                    <div class="import-page-album-card" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:12px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);transition:all 0.2s;"
+                         onmouseenter="this.style.borderColor='rgba(255,255,255,0.12)';this.style.background='rgba(255,255,255,0.05)'"
+                         onmouseleave="this.style.borderColor='rgba(255,255,255,0.06)';this.style.background='rgba(255,255,255,0.03)'"
+                         onclick="importPageMatchAutoGroup(${idx})">
+                        <div style="width:48px;height:48px;border-radius:8px;background:rgba(var(--accent-rgb,29,185,84),0.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:1.2em;">
+                            ${g.file_count}
+                        </div>
+                        <div style="min-width:0;">
+                            <div style="font-size:0.92em;font-weight:500;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${_escAttr(g.album)}">${_esc(g.album)}</div>
+                            <div style="font-size:0.8em;color:rgba(255,255,255,0.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${_escAttr(g.artist)}">${_esc(g.artist)} · ${g.file_count} tracks</div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+
+        // Store groups for click handler
+        importPageState._autoGroups = data.groups;
+    } catch (err) {
+        console.warn('Failed to load auto-groups:', err);
+    }
+}
+
+async function importPageMatchAutoGroup(groupIdx) {
+    const group = importPageState._autoGroups?.[groupIdx];
+    if (!group) return;
+
+    // Search for the album by name + artist
+    const query = `${group.artist} ${group.album}`;
+    const searchInput = document.getElementById('import-page-album-search-input');
+    if (searchInput) searchInput.value = query;
+
+    // Hide suggestions/groups, show search results
+    const suggestionsEl = document.getElementById('import-page-suggestions');
+    const groupsEl = document.getElementById('import-page-auto-groups');
+    if (suggestionsEl) suggestionsEl.style.display = 'none';
+    if (groupsEl) groupsEl.style.display = 'none';
+
+    const grid = document.getElementById('import-page-album-results');
+    if (grid) grid.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">Searching...</div>';
+
+    try {
+        const resp = await fetch(`/api/import/search/albums?q=${encodeURIComponent(query)}&limit=12`);
+        const data = await resp.json();
+
+        if (data.success && data.albums && data.albums.length > 0) {
+            // Store file_paths filter so match only includes this group's files
+            importPageState._autoGroupFilePaths = group.file_paths;
+
+            // Render results — user picks the right album
+            grid.innerHTML = data.albums.map(a => _renderSuggestionCard(a)).join('');
+        } else {
+            grid.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">No albums found — try searching manually</div>';
+        }
+    } catch (err) {
+        console.error('Auto-group search failed:', err);
+        if (grid) grid.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">Search failed</div>';
     }
 }
 
@@ -54617,10 +54712,16 @@ async function importPageSelectAlbum(albumId) {
     matchList.innerHTML = '<div style="color:#888;text-align:center;padding:20px;">Matching files to tracklist...</div>';
 
     try {
+        // Include file_paths filter if matching from an auto-group
+        const matchBody = { album_id: albumId };
+        if (importPageState._autoGroupFilePaths) {
+            matchBody.file_paths = importPageState._autoGroupFilePaths;
+            importPageState._autoGroupFilePaths = null; // clear after use
+        }
         const resp = await fetch('/api/import/album/match', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({album_id: albumId})
+            body: JSON.stringify(matchBody)
         });
         const data = await resp.json();
         if (!data.success) {
