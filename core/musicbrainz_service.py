@@ -1,5 +1,6 @@
 from typing import Optional, Dict, Any
 import json
+import re
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from utils.logging_config import get_logger
@@ -186,10 +187,22 @@ class MusicBrainzService:
             logger.error(f"Error matching artist '{artist_name}': {e}")
             return None
     
+    # Version qualifiers that distinguish releases (Deluxe, Remastered, etc.)
+    _VERSION_QUALIFIERS = re.compile(
+        r'\b(deluxe|expanded|remaster(?:ed)?|anniversary|special|collector|'
+        r'limited|bonus|platinum|gold|super\s*deluxe|standard)\b',
+        re.IGNORECASE
+    )
+
+    def _extract_version_qualifier(self, title: str) -> str:
+        """Extract version qualifiers from an album title, normalized and sorted."""
+        qualifiers = sorted(set(q.lower() for q in self._VERSION_QUALIFIERS.findall(title)))
+        return ' '.join(qualifiers)
+
     def match_release(self, album_name: str, artist_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Match a release (album) by name to MusicBrainz
-        
+
         Returns:
             Dict with 'mbid', 'title', 'confidence' or None if no good match
         """
@@ -203,27 +216,30 @@ class MusicBrainzService:
                 'confidence': cached['confidence'],
                 'cached': True
             }
-        
+
         # Search MusicBrainz
         try:
             results = self.mb_client.search_release(album_name, artist_name, limit=5)
-            
+
             if not results:
                 logger.info(f"No MusicBrainz results for release '{album_name}'")
                 self._save_to_cache('release', album_name, artist_name, None, None, 0)
                 return None
-            
+
+            # Extract version qualifier from search query for preference matching
+            query_qualifier = self._extract_version_qualifier(album_name)
+
             # Find best match
             best_match = None
             best_confidence = 0
-            
+
             for result in results:
                 mb_title = result.get('title', '')
                 mb_score = result.get('score', 0)
-                
+
                 # Calculate title similarity
                 title_similarity = self._calculate_similarity(album_name, mb_title)
-                
+
                 # If we have artist info, check artist match too
                 artist_bonus = 0
                 if artist_name and 'artist-credit' in result:
@@ -235,10 +251,24 @@ class MusicBrainzService:
                             if artist_similarity > 0.7:
                                 artist_bonus = 20
                                 break
-                
+
+                # Version qualifier matching: prefer releases with the same
+                # edition qualifier (Deluxe, Remastered, etc.) as the query.
+                # This prevents "Playing the Angel (Deluxe)" from matching the
+                # standard "Playing the Angel" release.
+                version_bonus = 0
+                if query_qualifier:
+                    mb_qualifier = self._extract_version_qualifier(mb_title)
+                    if query_qualifier == mb_qualifier:
+                        version_bonus = 10  # Same edition — strong preference
+                    elif mb_qualifier and mb_qualifier in query_qualifier:
+                        version_bonus = 5   # Partial match (e.g. "deluxe" in "super deluxe")
+                    elif not mb_qualifier:
+                        version_bonus = -5  # Query has qualifier but result doesn't — penalize
+
                 # Combine scores - cap at 100
-                confidence = min(100, int((title_similarity * 50) + (mb_score / 100 * 30) + artist_bonus))
-                
+                confidence = min(100, int((title_similarity * 50) + (mb_score / 100 * 30) + artist_bonus + version_bonus))
+
                 if confidence > best_confidence:
                     best_confidence = confidence
                     best_match = result
