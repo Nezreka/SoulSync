@@ -749,8 +749,13 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-    def fix_finding(self, finding_id: int) -> dict:
-        """Execute the appropriate fix action for a finding, then mark it resolved."""
+    def fix_finding(self, finding_id: int, fix_action: str = None) -> dict:
+        """Execute the appropriate fix action for a finding, then mark it resolved.
+
+        Args:
+            finding_id: ID of the finding to fix
+            fix_action: Optional action override (e.g. 'staging' or 'delete' for orphan files)
+        """
         conn = None
         try:
             conn = self.db._get_connection()
@@ -768,6 +773,10 @@ class RepairWorker:
             details = json.loads(details_json) if details_json else {}
             conn.close()
             conn = None
+
+            # Pass fix_action through to handler via details
+            if fix_action:
+                details['_fix_action'] = fix_action
 
             # Dispatch fix by finding type
             result = self._execute_fix(finding_type, entity_type, entity_id, file_path, details)
@@ -902,9 +911,21 @@ class RepairWorker:
                 conn.close()
 
     def _fix_orphan_file(self, entity_type, entity_id, file_path, details):
-        """Delete the orphan file from disk."""
+        """Handle an orphan file — move to staging or delete based on user choice.
+
+        The fix_action is passed via details['_fix_action']:
+          'staging' — move file to the staging folder for import
+          'delete'  — delete file from disk
+        If no action specified, returns an error asking the user to choose.
+        """
+        fix_action = details.get('_fix_action', '')
+        if fix_action not in ('staging', 'delete'):
+            return {'success': False, 'error': 'Please choose an action: move to staging or delete',
+                    'needs_action': True}
+
         if not file_path:
             return {'success': False, 'error': 'No file path associated with this finding'}
+
         try:
             # Resolve path in case of cross-environment mismatch
             download_folder = None
@@ -912,25 +933,60 @@ class RepairWorker:
                 download_folder = self._config_manager.get('soulseek.download_path', '')
             resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder) or file_path
 
-            if os.path.exists(resolved):
+            if not os.path.exists(resolved):
+                return {'success': True, 'action': 'already_gone',
+                        'message': 'File was already removed'}
+
+            if fix_action == 'staging':
+                # Move to staging folder
+                staging_path = './Staging'
+                if self._config_manager:
+                    staging_path = self._config_manager.get('import.staging_path', './Staging')
+                staging_path = self._resolve_path(staging_path)
+                os.makedirs(staging_path, exist_ok=True)
+
+                dest = os.path.join(staging_path, os.path.basename(resolved))
+                # Avoid overwriting existing files in staging
+                if os.path.exists(dest):
+                    base, ext = os.path.splitext(os.path.basename(resolved))
+                    counter = 1
+                    while os.path.exists(dest):
+                        dest = os.path.join(staging_path, f"{base} ({counter}){ext}")
+                        counter += 1
+
+                import shutil
+                shutil.move(resolved, dest)
+
+                # Clean up empty parent directories
+                self._cleanup_empty_parents(resolved)
+
+                return {'success': True, 'action': 'moved_to_staging',
+                        'message': f'Moved to staging folder for import'}
+
+            elif fix_action == 'delete':
                 os.remove(resolved)
-                # Clean up empty parent directories (never remove transfer folder itself)
-                transfer_norm = os.path.normpath(self.transfer_folder)
-                parent = os.path.dirname(resolved)
-                for _ in range(3):  # Up to 3 levels (track/album/artist)
-                    if (parent and os.path.isdir(parent)
-                            and os.path.normpath(parent) != transfer_norm
-                            and not os.listdir(parent)):
-                        os.rmdir(parent)
-                        parent = os.path.dirname(parent)
-                    else:
-                        break
+                self._cleanup_empty_parents(resolved)
                 return {'success': True, 'action': 'deleted_file',
                         'message': 'Deleted orphan file from disk'}
-            return {'success': True, 'action': 'already_gone',
-                    'message': 'File was already removed'}
+
         except OSError as e:
-            return {'success': False, 'error': f'Failed to delete file: {e}'}
+            return {'success': False, 'error': f'Failed to handle orphan file: {e}'}
+
+    def _cleanup_empty_parents(self, file_path):
+        """Remove empty parent directories up to 3 levels, never removing the transfer folder."""
+        try:
+            transfer_norm = os.path.normpath(self.transfer_folder)
+            parent = os.path.dirname(file_path)
+            for _ in range(3):
+                if (parent and os.path.isdir(parent)
+                        and os.path.normpath(parent) != transfer_norm
+                        and not os.listdir(parent)):
+                    os.rmdir(parent)
+                    parent = os.path.dirname(parent)
+                else:
+                    break
+        except OSError:
+            pass
 
     def _fix_track_number(self, entity_type, entity_id, file_path, details):
         """Fix track number in file tags, rename file, and update DB."""
@@ -1874,8 +1930,12 @@ class RepairWorker:
                 conn.close()
 
     def bulk_fix_findings(self, job_id: str = None, severity: str = None,
-                          finding_ids: List[int] = None) -> dict:
-        """Fix all pending fixable findings matching filters. Returns {fixed, failed, skipped}."""
+                          finding_ids: List[int] = None, fix_action: str = None) -> dict:
+        """Fix all pending fixable findings matching filters. Returns {fixed, failed, skipped}.
+
+        Args:
+            fix_action: Optional action for findings that need user choice (e.g. orphan files)
+        """
         conn = None
         try:
             conn = self.db._get_connection()
@@ -1910,7 +1970,7 @@ class RepairWorker:
             fixed = 0
             failed = 0
             for fid in ids_to_fix:
-                result = self.fix_finding(fid)
+                result = self.fix_finding(fid, fix_action=fix_action)
                 if result.get('success'):
                     fixed += 1
                 else:

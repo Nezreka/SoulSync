@@ -41622,7 +41622,9 @@ def repair_finding_fix(finding_id):
         if repair_worker is None:
             return jsonify({'error': 'Repair worker not initialized'}), 400
 
-        result = repair_worker.fix_finding(finding_id)
+        data = request.get_json(silent=True) or {}
+        fix_action = data.get('fix_action')  # e.g. 'staging' or 'delete' for orphan files
+        result = repair_worker.fix_finding(finding_id, fix_action=fix_action)
         return jsonify(result), 200 if result.get('success') else 400
     except Exception as e:
         logger.error(f"Error fixing finding {finding_id}: {e}")
@@ -41667,9 +41669,11 @@ def repair_findings_bulk_fix():
         job_id = data.get('job_id') or None
         severity = data.get('severity') or None
         finding_ids = data.get('ids') or None
+        fix_action = data.get('fix_action') or None
 
         result = repair_worker.bulk_fix_findings(
-            job_id=job_id, severity=severity, finding_ids=finding_ids
+            job_id=job_id, severity=severity, finding_ids=finding_ids,
+            fix_action=fix_action
         )
         return jsonify({
             'success': True,
