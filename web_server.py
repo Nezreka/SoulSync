@@ -27829,7 +27829,7 @@ def start_tidal_sync(playlist_id):
             sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
         
         # Submit sync task
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks)
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id())
         active_sync_workers[sync_playlist_id] = future
         
         print(f"🔄 Started Tidal sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
@@ -28663,7 +28663,7 @@ def start_deezer_sync(playlist_id):
             sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
 
         # Submit sync task
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks)
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id())
         active_sync_workers[sync_playlist_id] = future
 
         print(f"🔄 Started Deezer sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
@@ -29490,7 +29490,7 @@ def start_spotify_public_sync(url_hash):
             sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
 
         # Submit sync task
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks)
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id())
         active_sync_workers[sync_playlist_id] = future
 
         print(f"🔄 Started Spotify Public sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
@@ -30527,7 +30527,7 @@ def start_youtube_sync(url_hash):
             sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
         
         # Submit sync task
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks)
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id())
         active_sync_workers[sync_playlist_id] = future
         
         print(f"🔄 Started YouTube sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
@@ -30806,7 +30806,7 @@ def convert_youtube_results_to_spotify_tracks(discovery_results):
 
 # Add these new endpoints to the end of web_server.py
 
-def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
+def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1):
     """The actual sync function that runs in the background thread."""
     global sync_states, sync_service
 
@@ -31097,7 +31097,7 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None):
         sync_service._original_tracks_map = original_tracks_map
 
         # Run the sync (this is a blocking call within this thread)
-        result = run_async(sync_service.sync_playlist(playlist, download_missing=False, profile_id=get_current_profile_id()))
+        result = run_async(sync_service.sync_playlist(playlist, download_missing=False, profile_id=profile_id))
 
         # Clear progress callback immediately to prevent race condition where a
         # late-firing progress callback overwrites the "finished" state below
@@ -31220,9 +31220,10 @@ def start_playlist_sync():
         # Initial state
         sync_states[playlist_id] = {"status": "starting", "progress": {}}
 
-        # Submit the task to the thread pool
+        # Submit the task to the thread pool (capture profile_id while still in request context)
+        _sync_profile_id = get_current_profile_id()
         thread_submit_time = time.time()
-        future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json)
+        future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json, None, _sync_profile_id)
         active_sync_workers[playlist_id] = future
         thread_submit_duration = (time.time() - thread_submit_time) * 1000
         print(f"⏱️ [TIMING] Thread submitted at {time.strftime('%H:%M:%S')} (took {thread_submit_duration:.1f}ms)")
@@ -36340,7 +36341,7 @@ def start_listenbrainz_sync(playlist_mbid):
             sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
 
         # Submit sync task
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks)
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id())
         active_sync_workers[sync_playlist_id] = future
 
         print(f"🔄 Started ListenBrainz sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
@@ -38778,7 +38779,7 @@ def start_beatport_sync(url_hash):
             sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
 
         # Start sync in background using existing thread pool
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['name'], spotify_tracks)
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['name'], spotify_tracks, None, get_current_profile_id())
         state['sync_future'] = future
 
         print(f"🎧 Started Beatport sync for chart: {state['chart']['name']}")
