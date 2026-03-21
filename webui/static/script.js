@@ -349,6 +349,7 @@ function initializeWebSocket() {
     socket.on('enrichment:qobuz-enrichment', (data) => updateQobuzEnrichmentStatusFromData(data));
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
+    socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));
     socket.on('repair:progress', (data) => updateRepairJobProgressFromData(data));
 
     // Phase 4 event listeners (tool progress)
@@ -38289,6 +38290,9 @@ function createLibraryArtistCard(artist) {
     if (artist.qobuz_id) {
         badgeSources.push({ cls: 'qobuz-card-icon', logo: QOBUZ_LOGO_URL, fallback: 'Qz', title: 'View on Qobuz', url: `https://www.qobuz.com/artist/${artist.qobuz_id}` });
     }
+    if (artist.soul_id && !artist.soul_id.startsWith('soul_unnamed_')) {
+        badgeSources.push({ cls: 'soulid-card-icon', logo: '/static/trans2.png', fallback: 'SS', title: `SoulID: ${artist.soul_id}`, url: null });
+    }
     // Add watchlist indicator — only if artist has a usable ID for the active source
     const hasActiveSourceId = currentMusicSourceName === 'Apple Music'
         ? (artist.itunes_artist_id || artist.spotify_artist_id)
@@ -53170,6 +53174,51 @@ function updateRepairStatusFromData(data) {
     if (!data.enabled) {
         button.classList.add('paused');
         button.classList.remove('active', 'complete');
+    }
+}
+
+// ── SoulID Worker Status ──
+
+function updateSoulIDStatusFromData(data) {
+    const button = document.getElementById('soulid-button');
+    if (!button) return;
+
+    button.classList.remove('active', 'complete');
+    if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    }
+
+    const tooltipStatus = document.getElementById('soulid-tooltip-status');
+    const tooltipCurrent = document.getElementById('soulid-tooltip-current');
+    const tooltipProgress = document.getElementById('soulid-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (data.idle) tooltipStatus.textContent = 'Complete';
+        else if (data.running && !data.paused) tooltipStatus.textContent = 'Running';
+        else if (data.paused) tooltipStatus.textContent = 'Paused';
+        else tooltipStatus.textContent = 'Idle';
+    }
+
+    if (tooltipCurrent) {
+        if (data.current_item) {
+            tooltipCurrent.textContent = data.current_item;
+        } else if (data.idle) {
+            tooltipCurrent.textContent = 'All entities have soul IDs';
+        } else {
+            tooltipCurrent.textContent = 'No items processing';
+        }
+    }
+
+    if (tooltipProgress && data.stats) {
+        const s = data.stats;
+        const parts = [];
+        if (s.artists_processed) parts.push(`Artists: ${s.artists_processed}`);
+        if (s.albums_processed) parts.push(`Albums: ${s.albums_processed}`);
+        if (s.tracks_processed) parts.push(`Tracks: ${s.tracks_processed}`);
+        if (s.pending > 0) parts.push(`Pending: ${s.pending}`);
+        tooltipProgress.textContent = parts.length ? parts.join(' · ') : 'No items processed yet';
     }
 }
 
