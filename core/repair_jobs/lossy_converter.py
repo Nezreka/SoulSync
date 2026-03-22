@@ -55,7 +55,9 @@ class LossyConverterJob(RepairJob):
     icon = 'repair-icon-lossy'
     default_enabled = False
     default_interval_hours = 0  # Manual only
-    default_settings = {}
+    default_settings = {
+        'delete_original': False,  # Blasphemy Mode — delete FLAC after conversion
+    }
     auto_fix = False
 
     def scan(self, context: JobContext) -> JobResult:

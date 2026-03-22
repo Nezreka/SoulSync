@@ -1989,10 +1989,12 @@ class RepairWorker:
             except Exception:
                 pass
 
-            # Blasphemy Mode — delete original if enabled
+            # Blasphemy Mode — uses the job's own setting, not the global lossy_copy one
             delete_original = False
             if self._config_manager:
-                delete_original = self._config_manager.get('lossy_copy.delete_original', False)
+                job_settings = self._config_manager.get('repair.jobs.lossy_converter.settings', {})
+                if isinstance(job_settings, dict):
+                    delete_original = job_settings.get('delete_original', False)
 
             if delete_original:
                 try:
