@@ -5479,6 +5479,15 @@ async function loadSettingsData() {
 
         // Populate Last.fm settings
         document.getElementById('lastfm-api-key').value = settings.lastfm?.api_key || '';
+        document.getElementById('lastfm-api-secret').value = settings.lastfm?.api_secret || '';
+        document.getElementById('lastfm-scrobble-enabled').checked = settings.lastfm?.scrobble_enabled === true;
+        const lfmStatus = document.getElementById('lastfm-scrobble-status');
+        if (lfmStatus) {
+            lfmStatus.textContent = settings.lastfm?.session_key ? 'Authorized' : 'Not authorized';
+        }
+
+        // Populate ListenBrainz scrobble toggle
+        document.getElementById('listenbrainz-scrobble-enabled').checked = settings.listenbrainz?.scrobble_enabled === true;
 
         // Populate Genius settings
         document.getElementById('genius-access-token').value = settings.genius?.access_token || '';
@@ -6481,7 +6490,8 @@ async function saveSettings(quiet = false) {
         },
         listenbrainz: {
             base_url: document.getElementById('listenbrainz-base-url').value,
-            token: document.getElementById('listenbrainz-token').value
+            token: document.getElementById('listenbrainz-token').value,
+            scrobble_enabled: document.getElementById('listenbrainz-scrobble-enabled').checked,
         },
         acoustid: {
             api_key: document.getElementById('acoustid-api-key').value,
@@ -6489,6 +6499,8 @@ async function saveSettings(quiet = false) {
         },
         lastfm: {
             api_key: document.getElementById('lastfm-api-key').value,
+            api_secret: document.getElementById('lastfm-api-secret').value,
+            scrobble_enabled: document.getElementById('lastfm-scrobble-enabled').checked,
             embed_tags: document.getElementById('embed-lastfm').checked,
             tags: _collectServiceTags('lastfm')
         },
@@ -6657,6 +6669,23 @@ async function saveSettings(quiet = false) {
         showToast('Failed to save settings', 'error', 'set-services');
     } finally {
         if (!quiet) hideLoadingOverlay();
+    }
+}
+
+async function authorizeLastfmScrobbling() {
+    try {
+        // Save settings first so API secret is stored
+        await saveSettings();
+        const resp = await fetch('/api/lastfm/auth-url');
+        const data = await resp.json();
+        if (data.success && data.url) {
+            window.open(data.url, '_blank', 'width=600,height=500');
+            showToast('Authorize SoulSync in the Last.fm window that opened', 'info');
+        } else {
+            showToast(data.error || 'Could not generate auth URL', 'error');
+        }
+    } catch (e) {
+        showToast('Failed to start Last.fm authorization', 'error');
     }
 }
 

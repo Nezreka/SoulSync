@@ -392,14 +392,18 @@ class ConfigManager:
             },
             "listenbrainz": {
                 "base_url": "",
-                "token": ""
+                "token": "",
+                "scrobble_enabled": False
             },
             "acoustid": {
                 "api_key": "",
                 "enabled": False  # Disabled by default - requires API key and fpcalc
             },
             "lastfm": {
-                "api_key": ""
+                "api_key": "",
+                "api_secret": "",
+                "session_key": "",
+                "scrobble_enabled": False
             },
             "genius": {
                 "access_token": ""

@@ -197,7 +197,11 @@ class ListeningStatsWorker:
                 self.stats['tracks_updated'] += len(updates)
                 logger.info(f"Updated play counts for {len(updates)} tracks")
 
-        # Step 3: Pre-compute stats cache for all time ranges
+        # Step 3: Scrobble new events to ListenBrainz and Last.fm
+        self.current_item = "Scrobbling to external services..."
+        self._scrobble_new_events()
+
+        # Step 4: Pre-compute stats cache for all time ranges
         self.current_item = "Building stats cache..."
         self._build_stats_cache()
 
@@ -311,6 +315,112 @@ class ListeningStatsWorker:
         finally:
             if conn:
                 conn.close()
+
+    def _scrobble_new_events(self):
+        """Scrobble unscrobbled listening events to ListenBrainz and Last.fm."""
+        conn = None
+        try:
+            # ListenBrainz scrobbling
+            if self.config_manager.get('listenbrainz.scrobble_enabled', False):
+                lb_token = self.config_manager.get('listenbrainz.token', '')
+                if lb_token:
+                    conn = self.db._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT id, title, artist, album, played_at
+                        FROM listening_history
+                        WHERE scrobbled_listenbrainz = 0
+                        ORDER BY played_at ASC
+                        LIMIT 500
+                    """)
+                    rows = cursor.fetchall()
+                    conn.close()
+                    conn = None
+
+                    if rows:
+                        try:
+                            from core.listenbrainz_client import ListenBrainzClient
+                            lb_client = ListenBrainzClient(token=lb_token)
+                            if lb_client.is_authenticated():
+                                listens = [{
+                                    'artist': r[2] or '',
+                                    'track': r[1] or '',
+                                    'album': r[3] or '',
+                                    'timestamp': r[4],
+                                } for r in rows]
+
+                                if lb_client.submit_listens(listens):
+                                    # Mark as scrobbled
+                                    ids = [r[0] for r in rows]
+                                    conn = self.db._get_connection()
+                                    cursor = conn.cursor()
+                                    placeholders = ','.join(['?'] * len(ids))
+                                    cursor.execute(f"UPDATE listening_history SET scrobbled_listenbrainz = 1 WHERE id IN ({placeholders})", ids)
+                                    conn.commit()
+                                    conn.close()
+                                    conn = None
+                                    logger.info(f"Scrobbled {len(ids)} events to ListenBrainz")
+                        except Exception as e:
+                            logger.debug(f"ListenBrainz scrobble failed: {e}")
+
+            # Last.fm scrobbling
+            if self.config_manager.get('lastfm.scrobble_enabled', False):
+                api_key = self.config_manager.get('lastfm.api_key', '')
+                api_secret = self.config_manager.get('lastfm.api_secret', '')
+                session_key = self.config_manager.get('lastfm.session_key', '')
+                if api_key and api_secret and session_key:
+                    conn = self.db._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT id, title, artist, album, played_at
+                        FROM listening_history
+                        WHERE scrobbled_lastfm = 0
+                        ORDER BY played_at ASC
+                        LIMIT 200
+                    """)
+                    rows = cursor.fetchall()
+                    conn.close()
+                    conn = None
+
+                    if rows:
+                        try:
+                            from core.lastfm_client import LastFMClient
+                            lfm_client = LastFMClient(api_key=api_key, api_secret=api_secret, session_key=session_key)
+
+                            # Process in batches of 50 (Last.fm limit)
+                            all_scrobbled_ids = []
+                            for i in range(0, len(rows), 50):
+                                batch = rows[i:i + 50]
+                                tracks = [{
+                                    'artist': r[2] or '',
+                                    'track': r[1] or '',
+                                    'album': r[3] or '',
+                                    'timestamp': r[4],
+                                } for r in batch]
+
+                                if lfm_client.scrobble_tracks(tracks):
+                                    all_scrobbled_ids.extend(r[0] for r in batch)
+
+                            if all_scrobbled_ids:
+                                conn = self.db._get_connection()
+                                cursor = conn.cursor()
+                                placeholders = ','.join(['?'] * len(all_scrobbled_ids))
+                                cursor.execute(f"UPDATE listening_history SET scrobbled_lastfm = 1 WHERE id IN ({placeholders})", all_scrobbled_ids)
+                                conn.commit()
+                                conn.close()
+                                conn = None
+                                logger.info(f"Scrobbled {len(all_scrobbled_ids)} events to Last.fm")
+                        except Exception as e:
+                            logger.debug(f"Last.fm scrobble failed: {e}")
+
+        except Exception as e:
+            logger.error(f"Scrobble error: {e}")
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     def _resolve_db_track_id(self, title, artist):
         """Try to match a server track to a local DB track by title+artist."""

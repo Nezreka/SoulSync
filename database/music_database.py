@@ -2694,6 +2694,16 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN last_played TIMESTAMP")
                 logger.info("Added last_played column to tracks table")
 
+            # Add scrobble tracking columns to listening_history
+            cursor.execute("PRAGMA table_info(listening_history)")
+            lh_cols = [c[1] for c in cursor.fetchall()]
+            if 'scrobbled_lastfm' not in lh_cols:
+                cursor.execute("ALTER TABLE listening_history ADD COLUMN scrobbled_lastfm INTEGER DEFAULT 0")
+                logger.info("Added scrobbled_lastfm column to listening_history")
+            if 'scrobbled_listenbrainz' not in lh_cols:
+                cursor.execute("ALTER TABLE listening_history ADD COLUMN scrobbled_listenbrainz INTEGER DEFAULT 0")
+                logger.info("Added scrobbled_listenbrainz column to listening_history")
+
         except Exception as e:
             logger.error(f"Error creating listening_history table: {e}")
 
