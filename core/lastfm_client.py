@@ -177,6 +177,36 @@ class LastFMClient:
         return tags if isinstance(tags, list) else [tags] if tags else []
 
     @rate_limited
+    def get_artist_top_tracks(self, artist_name: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        Get top tracks for an artist.
+
+        Returns:
+            List of track dicts with: name, playcount, listeners, url
+        """
+        data = self._make_request('artist.gettoptracks', {
+            'artist': artist_name,
+            'autocorrect': 1,
+            'limit': limit
+        })
+        if not data:
+            return []
+
+        tracks = data.get('toptracks', {}).get('track', [])
+        if not isinstance(tracks, list):
+            tracks = [tracks] if tracks else []
+
+        result = []
+        for t in tracks:
+            result.append({
+                'name': t.get('name', ''),
+                'playcount': int(t.get('playcount', 0)),
+                'listeners': int(t.get('listeners', 0)),
+                'url': t.get('url', ''),
+            })
+        return result
+
+    @rate_limited
     def get_similar_artists(self, artist_name: str, limit: int = 10) -> List[Dict[str, Any]]:
         """
         Get similar artists.

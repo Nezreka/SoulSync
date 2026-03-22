@@ -41056,6 +41056,24 @@ def lastfm_enrichment_resume():
         logger.error(f"Error resuming Last.fm worker: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/artist/<artist_id>/lastfm-top-tracks', methods=['GET'])
+def get_artist_lastfm_top_tracks(artist_id):
+    """Get top tracks for an artist from Last.fm (lazy-loaded by frontend)."""
+    try:
+        artist_name = request.args.get('name', '')
+        if not artist_name:
+            return jsonify({'success': False, 'error': 'Artist name required'}), 400
+
+        if not lastfm_worker or not lastfm_worker.client:
+            return jsonify({'success': True, 'tracks': []})
+
+        limit = int(request.args.get('limit', 100))
+        tracks = lastfm_worker.client.get_artist_top_tracks(artist_name, limit=min(limit, 100))
+        return jsonify({'success': True, 'tracks': tracks})
+    except Exception as e:
+        logger.error(f"Error fetching Last.fm top tracks: {e}")
+        return jsonify({'success': True, 'tracks': []})
+
 # ================================================================================================
 # END LAST.FM ENRICHMENT INTEGRATION
 # ================================================================================================

@@ -7297,7 +7297,8 @@ class MusicDatabase:
                         id, name, thumb_url, genres, server_source,
                         musicbrainz_id, deezer_id, audiodb_id,
                         spotify_artist_id, itunes_artist_id, lastfm_url, genius_url,
-                        tidal_id, qobuz_id
+                        tidal_id, qobuz_id, soul_id,
+                        lastfm_listeners, lastfm_playcount, lastfm_tags, lastfm_bio
                     FROM artists
                     WHERE id = ?
                 """, (artist_id,))
@@ -7452,6 +7453,11 @@ class MusicDatabase:
                         'genius_url': artist_row['genius_url'],
                         'tidal_id': artist_row['tidal_id'],
                         'qobuz_id': artist_row['qobuz_id'],
+                        'soul_id': artist_row['soul_id'],
+                        'lastfm_listeners': artist_row['lastfm_listeners'],
+                        'lastfm_playcount': artist_row['lastfm_playcount'],
+                        'lastfm_tags': artist_row['lastfm_tags'],
+                        'lastfm_bio': artist_row['lastfm_bio'],
                         'album_count': album_count,
                         'track_count': track_count
                     },
