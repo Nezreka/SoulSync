@@ -2535,58 +2535,54 @@
                 <!-- Artist Hero Section -->
                 <div class="artist-hero-section" id="artist-hero-section">
                     <div class="artist-hero-content">
+                        <!-- Left: Image -->
                         <div class="artist-image-container">
                             <img class="artist-image" id="artist-detail-image" src="" alt="Artist Image" />
                             <div class="artist-image-fallback" id="artist-detail-image-fallback">🎵</div>
                         </div>
 
+                        <!-- Center: Identity + Meta -->
                         <div class="artist-info">
-                            <h1 class="artist-name" id="artist-detail-name">Artist Name</h1>
+                            <div class="artist-hero-identity">
+                                <h1 class="artist-name" id="artist-detail-name">Artist Name</h1>
+                                <div class="artist-hero-badges" id="artist-hero-badges"></div>
+                            </div>
                             <div class="artist-genres-container" id="artist-genres"></div>
+                            <div class="artist-hero-bio" id="artist-hero-bio" style="display:none;"></div>
+                            <div class="artist-hero-numbers">
+                                <div class="artist-hero-stat" id="artist-hero-listeners" style="display:none;">
+                                    <span class="hero-stat-value">0</span>
+                                    <span class="hero-stat-label">listeners</span>
+                                </div>
+                                <div class="artist-hero-stat" id="artist-hero-playcount" style="display:none;">
+                                    <span class="hero-stat-value">0</span>
+                                    <span class="hero-stat-label">plays</span>
+                                </div>
+                            </div>
 
                             <div class="collection-overview">
                                 <div class="collection-category">
-                                    <div class="category-header">
-                                        <span class="category-label">Albums</span>
-                                        <span class="category-stats" id="albums-stats">0 owned, 0 missing</span>
-                                    </div>
-                                    <div class="completion-section">
-                                        <div class="completion-bar">
-                                            <div class="completion-fill" id="albums-completion-fill" style="width: 0%">
-                                            </div>
-                                        </div>
-                                        <span class="completion-text" id="albums-completion-text">0%</span>
-                                    </div>
+                                    <span class="category-label">Albums</span>
+                                    <div class="completion-bar"><div class="completion-fill" id="albums-completion-fill" style="width: 0%"></div></div>
+                                    <span class="category-stats" id="albums-stats">0/0</span>
                                 </div>
-
                                 <div class="collection-category">
-                                    <div class="category-header">
-                                        <span class="category-label">EPs</span>
-                                        <span class="category-stats" id="eps-stats">0 owned, 0 missing</span>
-                                    </div>
-                                    <div class="completion-section">
-                                        <div class="completion-bar">
-                                            <div class="completion-fill" id="eps-completion-fill" style="width: 0%">
-                                            </div>
-                                        </div>
-                                        <span class="completion-text" id="eps-completion-text">0%</span>
-                                    </div>
+                                    <span class="category-label">EPs</span>
+                                    <div class="completion-bar"><div class="completion-fill" id="eps-completion-fill" style="width: 0%"></div></div>
+                                    <span class="category-stats" id="eps-stats">0/0</span>
                                 </div>
-
                                 <div class="collection-category">
-                                    <div class="category-header">
-                                        <span class="category-label">Singles</span>
-                                        <span class="category-stats" id="singles-stats">0 owned, 0 missing</span>
-                                    </div>
-                                    <div class="completion-section">
-                                        <div class="completion-bar">
-                                            <div class="completion-fill" id="singles-completion-fill" style="width: 0%">
-                                            </div>
-                                        </div>
-                                        <span class="completion-text" id="singles-completion-text">0%</span>
-                                    </div>
+                                    <span class="category-label">Singles</span>
+                                    <div class="completion-bar"><div class="completion-fill" id="singles-completion-fill" style="width: 0%"></div></div>
+                                    <span class="category-stats" id="singles-stats">0/0</span>
                                 </div>
                             </div>
+                        </div>
+
+                        <!-- Right: Top Tracks only -->
+                        <div class="artist-hero-right" id="artist-hero-sidebar" style="display:none;">
+                            <div class="hero-sidebar-title">Popular on Last.fm</div>
+                            <div class="hero-top-tracks" id="hero-top-tracks"></div>
                         </div>
                     </div>
                 </div>

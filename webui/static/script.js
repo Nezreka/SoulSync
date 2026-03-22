@@ -38815,47 +38815,39 @@ function updateArtistDetailPageHeader(artistName) {
 }
 
 function updateArtistDetailPageHeaderWithData(artist) {
-    // Target the visible header element
+    // Update name
     const mainTitle = document.getElementById("artist-detail-name");
-
     if (mainTitle) {
         mainTitle.textContent = artist.name;
-
-        // Remove existing source links (to prevent duplicates)
+        // Remove any old source links that were appended to the h1
         mainTitle.querySelectorAll('.source-link-btn').forEach(el => el.remove());
+    }
+
+    // Render badges in dedicated container
+    const badgesContainer = document.getElementById("artist-hero-badges");
+    if (badgesContainer) {
+        const _hb = (logo, fallback, title, url) => {
+            const attr = url ? `data-url="${url}" onclick="window.open(this.dataset.url,'_blank')"` : '';
+            const inner = logo
+                ? `<img src="${logo}" alt="${fallback}" onerror="this.parentNode.textContent='${fallback}'">`
+                : `<span style="font-size:9px;font-weight:700;">${fallback}</span>`;
+            return `<div class="artist-hero-badge" title="${title}" ${attr}>${inner}</div>`;
+        };
 
         const adbSlug = artist.name ? artist.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '') : '';
-        const sources = [
-            { id: artist.spotify_artist_id, url: `https://open.spotify.com/artist/${artist.spotify_artist_id}`, logo: SPOTIFY_LOGO_URL, label: 'Spotify' },
-            { id: artist.itunes_artist_id, url: `https://music.apple.com/artist/${artist.itunes_artist_id}`, logo: ITUNES_LOGO_URL, label: 'Apple Music' },
-            { id: artist.musicbrainz_id, url: `https://musicbrainz.org/artist/${artist.musicbrainz_id}`, logo: MUSICBRAINZ_LOGO_URL, label: 'MusicBrainz' },
-            { id: artist.deezer_id, url: `https://www.deezer.com/artist/${artist.deezer_id}`, logo: DEEZER_LOGO_URL, label: 'Deezer' },
-            { id: artist.audiodb_id, url: `https://www.theaudiodb.com/artist/${artist.audiodb_id}-${adbSlug}`, logo: getAudioDBLogoURL(), label: 'TheAudioDB' },
-            { id: artist.lastfm_url, url: artist.lastfm_url, logo: LASTFM_LOGO_URL, label: 'Last.fm' },
-            { id: artist.genius_url, url: artist.genius_url, logo: GENIUS_LOGO_URL, label: 'Genius' },
-            { id: artist.tidal_id, url: `https://tidal.com/browse/artist/${artist.tidal_id}`, logo: TIDAL_LOGO_URL, label: 'Tidal' },
-            { id: artist.qobuz_id, url: `https://www.qobuz.com/artist/${artist.qobuz_id}`, logo: QOBUZ_LOGO_URL, label: 'Qobuz' },
-        ];
+        const badges = [];
+        if (artist.spotify_artist_id) badges.push(_hb(SPOTIFY_LOGO_URL, 'SP', 'Spotify', `https://open.spotify.com/artist/${artist.spotify_artist_id}`));
+        if (artist.musicbrainz_id) badges.push(_hb(MUSICBRAINZ_LOGO_URL, 'MB', 'MusicBrainz', `https://musicbrainz.org/artist/${artist.musicbrainz_id}`));
+        if (artist.deezer_id) badges.push(_hb(DEEZER_LOGO_URL, 'Dz', 'Deezer', `https://www.deezer.com/artist/${artist.deezer_id}`));
+        if (artist.audiodb_id) badges.push(_hb(typeof getAudioDBLogoURL === 'function' ? getAudioDBLogoURL() : '', 'ADB', 'AudioDB', `https://www.theaudiodb.com/artist/${artist.audiodb_id}-${adbSlug}`));
+        if (artist.itunes_artist_id) badges.push(_hb(ITUNES_LOGO_URL, 'IT', 'Apple Music', `https://music.apple.com/artist/${artist.itunes_artist_id}`));
+        if (artist.lastfm_url) badges.push(_hb(LASTFM_LOGO_URL, 'LFM', 'Last.fm', artist.lastfm_url));
+        if (artist.genius_url) badges.push(_hb(GENIUS_LOGO_URL, 'GEN', 'Genius', artist.genius_url));
+        if (artist.tidal_id) badges.push(_hb(TIDAL_LOGO_URL, 'TD', 'Tidal', `https://tidal.com/browse/artist/${artist.tidal_id}`));
+        if (artist.qobuz_id) badges.push(_hb(QOBUZ_LOGO_URL, 'Qz', 'Qobuz', `https://www.qobuz.com/artist/${artist.qobuz_id}`));
+        if (artist.soul_id && !artist.soul_id.startsWith('soul_unnamed_')) badges.push(_hb('/static/trans2.png', 'SS', `SoulID: ${artist.soul_id}`, null));
 
-        sources.forEach(source => {
-            if (!source.id) return;
-            const link = document.createElement('a');
-            link.className = 'source-link-btn';
-            link.href = source.url;
-            link.target = '_blank';
-            link.title = `View on ${source.label}`;
-
-            if (source.logo) {
-                const img = document.createElement('img');
-                img.src = source.logo;
-                img.onerror = () => { img.style.display = 'none'; };
-                link.appendChild(img);
-            }
-            const span = document.createElement('span');
-            span.textContent = source.label;
-            link.appendChild(span);
-            mainTitle.appendChild(link);
-        });
+        badgesContainer.innerHTML = badges.join('');
     }
 }
 
@@ -39026,23 +39018,129 @@ function updateArtistHeroSection(artist, discography) {
     updateCategoryStats('albums', discography.albums);
     updateCategoryStats('eps', discography.eps);
     updateCategoryStats('singles', discography.singles);
+
+    // Last.fm stats (listeners / playcount)
+    const _fmtNum = (n) => {
+        if (!n || n <= 0) return '0';
+        if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+        return n.toLocaleString();
+    };
+
+    const listenersEl = document.getElementById('artist-hero-listeners');
+    if (listenersEl) {
+        if (artist.lastfm_listeners) {
+            listenersEl.querySelector('.hero-stat-value').textContent = _fmtNum(artist.lastfm_listeners);
+            listenersEl.style.display = '';
+        } else {
+            listenersEl.style.display = 'none';
+        }
+    }
+
+    const playcountEl = document.getElementById('artist-hero-playcount');
+    if (playcountEl) {
+        if (artist.lastfm_playcount) {
+            playcountEl.querySelector('.hero-stat-value').textContent = _fmtNum(artist.lastfm_playcount);
+            playcountEl.style.display = '';
+        } else {
+            playcountEl.style.display = 'none';
+        }
+    }
+
+    // Last.fm bio
+    const bioEl = document.getElementById('artist-hero-bio');
+    if (bioEl) {
+        const bio = artist.lastfm_bio;
+        if (bio && bio.trim()) {
+            // Strip HTML tags and "Read more on Last.fm" links
+            let cleanBio = bio.replace(/<a\b[^>]*>.*?<\/a>/gi, '').replace(/<[^>]+>/g, '').trim();
+            if (cleanBio) {
+                bioEl.innerHTML = `<span class="bio-text">${cleanBio}</span>
+                    <span class="artist-hero-bio-toggle" onclick="this.parentElement.classList.toggle('expanded');this.textContent=this.parentElement.classList.contains('expanded')?'Show less':'Read more'">Read more</span>`;
+                bioEl.style.display = '';
+            } else {
+                bioEl.style.display = 'none';
+            }
+        } else {
+            bioEl.style.display = 'none';
+        }
+    }
+
+    // Last.fm tags — merge with existing genres (deduplicate)
+    if (artist.lastfm_tags) {
+        try {
+            let lfmTags = typeof artist.lastfm_tags === 'string' ? JSON.parse(artist.lastfm_tags) : artist.lastfm_tags;
+            if (Array.isArray(lfmTags) && lfmTags.length > 0) {
+                const existingGenres = new Set((artist.genres || []).map(g => g.toLowerCase()));
+                const newTags = lfmTags.filter(t => !existingGenres.has(t.toLowerCase())).slice(0, 5);
+                if (newTags.length > 0) {
+                    const genresContainer = document.getElementById('artist-genres');
+                    if (genresContainer) {
+                        newTags.forEach(tag => {
+                            const el = document.createElement('span');
+                            el.className = 'genre-tag';
+                            el.textContent = tag;
+                            el.style.opacity = '0.6';
+                            genresContainer.appendChild(el);
+                        });
+                    }
+                }
+            }
+        } catch (e) {
+            console.debug('Failed to parse Last.fm tags:', e);
+        }
+    }
+
+    // Lazy-load top tracks sidebar
+    if (artist.lastfm_url || artist.lastfm_listeners) {
+        _loadArtistTopTracks(artist.name);
+    }
+}
+
+async function _loadArtistTopTracks(artistName) {
+    const sidebar = document.getElementById('artist-hero-sidebar');
+    const container = document.getElementById('hero-top-tracks');
+    if (!sidebar || !container) return;
+
+    try {
+        const resp = await fetch(`/api/artist/0/lastfm-top-tracks?name=${encodeURIComponent(artistName)}`);
+        const data = await resp.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            sidebar.style.display = 'none';
+            return;
+        }
+
+        const _fmtNum = (n) => {
+            if (!n || n <= 0) return '0';
+            if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+            if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+            return n.toLocaleString();
+        };
+
+        container.innerHTML = data.tracks.map((t, i) => `
+            <div class="hero-top-track">
+                <span class="hero-top-track-num">${i + 1}</span>
+                <span class="hero-top-track-name" title="${t.name}">${t.name}</span>
+                <span class="hero-top-track-plays">${_fmtNum(t.playcount)}</span>
+            </div>
+        `).join('');
+        sidebar.style.display = '';
+    } catch (e) {
+        console.debug('Failed to load top tracks:', e);
+        sidebar.style.display = 'none';
+    }
 }
 
 function updateCategoryStats(category, releases) {
     const hasChecking = releases.some(r => r.owned === null);
     const owned = releases.filter(r => r.owned === true).length;
-    const missing = releases.filter(r => r.owned === false).length;
     const total = releases.length;
     const completion = total > 0 ? Math.round((owned / total) * 100) : 100;
 
-    // Update stats text
+    // Update stats text (compact: "3/12")
     const statsElement = document.getElementById(`${category}-stats`);
     if (statsElement) {
-        if (hasChecking) {
-            statsElement.textContent = `Checking...`;
-        } else {
-            statsElement.textContent = `${owned} owned, ${missing} missing`;
-        }
+        statsElement.textContent = hasChecking ? '...' : `${owned}/${total}`;
     }
 
     // Update completion bar
@@ -39054,16 +39152,6 @@ function updateCategoryStats(category, releases) {
         } else {
             fillElement.style.width = `${completion}%`;
             fillElement.classList.remove('checking');
-        }
-    }
-
-    // Update completion text
-    const textElement = document.getElementById(`${category}-completion-text`);
-    if (textElement) {
-        if (hasChecking) {
-            textElement.textContent = `Checking...`;
-        } else {
-            textElement.textContent = `${completion}%`;
         }
     }
 }
@@ -39577,33 +39665,18 @@ function updateLibraryReleaseCard(data) {
 }
 
 function updateCategoryStatsFromStream(category, ownedCount, missingCount) {
-    const statsElement = document.getElementById(`${category}-stats`);
-    if (statsElement) {
-        statsElement.textContent = `${ownedCount} owned, ${missingCount} missing`;
-    }
-
     const total = ownedCount + missingCount;
     const completion = total > 0 ? Math.round((ownedCount / total) * 100) : 100;
+
+    const statsElement = document.getElementById(`${category}-stats`);
+    if (statsElement) {
+        statsElement.textContent = `${ownedCount}/${total}`;
+    }
 
     const fillElement = document.getElementById(`${category}-completion-fill`);
     if (fillElement) {
         fillElement.classList.remove('checking');
         fillElement.style.width = `${completion}%`;
-    }
-
-    const textElement = document.getElementById(`${category}-completion-text`);
-    if (textElement) {
-        textElement.textContent = `${completion}%`;
-    }
-
-    // Update section owned/missing counts
-    const ownedElement = document.getElementById(`${category}-owned-count`);
-    if (ownedElement) {
-        ownedElement.textContent = `${ownedCount} owned`;
-    }
-    const missingElement = document.getElementById(`${category}-missing-count`);
-    if (missingElement) {
-        missingElement.textContent = `${missingCount} missing`;
     }
 }
 
