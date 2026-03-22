@@ -41919,6 +41919,54 @@ def stats_recent():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/stats/resolve-track', methods=['POST'])
+def stats_resolve_track():
+    """Resolve a track by title+artist to get its file_path for playback."""
+    try:
+        data = request.get_json()
+        title = data.get('title', '')
+        artist = data.get('artist', '')
+        if not title:
+            return jsonify({'success': False, 'error': 'Title required'}), 400
+
+        database = get_database()
+        conn = database._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT t.id, t.title, t.file_path, t.bitrate, t.duration,
+                   ar.name as artist_name, al.title as album_title,
+                   al.thumb_url, t.artist_id, t.album_id
+            FROM tracks t
+            JOIN artists ar ON ar.id = t.artist_id
+            LEFT JOIN albums al ON al.id = t.album_id
+            WHERE LOWER(t.title) = LOWER(?) AND LOWER(ar.name) = LOWER(?)
+              AND t.file_path IS NOT NULL AND t.file_path != ''
+            LIMIT 1
+        """, (title.strip(), artist.strip()))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return jsonify({'success': False, 'error': 'Track not found in library'})
+
+        return jsonify({
+            'success': True,
+            'track': {
+                'id': row[0],
+                'title': row[1],
+                'file_path': row[2],
+                'bitrate': row[3],
+                'duration': row[4],
+                'artist_name': row[5],
+                'album_title': row[6],
+                'image_url': fix_artist_image_url(row[7]) if row[7] else None,
+                'artist_id': row[8],
+                'album_id': row[9],
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/listening-stats/sync', methods=['POST'])
 def listening_stats_sync():
     """Trigger an immediate listening stats poll."""

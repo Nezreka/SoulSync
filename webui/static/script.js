@@ -42622,6 +42622,7 @@ async function playLibraryTrack(track, albumTitle, artistName) {
             }
             if (!albumArt) albumArt = artistDetailPageState.enhancedData.artist?.thumb_url;
         }
+        if (!albumArt && track._stats_image) albumArt = track._stats_image;
 
         // Set track info in the media player UI
         setTrackInfo({
@@ -54944,6 +54945,7 @@ async function loadStatsData() {
                 <div class="stats-ranked-name">${_esc(item.name)}</div>
                 <div class="stats-ranked-meta">${item.artist_id ? `<a class="stats-artist-link" onclick="navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${item.artist_id}','${_esc(item.artist||'').replace(/'/g,"\\'")}'),300)">${_esc(item.artist || '')}</a>` : _esc(item.artist || '')}${item.album ? ' · ' + _esc(item.album) : ''}</div>
             </div>
+            <button class="stats-play-btn" onclick="event.stopPropagation();playStatsTrack('${_esc(item.name).replace(/'/g,"\\'")}','${_esc(item.artist||'').replace(/'/g,"\\'")}','${_esc(item.album||'').replace(/'/g,"\\'")}')" title="Play">▶</button>
             <span class="stats-ranked-count">${_fmt(item.play_count)} plays</span>
         </div>
     `);
@@ -55127,6 +55129,33 @@ function _renderLibraryHealth(data) {
     }
 }
 
+async function playStatsTrack(title, artist, album) {
+    try {
+        const resp = await fetch('/api/stats/resolve-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, artist }),
+        });
+        const data = await resp.json();
+        if (!data.success || !data.track) {
+            showToast(data.error || 'Track not found in library', 'error');
+            return;
+        }
+        const t = data.track;
+        playLibraryTrack({
+            id: t.id,
+            title: t.title,
+            file_path: t.file_path,
+            bitrate: t.bitrate,
+            artist_id: t.artist_id,
+            album_id: t.album_id,
+            _stats_image: t.image_url || null,
+        }, t.album_title || album || '', t.artist_name || artist || '');
+    } catch (e) {
+        showToast('Failed to play track', 'error');
+    }
+}
+
 function _renderRecentPlays(tracks) {
     const el = document.getElementById('stats-recent-plays');
     if (!el) return;
@@ -55150,6 +55179,7 @@ function _renderRecentPlays(tracks) {
 
     el.innerHTML = tracks.map(t => `
         <div class="stats-recent-item">
+            <button class="stats-play-btn stats-play-btn-sm" onclick="event.stopPropagation();playStatsTrack('${_esc(t.title).replace(/'/g,"\\'")}','${_esc(t.artist||'').replace(/'/g,"\\'")}','${_esc(t.album||'').replace(/'/g,"\\'")}')" title="Play">▶</button>
             <span class="stats-recent-title">${_esc(t.title)}</span>
             <span class="stats-recent-artist">${_esc(t.artist || '')}</span>
             <span class="stats-recent-time">${_ago(t.played_at)}</span>

@@ -33064,6 +33064,41 @@ body {
     color: rgb(var(--accent-rgb));
 }
 
+/* Play buttons */
+.stats-play-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(var(--accent-rgb), 0.15);
+    color: rgb(var(--accent-rgb));
+    font-size: 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    opacity: 0;
+}
+
+.stats-ranked-item:hover .stats-play-btn,
+.stats-recent-item:hover .stats-play-btn {
+    opacity: 1;
+}
+
+.stats-play-btn:hover {
+    background: rgb(var(--accent-rgb));
+    color: #fff;
+    transform: scale(1.1);
+}
+
+.stats-play-btn-sm {
+    width: 22px;
+    height: 22px;
+    font-size: 8px;
+}
+
 /* Library health */
 .stats-health-grid {
     display: grid;
