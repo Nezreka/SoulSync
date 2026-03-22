@@ -807,6 +807,7 @@ class RepairWorker:
             'mbid_mismatch': self._fix_mbid_mismatch,
             'incomplete_album': self._fix_incomplete_album,
             'path_mismatch': self._fix_path_mismatch,
+            'missing_lossy_copy': self._fix_missing_lossy_copy,
         }
         handler = handlers.get(finding_type)
         if not handler:
@@ -1908,6 +1909,128 @@ class RepairWorker:
             logger.error("Failed to move %s -> %s: %s", src, dst, e)
             return {'success': False, 'error': str(e)}
 
+    def _fix_missing_lossy_copy(self, entity_type, entity_id, file_path, details):
+        """Convert a FLAC file to the configured lossy codec using ffmpeg."""
+        if not file_path:
+            return {'success': False, 'error': 'No file path associated with this finding'}
+
+        codec = details.get('codec', 'mp3')
+        bitrate = details.get('bitrate', '320')
+        quality_label = details.get('quality_label', f'{codec.upper()}-{bitrate}')
+
+        codec_configs = {
+            'mp3':  ('libmp3lame', '.mp3',  ['-id3v2_version', '3']),
+            'opus': ('libopus',    '.opus', ['-vbr', 'on']),
+            'aac':  ('aac',        '.m4a',  ['-movflags', '+faststart']),
+        }
+
+        if codec not in codec_configs:
+            return {'success': False, 'error': f'Unknown codec: {codec}'}
+
+        ffmpeg_codec, out_ext, extra_args = codec_configs[codec]
+
+        # Find ffmpeg
+        import shutil
+        ffmpeg_bin = shutil.which('ffmpeg')
+        if not ffmpeg_bin:
+            local = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tools', 'ffmpeg')
+            if os.path.isfile(local):
+                ffmpeg_bin = local
+            else:
+                return {'success': False, 'error': 'ffmpeg not found'}
+
+        # Resolve path
+        download_folder = None
+        if self._config_manager:
+            download_folder = self._config_manager.get('soulseek.download_path', '')
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder) or file_path
+
+        if not os.path.exists(resolved):
+            return {'success': False, 'error': f'Source file not found: {file_path}'}
+
+        out_path = os.path.splitext(resolved)[0] + out_ext
+        if os.path.exists(out_path):
+            return {'success': True, 'action': 'already_exists',
+                    'message': f'{quality_label} copy already exists'}
+
+        import subprocess
+        try:
+            cmd = [
+                ffmpeg_bin, '-i', resolved,
+                '-codec:a', ffmpeg_codec,
+                '-b:a', f'{bitrate}k',
+                '-map_metadata', '0',
+            ] + extra_args + ['-y', out_path]
+
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+            if proc.returncode != 0 or not os.path.isfile(out_path) or os.path.getsize(out_path) == 0:
+                if os.path.exists(out_path):
+                    try:
+                        os.remove(out_path)
+                    except Exception:
+                        pass
+                return {'success': False, 'error': f'ffmpeg conversion failed: {proc.stderr[:200] if proc.stderr else "unknown error"}'}
+
+            # Update QUALITY tag
+            try:
+                from mutagen import File as MutagenFile
+                audio = MutagenFile(out_path)
+                if audio is not None:
+                    if codec == 'mp3':
+                        from mutagen.id3 import TXXX
+                        audio.tags.add(TXXX(encoding=3, desc='QUALITY', text=[quality_label]))
+                    elif codec == 'opus':
+                        audio['QUALITY'] = [quality_label]
+                    elif codec == 'aac':
+                        from mutagen.mp4 import MP4FreeForm
+                        audio['----:com.apple.iTunes:QUALITY'] = [MP4FreeForm(quality_label.encode('utf-8'))]
+                    audio.save()
+            except Exception:
+                pass
+
+            # Blasphemy Mode — delete original if enabled
+            delete_original = False
+            if self._config_manager:
+                delete_original = self._config_manager.get('lossy_copy.delete_original', False)
+
+            if delete_original:
+                try:
+                    from mutagen import File as MutagenFile
+                    test = MutagenFile(out_path)
+                    if test is not None:
+                        os.remove(resolved)
+                        # Update DB path using original DB format
+                        new_db_path = os.path.splitext(file_path)[0] + out_ext
+                        try:
+                            conn = self.db._get_connection()
+                            cursor = conn.cursor()
+                            cursor.execute(
+                                "UPDATE tracks SET file_path = ? WHERE id = ?",
+                                (new_db_path, entity_id)
+                            )
+                            conn.commit()
+                            conn.close()
+                        except Exception:
+                            pass
+                        return {'success': True, 'action': 'converted_and_deleted',
+                                'message': f'Converted to {quality_label} and deleted original'}
+                except Exception as e:
+                    logger.debug("Blasphemy mode error: %s", e)
+
+            return {'success': True, 'action': 'converted',
+                    'message': f'Created {quality_label} copy'}
+
+        except subprocess.TimeoutExpired:
+            if os.path.exists(out_path):
+                try:
+                    os.remove(out_path)
+                except Exception:
+                    pass
+            return {'success': False, 'error': 'Conversion timed out (120s)'}
+        except Exception as e:
+            return {'success': False, 'error': f'Conversion error: {e}'}
+
     def dismiss_finding(self, finding_id: int) -> bool:
         """Dismiss a finding."""
         conn = None
@@ -1945,7 +2068,8 @@ class RepairWorker:
             fixable_types = ('dead_file', 'orphan_file', 'track_number_mismatch',
                              'missing_cover_art', 'metadata_gap', 'duplicate_tracks',
                              'single_album_redundant', 'mbid_mismatch',
-                             'incomplete_album', 'path_mismatch')
+                             'incomplete_album', 'path_mismatch',
+                             'missing_lossy_copy')
             placeholders = ','.join(['?'] * len(fixable_types))
             where_parts = [f"finding_type IN ({placeholders})", "status = 'pending'"]
             params = list(fixable_types)
