@@ -2438,8 +2438,19 @@ class WatchlistScanner:
             # Clear existing cache for this profile
             self.database.clear_discovery_recent_albums(profile_id=profile_id)
 
-            # 30-day window for recent releases
-            cutoff_date = datetime.now() - timedelta(days=30)
+            # Adaptive window based on listening velocity
+            days_lookback = 30
+            try:
+                profile = self._get_listening_profile(profile_id)
+                if profile['has_data']:
+                    if profile['avg_daily_plays'] < 5:
+                        days_lookback = 60   # Casual listener — show more
+                    elif profile['avg_daily_plays'] > 20:
+                        days_lookback = 21   # Heavy listener — keep it fresh
+                    logger.info(f"Recent albums window: {days_lookback} days (avg {profile['avg_daily_plays']:.1f} plays/day)")
+            except Exception:
+                pass
+            cutoff_date = datetime.now() - timedelta(days=days_lookback)
             cached_count = {'spotify': 0, 'itunes': 0, 'deezer': 0}
             albums_checked = 0
 
@@ -2614,6 +2625,42 @@ class WatchlistScanner:
             import traceback
             traceback.print_exc()
 
+    def _get_listening_profile(self, profile_id: int = 1) -> dict:
+        """Build a listening profile from the user's play history for personalized discovery.
+
+        Returns a dict with top artists, genres, listening velocity, etc.
+        Falls back to empty/default values if no listening data exists.
+        """
+        try:
+            stats = self.database.get_listening_stats('30d')
+            if not stats or stats.get('total_plays', 0) == 0:
+                return {'has_data': False, 'top_artist_names': set(), 'top_genres': set(),
+                        'genre_weights': {}, 'artist_play_counts': {}, 'avg_daily_plays': 0, 'listening_diversity': 0}
+
+            top_artists = self.database.get_top_artists('30d', 20)
+            top_artist_names = {a['name'].lower() for a in top_artists}
+
+            # Build play count lookup for artist penalty scoring
+            artist_play_counts = {a['name'].lower(): a['play_count'] for a in top_artists}
+
+            genre_breakdown = self.database.get_genre_breakdown('30d')
+            top_genres = {g['genre'].lower() for g in genre_breakdown[:5]} if genre_breakdown else set()
+            genre_weights = {g['genre'].lower(): g['percentage'] for g in genre_breakdown} if genre_breakdown else {}
+
+            return {
+                'has_data': True,
+                'top_artist_names': top_artist_names,
+                'artist_play_counts': artist_play_counts,
+                'top_genres': top_genres,
+                'genre_weights': genre_weights,
+                'avg_daily_plays': stats.get('total_plays', 0) / 30,
+                'listening_diversity': stats.get('unique_artists', 0),
+            }
+        except Exception as e:
+            logger.debug(f"Could not build listening profile: {e}")
+            return {'has_data': False, 'top_artist_names': set(), 'top_genres': set(),
+                    'genre_weights': {}, 'avg_daily_plays': 0, 'listening_diversity': 0}
+
     def curate_discovery_playlists(self, profile_id: int = 1):
         """
         Curate consistent playlist selections that stay the same until next discovery pool update.
@@ -2621,12 +2668,21 @@ class WatchlistScanner:
         Supports both Spotify and iTunes sources - creates separate curated playlists for each.
         - Release Radar: Prioritizes freshness + popularity from recent releases
         - Discovery Weekly: Balanced mix of popular picks, deep cuts, and mid-tier tracks
+
+        Uses listening stats (if available) to personalize scoring.
         """
         try:
             import random
             from datetime import datetime
 
             logger.info("Curating discovery playlists...")
+
+            # Build listening profile for personalization
+            profile = self._get_listening_profile(profile_id)
+            if profile['has_data']:
+                logger.info(f"Listening profile: {len(profile['top_artist_names'])} top artists, "
+                           f"{len(profile['top_genres'])} top genres, "
+                           f"{profile['avg_daily_plays']:.1f} avg daily plays")
 
             # Determine available sources
             spotify_available = self.spotify_client and self.spotify_client.is_spotify_authenticated()
@@ -2636,6 +2692,28 @@ class WatchlistScanner:
             sources_to_process = [fallback_source]  # Fallback source (iTunes/Deezer) always available
             if spotify_available:
                 sources_to_process.append('spotify')
+
+            # Pre-build artist genre cache from local DB for genre affinity scoring
+            _artist_genre_cache = {}
+            if profile['has_data']:
+                try:
+                    import json as _json
+                    _conn = self.database._get_connection()
+                    _cur = _conn.cursor()
+                    _cur.execute("SELECT name, genres FROM artists WHERE genres IS NOT NULL AND genres != ''")
+                    for _row in _cur.fetchall():
+                        if not _row[0]:
+                            continue
+                        try:
+                            _parsed = _json.loads(_row[1])
+                            if isinstance(_parsed, list):
+                                _artist_genre_cache[_row[0].lower()] = {g.lower() for g in _parsed if g}
+                        except (ValueError, TypeError):
+                            _artist_genre_cache[_row[0].lower()] = {g.strip().lower() for g in _row[1].split(',') if g.strip()}
+                    _conn.close()
+                    logger.debug(f"Built genre cache for {len(_artist_genre_cache)} artists")
+                except Exception:
+                    pass
 
             logger.info(f"Curating playlists for sources: {sources_to_process}")
 
@@ -2709,7 +2787,27 @@ class WatchlistScanner:
                                         popularity_score = max(40, 70 - days_old)
                                     is_single = album.get('album_type', 'album') == 'single'
                                     single_bonus = 20 if is_single else 0
-                                    total_score = (recency_score * 0.5) + (popularity_score * 0.3) + single_bonus
+
+                                    # Personalization bonuses (from listening profile)
+                                    genre_bonus = 0
+                                    artist_bonus = 0
+                                    overplay_penalty = 0
+                                    if profile['has_data']:
+                                        artist_lower = artist.lower()
+                                        # Genre affinity: check album/API genres, then use cached DB genres
+                                        artist_genres_lower = {g.lower() for g in (album.get('genres') or album_data.get('genres') or [])}
+                                        if not artist_genres_lower:
+                                            artist_genres_lower = _artist_genre_cache.get(artist_lower, set())
+                                        if artist_genres_lower & profile['top_genres']:
+                                            genre_bonus = 10
+                                        # Artist familiarity: boost tracks from artists user listens to
+                                        if artist_lower in profile['top_artist_names']:
+                                            artist_bonus = 15
+                                        # Overplay penalty: reduce score for artists user has heard too much
+                                        if profile['artist_play_counts'].get(artist_lower, 0) > 20:
+                                            overplay_penalty = -10
+
+                                    total_score = (recency_score * 0.45) + (popularity_score * 0.25) + single_bonus + genre_bonus + artist_bonus + overplay_penalty
 
                                     full_track = {
                                         'id': track_id,
@@ -2807,10 +2905,36 @@ class WatchlistScanner:
 
                     logger.info(f"Discovery pool ({source}): {len(popular_picks)} popular, {len(balanced_mix)} mid-tier, {len(deep_cuts)} deep cuts")
 
-                    # Balanced selection
-                    random.shuffle(popular_picks)
-                    random.shuffle(balanced_mix)
-                    random.shuffle(deep_cuts)
+                    # Serendipity-weighted selection within each tier
+                    def _serendipity_sort(tracks_list):
+                        """Sort by serendipity: prefer unknown artists in genres user likes."""
+                        if not profile['has_data']:
+                            random.shuffle(tracks_list)
+                            return tracks_list
+
+                        for t in tracks_list:
+                            score = 1.0
+                            t_artist = (t.artist_name or '').lower()
+                            t_genres = _artist_genre_cache.get(t_artist, set())
+
+                            # Boost artists user has NEVER played (true discovery)
+                            if t_artist not in profile['top_artist_names']:
+                                score += 0.5
+                            # Boost genres user likes but hasn't explored
+                            if t_genres & profile['top_genres']:
+                                score += 0.3
+                            # Penalize artists user already plays heavily
+                            if profile['artist_play_counts'].get(t_artist, 0) > 10:
+                                score -= 0.4
+
+                            t._serendipity = score + random.random() * 0.2  # Small random factor
+
+                        tracks_list.sort(key=lambda t: getattr(t, '_serendipity', 1.0), reverse=True)
+                        return tracks_list
+
+                    _serendipity_sort(popular_picks)
+                    _serendipity_sort(balanced_mix)
+                    _serendipity_sort(deep_cuts)
 
                     selected_tracks = []
                     selected_tracks.extend(popular_picks[:20])
@@ -2830,6 +2954,81 @@ class WatchlistScanner:
                 playlist_key = f'discovery_weekly_{source}'
                 self.database.save_curated_playlist(playlist_key, discovery_weekly_tracks, profile_id=profile_id)
                 logger.info(f"Discovery Weekly ({source}) curated: {len(discovery_weekly_tracks)} tracks")
+
+            # 3. "Because You Listen To" — personalized sections based on top played artists
+            if profile['has_data']:
+                logger.info("Building 'Because You Listen To' playlists...")
+                top_played = self.database.get_top_artists('30d', 3)
+                active_source_for_bylt = 'spotify' if spotify_available else fallback_source
+                all_pool_tracks = self.database.get_discovery_pool_tracks(
+                    limit=2000, new_releases_only=False,
+                    source=active_source_for_bylt, profile_id=profile_id
+                )
+
+                # Build source_artist_id → artist_name mapping from watchlist
+                _wa_id_to_name = {}
+                try:
+                    _wa_list = self.database.get_watchlist_artists(profile_id=profile_id)
+                    for _wa in _wa_list:
+                        _wa_id_to_name[str(_wa.id)] = (_wa.artist_name or '').lower()
+                except Exception:
+                    pass
+
+                all_similar = self.database.get_top_similar_artists(limit=200, profile_id=profile_id)
+
+                for i, played_artist in enumerate(top_played):
+                    try:
+                        artist_name = played_artist['name']
+                        artist_lower = artist_name.lower()
+
+                        # Find similar artists to this played artist via the similar_artists table
+                        similar_names = set()
+                        for s in all_similar:
+                            # Check if this similar artist's source matches our played artist
+                            src_id = str(getattr(s, 'source_artist_id', ''))
+                            src_name = _wa_id_to_name.get(src_id, '')
+                            sim_name = getattr(s, 'similar_artist_name', '') or ''
+                            if src_name == artist_lower and sim_name:
+                                similar_names.add(sim_name.lower())
+
+                        if not similar_names:
+                            # Fallback: find pool tracks from same genre
+                            played_genres = _artist_genre_cache.get(artist_lower, set())
+                            if played_genres:
+                                for t in all_pool_tracks:
+                                    t_artist_lower = (t.artist_name or '').lower()
+                                    if t_artist_lower != artist_lower and _artist_genre_cache.get(t_artist_lower, set()) & played_genres:
+                                        similar_names.add(t_artist_lower)
+                                    if len(similar_names) >= 20:
+                                        break
+
+                        if not similar_names:
+                            continue
+
+                        # Pick tracks from those similar artists in the pool
+                        matching_tracks = []
+                        for t in all_pool_tracks:
+                            if (t.artist_name or '').lower() in similar_names:
+                                if active_source_for_bylt == 'spotify' and t.spotify_track_id:
+                                    matching_tracks.append(t.spotify_track_id)
+                                elif active_source_for_bylt == 'itunes' and t.itunes_track_id:
+                                    matching_tracks.append(t.itunes_track_id)
+                                elif active_source_for_bylt == 'deezer' and t.deezer_track_id:
+                                    matching_tracks.append(t.deezer_track_id)
+
+                            if len(matching_tracks) >= 15:
+                                break
+
+                        if matching_tracks:
+                            import random as _rnd
+                            _rnd.shuffle(matching_tracks)
+                            playlist_key = f'because_you_listen_to_{i}'
+                            self.database.save_curated_playlist(playlist_key, matching_tracks[:10], profile_id=profile_id)
+                            # Store the source artist name in metadata
+                            self.database.set_metadata(f'bylt_artist_{i}', artist_name)
+                            logger.info(f"'Because You Listen To {artist_name}': {len(matching_tracks[:10])} tracks")
+                    except Exception as e:
+                        logger.debug(f"Error building BYLT for {played_artist.get('name', '?')}: {e}")
 
             # Also save without suffix for backward compatibility (use active source)
             active_source = 'spotify' if spotify_available else fallback_source

@@ -35027,6 +35027,73 @@ def get_discover_release_radar():
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/discover/because-you-listen-to', methods=['GET'])
+def get_discover_because_you_listen_to():
+    """Get 'Because You Listen To' sections — personalized by top played artists."""
+    try:
+        database = get_database()
+        active_source = _get_active_discovery_source()
+        pid = get_current_profile_id()
+
+        # Fetch pool tracks once for all sections
+        pool_tracks = database.get_discovery_pool_tracks(limit=5000, new_releases_only=False, source=active_source, profile_id=pid)
+        tracks_by_id = {}
+        for t in pool_tracks:
+            if active_source == 'spotify' and t.spotify_track_id:
+                tracks_by_id[t.spotify_track_id] = t
+            elif active_source == 'itunes' and t.itunes_track_id:
+                tracks_by_id[t.itunes_track_id] = t
+            elif active_source == 'deezer' and getattr(t, 'deezer_track_id', None):
+                tracks_by_id[t.deezer_track_id] = t
+
+        sections = []
+        for i in range(3):
+            artist_name = database.get_metadata(f'bylt_artist_{i}')
+            if not artist_name:
+                continue
+            track_ids = database.get_curated_playlist(f'because_you_listen_to_{i}', profile_id=pid)
+            if not track_ids:
+                continue
+
+            tracks = []
+            for tid in track_ids:
+                t = tracks_by_id.get(tid)
+                if t:
+                    tracks.append({
+                        'id': tid,
+                        'name': t.track_name,
+                        'artist': t.artist_name,
+                        'album': t.album_name,
+                        'image_url': t.album_cover_url,
+                        'duration_ms': t.duration_ms,
+                        'popularity': t.popularity,
+                    })
+
+            if tracks:
+                # Get artist image
+                artist_image = None
+                try:
+                    conn = database._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT thumb_url FROM artists WHERE LOWER(name) = LOWER(?) LIMIT 1", (artist_name,))
+                    row = cursor.fetchone()
+                    if row and row[0]:
+                        artist_image = fix_artist_image_url(row[0])
+                    conn.close()
+                except Exception:
+                    pass
+
+                sections.append({
+                    'artist_name': artist_name,
+                    'artist_image': artist_image,
+                    'tracks': tracks,
+                })
+
+        return jsonify({'success': True, 'sections': sections})
+    except Exception as e:
+        logger.error(f"Error getting BYLT: {e}")
+        return jsonify({'success': True, 'sections': []})
+
 @app.route('/api/discover/weekly', methods=['GET'])
 def get_discover_weekly():
     """Get discovery weekly playlist - curated selection that stays consistent until next update"""
