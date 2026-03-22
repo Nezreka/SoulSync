@@ -1910,13 +1910,21 @@ class RepairWorker:
             return {'success': False, 'error': str(e)}
 
     def _fix_missing_lossy_copy(self, entity_type, entity_id, file_path, details):
-        """Convert a FLAC file to the configured lossy codec using ffmpeg."""
+        """Convert a FLAC file to the configured lossy codec using ffmpeg.
+
+        Always reads codec/bitrate from current settings (not finding details)
+        so the user can change their preference after scanning.
+        """
         if not file_path:
             return {'success': False, 'error': 'No file path associated with this finding'}
 
-        codec = details.get('codec', 'mp3')
-        bitrate = details.get('bitrate', '320')
-        quality_label = details.get('quality_label', f'{codec.upper()}-{bitrate}')
+        # Read fresh from current settings — not from finding details
+        codec = 'mp3'
+        bitrate = '320'
+        if self._config_manager:
+            codec = self._config_manager.get('lossy_copy.codec', 'mp3').lower()
+            bitrate = self._config_manager.get('lossy_copy.bitrate', '320')
+        quality_label = f'{codec.upper()}-{bitrate}'
 
         codec_configs = {
             'mp3':  ('libmp3lame', '.mp3',  ['-id3v2_version', '3']),
