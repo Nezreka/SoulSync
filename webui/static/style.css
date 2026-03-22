@@ -18722,6 +18722,17 @@ body {
 }
 
 /* Library Artist Card — full-bleed photo style */
+@keyframes cardFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(16px) scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
 .library-artist-card {
     background: rgba(18, 18, 18, 1);
     border-radius: 16px;
