@@ -213,9 +213,9 @@ class ListeningStatsWorker:
                 granularity = 'month' if time_range in ('12m', 'all') else 'day'
                 cache = {
                     'overview': self.db.get_listening_stats(time_range),
-                    'top_artists': self.db.get_top_artists(time_range, 10),
-                    'top_albums': self.db.get_top_albums(time_range, 10),
-                    'top_tracks': self.db.get_top_tracks(time_range, 10),
+                    'top_artists': self.db.get_top_artists(time_range, 25),
+                    'top_albums': self.db.get_top_albums(time_range, 25),
+                    'top_tracks': self.db.get_top_tracks(time_range, 25),
                     'timeline': self.db.get_listening_timeline(time_range, granularity),
                     'genres': self.db.get_genre_breakdown(time_range),
                 }
