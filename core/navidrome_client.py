@@ -644,6 +644,106 @@ class NavidromeClient:
             logger.error(f"Error getting library stats: {e}")
             return {}
 
+    def get_play_history(self, limit=500):
+        """Fetch recently played tracks via Subsonic API.
+
+        Uses getAlbumList2 with type=recent to get recently played albums,
+        then fetches tracks for each with their play dates.
+
+        Returns list of dicts with: track_title, artist, album, played_at,
+        duration_ms, track_id.
+        """
+        if not self.ensure_connection():
+            return []
+
+        try:
+            response = self._make_request('getAlbumList2', {
+                'type': 'recent',
+                'size': min(limit, 500),
+            })
+            if not response:
+                return []
+
+            album_list = response.get('albumList2', {}).get('album', [])
+            if not isinstance(album_list, list):
+                album_list = [album_list] if album_list else []
+
+            results = []
+            for album in album_list[:50]:  # Limit album fetches to avoid API spam
+                album_id = album.get('id')
+                if not album_id:
+                    continue
+                album_resp = self._make_request('getAlbum', {'id': album_id})
+                if not album_resp:
+                    continue
+                songs = album_resp.get('album', {}).get('song', [])
+                if not isinstance(songs, list):
+                    songs = [songs] if songs else []
+                for song in songs:
+                    played = song.get('played')
+                    if not played:
+                        continue
+                    results.append({
+                        'track_title': song.get('title', ''),
+                        'artist': song.get('artist', ''),
+                        'album': song.get('album', ''),
+                        'played_at': played,
+                        'duration_ms': int(song.get('duration', 0)) * 1000,
+                        'track_id': song.get('id', ''),
+                    })
+
+            logger.info(f"Retrieved {len(results)} play history entries from Navidrome")
+            return results
+        except Exception as e:
+            logger.error(f"Error getting Navidrome play history: {e}")
+            return []
+
+    def get_track_play_counts(self):
+        """Get play counts for tracks via Subsonic API.
+
+        Uses getAlbumList2 type=frequent to find most-played albums,
+        then reads playCount from each track.
+
+        Returns dict of {track_id: play_count}.
+        """
+        if not self.ensure_connection():
+            return {}
+
+        try:
+            response = self._make_request('getAlbumList2', {
+                'type': 'frequent',
+                'size': 500,
+            })
+            if not response:
+                return {}
+
+            album_list = response.get('albumList2', {}).get('album', [])
+            if not isinstance(album_list, list):
+                album_list = [album_list] if album_list else []
+
+            counts = {}
+            for album in album_list[:100]:
+                album_id = album.get('id')
+                if not album_id:
+                    continue
+                album_resp = self._make_request('getAlbum', {'id': album_id})
+                if not album_resp:
+                    continue
+                songs = album_resp.get('album', {}).get('song', [])
+                if not isinstance(songs, list):
+                    songs = [songs] if songs else []
+                for song in songs:
+                    pc = song.get('playCount', 0)
+                    if pc and pc > 0:
+                        counts[song.get('id', '')] = pc
+
+            logger.info(f"Retrieved play counts for {len(counts)} tracks from Navidrome")
+            return counts
+        except Exception as e:
+            logger.error(f"Error getting Navidrome track play counts: {e}")
+            return {}
+            return {}
+
     def get_all_playlists(self) -> List[NavidromePlaylistInfo]:
         """Get all playlists from Navidrome server"""
         if not self.ensure_connection():

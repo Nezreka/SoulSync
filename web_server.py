@@ -4481,7 +4481,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -41455,6 +41455,284 @@ def soulid_status():
         return jsonify({'error': str(e)}), 500
 
 # ===================================================================
+# Listening Stats Worker — polls media servers for play data
+# ===================================================================
+listening_stats_worker = None
+try:
+    from core.listening_stats_worker import ListeningStatsWorker
+    from database.music_database import MusicDatabase
+    listening_stats_db = MusicDatabase()
+    listening_stats_worker = ListeningStatsWorker(
+        database=listening_stats_db,
+        config_manager=config_manager,
+        plex_client=plex_client,
+        jellyfin_client=jellyfin_client,
+        navidrome_client=navidrome_client,
+    )
+    listening_stats_worker.start()
+    print("✅ Listening stats worker initialized and started")
+except Exception as e:
+    print(f"⚠️ Listening stats worker initialization failed: {e}")
+    listening_stats_worker = None
+
+# --- Stats API Endpoints ---
+
+@app.route('/api/stats/cached', methods=['GET'])
+def stats_cached():
+    """Get all pre-computed stats for a time range from cache. Instant response."""
+    try:
+        import json as _json
+        time_range = request.args.get('range', '7d')
+        database = get_database()
+        conn = database._get_connection()
+        cursor = conn.cursor()
+
+        # Get time-range-specific cache
+        cursor.execute("SELECT value FROM metadata WHERE key = ?", (f'stats_cache_{time_range}',))
+        row = cursor.fetchone()
+        data = _json.loads(row[0]) if row and row[0] else {}
+
+        # Get recent plays cache
+        cursor.execute("SELECT value FROM metadata WHERE key = 'stats_cache_recent'")
+        row = cursor.fetchone()
+        recent = _json.loads(row[0]) if row and row[0] else []
+
+        # Get library health cache
+        cursor.execute("SELECT value FROM metadata WHERE key = 'stats_cache_health'")
+        row = cursor.fetchone()
+        health = _json.loads(row[0]) if row and row[0] else {}
+
+        conn.close()
+
+        # Fix image URLs (stored as relative paths, need server prefix)
+        for item in (data.get('top_artists') or []) + (data.get('top_albums') or []) + (data.get('top_tracks') or []):
+            if item.get('image_url'):
+                item['image_url'] = fix_artist_image_url(item['image_url'])
+
+        return jsonify({
+            'success': True,
+            'cached': True,
+            **data,
+            'recent': recent,
+            'health': health,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stats/overview', methods=['GET'])
+def stats_overview():
+    """Get aggregate listening stats for a time range."""
+    try:
+        time_range = request.args.get('range', 'all')
+        database = get_database()
+        data = database.get_listening_stats(time_range)
+        return jsonify({'success': True, **data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stats/top-artists', methods=['GET'])
+def stats_top_artists():
+    """Get top artists by play count."""
+    try:
+        time_range = request.args.get('range', 'all')
+        limit = int(request.args.get('limit', 10))
+        database = get_database()
+        artists = database.get_top_artists(time_range, limit)
+
+        # Enrich with images, Last.fm stats, and soul_id from the library
+        for artist in artists:
+            try:
+                conn = database._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT thumb_url, id, lastfm_listeners, lastfm_playcount, soul_id
+                    FROM artists
+                    WHERE LOWER(name) = LOWER(?)
+                    LIMIT 1
+                """, (artist['name'],))
+                row = cursor.fetchone()
+                if row:
+                    artist['image_url'] = fix_artist_image_url(row[0]) if row[0] else None
+                    artist['id'] = row[1]
+                    artist['global_listeners'] = row[2]
+                    artist['global_playcount'] = row[3]
+                    artist['soul_id'] = row[4]
+                conn.close()
+            except Exception:
+                pass
+
+        return jsonify({'success': True, 'artists': artists})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stats/top-albums', methods=['GET'])
+def stats_top_albums():
+    """Get top albums by play count."""
+    try:
+        time_range = request.args.get('range', 'all')
+        limit = int(request.args.get('limit', 10))
+        database = get_database()
+        albums = database.get_top_albums(time_range, limit)
+
+        # Enrich with images
+        for album in albums:
+            try:
+                conn = database._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT al.thumb_url, al.id, al.artist_id FROM albums al
+                    WHERE LOWER(al.title) = LOWER(?) AND al.thumb_url IS NOT NULL AND al.thumb_url != ''
+                    LIMIT 1
+                """, (album['name'],))
+                row = cursor.fetchone()
+                if row:
+                    album['image_url'] = fix_artist_image_url(row[0]) if row[0] else None
+                    album['id'] = row[1]
+                    album['artist_id'] = row[2]
+                conn.close()
+            except Exception:
+                pass
+
+        return jsonify({'success': True, 'albums': albums})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stats/top-tracks', methods=['GET'])
+def stats_top_tracks():
+    """Get top tracks by play count."""
+    try:
+        time_range = request.args.get('range', 'all')
+        limit = int(request.args.get('limit', 10))
+        database = get_database()
+        tracks = database.get_top_tracks(time_range, limit)
+
+        # Enrich with album images
+        for track in tracks:
+            try:
+                conn = database._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT al.thumb_url, t.id, t.artist_id FROM tracks t
+                    JOIN albums al ON al.id = t.album_id
+                    JOIN artists ar ON ar.id = t.artist_id
+                    WHERE LOWER(t.title) = LOWER(?) AND LOWER(ar.name) = LOWER(?)
+                    LIMIT 1
+                """, (track['name'], track['artist']))
+                row = cursor.fetchone()
+                if row:
+                    track['image_url'] = fix_artist_image_url(row[0]) if row[0] else None
+                    track['id'] = row[1]
+                    track['artist_id'] = row[2]
+                conn.close()
+            except Exception:
+                pass
+
+        return jsonify({'success': True, 'tracks': tracks})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stats/timeline', methods=['GET'])
+def stats_timeline():
+    """Get play count per time period for chart rendering."""
+    try:
+        time_range = request.args.get('range', '30d')
+        granularity = request.args.get('granularity', 'day')
+        database = get_database()
+        data = database.get_listening_timeline(time_range, granularity)
+        return jsonify({'success': True, 'timeline': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stats/genres', methods=['GET'])
+def stats_genres():
+    """Get genre distribution by play count."""
+    try:
+        time_range = request.args.get('range', 'all')
+        database = get_database()
+        data = database.get_genre_breakdown(time_range)
+        return jsonify({'success': True, 'genres': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stats/library-health', methods=['GET'])
+def stats_library_health():
+    """Get library health metrics."""
+    try:
+        database = get_database()
+        data = database.get_library_health()
+        return jsonify({'success': True, **data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stats/recent', methods=['GET'])
+def stats_recent():
+    """Get recently played tracks."""
+    try:
+        limit = int(request.args.get('limit', 20))
+        database = get_database()
+        conn = database._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT title, artist, album, played_at, duration_ms
+            FROM listening_history
+            ORDER BY played_at DESC
+            LIMIT ?
+        """, (limit,))
+        rows = cursor.fetchall()
+        conn.close()
+
+        tracks = []
+        for row in rows:
+            tracks.append({
+                'title': row[0],
+                'artist': row[1],
+                'album': row[2],
+                'played_at': row[3],
+                'duration_ms': row[4],
+            })
+
+        return jsonify({'success': True, 'tracks': tracks})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/listening-stats/sync', methods=['POST'])
+def listening_stats_sync():
+    """Trigger an immediate listening stats poll."""
+    try:
+        if not listening_stats_worker:
+            return jsonify({'success': False, 'error': 'Listening stats worker not initialized'}), 400
+
+        import threading
+        def _do_sync():
+            try:
+                print("🔄 [Stats Sync] Starting manual poll...")
+                listening_stats_worker._poll()
+                listening_stats_worker.stats['polls_completed'] += 1
+                listening_stats_worker.stats['last_poll'] = time.strftime('%Y-%m-%d %H:%M:%S')
+                print("✅ [Stats Sync] Manual poll completed")
+            except Exception as e:
+                print(f"❌ [Stats Sync] Manual poll failed: {e}")
+                import traceback
+                traceback.print_exc()
+                logger.error(f"Manual stats sync failed: {e}")
+
+        threading.Thread(target=_do_sync, daemon=True).start()
+        return jsonify({'success': True, 'message': 'Sync started'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/listening-stats/status', methods=['GET'])
+def listening_stats_status():
+    """Get listening stats worker status."""
+    try:
+        if listening_stats_worker is None:
+            return jsonify({'enabled': False, 'running': False, 'paused': False,
+                            'idle': False, 'current_item': None, 'stats': {}})
+        return jsonify(listening_stats_worker.get_stats())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ===================================================================
 # Repair Worker — Library maintenance and repair jobs
 # ===================================================================
 repair_worker = None
@@ -42977,6 +43255,7 @@ def _emit_enrichment_status_loop():
         'qobuz-enrichment': lambda: qobuz_enrichment_worker,
         'hydrabase': lambda: hydrabase_worker,
         'soulid': lambda: soulid_worker,
+        'listening-stats': lambda: listening_stats_worker,
         'repair': lambda: repair_worker,
     }
     while True:

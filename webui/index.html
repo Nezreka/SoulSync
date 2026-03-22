@@ -167,6 +167,10 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="16" y2="7"/><line x1="9" y1="11" x2="14" y2="11"/></svg></span>
                     <span class="nav-text">Library</span>
                 </button>
+                <button class="nav-button" data-page="stats">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg></span>
+                    <span class="nav-text">Stats</span>
+                </button>
                 <button class="nav-button" data-page="import">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
                     <span class="nav-text">Import</span>
@@ -4656,6 +4660,25 @@
                                 </div>
                             </div>
 
+                            <!-- Listening Stats Settings -->
+                            <div class="settings-group" data-stg="library">
+                                <h3>📊 Listening Stats</h3>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="listening-stats-enabled">
+                                        Enable listening stats collection from media server
+                                    </label>
+                                </div>
+                                <div class="form-group">
+                                    <label>Poll Interval (minutes):</label>
+                                    <input type="number" id="listening-stats-interval" min="5" max="1440" value="30">
+                                </div>
+                                <div class="help-text">
+                                    Polls your active media server (Plex, Jellyfin, or Navidrome) for play history
+                                    and displays stats on the Stats page.
+                                </div>
+                            </div>
+
                             <!-- Discovery Settings -->
                             <div class="settings-group" data-stg="advanced">
                                 <h3>🔍 Discovery Pool Settings</h3>
@@ -4981,6 +5004,123 @@
                     <p style="color: #888; font-size: 12px; margin: 0 0 8px 0;">When Hydrabase is the active metadata source, searches are compared against Spotify and iTunes in the background.</p>
                     <div id="hydra-comparisons-container">
                         <p style="color: #666; font-size: 13px;">No comparisons yet. Search with Hydrabase active to generate comparisons.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Page -->
+            <div class="page" id="stats-page">
+                <div class="stats-container">
+                    <div class="stats-header">
+                        <div class="stats-header-title">
+                            <img src="/static/trans2.png" alt="Stats" class="page-header-icon">
+                            <h1 class="header-title">Listening Stats</h1>
+                        </div>
+                        <div class="stats-header-controls">
+                            <div class="stats-time-range" id="stats-time-range">
+                                <button class="stats-range-btn active" data-range="7d">7 Days</button>
+                                <button class="stats-range-btn" data-range="30d">30 Days</button>
+                                <button class="stats-range-btn" data-range="12m">12 Months</button>
+                                <button class="stats-range-btn" data-range="all">All Time</button>
+                            </div>
+                            <div class="stats-sync-controls">
+                                <span class="stats-last-synced" id="stats-last-synced"></span>
+                                <button class="stats-sync-btn" id="stats-sync-btn" onclick="triggerStatsSync()" title="Sync now"><span class="stats-sync-icon">↻</span></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Overview Cards -->
+                    <div class="stats-overview" id="stats-overview">
+                        <div class="stats-card">
+                            <div class="stats-card-value" id="stats-total-plays">0</div>
+                            <div class="stats-card-label">Total Plays</div>
+                        </div>
+                        <div class="stats-card">
+                            <div class="stats-card-value" id="stats-listening-time">0h</div>
+                            <div class="stats-card-label">Listening Time</div>
+                        </div>
+                        <div class="stats-card">
+                            <div class="stats-card-value" id="stats-unique-artists">0</div>
+                            <div class="stats-card-label">Artists</div>
+                        </div>
+                        <div class="stats-card">
+                            <div class="stats-card-value" id="stats-unique-albums">0</div>
+                            <div class="stats-card-label">Albums</div>
+                        </div>
+                        <div class="stats-card">
+                            <div class="stats-card-value" id="stats-unique-tracks">0</div>
+                            <div class="stats-card-label">Tracks</div>
+                        </div>
+                    </div>
+
+                    <!-- Main Grid: Charts + Rankings -->
+                    <div class="stats-main-grid">
+                        <div class="stats-left-col">
+                            <div class="stats-section-card">
+                                <div class="stats-section-title">Listening Activity</div>
+                                <div style="position:relative;height:220px;">
+                                    <canvas id="stats-timeline-chart"></canvas>
+                                </div>
+                            </div>
+                            <div class="stats-section-card">
+                                <div class="stats-section-title">Genre Breakdown</div>
+                                <div class="stats-genre-chart-container">
+                                    <canvas id="stats-genre-chart"></canvas>
+                                    <div class="stats-genre-legend" id="stats-genre-legend"></div>
+                                </div>
+                            </div>
+                            <div class="stats-section-card">
+                                <div class="stats-section-title">Recently Played</div>
+                                <div class="stats-recent-list" id="stats-recent-plays"></div>
+                            </div>
+                        </div>
+                        <div class="stats-right-col">
+                            <div class="stats-section-card">
+                                <div class="stats-section-title">Top Artists</div>
+                                <div class="stats-top-artists-visual" id="stats-top-artists-visual"></div>
+                                <div class="stats-ranked-list" id="stats-top-artists"></div>
+                            </div>
+                            <div class="stats-section-card">
+                                <div class="stats-section-title">Top Albums</div>
+                                <div class="stats-ranked-list" id="stats-top-albums"></div>
+                            </div>
+                            <div class="stats-section-card">
+                                <div class="stats-section-title">Top Tracks</div>
+                                <div class="stats-ranked-list" id="stats-top-tracks"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Library Health -->
+                    <div class="stats-section-card stats-full-width">
+                        <div class="stats-section-title">Library Health</div>
+                        <div class="stats-health-grid" id="stats-library-health">
+                            <div class="stats-health-item">
+                                <div class="stats-health-label">Format Breakdown</div>
+                                <div class="stats-format-bar" id="stats-format-bar"></div>
+                            </div>
+                            <div class="stats-health-item">
+                                <div class="stats-health-value" id="stats-unplayed">0</div>
+                                <div class="stats-health-label">Unplayed Tracks</div>
+                            </div>
+                            <div class="stats-health-item">
+                                <div class="stats-health-value" id="stats-total-duration">0h</div>
+                                <div class="stats-health-label">Total Duration</div>
+                            </div>
+                            <div class="stats-health-item">
+                                <div class="stats-health-value" id="stats-total-tracks-count">0</div>
+                                <div class="stats-health-label">Total Tracks</div>
+                            </div>
+                        </div>
+                        <div class="stats-enrichment" id="stats-enrichment-coverage"></div>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div class="stats-empty hidden" id="stats-empty">
+                        <div class="stats-empty-icon">📊</div>
+                        <h3>No Listening Data Yet</h3>
+                        <p>Enable "Listening Stats" in Settings to start tracking your listening activity from your media server.</p>
                     </div>
                 </div>
             </div>
@@ -6166,6 +6306,7 @@
     </div>
 
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
     <script src="{{ url_for('static', filename='docs.js') }}"></script>
     <script src="{{ url_for('static', filename='particles.js') }}"></script>

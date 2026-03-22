@@ -612,6 +612,60 @@ class PlexClient:
             logger.error(f"Error getting library stats: {e}")
             return {}
     
+    def get_play_history(self, limit=500):
+        """Fetch recently played tracks from Plex.
+
+        Returns list of dicts with: track_title, artist, album, played_at,
+        duration_ms, track_id (ratingKey).
+        """
+        if not self.ensure_connection() or not self.server:
+            return []
+
+        try:
+            history = self.server.history(librarySectionID=self.music_library.key if self.music_library else None,
+                                          maxresults=limit)
+            results = []
+            for item in history:
+                if item.type != 'track':
+                    continue
+                try:
+                    results.append({
+                        'track_title': item.title or '',
+                        'artist': item.grandparentTitle or '',
+                        'album': item.parentTitle or '',
+                        'played_at': item.viewedAt.isoformat() if hasattr(item, 'viewedAt') and item.viewedAt else None,
+                        'duration_ms': (item.duration or 0),
+                        'track_id': str(item.ratingKey),
+                    })
+                except Exception:
+                    continue
+            logger.info(f"Retrieved {len(results)} play history entries from Plex")
+            return results
+        except Exception as e:
+            logger.error(f"Error getting Plex play history: {e}")
+            return []
+
+    def get_track_play_counts(self):
+        """Get viewCount for all tracks in the music library.
+
+        Returns dict of {ratingKey: play_count}.
+        """
+        if not self.ensure_connection() or not self.music_library:
+            return {}
+
+        try:
+            tracks = self.music_library.searchTracks()
+            counts = {}
+            for track in tracks:
+                view_count = getattr(track, 'viewCount', 0) or 0
+                if view_count > 0:
+                    counts[str(track.ratingKey)] = view_count
+            logger.info(f"Retrieved play counts for {len(counts)} tracks from Plex")
+            return counts
+        except Exception as e:
+            logger.error(f"Error getting Plex track play counts: {e}")
+            return {}
+
     def get_all_artists(self) -> List[PlexArtist]:
         """Get all artists from the music library"""
         if not self.ensure_connection() or not self.music_library:

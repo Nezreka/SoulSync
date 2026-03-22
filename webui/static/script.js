@@ -350,6 +350,7 @@ function initializeWebSocket() {
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
     socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));
+    socket.on('enrichment:listening-stats', () => {}); // Status only, no UI update needed
     socket.on('repair:progress', (data) => updateRepairJobProgressFromData(data));
 
     // Phase 4 event listeners (tool progress)
@@ -2623,6 +2624,9 @@ async function loadPageData(pageId) {
                 await loadQualityProfile();
                 loadApiKeys();
                 switchSettingsTab('connections');
+                break;
+            case 'stats':
+                initializeStatsPage();
                 break;
             case 'import':
                 initializeImportPage();
@@ -5579,6 +5583,10 @@ async function loadSettingsData() {
         document.getElementById('lossy-copy-codec').value = settings.lossy_copy?.codec || 'mp3';
         document.getElementById('lossy-copy-bitrate').value = settings.lossy_copy?.bitrate || '320';
         document.getElementById('lossy-copy-delete-original').checked = settings.lossy_copy?.delete_original === true;
+
+        // Populate Listening Stats settings
+        document.getElementById('listening-stats-enabled').checked = settings.listening_stats?.enabled === true;
+        document.getElementById('listening-stats-interval').value = settings.listening_stats?.poll_interval || 30;
         document.getElementById('lossy-copy-options').style.display =
             settings.lossy_copy?.enabled ? 'block' : 'none';
 
@@ -5785,10 +5793,12 @@ function updateDownloadSourceUI() {
     youtubeContainer.style.display = activeSources.has('youtube') ? 'block' : 'none';
     hifiContainer.style.display = activeSources.has('hifi') ? 'block' : 'none';
 
-    // Quality profile is Soulseek-only (streaming sources handle quality via their own settings)
+    // Quality profile is Soulseek-only and downloads-tab-only
     const qualityProfileSection = document.getElementById('quality-profile-section');
     if (qualityProfileSection) {
-        qualityProfileSection.style.display = activeSources.has('soulseek') ? '' : 'none';
+        const activeTab = document.querySelector('.stg-tab.active');
+        const onDownloadsTab = activeTab && activeTab.dataset.tab === 'downloads';
+        qualityProfileSection.style.display = (activeSources.has('soulseek') && onDownloadsTab) ? '' : 'none';
     }
 
     if (activeSources.has('tidal')) {
@@ -6563,6 +6573,10 @@ async function saveSettings(quiet = false) {
             bitrate: document.getElementById('lossy-copy-bitrate').value,
             delete_original: document.getElementById('lossy-copy-delete-original').checked,
             downsample_hires: document.getElementById('downsample-hires').checked
+        },
+        listening_stats: {
+            enabled: document.getElementById('listening-stats-enabled').checked,
+            poll_interval: parseInt(document.getElementById('listening-stats-interval').value) || 30,
         },
         import: {
             staging_path: document.getElementById('staging-path').value || './Staging'
@@ -54672,6 +54686,386 @@ const importPageState = {
     activeTab: 'album',
     tapSelectedChip: null,    // for mobile tap-to-assign fallback
 };
+
+// ===============================
+// STATS PAGE
+// ===============================
+
+let _statsRange = '7d';
+let _statsTimelineChart = null;
+let _statsGenreChart = null;
+let _statsInitialized = false;
+
+function initializeStatsPage() {
+    if (_statsInitialized) {
+        loadStatsData();
+        return;
+    }
+    _statsInitialized = true;
+
+    // Time range buttons
+    const rangeContainer = document.getElementById('stats-time-range');
+    if (rangeContainer) {
+        rangeContainer.addEventListener('click', (e) => {
+            const btn = e.target.closest('.stats-range-btn');
+            if (!btn) return;
+            _statsRange = btn.dataset.range;
+            rangeContainer.querySelectorAll('.stats-range-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            loadStatsData();
+        });
+    }
+
+    loadStatsData();
+    _updateStatsLastSynced();
+}
+
+async function triggerStatsSync() {
+    const btn = document.getElementById('stats-sync-btn');
+    if (btn) btn.classList.add('syncing');
+
+    try {
+        const resp = await fetch('/api/listening-stats/sync', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('Syncing listening data...', 'info');
+            // Wait a few seconds for the sync to complete, then reload
+            setTimeout(async () => {
+                await loadStatsData();
+                _updateStatsLastSynced();
+                if (btn) btn.classList.remove('syncing');
+                showToast('Listening stats updated', 'success');
+            }, 5000);
+        } else {
+            showToast(data.error || 'Sync failed', 'error');
+            if (btn) btn.classList.remove('syncing');
+        }
+    } catch (e) {
+        showToast('Sync failed', 'error');
+        if (btn) btn.classList.remove('syncing');
+    }
+}
+
+async function _updateStatsLastSynced() {
+    const el = document.getElementById('stats-last-synced');
+    if (!el) return;
+    try {
+        const resp = await fetch('/api/listening-stats/status');
+        const data = await resp.json();
+        if (data.stats && data.stats.last_poll) {
+            el.textContent = `Last synced: ${data.stats.last_poll}`;
+        } else {
+            el.textContent = 'Not synced yet';
+        }
+    } catch {
+        el.textContent = '';
+    }
+}
+
+async function loadStatsData() {
+    // Show loading state
+    document.querySelectorAll('.stats-card-value').forEach(el => el.style.opacity = '0.3');
+
+    // Single cached endpoint — instant response
+    let data;
+    try {
+        const resp = await fetch(`/api/stats/cached?range=${_statsRange}`);
+        data = await resp.json();
+    } catch {
+        data = {};
+    }
+
+    if (!data.success) {
+        // Cache not available — show empty state, user should hit Sync
+        data = { overview: {}, top_artists: [], top_albums: [], top_tracks: [],
+                 timeline: [], genres: [], recent: [], health: {} };
+    }
+
+    const overview = data.overview || {};
+    const emptyEl = document.getElementById('stats-empty');
+    const hasData = (overview.total_plays || 0) > 0;
+
+    if (emptyEl) {
+        emptyEl.classList.toggle('hidden', hasData);
+    }
+    // Hide main content sections when no data
+    const mainSections = document.querySelectorAll('.stats-overview, .stats-main-grid, .stats-full-width');
+    mainSections.forEach(el => el.style.display = hasData ? '' : 'none');
+
+    // Overview cards
+    const _fmt = (n) => {
+        if (!n) return '0';
+        if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+        return n.toLocaleString();
+    };
+    const _fmtTime = (ms) => {
+        if (!ms) return '0h';
+        const hours = Math.floor(ms / 3600000);
+        const mins = Math.floor((ms % 3600000) / 60000);
+        if (hours > 0) return `${hours}h ${mins}m`;
+        return `${mins}m`;
+    };
+
+    // Restore opacity
+    document.querySelectorAll('.stats-card-value').forEach(el => el.style.opacity = '1');
+
+    _setText('stats-total-plays', _fmt(overview.total_plays));
+    _setText('stats-listening-time', _fmtTime(overview.total_time_ms));
+    _setText('stats-unique-artists', _fmt(overview.unique_artists));
+    _setText('stats-unique-albums', _fmt(overview.unique_albums));
+    _setText('stats-unique-tracks', _fmt(overview.unique_tracks));
+
+    // Top Artists — visual bubbles
+    _renderTopArtistsVisual(data.top_artists || []);
+
+    // Top Artists — ranked list
+    _renderRankedList('stats-top-artists', data.top_artists || [], (item, i) => `
+        <div class="stats-ranked-item">
+            <span class="stats-ranked-num">${i + 1}</span>
+            ${item.image_url ? `<img class="stats-ranked-img" src="${item.image_url}" alt="" onerror="this.style.display='none'">` : ''}
+            <div class="stats-ranked-info">
+                <div class="stats-ranked-name">${item.id ? `<a class="stats-artist-link" onclick="navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${item.id}','${_esc(item.name).replace(/'/g,"\\'")}'),300)">${_esc(item.name)}</a>` : _esc(item.name)}${item.soul_id && !item.soul_id.startsWith('soul_unnamed_') ? ' <img src="/static/trans2.png" style="width:12px;height:12px;vertical-align:middle;opacity:0.5;" title="SoulID">' : ''}</div>
+                <div class="stats-ranked-meta">${item.global_listeners ? _fmt(item.global_listeners) + ' global listeners' : ''}</div>
+            </div>
+            <span class="stats-ranked-count">${_fmt(item.play_count)} plays</span>
+        </div>
+    `);
+
+    // Top Albums
+    _renderRankedList('stats-top-albums', data.top_albums || [], (item, i) => `
+        <div class="stats-ranked-item">
+            <span class="stats-ranked-num">${i + 1}</span>
+            ${item.image_url ? `<img class="stats-ranked-img" src="${item.image_url}" alt="" onerror="this.style.display='none'">` : ''}
+            <div class="stats-ranked-info">
+                <div class="stats-ranked-name">${_esc(item.name)}</div>
+                <div class="stats-ranked-meta">${item.artist_id ? `<a class="stats-artist-link" onclick="navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${item.artist_id}','${_esc(item.artist||'').replace(/'/g,"\\'")}'),300)">${_esc(item.artist || '')}</a>` : _esc(item.artist || '')}</div>
+            </div>
+            <span class="stats-ranked-count">${_fmt(item.play_count)} plays</span>
+        </div>
+    `);
+
+    // Top Tracks
+    _renderRankedList('stats-top-tracks', data.top_tracks || [], (item, i) => `
+        <div class="stats-ranked-item">
+            <span class="stats-ranked-num">${i + 1}</span>
+            ${item.image_url ? `<img class="stats-ranked-img" src="${item.image_url}" alt="" onerror="this.style.display='none'">` : ''}
+            <div class="stats-ranked-info">
+                <div class="stats-ranked-name">${_esc(item.name)}</div>
+                <div class="stats-ranked-meta">${item.artist_id ? `<a class="stats-artist-link" onclick="navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${item.artist_id}','${_esc(item.artist||'').replace(/'/g,"\\'")}'),300)">${_esc(item.artist || '')}</a>` : _esc(item.artist || '')}${item.album ? ' · ' + _esc(item.album) : ''}</div>
+            </div>
+            <span class="stats-ranked-count">${_fmt(item.play_count)} plays</span>
+        </div>
+    `);
+
+    // Timeline chart
+    _renderTimelineChart(data.timeline || []);
+
+    // Genre chart
+    _renderGenreChart(data.genres || []);
+
+    // Library health
+    _renderLibraryHealth(data.health || {});
+
+    // Recent plays
+    _renderRecentPlays(data.recent || []);
+}
+
+function _renderTopArtistsVisual(artists) {
+    const el = document.getElementById('stats-top-artists-visual');
+    if (!el || !artists.length) { if (el) el.innerHTML = ''; return; }
+
+    const top5 = artists.slice(0, 5);
+    const maxPlays = top5[0]?.play_count || 1;
+    const _fmt = (n) => {
+        if (!n) return '0';
+        if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+        return n.toString();
+    };
+
+    el.innerHTML = `<div class="stats-artist-bubbles">
+        ${top5.map((a, i) => {
+            const pct = Math.round((a.play_count / maxPlays) * 100);
+            const size = 44 + (4 - i) * 6; // Largest first: 68, 62, 56, 50, 44
+            return `<div class="stats-artist-bubble" onclick="${a.id ? `navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${a.id}','${_esc(a.name).replace(/'/g,"\\\\'")}'),300)` : ''}" style="cursor:${a.id ? 'pointer' : 'default'}">
+                <div class="stats-bubble-img" style="width:${size}px;height:${size}px;${a.image_url ? `background-image:url('${a.image_url}')` : ''}">
+                    ${!a.image_url ? `<span>${(a.name || '?')[0]}</span>` : ''}
+                </div>
+                <div class="stats-bubble-bar-container">
+                    <div class="stats-bubble-bar" style="width:${pct}%"></div>
+                </div>
+                <div class="stats-bubble-name">${_esc(a.name)}</div>
+                <div class="stats-bubble-count">${_fmt(a.play_count)}</div>
+            </div>`;
+        }).join('')}
+    </div>`;
+}
+
+function _setText(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+}
+
+function _renderRankedList(containerId, items, template) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = items.length
+        ? items.map((item, i) => template(item, i)).join('')
+        : '<div style="color:rgba(255,255,255,0.3);font-size:0.85em;padding:12px;">No data yet</div>';
+}
+
+function _renderTimelineChart(data) {
+    const canvas = document.getElementById('stats-timeline-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+
+    if (_statsTimelineChart) _statsTimelineChart.destroy();
+
+    _statsTimelineChart = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: data.map(d => d.date),
+            datasets: [{
+                label: 'Plays',
+                data: data.map(d => d.plays),
+                backgroundColor: `rgba(${getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb').trim() || '29,185,84'}, 0.5)`,
+                borderColor: `rgba(${getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb').trim() || '29,185,84'}, 0.8)`,
+                borderWidth: 1,
+                borderRadius: 4,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { grid: { display: false }, ticks: { color: 'rgba(255,255,255,0.3)', font: { size: 10 }, maxTicksLimit: 12 } },
+                y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: 'rgba(255,255,255,0.3)', font: { size: 10 } }, beginAtZero: true },
+            }
+        }
+    });
+}
+
+function _renderGenreChart(data) {
+    const canvas = document.getElementById('stats-genre-chart');
+    const legend = document.getElementById('stats-genre-legend');
+    if (!canvas || typeof Chart === 'undefined') return;
+
+    if (_statsGenreChart) _statsGenreChart.destroy();
+
+    const colors = [
+        '#1db954', '#1ed760', '#4ade80', '#7c3aed', '#a855f7',
+        '#ec4899', '#f43f5e', '#f97316', '#eab308', '#06b6d4',
+        '#3b82f6', '#6366f1', '#14b8a6', '#84cc16', '#f59e0b',
+    ];
+
+    const top = data.slice(0, 10);
+
+    _statsGenreChart = new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+            labels: top.map(g => g.genre),
+            datasets: [{
+                data: top.map(g => g.play_count),
+                backgroundColor: colors.slice(0, top.length),
+                borderWidth: 0,
+                hoverOffset: 6,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            cutout: '65%',
+            plugins: { legend: { display: false } },
+        }
+    });
+
+    if (legend) {
+        legend.innerHTML = top.map((g, i) => `
+            <div class="stats-genre-legend-item">
+                <span class="stats-genre-dot" style="background:${colors[i]}"></span>
+                <span>${g.genre}</span>
+                <span class="stats-genre-pct">${g.percentage}%</span>
+            </div>
+        `).join('');
+    }
+}
+
+function _renderLibraryHealth(data) {
+    if (!data || !data.total_tracks) return;
+
+    const _fmt = (n) => {
+        if (!n) return '0';
+        if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+        if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+        return n.toLocaleString();
+    };
+
+    _setText('stats-unplayed', `${_fmt(data.unplayed_count)} (${data.unplayed_percentage || 0}%)`);
+    _setText('stats-total-duration', data.total_duration_ms ? `${Math.floor(data.total_duration_ms / 3600000)}h` : '0h');
+    _setText('stats-total-tracks-count', _fmt(data.total_tracks));
+
+    // Format bar
+    const bar = document.getElementById('stats-format-bar');
+    if (bar && data.format_breakdown) {
+        const total = Object.values(data.format_breakdown).reduce((s, v) => s + v, 0) || 1;
+        const fmtColors = { FLAC: '#3b82f6', MP3: '#f97316', Opus: '#a855f7', AAC: '#14b8a6', OGG: '#eab308', WAV: '#ec4899', Other: '#555' };
+
+        bar.innerHTML = Object.entries(data.format_breakdown).map(([fmt, count]) => {
+            const pct = (count / total * 100).toFixed(1);
+            return `<div class="stats-format-segment" style="flex:${count};background:${fmtColors[fmt] || '#555'}" title="${fmt}: ${count} tracks (${pct}%)">${pct > 8 ? fmt : ''}</div>`;
+        }).join('');
+    }
+
+    // Enrichment coverage
+    const enrichEl = document.getElementById('stats-enrichment-coverage');
+    if (enrichEl && data.enrichment_coverage) {
+        const ec = data.enrichment_coverage;
+        const services = [
+            { name: 'Spotify', pct: ec.spotify || 0, color: '#1db954' },
+            { name: 'MusicBrainz', pct: ec.musicbrainz || 0, color: '#ba55d3' },
+            { name: 'Deezer', pct: ec.deezer || 0, color: '#a238ff' },
+            { name: 'Last.fm', pct: ec.lastfm || 0, color: '#d51007' },
+        ];
+        enrichEl.innerHTML = services.map(s => `
+            <div class="stats-enrich-item">
+                <span class="stats-enrich-name">${s.name}</span>
+                <div class="stats-enrich-bar"><div class="stats-enrich-fill" style="width:${s.pct}%;background:${s.color}"></div></div>
+                <span class="stats-enrich-pct">${s.pct}%</span>
+            </div>
+        `).join('');
+    }
+}
+
+function _renderRecentPlays(tracks) {
+    const el = document.getElementById('stats-recent-plays');
+    if (!el) return;
+
+    if (!tracks.length) {
+        el.innerHTML = '<div style="color:rgba(255,255,255,0.3);font-size:0.85em;padding:12px;">No recent plays</div>';
+        return;
+    }
+
+    const _ago = (dateStr) => {
+        if (!dateStr) return '';
+        const diff = Date.now() - new Date(dateStr).getTime();
+        const mins = Math.floor(diff / 60000);
+        if (mins < 60) return `${mins}m ago`;
+        const hours = Math.floor(mins / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        if (days < 30) return `${days}d ago`;
+        return `${Math.floor(days / 30)}mo ago`;
+    };
+
+    el.innerHTML = tracks.map(t => `
+        <div class="stats-recent-item">
+            <span class="stats-recent-title">${_esc(t.title)}</span>
+            <span class="stats-recent-artist">${_esc(t.artist || '')}</span>
+            <span class="stats-recent-time">${_ago(t.played_at)}</span>
+        </div>
+    `).join('');
+}
 
 // --- Initialization ---
 
