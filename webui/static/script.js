@@ -53871,7 +53871,8 @@ async function loadRepairFindings() {
             acoustid_no_match: 'No Match', fake_lossless: 'Fake Lossless',
             duplicate_tracks: 'Duplicate', incomplete_album: 'Incomplete',
             path_mismatch: 'Path Mismatch', metadata_gap: 'Missing Metadata',
-            missing_cover_art: 'Missing Art', track_number_mismatch: 'Track Number'
+            missing_cover_art: 'Missing Art', track_number_mismatch: 'Track Number',
+            missing_lossy_copy: 'No Lossy Copy'
         };
 
         // Finding types that have an automated fix action
@@ -53883,6 +53884,7 @@ async function loadRepairFindings() {
             metadata_gap: 'Apply',
             duplicate_tracks: 'Keep Best',
             incomplete_album: 'Auto-Fill',
+            missing_lossy_copy: 'Convert',
         };
 
         container.innerHTML = items.map(f => {
