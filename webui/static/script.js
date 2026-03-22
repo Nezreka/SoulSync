@@ -46770,6 +46770,7 @@ async function loadDiscoverPage() {
         loadPersonalizedForgottenFavorites(),  // NEW: Forgotten favorites
         loadDiscoveryShuffle(),  // NEW: Discovery Shuffle
         loadFamiliarFavorites(),  // NEW: Familiar Favorites
+        loadBecauseYouListenTo(),  // Personalized by listening stats
         initializeListenBrainzTabs(),  // ListenBrainz playlists (tabbed)
         loadDecadeBrowserTabs(),  // Time Machine (tabbed by decade)
         loadGenreBrowserTabs(),  // Browse by Genre (tabbed by genre)
@@ -50506,6 +50507,66 @@ async function loadFamiliarFavorites() {
 
     } catch (error) {
         console.error('Error loading familiar favorites:', error);
+    }
+}
+
+// ===============================
+// BECAUSE YOU LISTEN TO
+// ===============================
+
+async function loadBecauseYouListenTo() {
+    try {
+        const resp = await fetch('/api/discover/because-you-listen-to');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.success || !data.sections || data.sections.length === 0) return;
+
+        // Find or create the BYLT container
+        let byltContainer = document.getElementById('discover-bylt-sections');
+        if (!byltContainer) {
+            // Insert after the release radar section
+            const releaseRadar = document.getElementById('discover-release-radar');
+            if (!releaseRadar) return;
+            const parent = releaseRadar.closest('.discover-section');
+            if (!parent) return;
+
+            byltContainer = document.createElement('div');
+            byltContainer.id = 'discover-bylt-sections';
+            parent.parentNode.insertBefore(byltContainer, parent.nextSibling);
+        }
+
+        byltContainer.innerHTML = data.sections.map((section, idx) => `
+            <div class="discover-section bylt-section">
+                <div class="discover-section-header">
+                    <div class="bylt-header">
+                        ${section.artist_image ? `<img class="bylt-artist-img" src="${section.artist_image}" alt="" onerror="this.style.display='none'">` : ''}
+                        <div>
+                            <div class="discover-section-subtitle">Because you listen to</div>
+                            <h3 class="discover-section-title">${_esc(section.artist_name)}</h3>
+                        </div>
+                    </div>
+                </div>
+                <div class="discover-carousel" id="bylt-carousel-${idx}"></div>
+            </div>
+        `).join('');
+
+        // Render track cards in each carousel
+        data.sections.forEach((section, idx) => {
+            const carousel = document.getElementById(`bylt-carousel-${idx}`);
+            if (!carousel) return;
+            carousel.innerHTML = section.tracks.map(t => `
+                <div class="discover-card">
+                    <div class="discover-card-image">
+                        ${t.image_url ? `<img src="${t.image_url}" alt="" loading="lazy" onerror="this.src='/static/placeholder.png'">` : '<div class="discover-card-placeholder">🎵</div>'}
+                    </div>
+                    <div class="discover-card-title">${_esc(t.name)}</div>
+                    <div class="discover-card-artist">${_esc(t.artist)}</div>
+                </div>
+            `).join('');
+        });
+
+    } catch (error) {
+        console.debug('Error loading Because You Listen To:', error);
     }
 }
 

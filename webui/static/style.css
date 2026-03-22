@@ -25804,6 +25804,40 @@ body {
     margin: 0;
 }
 
+/* Because You Listen To */
+.bylt-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.bylt-artist-img {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid rgba(var(--accent-rgb), 0.25);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.bylt-section {
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    padding-top: 16px;
+}
+
+.bylt-section .discover-section-subtitle {
+    font-size: 12px;
+    color: rgba(var(--accent-rgb), 0.7);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.bylt-section .discover-section-title {
+    font-size: 22px;
+}
+
 .discover-section-actions {
     display: flex;
     gap: 10px;
