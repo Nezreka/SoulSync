@@ -2947,6 +2947,35 @@ _mb_release_cache_lock = threading.Lock()
 _mb_release_detail_cache = {}  # mbid -> release detail dict from get_release()
 _mb_release_detail_cache_lock = threading.Lock()
 
+# Regexes to strip edition suffixes for cache key normalization.
+# Prevents Navidrome splitting albums when tracks get different MusicBrainz release IDs.
+import re as _re
+
+# Strip parenthetical/bracketed editions: "Album (Deluxe Edition)" → "Album"
+_EDITION_PAREN_RE = _re.compile(
+    r'\s*[\(\[]'
+    r'[^)\]]*'
+    r'(?:deluxe|expanded|remaster(?:ed)?|anniversary|special|collector|'
+    r'limited|bonus|platinum|gold|super\s*deluxe|standard|edition)'
+    r'[^)\]]*'
+    r'[\)\]]',
+    _re.IGNORECASE
+)
+
+# Strip trailing bare editions (no parens): "Album Deluxe Edition" → "Album"
+_EDITION_BARE_RE = _re.compile(
+    r'\s+(?:-\s+)?(?:deluxe|expanded|remaster(?:ed)?|anniversary|special|collector|'
+    r'limited|bonus|platinum|gold|super\s*deluxe|standard)'
+    r'(?:\s+(?:edition|version))?\s*$',
+    _re.IGNORECASE
+)
+
+def _normalize_album_cache_key(album_name):
+    """Normalize album name for cache key: strip edition suffixes, lowercase, strip whitespace."""
+    result = _EDITION_PAREN_RE.sub('', album_name)
+    result = _EDITION_BARE_RE.sub('', result)
+    return result.lower().strip()
+
 def _prepare_stream_task(track_data):
     """
     Background streaming task that downloads track to Stream folder and updates global state.
@@ -16310,17 +16339,28 @@ def _pp_lookup_musicbrainz(pp, _names_match):
 
         album_name_for_mb = metadata.get('album', '')
         if album_name_for_mb:
-            _rc_key = (album_name_for_mb.lower().strip(), artist_name.lower().strip())
+            # Use normalized key (strips edition suffixes) so "Album (Deluxe Edition)"
+            # and "Album (Deluxe)" and "Album" all share the same cached MBID.
+            # This prevents Navidrome from splitting one album into multiple entries.
+            _artist_key = artist_name.lower().strip()
+            _rc_key_norm = (_normalize_album_cache_key(album_name_for_mb), _artist_key)
+            _rc_key_exact = (album_name_for_mb.lower().strip(), _artist_key)
             with _mb_release_cache_lock:
-                if _rc_key in _mb_release_cache:
-                    pp['release_mbid'] = _mb_release_cache[_rc_key]
+                # Check normalized key first (catches edition variants)
+                cached = _mb_release_cache.get(_rc_key_norm)
+                if cached is None:
+                    cached = _mb_release_cache.get(_rc_key_exact)
+                if cached is not None:
+                    pp['release_mbid'] = cached
                 else:
                     try:
                         _rc_result = mb_service.match_release(album_name_for_mb, artist_name)
                         pp['release_mbid'] = _rc_result.get('mbid', '') if _rc_result else ''
                     except Exception:
                         pp['release_mbid'] = ''
-                    _mb_release_cache[_rc_key] = pp['release_mbid']
+                    # Cache under both normalized and exact keys
+                    _mb_release_cache[_rc_key_norm] = pp['release_mbid']
+                    _mb_release_cache[_rc_key_exact] = pp['release_mbid']
             if pp['release_mbid']:
                 id_tags['MUSICBRAINZ_RELEASE_ID'] = pp['release_mbid']
 
