@@ -1085,6 +1085,90 @@ class JellyfinClient:
             logger.error(f"Error getting library stats: {e}")
             return {}
     
+    def get_play_history(self, limit=500):
+        """Fetch recently played tracks for the active user.
+
+        Returns list of dicts with: track_title, artist, album, played_at,
+        duration_ms, track_id.
+        """
+        if not self.ensure_connection() or not self.user_id:
+            return []
+
+        try:
+            params = {
+                'UserId': self.user_id,
+                'IncludeItemTypes': 'Audio',
+                'SortBy': 'DatePlayed',
+                'SortOrder': 'Descending',
+                'Fields': 'UserData,MediaSources',
+                'Recursive': True,
+                'IsPlayed': True,
+                'Limit': limit,
+            }
+            if self.music_library_id:
+                params['ParentId'] = self.music_library_id
+
+            response = self._make_request(f'/Users/{self.user_id}/Items', params)
+            if not response or 'Items' not in response:
+                return []
+
+            results = []
+            for item in response['Items']:
+                user_data = item.get('UserData', {})
+                played_at = user_data.get('LastPlayedDate')
+                if not played_at:
+                    continue
+                duration_ticks = item.get('RunTimeTicks', 0)
+                results.append({
+                    'track_title': item.get('Name', ''),
+                    'artist': item.get('AlbumArtist', '') or (item.get('Artists', [''])[0] if item.get('Artists') else ''),
+                    'album': item.get('Album', ''),
+                    'played_at': played_at,
+                    'duration_ms': duration_ticks // 10000 if duration_ticks else 0,
+                    'track_id': item.get('Id', ''),
+                })
+            logger.info(f"Retrieved {len(results)} play history entries from Jellyfin")
+            return results
+        except Exception as e:
+            logger.error(f"Error getting Jellyfin play history: {e}")
+            return []
+
+    def get_track_play_counts(self):
+        """Get PlayCount for all played audio items.
+
+        Returns dict of {item_id: play_count}.
+        """
+        if not self.ensure_connection() or not self.user_id:
+            return {}
+
+        try:
+            params = {
+                'UserId': self.user_id,
+                'IncludeItemTypes': 'Audio',
+                'Fields': 'UserData',
+                'Recursive': True,
+                'IsPlayed': True,
+                'Limit': 10000,
+            }
+            if self.music_library_id:
+                params['ParentId'] = self.music_library_id
+
+            response = self._make_request(f'/Users/{self.user_id}/Items', params)
+            if not response or 'Items' not in response:
+                return {}
+
+            counts = {}
+            for item in response['Items']:
+                user_data = item.get('UserData', {})
+                play_count = user_data.get('PlayCount', 0)
+                if play_count > 0:
+                    counts[item.get('Id', '')] = play_count
+            logger.info(f"Retrieved play counts for {len(counts)} tracks from Jellyfin")
+            return counts
+        except Exception as e:
+            logger.error(f"Error getting Jellyfin track play counts: {e}")
+            return {}
+
     def clear_cache(self):
         """Clear all caches to force fresh data on next request"""
         self._album_cache.clear()

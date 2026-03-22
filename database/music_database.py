@@ -357,6 +357,7 @@ class MusicDatabase:
             self._add_profile_listenbrainz_support(cursor)
             self._add_profile_service_credentials(cursor)
             self._add_soul_id_columns(cursor)
+            self._add_listening_history_table(cursor)
 
             # Spotify library cache
             self._add_spotify_library_cache_table(cursor)
@@ -2661,6 +2662,378 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding soul_id columns: {e}")
+
+    def _add_listening_history_table(self, cursor):
+        """Create listening_history table and add play_count/last_played to tracks."""
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS listening_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    track_id TEXT,
+                    title TEXT NOT NULL,
+                    artist TEXT,
+                    album TEXT,
+                    played_at TIMESTAMP NOT NULL,
+                    duration_ms INTEGER DEFAULT 0,
+                    server_source TEXT,
+                    db_track_id INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_played_at ON listening_history (played_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_artist ON listening_history (artist)")
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_listening_dedup ON listening_history (track_id, played_at, server_source)")
+
+            # Add play_count and last_played to tracks table
+            cursor.execute("PRAGMA table_info(tracks)")
+            track_cols = [c[1] for c in cursor.fetchall()]
+            if 'play_count' not in track_cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN play_count INTEGER DEFAULT 0")
+                logger.info("Added play_count column to tracks table")
+            if 'last_played' not in track_cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN last_played TIMESTAMP")
+                logger.info("Added last_played column to tracks table")
+
+        except Exception as e:
+            logger.error(f"Error creating listening_history table: {e}")
+
+    def insert_listening_events(self, events):
+        """Bulk insert listening events, skipping duplicates."""
+        if not events:
+            return 0
+        conn = None
+        inserted = 0
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            for event in events:
+                try:
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO listening_history
+                            (track_id, title, artist, album, played_at, duration_ms, server_source, db_track_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        event.get('track_id'),
+                        event.get('title', ''),
+                        event.get('artist', ''),
+                        event.get('album', ''),
+                        event.get('played_at'),
+                        event.get('duration_ms', 0),
+                        event.get('server_source', ''),
+                        event.get('db_track_id'),
+                    ))
+                    if cursor.rowcount > 0:
+                        inserted += 1
+                except Exception:
+                    pass
+            conn.commit()
+            return inserted
+        except Exception as e:
+            logger.error(f"Error inserting listening events: {e}")
+            return 0
+        finally:
+            if conn:
+                conn.close()
+
+    def update_track_play_counts(self, counts):
+        """Update play_count and last_played on the tracks table.
+
+        Args:
+            counts: list of dicts with {db_track_id, play_count, last_played}
+        """
+        if not counts:
+            return
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            for item in counts:
+                cursor.execute("""
+                    UPDATE tracks SET play_count = ?, last_played = ?
+                    WHERE id = ?
+                """, (item.get('play_count', 0), item.get('last_played'), item.get('db_track_id')))
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error updating track play counts: {e}")
+        finally:
+            if conn:
+                conn.close()
+
+    def get_listening_stats(self, time_range='all'):
+        """Get aggregate listening stats for a time range.
+
+        Args:
+            time_range: '7d', '30d', '12m', or 'all'
+
+        Returns:
+            Dict with total_plays, total_time_ms, unique_artists, unique_albums, unique_tracks
+        """
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            where = self._listening_time_filter(time_range)
+
+            cursor.execute(f"""
+                SELECT
+                    COUNT(*) as total_plays,
+                    COALESCE(SUM(duration_ms), 0) as total_time_ms,
+                    COUNT(DISTINCT artist) as unique_artists,
+                    COUNT(DISTINCT album) as unique_albums,
+                    COUNT(DISTINCT title || '|||' || COALESCE(artist, '')) as unique_tracks
+                FROM listening_history
+                {where}
+            """)
+            row = cursor.fetchone()
+            return {
+                'total_plays': row[0] or 0,
+                'total_time_ms': row[1] or 0,
+                'unique_artists': row[2] or 0,
+                'unique_albums': row[3] or 0,
+                'unique_tracks': row[4] or 0,
+            }
+        except Exception as e:
+            logger.error(f"Error getting listening stats: {e}")
+            return {'total_plays': 0, 'total_time_ms': 0, 'unique_artists': 0, 'unique_albums': 0, 'unique_tracks': 0}
+        finally:
+            if conn:
+                conn.close()
+
+    def get_top_artists(self, time_range='all', limit=10):
+        """Get top artists by play count."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            where = self._listening_time_filter(time_range)
+
+            cursor.execute(f"""
+                SELECT artist, COUNT(*) as play_count
+                FROM listening_history
+                {where}
+                AND artist IS NOT NULL AND artist != ''
+                GROUP BY LOWER(artist)
+                ORDER BY play_count DESC
+                LIMIT ?
+            """, (limit,))
+            return [{'name': row[0], 'play_count': row[1]} for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting top artists: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def get_top_albums(self, time_range='all', limit=10):
+        """Get top albums by play count."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            where = self._listening_time_filter(time_range)
+
+            cursor.execute(f"""
+                SELECT album, artist, COUNT(*) as play_count
+                FROM listening_history
+                {where}
+                AND album IS NOT NULL AND album != ''
+                GROUP BY LOWER(album), LOWER(artist)
+                ORDER BY play_count DESC
+                LIMIT ?
+            """, (limit,))
+            return [{'name': row[0], 'artist': row[1], 'play_count': row[2]} for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting top albums: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def get_top_tracks(self, time_range='all', limit=10):
+        """Get top tracks by play count."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            where = self._listening_time_filter(time_range)
+
+            cursor.execute(f"""
+                SELECT title, artist, album, COUNT(*) as play_count
+                FROM listening_history
+                {where}
+                AND title IS NOT NULL AND title != ''
+                GROUP BY LOWER(title), LOWER(artist)
+                ORDER BY play_count DESC
+                LIMIT ?
+            """, (limit,))
+            return [{'name': row[0], 'artist': row[1], 'album': row[2], 'play_count': row[3]} for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting top tracks: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def get_listening_timeline(self, time_range='30d', granularity='day'):
+        """Get play count per time period for chart rendering."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            where = self._listening_time_filter(time_range)
+
+            if granularity == 'month':
+                date_fmt = '%Y-%m'
+            elif granularity == 'week':
+                date_fmt = '%Y-W%W'
+            else:
+                date_fmt = '%Y-%m-%d'
+
+            cursor.execute(f"""
+                SELECT strftime('{date_fmt}', played_at) as period, COUNT(*) as plays
+                FROM listening_history
+                {where}
+                GROUP BY period
+                ORDER BY period ASC
+            """)
+            return [{'date': row[0], 'plays': row[1]} for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting listening timeline: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def get_genre_breakdown(self, time_range='all'):
+        """Get genre distribution by play count (joins listening_history to tracks/artists)."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            where = self._listening_time_filter(time_range, alias='lh')
+
+            cursor.execute(f"""
+                SELECT a.genres, COUNT(*) as play_count
+                FROM listening_history lh
+                JOIN tracks t ON t.id = lh.db_track_id
+                JOIN artists a ON a.id = t.artist_id
+                {where}
+                AND a.genres IS NOT NULL AND a.genres != ''
+                GROUP BY a.genres
+                ORDER BY play_count DESC
+                LIMIT 50
+            """)
+            # Parse genre JSON and aggregate
+            genre_counts = {}
+            for row in cursor.fetchall():
+                genres_str = row[0]
+                count = row[1]
+                try:
+                    import json
+                    genres = json.loads(genres_str)
+                    if isinstance(genres, list):
+                        for g in genres:
+                            genre_counts[g] = genre_counts.get(g, 0) + count
+                    else:
+                        genre_counts[str(genres)] = genre_counts.get(str(genres), 0) + count
+                except (ValueError, TypeError):
+                    for g in genres_str.split(','):
+                        g = g.strip()
+                        if g:
+                            genre_counts[g] = genre_counts.get(g, 0) + count
+
+            total = sum(genre_counts.values()) or 1
+            result = sorted(
+                [{'genre': g, 'play_count': c, 'percentage': round(c / total * 100, 1)} for g, c in genre_counts.items()],
+                key=lambda x: x['play_count'], reverse=True
+            )[:15]
+            return result
+        except Exception as e:
+            logger.error(f"Error getting genre breakdown: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def get_library_health(self):
+        """Get library health metrics."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Total tracks
+            cursor.execute("SELECT COUNT(*) FROM tracks WHERE id IS NOT NULL")
+            total_tracks = (cursor.fetchone() or [0])[0]
+
+            # Unplayed
+            cursor.execute("SELECT COUNT(*) FROM tracks WHERE (play_count IS NULL OR play_count = 0) AND id IS NOT NULL")
+            unplayed = (cursor.fetchone() or [0])[0]
+
+            # Format breakdown
+            cursor.execute("""
+                SELECT
+                    CASE
+                        WHEN LOWER(file_path) LIKE '%.flac' THEN 'FLAC'
+                        WHEN LOWER(file_path) LIKE '%.mp3' THEN 'MP3'
+                        WHEN LOWER(file_path) LIKE '%.opus' THEN 'Opus'
+                        WHEN LOWER(file_path) LIKE '%.m4a' THEN 'AAC'
+                        WHEN LOWER(file_path) LIKE '%.ogg' THEN 'OGG'
+                        WHEN LOWER(file_path) LIKE '%.wav' THEN 'WAV'
+                        ELSE 'Other'
+                    END as format,
+                    COUNT(*) as count
+                FROM tracks
+                WHERE file_path IS NOT NULL AND file_path != ''
+                GROUP BY format
+                ORDER BY count DESC
+            """)
+            format_breakdown = {row[0]: row[1] for row in cursor.fetchall()}
+
+            # Total duration
+            cursor.execute("SELECT COALESCE(SUM(duration), 0) FROM tracks WHERE id IS NOT NULL")
+            total_duration_ms = (cursor.fetchone() or [0])[0]
+
+            # Enrichment coverage
+            enrichment = {}
+            for service, col in [('spotify', 'spotify_id'), ('musicbrainz', 'musicbrainz_id'),
+                                 ('deezer', 'deezer_id'), ('lastfm', 'lastfm_url')]:
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM artists WHERE {col} IS NOT NULL AND {col} != ''")
+                    matched = (cursor.fetchone() or [0])[0]
+                    cursor.execute("SELECT COUNT(*) FROM artists WHERE id IS NOT NULL")
+                    total_artists = (cursor.fetchone() or [0])[0]
+                    enrichment[service] = round(matched / total_artists * 100, 1) if total_artists else 0
+                except Exception:
+                    enrichment[service] = 0
+
+            return {
+                'total_tracks': total_tracks,
+                'unplayed_count': unplayed,
+                'unplayed_percentage': round(unplayed / total_tracks * 100, 1) if total_tracks else 0,
+                'format_breakdown': format_breakdown,
+                'total_duration_ms': total_duration_ms,
+                'enrichment_coverage': enrichment,
+            }
+        except Exception as e:
+            logger.error(f"Error getting library health: {e}")
+            return {}
+        finally:
+            if conn:
+                conn.close()
+
+    @staticmethod
+    def _listening_time_filter(time_range, alias=''):
+        """Build a WHERE clause for time-range filtering."""
+        prefix = f"{alias}." if alias else ""
+        if time_range == '7d':
+            return f"WHERE {prefix}played_at >= datetime('now', '-7 days')"
+        elif time_range == '30d':
+            return f"WHERE {prefix}played_at >= datetime('now', '-30 days')"
+        elif time_range == '12m':
+            return f"WHERE {prefix}played_at >= datetime('now', '-12 months')"
+        else:
+            return "WHERE 1=1"
 
     def set_profile_spotify(self, profile_id: int, client_id: str, client_secret: str,
                             redirect_uri: str = '') -> bool:

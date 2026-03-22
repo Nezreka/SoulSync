@@ -433,6 +433,10 @@ class ConfigManager:
                 "delete_original": False,
                 "downsample_hires": False
             },
+            "listening_stats": {
+                "enabled": True,
+                "poll_interval": 30
+            },
             "import": {
                 "staging_path": "./Staging"
             },
