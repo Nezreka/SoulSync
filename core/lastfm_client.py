@@ -41,18 +41,132 @@ def rate_limited(func):
 
 
 class LastFMClient:
-    """Client for interacting with the Last.fm API (read-only metadata)"""
+    """Client for interacting with the Last.fm API (metadata + scrobbling)"""
 
     BASE_URL = "https://ws.audioscrobbler.com/2.0/"
 
-    def __init__(self, api_key: str = ""):
+    def __init__(self, api_key: str = "", api_secret: str = "", session_key: str = ""):
         self.api_key = api_key
+        self.api_secret = api_secret
+        self.session_key = session_key
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'SoulSync/1.0',
             'Accept': 'application/json'
         })
         logger.info("Last.fm client initialized")
+
+    def _sign_request(self, params: dict) -> str:
+        """Generate MD5 API signature for write operations."""
+        import hashlib
+        # Sort params alphabetically, concatenate key+value pairs, append secret
+        sorted_str = ''.join(f'{k}{v}' for k, v in sorted(params.items()))
+        return hashlib.md5((sorted_str + self.api_secret).encode('utf-8')).hexdigest()
+
+    def get_auth_url(self, callback_url: str) -> Optional[str]:
+        """Generate the Last.fm authorization URL for scrobbling.
+
+        User visits this URL, authorizes SoulSync, gets redirected back with a token.
+        """
+        if not self.api_key:
+            return None
+        return f"https://www.last.fm/api/auth/?api_key={self.api_key}&cb={callback_url}"
+
+    def get_session_key(self, token: str) -> Optional[str]:
+        """Exchange an auth token for a session key (one-time after user authorizes).
+
+        Returns the session key string, or None on failure.
+        """
+        if not self.api_key or not self.api_secret or not token:
+            return None
+
+        params = {
+            'method': 'auth.getSession',
+            'api_key': self.api_key,
+            'token': token,
+        }
+        params['api_sig'] = self._sign_request(params)
+        params['format'] = 'json'
+
+        try:
+            response = self.session.get(self.BASE_URL, params=params, timeout=10)
+            data = response.json()
+            session = data.get('session', {})
+            key = session.get('key')
+            if key:
+                self.session_key = key
+                logger.info(f"Last.fm session key obtained for user: {session.get('name', '?')}")
+                return key
+            else:
+                error = data.get('error', 'Unknown')
+                logger.error(f"Last.fm auth failed: {data.get('message', error)}")
+                return None
+        except Exception as e:
+            logger.error(f"Last.fm session key exchange failed: {e}")
+            return None
+
+    def can_scrobble(self) -> bool:
+        """Check if scrobbling is possible (has api_key, api_secret, and session_key)."""
+        return bool(self.api_key and self.api_secret and self.session_key)
+
+    @rate_limited
+    def scrobble_tracks(self, tracks: List[Dict]) -> bool:
+        """Scrobble up to 50 tracks at once via track.scrobble POST endpoint.
+
+        Args:
+            tracks: list of dicts with {artist, track, album, timestamp (unix int)}
+
+        Returns:
+            True if scrobble succeeded.
+        """
+        if not self.can_scrobble():
+            return False
+
+        if not tracks:
+            return True
+
+        # Last.fm accepts max 50 scrobbles per request
+        batch = tracks[:50]
+
+        params = {
+            'method': 'track.scrobble',
+            'api_key': self.api_key,
+            'sk': self.session_key,
+        }
+
+        for i, t in enumerate(batch):
+            ts = t.get('timestamp')
+            if isinstance(ts, str):
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                    ts = int(dt.timestamp())
+                except Exception:
+                    continue
+
+            params[f'artist[{i}]'] = t.get('artist', '')
+            params[f'track[{i}]'] = t.get('track', '')
+            params[f'timestamp[{i}]'] = str(ts)
+            if t.get('album'):
+                params[f'album[{i}]'] = t['album']
+
+        params['api_sig'] = self._sign_request(params)
+        params['format'] = 'json'
+
+        try:
+            response = self.session.post(self.BASE_URL, data=params, timeout=15)
+            data = response.json()
+            if 'scrobbles' in data:
+                accepted = data['scrobbles'].get('@attr', {}).get('accepted', 0)
+                logger.info(f"Last.fm scrobbled {accepted}/{len(batch)} tracks")
+                return True
+            else:
+                error = data.get('error', 'Unknown')
+                logger.warning(f"Last.fm scrobble failed: {data.get('message', error)}")
+                return False
+        except Exception as e:
+            logger.error(f"Last.fm scrobble error: {e}")
+            return False
 
     def _make_request(self, method: str, params: Dict = None, timeout: int = 10, raise_on_transient: bool = False) -> Optional[Dict]:
         """Make a request to the Last.fm API.

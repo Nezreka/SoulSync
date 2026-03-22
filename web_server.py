@@ -18369,6 +18369,117 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🎧 Scrobbling to Last.fm & ListenBrainz",
+                "description": "Automatically scrobble your plays from Plex, Jellyfin, or Navidrome",
+                "features": [
+                    "• Listen on your media server — SoulSync automatically scrobbles to Last.fm and/or ListenBrainz",
+                    "• Last.fm: full web auth flow — enter API secret, click Authorize, session key stored permanently",
+                    "• ListenBrainz: simple token-based — enable toggle and plays are submitted automatically",
+                    "• Batch scrobbling with dedup tracking — events only scrobbled once, never duplicated",
+                    "• Both services fully opt-in via Settings toggles"
+                ]
+            },
+            {
+                "title": "🧠 Personalized Discovery",
+                "description": "Discovery playlists now use your listening history to recommend better music",
+                "features": [
+                    "• Release Radar: genre affinity (+10), artist familiarity (+15), overplay penalty (-10) scoring",
+                    "• Discovery Weekly: serendipity weighting — boosts unheard artists in your favorite genres",
+                    "• Recent Albums: adaptive time window (21-60 days) based on how fast you consume music",
+                    "• New 'Because You Listen To' sections: personalized carousels for your top 3 artists",
+                    "• Familiar Favorites weighted by actual play count, not random sampling",
+                    "• All personalization gracefully falls back for new users with no listening data"
+                ]
+            },
+            {
+                "title": "📊 Listening Stats Page",
+                "description": "Full stats dashboard with Chart.js visualizations of your listening habits",
+                "features": [
+                    "• Overview cards: total plays, listening time, unique artists/albums/tracks",
+                    "• Listening activity timeline bar chart with 7d/30d/12m/all time ranges",
+                    "• Genre breakdown doughnut chart with percentage legend",
+                    "• Top artists visual bubbles with profile pictures + ranked lists",
+                    "• Top albums and tracks with album art, clickable artist names",
+                    "• Library health: format breakdown bar, unplayed tracks, enrichment coverage",
+                    "• Sync Now button for instant data refresh from your media server",
+                    "• Background worker polls Plex/Jellyfin/Navidrome every 30 minutes",
+                    "• Pre-computed cache — tab switching is instant"
+                ]
+            },
+            {
+                "title": "🆔 SoulID Worker",
+                "description": "Deterministic identity system for cross-node artist/album/track matching",
+                "features": [
+                    "• Generates soul IDs using SHA-256 hash of normalized names",
+                    "• Artists: hash(name + debut_year) — debut year from iTunes + Deezer API verification",
+                    "• Albums: hash(artist + album), Tracks: dual IDs (song + album-specific)",
+                    "• Dashboard worker button with rainbow spinner and hover tooltip",
+                    "• SoulSync badge on library artist cards when matched"
+                ]
+            },
+            {
+                "title": "🔊 Lossy Codec Expansion + Retroactive Converter",
+                "description": "Opus and AAC support for post-download conversion, plus a repair job for existing files",
+                "features": [
+                    "• Lossy copy now supports MP3, Opus, and AAC (M4A) — configurable codec and bitrate",
+                    "• Opus: -map 0:a for clean audio extraction, cover art embedded via METADATA_BLOCK_PICTURE",
+                    "• AAC: MP4Cover embedding, -movflags +faststart for streaming optimization",
+                    "• New Lossy Converter repair job: scans FLAC library, creates findings, Fix/Fix All converts",
+                    "• Job reads codec/bitrate from current settings at fix time (change settings after scanning)",
+                    "• Independent Blasphemy Mode toggle per job (separate from download-time setting)"
+                ]
+            },
+            {
+                "title": "📥 Smarter Staging Import",
+                "description": "Tag-first matching and auto-grouping for the import workflow",
+                "features": [
+                    "• Tags take priority over filename parsing — no more '08' as artist name",
+                    "• Auto-detected album groups from file tags shown as one-click import cards",
+                    "• Match scoring rebalanced: title (0.45) + artist (0.15) + track# (0.30) + album bonus (0.10)",
+                    "• Filename parser pattern order fixed — track numbers no longer misidentified as artists"
+                ]
+            },
+            {
+                "title": "🎨 Library Artist Hero Redesign",
+                "description": "Expanded artist detail section with Last.fm integration",
+                "features": [
+                    "• Horizontal service badge row with hover lift animations",
+                    "• Last.fm bio with Read More toggle, listener/play count stats",
+                    "• Scrollable top 100 tracks from Last.fm in sidebar card",
+                    "• Last.fm tags merged with existing genres",
+                    "• Compact inline progress bars for Albums/EPs/Singles completion"
+                ]
+            },
+            {
+                "title": "🌐 Hydrabase Search & Routing",
+                "description": "Hydrabase shows as a search tab with proper ID routing",
+                "features": [
+                    "• Hydrabase appears as a source tab on enhanced search when connected",
+                    "• Plugin-aware ID routing: numeric IDs → iTunes, alphanumeric → Spotify",
+                    "• Artist images fetched from iTunes for Hydrabase results",
+                    "• Full Spotify-compatible interface: get_album, get_artist, get_track_details"
+                ]
+            },
+            {
+                "title": "🔧 Orphan File Detector + MusicBrainz Fixes",
+                "description": "Better orphan detection and album version matching",
+                "features": [
+                    "• Orphan detector: normalized tag matching strips feat./parentheticals to reduce false positives",
+                    "• Orphan fix now prompts 'Move to Staging' or 'Delete' instead of auto-deleting",
+                    "• MusicBrainz release matching: version qualifier scoring prevents deluxe → standard MBID mismatch",
+                    "• Playlist sync crash fixed: profile ID captured at request time, not in background thread"
+                ]
+            },
+            {
+                "title": "📅 Release Year Collection",
+                "description": "Post-processing now collects release year from all metadata sources",
+                "features": [
+                    "• Year extracted from MusicBrainz, Deezer, Tidal, Qobuz during post-processing",
+                    "• First source to find a year wins — written to ORIGINALDATE/DATE tags and album DB year",
+                    "• Library Reorganize API year lookup cap raised from 50 to 200"
+                ]
+            },
+            {
                 "title": "🔍 Multi-Source Search Tabs",
                 "description": "View search results from Spotify, iTunes, and Deezer side by side",
                 "features": [
@@ -41181,6 +41292,52 @@ def get_artist_lastfm_top_tracks(artist_id):
         return jsonify({'success': True, 'tracks': []})
 
 # ================================================================================================
+@app.route('/api/lastfm/auth-url', methods=['GET'])
+def lastfm_auth_url():
+    """Get the Last.fm authorization URL for scrobbling."""
+    try:
+        api_key = config_manager.get('lastfm.api_key', '')
+        if not api_key:
+            return jsonify({'success': False, 'error': 'Last.fm API key not configured'}), 400
+
+        # Build callback URL
+        callback = request.host_url.rstrip('/') + '/api/lastfm/callback'
+        auth_url = f"https://www.last.fm/api/auth/?api_key={api_key}&cb={callback}"
+        return jsonify({'success': True, 'url': auth_url})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/lastfm/callback', methods=['GET'])
+def lastfm_callback():
+    """Last.fm auth callback — exchanges token for session key."""
+    try:
+        token = request.args.get('token')
+        if not token:
+            return "Error: No token received from Last.fm", 400
+
+        api_key = config_manager.get('lastfm.api_key', '')
+        api_secret = config_manager.get('lastfm.api_secret', '')
+        if not api_key or not api_secret:
+            return "Error: Last.fm API key and secret must be configured in Settings", 400
+
+        from core.lastfm_client import LastFMClient
+        client = LastFMClient(api_key=api_key, api_secret=api_secret)
+        session_key = client.get_session_key(token)
+
+        if session_key:
+            config_manager.set('lastfm.session_key', session_key)
+            return """
+            <html><body style="background:#121212;color:#fff;font-family:sans-serif;text-align:center;padding-top:100px;">
+                <h2>Last.fm Scrobbling Authorized!</h2>
+                <p>You can close this window and return to SoulSync.</p>
+                <script>setTimeout(()=>window.close(),3000);</script>
+            </body></html>
+            """
+        else:
+            return "Error: Failed to get session key from Last.fm. Check your API key and secret.", 400
+    except Exception as e:
+        return f"Error: {e}", 500
+
 # END LAST.FM ENRICHMENT INTEGRATION
 # ================================================================================================
 

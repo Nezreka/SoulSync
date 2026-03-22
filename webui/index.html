@@ -3589,6 +3589,12 @@
                                                 style="color: #eb743b;">ListenBrainz Settings</a></div>
                                         <div class="callback-help">Self-hosted? Enter your server URL (e.g. http://localhost:8093)</div>
                                     </div>
+                                    <div class="form-group" style="margin-top: 12px;">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="listenbrainz-scrobble-enabled">
+                                            Scrobble plays to ListenBrainz
+                                        </label>
+                                    </div>
                                 </div>
 
                                 <!-- AcoustID Settings -->
@@ -3630,11 +3636,26 @@
                                         <input type="password" id="lastfm-api-key"
                                             placeholder="Last.fm API Key">
                                     </div>
+                                    <div class="form-group">
+                                        <label>API Secret:</label>
+                                        <input type="password" id="lastfm-api-secret"
+                                            placeholder="Last.fm API Secret (required for scrobbling)">
+                                    </div>
                                     <div class="callback-info">
-                                        <div class="callback-help">Get your API key from <a
+                                        <div class="callback-help">Get your API key and secret from <a
                                                 href="https://www.last.fm/api/account/create" target="_blank"
                                                 style="color: #d51007;">Last.fm API Account</a></div>
-                                        <div class="callback-help">Used for artist tags, play counts, and similar artists. Callback URL is not used.</div>
+                                        <div class="callback-help">API key: used for metadata enrichment. API secret: required for scrobbling.</div>
+                                    </div>
+                                    <div class="form-group" style="margin-top: 12px;">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="lastfm-scrobble-enabled">
+                                            Scrobble plays to Last.fm
+                                        </label>
+                                    </div>
+                                    <div class="form-actions" id="lastfm-scrobble-actions">
+                                        <button class="test-button" onclick="authorizeLastfmScrobbling()">Authorize Scrobbling</button>
+                                        <span class="setting-help-text" id="lastfm-scrobble-status"></span>
                                     </div>
                                 </div>
 

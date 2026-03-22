@@ -85,6 +85,79 @@ class ListenBrainzClient:
         """Check if client is authenticated"""
         return bool(self.token and self.username)
 
+    def submit_listens(self, listens: List[Dict]) -> bool:
+        """Submit play events to ListenBrainz.
+
+        Args:
+            listens: list of dicts with {artist, track, album, timestamp (unix int)}
+
+        Returns:
+            True if submission succeeded.
+        """
+        if not self.is_authenticated():
+            return False
+
+        if not listens:
+            return True
+
+        # Build payload per ListenBrainz API spec
+        payload_listens = []
+        for listen in listens:
+            ts = listen.get('timestamp')
+            if not ts:
+                continue
+            # Convert ISO string to unix timestamp if needed
+            if isinstance(ts, str):
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                    ts = int(dt.timestamp())
+                except Exception:
+                    continue
+
+            track_metadata = {
+                'artist_name': listen.get('artist', ''),
+                'track_name': listen.get('track', ''),
+            }
+            if listen.get('album'):
+                track_metadata['release_name'] = listen['album']
+
+            payload_listens.append({
+                'listened_at': ts,
+                'track_metadata': track_metadata,
+            })
+
+        if not payload_listens:
+            return True
+
+        # Submit in batches of 1000 (ListenBrainz limit)
+        for i in range(0, len(payload_listens), 1000):
+            batch = payload_listens[i:i + 1000]
+            try:
+                url = f"{self.base_url}/submit-listens"
+                response = self._make_request_with_retry(
+                    'POST', url,
+                    json={
+                        'listen_type': 'import',
+                        'payload': batch,
+                    },
+                    headers={
+                        'Authorization': f'Token {self.token}',
+                        'Content-Type': 'application/json',
+                    }
+                )
+                if response and response.status_code == 200:
+                    logger.info(f"Submitted {len(batch)} listens to ListenBrainz")
+                else:
+                    status = response.status_code if response else 'no response'
+                    logger.warning(f"ListenBrainz submit failed: {status}")
+                    return False
+            except Exception as e:
+                logger.error(f"ListenBrainz submit error: {e}")
+                return False
+
+        return True
+
     def get_playlists_created_for_user(self, count: int = 25, offset: int = 0) -> List[Dict]:
         """
         Fetch playlists created FOR the user (recommendations, personalized playlists)
