@@ -5576,6 +5576,7 @@ async function loadSettingsData() {
         // Populate Post-Download Conversion settings
         document.getElementById('downsample-hires').checked = settings.lossy_copy?.downsample_hires === true;
         document.getElementById('lossy-copy-enabled').checked = settings.lossy_copy?.enabled === true;
+        document.getElementById('lossy-copy-codec').value = settings.lossy_copy?.codec || 'mp3';
         document.getElementById('lossy-copy-bitrate').value = settings.lossy_copy?.bitrate || '320';
         document.getElementById('lossy-copy-delete-original').checked = settings.lossy_copy?.delete_original === true;
         document.getElementById('lossy-copy-options').style.display =
@@ -6558,6 +6559,7 @@ async function saveSettings(quiet = false) {
         },
         lossy_copy: {
             enabled: document.getElementById('lossy-copy-enabled').checked,
+            codec: document.getElementById('lossy-copy-codec').value,
             bitrate: document.getElementById('lossy-copy-bitrate').value,
             delete_original: document.getElementById('lossy-copy-delete-original').checked,
             downsample_hires: document.getElementById('downsample-hires').checked

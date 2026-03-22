@@ -428,6 +428,7 @@ class ConfigManager:
             },
             "lossy_copy": {
                 "enabled": False,
+                "codec": "mp3",
                 "bitrate": "320",
                 "delete_original": False,
                 "downsample_hires": False

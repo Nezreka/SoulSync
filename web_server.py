@@ -14728,12 +14728,13 @@ def _downsample_hires_flac(final_path, context):
 
 
 def _create_lossy_copy(final_path):
-    """Convert a FLAC file to MP3 at the user's configured bitrate.
+    """Convert a FLAC file to a lossy codec at the user's configured bitrate.
 
+    Supported codecs: mp3 (libmp3lame), opus (libopus), aac (aac/libfdk_aac).
     Only runs when lossy_copy is enabled and the file is a FLAC.
-    Places the MP3 alongside the FLAC with the same basename.
+    Places the output alongside the FLAC with the same basename.
 
-    Returns the MP3 path if Blasphemy Mode deleted the original, else None.
+    Returns the output path if Blasphemy Mode deleted the original, else None.
     """
     if not config_manager.get('lossy_copy.enabled', False):
         return None
@@ -14742,17 +14743,30 @@ def _create_lossy_copy(final_path):
     if ext != '.flac':
         return None
 
+    codec = config_manager.get('lossy_copy.codec', 'mp3').lower()
     bitrate = config_manager.get('lossy_copy.bitrate', '320')
-    mp3_quality = f'MP3-{bitrate}'
-    mp3_path = os.path.splitext(final_path)[0] + '.mp3'
 
-    # If $quality was used in filename, swap FLAC quality for MP3 quality
+    # Codec configuration: (ffmpeg_codec, extension, quality_label, extra_args)
+    codec_map = {
+        'mp3':  ('libmp3lame', '.mp3',  f'MP3-{bitrate}',  ['-id3v2_version', '3']),
+        'opus': ('libopus',    '.opus', f'OPUS-{bitrate}',  ['-vbr', 'on']),
+        'aac':  ('aac',        '.m4a',  f'AAC-{bitrate}',   ['-movflags', '+faststart']),
+    }
+
+    if codec not in codec_map:
+        print(f"⚠️ [Lossy Copy] Unknown codec '{codec}' — skipping conversion")
+        return None
+
+    ffmpeg_codec, out_ext, quality_label, extra_args = codec_map[codec]
+    out_path = os.path.splitext(final_path)[0] + out_ext
+
+    # If $quality was used in filename, swap FLAC quality for lossy quality
     original_quality = _get_audio_quality_string(final_path)
     if original_quality:
-        mp3_basename = os.path.basename(mp3_path)
-        if original_quality in mp3_basename:
-            mp3_basename = mp3_basename.replace(original_quality, mp3_quality)
-            mp3_path = os.path.join(os.path.dirname(mp3_path), mp3_basename)
+        out_basename = os.path.basename(out_path)
+        if original_quality in out_basename:
+            out_basename = out_basename.replace(original_quality, quality_label)
+            out_path = os.path.join(os.path.dirname(out_path), out_basename)
 
     ffmpeg_bin = shutil.which('ffmpeg')
     if not ffmpeg_bin:
@@ -14760,54 +14774,63 @@ def _create_lossy_copy(final_path):
         if os.path.isfile(local):
             ffmpeg_bin = local
         else:
-            print("⚠️ [Lossy Copy] ffmpeg not found — skipping MP3 conversion")
+            print(f"⚠️ [Lossy Copy] ffmpeg not found — skipping {codec.upper()} conversion")
             return None
 
     try:
-        print(f"🎵 [Lossy Copy] Converting to MP3-{bitrate}: {os.path.basename(final_path)}")
-        result = subprocess.run([
+        print(f"🎵 [Lossy Copy] Converting to {quality_label}: {os.path.basename(final_path)}")
+        cmd = [
             ffmpeg_bin, '-i', final_path,
-            '-codec:a', 'libmp3lame',
+            '-codec:a', ffmpeg_codec,
             '-b:a', f'{bitrate}k',
             '-map_metadata', '0',
-            '-id3v2_version', '3',
-            '-y', mp3_path
-        ], capture_output=True, text=True, timeout=120)
+        ] + extra_args + ['-y', out_path]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
 
         if result.returncode == 0:
-            print(f"✅ [Lossy Copy] Created MP3-{bitrate} copy: {os.path.basename(mp3_path)}")
-            # Fix QUALITY tag — the FLAC's tag (e.g. "FLAC 24bit") was copied verbatim
+            print(f"✅ [Lossy Copy] Created {quality_label} copy: {os.path.basename(out_path)}")
+
+            # Fix QUALITY tag — the FLAC's tag was copied verbatim by ffmpeg
             try:
-                from mutagen.id3 import ID3, TXXX
-                tags = ID3(mp3_path)
-                tags.add(TXXX(encoding=3, desc='QUALITY', text=[f'MP3-{bitrate}']))
-                tags.save()
+                from mutagen import File as MutagenFile
+                audio = MutagenFile(out_path)
+                if audio is not None:
+                    if codec == 'mp3':
+                        from mutagen.id3 import TXXX
+                        audio.tags.add(TXXX(encoding=3, desc='QUALITY', text=[quality_label]))
+                    elif codec == 'opus':
+                        audio['QUALITY'] = [quality_label]
+                    elif codec == 'aac':
+                        from mutagen.mp4 import MP4FreeForm
+                        audio['----:com.apple.iTunes:QUALITY'] = [MP4FreeForm(quality_label.encode('utf-8'))]
+                    audio.save()
             except Exception as tag_err:
                 print(f"⚠️ [Lossy Copy] Could not update QUALITY tag: {tag_err}")
 
-            # Blasphemy Mode: delete original FLAC if enabled and MP3 is verified
+            # Blasphemy Mode: delete original FLAC if enabled and output is verified
             if config_manager.get('lossy_copy.delete_original', False):
                 try:
-                    if os.path.isfile(mp3_path) and os.path.getsize(mp3_path) > 0:
+                    if os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
                         from mutagen import File as MutagenFile
-                        test_audio = MutagenFile(mp3_path)
+                        test_audio = MutagenFile(out_path)
                         if test_audio is not None:
                             os.remove(final_path)
                             print(f"🔥 [Blasphemy Mode] Deleted original: {os.path.basename(final_path)}")
-                            # Rename LRC file to match the MP3 filename
+                            # Rename LRC file to match the output filename
                             flac_lrc = os.path.splitext(final_path)[0] + '.lrc'
                             if os.path.isfile(flac_lrc):
-                                mp3_lrc = os.path.splitext(mp3_path)[0] + '.lrc'
+                                out_lrc = os.path.splitext(out_path)[0] + '.lrc'
                                 try:
-                                    os.rename(flac_lrc, mp3_lrc)
-                                    print(f"🔥 [Blasphemy Mode] Renamed LRC: {os.path.basename(flac_lrc)} -> {os.path.basename(mp3_lrc)}")
+                                    os.rename(flac_lrc, out_lrc)
+                                    print(f"🔥 [Blasphemy Mode] Renamed LRC: {os.path.basename(flac_lrc)} -> {os.path.basename(out_lrc)}")
                                 except Exception as lrc_err:
                                     print(f"⚠️ [Blasphemy Mode] Could not rename LRC: {lrc_err}")
-                            return mp3_path
+                            return out_path
                         else:
-                            print(f"⚠️ [Blasphemy Mode] MP3 failed audio validation, keeping original: {os.path.basename(final_path)}")
+                            print(f"⚠️ [Blasphemy Mode] Output failed audio validation, keeping original: {os.path.basename(final_path)}")
                     else:
-                        print(f"⚠️ [Blasphemy Mode] MP3 missing or empty, keeping original: {os.path.basename(final_path)}")
+                        print(f"⚠️ [Blasphemy Mode] Output missing or empty, keeping original: {os.path.basename(final_path)}")
                 except Exception as del_err:
                     print(f"⚠️ [Blasphemy Mode] Error during original deletion, keeping original: {del_err}")
         else:
@@ -17495,10 +17518,12 @@ def _post_process_matched_download(context_key, context, file_path):
                 expected_stem = os.path.splitext(os.path.basename(final_path))[0]
                 expected_ext = os.path.splitext(final_path)[1]
                 found_variant = None
-                # Also check for .mp3 if Blasphemy Mode may have deleted the .flac
+                # Also check for lossy output if Blasphemy Mode may have deleted the .flac
                 check_exts = {expected_ext}
                 if expected_ext == '.flac' and config_manager.get('lossy_copy.enabled', False) and config_manager.get('lossy_copy.delete_original', False):
-                    check_exts.add('.mp3')
+                    _lossy_ext_map = {'mp3': '.mp3', 'opus': '.opus', 'aac': '.m4a'}
+                    _lossy_codec = config_manager.get('lossy_copy.codec', 'mp3')
+                    check_exts.add(_lossy_ext_map.get(_lossy_codec, '.mp3'))
                 if os.path.exists(expected_dir):
                     for f in os.listdir(expected_dir):
                         # Match files that start with the expected stem and have a matching extension
