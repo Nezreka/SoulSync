@@ -19729,6 +19729,109 @@ body {
     margin-top: 14px;
 }
 
+/* Per-artist enrichment coverage */
+.artist-enrichment-coverage {
+    margin-top: 16px;
+}
+
+.artist-enrichment-coverage .artist-enrich-title {
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 0.65em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 10px;
+}
+
+.artist-enrich-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px 10px;
+}
+
+.artist-enrich-circle {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    cursor: default;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.artist-enrich-circle:hover {
+    transform: scale(1.12);
+}
+
+.artist-enrich-circle:hover .ring-pct {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.artist-enrich-circle:hover .artist-enrich-label {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.artist-enrich-ring {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    filter: drop-shadow(0 0 0px transparent);
+    transition: filter 0.3s ease;
+}
+
+.artist-enrich-circle:hover .artist-enrich-ring {
+    filter: drop-shadow(0 0 6px var(--ring-color, rgba(255, 255, 255, 0.2)));
+}
+
+.artist-enrich-ring svg {
+    transform: rotate(-90deg);
+    width: 48px;
+    height: 48px;
+}
+
+.artist-enrich-ring .ring-bg {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.06);
+    stroke-width: 3;
+}
+
+.artist-enrich-ring .ring-fill {
+    fill: none;
+    stroke-width: 3;
+    stroke-linecap: round;
+}
+
+.artist-enrich-ring .ring-pct {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.5);
+    transition: color 0.25s ease;
+}
+
+.artist-enrich-label {
+    font-size: 0.7em;
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: 500;
+    text-align: center;
+    line-height: 1.1;
+    transition: color 0.25s ease;
+}
+
+@keyframes ringFillIn {
+    from { stroke-dashoffset: var(--ring-circ); }
+    to   { stroke-dashoffset: var(--ring-offset); }
+}
+
+@keyframes ringPctFade {
+    0%   { opacity: 0; transform: scale(0.7); }
+    60%  { opacity: 0; transform: scale(0.7); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
 .collection-category {
     flex: 1;
     display: flex;

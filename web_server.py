@@ -8554,10 +8554,47 @@ def get_artist_detail(artist_id):
             # Fall back to our database categorization
             merged_discography = owned_releases
 
+        # Compute per-artist track enrichment coverage
+        enrichment_coverage = {}
+        try:
+            with database._get_connection() as conn:
+                cursor = conn.cursor()
+                artist_name = artist_info['name']
+                server_source = artist_info.get('server_source', '')
+                cursor.execute("""
+                    SELECT COUNT(*) FROM tracks t
+                    JOIN albums al ON al.id = t.album_id
+                    JOIN artists ar ON ar.id = al.artist_id
+                    WHERE ar.name = ? AND ar.server_source = ?
+                """, (artist_name, server_source))
+                total = (cursor.fetchone() or [0])[0]
+                if total > 0:
+                    for svc, col in [('spotify', 'spotify_track_id'), ('musicbrainz', 'musicbrainz_recording_id'),
+                                     ('deezer', 'deezer_id'), ('lastfm', 'lastfm_url'),
+                                     ('itunes', 'itunes_track_id'), ('audiodb', 'audiodb_id'),
+                                     ('genius', 'genius_id'), ('tidal', 'tidal_id'),
+                                     ('qobuz', 'qobuz_id')]:
+                        try:
+                            cursor.execute(f"""
+                                SELECT COUNT(*) FROM tracks t
+                                JOIN albums al ON al.id = t.album_id
+                                JOIN artists ar ON ar.id = al.artist_id
+                                WHERE ar.name = ? AND ar.server_source = ?
+                                  AND t.{col} IS NOT NULL AND t.{col} != ''
+                            """, (artist_name, server_source))
+                            matched = (cursor.fetchone() or [0])[0]
+                            enrichment_coverage[svc] = round(matched / total * 100, 1)
+                        except Exception:
+                            enrichment_coverage[svc] = 0
+                    enrichment_coverage['total_tracks'] = total
+        except Exception:
+            pass
+
         response_data = {
             "success": True,
             "artist": artist_info,
-            "discography": merged_discography
+            "discography": merged_discography,
+            "enrichment_coverage": enrichment_coverage
         }
 
         # Add Spotify artist data if available

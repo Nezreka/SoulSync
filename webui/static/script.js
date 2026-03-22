@@ -38817,6 +38817,9 @@ async function loadArtistDetailData(artistId, artistName) {
         // Update header with artist name and MusicBrainz link LAST to avoid overwrite
         updateArtistDetailPageHeaderWithData(data.artist);
 
+        // Render per-artist enrichment coverage
+        renderArtistEnrichmentCoverage(data.enrichment_coverage);
+
         // Start streaming ownership checks if we have Spotify discography with checking state
         if (data.discography && data.discography.albums) {
             const hasChecking = [...(data.discography.albums || []), ...(data.discography.eps || []), ...(data.discography.singles || [])]
@@ -38892,6 +38895,54 @@ function updateArtistDetailPageHeaderWithData(artist) {
 
         badgesContainer.innerHTML = badges.join('');
     }
+}
+
+function renderArtistEnrichmentCoverage(enrichment) {
+    const el = document.getElementById('artist-enrichment-coverage');
+    if (!el) return;
+
+    if (!enrichment || !enrichment.total_tracks) {
+        el.style.display = 'none';
+        return;
+    }
+
+    const services = [
+        { name: 'Spotify', key: 'spotify', color: '#1db954' },
+        { name: 'MusicBrainz', key: 'musicbrainz', color: '#ba55d3' },
+        { name: 'Deezer', key: 'deezer', color: '#a238ff' },
+        { name: 'Last.fm', key: 'lastfm', color: '#d51007' },
+        { name: 'iTunes', key: 'itunes', color: '#fc3c44' },
+        { name: 'AudioDB', key: 'audiodb', color: '#1a9fff' },
+        { name: 'Genius', key: 'genius', color: '#ffff64' },
+        { name: 'Tidal', key: 'tidal', color: '#00ffff' },
+        { name: 'Qobuz', key: 'qobuz', color: '#4285f4' },
+    ];
+
+    const r = 20, circ = 2 * Math.PI * r;
+
+    el.style.display = '';
+    el.innerHTML = `
+        <div class="artist-enrich-title">Enrichment Coverage</div>
+        <div class="artist-enrich-grid">
+            ${services.map((s, i) => {
+                const pct = enrichment[s.key] || 0;
+                const offset = circ - (circ * pct / 100);
+                const delay = (i * 0.08).toFixed(2);
+                return `<div class="artist-enrich-circle">
+                    <div class="artist-enrich-ring" style="--ring-color:${s.color}">
+                        <svg viewBox="0 0 48 48">
+                            <circle class="ring-bg" cx="24" cy="24" r="${r}"/>
+                            <circle class="ring-fill" cx="24" cy="24" r="${r}"
+                                stroke="${s.color}" stroke-dasharray="${circ.toFixed(1)}"
+                                style="--ring-circ:${circ.toFixed(1)};--ring-offset:${offset.toFixed(1)};stroke-dashoffset:${offset.toFixed(1)};animation:ringFillIn 1s cubic-bezier(0.4,0,0.2,1) ${delay}s both"/>
+                        </svg>
+                        <span class="ring-pct" style="animation:ringPctFade 0.8s ease ${(parseFloat(delay) + 0.3).toFixed(2)}s both">${Math.round(pct)}</span>
+                    </div>
+                    <span class="artist-enrich-label">${s.name}</span>
+                </div>`;
+            }).join('')}
+        </div>
+    `;
 }
 
 function populateArtistDetailPage(data) {
