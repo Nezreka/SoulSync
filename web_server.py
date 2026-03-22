@@ -14749,7 +14749,7 @@ def _create_lossy_copy(final_path):
     # Codec configuration: (ffmpeg_codec, extension, quality_label, extra_args)
     codec_map = {
         'mp3':  ('libmp3lame', '.mp3',  f'MP3-{bitrate}',  ['-id3v2_version', '3']),
-        'opus': ('libopus',    '.opus', f'OPUS-{bitrate}',  ['-vbr', 'on']),
+        'opus': ('libopus',    '.opus', f'OPUS-{bitrate}',  ['-map', '0:a', '-vbr', 'on']),
         'aac':  ('aac',        '.m4a',  f'AAC-{bitrate}',   ['-movflags', '+faststart']),
     }
 
@@ -14807,6 +14807,45 @@ def _create_lossy_copy(final_path):
                     audio.save()
             except Exception as tag_err:
                 print(f"⚠️ [Lossy Copy] Could not update QUALITY tag: {tag_err}")
+
+            # Embed cover art from source FLAC into the lossy copy
+            # Opus/OGG can't inherit FLAC cover art via ffmpeg -map_metadata alone
+            if codec in ('opus', 'aac'):
+                try:
+                    from mutagen import File as MutagenFile
+                    from mutagen.flac import FLAC as MutagenFLAC
+                    source_audio = MutagenFLAC(final_path)
+                    if source_audio and source_audio.pictures:
+                        pic = source_audio.pictures[0]
+                        dest_audio = MutagenFile(out_path)
+                        if dest_audio is not None:
+                            if codec == 'opus':
+                                import base64
+                                from mutagen.oggopus import OggOpus
+                                if isinstance(dest_audio, OggOpus):
+                                    # OGG stores pictures as base64-encoded METADATA_BLOCK_PICTURE
+                                    import struct
+                                    # Build METADATA_BLOCK_PICTURE block
+                                    picture_data = (
+                                        struct.pack('>II', pic.type, len(pic.mime.encode('utf-8')))
+                                        + pic.mime.encode('utf-8')
+                                        + struct.pack('>I', len(pic.desc.encode('utf-8')))
+                                        + pic.desc.encode('utf-8')
+                                        + struct.pack('>IIII', pic.width, pic.height, pic.depth, pic.colors)
+                                        + struct.pack('>I', len(pic.data))
+                                        + pic.data
+                                    )
+                                    dest_audio['METADATA_BLOCK_PICTURE'] = [base64.b64encode(picture_data).decode('ascii')]
+                                    dest_audio.save()
+                                    print(f"🎨 [Lossy Copy] Embedded cover art in Opus file")
+                            elif codec == 'aac':
+                                from mutagen.mp4 import MP4Cover
+                                fmt = MP4Cover.FORMAT_JPEG if 'jpeg' in pic.mime else MP4Cover.FORMAT_PNG
+                                dest_audio['covr'] = [MP4Cover(pic.data, imageformat=fmt)]
+                                dest_audio.save()
+                                print(f"🎨 [Lossy Copy] Embedded cover art in M4A file")
+                except Exception as art_err:
+                    print(f"⚠️ [Lossy Copy] Could not embed cover art: {art_err}")
 
             # Blasphemy Mode: delete original FLAC if enabled and output is verified
             if config_manager.get('lossy_copy.delete_original', False):
