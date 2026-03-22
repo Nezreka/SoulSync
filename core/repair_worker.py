@@ -1928,7 +1928,7 @@ class RepairWorker:
 
         codec_configs = {
             'mp3':  ('libmp3lame', '.mp3',  ['-id3v2_version', '3']),
-            'opus': ('libopus',    '.opus', ['-vbr', 'on']),
+            'opus': ('libopus',    '.opus', ['-map', '0:a', '-vbr', 'on']),
             'aac':  ('aac',        '.m4a',  ['-movflags', '+faststart']),
         }
 
@@ -1996,6 +1996,39 @@ class RepairWorker:
                     audio.save()
             except Exception:
                 pass
+
+            # Embed cover art from source FLAC
+            if codec in ('opus', 'aac'):
+                try:
+                    from mutagen import File as MutagenFile
+                    from mutagen.flac import FLAC as MutagenFLAC
+                    source_audio = MutagenFLAC(resolved)
+                    if source_audio and source_audio.pictures:
+                        pic = source_audio.pictures[0]
+                        dest_audio = MutagenFile(out_path)
+                        if dest_audio is not None:
+                            if codec == 'opus':
+                                import base64, struct
+                                from mutagen.oggopus import OggOpus
+                                if isinstance(dest_audio, OggOpus):
+                                    picture_data = (
+                                        struct.pack('>II', pic.type, len(pic.mime.encode('utf-8')))
+                                        + pic.mime.encode('utf-8')
+                                        + struct.pack('>I', len(pic.desc.encode('utf-8')))
+                                        + pic.desc.encode('utf-8')
+                                        + struct.pack('>IIII', pic.width, pic.height, pic.depth, pic.colors)
+                                        + struct.pack('>I', len(pic.data))
+                                        + pic.data
+                                    )
+                                    dest_audio['METADATA_BLOCK_PICTURE'] = [base64.b64encode(picture_data).decode('ascii')]
+                                    dest_audio.save()
+                            elif codec == 'aac':
+                                from mutagen.mp4 import MP4Cover
+                                fmt = MP4Cover.FORMAT_JPEG if 'jpeg' in pic.mime else MP4Cover.FORMAT_PNG
+                                dest_audio['covr'] = [MP4Cover(pic.data, imageformat=fmt)]
+                                dest_audio.save()
+                except Exception:
+                    pass
 
             # Blasphemy Mode — uses the job's own setting, not the global lossy_copy one
             delete_original = False
