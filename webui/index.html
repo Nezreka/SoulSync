@@ -4621,13 +4621,21 @@
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="lossy-copy-enabled"
                                             onchange="document.getElementById('lossy-copy-options').style.display = this.checked ? 'block' : 'none'">
-                                        Create MP3 copy of downloaded FLAC files
+                                        Create lossy copy of downloaded FLAC files
                                     </label>
                                 </div>
 
                                 <div id="lossy-copy-options" style="display: none;">
                                     <div class="form-group">
-                                        <label>MP3 Bitrate:</label>
+                                        <label>Codec:</label>
+                                        <select id="lossy-copy-codec">
+                                            <option value="mp3">MP3</option>
+                                            <option value="opus">Opus</option>
+                                            <option value="aac">AAC (M4A)</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Bitrate:</label>
                                         <select id="lossy-copy-bitrate">
                                             <option value="320">320 kbps</option>
                                             <option value="256">256 kbps</option>
@@ -4636,13 +4644,13 @@
                                         </select>
                                     </div>
                                     <div class="help-text">
-                                        After downloading a FLAC, an MP3 copy at the selected bitrate
+                                        After downloading a FLAC, a lossy copy at the selected codec and bitrate
                                         will be created in the same folder. Requires ffmpeg.
                                     </div>
                                     <div class="form-group" style="margin-top: 12px;">
                                         <label class="checkbox-label">
                                             <input type="checkbox" id="lossy-copy-delete-original">
-                                            Blasphemy Mode — Delete original FLAC after MP3 is created
+                                            Blasphemy Mode — Delete original FLAC after conversion
                                         </label>
                                     </div>
                                     <div class="help-text" style="color: rgba(255, 100, 100, 0.8);">
