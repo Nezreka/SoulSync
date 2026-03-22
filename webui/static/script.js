@@ -38287,202 +38287,101 @@ function displayLibraryArtists(artists) {
     const grid = document.getElementById("library-artists-grid");
     if (!grid) return;
 
-    // Clear existing content
-    grid.innerHTML = "";
+    // Build all cards as HTML string for single DOM write (much faster than createElement loop)
+    grid.innerHTML = artists.map((artist, i) => buildLibraryArtistCardHTML(artist, i)).join('');
 
-    // Create artist cards
-    artists.forEach(artist => {
-        const card = createLibraryArtistCard(artist);
-        grid.appendChild(card);
-    });
+    // Attach click handlers via event delegation (single listener vs 75+ individual)
+    grid.onclick = (e) => {
+        // Ignore clicks on badge icons (they open external links / toggle watchlist)
+        const badge = e.target.closest('.source-card-icon');
+        if (badge) {
+            e.stopPropagation();
+            const url = badge.dataset.url;
+            if (url) { window.open(url, '_blank'); return; }
+            // Watchlist toggle
+            if (badge.classList.contains('watch-card-icon') && badge.dataset.unwatched) {
+                const card = badge.closest('.library-artist-card');
+                if (card) {
+                    const artistId = card.dataset.artistId;
+                    const artistName = card.dataset.artistName;
+                    const artist = artists.find(a => String(a.id) === artistId);
+                    if (artist) toggleLibraryCardWatchlist(badge, artist);
+                }
+            }
+            return;
+        }
+        const card = e.target.closest('.library-artist-card');
+        if (card) {
+            navigateToArtistDetail(card.dataset.artistId, card.dataset.artistName);
+        }
+    };
 }
 
-function createLibraryArtistCard(artist) {
-    const card = document.createElement("div");
-    card.className = "library-artist-card";
-    card.setAttribute("data-artist-id", artist.id);
-    // Add relative positioning for icon and smooth transition
-    card.style.position = 'relative';
-    card.style.transition = 'transform 0.2s, box-shadow 0.2s';
+function buildLibraryArtistCardHTML(artist, index) {
+    const _esc = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const delay = Math.min(index * 20, 600); // Cap at 600ms so last cards don't wait too long
 
-    // Add source badges stacked on top-right
-    const badgeSources = [];
-    if (artist.spotify_artist_id) {
-        badgeSources.push({ cls: 'spotify-card-icon', logo: SPOTIFY_LOGO_URL, fallback: 'SP', title: 'View on Spotify', url: `https://open.spotify.com/artist/${artist.spotify_artist_id}` });
-    }
-    if (artist.musicbrainz_id) {
-        badgeSources.push({ cls: 'mb-card-icon', logo: MUSICBRAINZ_LOGO_URL, fallback: 'MB', title: 'View on MusicBrainz', url: `https://musicbrainz.org/artist/${artist.musicbrainz_id}` });
-    }
-    if (artist.deezer_id) {
-        badgeSources.push({ cls: 'deezer-card-icon', logo: DEEZER_LOGO_URL, fallback: 'Dz', title: 'View on Deezer', url: `https://www.deezer.com/artist/${artist.deezer_id}` });
-    }
+    // Build badge icons
+    const badges = [];
+    if (artist.spotify_artist_id) badges.push({ logo: SPOTIFY_LOGO_URL, fb: 'SP', title: 'Spotify', url: `https://open.spotify.com/artist/${artist.spotify_artist_id}` });
+    if (artist.musicbrainz_id) badges.push({ logo: MUSICBRAINZ_LOGO_URL, fb: 'MB', title: 'MusicBrainz', url: `https://musicbrainz.org/artist/${artist.musicbrainz_id}` });
+    if (artist.deezer_id) badges.push({ logo: DEEZER_LOGO_URL, fb: 'Dz', title: 'Deezer', url: `https://www.deezer.com/artist/${artist.deezer_id}` });
     if (artist.audiodb_id) {
-        const adbSlug = artist.name ? artist.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '') : '';
-        badgeSources.push({ cls: 'audiodb-card-icon', logo: getAudioDBLogoURL(), fallback: 'ADB', title: 'View on TheAudioDB', url: `https://www.theaudiodb.com/artist/${artist.audiodb_id}-${adbSlug}` });
+        const slug = artist.name ? artist.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '') : '';
+        badges.push({ logo: typeof getAudioDBLogoURL === 'function' ? getAudioDBLogoURL() : '', fb: 'ADB', title: 'AudioDB', url: `https://www.theaudiodb.com/artist/${artist.audiodb_id}-${slug}` });
     }
-    if (artist.itunes_artist_id) {
-        badgeSources.push({ cls: 'itunes-card-icon', logo: ITUNES_LOGO_URL, fallback: 'IT', title: 'View on Apple Music', url: `https://music.apple.com/artist/${artist.itunes_artist_id}` });
-    }
-    if (artist.lastfm_url) {
-        badgeSources.push({ cls: 'lastfm-card-icon', logo: LASTFM_LOGO_URL, fallback: 'LFM', title: 'View on Last.fm', url: artist.lastfm_url });
-    }
-    if (artist.genius_url) {
-        badgeSources.push({ cls: 'genius-card-icon', logo: GENIUS_LOGO_URL, fallback: 'GEN', title: 'View on Genius', url: artist.genius_url });
-    }
-    if (artist.tidal_id) {
-        badgeSources.push({ cls: 'tidal-card-icon', logo: TIDAL_LOGO_URL, fallback: 'TD', title: 'View on Tidal', url: `https://tidal.com/browse/artist/${artist.tidal_id}` });
-    }
-    if (artist.qobuz_id) {
-        badgeSources.push({ cls: 'qobuz-card-icon', logo: QOBUZ_LOGO_URL, fallback: 'Qz', title: 'View on Qobuz', url: `https://www.qobuz.com/artist/${artist.qobuz_id}` });
-    }
-    if (artist.soul_id && !artist.soul_id.startsWith('soul_unnamed_')) {
-        badgeSources.push({ cls: 'soulid-card-icon', logo: '/static/trans2.png', fallback: 'SS', title: `SoulID: ${artist.soul_id}`, url: null });
-    }
-    // Add watchlist indicator — only if artist has a usable ID for the active source
+    if (artist.itunes_artist_id) badges.push({ logo: ITUNES_LOGO_URL, fb: 'IT', title: 'Apple Music', url: `https://music.apple.com/artist/${artist.itunes_artist_id}` });
+    if (artist.lastfm_url) badges.push({ logo: LASTFM_LOGO_URL, fb: 'LFM', title: 'Last.fm', url: artist.lastfm_url });
+    if (artist.genius_url) badges.push({ logo: GENIUS_LOGO_URL, fb: 'GEN', title: 'Genius', url: artist.genius_url });
+    if (artist.tidal_id) badges.push({ logo: TIDAL_LOGO_URL, fb: 'TD', title: 'Tidal', url: `https://tidal.com/browse/artist/${artist.tidal_id}` });
+    if (artist.qobuz_id) badges.push({ logo: QOBUZ_LOGO_URL, fb: 'Qz', title: 'Qobuz', url: `https://www.qobuz.com/artist/${artist.qobuz_id}` });
+    if (artist.soul_id && !artist.soul_id.startsWith('soul_unnamed_')) badges.push({ logo: '/static/trans2.png', fb: 'SS', title: `SoulID: ${artist.soul_id}`, url: null });
+
+    // Watchlist badge
     const hasActiveSourceId = currentMusicSourceName === 'Apple Music'
         ? (artist.itunes_artist_id || artist.spotify_artist_id)
         : (artist.spotify_artist_id || artist.itunes_artist_id);
+    let watchBadgeHTML = '';
     if (artist.is_watched) {
-        badgeSources.push({ cls: 'watch-card-icon watched', logo: null, fallback: '👁️', fallbackExpanded: 'Watching', title: 'On your watchlist', url: null, isWatch: true });
+        watchBadgeHTML = `<div class="watch-card-icon watched source-card-icon" title="On your watchlist"><span class="watch-icon-emoji">👁️</span><span class="watch-icon-label">Watching</span></div>`;
     } else if (hasActiveSourceId) {
-        badgeSources.push({ cls: 'watch-card-icon', logo: null, fallback: '👁️', fallbackExpanded: 'Watch', title: 'Add to Watchlist', url: null, isWatch: true, unwatched: true });
+        watchBadgeHTML = `<div class="watch-card-icon source-card-icon" data-unwatched="1" title="Add to Watchlist" style="opacity:0.4"><span class="watch-icon-emoji">👁️</span><span class="watch-icon-label">Watch</span></div>`;
     }
 
-    if (badgeSources.length > 0) {
-        const badgeContainer = document.createElement('div');
-        badgeContainer.className = 'card-badge-container';
+    const maxPerColumn = 6;
+    const needsOverflow = badges.length > maxPerColumn;
+    const badgeIcon = (b) => `<div class="source-card-icon" title="${_esc(b.title)}" ${b.url ? `data-url="${_esc(b.url)}"` : ''}>${b.logo ? `<img src="${_esc(b.logo)}" style="width:16px;height:auto;display:block" onerror="this.parentNode.textContent='${b.fb}'">` : `<span style="font-size:9px;font-weight:700">${b.fb}</span>`}</div>`;
 
-        // Separate service badges from watch badge
-        const serviceBadges = badgeSources.filter(s => !s.isWatch);
-        const watchBadge = badgeSources.find(s => s.isWatch);
-        const maxPerColumn = 6;
-        const needsOverflow = serviceBadges.length > maxPerColumn;
-
-        // Helper to create a badge icon element
-        const createBadgeIcon = (source) => {
-            const icon = document.createElement('div');
-            icon.className = `${source.cls} source-card-icon`;
-            icon.title = source.title;
-            if (source.logo) {
-                const img = document.createElement('img');
-                img.src = source.logo;
-                img.style.cssText = 'width: 16px; height: auto; display: block;';
-                img.onerror = () => { icon.textContent = source.fallback; };
-                icon.appendChild(img);
-            } else if (source.fallbackExpanded) {
-                icon.innerHTML = `<span class="watch-icon-emoji">${source.fallback}</span><span class="watch-icon-label">${source.fallbackExpanded}</span>`;
-            } else {
-                icon.textContent = source.fallback;
-            }
-            if (source.isWatch && source.unwatched) {
-                icon.style.opacity = '0.4';
-                icon.onclick = (e) => {
-                    e.stopPropagation();
-                    toggleLibraryCardWatchlist(icon, artist);
-                };
-            } else if (source.url) {
-                icon.onclick = (e) => {
-                    e.stopPropagation();
-                    window.open(source.url, '_blank');
-                };
-            }
-            return icon;
-        };
-
+    let badgeContainerHTML = '';
+    if (badges.length > 0 || watchBadgeHTML) {
         if (needsOverflow) {
-            // Overflow column (left) — watch badge first, then extra service badges
-            const overflowCol = document.createElement('div');
-            overflowCol.className = 'badge-overflow-column';
-            if (watchBadge) {
-                overflowCol.appendChild(createBadgeIcon(watchBadge));
-            }
-            serviceBadges.slice(maxPerColumn).forEach(source => {
-                overflowCol.appendChild(createBadgeIcon(source));
-            });
-            badgeContainer.appendChild(overflowCol);
-
-            // Primary column (right) — first 6 service badges
-            const primaryCol = document.createElement('div');
-            primaryCol.className = 'badge-primary-column';
-            serviceBadges.slice(0, maxPerColumn).forEach(source => {
-                primaryCol.appendChild(createBadgeIcon(source));
-            });
-            badgeContainer.appendChild(primaryCol);
+            badgeContainerHTML = `<div class="card-badge-container">
+                <div class="badge-overflow-column">${watchBadgeHTML}${badges.slice(maxPerColumn).map(badgeIcon).join('')}</div>
+                <div class="badge-primary-column">${badges.slice(0, maxPerColumn).map(badgeIcon).join('')}</div>
+            </div>`;
         } else {
-            // Single column — service badges + watch badge last
-            serviceBadges.forEach(source => {
-                badgeContainer.appendChild(createBadgeIcon(source));
-            });
-            if (watchBadge) {
-                badgeContainer.appendChild(createBadgeIcon(watchBadge));
-            }
+            badgeContainerHTML = `<div class="card-badge-container">${badges.map(badgeIcon).join('')}${watchBadgeHTML}</div>`;
         }
-
-        card.appendChild(badgeContainer);
     }
 
-    // Create image element
-    const imageContainer = document.createElement("div");
-    imageContainer.className = "library-artist-image";
+    // Image
+    const hasImage = artist.image_url && artist.image_url.trim() !== '';
+    const deezerFallback = artist.deezer_id ? `if(!this.dataset.triedDeezer){this.dataset.triedDeezer='true';this.src='https://api.deezer.com/artist/${artist.deezer_id}/image?size=big'}else{this.parentNode.innerHTML='<div class=\\'library-artist-image-fallback\\'>🎵</div>'}` : `this.parentNode.innerHTML='<div class=\\'library-artist-image-fallback\\'>🎵</div>'`;
+    const imageHTML = hasImage
+        ? `<div class="library-artist-image"><img src="${_esc(artist.image_url)}" alt="${_esc(artist.name)}" loading="lazy" onerror="${deezerFallback}"></div>`
+        : `<div class="library-artist-image"><div class="library-artist-image-fallback">🎵</div></div>`;
 
-    if (artist.image_url && artist.image_url.trim() !== "") {
-        const img = document.createElement("img");
-        img.src = artist.image_url;
-        img.alt = artist.name;
-        img.loading = 'lazy';
-        img.onerror = () => {
-            console.log(`Failed to load image for ${artist.name}: ${img.src}`);
-            // Try Deezer fallback before emoji
-            if (artist.deezer_id && !img.dataset.triedDeezer) {
-                img.dataset.triedDeezer = 'true';
-                img.src = `https://api.deezer.com/artist/${artist.deezer_id}/image?size=big`;
-            } else {
-                imageContainer.innerHTML = `<div class="library-artist-image-fallback">🎵</div>`;
-            }
-        };
-        img.onload = () => {
-            console.log(`Successfully loaded image for ${artist.name}: ${artist.image_url}`);
-        };
-        imageContainer.appendChild(img);
-    } else {
-        console.log(`No image URL for ${artist.name}: '${artist.image_url}'`);
-        imageContainer.innerHTML = `<div class="library-artist-image-fallback">🎵</div>`;
-    }
+    // Track stats
+    const trackStat = artist.track_count > 0 ? `<span class="library-artist-stat">${artist.track_count} track${artist.track_count !== 1 ? 's' : ''}</span>` : '';
 
-    // Create info section
-    const info = document.createElement("div");
-    info.className = "library-artist-info";
-
-    const name = document.createElement("h3");
-    name.className = "library-artist-name";
-    name.textContent = artist.name;
-    name.title = artist.name; // For tooltip on long names
-
-    const stats = document.createElement("div");
-    stats.className = "library-artist-stats";
-
-    if (artist.track_count > 0) {
-        const trackStat = document.createElement("span");
-        trackStat.className = "library-artist-stat";
-        trackStat.textContent = `${artist.track_count} track${artist.track_count !== 1 ? "s" : ""}`;
-
-        stats.appendChild(trackStat);
-    }
-
-    info.appendChild(name);
-    info.appendChild(stats);
-
-    // Assemble card
-    card.appendChild(imageContainer);
-    card.appendChild(info);
-
-    // Add click handler to navigate to artist detail page
-    card.addEventListener("click", () => {
-        console.log(`🎵 Opening artist detail for: ${artist.name} (ID: ${artist.id})`);
-        navigateToArtistDetail(artist.id, artist.name);
-    });
-
-    return card;
+    return `<div class="library-artist-card" data-artist-id="${_esc(String(artist.id))}" data-artist-name="${_esc(artist.name)}" style="position:relative;animation:cardFadeIn 0.35s cubic-bezier(0.4,0,0.2,1) ${delay}ms both">
+        ${badgeContainerHTML}
+        ${imageHTML}
+        <div class="library-artist-info">
+            <h3 class="library-artist-name" title="${_esc(artist.name)}">${_esc(artist.name)}</h3>
+            <div class="library-artist-stats">${trackStat}</div>
+        </div>
+    </div>`;
 }
 
 function updateLibraryPagination(pagination) {

@@ -7530,7 +7530,7 @@ class MusicDatabase:
                         # Empty watchlist, no artists can match
                         where_clause += " AND 0"
 
-                # Deduplicate: only count canonical artist rows (one per name+server_source)
+                # Step 1: Fast count query — no joins, just filter canonical artists
                 count_query = f"""
                     SELECT COUNT(*) as total_count
                     FROM artists a
@@ -7541,11 +7541,8 @@ class MusicDatabase:
                 cursor.execute(count_query, params)
                 total_count = cursor.fetchone()['total_count']
 
-                # Get artists with pagination
+                # Step 2: Get paginated artist rows (no album/track joins — fast)
                 offset = (page - 1) * limit
-
-                # Deduplicate: select canonical row per name, but count albums/tracks
-                # across ALL same-name artist IDs (fixes duplicate artist display)
                 artists_query = f"""
                     SELECT
                         a.id,
@@ -7562,24 +7559,59 @@ class MusicDatabase:
                         a.tidal_id,
                         a.qobuz_id,
                         a.soul_id,
-                        COUNT(DISTINCT al.id) as album_count,
-                        COUNT(DISTINCT t.id) as track_count
+                        a.server_source
                     FROM artists a
-                    LEFT JOIN albums al ON al.artist_id IN (
-                        SELECT id FROM artists WHERE name = a.name AND server_source = a.server_source
-                    )
-                    LEFT JOIN tracks t ON al.id = t.album_id
                     WHERE {where_clause}
                         AND a.id = (SELECT MIN(a2.id) FROM artists a2
                                     WHERE a2.name = a.name AND a2.server_source = a.server_source)
-                    GROUP BY a.id, a.name, a.thumb_url, a.genres, a.musicbrainz_id, a.spotify_artist_id, a.itunes_artist_id, a.deezer_id, a.audiodb_id, a.lastfm_url, a.genius_url, a.tidal_id, a.qobuz_id, a.soul_id
                     ORDER BY a.name COLLATE NOCASE
                     LIMIT ? OFFSET ?
                 """
                 query_params = params + [limit, offset]
-
                 cursor.execute(artists_query, query_params)
-                rows = cursor.fetchall()
+                artist_rows = cursor.fetchall()
+
+                # Step 3: Batch-fetch album/track counts only for the 75 artists on this page
+                artist_ids_on_page = [row['id'] for row in artist_rows]
+                counts_map = {}
+                if artist_ids_on_page:
+                    # Get all artist IDs that share names with the page artists (for dedup merging)
+                    name_pairs = [(row['name'], row['server_source']) for row in artist_rows]
+                    # Build counts query using artist IDs directly
+                    # Get all artist IDs sharing names with page artists
+                    id_placeholders = ','.join(['?'] * len(artist_ids_on_page))
+                    cursor.execute(f"""
+                        SELECT id, name, server_source FROM artists
+                        WHERE id IN ({id_placeholders})
+                    """, artist_ids_on_page)
+                    page_info = cursor.fetchall()
+
+                    # Find all related artist IDs (same name+server) for count merging
+                    or_clauses = []
+                    or_params = []
+                    for pi in page_info:
+                        or_clauses.append("(ar.name = ? AND ar.server_source = ?)")
+                        or_params.extend([pi['name'], pi['server_source']])
+
+                    cursor.execute(f"""
+                        SELECT
+                            ar.name as artist_name, ar.server_source as artist_source,
+                            COUNT(DISTINCT al.id) as album_count,
+                            COUNT(DISTINCT t.id) as track_count
+                        FROM artists ar
+                        LEFT JOIN albums al ON al.artist_id = ar.id
+                        LEFT JOIN tracks t ON t.album_id = al.id
+                        WHERE {' OR '.join(or_clauses)}
+                        GROUP BY ar.name, ar.server_source
+                    """, or_params)
+                    # Map back to canonical IDs
+                    name_to_canonical = {(pi['name'], pi['server_source']): pi['id'] for pi in page_info}
+                    for crow in cursor.fetchall():
+                        cid = name_to_canonical.get((crow['artist_name'], crow['artist_source']))
+                        if cid:
+                            counts_map[cid] = (crow['album_count'], crow['track_count'])
+
+                rows = artist_rows
 
                 # Convert to artist objects
                 artists = []
@@ -7625,8 +7657,8 @@ class MusicDatabase:
                         'tidal_id': row['tidal_id'],
                         'qobuz_id': row['qobuz_id'],
                         'soul_id': row['soul_id'],
-                        'album_count': row['album_count'] or 0,
-                        'track_count': row['track_count'] or 0,
+                        'album_count': counts_map.get(row['id'], (0, 0))[0],
+                        'track_count': counts_map.get(row['id'], (0, 0))[1],
                         'is_watched': bool(is_watched)
                     }
                     artists.append(artist_data)
