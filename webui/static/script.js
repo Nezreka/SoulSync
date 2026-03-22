@@ -55118,6 +55118,11 @@ function _renderLibraryHealth(data) {
             { name: 'MusicBrainz', pct: ec.musicbrainz || 0, color: '#ba55d3' },
             { name: 'Deezer', pct: ec.deezer || 0, color: '#a238ff' },
             { name: 'Last.fm', pct: ec.lastfm || 0, color: '#d51007' },
+            { name: 'iTunes', pct: ec.itunes || 0, color: '#fc3c44' },
+            { name: 'AudioDB', pct: ec.audiodb || 0, color: '#1a9fff' },
+            { name: 'Genius', pct: ec.genius || 0, color: '#ffff64' },
+            { name: 'Tidal', pct: ec.tidal || 0, color: '#00ffff' },
+            { name: 'Qobuz', pct: ec.qobuz || 0, color: '#4285f4' },
         ];
         enrichEl.innerHTML = services.map(s => `
             <div class="stats-enrich-item">

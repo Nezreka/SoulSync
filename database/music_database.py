@@ -3006,8 +3006,11 @@ class MusicDatabase:
 
             # Enrichment coverage
             enrichment = {}
-            for service, col in [('spotify', 'spotify_id'), ('musicbrainz', 'musicbrainz_id'),
-                                 ('deezer', 'deezer_id'), ('lastfm', 'lastfm_url')]:
+            for service, col in [('spotify', 'spotify_artist_id'), ('musicbrainz', 'musicbrainz_id'),
+                                 ('deezer', 'deezer_id'), ('lastfm', 'lastfm_url'),
+                                 ('itunes', 'itunes_artist_id'), ('audiodb', 'audiodb_id'),
+                                 ('genius', 'genius_id'), ('tidal', 'tidal_id'),
+                                 ('qobuz', 'qobuz_id')]:
                 try:
                     cursor.execute(f"SELECT COUNT(*) FROM artists WHERE {col} IS NOT NULL AND {col} != ''")
                     matched = (cursor.fetchone() or [0])[0]
