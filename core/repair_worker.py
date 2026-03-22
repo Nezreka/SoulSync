@@ -1924,6 +1924,9 @@ class RepairWorker:
         if self._config_manager:
             codec = self._config_manager.get('lossy_copy.codec', 'mp3').lower()
             bitrate = self._config_manager.get('lossy_copy.bitrate', '320')
+        # Opus max per-channel bitrate is 256kbps — cap to avoid encoding failures
+        if codec == 'opus' and int(bitrate) > 256:
+            bitrate = '256'
         quality_label = f'{codec.upper()}-{bitrate}'
 
         codec_configs = {

@@ -4652,7 +4652,7 @@
                                 <div id="lossy-copy-options" style="display: none;">
                                     <div class="form-group">
                                         <label>Codec:</label>
-                                        <select id="lossy-copy-codec">
+                                        <select id="lossy-copy-codec" onchange="updateLossyBitrateOptions()">
                                             <option value="mp3">MP3</option>
                                             <option value="opus">Opus</option>
                                             <option value="aac">AAC (M4A)</option>
@@ -4679,7 +4679,7 @@
                                     </div>
                                     <div class="help-text" style="color: rgba(255, 100, 100, 0.8);">
                                         Warning: The original high-quality file will be permanently deleted.
-                                        Only the MP3 copy will remain.
+                                        Only the lossy copy will remain.
                                     </div>
                                 </div>
                             </div>

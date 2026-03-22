@@ -5401,6 +5401,20 @@ function loadHybridSourceOrder(settings) {
     buildHybridSourceList();
 }
 
+function updateLossyBitrateOptions() {
+    const codec = document.getElementById('lossy-copy-codec')?.value || 'mp3';
+    const bitrateSelect = document.getElementById('lossy-copy-bitrate');
+    if (!bitrateSelect) return;
+    const opt320 = bitrateSelect.querySelector('option[value="320"]');
+    if (codec === 'opus') {
+        // Opus max is 256kbps per channel — hide 320 option
+        if (opt320) opt320.disabled = true;
+        if (bitrateSelect.value === '320') bitrateSelect.value = '256';
+    } else {
+        if (opt320) opt320.disabled = false;
+    }
+}
+
 async function loadSettingsData() {
     try {
         const response = await fetch(API.settings);
@@ -5591,6 +5605,7 @@ async function loadSettingsData() {
         document.getElementById('lossy-copy-enabled').checked = settings.lossy_copy?.enabled === true;
         document.getElementById('lossy-copy-codec').value = settings.lossy_copy?.codec || 'mp3';
         document.getElementById('lossy-copy-bitrate').value = settings.lossy_copy?.bitrate || '320';
+        updateLossyBitrateOptions();
         document.getElementById('lossy-copy-delete-original').checked = settings.lossy_copy?.delete_original === true;
 
         // Populate Listening Stats settings
