@@ -14783,6 +14783,10 @@ def _create_lossy_copy(final_path):
     codec = config_manager.get('lossy_copy.codec', 'mp3').lower()
     bitrate = config_manager.get('lossy_copy.bitrate', '320')
 
+    # Opus max per-channel bitrate is 256kbps — cap to avoid encoding failures
+    if codec == 'opus' and int(bitrate) > 256:
+        bitrate = '256'
+
     # Codec configuration: (ffmpeg_codec, extension, quality_label, extra_args)
     codec_map = {
         'mp3':  ('libmp3lame', '.mp3',  f'MP3-{bitrate}',  ['-id3v2_version', '3']),

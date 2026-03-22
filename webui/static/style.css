@@ -16815,43 +16815,87 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 18px;
-    font-size: 14px;
+    padding: 10px 20px;
+    font-size: 13px;
     font-weight: 600;
-    color: #e0e0e0;
-
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 16px;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.85);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     outline: none;
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(8px);
+}
+
+.library-artist-watchlist-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.05) 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.library-artist-watchlist-btn:hover:not(:disabled)::before {
+    opacity: 1;
 }
 
 .library-artist-watchlist-btn:hover:not(:disabled) {
-    background: rgba(var(--accent-rgb), 0.15);
     color: #ffffff;
-    border-color: rgba(var(--accent-rgb), 0.3);
-    transform: translateY(-1px);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.2), 0 0 0 1px rgba(var(--accent-rgb), 0.1);
+}
+
+.library-artist-watchlist-btn:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+.library-artist-watchlist-btn .watchlist-icon {
+    font-size: 14px;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    z-index: 1;
+}
+
+.library-artist-watchlist-btn:hover:not(:disabled) .watchlist-icon {
+    transform: scale(1.15);
+}
+
+.library-artist-watchlist-btn .watchlist-text {
+    position: relative;
+    z-index: 1;
 }
 
 .library-artist-watchlist-btn.watching {
-    background: rgba(255, 193, 7, 0.15);
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.15) 0%, rgba(255, 193, 7, 0.05) 100%);
     color: #ffc107;
-    border-color: rgba(255, 193, 7, 0.3);
+    border-color: rgba(255, 193, 7, 0.25);
+    box-shadow: 0 0 12px rgba(255, 193, 7, 0.08);
+}
+
+.library-artist-watchlist-btn.watching::before {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.25) 0%, rgba(255, 193, 7, 0.08) 100%);
 }
 
 .library-artist-watchlist-btn.watching:hover:not(:disabled) {
-    background: rgba(255, 193, 7, 0.25);
     color: #ffffff;
     border-color: rgba(255, 193, 7, 0.5);
+    box-shadow: 0 4px 20px rgba(255, 193, 7, 0.25), 0 0 0 1px rgba(255, 193, 7, 0.15);
 }
 
 .library-artist-watchlist-btn:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: not-allowed;
     transform: none;
+    box-shadow: none;
 }
 
 /* ─── Enhance Quality Button ─── */
@@ -16860,28 +16904,63 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 18px;
-    font-size: 14px;
+    padding: 10px 20px;
+    font-size: 13px;
     font-weight: 600;
-    color: #4fc3f7;
-    background: rgba(79, 195, 247, 0.08);
-    border: 1px solid rgba(79, 195, 247, 0.2);
-    border-radius: 16px;
+    letter-spacing: 0.02em;
+    color: rgba(79, 195, 247, 0.9);
+    background: linear-gradient(135deg, rgba(79, 195, 247, 0.08) 0%, rgba(79, 195, 247, 0.02) 100%);
+    border: 1px solid rgba(79, 195, 247, 0.15);
+    border-radius: 12px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     outline: none;
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(8px);
+}
+
+.library-artist-enhance-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(79, 195, 247, 0.22) 0%, rgba(100, 220, 255, 0.08) 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.library-artist-enhance-btn:hover::before {
+    opacity: 1;
 }
 
 .library-artist-enhance-btn:hover {
-    background: rgba(79, 195, 247, 0.18);
     color: #ffffff;
     border-color: rgba(79, 195, 247, 0.4);
-    transform: translateY(-1px);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(79, 195, 247, 0.2), 0 0 0 1px rgba(79, 195, 247, 0.1);
+}
+
+.library-artist-enhance-btn:active {
+    transform: translateY(0);
+    box-shadow: none;
 }
 
 .library-artist-enhance-btn .enhance-icon {
-    font-size: 16px;
+    font-size: 14px;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    z-index: 1;
+}
+
+.library-artist-enhance-btn:hover .enhance-icon {
+    transform: scale(1.2) rotate(8deg);
+}
+
+.library-artist-enhance-btn .enhance-text {
+    position: relative;
+    z-index: 1;
 }
 
 .library-artist-enhance-btn.hidden {
