@@ -766,12 +766,14 @@ def _register_automation_handlers():
                     if old_ids != new_ids:
                         added_count = len(new_ids - old_ids)
                         removed_count = len(old_ids - new_ids)
+                        print(f"🔔 [AUTOMATION] Playlist changed: '{pl.get('name', '')}' — {added_count} added, {removed_count} removed (old={len(old_ids)}, new={len(new_ids)})")
                         _update_automation_progress(auto_id,
                             log_line=f'"{pl.get("name", "")}" — {added_count} added, {removed_count} removed', log_type='success')
                         try:
                             if automation_engine:
                                 automation_engine.emit('playlist_changed', {
                                     'playlist_name': pl.get('name', ''),
+                                    'playlist_id': str(pl.get('id', '')),
                                     'old_count': str(len(old_ids)),
                                     'new_count': str(len(new_ids)),
                                     'added': str(added_count),
@@ -780,6 +782,7 @@ def _register_automation_handlers():
                         except Exception:
                             pass
                     else:
+                        print(f"⏭️ [AUTOMATION] No changes: '{pl.get('name', '')}' (tracks={len(old_ids)})")
                         _update_automation_progress(auto_id,
                             log_line=f'No changes: "{pl.get("name", "")}"', log_type='skip')
             except Exception as e:
@@ -27568,8 +27571,10 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
         # (no point triggering downstream sync if nothing changed)
         try:
             if automation_engine and total_discovered > 0:
+                _disc_pl_id = str(playlists[0]['id']) if len(playlists) == 1 else ''
                 automation_engine.emit('discovery_completed', {
                     'playlist_name': last_playlist_name if len(playlists) == 1 else f'{len(playlists)} playlists',
+                    'playlist_id': _disc_pl_id,
                     'total_tracks': str(total_tracks),
                     'discovered_count': str(total_discovered),
                     'failed_count': str(total_failed),
