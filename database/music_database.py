@@ -3297,6 +3297,12 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_artist ON metadata_cache_entities (artist_name COLLATE NOCASE)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_accessed ON metadata_cache_entities (last_accessed_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_source ON metadata_cache_entities (source)")
+            # Composite indexes for browse queries (entity_type + sort column)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_browse ON metadata_cache_entities (entity_type, source, last_accessed_at DESC)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_browse_name ON metadata_cache_entities (entity_type, source, name COLLATE NOCASE)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_browse_pop ON metadata_cache_entities (entity_type, source, popularity DESC)")
+            # Stats query index (covers GROUP BY entity_type, source with count)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_stats ON metadata_cache_entities (entity_type, source, access_count)")
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS metadata_cache_searches (
