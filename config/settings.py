@@ -247,7 +247,8 @@ class ConfigManager:
             self.database_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Connect to database (creates file if it doesn't exist)
-            conn = sqlite3.connect(str(self.database_path))
+            conn = sqlite3.connect(str(self.database_path), timeout=30.0)
+            conn.execute("PRAGMA journal_mode=WAL")
             cursor = conn.cursor()
 
             # Create metadata table if it doesn't exist
@@ -265,14 +266,15 @@ class ConfigManager:
 
     def _load_from_database(self) -> Optional[Dict[str, Any]]:
         """Load configuration from database, decrypting sensitive values."""
+        conn = None
         try:
             self._ensure_database_exists()
 
-            conn = sqlite3.connect(str(self.database_path))
+            conn = sqlite3.connect(str(self.database_path), timeout=30.0)
+            conn.execute("PRAGMA journal_mode=WAL")
             cursor = conn.cursor()
             cursor.execute("SELECT value FROM metadata WHERE key = 'app_config'")
             row = cursor.fetchone()
-            conn.close()
 
             if row and row[0]:
                 config_data = json.loads(row[0])
@@ -286,16 +288,22 @@ class ConfigManager:
         except Exception as e:
             print(f"Warning: Could not load config from database: {e}")
             return None
+        finally:
+            if conn:
+                conn.close()
 
     def _save_to_database(self, config_data: Dict[str, Any]) -> bool:
         """Save configuration to database, encrypting sensitive values."""
+        conn = None
         try:
             self._ensure_database_exists()
 
             # Encrypt sensitive values before writing (original dict is untouched)
             encrypted_data = self._encrypt_sensitive(config_data)
 
-            conn = sqlite3.connect(str(self.database_path))
+            # Use longer timeout (30s) to handle contention from enrichment workers
+            conn = sqlite3.connect(str(self.database_path), timeout=30.0)
+            conn.execute("PRAGMA journal_mode=WAL")
             cursor = conn.cursor()
 
             config_json = json.dumps(encrypted_data, indent=2)
@@ -305,12 +313,14 @@ class ConfigManager:
             """, (config_json,))
 
             conn.commit()
-            conn.close()
             return True
 
         except Exception as e:
             print(f"Error: Could not save config to database: {e}")
             return False
+        finally:
+            if conn:
+                conn.close()
 
     def _load_from_config_file(self) -> Optional[Dict[str, Any]]:
         """Load configuration from config.json file (for migration)"""
@@ -510,8 +520,14 @@ class ConfigManager:
         self.config_data = config_data
 
     def _save_config(self):
-        """Save configuration to database"""
+        """Save configuration to database with retry on lock."""
         success = self._save_to_database(self.config_data)
+
+        if not success:
+            # Retry once after a brief wait (handles transient lock contention)
+            import time
+            time.sleep(1)
+            success = self._save_to_database(self.config_data)
 
         if not success:
             # Fallback: Try to save to config.json if database fails
