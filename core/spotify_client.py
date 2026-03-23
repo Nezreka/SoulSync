@@ -967,27 +967,32 @@ class SpotifyClient:
                 if tracks:
                     return tracks
 
-            try:
-                results = self.sp.search(q=query, type='track', limit=effective_limit)
-                tracks = []
-                raw_items = results['tracks']['items']
+            # Skip Spotify if globally rate limited — fall through to fallback
+            if self.is_rate_limited():
+                logger.debug(f"Spotify rate limited, skipping track search for: {query}")
+                use_spotify = False
+            else:
+                try:
+                    results = self.sp.search(q=query, type='track', limit=effective_limit)
+                    tracks = []
+                    raw_items = results['tracks']['items']
 
-                for track_data in raw_items:
-                    track = Track.from_spotify_track(track_data)
-                    tracks.append(track)
+                    for track_data in raw_items:
+                        track = Track.from_spotify_track(track_data)
+                        tracks.append(track)
 
-                # Cache individual tracks + search mapping
-                entries = [(td.get('id'), td) for td in raw_items if td.get('id')]
-                if entries:
-                    cache.store_entities_bulk('spotify', 'track', entries)
-                    cache.store_search_results('spotify', 'track', query, effective_limit,
-                                               [td.get('id') for td in raw_items if td.get('id')])
+                    # Cache individual tracks + search mapping
+                    entries = [(td.get('id'), td) for td in raw_items if td.get('id')]
+                    if entries:
+                        cache.store_entities_bulk('spotify', 'track', entries)
+                        cache.store_search_results('spotify', 'track', query, effective_limit,
+                                                   [td.get('id') for td in raw_items if td.get('id')])
 
-                return tracks
+                    return tracks
 
-            except Exception as e:
-                logger.error(f"Error searching tracks via Spotify: {e}")
-                # Fall through to fallback
+                except Exception as e:
+                    logger.error(f"Error searching tracks via Spotify: {e}")
+                    # Fall through to fallback
 
         # Fallback (iTunes or Deezer — configured in settings)
         logger.debug(f"Using {self._fallback_source} fallback for track search: {query}")
@@ -1069,27 +1074,32 @@ class SpotifyClient:
                     return albums
 
         if use_spotify:
-            try:
-                results = self.sp.search(q=query, type='album', limit=min(limit, 10))
-                albums = []
-                raw_items = results['albums']['items']
+            # Skip Spotify if globally rate limited — fall through to fallback
+            if self.is_rate_limited():
+                logger.debug(f"Spotify rate limited, skipping album search for: {query}")
+                use_spotify = False
+            else:
+                try:
+                    results = self.sp.search(q=query, type='album', limit=min(limit, 10))
+                    albums = []
+                    raw_items = results['albums']['items']
 
-                for album_data in raw_items:
-                    album = Album.from_spotify_album(album_data)
-                    albums.append(album)
+                    for album_data in raw_items:
+                        album = Album.from_spotify_album(album_data)
+                        albums.append(album)
 
-                # Cache individual albums + search mapping (skip if full data already cached)
-                entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
-                if entries:
-                    cache.store_entities_bulk('spotify', 'album', entries, skip_if_exists=True)
-                    cache.store_search_results('spotify', 'album', query, min(limit, 10),
-                                               [ad.get('id') for ad in raw_items if ad.get('id')])
+                    # Cache individual albums + search mapping (skip if full data already cached)
+                    entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
+                    if entries:
+                        cache.store_entities_bulk('spotify', 'album', entries, skip_if_exists=True)
+                        cache.store_search_results('spotify', 'album', query, min(limit, 10),
+                                                   [ad.get('id') for ad in raw_items if ad.get('id')])
 
-                return albums
+                    return albums
 
-            except Exception as e:
-                logger.error(f"Error searching albums via Spotify: {e}")
-                # Fall through to iTunes fallback
+                except Exception as e:
+                    logger.error(f"Error searching albums via Spotify: {e}")
+                    # Fall through to iTunes fallback
 
         # Fallback (iTunes or Deezer)
         logger.debug(f"Using {self._fallback_source} fallback for album search: {query}")
