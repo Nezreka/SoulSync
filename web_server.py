@@ -606,7 +606,6 @@ def _register_automation_handlers():
                             embed_data = scrape_spotify_embed('playlist', source_id)
                             if embed_data and not embed_data.get('error') and embed_data.get('tracks'):
                                 embed_album = embed_data.get('name', '') if embed_data.get('type') == 'album' else ''
-                                embed_image = embed_data.get('image_url', '')
                                 tracks = []
                                 for t in embed_data['tracks']:
                                     artist_names = [a['name'] for a in t.get('artists', [])]
@@ -618,22 +617,15 @@ def _register_automation_handlers():
                                         'duration_ms': t.get('duration_ms', 0),
                                         'source_track_id': t.get('id', ''),
                                     }
+                                    # Store Spotify track ID hint but don't mark discovered —
+                                    # Discover step needs to run for proper album art
                                     if t.get('id'):
-                                        _t_image = t.get('image_url') or embed_image
-                                        _t_album_obj = {'name': embed_album}
-                                        if _t_image:
-                                            _t_album_obj['images'] = [{'url': _t_image, 'height': 600, 'width': 600}]
                                         track_dict['extra_data'] = json.dumps({
-                                            'discovered': True,
-                                            'provider': 'spotify',
-                                            'confidence': 1.0,
-                                            'matched_data': {
+                                            'discovered': False,
+                                            'spotify_hint': {
                                                 'id': t['id'],
                                                 'name': t.get('name', ''),
                                                 'artists': t.get('artists', []),
-                                                'album': _t_album_obj,
-                                                'duration_ms': t.get('duration_ms', 0),
-                                                'image_url': _t_image,
                                             }
                                         })
                                     tracks.append(track_dict)
@@ -650,7 +642,6 @@ def _register_automation_handlers():
                             embed_data = scrape_spotify_embed(parsed['type'], parsed['id'])
                             if embed_data and not embed_data.get('error') and embed_data.get('tracks'):
                                 embed_album = embed_data.get('name', '') if embed_data.get('type') == 'album' else ''
-                                embed_image = embed_data.get('image_url', '')
                                 tracks = []
                                 for t in embed_data['tracks']:
                                     artist_names = [a['name'] for a in t.get('artists', [])]
@@ -662,22 +653,16 @@ def _register_automation_handlers():
                                         'duration_ms': t.get('duration_ms', 0),
                                         'source_track_id': t.get('id', ''),
                                     }
+                                    # Store Spotify track ID as a hint for the Discover step,
+                                    # but do NOT mark as discovered — Discover needs to run a proper
+                                    # API lookup to get real album art (embed only has playlist-level images)
                                     if t.get('id'):
-                                        _t_image = t.get('image_url') or embed_image
-                                        _t_album_obj = {'name': embed_album}
-                                        if _t_image:
-                                            _t_album_obj['images'] = [{'url': _t_image, 'height': 600, 'width': 600}]
                                         track_dict['extra_data'] = json.dumps({
-                                            'discovered': True,
-                                            'provider': 'spotify',
-                                            'confidence': 1.0,
-                                            'matched_data': {
+                                            'discovered': False,
+                                            'spotify_hint': {
                                                 'id': t['id'],
                                                 'name': t.get('name', ''),
                                                 'artists': t.get('artists', []),
-                                                'album': _t_album_obj,
-                                                'duration_ms': t.get('duration_ms', 0),
-                                                'image_url': _t_image,
                                             }
                                         })
                                     tracks.append(track_dict)
