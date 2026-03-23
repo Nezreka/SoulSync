@@ -2935,6 +2935,7 @@ _mb_release_cache_lock = threading.Lock()
 _mb_release_detail_cache = {}  # mbid -> release detail dict from get_release()
 _mb_release_detail_cache_lock = threading.Lock()
 
+
 # Regexes to strip edition suffixes for cache key normalization.
 # Prevents Navidrome splitting albums when tracks get different MusicBrainz release IDs.
 import re as _re
@@ -12880,6 +12881,26 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
 
     started_count = 0
 
+    # PREFLIGHT: Pre-populate MusicBrainz release cache so all tracks get the same release
+    try:
+        mb_svc = mb_worker.mb_service if mb_worker else None
+        if mb_svc and spotify_album.get('name') and spotify_artist.get('name'):
+            from core.album_consistency import _find_best_release
+            _pf_count = len(enhanced_tracks) + len(unmatched_tracks)
+            _pf_release = _find_best_release(spotify_album['name'], spotify_artist['name'], _pf_count, mb_svc)
+            if _pf_release and _pf_release.get('id'):
+                _pf_mbid = _pf_release['id']
+                _pf_artist_key = spotify_artist['name'].lower().strip()
+                with _mb_release_cache_lock:
+                    _mb_release_cache[(_normalize_album_cache_key(spotify_album['name']), _pf_artist_key)] = _pf_mbid
+                    _mb_release_cache[(spotify_album['name'].lower().strip(), _pf_artist_key)] = _pf_mbid
+                with _mb_release_detail_cache_lock:
+                    _mb_release_detail_cache[_pf_mbid] = _pf_release
+                print(f"🏷️ [Preflight] Pre-cached MB release for '{spotify_album['name']}': "
+                      f"'{_pf_release.get('title', '')}' ({_pf_mbid[:8]}...)")
+    except Exception as pf_err:
+        print(f"⚠️ [Preflight] MB release preflight failed: {pf_err}")
+
     # Process matched tracks with full Spotify metadata
     for matched_item in enhanced_tracks:
         try:
@@ -12997,6 +13018,25 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
     else:
         total_discs = 1
     spotify_album['total_discs'] = total_discs
+
+    # PREFLIGHT: Pre-populate MusicBrainz release cache so all tracks get the same release
+    try:
+        mb_svc = mb_worker.mb_service if mb_worker else None
+        if mb_svc and spotify_album.get('name') and spotify_artist.get('name'):
+            from core.album_consistency import _find_best_release
+            _pf_release = _find_best_release(spotify_album['name'], spotify_artist['name'], len(tracks_to_download), mb_svc)
+            if _pf_release and _pf_release.get('id'):
+                _pf_mbid = _pf_release['id']
+                _pf_artist_key = spotify_artist['name'].lower().strip()
+                with _mb_release_cache_lock:
+                    _mb_release_cache[(_normalize_album_cache_key(spotify_album['name']), _pf_artist_key)] = _pf_mbid
+                    _mb_release_cache[(spotify_album['name'].lower().strip(), _pf_artist_key)] = _pf_mbid
+                with _mb_release_detail_cache_lock:
+                    _mb_release_detail_cache[_pf_mbid] = _pf_release
+                print(f"🏷️ [Preflight] Pre-cached MB release for '{spotify_album['name']}': "
+                      f"'{_pf_release.get('title', '')}' ({_pf_mbid[:8]}...)")
+    except Exception as pf_err:
+        print(f"⚠️ [Preflight] MB release preflight failed: {pf_err}")
 
     started_count = 0
     for track_data in tracks_to_download:
@@ -19670,7 +19710,7 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
     _db_update_automation_id = None
 
     # Resume enrichment workers now that scan is done
-    _resume_enrichment_workers()
+    _resume_workers_after_scan()
 
     # Add activity for database update completion
     summary = f"{total_tracks} tracks, {total_albums} albums, {total_artists} artists processed"
@@ -19711,7 +19751,7 @@ def _db_update_error_callback(error_message):
         db_update_state["status"] = "error"
         db_update_state["error_message"] = error_message
     # Resume enrichment workers even on error
-    _resume_enrichment_workers()
+    _resume_workers_after_scan()
     _update_automation_progress(_db_update_automation_id,
         status='error', phase='Error',
         log_line=error_message, log_type='error')
@@ -19722,7 +19762,7 @@ def _db_update_error_callback(error_message):
 
 _workers_paused_by_scan = set()  # Track which workers WE paused (don't resume manually-paused ones)
 
-def _pause_enrichment_workers():
+def _pause_workers_for_scan():
     """Pause all enrichment and maintenance workers during database scans to reduce lock contention."""
     global _workers_paused_by_scan
     _workers_paused_by_scan = set()
@@ -19739,7 +19779,7 @@ def _pause_enrichment_workers():
     if _workers_paused_by_scan:
         print(f"⏸️ Paused {len(_workers_paused_by_scan)} workers during database scan: {', '.join(_workers_paused_by_scan)}")
 
-def _resume_enrichment_workers():
+def _resume_workers_after_scan():
     """Resume only the workers that WE paused (don't resume manually-paused ones)."""
     global _workers_paused_by_scan
     workers = {
@@ -19774,7 +19814,7 @@ def _run_db_update_task(full_refresh, server_type):
         return
 
     # Pause enrichment workers to reduce DB lock contention during scan
-    _pause_enrichment_workers()
+    _pause_workers_for_scan()
 
     with db_update_lock:
         db_update_worker = DatabaseUpdateWorker(
@@ -19820,7 +19860,7 @@ def _run_deep_scan_task(server_type):
         return
 
     # Pause enrichment workers to reduce DB lock contention during deep scan
-    _pause_enrichment_workers()
+    _pause_workers_for_scan()
 
     with db_update_lock:
         db_update_worker = DatabaseUpdateWorker(
@@ -22805,6 +22845,36 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
 
         if force_download_all:
             print(f"🔄 [Force Download] Force download mode enabled for batch {batch_id} - treating all tracks as missing")
+
+        # PREFLIGHT: Pre-populate MusicBrainz release cache for album downloads.
+        # This ensures ALL tracks in the album use the same release MBID during
+        # per-track post-processing, preventing Navidrome album splits.
+        if batch_is_album and batch_album_context and batch_artist_context:
+            try:
+                album_name_pf = batch_album_context.get('name', '')
+                artist_name_pf = batch_artist_context.get('name', '')
+                if album_name_pf and artist_name_pf:
+                    mb_svc = mb_worker.mb_service if mb_worker else None
+                    if mb_svc:
+                        from core.album_consistency import _find_best_release
+                        release = _find_best_release(album_name_pf, artist_name_pf, len(tracks_json), mb_svc)
+                        if release and release.get('id'):
+                            release_mbid = release['id']
+                            _artist_key = artist_name_pf.lower().strip()
+                            _rc_key_norm = (_normalize_album_cache_key(album_name_pf), _artist_key)
+                            _rc_key_exact = (album_name_pf.lower().strip(), _artist_key)
+                            with _mb_release_cache_lock:
+                                _mb_release_cache[_rc_key_norm] = release_mbid
+                                _mb_release_cache[_rc_key_exact] = release_mbid
+                            # Also cache the full release detail for tag extraction
+                            with _mb_release_detail_cache_lock:
+                                _mb_release_detail_cache[release_mbid] = release
+                            print(f"🏷️ [Preflight] Pre-cached MB release for '{album_name_pf}': "
+                                  f"'{release.get('title', '')}' ({release_mbid[:8]}...)")
+                        else:
+                            print(f"⚠️ [Preflight] No MB release found for '{album_name_pf}' — per-track lookup will be used")
+            except Exception as pf_err:
+                print(f"⚠️ [Preflight] MB release preflight failed: {pf_err}")
 
         # ALBUM FAST PATH: If this is an album download, try to find the album in the DB first
         # and match tracks within it — faster and more accurate than N global searches
