@@ -345,17 +345,19 @@ class AutomationEngine:
 
             automation_ids = self._event_automations.get(event_type, [])
             if not automation_ids:
+                logger.info(f"Event '{event_type}' — no automations registered in cache. Cache keys: {list(self._event_automations.keys())}")
                 return
 
-            logger.debug(f"Event '{event_type}' — checking {len(automation_ids)} automation(s)")
+            logger.info(f"Event '{event_type}' — checking {len(automation_ids)} automation(s), data={data}")
             for aid in automation_ids:
                 try:
                     auto = self.db.get_automation(aid)
                     if not auto or not auto.get('enabled'):
+                        logger.debug(f"Event '{event_type}' — automation {aid} disabled or not found, skipping")
                         continue
                     config = json.loads(auto.get('trigger_config') or '{}')
                     if self._evaluate_conditions(config, data):
-                        logger.info(f"Event '{event_type}' matched automation '{auto.get('name')}' (id={aid})")
+                        logger.info(f"Event '{event_type}' MATCHED automation '{auto.get('name')}' (id={aid})")
                         # Run in separate thread so delays don't block the event loop
                         threading.Thread(
                             target=self._run_event_automation,
@@ -364,7 +366,7 @@ class AutomationEngine:
                             name=f'automation-exec-{aid}'
                         ).start()
                     else:
-                        logger.debug(f"Event '{event_type}' conditions not met for automation {aid}")
+                        logger.info(f"Event '{event_type}' conditions NOT MET for automation '{auto.get('name')}' (id={aid}), config={config}, data={data}")
                 except Exception as e:
                     logger.error(f"Event automation {aid} error: {e}")
         except Exception as e:
@@ -441,6 +443,12 @@ class AutomationEngine:
         # Inject automation identity for progress tracking
         action_config['_automation_id'] = automation_id
         action_config['_automation_name'] = auto.get('name', '')
+        # Merge event data so action handlers can access trigger context
+        if event_data:
+            action_config['_event_data'] = event_data
+            # Forward playlist_id from event if action config doesn't have one set
+            if not action_config.get('playlist_id') and event_data.get('playlist_id'):
+                action_config['playlist_id'] = event_data['playlist_id']
 
         delay_minutes = action_config.get('delay', 0)
         _delay_already_inited = False
