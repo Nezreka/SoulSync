@@ -7979,77 +7979,86 @@ body {
 
 /* Mirrored playlist cards */
 .mirrored-playlist-card {
-    background: linear-gradient(135deg, rgba(26, 26, 26, 0.95) 0%, rgba(18, 18, 18, 0.98) 100%);
-    border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    margin: 10px 8px;
-    padding: 20px 22px;
+    background: rgba(18, 18, 22, 0.9);
+    backdrop-filter: blur(12px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    margin: 10px 6px;
+    padding: 18px 22px;
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 16px;
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    gap: 14px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
-    box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 2px 8px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.mirrored-playlist-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 20%;
+    right: 20%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.3), transparent);
+    transition: all 0.3s;
 }
 
 .mirrored-playlist-card:hover {
-    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(22, 22, 22, 1.0) 100%);
-    border-color: rgba(var(--accent-rgb), 0.3);
-    border-top-color: rgba(var(--accent-rgb), 0.4);
-    transform: translateY(-3px) scale(1.01);
-    box-shadow:
-        0 16px 48px rgba(0, 0, 0, 0.5),
-        0 8px 16px rgba(0, 0, 0, 0.3),
-        0 0 20px rgba(var(--accent-rgb), 0.12),
-        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    transform: translateY(-2px);
+    border-color: rgba(var(--accent-rgb), 0.15);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(var(--accent-rgb), 0.06);
+}
+
+.mirrored-playlist-card:hover::before {
+    left: 10%;
+    right: 10%;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.6), transparent);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.3);
 }
 
 .mirrored-playlist-card .source-icon {
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 20px;
+    font-size: 18px;
     flex-shrink: 0;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: all 0.25s;
 }
 
 .mirrored-playlist-card .source-icon.spotify {
-    background: linear-gradient(135deg, rgba(29, 185, 84, 0.2) 0%, rgba(29, 185, 84, 0.08) 100%);
-    border-color: rgba(29, 185, 84, 0.25);
+    background: rgba(29, 185, 84, 0.12);
+    border: 1px solid rgba(29, 185, 84, 0.2);
     color: #1db954;
 }
 .mirrored-playlist-card .source-icon.tidal {
-    background: linear-gradient(135deg, rgba(255, 102, 0, 0.2) 0%, rgba(255, 102, 0, 0.08) 100%);
-    border-color: rgba(255, 102, 0, 0.25);
+    background: rgba(255, 102, 0, 0.12);
+    border: 1px solid rgba(255, 102, 0, 0.2);
     color: #ff6600;
 }
 .mirrored-playlist-card .source-icon.youtube {
-    background: linear-gradient(135deg, rgba(255, 0, 0, 0.2) 0%, rgba(255, 0, 0, 0.08) 100%);
-    border-color: rgba(255, 0, 0, 0.25);
+    background: rgba(255, 0, 0, 0.12);
+    border: 1px solid rgba(255, 0, 0, 0.2);
     color: #ff4444;
 }
 .mirrored-playlist-card .source-icon.deezer {
-    background: linear-gradient(135deg, rgba(162, 56, 255, 0.2) 0%, rgba(162, 56, 255, 0.08) 100%);
-    border-color: rgba(162, 56, 255, 0.25);
+    background: rgba(162, 56, 255, 0.12);
+    border: 1px solid rgba(162, 56, 255, 0.2);
     color: #a238ff;
 }
 .mirrored-playlist-card .source-icon.beatport {
-    background: linear-gradient(135deg, rgba(1, 255, 149, 0.2) 0%, rgba(1, 255, 149, 0.08) 100%);
-    border-color: rgba(1, 255, 149, 0.25);
+    background: rgba(1, 255, 149, 0.12);
+    border: 1px solid rgba(1, 255, 149, 0.2);
     color: #01ff95;
 }
 .mirrored-playlist-card .source-icon.file {
-    background: linear-gradient(135deg, rgba(96, 165, 250, 0.2) 0%, rgba(96, 165, 250, 0.08) 100%);
-    border-color: rgba(96, 165, 250, 0.25);
+    background: rgba(96, 165, 250, 0.12);
+    border: 1px solid rgba(96, 165, 250, 0.2);
     color: #60a5fa;
 }
 
@@ -8077,20 +8086,20 @@ body {
 }
 
 .mirrored-card-info .card-name {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 600;
-    color: #fff;
+    color: rgba(255, 255, 255, 0.9);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    letter-spacing: -0.3px;
+    letter-spacing: -0.01em;
     line-height: 1.3;
 }
 
 .mirrored-card-info .card-meta {
-    font-size: 13px;
-    color: #888;
-    margin-top: 6px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.35);
+    margin-top: 5px;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -9575,63 +9584,40 @@ body {
 }
 
 .beatport-category-card {
-    /* Premium glassmorphic foundation matching add-to-wishlist modal */
-    background: linear-gradient(135deg,
-            rgba(26, 26, 26, 0.95) 0%,
-            rgba(18, 18, 18, 0.98) 100%);
-
-    /* Enhanced borders matching modal */
-    border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-top: 1px solid rgba(255, 255, 255, 0.18);
-
-    padding: 28px;
+    background: rgba(18, 18, 22, 0.9);
+    backdrop-filter: blur(12px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 24px;
     cursor: pointer;
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
-
-    /* Premium shadow effect matching modal */
-    box-shadow:
-        0 20px 60px rgba(0, 0, 0, 0.5),
-        0 8px 32px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
 .beatport-category-card::before {
     content: '';
     position: absolute;
     top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(135deg,
-            rgba(1, 255, 149, 0.1) 0%,
-            transparent 50%);
-    opacity: 0;
-    transition: opacity 0.3s ease;
+    left: 20%;
+    right: 20%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(1, 255, 149, 0.4), transparent);
+    transition: all 0.3s;
 }
 
 .beatport-category-card:hover {
-    /* Enhanced glassmorphic hover state matching modal patterns */
-    background: linear-gradient(135deg,
-            rgba(30, 30, 30, 0.98) 0%,
-            rgba(22, 22, 22, 1.0) 100%);
-
-    transform: translateY(-6px) scale(1.02);
-    border-color: rgba(1, 255, 149, 0.4);
-    border-top-color: rgba(1, 255, 149, 0.6);
-
-    /* Premium enhanced shadow matching modal hover */
-    box-shadow:
-        0 32px 80px rgba(0, 0, 0, 0.6),
-        0 16px 48px rgba(0, 0, 0, 0.4),
-        0 0 40px rgba(1, 255, 149, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    transform: translateY(-2px);
+    border-color: rgba(1, 255, 149, 0.15);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(1, 255, 149, 0.06);
 }
 
 .beatport-category-card:hover::before {
-    opacity: 1;
+    left: 10%;
+    right: 10%;
+    background: linear-gradient(90deg, transparent, rgba(1, 255, 149, 0.7), transparent);
+    box-shadow: 0 0 8px rgba(1, 255, 149, 0.3);
 }
 
 .category-icon {
@@ -11218,61 +11204,53 @@ body {
 
 /* Playlist Cards Styling - Premium Glassmorphic Design */
 .playlist-card {
-    /* Premium glassmorphic foundation matching search results */
-    background: linear-gradient(135deg,
-            rgba(26, 26, 26, 0.95) 0%,
-            rgba(18, 18, 18, 0.98) 100%);
-    border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    margin: 12px 8px;
-    padding: 24px;
+    background: rgba(18, 18, 22, 0.9);
+    backdrop-filter: blur(12px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    margin: 10px 6px;
+    padding: 20px 22px;
     cursor: pointer;
     position: relative;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
 
-    /* Premium shadow effect */
-    box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 2px 8px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
-
-    /* Smooth transitions */
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+.playlist-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 20%;
+    right: 20%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.3), transparent);
+    transition: all 0.3s;
 }
 
 .playlist-card:hover {
-    /* Enhanced glassmorphic hover state */
-    background: linear-gradient(135deg,
-            rgba(30, 30, 30, 0.98) 0%,
-            rgba(22, 22, 22, 1.0) 100%);
-    border-color: rgba(var(--accent-rgb), 0.3);
-    border-top-color: rgba(var(--accent-rgb), 0.4);
+    transform: translateY(-2px);
+    border-color: rgba(var(--accent-rgb), 0.15);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(var(--accent-rgb), 0.06);
+}
 
-    /* More dramatic elevated effect */
-    box-shadow:
-        0 16px 48px rgba(0, 0, 0, 0.5),
-        0 8px 16px rgba(0, 0, 0, 0.3),
-        0 0 20px rgba(var(--accent-rgb), 0.15),
-        inset 0 1px 0 rgba(255, 255, 255, 0.15);
-
-    transform: translateY(-4px) scale(1.02);
+.playlist-card:hover::before {
+    left: 10%;
+    right: 10%;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.6), transparent);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.3);
 }
 
 .playlist-card.selected {
-    /* Selection state with Spotify green accent */
-    border-color: rgba(var(--accent-rgb), 0.5);
-    border-top-color: rgba(var(--accent-rgb), 0.6);
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.08) 0%,
-            rgba(26, 26, 26, 0.98) 50%);
-
-    box-shadow:
-        0 12px 36px rgba(0, 0, 0, 0.4),
-        0 4px 12px rgba(0, 0, 0, 0.25),
-        0 0 24px rgba(var(--accent-rgb), 0.25),
-        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    background: rgba(var(--accent-rgb), 0.04);
 }
 
+.playlist-card.selected::before {
+    left: 5%;
+    right: 5%;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.7), transparent);
+}
 
 .playlist-card-main {
     display: flex;
@@ -11284,112 +11262,89 @@ body {
 .playlist-card-content {
     flex: 1;
     min-width: 0;
-    /* Prevents text overflow issues */
 }
 
 .playlist-card-name {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 600;
-    color: #ffffff;
-    margin-bottom: 8px;
+    color: rgba(255, 255, 255, 0.9);
+    margin-bottom: 6px;
     line-height: 1.3;
 }
 
 .playlist-card-info {
-    font-size: 14px;
-    color: #b3b3b3;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.4);
     margin-bottom: 8px;
 }
 
 .playlist-card-status {
     font-weight: 600;
-    padding: 6px 12px;
-    border-radius: 8px;
-    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 10px;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-
-    /* Glassmorphic badge styling */
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow:
-        0 2px 8px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    letter-spacing: 0.05em;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    display: inline-block;
 }
 
 .status-never-synced {
-    background: linear-gradient(135deg,
-            rgba(128, 128, 128, 0.3) 0%,
-            rgba(96, 96, 96, 0.4) 100%);
-    color: #e0e0e0;
-    border-color: rgba(128, 128, 128, 0.2);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.4);
+    border-color: rgba(255, 255, 255, 0.06);
 }
 
 .status-synced {
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.3) 0%,
-            rgba(24, 158, 72, 0.4) 100%);
+    background: rgba(var(--accent-rgb), 0.1);
     color: rgb(var(--accent-light-rgb));
-    border-color: rgba(var(--accent-rgb), 0.3);
-    box-shadow:
-        0 2px 8px rgba(var(--accent-rgb), 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    border-color: rgba(var(--accent-rgb), 0.2);
 }
 
 .status-needs-sync {
-    background: linear-gradient(135deg,
-            rgba(255, 149, 0, 0.3) 0%,
-            rgba(230, 130, 0, 0.4) 100%);
+    background: rgba(255, 149, 0, 0.1);
     color: #ffb84d;
-    border-color: rgba(255, 149, 0, 0.3);
-    box-shadow:
-        0 2px 8px rgba(255, 149, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 149, 0, 0.15);
 }
 
 .playlist-card-actions {
     flex-shrink: 0;
-    margin-left: 20px;
+    margin-left: 16px;
 }
 
 .playlist-card-actions button {
-    /* Premium glassmorphic button matching search results */
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.9) 0%,
-            rgba(24, 158, 72, 0.95) 100%);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(var(--accent-rgb), 0.3);
-    border-top: 1px solid rgba(var(--accent-rgb), 0.5);
-    color: #ffffff;
-    padding: 10px 20px;
-    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+    padding: 9px 18px;
+    border-radius: 10px;
     cursor: pointer;
     font-size: 13px;
     font-weight: 600;
-
-    /* Premium shadow effect */
-    box-shadow:
-        0 4px 16px rgba(var(--accent-rgb), 0.25),
-        0 2px 4px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.2);
-
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.playlist-card-actions button::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.05) 100%);
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.playlist-card-actions button:hover::before {
+    opacity: 1;
 }
 
 .playlist-card-actions button:hover {
-    /* Enhanced hover state */
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 1.0) 0%,
-            rgba(24, 158, 72, 1.0) 100%);
-    border-color: rgba(var(--accent-rgb), 0.6);
-    border-top-color: rgba(var(--accent-rgb), 0.8);
-
-    box-shadow:
-        0 6px 20px rgba(var(--accent-rgb), 0.35),
-        0 3px 6px rgba(0, 0, 0, 0.25),
-        inset 0 1px 0 rgba(255, 255, 255, 0.25);
-
-    transform: translateY(-2px);
+    color: #fff;
+    border-color: rgba(var(--accent-rgb), 0.35);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.15);
 }
 
 .sync-progress-indicator {
@@ -11403,216 +11358,157 @@ body {
    YOUTUBE PLAYLIST CARD STYLES
    =============================== */
 
-.youtube-playlist-card {
-    /* Premium glassmorphic foundation matching existing cards */
-    background: linear-gradient(135deg,
-            rgba(26, 26, 26, 0.95) 0%,
-            rgba(18, 18, 18, 0.98) 100%);
-    backdrop-filter: blur(12px) saturate(1.1);
-    border-radius: 20px;
-    border: 1px solid rgba(255, 0, 0, 0.15);
-    /* Red YouTube border */
-    border-top: 1px solid rgba(255, 0, 0, 0.25);
-    margin: 12px 8px;
-    padding: 24px;
+/* Source-specific playlist cards — unified glass style with brand color accents */
+.youtube-playlist-card,
+.tidal-playlist-card,
+.deezer-playlist-card,
+.spotify-public-card {
+    background: rgba(18, 18, 22, 0.9);
+    backdrop-filter: blur(12px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    margin: 10px 6px;
+    padding: 18px 22px;
     cursor: pointer;
     position: relative;
-    height: 80px;
+    overflow: hidden;
+    height: auto;
+    min-height: 70px;
     display: flex;
     align-items: center;
-
-    /* Premium shadow effect with YouTube red accent */
-    box-shadow:
-        0 8px 32px rgba(255, 0, 0, 0.15),
-        0 2px 8px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
-
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.youtube-playlist-card:hover {
-    /* Enhanced glassmorphic hover state */
-    background: linear-gradient(135deg,
-            rgba(30, 30, 30, 0.98) 0%,
-            rgba(22, 22, 22, 1.0) 100%);
-    border-color: rgba(255, 0, 0, 0.25);
-    border-top-color: rgba(255, 0, 0, 0.4);
-
-    box-shadow:
-        0 12px 40px rgba(255, 0, 0, 0.2),
-        0 4px 12px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.15);
-
-    transform: translateY(-3px);
+.youtube-playlist-card::before,
+.tidal-playlist-card::before,
+.deezer-playlist-card::before,
+.spotify-public-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 20%;
+    right: 20%;
+    height: 2px;
+    transition: all 0.3s;
 }
 
-.youtube-playlist-card .playlist-card-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 8px;
-    background: linear-gradient(135deg, #ff0000 0%, #cc0000 100%);
-    border: 2px solid rgba(255, 0, 0, 0.3);
+/* Brand accent lines */
+.youtube-playlist-card::before { background: linear-gradient(90deg, transparent, rgba(255, 0, 0, 0.4), transparent); }
+.tidal-playlist-card::before { background: linear-gradient(90deg, transparent, rgba(255, 102, 0, 0.4), transparent); }
+.deezer-playlist-card::before { background: linear-gradient(90deg, transparent, rgba(162, 56, 255, 0.4), transparent); }
+.spotify-public-card::before { background: linear-gradient(90deg, transparent, rgba(29, 185, 84, 0.4), transparent); }
+
+/* Hover — brand glow */
+.youtube-playlist-card:hover { border-color: rgba(255, 0, 0, 0.15); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 16px rgba(255, 0, 0, 0.06); transform: translateY(-2px); }
+.tidal-playlist-card:hover { border-color: rgba(255, 102, 0, 0.15); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 16px rgba(255, 102, 0, 0.06); transform: translateY(-2px); }
+.deezer-playlist-card:hover { border-color: rgba(162, 56, 255, 0.15); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 16px rgba(162, 56, 255, 0.06); transform: translateY(-2px); }
+.spotify-public-card:hover { border-color: rgba(29, 185, 84, 0.15); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 16px rgba(29, 185, 84, 0.06); transform: translateY(-2px); }
+
+.youtube-playlist-card:hover::before { left: 10%; right: 10%; background: linear-gradient(90deg, transparent, rgba(255, 0, 0, 0.7), transparent); }
+.tidal-playlist-card:hover::before { left: 10%; right: 10%; background: linear-gradient(90deg, transparent, rgba(255, 102, 0, 0.7), transparent); }
+.deezer-playlist-card:hover::before { left: 10%; right: 10%; background: linear-gradient(90deg, transparent, rgba(162, 56, 255, 0.7), transparent); }
+.spotify-public-card:hover::before { left: 10%; right: 10%; background: linear-gradient(90deg, transparent, rgba(29, 185, 84, 0.7), transparent); }
+
+/* Source icons */
+.youtube-playlist-card .playlist-card-icon,
+.tidal-playlist-card .playlist-card-icon,
+.deezer-playlist-card .playlist-card-icon,
+.spotify-public-card .playlist-card-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 20px;
-    color: #ffffff;
-    margin-right: 20px;
-    flex-shrink: 0;
-
-    box-shadow:
-        0 4px 16px rgba(255, 0, 0, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.2);
-}
-
-.youtube-playlist-card .playlist-card-content {
-    flex: 1;
-    min-width: 0;
-}
-
-.youtube-playlist-card .playlist-card-name {
     font-size: 18px;
-    font-weight: 600;
     color: #ffffff;
-    margin-bottom: 4px;
-    line-height: 1.3;
+    margin-right: 16px;
+    flex-shrink: 0;
+    transition: all 0.25s;
 }
 
-.youtube-playlist-card .playlist-card-info {
-    font-size: 14px;
-    color: #b3b3b3;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
+.youtube-playlist-card .playlist-card-icon { background: rgba(255, 0, 0, 0.12); border: 1px solid rgba(255, 0, 0, 0.2); color: #ff4444; }
+.tidal-playlist-card .playlist-card-icon { background: rgba(255, 102, 0, 0.12); border: 1px solid rgba(255, 102, 0, 0.2); color: #ff6600; font-size: 16px; }
+.deezer-playlist-card .playlist-card-icon { background: rgba(162, 56, 255, 0.12); border: 1px solid rgba(162, 56, 255, 0.2); color: #a238ff; }
+.spotify-public-card .playlist-card-icon { background: rgba(29, 185, 84, 0.12); border: 1px solid rgba(29, 185, 84, 0.2); color: #1DB954; }
 
-.youtube-playlist-card .playlist-card-track-count {
-    color: #ffffff;
-}
+.youtube-playlist-card .playlist-card-content,
+.tidal-playlist-card .playlist-card-content,
+.deezer-playlist-card .playlist-card-content,
+.spotify-public-card .playlist-card-content { flex: 1; min-width: 0; }
 
-.youtube-playlist-card .playlist-card-phase-text {
-    font-weight: 500;
-}
+.youtube-playlist-card .playlist-card-name,
+.tidal-playlist-card .playlist-card-name,
+.deezer-playlist-card .playlist-card-name,
+.spotify-public-card .playlist-card-name { font-size: 15px; font-weight: 600; color: rgba(255, 255, 255, 0.9); margin-bottom: 4px; }
 
-.youtube-playlist-card .playlist-card-progress {
-    font-size: 13px;
-    color: #ff6b6b;
-    margin-top: 6px;
-    font-weight: 500;
-}
+.youtube-playlist-card .playlist-card-info,
+.tidal-playlist-card .playlist-card-info,
+.deezer-playlist-card .playlist-card-info,
+.spotify-public-card .playlist-card-info { font-size: 13px; color: rgba(255, 255, 255, 0.4); display: flex; align-items: center; gap: 10px; }
 
-.youtube-playlist-card .playlist-card-action-btn {
-    /* YouTube-themed action button */
-    background: linear-gradient(135deg,
-            rgba(255, 0, 0, 0.9) 0%,
-            rgba(204, 0, 0, 0.95) 100%);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 0, 0, 0.3);
-    border-top: 1px solid rgba(255, 0, 0, 0.5);
-    color: #ffffff;
-    padding: 10px 20px;
-    border-radius: 12px;
+.youtube-playlist-card .playlist-card-track-count { color: rgba(255, 255, 255, 0.7); }
+.youtube-playlist-card .playlist-card-phase-text { font-weight: 500; }
+.youtube-playlist-card .playlist-card-progress { font-size: 12px; color: #ff6b6b; margin-top: 4px; font-weight: 500; }
+
+/* Action buttons — glass style with brand hover */
+.youtube-playlist-card .playlist-card-action-btn,
+.tidal-playlist-card .playlist-card-action-btn,
+.deezer-playlist-card .playlist-card-action-btn,
+.spotify-public-card .playlist-card-action-btn {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+    padding: 9px 18px;
+    border-radius: 10px;
     cursor: pointer;
     font-size: 13px;
     font-weight: 600;
-
-    box-shadow:
-        0 4px 16px rgba(255, 0, 0, 0.25),
-        0 2px 4px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.2);
-
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    margin-left: 20px;
+    margin-left: 16px;
     flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
 }
 
-.youtube-playlist-card .playlist-card-action-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg,
-            rgba(255, 0, 0, 1.0) 0%,
-            rgba(204, 0, 0, 1.0) 100%);
-    border-color: rgba(255, 0, 0, 0.6);
-    border-top-color: rgba(255, 0, 0, 0.8);
-
-    box-shadow:
-        0 6px 20px rgba(255, 0, 0, 0.35),
-        0 3px 6px rgba(0, 0, 0, 0.25),
-        inset 0 1px 0 rgba(255, 255, 255, 0.25);
-
-    transform: translateY(-2px);
+.youtube-playlist-card .playlist-card-action-btn::before,
+.tidal-playlist-card .playlist-card-action-btn::before,
+.deezer-playlist-card .playlist-card-action-btn::before,
+.spotify-public-card .playlist-card-action-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    opacity: 0;
+    transition: opacity 0.3s;
 }
 
-.youtube-playlist-card .playlist-card-action-btn:disabled {
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.5);
+.youtube-playlist-card .playlist-card-action-btn::before { background: linear-gradient(135deg, rgba(255, 0, 0, 0.2), rgba(255, 0, 0, 0.05)); }
+.tidal-playlist-card .playlist-card-action-btn::before { background: linear-gradient(135deg, rgba(255, 102, 0, 0.2), rgba(255, 102, 0, 0.05)); }
+.deezer-playlist-card .playlist-card-action-btn::before { background: linear-gradient(135deg, rgba(162, 56, 255, 0.2), rgba(162, 56, 255, 0.05)); }
+.spotify-public-card .playlist-card-action-btn::before { background: linear-gradient(135deg, rgba(29, 185, 84, 0.2), rgba(29, 185, 84, 0.05)); }
+
+.youtube-playlist-card .playlist-card-action-btn:hover:not(:disabled)::before,
+.tidal-playlist-card .playlist-card-action-btn:hover:not(:disabled)::before,
+.deezer-playlist-card .playlist-card-action-btn:hover:not(:disabled)::before,
+.spotify-public-card .playlist-card-action-btn:hover:not(:disabled)::before { opacity: 1; }
+
+.youtube-playlist-card .playlist-card-action-btn:hover:not(:disabled) { color: #fff; border-color: rgba(255, 0, 0, 0.35); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(255, 0, 0, 0.15); }
+.tidal-playlist-card .playlist-card-action-btn:hover:not(:disabled) { color: #fff; border-color: rgba(255, 102, 0, 0.35); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(255, 102, 0, 0.15); }
+.deezer-playlist-card .playlist-card-action-btn:hover:not(:disabled) { color: #fff; border-color: rgba(162, 56, 255, 0.35); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(162, 56, 255, 0.15); }
+.spotify-public-card .playlist-card-action-btn:hover:not(:disabled) { color: #fff; border-color: rgba(29, 185, 84, 0.35); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(29, 185, 84, 0.15); }
+
+.youtube-playlist-card .playlist-card-action-btn:disabled,
+.tidal-playlist-card .playlist-card-action-btn:disabled,
+.deezer-playlist-card .playlist-card-action-btn:disabled,
+.spotify-public-card .playlist-card-action-btn:disabled {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.2);
     cursor: not-allowed;
     box-shadow: none;
     transform: none;
-}
-
-/* ===============================
-   TIDAL PLAYLIST CARD STYLES (extends YouTube card styles)
-   ===============================*/
-
-.tidal-playlist-card .playlist-card-icon {
-    background: rgba(255, 102, 0, 0.2);
-    border: 1px solid #ff6600;
-    color: #ff6600;
-    font-size: 16px;
-}
-
-.tidal-playlist-card:hover .playlist-card-icon {
-    background: rgba(255, 102, 0, 0.3);
-    border: 1px solid #ff7700;
-}
-
-.tidal-playlist-card .playlist-card-action-btn {
-    background: linear-gradient(135deg, #ff6600, #ff7700);
-    border: 1px solid #ff6600;
-}
-
-.tidal-playlist-card .playlist-card-action-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, #ff7700, #ff8800);
-    border: 1px solid #ff7700;
-    box-shadow: 0 4px 15px rgba(255, 102, 0, 0.3);
-}
-
-/* ===============================
-   DEEZER PLAYLIST CARD STYLES (extends YouTube card styles)
-   ===============================*/
-
-.deezer-playlist-card .playlist-card-icon {
-    background: rgba(162, 56, 255, 0.2);
-    border-color: #a238ff;
-    color: #a238ff;
-}
-
-.deezer-playlist-card .playlist-card-action-btn {
-    background: linear-gradient(135deg, #a238ff, #b44dff);
-}
-
-.deezer-playlist-card .playlist-card-action-btn:hover {
-    background: linear-gradient(135deg, #b44dff, #c562ff);
-    box-shadow: 0 0 15px rgba(162, 56, 255, 0.4);
-}
-
-/* ===============================
-   SPOTIFY PUBLIC CARD STYLES (extends YouTube card styles)
-   ===============================*/
-
-.spotify-public-card .playlist-card-icon {
-    background: rgba(29, 185, 84, 0.2);
-    border-color: #1DB954;
-    color: #1DB954;
-}
-
-.spotify-public-card .playlist-card-action-btn {
-    background: linear-gradient(135deg, #1DB954, #1ed760);
-}
-
-.spotify-public-card .playlist-card-action-btn:hover {
-    background: linear-gradient(135deg, #1ed760, #3be477);
-    box-shadow: 0 0 15px rgba(29, 185, 84, 0.4);
 }
 
 /* ===============================
