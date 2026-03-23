@@ -359,10 +359,6 @@ class MetadataCache:
                 where_clauses = ['entity_type = ?']
                 params = [entity_type]
 
-                # Exclude pseudo-entities like album_id_tracks and track_id_features
-                where_clauses.append(r"entity_id NOT LIKE '%\_tracks' ESCAPE '\'")
-                where_clauses.append(r"entity_id NOT LIKE '%\_features' ESCAPE '\'")
-
                 if source:
                     where_clauses.append('source = ?')
                     params.append(source)
@@ -384,6 +380,7 @@ class MetadataCache:
                     sort = 'last_accessed_at'
                 direction = 'ASC' if sort_dir == 'asc' else 'DESC'
 
+                # Don't select raw_json — it's huge and only needed for detail view
                 cursor.execute(f"""
                     SELECT id, source, entity_type, entity_id, name, image_url,
                            genres, popularity, followers,
@@ -475,12 +472,10 @@ class MetadataCache:
                     'newest': None,
                 }
 
-                # Count by type and source (exclude pseudo-entities like _tracks, _features)
-                cursor.execute(r"""
+                # Count by type and source — fast via idx_mce_stats covering index
+                cursor.execute("""
                     SELECT entity_type, source, COUNT(*) as cnt, SUM(access_count) as hits
                     FROM metadata_cache_entities
-                    WHERE entity_id NOT LIKE '%\_tracks' ESCAPE '\'
-                      AND entity_id NOT LIKE '%\_features' ESCAPE '\'
                     GROUP BY entity_type, source
                 """)
                 type_key_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
