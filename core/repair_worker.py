@@ -806,6 +806,7 @@ class RepairWorker:
             'duplicate_tracks': self._fix_duplicates,
             'single_album_redundant': self._fix_single_album_redundant,
             'mbid_mismatch': self._fix_mbid_mismatch,
+            'album_tag_inconsistency': self._fix_album_tag_inconsistency,
             'incomplete_album': self._fix_incomplete_album,
             'path_mismatch': self._fix_path_mismatch,
             'missing_lossy_copy': self._fix_missing_lossy_copy,
@@ -1301,6 +1302,63 @@ class RepairWorker:
                 return {'success': False, 'error': 'MBID tag not found in file (may have been removed already)'}
         except Exception as e:
             return {'success': False, 'error': f'Failed to remove MBID: {str(e)}'}
+
+    def _fix_album_tag_inconsistency(self, entity_type, entity_id, file_path, details):
+        """Normalize inconsistent tags across all tracks in an album to the canonical (majority) value."""
+        inconsistencies = details.get('inconsistencies', [])
+        tracks = details.get('tracks', [])
+        if not inconsistencies or not tracks:
+            return {'success': False, 'error': 'No inconsistency data in finding'}
+
+        from mutagen import File as MutagenFile
+        from core.repair_jobs.album_tag_consistency import _read_tag, _write_tag
+
+        fixed_files = 0
+        errors = 0
+        changes = []
+
+        for inc in inconsistencies:
+            field = inc['field']
+            canonical = inc['canonical']
+
+            for track_info in tracks:
+                track_file = track_info.get('file_path', '')
+                if not track_file:
+                    continue
+
+                # Resolve path
+                download_folder = None
+                if self._config_manager:
+                    download_folder = self._config_manager.get('soulseek.download_path', '')
+                resolved = _resolve_file_path(track_file, self.transfer_folder, download_folder)
+                if not resolved or not os.path.exists(resolved):
+                    continue
+
+                try:
+                    audio = MutagenFile(resolved, easy=False)
+                    if audio is None:
+                        continue
+
+                    current = _read_tag(audio, field)
+                    if current and current != canonical:
+                        if _write_tag(audio, field, canonical):
+                            audio.save()
+                            fixed_files += 1
+                            changes.append(f'{field}: "{current}" → "{canonical}" in {os.path.basename(resolved)}')
+                except Exception as e:
+                    logger.error(f"Error fixing tag consistency for {resolved}: {e}")
+                    errors += 1
+
+        if fixed_files > 0:
+            return {
+                'success': True,
+                'action': 'normalized_tags',
+                'message': f'Fixed {fixed_files} file(s): {"; ".join(changes[:3])}{"..." if len(changes) > 3 else ""}',
+            }
+        elif errors > 0:
+            return {'success': False, 'error': f'Failed to fix {errors} file(s)'}
+        else:
+            return {'success': True, 'action': 'already_consistent', 'message': 'All tags already consistent'}
 
     # --- Album Completeness Auto-Fill ---
 
@@ -2115,6 +2173,7 @@ class RepairWorker:
             fixable_types = ('dead_file', 'orphan_file', 'track_number_mismatch',
                              'missing_cover_art', 'metadata_gap', 'duplicate_tracks',
                              'single_album_redundant', 'mbid_mismatch',
+                             'album_tag_inconsistency',
                              'incomplete_album', 'path_mismatch',
                              'missing_lossy_copy')
             placeholders = ','.join(['?'] * len(fixable_types))
