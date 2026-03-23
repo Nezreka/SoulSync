@@ -3035,6 +3035,59 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
+    def get_db_storage_stats(self):
+        """Get database storage breakdown by table."""
+        import os
+        conn = None
+        try:
+            # Total file size
+            total_size = 0
+            try:
+                total_size = os.path.getsize(str(self.database_path))
+            except Exception:
+                pass
+
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Try dbstat first (real byte sizes)
+            tables = []
+            method = 'row_count'
+            try:
+                cursor.execute("""
+                    SELECT name, SUM(pgsize) as size
+                    FROM dbstat
+                    WHERE name IN (SELECT name FROM sqlite_master WHERE type='table')
+                    GROUP BY name
+                    ORDER BY size DESC
+                """)
+                tables = [{'name': r[0], 'size': r[1]} for r in cursor.fetchall()]
+                method = 'dbstat'
+            except Exception:
+                # Fallback: row counts per table
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                for row in cursor.fetchall():
+                    tbl = row[0]
+                    try:
+                        cursor.execute(f"SELECT COUNT(*) FROM [{tbl}]")
+                        count = cursor.fetchone()[0]
+                        tables.append({'name': tbl, 'size': count})
+                    except Exception:
+                        pass
+                tables.sort(key=lambda x: x['size'], reverse=True)
+
+            return {
+                'tables': tables,
+                'total_file_size': total_size,
+                'method': method,
+            }
+        except Exception as e:
+            logger.error(f"Error getting db storage stats: {e}")
+            return {'tables': [], 'total_file_size': 0, 'method': 'error'}
+        finally:
+            if conn:
+                conn.close()
+
     @staticmethod
     def _listening_time_filter(time_range, alias=''):
         """Build a WHERE clause for time-range filtering."""

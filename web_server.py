@@ -35286,6 +35286,151 @@ def get_discover_because_you_listen_to():
         logger.error(f"Error getting BYLT: {e}")
         return jsonify({'success': True, 'sections': []})
 
+@app.route('/api/discover/undiscovered-albums', methods=['GET'])
+def get_discover_undiscovered_albums():
+    """Albums by artists you listen to that aren't in your library — from cache."""
+    try:
+        database = get_database()
+        cache = get_metadata_cache()
+        active_source = _get_active_discovery_source()
+
+        # Get top played artists
+        top = database.get_top_artists('all', 25)
+        artist_names = [a['name'] for a in top if a.get('name')]
+        if not artist_names:
+            return jsonify({'success': True, 'albums': []})
+
+        # Build library album keys for exclusion
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT LOWER(al.title), LOWER(ar.name)
+                FROM albums al JOIN artists ar ON ar.id = al.artist_id
+            """)
+            library_keys = {(r[0].strip(), r[1].strip()) for r in cursor.fetchall()}
+
+        albums = cache.get_undiscovered_albums(artist_names, library_keys, source=active_source, limit=20)
+        return jsonify({'success': True, 'albums': albums})
+    except Exception as e:
+        logger.error(f"Undiscovered albums endpoint error: {e}")
+        return jsonify({'success': True, 'albums': []})
+
+@app.route('/api/discover/genre-new-releases', methods=['GET'])
+def get_discover_genre_new_releases():
+    """Recent releases matching your top genres — from cache."""
+    try:
+        database = get_database()
+        cache = get_metadata_cache()
+        active_source = _get_active_discovery_source()
+        genres = database.get_genre_breakdown('all')
+        genre_names = [g['genre'] for g in (genres or [])[:10] if g.get('genre')]
+        if not genre_names:
+            return jsonify({'success': True, 'albums': []})
+        albums = cache.get_genre_new_releases(genre_names, source=active_source, limit=20)
+        return jsonify({'success': True, 'albums': albums})
+    except Exception as e:
+        logger.error(f"Genre new releases endpoint error: {e}")
+        return jsonify({'success': True, 'albums': []})
+
+@app.route('/api/discover/label-explorer', methods=['GET'])
+def get_discover_label_explorer():
+    """Popular albums from labels in your library — from cache."""
+    try:
+        database = get_database()
+        cache = get_metadata_cache()
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT DISTINCT label FROM albums
+                WHERE label IS NOT NULL AND label != ''
+                LIMIT 30
+            """)
+            labels = {r[0] for r in cursor.fetchall()}
+        active_source = _get_active_discovery_source()
+        if not labels:
+            return jsonify({'success': True, 'albums': [], 'labels': []})
+        albums = cache.get_label_explorer(labels, source=active_source, limit=20)
+        return jsonify({'success': True, 'albums': albums, 'labels': sorted(labels)})
+    except Exception as e:
+        logger.error(f"Label explorer endpoint error: {e}")
+        return jsonify({'success': True, 'albums': [], 'labels': []})
+
+@app.route('/api/discover/deep-cuts', methods=['GET'])
+def get_discover_deep_cuts():
+    """Low-popularity tracks from artists you listen to — from cache."""
+    try:
+        database = get_database()
+        cache = get_metadata_cache()
+        top = database.get_top_artists('all', 15)
+        artist_names = [a['name'] for a in top if a.get('name')]
+        active_source = _get_active_discovery_source()
+        if not artist_names:
+            return jsonify({'success': True, 'tracks': []})
+        tracks = cache.get_deep_cuts(artist_names, source=active_source, popularity_cap=30, limit=20)
+        return jsonify({'success': True, 'tracks': tracks})
+    except Exception as e:
+        logger.error(f"Deep cuts endpoint error: {e}")
+        return jsonify({'success': True, 'tracks': []})
+
+@app.route('/api/discover/genre-explorer', methods=['GET'])
+def get_discover_genre_explorer():
+    """Genre landscape from cached artists — highlights unexplored genres."""
+    try:
+        database = get_database()
+        cache = get_metadata_cache()
+        active_source = _get_active_discovery_source()
+        genres = database.get_genre_breakdown('all')
+        user_genres = {g['genre'] for g in (genres or []) if g.get('genre')}
+        data = cache.get_genre_explorer(user_genres, source=active_source)
+        return jsonify({'success': True, 'genres': data})
+    except Exception as e:
+        logger.error(f"Genre explorer endpoint error: {e}")
+        return jsonify({'success': True, 'genres': []})
+
+@app.route('/api/discover/genre-deep-dive', methods=['GET'])
+def get_discover_genre_deep_dive():
+    """Get artists + albums for a genre — from cache."""
+    try:
+        genre = request.args.get('genre', '').strip()
+        if not genre:
+            return jsonify({'success': False, 'error': 'genre required'}), 400
+        active_source = _get_active_discovery_source()
+        cache = get_metadata_cache()
+        data = cache.get_genre_deep_dive(genre, source=active_source)
+        return jsonify({'success': True, **data})
+    except Exception as e:
+        logger.error(f"Genre albums endpoint error: {e}")
+        return jsonify({'success': True, 'albums': []})
+
+@app.route('/api/discover/resolve-cache-album', methods=['GET'])
+def resolve_cache_album():
+    """Look up a real album entity in the cache by name+artist (avoids playlist ID confusion)."""
+    try:
+        name = request.args.get('name', '').strip()
+        artist = request.args.get('artist', '').strip()
+        if not name or not artist:
+            return jsonify({'success': False, 'error': 'name and artist required'}), 400
+
+        active_source = _get_active_discovery_source()
+        database = get_database()
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+            # Prefer active source, fall back to any source
+            cursor.execute("""
+                SELECT entity_id, source FROM metadata_cache_entities
+                WHERE entity_type = 'album'
+                  AND LOWER(name) = LOWER(?)
+                  AND LOWER(artist_name) = LOWER(?)
+                ORDER BY CASE WHEN source = ? THEN 0 ELSE 1 END
+                LIMIT 1
+            """, (name, artist, active_source))
+            row = cursor.fetchone()
+            if row:
+                return jsonify({'success': True, 'entity_id': row['entity_id'], 'source': row['source']})
+            return jsonify({'success': False, 'error': 'Album not found in cache'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/discover/weekly', methods=['GET'])
 def get_discover_weekly():
     """Get discovery weekly playlist - curated selection that stays consistent until next update"""
@@ -41965,6 +42110,16 @@ def stats_library_health():
     try:
         database = get_database()
         data = database.get_library_health()
+        return jsonify({'success': True, **data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stats/db-storage', methods=['GET'])
+def stats_db_storage():
+    """Get database storage breakdown by table."""
+    try:
+        database = get_database()
+        data = database.get_db_storage_stats()
         return jsonify({'success': True, **data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

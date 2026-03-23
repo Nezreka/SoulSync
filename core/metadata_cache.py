@@ -806,3 +806,305 @@ class MetadataCache:
             fields['external_urls'] = json.dumps(urls)
 
         return fields
+
+    # ─── Discovery Methods (mine cache for recommendations) ──────
+
+    def get_undiscovered_albums(self, top_artist_names, library_album_keys, source=None, limit=20):
+        """Find popular cached albums by user's top artists that aren't in their library."""
+        if not top_artist_names:
+            return []
+        try:
+            db = self._get_db()
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+                placeholders = ','.join(['?'] * len(top_artist_names))
+                params = [a.lower() for a in top_artist_names]
+                source_filter = "AND source = ?" if source else ""
+                if source:
+                    params.append(source)
+                cursor.execute(f"""
+                    SELECT name, artist_name, image_url, popularity, release_date, label,
+                           source, entity_id, album_type, total_tracks
+                    FROM metadata_cache_entities
+                    WHERE entity_type = 'album'
+                      AND LOWER(artist_name) IN ({placeholders})
+                      {source_filter}
+                    ORDER BY COALESCE(popularity, 0) DESC, access_count DESC
+                    LIMIT 200
+                """, params)
+                results = []
+                for row in cursor.fetchall():
+                    key = (row['name'].lower().strip(), row['artist_name'].lower().strip())
+                    if key not in library_album_keys:
+                        results.append(dict(row))
+                        if len(results) >= limit:
+                            break
+                return results
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Undiscovered albums error: {e}")
+            return []
+
+    def get_genre_new_releases(self, user_genres, source=None, limit=20):
+        """Find recently released cached albums matching user's genres."""
+        if not user_genres:
+            return []
+        try:
+            db = self._get_db()
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+                genre_clauses = ' OR '.join(['genres LIKE ?' for _ in user_genres])
+                params = [f'%{g}%' for g in user_genres]
+                source_filter = ""
+                if source:
+                    source_filter = "AND source = ?"
+                    params.append(source)
+                cursor.execute(f"""
+                    SELECT name, artist_name, image_url, popularity, release_date, genres,
+                           source, entity_id, album_type, total_tracks
+                    FROM metadata_cache_entities
+                    WHERE entity_type = 'album'
+                      AND release_date != '' AND release_date IS NOT NULL
+                      AND release_date >= date('now', '-180 days')
+                      AND ({genre_clauses})
+                      {source_filter}
+                    ORDER BY release_date DESC, COALESCE(popularity, 0) DESC
+                    LIMIT ?
+                """, params + [limit])
+                return [dict(r) for r in cursor.fetchall()]
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Genre new releases error: {e}")
+            return []
+
+    def get_label_explorer(self, user_labels, source=None, limit=20):
+        """Find popular cached albums from labels the user already has."""
+        if not user_labels:
+            return []
+        try:
+            db = self._get_db()
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+                placeholders = ','.join(['?'] * len(user_labels))
+                params = list(user_labels)
+                source_filter = ""
+                if source:
+                    source_filter = "AND source = ?"
+                    params.append(source)
+                cursor.execute(f"""
+                    SELECT name, artist_name, image_url, popularity, release_date, label,
+                           source, entity_id, album_type, total_tracks
+                    FROM metadata_cache_entities
+                    WHERE entity_type = 'album'
+                      AND label IN ({placeholders})
+                      {source_filter}
+                    ORDER BY COALESCE(popularity, 0) DESC, access_count DESC
+                    LIMIT ?
+                """, params + [limit])
+                return [dict(r) for r in cursor.fetchall()]
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Label explorer error: {e}")
+            return []
+
+    def get_deep_cuts(self, artist_names, source=None, popularity_cap=30, limit=20):
+        """Find low-popularity tracks from artists the user listens to."""
+        if not artist_names:
+            return []
+        try:
+            db = self._get_db()
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+                placeholders = ','.join(['?'] * len(artist_names))
+                params = [a.lower() for a in artist_names]
+                source_filter = ""
+                if source:
+                    source_filter = "AND source = ?"
+                    params.append(source)
+                cursor.execute(f"""
+                    SELECT name, artist_name, image_url, popularity, album_name,
+                           source, entity_id, duration_ms, album_id
+                    FROM metadata_cache_entities
+                    WHERE entity_type = 'track'
+                      AND LOWER(artist_name) IN ({placeholders})
+                      AND (popularity IS NULL OR popularity <= ?)
+                      {source_filter}
+                    ORDER BY COALESCE(popularity, 50) ASC, access_count DESC
+                    LIMIT ?
+                """, params + [popularity_cap, limit])
+                return [dict(r) for r in cursor.fetchall()]
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Deep cuts error: {e}")
+            return []
+
+    def get_genre_deep_dive(self, genre, source=None, artist_limit=12, album_limit=20, track_limit=15):
+        """Get artists, albums, and tracks for a genre. Albums don't have genres in Spotify,
+        so we find artists with matching genres then fetch their cached albums and tracks."""
+        if not genre:
+            return {'artists': [], 'albums': [], 'tracks': []}
+        try:
+            db = self._get_db()
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+
+                # Step 1: Find artists with this genre
+                params = [f'%{genre}%']
+                source_filter = "AND source = ?" if source else ""
+                if source:
+                    params.append(source)
+                cursor.execute(f"""
+                    SELECT name, image_url, popularity, followers, entity_id, source, genres
+                    FROM metadata_cache_entities
+                    WHERE entity_type = 'artist'
+                      AND genres LIKE ?
+                      {source_filter}
+                    ORDER BY COALESCE(followers, 0) DESC, COALESCE(popularity, 0) DESC
+                    LIMIT ?
+                """, params + [artist_limit])
+                artists = [dict(r) for r in cursor.fetchall()]
+
+                artist_names = [a['name'].lower() for a in artists if a.get('name')]
+                albums = []
+                tracks = []
+
+                if artist_names:
+                    name_placeholders = ','.join(['?'] * len(artist_names))
+                    src_filter = "AND source = ?" if source else ""
+
+                    # Step 2: Find albums by those artists
+                    album_params = list(artist_names)
+                    if source:
+                        album_params.append(source)
+                    cursor.execute(f"""
+                        SELECT name, artist_name, image_url, popularity, release_date, label,
+                               source, entity_id, album_type, total_tracks
+                        FROM metadata_cache_entities
+                        WHERE entity_type = 'album'
+                          AND LOWER(artist_name) IN ({name_placeholders})
+                          {src_filter}
+                        ORDER BY COALESCE(popularity, 0) DESC, access_count DESC
+                        LIMIT ?
+                    """, album_params + [album_limit])
+                    albums = [dict(r) for r in cursor.fetchall()]
+
+                    # Step 3: Find tracks by those artists
+                    track_params = list(artist_names)
+                    if source:
+                        track_params.append(source)
+                    cursor.execute(f"""
+                        SELECT name, artist_name, image_url, popularity, album_name,
+                               source, entity_id, duration_ms, album_id
+                        FROM metadata_cache_entities
+                        WHERE entity_type = 'track'
+                          AND LOWER(artist_name) IN ({name_placeholders})
+                          {src_filter}
+                        ORDER BY COALESCE(popularity, 0) DESC, access_count DESC
+                        LIMIT ?
+                    """, track_params + [track_limit])
+                    tracks = [dict(r) for r in cursor.fetchall()]
+
+                # Step 4: Find related genres (co-occurring on same artists)
+                related_genres = {}
+                for artist in artists:
+                    try:
+                        artist_genres = json.loads(artist.get('genres', '[]'))
+                        if isinstance(artist_genres, list):
+                            for g in artist_genres:
+                                g_lower = g.strip().lower()
+                                if g_lower and g_lower != genre.lower():
+                                    related_genres[g_lower] = related_genres.get(g_lower, 0) + 1
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                related = sorted(
+                    [{'genre': g.title(), 'count': c} for g, c in related_genres.items()],
+                    key=lambda x: x['count'], reverse=True
+                )[:12]
+
+                # Step 5: Check which albums are in the library
+                if albums:
+                    album_keys = [(a['name'].lower().strip(), a['artist_name'].lower().strip()) for a in albums]
+                    or_clauses = ' OR '.join(['(LOWER(al.title) = ? AND LOWER(ar.name) = ?)' for _ in album_keys])
+                    lib_params = []
+                    for k in album_keys:
+                        lib_params.extend(k)
+                    cursor.execute(f"""
+                        SELECT LOWER(al.title), LOWER(ar.name) FROM albums al
+                        JOIN artists ar ON ar.id = al.artist_id
+                        WHERE {or_clauses}
+                    """, lib_params)
+                    lib_set = {(r[0].strip(), r[1].strip()) for r in cursor.fetchall()}
+                    for album in albums:
+                        album['in_library'] = (album['name'].lower().strip(), album['artist_name'].lower().strip()) in lib_set
+
+                # Step 6: Resolve library artist IDs for navigation
+                for artist in artists:
+                    try:
+                        cursor.execute("""
+                            SELECT id FROM artists WHERE LOWER(name) = LOWER(?) LIMIT 1
+                        """, (artist['name'],))
+                        row = cursor.fetchone()
+                        artist['library_id'] = row['id'] if row else None
+                    except Exception:
+                        artist['library_id'] = None
+
+                return {'artists': artists, 'albums': albums, 'tracks': tracks, 'related_genres': related}
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Genre deep dive error: {e}")
+            return {'artists': [], 'albums': [], 'tracks': []}
+
+    def get_genre_explorer(self, user_genres_set, source=None):
+        """Aggregate genres from cached artists, highlight unexplored ones."""
+        try:
+            db = self._get_db()
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+                params = []
+                source_filter = ""
+                if source:
+                    source_filter = "AND source = ?"
+                    params.append(source)
+                cursor.execute(f"""
+                    SELECT genres FROM metadata_cache_entities
+                    WHERE entity_type = 'artist'
+                      AND genres IS NOT NULL AND genres != '' AND genres != '[]'
+                      {source_filter}
+                """, params)
+                genre_counts = {}
+                for row in cursor.fetchall():
+                    try:
+                        parsed = json.loads(row['genres'])
+                        if isinstance(parsed, list):
+                            for g in parsed:
+                                g_lower = g.strip().lower()
+                                if g_lower:
+                                    genre_counts[g_lower] = genre_counts.get(g_lower, 0) + 1
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                user_lower = {g.lower() for g in user_genres_set} if user_genres_set else set()
+                results = []
+                for genre, count in sorted(genre_counts.items(), key=lambda x: x[1], reverse=True)[:50]:
+                    results.append({
+                        'genre': genre.title(),
+                        'artist_count': count,
+                        'explored': genre in user_lower,
+                    })
+                return results
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Genre explorer error: {e}")
+            return []

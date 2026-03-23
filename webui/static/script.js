@@ -11174,7 +11174,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     }
 
     // CRITICAL FIX: Use album context for discover_album playlists
-    const isDiscoverAlbum = virtualPlaylistId.startsWith('discover_album_') || virtualPlaylistId.startsWith('seasonal_album_') || virtualPlaylistId.startsWith('spotify_library_');
+    const isDiscoverAlbum = virtualPlaylistId.startsWith('discover_album_') || virtualPlaylistId.startsWith('discover_cache_') || virtualPlaylistId.startsWith('seasonal_album_') || virtualPlaylistId.startsWith('spotify_library_');
     const heroContext = isDiscoverAlbum && album && artist ? {
         type: 'album',
         artist: {
@@ -46843,6 +46843,11 @@ async function loadDiscoverPage() {
         loadDiscoveryShuffle(),  // NEW: Discovery Shuffle
         loadFamiliarFavorites(),  // NEW: Familiar Favorites
         loadBecauseYouListenTo(),  // Personalized by listening stats
+        loadCacheUndiscoveredAlbums(),  // From metadata cache
+        loadCacheGenreNewReleases(),    // From metadata cache
+        loadCacheLabelExplorer(),       // From metadata cache
+        loadCacheDeepCuts(),            // From metadata cache
+        loadCacheGenreExplorer(),       // From metadata cache
         initializeListenBrainzTabs(),  // ListenBrainz playlists (tabbed)
         loadDecadeBrowserTabs(),  // Time Machine (tabbed by decade)
         loadGenreBrowserTabs(),  // Browse by Genre (tabbed by genre)
@@ -50639,6 +50644,384 @@ async function loadBecauseYouListenTo() {
 
     } catch (error) {
         console.debug('Error loading Because You Listen To:', error);
+    }
+}
+
+// ===============================
+// CACHE DISCOVERY SECTIONS
+// ===============================
+
+// Global arrays for cache discovery click handlers
+let _cacheDiscoverData = {};
+
+function _cacheDiscoverCard(item, type, sectionKey, index) {
+    const _esc = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const coverUrl = item.image_url || '/static/placeholder-album.png';
+    const title = item.name || '';
+    const subtitle = item.artist_name || '';
+    const meta = item.release_date ? item.release_date.substring(0, 10) : (item.label || '');
+    const onclick = `openCacheDiscoverAlbum('${sectionKey}',${index})`;
+    const libBadge = item.in_library ? '<div class="discover-card-lib-badge">In Library</div>' : '';
+    return `<div class="discover-card" onclick="${onclick}" style="cursor:pointer">
+        <div class="discover-card-image">
+            <img src="${_esc(coverUrl)}" alt="${_esc(title)}" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
+            ${libBadge}
+        </div>
+        <div class="discover-card-info">
+            <h4 class="discover-card-title">${_esc(title)}</h4>
+            <p class="discover-card-subtitle">${_esc(subtitle)}</p>
+            ${meta ? `<p class="discover-card-meta">${_esc(meta)}</p>` : ''}
+        </div>
+    </div>`;
+}
+
+async function openCacheDiscoverAlbum(sectionKey, index) {
+    const items = _cacheDiscoverData[sectionKey];
+    if (!items || !items[index]) return;
+    const item = items[index];
+    const source = item.source || 'spotify';
+    const albumId = item.entity_id;
+
+    // Deep cuts / genre dive tracks — find the real album by searching the cache
+    if (sectionKey === 'deep_cuts' || sectionKey === 'genre_dive_tracks') {
+        document.getElementById('genre-deep-dive-modal')?.remove();
+        const albumName = item.album_name || '';
+        const artistName = item.artist_name || '';
+        if (!albumName || !artistName) {
+            showToast('No album data available for this track', 'error');
+            return;
+        }
+        // Search for the album by name+artist to get the real album entity_id
+        showLoadingOverlay(`Loading ${albumName}...`);
+        try {
+            const searchResp = await fetch(`/api/discover/resolve-cache-album?name=${encodeURIComponent(albumName)}&artist=${encodeURIComponent(artistName)}`);
+            if (!searchResp.ok) throw new Error('Album not found in cache');
+            const searchData = await searchResp.json();
+            if (!searchData.success || !searchData.entity_id) throw new Error('Album not found in cache');
+
+            const resolvedSource = searchData.source || source;
+            const resolvedId = searchData.entity_id;
+
+            const _params = new URLSearchParams({ name: albumName, artist: artistName });
+            const response = await fetch(`/api/discover/album/${resolvedSource}/${resolvedId}?${_params}`);
+            if (!response.ok) throw new Error('Failed to fetch album tracks');
+            const albumData = await response.json();
+            if (!albumData.tracks || albumData.tracks.length === 0) throw new Error('No tracks found');
+
+            const spotifyTracks = albumData.tracks.map(track => {
+                let artists = track.artists || albumData.artists || [{ name: artistName }];
+                if (Array.isArray(artists)) artists = artists.map(a => a.name || a);
+                return {
+                    id: track.id, name: track.name, artists,
+                    album: { id: albumData.id, name: albumData.name, album_type: albumData.album_type || 'album', total_tracks: albumData.total_tracks || 0, release_date: albumData.release_date || '', images: albumData.images || [] },
+                    duration_ms: track.duration_ms || 0, track_number: track.track_number || 0,
+                };
+            });
+            const artistContext = { id: albumData.artists?.[0]?.id || '', name: artistName, source: resolvedSource };
+            const albumContext = { id: albumData.id, name: albumData.name, album_type: albumData.album_type || 'album', total_tracks: albumData.total_tracks || 0, release_date: albumData.release_date || '', images: albumData.images || [] };
+            await openDownloadMissingModalForYouTube(`discover_cache_${resolvedId}`, albumData.name, spotifyTracks, artistContext, albumContext);
+            hideLoadingOverlay();
+        } catch (error) {
+            console.error('Error opening deep cut album:', error);
+            showToast(`Failed to load album: ${error.message}`, 'error');
+            hideLoadingOverlay();
+        }
+        return;
+    }
+
+    if (!albumId) {
+        showToast('No album ID available', 'error');
+        return;
+    }
+
+    // Close genre deep dive modal if open
+    document.getElementById('genre-deep-dive-modal')?.remove();
+
+    showLoadingOverlay(`Loading ${item.name || 'album'}...`);
+    try {
+        const _params = new URLSearchParams({ name: item.name || '', artist: item.artist_name || '' });
+        let response = await fetch(`/api/discover/album/${source}/${albumId}?${_params}`);
+
+        // If 404 (stale cache entry), try resolving via name+artist
+        if (response.status === 404) {
+            const resolveResp = await fetch(`/api/discover/resolve-cache-album?name=${encodeURIComponent(item.name || '')}&artist=${encodeURIComponent(item.artist_name || '')}`);
+            if (resolveResp.ok) {
+                const resolved = await resolveResp.json();
+                if (resolved.success && resolved.entity_id && resolved.entity_id !== albumId) {
+                    response = await fetch(`/api/discover/album/${resolved.source || source}/${resolved.entity_id}?${_params}`);
+                }
+            }
+        }
+
+        if (!response.ok) throw new Error('Album not available — it may have been removed from the source');
+        const albumData = await response.json();
+        if (!albumData.tracks || albumData.tracks.length === 0) throw new Error('No tracks found');
+
+        const spotifyTracks = albumData.tracks.map(track => {
+            let artists = track.artists || albumData.artists || [{ name: item.artist_name }];
+            if (Array.isArray(artists)) artists = artists.map(a => a.name || a);
+            return {
+                id: track.id,
+                name: track.name,
+                artists: artists,
+                album: {
+                    id: albumData.id,
+                    name: albumData.name,
+                    album_type: albumData.album_type || 'album',
+                    total_tracks: albumData.total_tracks || 0,
+                    release_date: albumData.release_date || '',
+                    images: albumData.images || [],
+                },
+                duration_ms: track.duration_ms || 0,
+                track_number: track.track_number || 0,
+            };
+        });
+
+        const artistContext = {
+            id: albumData.artists?.[0]?.id || '',
+            name: item.artist_name || albumData.artists?.[0]?.name || '',
+            source: source,
+        };
+        const albumContext = {
+            id: albumData.id,
+            name: albumData.name,
+            album_type: albumData.album_type || 'album',
+            total_tracks: albumData.total_tracks || 0,
+            release_date: albumData.release_date || '',
+            images: albumData.images || [],
+        };
+
+        await openDownloadMissingModalForYouTube(
+            `discover_cache_${albumId}`, albumData.name, spotifyTracks, artistContext, albumContext
+        );
+        hideLoadingOverlay();
+    } catch (error) {
+        console.error('Error opening cache discover album:', error);
+        showToast(`Failed to load album: ${error.message}`, 'error');
+        hideLoadingOverlay();
+    }
+}
+
+function _insertCacheSection(id, title, subtitle, html) {
+    const container = document.getElementById('discover-bylt-sections') || document.querySelector('.discover-container');
+    if (!container) return;
+    let section = document.getElementById(id);
+    if (!section) {
+        section = document.createElement('div');
+        section.id = id;
+        section.className = 'discover-section';
+        container.appendChild(section);
+    }
+    section.innerHTML = `
+        <div class="discover-section-header">
+            <div>
+                <div class="discover-section-subtitle">${subtitle}</div>
+                <h3 class="discover-section-title">${title}</h3>
+            </div>
+        </div>
+        <div class="discover-carousel">${html}</div>
+    `;
+}
+
+async function loadCacheUndiscoveredAlbums() {
+    try {
+        const resp = await fetch('/api/discover/undiscovered-albums');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.success || !data.albums || !data.albums.length) return;
+        _cacheDiscoverData['undiscovered'] = data.albums;
+        _insertCacheSection('cache-undiscovered',
+            'Undiscovered Albums', 'From artists you love',
+            data.albums.map((a, i) => _cacheDiscoverCard(a, 'album', 'undiscovered', i)).join(''));
+    } catch (e) { console.debug('Cache undiscovered albums:', e); }
+}
+
+async function loadCacheGenreNewReleases() {
+    try {
+        const resp = await fetch('/api/discover/genre-new-releases');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.success || !data.albums || !data.albums.length) return;
+        _cacheDiscoverData['genre_releases'] = data.albums;
+        _insertCacheSection('cache-genre-releases',
+            'New In Your Genres', 'Released in the last 90 days',
+            data.albums.map((a, i) => _cacheDiscoverCard(a, 'album', 'genre_releases', i)).join(''));
+    } catch (e) { console.debug('Cache genre new releases:', e); }
+}
+
+async function loadCacheLabelExplorer() {
+    try {
+        const resp = await fetch('/api/discover/label-explorer');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.success || !data.albums || !data.albums.length) return;
+        _cacheDiscoverData['label_explorer'] = data.albums;
+        _insertCacheSection('cache-label-explorer',
+            'From Your Labels', 'Popular on labels in your library',
+            data.albums.map((a, i) => _cacheDiscoverCard(a, 'album', 'label_explorer', i)).join(''));
+    } catch (e) { console.debug('Cache label explorer:', e); }
+}
+
+async function loadCacheDeepCuts() {
+    try {
+        const resp = await fetch('/api/discover/deep-cuts');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.success || !data.tracks || !data.tracks.length) return;
+        _cacheDiscoverData['deep_cuts'] = data.tracks;
+        _insertCacheSection('cache-deep-cuts',
+            'Deep Cuts', 'Hidden tracks from artists you know',
+            data.tracks.map((t, i) => _cacheDiscoverCard(t, 'track', 'deep_cuts', i)).join(''));
+    } catch (e) { console.debug('Cache deep cuts:', e); }
+}
+
+async function loadCacheGenreExplorer() {
+    try {
+        const resp = await fetch('/api/discover/genre-explorer');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.success || !data.genres || !data.genres.length) return;
+        const _esc = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
+        const html = `<div class="genre-explorer-grid">${data.genres.map(g => `
+            <div class="genre-explorer-pill ${g.explored ? 'explored' : 'unexplored'}" onclick="openGenreDeepDive('${_esc(g.genre)}')" style="cursor:pointer">
+                <span class="genre-pill-name">${_esc(g.genre)}</span>
+                <span class="genre-pill-count">${g.artist_count} artist${g.artist_count !== 1 ? 's' : ''}</span>
+                ${!g.explored ? '<span class="genre-pill-badge">New</span>' : ''}
+            </div>
+        `).join('')}</div>`;
+        _insertCacheSection('cache-genre-explorer',
+            'Genre Explorer', 'Tap a genre to explore', html);
+    } catch (e) { console.debug('Cache genre explorer:', e); }
+}
+
+async function openGenreDeepDive(genre) {
+    document.getElementById('genre-deep-dive-modal')?.remove();
+
+    const _esc = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const _fmtNum = (n) => {
+        if (!n) return '';
+        if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+        if (n >= 1000) return (n/1000).toFixed(0) + 'K';
+        return n.toString();
+    };
+    const _fmtDur = (ms) => {
+        if (!ms) return '';
+        const m = Math.floor(ms / 60000);
+        const s = Math.floor((ms % 60000) / 1000);
+        return `${m}:${s.toString().padStart(2, '0')}`;
+    };
+
+    const overlay = document.createElement('div');
+    overlay.id = 'genre-deep-dive-modal';
+    overlay.className = 'genre-dive-overlay';
+    overlay.innerHTML = `
+        <div class="genre-dive-modal">
+            <div class="genre-dive-header">
+                <div>
+                    <div class="genre-dive-subtitle">Genre Deep Dive</div>
+                    <h2 class="genre-dive-title">${_esc(genre)}</h2>
+                </div>
+                <button class="genre-dive-close" onclick="document.getElementById('genre-deep-dive-modal').remove()">&times;</button>
+            </div>
+            <div class="genre-dive-body" id="genre-dive-body">
+                <div class="genre-dive-loading"><div class="genre-dive-spinner"></div>Exploring ${_esc(genre)}...</div>
+            </div>
+        </div>
+    `;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+
+    try {
+        const resp = await fetch(`/api/discover/genre-deep-dive?genre=${encodeURIComponent(genre)}`);
+        if (!resp.ok) throw new Error('Failed to load');
+        const data = await resp.json();
+        if (!data.success) throw new Error('Failed');
+
+        const body = document.getElementById('genre-dive-body');
+        if (!body) return;
+
+        // Update header with counts
+        const subtitle = document.querySelector('.genre-dive-subtitle');
+        if (subtitle) {
+            const parts = [];
+            if (data.artists?.length) parts.push(`${data.artists.length} artist${data.artists.length !== 1 ? 's' : ''}`);
+            if (data.tracks?.length) parts.push(`${data.tracks.length} track${data.tracks.length !== 1 ? 's' : ''}`);
+            if (data.albums?.length) parts.push(`${data.albums.length} album${data.albums.length !== 1 ? 's' : ''}`);
+            subtitle.textContent = parts.length ? parts.join(' · ') : 'Genre Deep Dive';
+        }
+
+        let html = '';
+
+        // Related genres — clickable pills that reload the modal
+        if (data.related_genres && data.related_genres.length) {
+            html += `<div class="genre-dive-related">
+                <div class="genre-dive-related-label">Related Genres</div>
+                ${data.related_genres.map(rg => `
+                    <button class="genre-dive-related-pill" onclick="document.getElementById('genre-deep-dive-modal').remove();openGenreDeepDive('${_esc(rg.genre)}')">${_esc(rg.genre)}</button>
+                `).join('')}
+            </div>`;
+        }
+
+        // Artists section — clickable, navigates to artist page directly
+        if (data.artists && data.artists.length) {
+            html += `<div class="genre-dive-section">
+                <h3 class="genre-dive-section-title"><span class="genre-dive-icon">🎤</span> Artists in ${_esc(genre)}</h3>
+                <div class="genre-dive-artists">
+                    ${data.artists.map(a => {
+                        const clickAction = `onclick="document.getElementById('genre-deep-dive-modal').remove();navigateToPage('artists');setTimeout(()=>selectArtistForDetail({id:'${_esc(a.entity_id)}',name:'${_esc(a.name)}',image_url:'${_esc(a.image_url||'')}'},{source:'${_esc(a.source||'spotify')}'}),300)"`;
+                        return `<div class="genre-dive-artist" ${clickAction}>
+                            <div class="genre-dive-artist-img" style="${a.image_url ? `background-image:url('${_esc(a.image_url)}')` : ''}">
+                                ${!a.image_url ? '<span>🎤</span>' : ''}
+                            </div>
+                            <div class="genre-dive-artist-name">${_esc(a.name)}</div>
+                            ${a.followers ? `<div class="genre-dive-artist-meta">${_fmtNum(a.followers)} followers</div>` : ''}
+                            ${a.library_id ? '<div class="genre-dive-artist-badge">In Library</div>' : ''}
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>`;
+        }
+
+        // Tracks section — clickable, opens album download
+        if (data.tracks && data.tracks.length) {
+            _cacheDiscoverData['genre_dive_tracks'] = data.tracks;
+            html += `<div class="genre-dive-section">
+                <h3 class="genre-dive-section-title"><span class="genre-dive-icon">🎵</span> Popular Tracks</h3>
+                <div class="genre-dive-tracks">
+                    ${data.tracks.map((t, i) => `
+                        <div class="genre-dive-track" onclick="document.getElementById('genre-deep-dive-modal').remove();openCacheDiscoverAlbum('genre_dive_tracks',${i})">
+                            <div class="genre-dive-track-num">${i + 1}</div>
+                            <div class="genre-dive-track-img" style="${t.image_url ? `background-image:url('${_esc(t.image_url)}')` : ''}">
+                                ${!t.image_url ? '🎵' : ''}
+                            </div>
+                            <div class="genre-dive-track-info">
+                                <div class="genre-dive-track-name">${_esc(t.name)}</div>
+                                <div class="genre-dive-track-artist">${_esc(t.artist_name)}${t.album_name ? ' · ' + _esc(t.album_name) : ''}</div>
+                            </div>
+                            <div class="genre-dive-track-duration">${_fmtDur(t.duration_ms)}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
+        }
+
+        // Albums section
+        if (data.albums && data.albums.length) {
+            _cacheDiscoverData['genre_dive_albums'] = data.albums;
+            html += `<div class="genre-dive-section">
+                <h3 class="genre-dive-section-title"><span class="genre-dive-icon">💿</span> Albums</h3>
+                <div class="discover-carousel">${data.albums.map((a, i) => _cacheDiscoverCard(a, 'album', 'genre_dive_albums', i)).join('')}</div>
+            </div>`;
+        }
+
+        if (!html) {
+            html = '<div class="genre-dive-empty"><div class="genre-dive-empty-icon">🔍</div><p>No cached data found for this genre yet</p><p class="genre-dive-empty-hint">Search for artists in this genre to build up the cache</p></div>';
+        }
+
+        body.innerHTML = html;
+    } catch (e) {
+        const body = document.getElementById('genre-dive-body');
+        if (body) body.innerHTML = '<div style="color:rgba(255,100,100,0.6);text-align:center;padding:40px;">Failed to load genre data</div>';
     }
 }
 
@@ -54827,6 +55210,7 @@ const importPageState = {
 let _statsRange = '7d';
 let _statsTimelineChart = null;
 let _statsGenreChart = null;
+let _statsDbStorageChart = null;
 let _statsInitialized = false;
 
 function initializeStatsPage() {
@@ -55001,6 +55385,9 @@ async function loadStatsData() {
     // Library health
     _renderLibraryHealth(data.health || {});
 
+    // DB storage chart (separate fetch — not part of cached stats)
+    _loadDbStorageChart();
+
     // Recent plays
     _renderRecentPlays(data.recent || []);
 }
@@ -55173,6 +55560,93 @@ function _renderLibraryHealth(data) {
                 <span class="stats-enrich-pct">${s.pct}%</span>
             </div>
         `).join('');
+    }
+}
+
+async function _loadDbStorageChart() {
+    try {
+        const resp = await fetch('/api/stats/db-storage');
+        const data = await resp.json();
+        if (!data.success || !data.tables || !data.tables.length) return;
+        _renderDbStorageChart(data.tables, data.total_file_size, data.method);
+    } catch (e) {
+        console.debug('DB storage chart load failed:', e);
+    }
+}
+
+function _renderDbStorageChart(tables, totalFileSize, method) {
+    const canvas = document.getElementById('stats-db-storage-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+
+    if (_statsDbStorageChart) _statsDbStorageChart.destroy();
+
+    // Top 8 tables, group rest as "Other"
+    const top = tables.slice(0, 8);
+    const rest = tables.slice(8);
+    const restSize = rest.reduce((s, t) => s + t.size, 0);
+    if (restSize > 0) top.push({ name: 'Other', size: restSize });
+
+    const colors = ['#3b82f6', '#f97316', '#a855f7', '#14b8a6', '#eab308', '#ec4899', '#6366f1', '#22c55e', '#555'];
+
+    _statsDbStorageChart = new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+            labels: top.map(t => t.name),
+            datasets: [{
+                data: top.map(t => t.size),
+                backgroundColor: colors.slice(0, top.length),
+                borderWidth: 0,
+                hoverOffset: 4,
+            }],
+        },
+        options: {
+            responsive: false,
+            cutout: '65%',
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => {
+                            const val = ctx.parsed;
+                            if (method === 'dbstat') {
+                                if (val > 1048576) return ` ${(val / 1048576).toFixed(1)} MB`;
+                                return ` ${(val / 1024).toFixed(0)} KB`;
+                            }
+                            return ` ${val.toLocaleString()} rows`;
+                        }
+                    }
+                }
+            },
+        },
+    });
+
+    // Center label — total file size
+    const totalEl = document.getElementById('stats-db-total');
+    if (totalEl) {
+        let sizeStr;
+        if (totalFileSize > 1073741824) sizeStr = (totalFileSize / 1073741824).toFixed(2) + ' GB';
+        else if (totalFileSize > 1048576) sizeStr = (totalFileSize / 1048576).toFixed(1) + ' MB';
+        else sizeStr = (totalFileSize / 1024).toFixed(0) + ' KB';
+        totalEl.innerHTML = `<div class="stats-db-total-value">${sizeStr}</div><div class="stats-db-total-label">Total Size</div>`;
+    }
+
+    // Legend
+    const legendEl = document.getElementById('stats-db-legend');
+    if (legendEl) {
+        legendEl.innerHTML = top.map((t, i) => {
+            let sizeLabel;
+            if (method === 'dbstat') {
+                if (t.size > 1048576) sizeLabel = (t.size / 1048576).toFixed(1) + ' MB';
+                else sizeLabel = (t.size / 1024).toFixed(0) + ' KB';
+            } else {
+                sizeLabel = t.size.toLocaleString() + ' rows';
+            }
+            return `<div class="stats-db-legend-item">
+                <span class="stats-db-legend-dot" style="background:${colors[i]}"></span>
+                <span class="stats-db-legend-name">${t.name}</span>
+                <span class="stats-db-legend-size">${sizeLabel}</span>
+            </div>`;
+        }).join('');
     }
 }
 
