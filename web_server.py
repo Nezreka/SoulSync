@@ -31,7 +31,7 @@ from config.settings import config_manager
 logger = get_logger("web_server")
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-SOULSYNC_VERSION = "2.0"
+SOULSYNC_VERSION = "2.1"
 
 # Dedicated source reuse logger — writes to logs/source_reuse.log
 import logging as _logging
@@ -18491,6 +18491,18 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🎧 Deezer Download Source",
+                "description": "Download music directly from Deezer with ARL authentication",
+                "features": [
+                    "• New download source: Deezer joins Soulseek, YouTube, Tidal, Qobuz, and HiFi",
+                    "• FLAC lossless, MP3 320, and MP3 128 with automatic quality fallback",
+                    "• ARL token authentication — paste from browser cookies, test connection in Settings",
+                    "• Full hybrid mode support — use Deezer as primary, fallback, or in any priority order",
+                    "• Blowfish CBC decryption handles Deezer's encrypted streams transparently",
+                    "• AcoustID verification automatically skipped for Deezer (and Tidal/Qobuz/HiFi) — trusted API sources"
+                ]
+            },
+            {
                 "title": "🔍 Cache-Powered Discovery",
                 "description": "Five new discover sections mined from your metadata cache — zero API calls",
                 "features": [
@@ -18566,46 +18578,71 @@ def get_version_info():
                 ]
             },
             {
+                "title": "🏷️ Picard-Style Album Tagging",
+                "description": "All tracks in an album now get the same MusicBrainz release ID automatically",
+                "features": [
+                    "• Pre-flight MB release lookup before album tracks start downloading",
+                    "• Picks ONE release, validates track count, caches for all tracks in the batch",
+                    "• Strips Spotify edition suffixes (Super Deluxe, Remastered) for better MB matching",
+                    "• New Album Tag Consistency repair job: scan and fix existing albums with mismatched tags"
+                ]
+            },
+            {
+                "title": "🛠️ Enrichment & Repair Fixes",
+                "description": "Critical fixes for background workers and maintenance jobs",
+                "features": [
+                    "• All 9 enrichment workers: error status items no longer auto-retry in infinite loops",
+                    "• Cover art filler: findings no longer recreated after being fixed",
+                    "• Spotify rate limit respected by search_tracks, search_albums, and cover art scanner",
+                    "• Config save: 30s timeout + WAL mode fixes 'database is locked' on busy systems",
+                    "• Enrichment workers auto-pause during DB scans and resume when complete"
+                ]
+            },
+            {
+                "title": "🔗 Automation Signal Chain Fix",
+                "description": "Event-triggered automations now receive playlist context properly",
+                "features": [
+                    "• playlist_id forwarded from events to action handlers (fixes silent 'No playlist specified')",
+                    "• Mirrored playlist discovery no longer pre-marks tracks as discovered with wrong album art",
+                    "• Reorganize modal now loads saved path template instead of hardcoded default",
+                    "• Spotify enrichment worker starts unpaused by default like all other workers"
+                ]
+            },
+            {
+                "title": "🎨 Unified Glass UI Redesign",
+                "description": "Consistent visual style across all cards, modals, and buttons",
+                "features": [
+                    "• Dashboard tool cards, service cards, and stat cards: unified glass style",
+                    "• Sync page playlist cards: all sources (Spotify, YouTube, Tidal, Deezer, Mirrored, Beatport)",
+                    "• Download missing and wishlist modals: cleaner backgrounds, softer shadows",
+                    "• Watchlist and enhance quality buttons: glass hover with accent glow",
+                    "• Library page: innerHTML rendering + staggered card animation for faster loads"
+                ]
+            },
+            {
                 "title": "🎧 Scrobbling to Last.fm & ListenBrainz",
                 "description": "Automatically scrobble your plays from Plex, Jellyfin, or Navidrome",
                 "features": [
                     "• Listen on your media server — SoulSync automatically scrobbles to Last.fm and/or ListenBrainz",
-                    "• Last.fm: full web auth flow — enter API secret, click Authorize, session key stored permanently",
-                    "• ListenBrainz: simple token-based — enable toggle and plays are submitted automatically",
-                    "• Batch scrobbling with dedup tracking — events only scrobbled once, never duplicated",
-                    "• Both services fully opt-in via Settings toggles"
+                    "• Last.fm: full web auth flow, ListenBrainz: simple token-based",
+                    "• Batch scrobbling with dedup tracking — events only scrobbled once"
                 ]
             },
             {
-                "title": "🧠 Personalized Discovery",
-                "description": "Discovery playlists now use your listening history to recommend better music",
+                "title": "🧠 Personalized Discovery + Listening Stats",
+                "description": "Discovery playlists use your listening history, plus a full stats dashboard",
                 "features": [
-                    "• Release Radar: genre affinity (+10), artist familiarity (+15), overplay penalty (-10) scoring",
-                    "• Discovery Weekly: serendipity weighting — boosts unheard artists in your favorite genres",
-                    "• Recent Albums: adaptive time window (21-60 days) based on how fast you consume music",
-                    "• New 'Because You Listen To' sections: personalized carousels for your top 3 artists",
-                    "• Familiar Favorites weighted by actual play count, not random sampling",
-                    "• All personalization gracefully falls back for new users with no listening data"
+                    "• Release Radar, Discovery Weekly, and Because You Listen To: personalized by play history",
+                    "• Listening Stats page: timeline chart, genre breakdown, top artists/albums/tracks",
+                    "• Database storage donut chart in Library Health section",
+                    "• Play buttons on stats page tracks with cover art"
                 ]
-            },
-            {
-                "title": "📊 Listening Stats Page",
-                "description": "Full stats dashboard with Chart.js visualizations of your listening habits",
-                "features": [
-                    "• Overview cards: total plays, listening time, unique artists/albums/tracks",
-                    "• Listening activity timeline bar chart with 7d/30d/12m/all time ranges",
-                    "• Genre breakdown doughnut chart with percentage legend",
-                    "• Top artists visual bubbles with profile pictures + ranked lists",
-                    "• Top albums and tracks with album art, clickable artist names",
-                    "• Library health: format breakdown bar, unplayed tracks, enrichment coverage",
-                    "• Sync Now button for instant data refresh from your media server",
-                    "• Background worker polls Plex/Jellyfin/Navidrome every 30 minutes",
-                    "• Pre-computed cache — tab switching is instant"
-                ]
-            },
-            {
-                "title": "🆔 SoulID Worker",
-                "description": "Deterministic identity system for cross-node artist/album/track matching",
+            }
+        ]
+    }
+    return jsonify(version_data)
+
+_OLD_V2_NOTES = r"""
                 "features": [
                     "• Generates soul IDs using SHA-256 hash of normalized names",
                     "• Artists: hash(name + debut_year) — debut year from iTunes + Deezer API verification",
@@ -19160,12 +19197,7 @@ def get_version_info():
                     "• Fix Docker upgrade crashes from stale volume mounts and partial DB migrations",
                     "• Isolate service client initialization so one failure doesn't break the app",
                     "• Explicit content filter with configurable toggle to skip explicit tracks",
-                    "• Full Cleanup automation for quarantine, downloads, staging, and search history"
-                ]
-            }
-        ]
-    }
-    return jsonify(version_data)
+"""  # end of _OLD_V2_NOTES_REMOVED
 
 
 def _simple_monitor_task():
