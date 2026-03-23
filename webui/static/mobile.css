@@ -898,22 +898,97 @@
         grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     }
 
-    /* Artist Detail (Library) */
+    /* Artist Detail (Library) — Hero section */
+    .artist-hero-section {
+        margin: 10px;
+        padding: 16px;
+        border-radius: 12px;
+    }
+
     .artist-hero-content {
         flex-direction: column;
         align-items: center;
         text-align: center;
+        gap: 16px;
     }
 
     .artist-image-container {
-        width: 120px;
-        height: 120px;
+        width: 100px;
+        height: 100px;
     }
 
     .artist-image,
     .artist-image-fallback {
-        width: 120px;
-        height: 120px;
+        width: 100px;
+        height: 100px;
+    }
+
+    .artist-info h1,
+    .artist-name {
+        font-size: 24px !important;
+        white-space: normal;
+        text-align: center;
+    }
+
+    .artist-hero-badges {
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .artist-hero-badge {
+        width: 22px;
+        height: 22px;
+    }
+
+    .artist-genres-container {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .artist-hero-bio {
+        font-size: 12px;
+        -webkit-line-clamp: 3;
+        max-height: 54px;
+    }
+
+    .artist-hero-numbers {
+        justify-content: center;
+        gap: 20px;
+    }
+
+    .hero-stat-value {
+        font-size: 18px;
+    }
+
+    .hero-stat-label {
+        font-size: 10px;
+    }
+
+    .collection-overview {
+        gap: 6px;
+    }
+
+    .category-label {
+        font-size: 0.65em;
+        min-width: 42px;
+    }
+
+    .category-stats {
+        font-size: 0.65em;
+    }
+
+    /* Top tracks sidebar — stack below on mobile */
+    .artist-hero-right {
+        width: 100%;
+        border-left: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        padding-top: 12px;
+    }
+
+    .hero-top-tracks {
+        max-height: 200px;
+        overflow-y: auto;
     }
 
     .releases-grid {
@@ -2216,6 +2291,271 @@
     .enhanced-bulk-modal {
         width: calc(100vw - 32px);
     }
+
+    /* Discography filter bar */
+    .discography-filters {
+        gap: 6px;
+        padding: 8px 0 12px;
+    }
+    .filter-group {
+        gap: 4px;
+        flex-wrap: wrap;
+    }
+    .filter-label {
+        font-size: 10px;
+        width: 100%;
+    }
+    .discography-filter-btn {
+        padding: 4px 10px;
+        font-size: 11px;
+    }
+    .filter-divider {
+        display: none;
+    }
+    .enhanced-view-toggle-btn {
+        padding: 5px 12px;
+        font-size: 11px;
+    }
+
+    /* Enhanced view — artist meta header */
+    .enhanced-artist-meta-header {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 14px 16px;
+        gap: 12px;
+    }
+    .enhanced-artist-meta-header-left {
+        width: 100%;
+        gap: 10px;
+    }
+    .enhanced-artist-meta-image {
+        width: 48px;
+        height: 48px;
+    }
+    .enhanced-artist-meta-name {
+        font-size: 18px;
+    }
+    .enhanced-artist-meta-actions {
+        width: 100%;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    .enhanced-artist-meta-actions button,
+    .enhanced-meta-save-btn,
+    .enhanced-meta-cancel-btn {
+        flex: 1;
+        min-width: 80px;
+        font-size: 11px;
+        padding: 6px 10px;
+    }
+
+    /* Enhanced view — artist meta fields grid */
+    .enhanced-artist-meta-panel {
+        padding: 12px;
+    }
+    .enhanced-meta-input {
+        font-size: 12px;
+        padding: 6px 8px;
+    }
+
+    /* Enhanced view — album expanded header */
+    .enhanced-expanded-header {
+        flex-direction: column;
+        gap: 12px;
+        padding: 14px;
+    }
+    .enhanced-expanded-thumb {
+        width: 80px;
+        height: 80px;
+        align-self: center;
+    }
+    .enhanced-expanded-info {
+        width: 100%;
+    }
+    .enhanced-expanded-title {
+        font-size: 16px;
+        text-align: center;
+    }
+    .enhanced-expanded-actions {
+        flex-direction: column;
+        gap: 6px;
+        width: 100%;
+    }
+    .enhanced-expanded-actions button {
+        width: 100%;
+        font-size: 12px;
+        padding: 8px;
+    }
+
+    /* Enhanced view — album expanded rows */
+    .enhanced-album-row {
+        flex-wrap: wrap;
+    }
+    .enhanced-album-thumb {
+        width: 40px;
+        height: 40px;
+    }
+    .enhanced-album-title {
+        font-size: 13px;
+    }
+    .enhanced-album-meta-line {
+        font-size: 11px;
+        white-space: normal;
+    }
+    .enhanced-album-meta-row {
+        grid-template-columns: 1fr !important;
+        gap: 8px;
+        padding: 10px;
+    }
+    .enhanced-album-meta-input {
+        font-size: 11px;
+        padding: 5px 8px;
+    }
+    .enhanced-album-actions {
+        flex-wrap: wrap;
+        gap: 6px;
+        width: 100%;
+    }
+    .enhanced-album-actions button {
+        font-size: 11px;
+        padding: 5px 10px;
+        flex: 1;
+        min-width: 80px;
+    }
+    .enhanced-album-save-btn {
+        width: 100%;
+    }
+
+    /* Enhanced view — track table */
+    .enhanced-track-table {
+        table-layout: auto;
+        font-size: 12px;
+    }
+    .enhanced-track-table th,
+    .enhanced-track-table td {
+        padding: 6px 3px;
+        font-size: 11px;
+    }
+    .enhanced-track-table .col-num {
+        width: 24px;
+    }
+    .enhanced-track-table .col-title {
+        word-break: break-word;
+    }
+    .enhanced-track-table .col-duration {
+        width: 42px;
+        font-size: 10px;
+    }
+    .enhanced-track-table .col-bitrate {
+        display: none;
+    }
+    .enhanced-track-table .col-actions {
+        width: 32px;
+    }
+    .enhanced-track-table .col-play {
+        width: 26px;
+    }
+    /* Hide less essential columns on mobile */
+    .enhanced-track-table .col-path,
+    .enhanced-track-table .col-bpm,
+    .enhanced-track-table .col-format,
+    .enhanced-track-table .col-match,
+    .enhanced-track-table .col-disc {
+        display: none;
+    }
+
+    /* Collapse queue/writetag/delete into single ⋯ actions column on mobile */
+    .enhanced-track-table .col-queue,
+    .enhanced-track-table .col-writetag,
+    .enhanced-track-table .col-delete,
+    .enhanced-track-table .col-report {
+        display: none;
+    }
+    .enhanced-track-table .col-mobile-actions {
+        display: table-cell;
+        width: 36px;
+        text-align: center;
+    }
+
+    /* Mobile actions popover */
+    .enhanced-mobile-actions-popover {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: rgba(20, 20, 20, 0.98);
+        backdrop-filter: blur(20px);
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 16px 16px 0 0;
+        padding: 16px;
+        z-index: 10001;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        animation: slideUpPopover 0.25s ease-out;
+    }
+    .enhanced-mobile-actions-popover .popover-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: rgba(255, 255, 255, 0.5);
+        padding: 0 4px 8px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        margin-bottom: 4px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .enhanced-mobile-actions-popover button {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        padding: 14px 16px;
+        background: none;
+        border: none;
+        border-radius: 10px;
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 14px;
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+    .enhanced-mobile-actions-popover button:active {
+        background: rgba(255, 255, 255, 0.08);
+    }
+    .enhanced-mobile-actions-popover button .popover-icon {
+        font-size: 16px;
+        width: 24px;
+        text-align: center;
+    }
+    .enhanced-mobile-actions-popover button.popover-delete {
+        color: rgba(255, 80, 80, 0.8);
+    }
+    .enhanced-mobile-actions-popover button.popover-cancel {
+        color: rgba(255, 255, 255, 0.4);
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        margin-top: 4px;
+    }
+    .mobile-popover-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 10000;
+    }
+
+    @keyframes slideUpPopover {
+        from { transform: translateY(100%); }
+        to { transform: translateY(0); }
+    }
+
+    /* Bulk bar */
+    .enhanced-bulk-bar {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .enhanced-bulk-bar .enhanced-bulk-btn {
+        font-size: 11px;
+        padding: 6px 10px;
+    }
     /* Now Playing Modal */
     .np-modal {
         width: 100vw;
@@ -2244,5 +2584,596 @@
     }
     .np-volume-slider-container {
         width: 120px;
+    }
+}
+
+/* ======================================
+   STATS PAGE — Mobile
+   ====================================== */
+
+@media (max-width: 768px) {
+    .stats-container {
+        padding: 12px !important;
+        margin: 8px !important;
+        gap: 14px;
+        border-radius: 16px;
+    }
+
+    .stats-header {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 12px !important;
+        margin: -12px -12px 0 -12px !important;
+        gap: 10px;
+        border-top-left-radius: 16px;
+        border-top-right-radius: 16px;
+    }
+
+    .stats-header-title {
+        gap: 8px;
+    }
+
+    .stats-header-title .page-header-icon {
+        width: 24px;
+        height: 24px;
+    }
+
+    .stats-header-title h1 {
+        font-size: 18px;
+    }
+
+    .stats-header-controls {
+        width: 100%;
+        flex-direction: column;
+        align-items: flex-start !important;
+        gap: 8px;
+    }
+
+    .stats-time-range {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        width: 100%;
+    }
+
+    .stats-range-btn {
+        padding: 6px 12px;
+        font-size: 11px;
+        flex: 1;
+        text-align: center;
+    }
+
+    .stats-sync-controls {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .stats-last-synced {
+        font-size: 11px;
+    }
+
+    .stats-sync-btn {
+        padding: 6px 12px;
+        font-size: 12px;
+    }
+
+    /* Overview cards — 2 columns */
+    .stats-overview {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 8px;
+    }
+
+    .stats-card {
+        padding: 12px 10px;
+        border-radius: 10px;
+    }
+
+    .stats-card-value {
+        font-size: 18px !important;
+    }
+
+    .stats-card-label {
+        font-size: 9px;
+        letter-spacing: 0.04em;
+    }
+
+    /* Main grid — single column */
+    .stats-main-grid {
+        grid-template-columns: 1fr !important;
+        gap: 14px;
+    }
+
+    .stats-left-col,
+    .stats-right-col {
+        width: 100% !important;
+        gap: 14px;
+    }
+
+    .stats-section-card {
+        padding: 12px;
+        border-radius: 12px;
+    }
+
+    .stats-section-title {
+        font-size: 13px;
+        margin-bottom: 10px;
+    }
+
+    /* Timeline chart — shrink height */
+    .stats-section-card > div[style*="height:220px"],
+    .stats-section-card > div[style*="height: 220px"] {
+        height: 160px !important;
+    }
+
+    /* Genre chart — stack vertically, shrink canvas */
+    .stats-genre-chart-container {
+        flex-direction: column !important;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .stats-genre-chart-container canvas {
+        width: 130px !important;
+        height: 130px !important;
+    }
+
+    .stats-genre-legend {
+        width: 100%;
+    }
+
+    .stats-genre-legend-item {
+        font-size: 11px;
+    }
+
+    /* Top artists bubbles */
+    .stats-artist-bubbles {
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .stats-artist-bubble {
+        max-width: 60px;
+    }
+
+    .stats-bubble-img {
+        width: 44px !important;
+        height: 44px !important;
+    }
+
+    .stats-bubble-name {
+        font-size: 9px;
+    }
+
+    .stats-bubble-count {
+        font-size: 9px;
+    }
+
+    .stats-bubble-bar-container {
+        height: 3px;
+    }
+
+    /* Ranked lists */
+    .stats-ranked-item {
+        padding: 8px 8px;
+        gap: 6px;
+    }
+
+    .stats-ranked-num {
+        font-size: 11px;
+        min-width: 18px;
+    }
+
+    .stats-ranked-img {
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+    }
+
+    .stats-ranked-info {
+        min-width: 0;
+    }
+
+    .stats-ranked-name {
+        font-size: 12px;
+    }
+
+    .stats-ranked-meta {
+        font-size: 10px;
+    }
+
+    .stats-ranked-count {
+        font-size: 10px;
+        white-space: nowrap;
+    }
+
+    .stats-play-btn {
+        width: 24px;
+        height: 24px;
+        font-size: 8px;
+        opacity: 1;
+    }
+
+    .stats-play-btn-sm {
+        width: 20px;
+        height: 20px;
+        font-size: 7px;
+        opacity: 1;
+    }
+
+    /* Recent plays */
+    .stats-recent-item {
+        padding: 6px 8px;
+        gap: 6px;
+    }
+
+    .stats-recent-title {
+        font-size: 12px;
+    }
+
+    .stats-recent-artist {
+        font-size: 11px;
+    }
+
+    .stats-recent-time {
+        font-size: 10px;
+    }
+
+    /* Library health */
+    .stats-full-width {
+        padding: 12px;
+    }
+
+    .stats-health-grid {
+        grid-template-columns: 1fr !important;
+        gap: 10px;
+    }
+
+    .stats-health-label {
+        font-size: 11px;
+    }
+
+    .stats-health-value {
+        font-size: 16px;
+    }
+
+    .stats-format-bar {
+        min-height: 20px;
+        border-radius: 6px;
+    }
+
+    .stats-format-segment {
+        font-size: 9px;
+    }
+
+    /* Enrichment coverage bars */
+    .stats-enrichment {
+        gap: 6px;
+    }
+
+    .stats-enrich-item {
+        gap: 6px;
+    }
+
+    .stats-enrich-name {
+        font-size: 10px;
+        min-width: 55px;
+    }
+
+    .stats-enrich-pct {
+        font-size: 10px;
+        min-width: 28px;
+    }
+
+    /* Empty state */
+    .stats-empty-icon {
+        font-size: 40px;
+    }
+
+    .stats-empty h3 {
+        font-size: 16px;
+    }
+
+    .stats-empty p {
+        font-size: 13px;
+    }
+}
+
+/* ======================================
+   ARTIST ENRICHMENT RINGS — Mobile
+   ====================================== */
+
+@media (max-width: 768px) {
+    .artist-enrichment-coverage {
+        margin-top: 12px;
+    }
+
+    .artist-enrich-grid {
+        grid-template-columns: repeat(5, 1fr);
+        gap: 8px 4px;
+    }
+
+    .artist-enrich-ring {
+        width: 36px;
+        height: 36px;
+    }
+
+    .artist-enrich-ring svg {
+        width: 36px;
+        height: 36px;
+    }
+
+    .artist-enrich-ring .ring-pct {
+        font-size: 8px;
+    }
+
+    .artist-enrich-label {
+        font-size: 0.5em;
+    }
+}
+
+@media (max-width: 480px) {
+    .artist-enrich-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px 8px;
+    }
+}
+
+/* ======================================
+   AUTOMATIONS PAGE — Mobile
+   ====================================== */
+
+@media (max-width: 768px) {
+    .automations-container {
+        padding: 16px;
+    }
+
+    .automations-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .automations-header-actions {
+        width: 100%;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .automations-header-actions button {
+        flex: 1;
+        min-width: 120px;
+    }
+
+    .automations-stats {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .automations-stat {
+        font-size: 12px;
+    }
+
+    /* Builder view */
+    .builder-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: 12px;
+    }
+
+    .builder-name-input,
+    .builder-group-input {
+        width: 100%;
+        font-size: 14px;
+    }
+
+    .builder-header-actions {
+        width: 100%;
+        display: flex;
+        gap: 8px;
+    }
+
+    .builder-header-actions button {
+        flex: 1;
+        font-size: 12px;
+        padding: 8px;
+    }
+
+    .builder-content {
+        flex-direction: column;
+    }
+
+    .builder-sidebar {
+        width: 100%;
+        max-height: 200px;
+        border-right: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        overflow-y: auto;
+    }
+
+    .builder-canvas {
+        width: 100%;
+        flex: 1;
+    }
+
+    .block-item {
+        padding: 10px;
+    }
+
+    .block-inputs label {
+        font-size: 12px;
+    }
+
+    .block-inputs input,
+    .block-inputs select {
+        font-size: 13px;
+        padding: 6px 8px;
+    }
+
+    .condition-builder {
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .condition-builder select,
+    .condition-builder input {
+        width: 100%;
+    }
+
+    /* Automation cards */
+    .automation-card {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .automation-card-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
+
+/* ======================================
+   HYDRABASE PAGE — Mobile
+   ====================================== */
+
+@media (max-width: 768px) {
+    .hydrabase-container {
+        flex-direction: column;
+        height: auto;
+        overflow-y: auto;
+    }
+
+    .hydrabase-panel {
+        width: 100%;
+        min-height: 200px;
+    }
+
+    .hydrabase-card {
+        padding: 12px;
+    }
+
+    .hydrabase-card > div {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .hydrabase-card input,
+    .hydrabase-card select {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .hydra-payload {
+        width: 100%;
+        min-height: 80px;
+    }
+
+    .hydrabase-response-area {
+        max-height: 250px;
+        font-size: 12px;
+    }
+}
+
+/* ======================================
+   ISSUES PAGE — Mobile (supplement)
+   ====================================== */
+
+@media (max-width: 768px) {
+    .issues-header-right {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .issues-filter-select {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .issues-stats {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+
+    .issues-stat-card {
+        min-width: 0;
+        padding: 10px;
+    }
+
+    .issues-stat-value {
+        font-size: 18px;
+    }
+
+    .issue-card-right {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+}
+
+/* ======================================
+   HELP / DOCS PAGE — Mobile
+   ====================================== */
+
+@media (max-width: 768px) {
+    .docs-layout {
+        flex-direction: column;
+        overflow: visible;
+    }
+
+    .docs-sidebar {
+        width: 100%;
+        min-width: 0;
+        height: auto;
+        max-height: 200px;
+        overflow-y: auto;
+        border-right: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .docs-sidebar-header {
+        padding: 16px;
+    }
+
+    .docs-sidebar-header h3 {
+        font-size: 16px;
+    }
+
+    .docs-content {
+        width: 100%;
+        padding: 16px;
+        overflow-y: auto;
+    }
+
+    .docs-content h1 {
+        font-size: 22px;
+    }
+
+    .docs-content h2 {
+        font-size: 18px;
+    }
+
+    .docs-content pre {
+        font-size: 12px;
+        overflow-x: auto;
+    }
+}
+
+/* ======================================
+   WATCHLIST / ENHANCE BUTTONS — Mobile
+   ====================================== */
+
+@media (max-width: 768px) {
+    .library-artist-watchlist-btn,
+    .library-artist-enhance-btn {
+        padding: 8px 14px;
+        font-size: 12px;
+        gap: 6px;
+    }
+
+    .library-artist-watchlist-btn .watchlist-icon,
+    .library-artist-enhance-btn .enhance-icon {
+        font-size: 12px;
     }
 }
