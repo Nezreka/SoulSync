@@ -18450,6 +18450,81 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔍 Cache-Powered Discovery",
+                "description": "Five new discover sections mined from your metadata cache — zero API calls",
+                "features": [
+                    "• Undiscovered Albums: albums by your most-played artists that aren't in your library",
+                    "• New In Your Genres: recently released albums matching your top genres",
+                    "• From Your Labels: popular albums on labels already in your library",
+                    "• Deep Cuts: low-popularity tracks from artists you listen to — find the hidden gems",
+                    "• Genre Explorer: genre landscape pills with artist counts — tap to deep dive",
+                    "• All data sourced from local metadata cache — instant, no API rate limits"
+                ]
+            },
+            {
+                "title": "🎶 Genre Deep Dive Modal",
+                "description": "Tap any genre pill to explore artists, tracks, and albums in that genre",
+                "features": [
+                    "• Artists section with scaled avatars — top artist gets largest, 'In Library' badges",
+                    "• Click any artist → navigates directly to their page on the Artists tab",
+                    "• Popular tracks list with album art, duration, click to open album download modal",
+                    "• Albums carousel with 'In Library' badges and full download flow on click",
+                    "• Related genres pills — click to seamlessly switch to a sibling genre",
+                    "• Header shows counts: '12 artists · 15 tracks · 20 albums'",
+                    "• Accent gradient header with animated light sweep"
+                ]
+            },
+            {
+                "title": "💾 Database Storage Visualization",
+                "description": "See how your database space is distributed across tables",
+                "features": [
+                    "• Donut chart on Stats page showing storage breakdown by table",
+                    "• Uses SQLite dbstat for real byte sizes, falls back to row counts",
+                    "• Top 8 tables shown individually, rest grouped as 'Other'",
+                    "• Center label shows total database file size"
+                ]
+            },
+            {
+                "title": "⚡ Library Page Performance",
+                "description": "Library artist grid loads significantly faster with smoother animations",
+                "features": [
+                    "• innerHTML batch rendering replaces per-card DOM manipulation — near-instant grid population",
+                    "• Database query split into 3 steps: paginate first, then batch-fetch counts for visible page only",
+                    "• Event delegation — single click listener instead of 75+ individual handlers",
+                    "• Staggered card fade-in animation on page load"
+                ]
+            },
+            {
+                "title": "🔄 Per-Artist Enrichment Rings",
+                "description": "See metadata coverage for each artist on their detail page",
+                "features": [
+                    "• SVG ring indicators for all 9 enrichment services below the album/EP/singles bars",
+                    "• Rings animate on page load with staggered fill-in effect",
+                    "• Hover glow in each service's brand color",
+                    "• Stats page enrichment coverage also expanded to all 9 services"
+                ]
+            },
+            {
+                "title": "📱 Mobile Responsive Overhaul",
+                "description": "Comprehensive mobile layout fixes across all pages",
+                "features": [
+                    "• Stats, Automations, Hydrabase, Issues, Help pages now fully mobile responsive",
+                    "• Artist hero section stacks properly with compact image, wrapping badges, bio clamp",
+                    "• Enhanced library track table: action columns collapse into iOS-style bottom sheet popover",
+                    "• Genre explorer, enrichment rings, filter bars all adapt to narrow screens"
+                ]
+            },
+            {
+                "title": "🎵 Album Split Fix (Navidrome)",
+                "description": "Prevent deluxe/standard editions from splitting into separate albums",
+                "features": [
+                    "• MusicBrainz release cache key normalized — strips edition suffixes (Deluxe, Remastered, etc.)",
+                    "• First track's MBID locked in for all subsequent tracks in the same album",
+                    "• Handles both parenthetical '(Deluxe Edition)' and bare 'Deluxe Edition' suffixes",
+                    "• Opus bitrate capped at 256kbps to prevent encoding failures"
+                ]
+            },
+            {
                 "title": "🎧 Scrobbling to Last.fm & ListenBrainz",
                 "description": "Automatically scrobble your plays from Plex, Jellyfin, or Navidrome",
                 "features": [
