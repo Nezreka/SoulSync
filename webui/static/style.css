@@ -6026,25 +6026,18 @@ body {
 .service-status-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-    gap: 20px;
+    gap: 16px;
 }
 
 .service-card {
-    background: linear-gradient(135deg,
-            rgba(20, 20, 20, 0.95) 0%,
-            rgba(12, 12, 12, 0.98) 100%);
-    border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-top: 1px solid rgba(255, 255, 255, 0.18);
-    padding: 20px;
-    padding-left: 24px;
+    background: rgba(18, 18, 22, 0.9);
+    backdrop-filter: blur(12px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 20px 22px;
     position: relative;
     overflow: hidden;
-
-    box-shadow:
-        0 20px 60px rgba(0, 0, 0, 0.6),
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 0 40px rgba(var(--accent-rgb), 0.1),
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
         inset 0 1px 0 rgba(255, 255, 255, 0.15);
 
     display: flex;
@@ -6054,30 +6047,28 @@ body {
     transform: translateZ(0);
 }
 
-/* Status accent bar on left edge */
+/* Top accent line */
 .service-card::before {
     content: '';
     position: absolute;
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 3px;
-    height: 50%;
-    border-radius: 0 3px 3px 0;
-    background: linear-gradient(180deg,
-            rgba(255, 255, 255, 0.15) 0%,
-            rgba(255, 255, 255, 0.08) 100%);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    top: 0;
+    left: 20%;
+    right: 20%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    transition: all 0.3s;
 }
 
 .service-card:hover {
-    transform: translateY(-3px) scale(1.01);
-    border-color: rgba(255, 255, 255, 0.18);
-    box-shadow:
-        0 24px 70px rgba(0, 0, 0, 0.7),
-        0 10px 38px rgba(0, 0, 0, 0.5),
-        0 0 48px rgba(var(--accent-rgb), 0.15),
-        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+    border-color: rgba(var(--accent-rgb), 0.15);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(var(--accent-rgb), 0.06);
+}
+
+.service-card:hover::before {
+    left: 10%;
+    right: 10%;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.5), transparent);
 }
 
 .service-card-header {
@@ -6089,7 +6080,7 @@ body {
 .service-card-title {
     font-size: 14px;
     font-weight: 700;
-    color: #ffffff;
+    color: rgba(255, 255, 255, 0.9);
 }
 
 .service-card-indicator {
@@ -6121,60 +6112,72 @@ body {
     50% { text-shadow: 0 0 12px rgba(var(--accent-rgb), 0.8), 0 0 24px rgba(var(--accent-rgb), 0.5); }
 }
 
-/* Green accent bar when service is connected */
+/* Top accent line when connected */
 .service-card:has(.service-card-indicator.connected)::before {
-    background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb)));
-    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.6);
-    height: 60%;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.6), transparent);
+    left: 10%;
+    right: 10%;
 }
 
-/* Red accent bar when disconnected */
+/* Top accent line when disconnected */
 .service-card:has(.service-card-indicator.disconnected)::before {
-    background: linear-gradient(180deg, #ff6b6b, #ff4444);
-    box-shadow: 0 0 8px rgba(255, 68, 68, 0.4);
-    height: 40%;
+    background: linear-gradient(90deg, transparent, rgba(255, 68, 68, 0.4), transparent);
 }
 
 .service-card-status-text {
     font-size: 12px;
-    color: #b3b3b3;
+    color: rgba(255, 255, 255, 0.4);
 }
 
 .service-card-response-time {
     font-size: 11px;
-    color: #888888;
+    color: rgba(255, 255, 255, 0.25);
+    font-variant-numeric: tabular-nums;
 }
 
 .service-card-footer {
     margin-top: auto;
-    /* Pushes button to the bottom */
-    padding-top: 8px;
+    padding-top: 10px;
 }
 
 .service-card-button {
     width: 100%;
-    padding: 10px 16px;
-    border: 1px solid rgba(var(--accent-rgb), 0.25);
-    border-radius: 12px;
+    padding: 9px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
     outline: none;
     user-select: none;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+    color: rgba(255, 255, 255, 0.7);
+    letter-spacing: 0.01em;
+    position: relative;
+    overflow: hidden;
+}
 
-    background: rgba(var(--accent-rgb), 0.06);
-    color: rgb(var(--accent-light-rgb));
-    letter-spacing: 0.3px;
+.service-card-button::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.05) 100%);
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.service-card-button:hover::before {
+    opacity: 1;
 }
 
 .service-card-button:hover {
-    background: rgba(var(--accent-rgb), 0.15);
-    border-color: rgba(var(--accent-rgb), 0.45);
-    color: rgb(var(--accent-neon-rgb));
+    color: #fff;
+    border-color: rgba(var(--accent-rgb), 0.35);
     transform: translateY(-1px);
-    box-shadow: 0 4px 15px rgba(var(--accent-rgb), 0.2), 0 0 8px rgba(var(--accent-rgb), 0.1);
+    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.15);
 }
 
 
@@ -6182,33 +6185,25 @@ body {
 .stats-grid-dashboard {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 20px;
+    gap: 16px;
 }
 
 .stat-card-dashboard {
-    background: linear-gradient(135deg,
-            rgba(20, 20, 20, 0.95) 0%,
-            rgba(12, 12, 12, 0.98) 100%);
-    border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    padding: 24px 20px;
+    background: rgba(18, 18, 22, 0.9);
+    backdrop-filter: blur(12px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 20px;
     position: relative;
     overflow: hidden;
-
-    box-shadow:
-        0 20px 60px rgba(0, 0, 0, 0.6),
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 0 40px rgba(var(--accent-rgb), 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.15);
-
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 4px;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    transform: translateZ(0);
 }
 
-/* Green gradient top accent line */
+/* Top accent line */
 .stat-card-dashboard::before {
     content: '';
     position: absolute;
@@ -6216,201 +6211,190 @@ body {
     left: 20%;
     right: 20%;
     height: 2px;
-    background: linear-gradient(90deg,
-        transparent 0%,
-        rgba(var(--accent-rgb), 0.5) 30%,
-        rgba(var(--accent-light-rgb), 0.7) 50%,
-        rgba(var(--accent-rgb), 0.5) 70%,
-        transparent 100%);
-    border-radius: 0 0 2px 2px;
-    transition: all 0.3s ease;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.4), transparent);
+    border-radius: 2px;
+    transition: all 0.3s;
 }
 
 .stat-card-dashboard:hover {
-    transform: translateY(-4px) scale(1.02);
-    border-color: rgba(var(--accent-rgb), 0.25);
-    box-shadow:
-        0 24px 70px rgba(0, 0, 0, 0.7),
-        0 10px 38px rgba(0, 0, 0, 0.5),
-        0 0 48px rgba(var(--accent-rgb), 0.2),
-        0 0 80px rgba(var(--accent-rgb), 0.08),
-        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+    border-color: rgba(var(--accent-rgb), 0.15);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(var(--accent-rgb), 0.06);
 }
 
 .stat-card-dashboard:hover::before {
-    left: 0%;
-    right: 0%;
-    height: 3px;
-    background: linear-gradient(90deg,
-        transparent 0%,
-        rgba(var(--accent-rgb), 0.6) 20%,
-        rgba(var(--accent-light-rgb), 0.9) 50%,
-        rgba(var(--accent-rgb), 0.6) 80%,
-        transparent 100%);
-    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.4),
-        0 0 24px rgba(var(--accent-rgb), 0.15);
+    left: 10%;
+    right: 10%;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.7), transparent);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.3);
 }
 
 .stat-card-title {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.4);
     text-transform: uppercase;
-    letter-spacing: 0.8px;
+    letter-spacing: 0.06em;
 }
 
 .stat-card-value {
-    font-size: 28px;
+    font-size: 24px;
     font-weight: 700;
-    background: linear-gradient(180deg, #ffffff 0%, rgba(255, 255, 255, 0.85) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    filter: drop-shadow(0 0 12px rgba(var(--accent-rgb), 0.2));
+    color: rgba(255, 255, 255, 0.9);
 }
 
 .stat-card-subtitle {
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.25);
 }
 
 /* Tools & Operations Grid */
 .tools-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 16px;
 }
 
 .tool-card {
-    background: linear-gradient(135deg,
-            rgba(20, 20, 20, 0.95) 0%,
-            rgba(12, 12, 12, 0.98) 100%);
-    border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-top: 1px solid rgba(255, 255, 255, 0.18);
-    padding: 24px;
-    padding-left: 28px;
+    background: rgba(18, 18, 22, 0.9);
+    backdrop-filter: blur(12px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 22px 24px;
     position: relative;
     overflow: hidden;
-
-    box-shadow:
-        0 20px 60px rgba(0, 0, 0, 0.6),
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 0 40px rgba(var(--accent-rgb), 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.15);
-
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 14px;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    transform: translateZ(0);
 }
 
-/* Subtle left accent bar */
+/* Top accent line */
 .tool-card::before {
     content: '';
     position: absolute;
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 3px;
-    height: 40%;
-    border-radius: 0 3px 3px 0;
-    background: linear-gradient(180deg,
-            rgba(var(--accent-rgb), 0.4) 0%,
-            rgba(var(--accent-rgb), 0.15) 100%);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    top: 0;
+    left: 20%;
+    right: 20%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.4), transparent);
+    border-radius: 2px;
+    transition: all 0.3s;
 }
 
 .tool-card:hover {
-    transform: translateY(-3px);
-    border-color: rgba(var(--accent-rgb), 0.2);
-    box-shadow:
-        0 24px 70px rgba(0, 0, 0, 0.7),
-        0 10px 38px rgba(0, 0, 0, 0.5),
-        0 0 48px rgba(var(--accent-rgb), 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+    border-color: rgba(var(--accent-rgb), 0.15);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(var(--accent-rgb), 0.06);
 }
 
 .tool-card:hover::before {
-    height: 60%;
-    background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb)));
-    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.5);
+    left: 10%;
+    right: 10%;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.7), transparent);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.3);
 }
 
 .tool-card-title {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 700;
-    color: #ffffff;
+    color: rgba(255, 255, 255, 0.9);
+    letter-spacing: -0.01em;
 }
 
 .tool-card-info {
     font-size: 12px;
-    color: #b3b3b3;
-    min-height: 2em;
-    /* Reserve space for two lines */
+    color: rgba(255, 255, 255, 0.4);
+    line-height: 1.5;
+    min-height: 0;
 }
 
 .tool-card-controls {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
 }
 
 .tool-card-controls select {
     flex-grow: 1;
-    padding: 10px 16px;
-    background: linear-gradient(135deg,
-            rgba(51, 51, 51, 0.95) 0%,
-            rgba(34, 34, 34, 0.98) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    color: #ffffff;
-    font-size: 14px;
+    padding: 9px 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
     outline: none;
-    transition: all 0.2s ease;
+    transition: all 0.2s;
+    cursor: pointer;
 }
 
 .tool-card-controls select:hover {
-    border-color: rgba(255, 255, 255, 0.2);
-    background: linear-gradient(135deg,
-            rgba(58, 58, 58, 0.95) 0%,
-            rgba(40, 40, 40, 0.98) 100%);
+    border-color: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.tool-card-controls select:focus {
+    border-color: rgba(var(--accent-rgb), 0.4);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.1);
 }
 
 .tool-card-controls select option {
-    background: #333333;
+    background: #1a1a1e;
     color: #ffffff;
 }
 
 .tool-card-controls button {
     padding: 10px 20px;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    font-size: 14px;
+    border-radius: 10px;
+    font-size: 13px;
     font-weight: 600;
+    letter-spacing: 0.01em;
     cursor: pointer;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
     outline: none;
     user-select: none;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+    color: rgba(255, 255, 255, 0.8);
+    min-width: 130px;
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(4px);
+}
 
-    background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, rgb(var(--accent-light-rgb)) 100%);
-    color: #ffffff;
-    min-width: 140px;
-    box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.3);
+.tool-card-controls button::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.05) 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.tool-card-controls button:hover:not(:disabled)::before {
+    opacity: 1;
 }
 
 .tool-card-controls button:hover:not(:disabled) {
-    background: linear-gradient(135deg, rgb(var(--accent-light-rgb)) 0%, rgb(var(--accent-neon-rgb)) 100%);
+    color: #ffffff;
+    border-color: rgba(var(--accent-rgb), 0.35);
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.4), 0 0 15px rgba(var(--accent-rgb), 0.2);
+    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.2), 0 0 0 1px rgba(var(--accent-rgb), 0.1);
+}
+
+.tool-card-controls button:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: none;
 }
 
 .tool-card-controls button:disabled {
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.04);
     cursor: not-allowed;
     transform: none;
     box-shadow: none;
@@ -6422,17 +6406,17 @@ body {
     align-items: center;
     justify-content: center;
     gap: 10px;
-    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
-    padding: 14px 24px;
-    font-size: 15px;
-    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.3);
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9) 0%, rgba(var(--accent-light-rgb), 0.9) 100%);
+    padding: 12px 22px;
+    font-size: 14px;
+    box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.2);
     width: 100%;
+    border-radius: 10px;
 }
 
 .media-scan-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-neon-rgb)));
-    box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.4);
-    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.3);
+    transform: translateY(-1px);
 }
 
 .media-scan-btn .scan-icon {
@@ -6469,29 +6453,31 @@ body {
 }
 
 .tool-card-progress-section {
-    padding-top: 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
 }
 
 .progress-phase-label {
-    font-size: 12px;
-    color: #b3b3b3;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+    font-weight: 500;
 }
 
 .progress-details-label {
-    font-size: 11px;
-    color: #888888;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.3);
     text-align: center;
+    font-variant-numeric: tabular-nums;
 }
 
 .progress-bar-container {
-    height: 8px;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    border-radius: 5px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    border: none;
+    border-radius: 2px;
     overflow: hidden;
 }
 
@@ -7350,12 +7336,11 @@ body {
 .tool-card-stats {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    padding: 10px;
-    background: rgba(0, 0, 0, 0.2);
+    gap: 6px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.04);
     border-radius: 10px;
-    margin-top: 5px;
-    margin-bottom: 5px;
 }
 
 .stat-item {
@@ -7363,10 +7348,11 @@ body {
     justify-content: space-between;
     align-items: center;
     font-size: 12px;
+    padding: 2px 0;
 }
 
 .stat-item-label {
-    color: #b3b3b3;
+    color: rgba(255, 255, 255, 0.35);
 }
 
 .stat-item-value {
@@ -24520,7 +24506,7 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
+    margin-bottom: 2px;
 }
 
 .tool-card-header .tool-card-title {
@@ -24528,13 +24514,13 @@ body {
 }
 
 .tool-help-button {
-    width: 24px;
-    height: 24px;
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.4);
-    font-size: 13px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 11px;
     font-weight: bold;
     cursor: pointer;
     display: flex;
