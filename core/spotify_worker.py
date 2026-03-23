@@ -45,7 +45,6 @@ class SpotifyWorker:
 
         # Retry configuration
         self.retry_days = 30
-        self.error_retry_days = 7
 
         # Name matching threshold
         self.name_similarity_threshold = 0.80
@@ -287,18 +286,16 @@ class SpotifyWorker:
             if row:
                 return {'type': 'track_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}
 
-            # Priority 6: Retry stale failures
+            # Priority 6: Retry stale 'not_found' failures
             not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-            error_cutoff = datetime.now() - timedelta(days=self.error_retry_days)
 
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE (spotify_match_status = 'not_found' AND spotify_last_attempted < ?)
-                   OR (spotify_match_status = 'error' AND spotify_last_attempted < ?)
+                WHERE spotify_match_status = 'not_found' AND spotify_last_attempted < ?
                 ORDER BY spotify_last_attempted ASC
                 LIMIT 1
-            """, (not_found_cutoff, error_cutoff))
+            """, (not_found_cutoff,))
             row = cursor.fetchone()
             if row:
                 return {'type': 'artist', 'id': row[0], 'name': row[1]}
@@ -307,11 +304,10 @@ class SpotifyWorker:
                 SELECT a.id, a.title, ar.name AS artist_name
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE (a.spotify_match_status = 'not_found' AND a.spotify_last_attempted < ?)
-                   OR (a.spotify_match_status = 'error' AND a.spotify_last_attempted < ?)
+                WHERE a.spotify_match_status = 'not_found' AND a.spotify_last_attempted < ?
                 ORDER BY a.spotify_last_attempted ASC
                 LIMIT 1
-            """, (not_found_cutoff, error_cutoff))
+            """, (not_found_cutoff,))
             row = cursor.fetchone()
             if row:
                 return {'type': 'album_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}
@@ -320,11 +316,10 @@ class SpotifyWorker:
                 SELECT t.id, t.title, ar.name AS artist_name
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE (t.spotify_match_status = 'not_found' AND t.spotify_last_attempted < ?)
-                   OR (t.spotify_match_status = 'error' AND t.spotify_last_attempted < ?)
+                WHERE t.spotify_match_status = 'not_found' AND t.spotify_last_attempted < ?
                 ORDER BY t.spotify_last_attempted ASC
                 LIMIT 1
-            """, (not_found_cutoff, error_cutoff))
+            """, (not_found_cutoff,))
             row = cursor.fetchone()
             if row:
                 return {'type': 'track_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}
