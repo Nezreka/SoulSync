@@ -45,7 +45,6 @@ class GeniusWorker:
 
         # Retry configuration
         self.retry_days = 30
-        self.error_retry_days = 7
 
         # Name matching threshold
         self.name_similarity_threshold = 0.75  # Slightly lower — Genius titles often include featured artists
@@ -200,32 +199,29 @@ class GeniusWorker:
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2]}
 
-            # Priority 3: Retry artists
+            # Priority 3: Retry 'not_found' artists
             not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-            error_cutoff = datetime.now() - timedelta(days=self.error_retry_days)
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE (genius_match_status = 'not_found' AND genius_last_attempted < ?)
-                   OR (genius_match_status = 'error' AND genius_last_attempted < ?)
+                WHERE genius_match_status = 'not_found' AND genius_last_attempted < ?
                 ORDER BY genius_last_attempted ASC
                 LIMIT 1
-            """, (not_found_cutoff, error_cutoff))
+            """, (not_found_cutoff,))
             row = cursor.fetchone()
             if row:
                 logger.info(f"Retrying artist '{row[1]}' (last attempted before cutoff)")
                 return {'type': 'artist', 'id': row[0], 'name': row[1]}
 
-            # Priority 4: Retry tracks
+            # Priority 4: Retry 'not_found' tracks
             cursor.execute("""
                 SELECT t.id, t.title, ar.name AS artist_name
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE (t.genius_match_status = 'not_found' AND t.genius_last_attempted < ?)
-                   OR (t.genius_match_status = 'error' AND t.genius_last_attempted < ?)
+                WHERE t.genius_match_status = 'not_found' AND t.genius_last_attempted < ?
                 ORDER BY t.genius_last_attempted ASC
                 LIMIT 1
-            """, (not_found_cutoff, error_cutoff))
+            """, (not_found_cutoff,))
             row = cursor.fetchone()
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2]}

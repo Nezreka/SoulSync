@@ -59,7 +59,6 @@ class TidalWorker:
 
         # Retry configuration
         self.retry_days = 30
-        self.error_retry_days = 7
 
         # Name matching threshold
         self.name_similarity_threshold = 0.80
@@ -232,46 +231,42 @@ class TidalWorker:
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_tidal_id': row[3]}
 
-            # Priority 4: Retry 'not_found' or 'error' artists
+            # Priority 4: Retry 'not_found' artists
             not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-            error_cutoff = datetime.now() - timedelta(days=self.error_retry_days)
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE (tidal_match_status = 'not_found' AND tidal_last_attempted < ?)
-                   OR (tidal_match_status = 'error' AND tidal_last_attempted < ?)
+                WHERE tidal_match_status = 'not_found' AND tidal_last_attempted < ?
                 ORDER BY tidal_last_attempted ASC
                 LIMIT 1
-            """, (not_found_cutoff, error_cutoff))
+            """, (not_found_cutoff,))
             row = cursor.fetchone()
             if row:
                 logger.info(f"Retrying artist '{row[1]}' (last attempted before cutoff)")
                 return {'type': 'artist', 'id': row[0], 'name': row[1]}
 
-            # Priority 5: Retry 'not_found' or 'error' albums
+            # Priority 5: Retry 'not_found' albums
             cursor.execute("""
                 SELECT a.id, a.title, ar.name AS artist_name, ar.tidal_id AS artist_tidal_id
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE (a.tidal_match_status = 'not_found' AND a.tidal_last_attempted < ?)
-                   OR (a.tidal_match_status = 'error' AND a.tidal_last_attempted < ?)
+                WHERE a.tidal_match_status = 'not_found' AND a.tidal_last_attempted < ?
                 ORDER BY a.tidal_last_attempted ASC
                 LIMIT 1
-            """, (not_found_cutoff, error_cutoff))
+            """, (not_found_cutoff,))
             row = cursor.fetchone()
             if row:
                 return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_tidal_id': row[3]}
 
-            # Priority 6: Retry 'not_found' or 'error' tracks
+            # Priority 6: Retry 'not_found' tracks
             cursor.execute("""
                 SELECT t.id, t.title, ar.name AS artist_name, ar.tidal_id AS artist_tidal_id
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE (t.tidal_match_status = 'not_found' AND t.tidal_last_attempted < ?)
-                   OR (t.tidal_match_status = 'error' AND t.tidal_last_attempted < ?)
+                WHERE t.tidal_match_status = 'not_found' AND t.tidal_last_attempted < ?
                 ORDER BY t.tidal_last_attempted ASC
                 LIMIT 1
-            """, (not_found_cutoff, error_cutoff))
+            """, (not_found_cutoff,))
             row = cursor.fetchone()
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_tidal_id': row[3]}

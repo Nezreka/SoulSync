@@ -252,18 +252,17 @@ class iTunesWorker:
             if row:
                 return {'type': 'track_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}
 
-            # Priority 6: Retry stale failures
+            # Priority 6: Retry stale not_found items only (errors don't auto-retry —
+            # they require a user-triggered full refresh to prevent infinite retry loops)
             not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-            error_cutoff = datetime.now() - timedelta(days=self.error_retry_days)
 
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE (itunes_match_status = 'not_found' AND itunes_last_attempted < ?)
-                   OR (itunes_match_status = 'error' AND itunes_last_attempted < ?)
+                WHERE itunes_match_status = 'not_found' AND itunes_last_attempted < ?
                 ORDER BY itunes_last_attempted ASC
                 LIMIT 1
-            """, (not_found_cutoff, error_cutoff))
+            """, (not_found_cutoff,))
             row = cursor.fetchone()
             if row:
                 return {'type': 'artist', 'id': row[0], 'name': row[1]}
@@ -272,11 +271,10 @@ class iTunesWorker:
                 SELECT a.id, a.title, ar.name AS artist_name
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE (a.itunes_match_status = 'not_found' AND a.itunes_last_attempted < ?)
-                   OR (a.itunes_match_status = 'error' AND a.itunes_last_attempted < ?)
+                WHERE a.itunes_match_status = 'not_found' AND a.itunes_last_attempted < ?
                 ORDER BY a.itunes_last_attempted ASC
                 LIMIT 1
-            """, (not_found_cutoff, error_cutoff))
+            """, (not_found_cutoff,))
             row = cursor.fetchone()
             if row:
                 return {'type': 'album_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}
@@ -285,11 +283,10 @@ class iTunesWorker:
                 SELECT t.id, t.title, ar.name AS artist_name
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE (t.itunes_match_status = 'not_found' AND t.itunes_last_attempted < ?)
-                   OR (t.itunes_match_status = 'error' AND t.itunes_last_attempted < ?)
+                WHERE t.itunes_match_status = 'not_found' AND t.itunes_last_attempted < ?
                 ORDER BY t.itunes_last_attempted ASC
                 LIMIT 1
-            """, (not_found_cutoff, error_cutoff))
+            """, (not_found_cutoff,))
             row = cursor.fetchone()
             if row:
                 return {'type': 'track_individual', 'id': row[0], 'name': row[1], 'artist': row[2]}

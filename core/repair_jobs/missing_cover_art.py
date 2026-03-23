@@ -67,6 +67,8 @@ class MissingCoverArtJob(RepairJob):
         if context.report_progress:
             context.report_progress(phase=f'Searching artwork for {total} albums...', total=total)
 
+        spotify_skipped = False  # Track if we've logged the rate limit skip
+
         for i, row in enumerate(albums):
             if context.check_stop():
                 return result
@@ -86,14 +88,23 @@ class MissingCoverArtJob(RepairJob):
 
             artwork_url = None
 
+            # Check Spotify rate limit at the top level — skip Spotify entirely if banned
+            spotify_available = not context.is_spotify_rate_limited()
+            if not spotify_available and not spotify_skipped:
+                logger.info("Spotify rate limited — skipping Spotify artwork lookups, using fallback only")
+                spotify_skipped = True
+
             # Try to find artwork URL from APIs
-            if prefer_source == 'spotify':
+            if prefer_source == 'spotify' and spotify_available:
                 artwork_url = self._try_spotify(spotify_album_id, title, artist_name, context)
                 if not artwork_url:
                     artwork_url = self._try_itunes(title, artist_name, context)
+            elif prefer_source == 'spotify' and not spotify_available:
+                # Spotify preferred but rate limited — use fallback only
+                artwork_url = self._try_itunes(title, artist_name, context)
             else:
                 artwork_url = self._try_itunes(title, artist_name, context)
-                if not artwork_url:
+                if not artwork_url and spotify_available:
                     artwork_url = self._try_spotify(spotify_album_id, title, artist_name, context)
 
             if artwork_url:
