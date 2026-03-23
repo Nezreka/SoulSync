@@ -4499,7 +4499,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -26860,6 +26860,61 @@ def hifi_status():
         })
     except Exception as e:
         return jsonify({"available": False, "error": str(e)})
+
+
+# ===================================================================
+# DEEZER DOWNLOAD ENDPOINTS
+# ===================================================================
+
+@app.route('/api/deezer-download/test', methods=['POST'])
+def deezer_download_test():
+    """Test Deezer ARL token authentication."""
+    try:
+        data = request.get_json() or {}
+        arl = data.get('arl', '')
+        if not arl:
+            return jsonify({'success': False, 'error': 'No ARL token provided'})
+
+        import requests as req
+        import threading
+
+        session = req.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                          '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+        })
+        session.cookies.set('arl', arl)
+
+        resp = session.post(
+            'https://www.deezer.com/ajax/gw-light.php',
+            params={'method': 'deezer.getUserData', 'api_version': '1.0', 'api_token': 'null'},
+            json={},
+            timeout=15
+        )
+        logger.debug(f"Deezer test raw response status={resp.status_code}, body_preview={resp.text[:500]}")
+        resp.raise_for_status()
+        result = resp.json().get('results', {})
+
+        user = result.get('USER', {})
+        user_id = user.get('USER_ID', 0)
+        logger.info(f"Deezer test: USER_ID={user_id}, keys={list(result.keys())}, user_keys={list(user.keys()) if user else 'none'}")
+        if not user_id or user_id == 0:
+            # Log more detail for debugging
+            error_info = result.get('error', result.get('ERROR', ''))
+            logger.warning(f"Deezer ARL test failed — USER_ID={user_id}, error={error_info}, response_keys={list(result.keys())}")
+            return jsonify({'success': False, 'error': f'Invalid ARL token — Deezer returned no user (USER_ID={user_id})'})
+
+        user_name = user.get('BLOG_NAME', 'Unknown')
+        options = user.get('OPTIONS', {})
+        can_lossless = options.get('web_lossless', False)
+        can_hq = options.get('web_hq', False)
+        tier = 'HiFi' if can_lossless else ('Premium' if can_hq else 'Free')
+
+        return jsonify({'success': True, 'user': user_name, 'tier': tier})
+    except Exception as e:
+        logger.error(f"Deezer download test failed: {e}")
+        return jsonify({'success': False, 'error': str(e)})
 
 
 # ===================================================================

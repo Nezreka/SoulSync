@@ -45936,6 +45936,7 @@ tr.tag-diff-same {
 #settings-page #tidal-download-settings-container,
 #settings-page #qobuz-settings-container,
 #settings-page #hifi-download-settings-container,
+#settings-page #deezer-download-settings-container,
 #settings-page #youtube-settings-container,
 #settings-page #hybrid-settings-container {
     background: rgba(255, 255, 255, 0.02);
@@ -45949,6 +45950,7 @@ tr.tag-diff-same {
 #settings-page #tidal-download-settings-container:hover,
 #settings-page #qobuz-settings-container:hover,
 #settings-page #hifi-download-settings-container:hover,
+#settings-page #deezer-download-settings-container:hover,
 #settings-page #youtube-settings-container:hover,
 #settings-page #hybrid-settings-container:hover {
     border-color: rgba(255, 255, 255, 0.1);
