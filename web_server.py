@@ -19669,6 +19669,9 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
         log_line=auto_summary, log_type='success')
     _db_update_automation_id = None
 
+    # Resume enrichment workers now that scan is done
+    _resume_enrichment_workers()
+
     # Add activity for database update completion
     summary = f"{total_tracks} tracks, {total_albums} albums, {total_artists} artists processed"
     if removed_artists > 0 or removed_albums > 0:
@@ -19707,6 +19710,8 @@ def _db_update_error_callback(error_message):
     with db_update_lock:
         db_update_state["status"] = "error"
         db_update_state["error_message"] = error_message
+    # Resume enrichment workers even on error
+    _resume_enrichment_workers()
     _update_automation_progress(_db_update_automation_id,
         status='error', phase='Error',
         log_line=error_message, log_type='error')
@@ -19714,6 +19719,43 @@ def _db_update_error_callback(error_message):
 
     # Add activity for database update error
     add_activity_item("❌", "Database Update Failed", error_message, "Now")
+
+_workers_paused_by_scan = set()  # Track which workers WE paused (don't resume manually-paused ones)
+
+def _pause_enrichment_workers():
+    """Pause all enrichment and maintenance workers during database scans to reduce lock contention."""
+    global _workers_paused_by_scan
+    _workers_paused_by_scan = set()
+    workers = {
+        'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
+        'deezer': deezer_worker, 'audiodb': audiodb_worker, 'lastfm': lastfm_worker,
+        'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
+        'repair': repair_worker, 'soulid': soulid_worker,
+    }
+    for name, w in workers.items():
+        if w and hasattr(w, 'pause') and not getattr(w, 'paused', True):
+            w.pause()
+            _workers_paused_by_scan.add(name)
+    if _workers_paused_by_scan:
+        print(f"⏸️ Paused {len(_workers_paused_by_scan)} workers during database scan: {', '.join(_workers_paused_by_scan)}")
+
+def _resume_enrichment_workers():
+    """Resume only the workers that WE paused (don't resume manually-paused ones)."""
+    global _workers_paused_by_scan
+    workers = {
+        'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
+        'deezer': deezer_worker, 'audiodb': audiodb_worker, 'lastfm': lastfm_worker,
+        'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
+        'repair': repair_worker, 'soulid': soulid_worker,
+    }
+    resumed = 0
+    for name, w in workers.items():
+        if name in _workers_paused_by_scan and w and hasattr(w, 'resume'):
+            w.resume()
+            resumed += 1
+    if resumed:
+        print(f"▶️ Resumed {resumed} workers after database scan")
+    _workers_paused_by_scan = set()
 
 def _run_db_update_task(full_refresh, server_type):
     """The actual function that runs in the background thread."""
@@ -19730,6 +19772,9 @@ def _run_db_update_task(full_refresh, server_type):
     if not media_client:
         _db_update_error_callback(f"Media client for '{server_type}' not available.")
         return
+
+    # Pause enrichment workers to reduce DB lock contention during scan
+    _pause_enrichment_workers()
 
     with db_update_lock:
         db_update_worker = DatabaseUpdateWorker(
@@ -19773,6 +19818,9 @@ def _run_deep_scan_task(server_type):
     if not media_client:
         _db_update_error_callback(f"Media client for '{server_type}' not available.")
         return
+
+    # Pause enrichment workers to reduce DB lock contention during deep scan
+    _pause_enrichment_workers()
 
     with db_update_lock:
         db_update_worker = DatabaseUpdateWorker(
