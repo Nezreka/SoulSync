@@ -17137,13 +17137,26 @@ def _post_process_matched_download(context_key, context, file_path):
         # --- ACOUSTID VERIFICATION ---
         # Optional verification that downloaded audio matches expected track.
         # Only runs if enabled and configured. Fails gracefully (skips on any error).
+        # Skip for trusted API sources (Tidal, Qobuz, Deezer, HiFi) — files are
+        # downloaded by exact track ID from official APIs, guaranteed to be correct.
+        # Only Soulseek (P2P, mislabeled files) and YouTube (extracted audio) need verification.
+        _download_username = (
+            context.get('original_search_result', {}).get('username', '') or
+            context.get('search_result', {}).get('username', '') or
+            context.get('_download_username', '')
+        )
+        _trusted_sources = ('tidal', 'qobuz', 'hifi', 'deezer_dl')
+        _skip_acoustid = _download_username in _trusted_sources
+        if _skip_acoustid:
+            print(f"⏭️ Skipping AcoustID verification — trusted API source ({_download_username})")
+
         try:
             from core.acoustid_verification import AcoustIDVerification, VerificationResult
 
             verifier = AcoustIDVerification()
             available, available_reason = verifier.quick_check_available()
 
-            if available:
+            if available and not _skip_acoustid:
                 # Extract expected track info from context
                 track_info = context.get('track_info', {})
                 original_search = context.get('original_search_result', {})
@@ -24241,7 +24254,8 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                         "has_clean_spotify_data": has_clean_spotify_data,  # Flag for post-processing
                         "task_id": task_id,  # Add task_id for completion callbacks
                         "batch_id": batch_id,  # Add batch_id for completion callbacks
-                        "track_info": track_info  # Add track_info for playlist folder mode
+                        "track_info": track_info,  # Add track_info for playlist folder mode
+                        "_download_username": username,  # Source username for AcoustID skip logic
                     }
 
                     print(f"🎯 [Context] Set is_album_download: {is_album_context} (has clean data: {has_clean_spotify_data})")
