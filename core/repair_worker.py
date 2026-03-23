@@ -1313,41 +1313,45 @@ class RepairWorker:
         from mutagen import File as MutagenFile
         from core.repair_jobs.album_tag_consistency import _read_tag, _write_tag
 
+        # Build field → canonical value map
+        canonical_map = {inc['field']: inc['canonical'] for inc in inconsistencies}
+
         fixed_files = 0
         errors = 0
         changes = []
 
-        for inc in inconsistencies:
-            field = inc['field']
-            canonical = inc['canonical']
+        for track_info in tracks:
+            track_file = track_info.get('file_path', '')
+            if not track_file:
+                continue
 
-            for track_info in tracks:
-                track_file = track_info.get('file_path', '')
-                if not track_file:
+            download_folder = None
+            if self._config_manager:
+                download_folder = self._config_manager.get('soulseek.download_path', '')
+            resolved = _resolve_file_path(track_file, self.transfer_folder, download_folder)
+            if not resolved or not os.path.exists(resolved):
+                continue
+
+            try:
+                audio = MutagenFile(resolved, easy=False)
+                if audio is None:
                     continue
 
-                # Resolve path
-                download_folder = None
-                if self._config_manager:
-                    download_folder = self._config_manager.get('soulseek.download_path', '')
-                resolved = _resolve_file_path(track_file, self.transfer_folder, download_folder)
-                if not resolved or not os.path.exists(resolved):
-                    continue
-
-                try:
-                    audio = MutagenFile(resolved, easy=False)
-                    if audio is None:
-                        continue
-
+                # Apply all field fixes in one open/save cycle
+                file_changed = False
+                for field, canonical in canonical_map.items():
                     current = _read_tag(audio, field)
                     if current and current != canonical:
                         if _write_tag(audio, field, canonical):
-                            audio.save()
-                            fixed_files += 1
+                            file_changed = True
                             changes.append(f'{field}: "{current}" → "{canonical}" in {os.path.basename(resolved)}')
-                except Exception as e:
-                    logger.error(f"Error fixing tag consistency for {resolved}: {e}")
-                    errors += 1
+
+                if file_changed:
+                    audio.save()
+                    fixed_files += 1
+            except Exception as e:
+                logger.error(f"Error fixing tag consistency for {resolved}: {e}")
+                errors += 1
 
         if fixed_files > 0:
             return {
