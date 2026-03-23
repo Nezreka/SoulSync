@@ -1876,7 +1876,7 @@ def get_cached_transfer_data():
                 all_downloads = run_async(soulseek_client.get_all_downloads())
                 for download in all_downloads:
                     # Only add streaming source downloads (Soulseek ones are already in the lookup)
-                    if download.username in ('youtube', 'tidal', 'qobuz', 'hifi'):
+                    if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
                         key = _make_context_key(download.username, download.filename)
                         # Convert DownloadStatus to transfer dict format
                         live_transfers_lookup[key] = {
@@ -2203,7 +2203,7 @@ class WebUIDownloadMonitor:
                 all_downloads = run_async(soulseek_client.get_all_downloads())
                 for download in all_downloads:
                     # Only add streaming source downloads (Soulseek ones are already in the lookup from slskd API)
-                    if download.username in ('youtube', 'tidal', 'qobuz', 'hifi'):
+                    if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
                         key = _make_context_key(download.username, download.filename)
                         # Convert DownloadStatus to transfer dict format for monitor compatibility
                         live_transfers[key] = {
@@ -7188,7 +7188,7 @@ def stream_enhanced_search_track():
 
         _hybrid_order = config_manager.get('download_source.hybrid_order', [])
         _hybrid_first = _hybrid_order[0] if _hybrid_order else config_manager.get('download_source.hybrid_primary', 'soulseek')
-        if download_mode in ('youtube', 'tidal', 'qobuz', 'hifi') or (download_mode == 'hybrid' and _hybrid_first in ('youtube', 'tidal', 'qobuz', 'hifi')):
+        if download_mode in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl') or (download_mode == 'hybrid' and _hybrid_first in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl')):
             # YouTube/Tidal mode: Include artist for better context
             # Primary query: Artist + Track
             if artist_name and track_name:
@@ -7365,7 +7365,7 @@ def start_download():
             if download_id:
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
-                is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi')
+                is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl')
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
                         'search_result': {
@@ -7743,7 +7743,7 @@ def get_download_status():
             all_streaming_downloads = run_async(soulseek_client.get_all_downloads())
 
             for download in all_streaming_downloads:
-                if download.username in ('youtube', 'tidal', 'qobuz', 'hifi'):
+                if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
                     source_label = download.username.title()
                     # Convert DownloadStatus to transfer format that frontend expects
                     streaming_transfer = {
@@ -21956,16 +21956,29 @@ def get_valid_candidates(results, spotify_track, query):
     Soulseek search results against a Spotify track to find the best, most
     accurate download candidates.
     """
-    if not results: 
+    if not results:
         return []
-    # Uses the existing, powerful matching engine for scoring
+
+    # Streaming sources (YouTube, Tidal, Qobuz, HiFi, Deezer) return structured API results
+    # with proper artist/title metadata — bypass Soulseek filename-parsing matching engine
+    # and trust the search API's results directly
+    _streaming_sources = ("youtube", "tidal", "qobuz", "hifi", "deezer_dl")
+    if results[0].username in _streaming_sources:
+        source_label = results[0].username.replace('_dl', '').title()
+        print(f"🎵 [{source_label}] Streaming source — using API results directly ({len(results)} candidates)")
+        for r in results:
+            r.confidence = 1.0
+            r.version_type = 'original'
+        return results
+
+    # Uses the existing, powerful matching engine for scoring (Soulseek P2P results)
     _max_q = config_manager.get('soulseek.max_peer_queue', 0) or 0
     initial_candidates = matching_engine.find_best_slskd_matches_enhanced(spotify_track, results, max_peer_queue=_max_q)
     if not initial_candidates:
         return []
 
-    # Skip quality filtering for YouTube/Tidal/Qobuz results (quality is fixed by source, not user-selectable per-result)
-    is_streaming_source = initial_candidates[0].username in ("youtube", "tidal", "qobuz", "hifi") if initial_candidates else False
+    # Skip quality filtering for streaming source results that somehow got here
+    is_streaming_source = initial_candidates[0].username in _streaming_sources if initial_candidates else False
 
     if is_streaming_source:
         source_label = initial_candidates[0].username.title()
@@ -24472,7 +24485,7 @@ def _try_source_reuse(task_id, batch_id, track):
     if not source_tracks or not last_source:
         _sr.info(f"Skipped — no source_tracks or no last_source")
         return False
-    if last_source.get('username') in ('youtube', 'tidal', 'qobuz', 'hifi'):
+    if last_source.get('username') in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
         _sr.info(f"Skipped — {last_source.get('username')} source (no folder-based reuse)")
         return False
 
@@ -24574,7 +24587,7 @@ def _store_batch_source(batch_id, username, filename):
     """Browse the successful download's folder and store results on the batch for reuse."""
     _sr = source_reuse_logger
     _sr.info(f"_store_batch_source called: batch={batch_id}, user={username}, file={filename}")
-    if not batch_id or username in ('youtube', 'tidal', 'qobuz', 'hifi'):
+    if not batch_id or username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
         _sr.info(f"Skipped — no batch_id or streaming source ({username})")
         return
 
@@ -26912,6 +26925,74 @@ def deezer_download_test():
         tier = 'HiFi' if can_lossless else ('Premium' if can_hq else 'Free')
 
         return jsonify({'success': True, 'user': user_name, 'tier': tier})
+    except Exception as e:
+        logger.error(f"Deezer download test failed: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/deezer-download/test-search', methods=['GET'])
+def deezer_download_test_search():
+    """Test Deezer download search (temporary testing endpoint)."""
+    try:
+        query = request.args.get('q', '')
+        if not query:
+            return jsonify({'success': False, 'error': 'No query provided'})
+
+        arl = config_manager.get('deezer_download.arl', '')
+        if not arl:
+            return jsonify({'success': False, 'error': 'No ARL configured'})
+
+        from core.deezer_download_client import DeezerDownloadClient
+        client = DeezerDownloadClient()
+        if not client.is_authenticated():
+            client.reconnect(arl)
+        if not client.is_authenticated():
+            return jsonify({'success': False, 'error': 'Authentication failed'})
+
+        tracks, albums = client._search_sync(query)
+        results = []
+        for t in tracks[:10]:
+            results.append({
+                'title': t.title,
+                'artist': t.artist,
+                'album': t.album,
+                'quality': t.quality,
+                'bitrate': t.bitrate,
+                'duration_ms': t.duration,
+                'size': t.size,
+                'filename': t.filename,
+            })
+        return jsonify({'success': True, 'count': len(tracks), 'results': results})
+    except Exception as e:
+        logger.error(f"Deezer search test failed: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/deezer-download/test-download', methods=['POST'])
+def deezer_download_test_download():
+    """Test Deezer download of a single track (temporary testing endpoint)."""
+    try:
+        data = request.get_json() or {}
+        filename = data.get('filename', '')
+        if not filename:
+            return jsonify({'success': False, 'error': 'No filename provided (use track_id||display_name format)'})
+
+        arl = config_manager.get('deezer_download.arl', '')
+        if not arl:
+            return jsonify({'success': False, 'error': 'No ARL configured'})
+
+        from core.deezer_download_client import DeezerDownloadClient
+        client = DeezerDownloadClient()
+        if not client.is_authenticated():
+            client.reconnect(arl)
+        if not client.is_authenticated():
+            return jsonify({'success': False, 'error': 'Authentication failed'})
+
+        download_id = run_async(client.download('deezer_dl', filename))
+        if not download_id:
+            return jsonify({'success': False, 'error': 'Download failed to start'})
+
+        return jsonify({'success': True, 'download_id': download_id, 'message': 'Download started — check logs'})
     except Exception as e:
         logger.error(f"Deezer download test failed: {e}")
         return jsonify({'success': False, 'error': str(e)})
