@@ -42435,8 +42435,17 @@ async function showReorganizeModal(albumId) {
     html += '<div class="reorganize-template-section">';
     html += '<label class="reorganize-label">Path Template</label>';
     html += '<div class="reorganize-template-hint">Use <code>/</code> to separate folders. The last segment becomes the filename.</div>';
+    // Load saved template from settings, fall back to default
+    let savedTemplate = '$albumartist/$albumartist - $album/$track - $title';
+    try {
+        const settingsResp = await fetch('/api/settings');
+        if (settingsResp.ok) {
+            const settings = await settingsResp.json();
+            savedTemplate = settings.file_organization?.templates?.album_path || savedTemplate;
+        }
+    } catch (_) {}
     html += '<input type="text" id="reorganize-template-input" class="reorganize-template-input" ';
-    html += 'value="$albumartist/$albumartist - $album/$track - $title" ';
+    html += `value="${savedTemplate.replace(/"/g, '&quot;')}" `;
     html += 'placeholder="$albumartist/$album/$track - $title" spellcheck="false">';
     html += '</div>';
 
