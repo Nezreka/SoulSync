@@ -5254,10 +5254,11 @@ const HYBRID_SOURCES = [
     { id: 'tidal', name: 'Tidal', icon: 'https://www.svgrepo.com/show/519734/tidal.svg', emoji: '🌊' },
     { id: 'qobuz', name: 'Qobuz', icon: 'https://www.svgrepo.com/show/504778/qobuz.svg', emoji: '🎧' },
     { id: 'hifi', name: 'HiFi', icon: null, emoji: '🎶' },
+    { id: 'deezer_dl', name: 'Deezer', icon: 'https://www.svgrepo.com/show/519734/deezer.svg', emoji: '🎧' },
 ];
 
 let _hybridSourceOrder = ['soulseek', 'youtube'];
-let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false };
+let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false };
 let _hybridVisualOrder = null; // Full visual order including disabled sources
 
 function buildHybridSourceList() {
@@ -5550,6 +5551,8 @@ async function loadSettingsData() {
         document.getElementById('tidal-download-quality').value = settings.tidal_download?.quality || 'lossless';
         document.getElementById('qobuz-quality').value = settings.qobuz?.quality || 'lossless';
         document.getElementById('hifi-download-quality').value = settings.hifi_download?.quality || 'lossless';
+        document.getElementById('deezer-download-quality').value = settings.deezer_download?.quality || 'flac';
+        document.getElementById('deezer-download-arl').value = settings.deezer_download?.arl || '';
 
         // Populate YouTube settings
         document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
@@ -5797,6 +5800,7 @@ function updateDownloadSourceUI() {
     const qobuzContainer = document.getElementById('qobuz-settings-container');
     const youtubeContainer = document.getElementById('youtube-settings-container');
     const hifiContainer = document.getElementById('hifi-download-settings-container');
+    const deezerDlContainer = document.getElementById('deezer-download-settings-container');
 
     hybridContainer.style.display = mode === 'hybrid' ? 'block' : 'none';
 
@@ -5816,6 +5820,7 @@ function updateDownloadSourceUI() {
     qobuzContainer.style.display = activeSources.has('qobuz') ? 'block' : 'none';
     youtubeContainer.style.display = activeSources.has('youtube') ? 'block' : 'none';
     hifiContainer.style.display = activeSources.has('hifi') ? 'block' : 'none';
+    if (deezerDlContainer) deezerDlContainer.style.display = activeSources.has('deezer_dl') ? 'block' : 'none';
 
     // Quality profile is Soulseek-only and downloads-tab-only
     const qualityProfileSection = document.getElementById('quality-profile-section');
@@ -6549,6 +6554,10 @@ async function saveSettings(quiet = false) {
         hifi_download: {
             quality: document.getElementById('hifi-download-quality').value || 'lossless'
         },
+        deezer_download: {
+            quality: document.getElementById('deezer-download-quality').value || 'flac',
+            arl: document.getElementById('deezer-download-arl').value || '',
+        },
         qobuz: {
             quality: document.getElementById('qobuz-quality').value || 'lossless',
             embed_tags: document.getElementById('embed-qobuz').checked,
@@ -7209,6 +7218,38 @@ async function testHiFiConnection() {
         } else {
             statusEl.textContent = 'No instances reachable';
             statusEl.style.color = '#ff9800';
+        }
+    } catch (e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+    }
+}
+
+async function testDeezerDownloadConnection() {
+    const statusEl = document.getElementById('deezer-download-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        // Save the ARL first so the backend can use it
+        const arl = document.getElementById('deezer-download-arl')?.value || '';
+        if (!arl) {
+            statusEl.textContent = 'No ARL token provided';
+            statusEl.style.color = '#ff9800';
+            return;
+        }
+        const resp = await fetch('/api/deezer-download/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ arl }),
+        });
+        const data = await resp.json();
+        if (data.success) {
+            statusEl.textContent = `Connected as ${data.user || 'Unknown'} (${data.tier || 'Free'})`;
+            statusEl.style.color = '#4caf50';
+        } else {
+            statusEl.textContent = data.error || 'Authentication failed';
+            statusEl.style.color = '#f44336';
         }
     } catch (e) {
         statusEl.textContent = 'Connection error';
@@ -35552,7 +35593,7 @@ function updateServiceStatus(service, statusData) {
 
     // Update download source title on dashboard card
     if (service === 'soulseek' && statusData.source) {
-        const sourceNames = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', hybrid: 'Hybrid' };
+        const sourceNames = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', hybrid: 'Hybrid' };
         const displayName = sourceNames[statusData.source] || 'Soulseek';
         const titleEl = document.getElementById('download-source-title');
         if (titleEl) titleEl.textContent = displayName;
@@ -35600,7 +35641,7 @@ function updateSidebarServiceStatus(service, statusData) {
 
         // Update download source name based on configured mode
         if (service === 'soulseek' && statusData.source) {
-            const sourceNames = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', hybrid: 'Hybrid' };
+            const sourceNames = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', hybrid: 'Hybrid' };
             const displayName = sourceNames[statusData.source] || 'Soulseek';
             const sidebarName = document.getElementById('download-source-name');
             if (sidebarName) sidebarName.textContent = displayName;

@@ -78,6 +78,7 @@ class ConfigManager:
         'navidrome.password',
         # Download sources
         'soulseek.api_key',
+        'deezer_download.arl',
         # Enrichment services
         'listenbrainz.token',
         'acoustid.api_key',

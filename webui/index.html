@@ -3937,6 +3937,7 @@
                                         <option value="tidal">Tidal Only</option>
                                         <option value="qobuz">Qobuz Only</option>
                                         <option value="hifi">HiFi Only (Free Lossless)</option>
+                                        <option value="deezer_dl">Deezer Only</option>
                                         <option value="hybrid">Hybrid (Primary + Fallback)</option>
                                     </select>
                                     <div class="setting-help-text">
@@ -3954,8 +3955,8 @@
                                         <!-- Populated by JS -->
                                     </div>
                                     <!-- Hidden selects for backward compatibility with saveSettings -->
-                                    <select id="hybrid-primary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option></select>
-                                    <select id="hybrid-secondary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option></select>
+                                    <select id="hybrid-primary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option><option value="deezer_dl">Deezer</option></select>
+                                    <select id="hybrid-secondary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option><option value="deezer_dl">Deezer</option></select>
                                 </div>
 
                                 <!-- Soulseek Settings (shown when soulseek is active source) -->
@@ -4115,6 +4116,41 @@
                                         </div>
                                         <div class="setting-help-text" style="margin-top: 6px;">
                                             Free lossless downloads via community-run hifi-api instances. No authentication or subscription needed.
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Deezer Download Settings (shown only when deezer_dl mode is selected) -->
+                                <div id="deezer-download-settings-container" style="display: none;">
+                                    <div class="form-group">
+                                        <label>Deezer Download Quality:</label>
+                                        <select id="deezer-download-quality" class="form-select">
+                                            <option value="mp3_128">MP3 128kbps (Free)</option>
+                                            <option value="mp3_320">MP3 320kbps (Premium)</option>
+                                            <option value="flac">FLAC Lossless (HiFi)</option>
+                                        </select>
+                                        <div class="setting-help-text">
+                                            Audio quality for Deezer downloads. FLAC requires a Deezer HiFi subscription.
+                                            MP3 320 requires Premium or higher.
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Deezer ARL Token:</label>
+                                        <input type="password" id="deezer-download-arl" class="form-input"
+                                            placeholder="Paste your ARL cookie token here">
+                                        <div class="setting-help-text">
+                                            Your ARL token authenticates with Deezer. To get it:
+                                            log into <a href="https://www.deezer.com" target="_blank" style="color: rgb(var(--accent-rgb));">deezer.com</a>
+                                            → open browser DevTools (F12) → Application tab → Cookies → copy the <code>arl</code> value.
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Deezer Status:</label>
+                                        <div class="form-actions" style="margin-top: 4px;">
+                                            <button class="test-button" id="deezer-download-test-btn" onclick="testDeezerDownloadConnection()">
+                                                Test Connection
+                                            </button>
+                                            <span id="deezer-download-status" class="setting-help-text" style="margin-left: 8px;"></span>
                                         </div>
                                     </div>
                                 </div>
