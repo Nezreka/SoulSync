@@ -40859,6 +40859,16 @@ function _buildTrackRow(track, album, admin) {
         tr.appendChild(reportTd);
     }
 
+    // Mobile actions column (visible only on mobile via CSS)
+    const mobileTd = document.createElement('td');
+    mobileTd.className = 'col-mobile-actions';
+    const mobileBtn = document.createElement('button');
+    mobileBtn.className = 'enhanced-mobile-actions-btn';
+    mobileBtn.innerHTML = '⋯';
+    mobileBtn.title = 'Actions';
+    mobileTd.appendChild(mobileBtn);
+    tr.appendChild(mobileTd);
+
     return tr;
 }
 
@@ -41001,7 +41011,73 @@ function _attachTableDelegation(table, album) {
             showReportIssueModal('track', track.id, track.title || 'Unknown', artistName, album.title || '');
             return;
         }
+
+        // Mobile actions button (⋯)
+        if (target.closest('.enhanced-mobile-actions-btn')) {
+            e.stopPropagation();
+            _showMobileTrackActions(track, album);
+            return;
+        }
     });
+}
+
+function _showMobileTrackActions(track, album) {
+    // Remove any existing popover
+    document.querySelectorAll('.mobile-popover-overlay, .enhanced-mobile-actions-popover').forEach(el => el.remove());
+
+    const overlay = document.createElement('div');
+    overlay.className = 'mobile-popover-overlay';
+
+    const popover = document.createElement('div');
+    popover.className = 'enhanced-mobile-actions-popover';
+
+    const title = document.createElement('div');
+    title.className = 'popover-title';
+    title.textContent = track.title || 'Track';
+    popover.appendChild(title);
+
+    const admin = isEnhancedAdmin();
+    const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+    const albumArt = album.thumb_url || (artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist?.thumb_url : null);
+
+    const actions = [];
+    if (track.file_path) {
+        actions.push({ icon: '▶', label: 'Play', action: () => {
+            playLibraryTrack({ id: track.id, title: track.title, file_path: track.file_path, bitrate: track.bitrate, artist_id: artistDetailPageState.enhancedData?.artist?.id, album_id: album.id }, album.title || '', artistName);
+        }});
+        actions.push({ icon: '+', label: 'Add to Queue', action: () => {
+            addToQueue({ title: track.title || 'Unknown', artist: artistName, album: album.title || '', file_path: track.file_path, filename: track.file_path, is_library: true, image_url: albumArt, id: track.id, artist_id: artistDetailPageState.enhancedData?.artist?.id, album_id: album.id, bitrate: track.bitrate });
+        }});
+    }
+    if (admin && track.file_path) {
+        actions.push({ icon: '✎', label: 'Write Tags', action: () => showTagPreview(track.id) });
+    }
+    if (admin) {
+        actions.push({ icon: '✕', label: 'Delete Track', cls: 'popover-delete', action: () => deleteLibraryTrack(track.id, album.id) });
+    }
+
+    actions.forEach(a => {
+        const btn = document.createElement('button');
+        if (a.cls) btn.className = a.cls;
+        btn.innerHTML = `<span class="popover-icon">${a.icon}</span>${a.label}`;
+        btn.addEventListener('click', () => { close(); a.action(); });
+        popover.appendChild(btn);
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'popover-cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', close);
+    popover.appendChild(cancelBtn);
+
+    function close() {
+        overlay.remove();
+        popover.remove();
+    }
+    overlay.addEventListener('click', close);
+
+    document.body.appendChild(overlay);
+    document.body.appendChild(popover);
 }
 
 function _rebuildTbody(table, album) {
@@ -41071,6 +41147,7 @@ function renderTrackTable(album) {
         ] : [
             { label: '', cls: 'col-report' },
         ]),
+        { label: '', cls: 'col-mobile-actions' },
     ];
     const currentSort = artistDetailPageState.enhancedTrackSort[album.id];
     columns.forEach(col => {

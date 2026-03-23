@@ -32785,6 +32785,7 @@ body {
     flex-direction: column;
     gap: 20px;
     padding: 28px 24px 30px;
+    overflow: hidden;
     background: linear-gradient(135deg,
         rgba(20, 20, 20, 0.55) 0%,
         rgba(12, 12, 12, 0.62) 100%);
@@ -33008,12 +33009,14 @@ body {
     display: grid;
     grid-template-columns: 1fr 360px;
     gap: 20px;
+    min-width: 0;
 }
 
 .stats-left-col, .stats-right-col {
     display: flex;
     flex-direction: column;
     gap: 20px;
+    min-width: 0;
 }
 
 .stats-two-col {
@@ -33029,6 +33032,8 @@ body {
     border-radius: 14px;
     padding: 20px;
     transition: border-color 0.2s;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .stats-section-card:hover {
@@ -37807,6 +37812,28 @@ textarea.enhanced-meta-field-input {
 .enhanced-track-table .col-queue,
 .enhanced-track-table .col-writetag,
 .enhanced-track-table .col-delete { padding-left: 4px; padding-right: 4px; }
+
+/* Mobile actions column — hidden on desktop, shown on mobile via mobile.css */
+.enhanced-track-table .col-mobile-actions { display: none; }
+.enhanced-mobile-actions-btn {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.5);
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    letter-spacing: 1px;
+}
+.enhanced-mobile-actions-btn:active {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
 
 .enhanced-track-table td {
     padding: 8px 10px;
