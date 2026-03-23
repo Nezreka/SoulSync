@@ -1,13 +1,14 @@
 """
 Download Orchestrator
-Routes downloads between Soulseek, YouTube, Tidal, Qobuz, and HiFi based on configuration.
+Routes downloads between Soulseek, YouTube, Tidal, Qobuz, HiFi, and Deezer based on configuration.
 
-Supports six modes:
+Supports seven modes:
 - Soulseek Only: Traditional behavior
 - YouTube Only: YouTube-exclusive downloads
 - Tidal Only: Tidal-exclusive downloads
 - Qobuz Only: Qobuz-exclusive downloads
 - HiFi Only: Free lossless downloads via public hifi-api instances
+- Deezer Only: Deezer downloads via ARL authentication
 - Hybrid: Try primary source first, fallback to others
 """
 
@@ -22,6 +23,7 @@ from core.youtube_client import YouTubeClient
 from core.tidal_download_client import TidalDownloadClient
 from core.qobuz_client import QobuzClient
 from core.hifi_client import HiFiClient
+from core.deezer_download_client import DeezerDownloadClient
 
 logger = get_logger("download_orchestrator")
 
@@ -41,6 +43,7 @@ class DownloadOrchestrator:
         self.tidal = TidalDownloadClient()
         self.qobuz = QobuzClient()
         self.hifi = HiFiClient()
+        self.deezer_dl = DeezerDownloadClient()
 
         # Load mode from config
         self.mode = config_manager.get('download_source.mode', 'soulseek')
@@ -66,6 +69,12 @@ class DownloadOrchestrator:
         self.soulseek._setup_client()
         logger.info(f"🔄 Soulseek client config reloaded")
 
+        # Reconnect Deezer if ARL changed
+        deezer_arl = config_manager.get('deezer_download.arl', '')
+        if deezer_arl:
+            self.deezer_dl.reconnect(deezer_arl)
+            self.deezer_dl._quality = config_manager.get('deezer_download.quality', 'flac')
+
         logger.info(f"🔄 Download Orchestrator settings reloaded - Mode: {self.mode}")
 
     def is_configured(self) -> bool:
@@ -84,8 +93,10 @@ class DownloadOrchestrator:
             return self.qobuz.is_configured()
         elif self.mode == 'hifi':
             return self.hifi.is_configured()
+        elif self.mode == 'deezer_dl':
+            return self.deezer_dl.is_configured()
         elif self.mode == 'hybrid':
-            clients = {'soulseek': self.soulseek, 'youtube': self.youtube, 'tidal': self.tidal, 'qobuz': self.qobuz, 'hifi': self.hifi}
+            clients = {'soulseek': self.soulseek, 'youtube': self.youtube, 'tidal': self.tidal, 'qobuz': self.qobuz, 'hifi': self.hifi, 'deezer_dl': self.deezer_dl}
             sources = self.hybrid_order if self.hybrid_order else [self.hybrid_primary, self.hybrid_secondary]
             return any(clients[s].is_configured() for s in sources if s in clients)
 
@@ -99,6 +110,7 @@ class DownloadOrchestrator:
             'tidal': self.tidal,
             'qobuz': self.qobuz,
             'hifi': self.hifi,
+            'deezer_dl': self.deezer_dl,
         }
         return {name: client.is_configured() for name, client in clients.items()}
 
@@ -118,16 +130,19 @@ class DownloadOrchestrator:
             return await self.qobuz.check_connection()
         elif self.mode == 'hifi':
             return await self.hifi.check_connection()
+        elif self.mode == 'deezer_dl':
+            return await self.deezer_dl.check_connection()
         elif self.mode == 'hybrid':
             soulseek_ok = await self.soulseek.check_connection()
             youtube_ok = await self.youtube.check_connection()
             tidal_ok = await self.tidal.check_connection()
             qobuz_ok = await self.qobuz.check_connection()
             hifi_ok = await self.hifi.check_connection()
+            deezer_ok = await self.deezer_dl.check_connection()
 
-            logger.info(f"   Soulseek: {'✅' if soulseek_ok else '❌'} | YouTube: {'✅' if youtube_ok else '❌'} | Tidal: {'✅' if tidal_ok else '❌'} | Qobuz: {'✅' if qobuz_ok else '❌'} | HiFi: {'✅' if hifi_ok else '❌'}")
+            logger.info(f"   Soulseek: {'✅' if soulseek_ok else '❌'} | YouTube: {'✅' if youtube_ok else '❌'} | Tidal: {'✅' if tidal_ok else '❌'} | Qobuz: {'✅' if qobuz_ok else '❌'} | HiFi: {'✅' if hifi_ok else '❌'} | Deezer: {'✅' if deezer_ok else '❌'}")
 
-            return soulseek_ok or youtube_ok or tidal_ok or qobuz_ok or hifi_ok
+            return soulseek_ok or youtube_ok or tidal_ok or qobuz_ok or hifi_ok or deezer_ok
 
         return False
 
@@ -163,6 +178,10 @@ class DownloadOrchestrator:
             logger.info(f"🔍 Searching HiFi: {query}")
             return await self.hifi.search(query, timeout, progress_callback)
 
+        elif self.mode == 'deezer_dl':
+            logger.info(f"🔍 Searching Deezer: {query}")
+            return await self.deezer_dl.search(query, timeout, progress_callback)
+
         elif self.mode == 'hybrid':
             clients = {
                 'soulseek': self.soulseek,
@@ -170,6 +189,7 @@ class DownloadOrchestrator:
                 'tidal': self.tidal,
                 'qobuz': self.qobuz,
                 'hifi': self.hifi,
+                'deezer_dl': self.deezer_dl,
             }
 
             # Build ordered source list: prefer hybrid_order, fall back to legacy primary/secondary
@@ -287,6 +307,9 @@ class DownloadOrchestrator:
         elif username == 'hifi':
             logger.info(f"📥 Downloading from HiFi: {filename}")
             return await self.hifi.download(username, filename, file_size)
+        elif username == 'deezer_dl':
+            logger.info(f"📥 Downloading from Deezer: {filename}")
+            return await self.deezer_dl.download(username, filename, file_size)
         else:
             logger.info(f"📥 Downloading from Soulseek: {filename}")
             return await self.soulseek.download(username, filename, file_size)
@@ -304,8 +327,9 @@ class DownloadOrchestrator:
         tidal_downloads = await self.tidal.get_all_downloads()
         qobuz_downloads = await self.qobuz.get_all_downloads()
         hifi_downloads = await self.hifi.get_all_downloads()
+        deezer_downloads = await self.deezer_dl.get_all_downloads()
 
-        return soulseek_downloads + youtube_downloads + tidal_downloads + qobuz_downloads + hifi_downloads
+        return soulseek_downloads + youtube_downloads + tidal_downloads + qobuz_downloads + hifi_downloads + deezer_downloads
 
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
         """
@@ -342,6 +366,11 @@ class DownloadOrchestrator:
         if status:
             return status
 
+        # Try Deezer
+        status = await self.deezer_dl.get_download_status(download_id)
+        if status:
+            return status
+
         return None
 
     async def cancel_download(self, download_id: str, username: str = None, remove: bool = False) -> bool:
@@ -365,6 +394,8 @@ class DownloadOrchestrator:
             return await self.qobuz.cancel_download(download_id, username, remove)
         elif username == 'hifi':
             return await self.hifi.cancel_download(download_id, username, remove)
+        elif username == 'deezer_dl':
+            return await self.deezer_dl.cancel_download(download_id, username, remove)
         elif username:
             return await self.soulseek.cancel_download(download_id, username, remove)
 
@@ -386,7 +417,11 @@ class DownloadOrchestrator:
             return True
 
         hifi_cancelled = await self.hifi.cancel_download(download_id, username, remove)
-        return hifi_cancelled
+        if hifi_cancelled:
+            return True
+
+        deezer_cancelled = await self.deezer_dl.cancel_download(download_id, username, remove)
+        return deezer_cancelled
 
     async def signal_download_completion(self, download_id: str, username: str, remove: bool = True) -> bool:
         """
@@ -415,8 +450,9 @@ class DownloadOrchestrator:
         tidal_cleared = await self.tidal.clear_all_completed_downloads()
         qobuz_cleared = await self.qobuz.clear_all_completed_downloads()
         hifi_cleared = await self.hifi.clear_all_completed_downloads()
+        deezer_cleared = await self.deezer_dl.clear_all_completed_downloads()
 
-        return soulseek_cleared and youtube_cleared and tidal_cleared and qobuz_cleared and hifi_cleared
+        return soulseek_cleared and youtube_cleared and tidal_cleared and qobuz_cleared and hifi_cleared and deezer_cleared
 
     # ===== Soulseek-specific methods (for backwards compatibility) =====
     # These are internal methods that some parts of the codebase use directly
@@ -479,4 +515,5 @@ class DownloadOrchestrator:
         await self.tidal.clear_all_completed_downloads()
         await self.qobuz.clear_all_completed_downloads()
         await self.hifi.clear_all_completed_downloads()
+        await self.deezer_dl.clear_all_completed_downloads()
         return soulseek_ok
