@@ -17,12 +17,14 @@
 SoulSync bridges streaming services to your media server with automated discovery:
 
 1. **Monitors artists** → Automatically detects new releases from your watchlist
-2. **Generates playlists** → Release Radar, Discovery Weekly, Seasonal, Decade/Genre mixes
-3. **Downloads missing tracks** → From Soulseek, Tidal (lossless/Hi-Res), YouTube, Beatport charts, Spotify/Tidal/YouTube playlists
-4. **Verifies downloads** → AcoustID fingerprinting confirms you got the right track
-5. **Enriches metadata** → LRC lyrics, album art, MusicBrainz IDs, proper tags
-6. **Organizes files** → Custom templates for clean folder structures
-7. **Syncs media server** → Plex, Jellyfin, or Navidrome stay updated automatically
+2. **Generates playlists** → Release Radar, Discovery Weekly, Seasonal, Decade/Genre mixes, Cache-powered discovery
+3. **Downloads missing tracks** → From Soulseek, Deezer, Tidal, Qobuz, HiFi, YouTube, or any combination via Hybrid mode
+4. **Verifies downloads** → AcoustID fingerprinting for P2P sources (skipped for trusted API sources)
+5. **Enriches metadata** → 9 enrichment workers (Spotify, MusicBrainz, iTunes, Deezer, AudioDB, Last.fm, Genius, Tidal, Qobuz)
+6. **Tags consistently** → Picard-style MusicBrainz release preflight ensures all album tracks get the same release ID
+7. **Organizes files** → Custom templates for clean folder structures
+8. **Syncs media server** → Plex, Jellyfin, or Navidrome stay updated automatically
+9. **Scrobbles plays** → Automatic scrobbling to Last.fm and ListenBrainz from your media server
 
 ---
 
@@ -34,64 +36,90 @@ SoulSync bridges streaming services to your media server with automated discover
 
 ### Discovery Engine
 
-**Release Radar** - 30 new tracks from watchlist artists (updates daily)
+**Release Radar** — New tracks from watchlist artists, personalized by listening history
 
-**Discovery Weekly** - 50 tracks from similar artists using custom algorithm
-- 20 popular + 20 mid-tier + 10 deep cuts
-- Built from 1000+ track discovery pool
-- Refreshes every 24 hours
+**Discovery Weekly** — 50 tracks from similar artists with serendipity weighting
 
-**Seasonal Playlists** - Halloween, Christmas, Valentine's, Summer, Spring, Autumn (auto-generated based on time of year)
+**Seasonal Playlists** — Halloween, Christmas, Valentine's, Summer, Spring, Autumn (hemisphere-aware)
 
 **Personalized Playlists** (12+ types)
 - Recently Added, Top Tracks, Forgotten Favorites
-- Decade Playlists (1960s-2020s), Genre Playlists (15 categories)
-- Daily Mixes, Hidden Gems, Popular Picks, Discovery Shuffle, Familiar Favorites
-- Custom Playlist Builder
+- Decade Playlists (1960s-2020s), Genre Playlists (15+ categories)
+- Because You Listen To, Daily Mixes, Hidden Gems, Popular Picks, Discovery Shuffle, Familiar Favorites
+- Custom Playlist Builder (1-5 seed artists → similar artists → random albums → shuffled tracks)
 
-**ListenBrainz** - Import recommendation and community playlists
+**Cache-Powered Discovery** (zero API calls)
+- Undiscovered Albums — albums by your most-played artists that aren't in your library
+- New In Your Genres — recently released albums matching your top genres
+- From Your Labels — popular albums on labels already in your library
+- Deep Cuts — low-popularity tracks from artists you listen to
+- Genre Explorer — genre landscape pills with artist counts, tap for Genre Deep Dive modal
 
-**Beatport** - Full electronic music integration with genre browser (39+ genres)
-- Top 100, Hype Charts, DJ Charts, Staff Picks, New Releases
-- Browse by genre with dedicated discovery UI
+**ListenBrainz** — Import recommendation and community playlists
+
+**Beatport** — Full electronic music integration with genre browser (39+ genres)
 
 ### Multi-Source Downloads
 
-**Download Sources**: Soulseek (FLAC priority), Tidal (direct streaming up to Hi-Res FLAC), YouTube (audio extraction), or Hybrid mode (tries primary source, falls back automatically)
+**6 Download Sources**: Soulseek, Deezer, Tidal, Qobuz, HiFi, YouTube — use any single source or Hybrid mode with drag-to-reorder priority
 
-**Playlist Sources**: Spotify, Tidal, YouTube, Beatport charts, ListenBrainz
+**Deezer Downloads** — ARL token authentication, FLAC lossless / MP3 320 / MP3 128 with automatic quality fallback and Blowfish decryption
 
-**Tidal Downloads** - Full download source with lossless and Hi-Res audio
-- Device-flow OAuth — authenticate via `link.tidal.com` from Settings
-- Quality tiers: AAC 96/320kbps, FLAC 16-bit/44.1kHz (lossless), FLAC 24-bit/96kHz (Hi-Res)
-- Automatic quality fallback: if requested tier is unavailable, tries next best
-- Hi-Res MP4-wrapped FLAC auto-extracted via FFmpeg
-- Works as a standalone source or as part of Hybrid mode fallback chain
-- Also supports playlist import: load your Tidal playlists, auto-match tracks to Spotify, then sync and download
+**Tidal Downloads** — Device-flow OAuth, quality tiers from AAC 96kbps to FLAC 24-bit/96kHz Hi-Res
 
-**Features**
-- Quality profiles with presets: Audiophile, Balanced, Space Saver
-- Per-format configuration (FLAC, MP3, OGG, AAC, WMA) with min/max size and priority
-- Automatic format fallback (FLAC → MP3 → next best)
-- Duplicate prevention against existing library
-- Batch processing with concurrent workers and automatic retry logic
-- Source reuse — when downloading an album, reuses the same uploader for consistency
-- Synchronized lyrics (LRC) via LRClib for every track
+**Qobuz Downloads** — Email/password auth, quality up to Hi-Res Max (FLAC 24-bit/192kHz)
+
+**HiFi Downloads** — Free lossless via public API instances, no account required
+
+**Soulseek** — FLAC priority with quality profiles, peer quality scoring, source reuse for album consistency
+
+**YouTube** — Audio extraction with cookie-based bot detection bypass
+
+**Hybrid Mode** — Enable any combination of sources, drag to set priority order, automatic fallback chain
+
+**Playlist Sources**: Spotify, Tidal, YouTube, Deezer, Beatport charts, ListenBrainz, Spotify Link (no API needed)
+
+**Post-Download**
+- Lossy copy creation: MP3, Opus, AAC with configurable bitrate (Opus capped at 256kbps)
+- Hi-Res FLAC downsampling to 16-bit/44.1kHz CD quality
+- Blasphemy Mode — delete original FLAC after conversion
+- Synchronized lyrics (LRC) via LRClib
+- Picard-style album consistency — pre-flight MusicBrainz release lookup ensures all tracks get the same release ID
+
+### Listening Stats & Scrobbling
+
+**Listening Stats Page** — Full dashboard with Chart.js visualizations
+- Overview cards: total plays, listening time, unique artists/albums/tracks
+- Timeline bar chart, genre breakdown donut with legend
+- Top artists visual bubbles, top albums and tracks with play buttons and cover art
+- Library health: format breakdown bar, enrichment coverage rings, database storage chart
+- Time range filters: 7 days, 30 days, 12 months, all time
+
+**Scrobbling** — Automatic Last.fm and ListenBrainz scrobbling from Plex, Jellyfin, or Navidrome
 
 ### Audio Verification
 
-**AcoustID Fingerprinting** (optional) - Verifies downloaded files actually match the expected track
-- Generates audio fingerprints and checks against AcoustID database
-- Compares title and artist using fuzzy matching with configurable thresholds
-- Fail-open design: verification errors never block downloads, only confident mismatches are rejected
-- Mismatched files are flagged and can be re-queued via the wishlist
+**AcoustID Fingerprinting** (optional) — Verifies downloaded files match expected tracks
+- Automatically skipped for trusted API sources (Deezer, Tidal, Qobuz, HiFi)
+- Only runs for P2P (Soulseek) and extracted audio (YouTube) where mislabeling is possible
+- Fail-open design: verification errors never block downloads
 
-### Dual-Source Metadata
+### Metadata & Enrichment
 
-- **Primary**: Spotify — richer data, discovery features, playlist sync
-- **Backup**: iTunes/Apple Music — no authentication required, works out of the box
-- **Seamless switching**: If Spotify is unavailable, rate-limited, or unauthorized, SoulSync automatically falls back to iTunes for metadata, cover art, and artist info
-- **MusicBrainz enrichment** — background worker matches artists, albums, and tracks to MusicBrainz IDs with 90-day caching
+**9 Background Enrichment Workers**: Spotify, MusicBrainz, iTunes, Deezer, AudioDB, Last.fm, Genius, Tidal, Qobuz
+- Each worker independently processes artists, albums, and tracks
+- Pause/resume controls on dashboard, auto-pause during database scans
+- Error items don't auto-retry in infinite loops (fixed in v2.1)
+
+**Dual-Source Metadata**
+- Primary: Spotify — richer data, discovery features, playlist sync
+- Fallback: iTunes/Apple Music or Deezer — configurable, no authentication required
+- MusicBrainz enrichment with Picard-style album consistency
+
+**Post-Processing Tag Embedding**
+- Granular per-service tag toggles (18+ MusicBrainz tags, Spotify/iTunes/Deezer IDs, AudioDB mood/style, Tidal/Qobuz ISRCs, Last.fm tags, Genius URLs)
+- Album art embedding, cover.jpg download
+- Spotify rate limit protection across all API calls
 
 ### Advanced Matching Engine
 
@@ -99,64 +127,69 @@ SoulSync bridges streaming services to your media server with automated discover
 - Unicode and accent handling (KoЯn, Bjork, A$AP Rocky)
 - Fuzzy matching with weighted confidence scoring (title, artist, duration)
 - Album variation detection (Deluxe, Remastered, Taylor's Version, etc.)
-- Multi-query search strategy: generates 4-6 query variations per track
+- Streaming source results bypass filename-matching engine (API results trusted directly)
 - Short title protection: prevents "Love" from matching "Loveless"
-- Source-specific weighting: Soulseek prioritizes artist match, YouTube prioritizes title match
 
 ### Automation
 
-**Automation Engine** - Visual drag-and-drop builder for custom workflows
-- **Triggers**: Schedule (interval/daily/weekly), Track Downloaded, Batch Complete, Playlist Changed, Discovery Complete, and 10+ more event types
-- **Actions**: Process Wishlist, Scan Watchlist, Refresh Mirrored Playlist, Discover Playlist, Sync Playlist, Scan Library, Update Database, Run Duplicate Cleaner, Quality Scan, and more
-- **Notifications**: Discord webhooks, Pushbullet, Telegram — with variable substitution for dynamic messages
-- **Conditions**: Filter triggers by artist, title, playlist name, quality, and other fields with contains/equals/starts_with operators
-- **System Automations**: Built-in wishlist processing (every 30 min) and watchlist scanning (every 24 hr) — configurable but non-deletable
-- **Playlist Discovery Pipeline**: Automatically discovers official Spotify/iTunes metadata for YouTube/Tidal mirrored playlists, ensuring nothing syncs or downloads without verified context
+**Automation Engine** — Visual drag-and-drop builder for custom workflows
+- **Triggers**: Schedule, Daily/Weekly Time, Track Downloaded, Batch Complete, Playlist Changed, Discovery Complete, Signal Received, and 10+ more
+- **Actions**: Process Wishlist, Scan Watchlist, Refresh Mirrored, Discover Playlist, Sync Playlist, Scan Library, Database Update, Quality Scan, Full Cleanup, and more
+- **Then Actions**: Fire Signal (chain automations), Discord, Telegram, Pushbullet notifications
+- **Pipelines**: 11 pre-built one-click pipeline deployments (Release Radar, Discovery Weekly, Nightly Operations, etc.)
+- **Signal Chains**: playlist_id forwarded from events to action handlers for proper chain execution
 
-**Watchlist** - Monitor unlimited artists with per-artist configuration
-- Choose which release types to track: Albums, EPs, Singles
+**Watchlist** — Monitor unlimited artists with per-artist configuration
+- Release type filters: Albums, EPs, Singles
 - Content filters: Live, Remixes, Acoustic, Compilations
-- Auto-discover similar artists via music-map.com
-- Periodic scanning for new releases
+- Auto-discover similar artists, periodic scanning
 
-**Wishlist** - Failed downloads are automatically queued for retry
-- Auto-processing on a configurable timer
-- Organized by category (albums vs singles)
-- Cleanup tool removes tracks you've since acquired
+**Wishlist** — Failed downloads automatically queued for retry with auto-processing
 
-**Mirrored Playlists** - Mirror playlists from Spotify, Tidal, or YouTube and keep them synced
-- Automatic refresh detects track additions and removals from source
-- Discovery pipeline matches raw YouTube/Tidal tracks to official Spotify/iTunes metadata
-- Sync to media server using verified metadata — undiscovered tracks are held back, not synced with garbage data
+**Mirrored Playlists** — Mirror from Spotify, Tidal, YouTube, Deezer and keep synced
+- Automatic refresh detects changes, discovery pipeline matches metadata
+- Followed Spotify playlists with 403 errors fall back to public embed scraper
 
-**Local Profiles** - Multiple configuration profiles for different setups or users
-- Each profile maintains its own watchlist, wishlist, playlists, and automation settings
-- Switch between profiles from the UI — all settings and data are isolated
-- System automations (wishlist/watchlist) appear across all profiles
-
-**Background Tasks** - Database sync, discovery pool updates, seasonal content, watchlist scanning
+**Local Profiles** — Multiple configuration profiles with isolated settings, watchlists, and playlists
 
 ### Library Management
 
-- **Dashboard** with service status, system stats, and activity feed
-- **Database Updater** - Incremental or full sync from your media server (smart early-stopping for speed)
-- **Metadata Updater** - Refresh artist photos, genres, and album art from Spotify/iTunes
-- **Quality Scanner** - Find low-bitrate files that could be replaced with higher quality
-- **Duplicate Cleaner** - Identify and remove redundant tracks, reclaim disk space
-- **Completion Tracking** - See album/EP/single progress percentages per artist
-- **Enhanced Search** - Unified search across Spotify, your library, and Soulseek simultaneously
-- **Import System** - Full-page import workflow for organizing local audio files from a staging folder
-  - Album mode: auto-suggests Spotify albums from file tags/folder names, drag-and-drop track remapping, confidence-scored matching
-  - Singles mode: match individual files to Spotify tracks with manual search
-  - Processing queue with real-time status, full metadata enrichment, and automatic library scan on completion
-- **Template Organization** - `$albumartist/$album/$track - $title` (fully customizable)
+**Dashboard** — Service status, system stats, activity feed, enrichment worker controls
+- Unified glass UI design across all tool cards, service cards, and stat cards
 
-### Built-in Streaming Player
+**Library Page** — Artist grid with staggered card animations, per-artist enrichment coverage rings
+- Artist Radio button — play random track with auto-queue radio mode
+- Play buttons on Last.fm top tracks sidebar
 
-- Stream any track directly from Soulseek before downloading
-- HTML5 audio player in the sidebar with play/pause, seeking, volume control
-- Format detection with browser compatibility checking
-- Retry logic with exponential backoff for reliability
+**Enhanced Library Manager** — Toggle between Standard and Enhanced views
+- Inline metadata editing, per-service manual matching
+- Write Tags to File (MP3/FLAC/OGG/M4A), tag preview with diff
+- Server sync after tag writes (Plex, Jellyfin, Navidrome)
+- Bulk operations, sortable columns, multi-disc support
+
+**Library Maintenance** — 10+ automated repair jobs
+- Track Number, Dead Files, Duplicates, Metadata Gaps, Album Completeness, Missing Cover Art, AcoustID Scanner, Orphan Files, Fake Lossless, Library Reorganize, Lossy Converter, MBID Mismatch, Album Tag Consistency
+- Enrichment workers auto-pause during database scans
+- One-click Fix All with findings dashboard
+
+**Database Storage Visualization** — Donut chart showing per-table storage breakdown
+
+**Import System** — Tag-first matching, auto-grouped album cards, staging folder workflow
+
+**Template Organization** — `$albumartist/$album/$track - $title` and 10+ variables
+
+### Built-in Media Player
+
+- Stream tracks from your library with queue system
+- Now Playing modal with album art ambient glow and Web Audio visualizer
+- Smart Radio mode — auto-queue similar tracks by genre, mood, and style
+- Repeat modes, shuffle, keyboard shortcuts, Media Session API
+
+### Mobile Responsive
+
+- Comprehensive mobile layouts for Stats, Automations, Hydrabase, Issues, Help pages
+- Artist hero section, enhanced library track table with bottom sheet action popover
+- Enrichment rings, filter bars, and discover cards all adapt to narrow screens
 
 ---
 
@@ -195,141 +228,58 @@ python web_server.py
 
 ### Prerequisites
 
-- **slskd** running and accessible ([Download](https://github.com/slskd/slskd/releases))
-- **Spotify API** credentials ([Dashboard](https://developer.spotify.com/dashboard)) — optional but recommended
+- **slskd** running and accessible ([Download](https://github.com/slskd/slskd/releases)) — required for Soulseek downloads
+- **Spotify API** credentials ([Dashboard](https://developer.spotify.com/dashboard)) — optional but recommended for discovery
 - **Media Server** (optional): Plex, Jellyfin, or Navidrome
+- **Deezer ARL token** (optional): For Deezer downloads — get from browser cookies after logging into deezer.com
+- **Tidal account** (optional): For Tidal downloads — authenticate via device flow in Settings
+- **Qobuz account** (optional): For Qobuz downloads — email/password login in Settings
 
 ### Step 1: Set Up slskd
 
-SoulSync talks to slskd through its API, so you need an API key.
+SoulSync talks to slskd through its API. See the [slskd setup guide](https://github.com/slskd/slskd) for API key configuration.
 
-**Getting your slskd API key:**
-1. Open your slskd web UI (usually `http://localhost:5030`)
-2. Go to the settings/options page
-3. Find the API keys section - if there isn't one already set, you'll need to add one in your slskd config file (`settings.yml`)
-4. In your slskd config, under `web` > `authentication` > `api_keys`, add a key. It can be literally anything, just make it long enough. Example:
-   ```yaml
-   web:
-     authentication:
-       api_keys:
-         my_key:
-           key: "12345678910111213"
-   ```
-5. Restart slskd after adding the key
-6. Copy that same key - you'll paste it into SoulSync's settings
+1. Add an API key in slskd's `settings.yml` under `web > authentication > api_keys`
+2. Restart slskd
+3. Paste the key into SoulSync's Settings → Downloads → Soulseek section
 
-**Making sure SoulSync can see slskd's downloads:**
+**Configure file sharing in slskd to avoid Soulseek bans.** Set up shared folders at `http://localhost:5030/shares`.
 
-This is the part that trips people up. slskd downloads files to a folder on your system, and SoulSync needs to be able to see that same folder. If both are running in Docker, you need to make sure they're pointed at the same place on disk.
+### Step 2: Set Up Spotify API (Optional)
 
-For example, if slskd downloads to `/mnt/user/Music/Downloads` on your host machine, SoulSync needs a volume mapping that points to that same host folder. In your SoulSync docker-compose or container config, map it like:
+Spotify gives you the best discovery features. Without it, SoulSync falls back to iTunes/Deezer for metadata.
 
-```yaml
-volumes:
-  - /mnt/user/Music/Downloads:/app/downloads
-```
-
-Then in SoulSync's settings, set the download path to `/app/downloads` (the container path, not the host path).
-
-Same idea for the transfer/library folder - wherever you want your organized music to end up, map that host folder into the container and use the container path in SoulSync's settings.
-
-**Configure file sharing in slskd to avoid Soulseek bans.** Soulseek expects you to share files. Set up shared folders at `http://localhost:5030/shares`.
-
-### Step 2: Set Up Spotify API
-
-Spotify is optional but gives you the best discovery features (playlists, recommendations, metadata). Without it, SoulSync falls back to iTunes for search and metadata which works fine for basic downloading.
-
-If you want Spotify features:
-1. Go to [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) and create an app
-2. In the app settings, add this as a Redirect URI: `http://127.0.0.1:8888/callback`
-3. Copy your Client ID and Client Secret - you'll paste these into SoulSync's settings page
-
-**If you're accessing SoulSync from a different machine than where it's running** (like a server), the Spotify OAuth callback can be tricky. Spotify redirects to `127.0.0.1` which points to your browser's machine, not the server. You have two options:
-- When it redirects, manually change `127.0.0.1` in the URL bar to your server's IP, then hit enter
-- Set up SSH port forwarding: `ssh -L 8888:localhost:8888 user@your-server-ip`, then do the auth from that terminal session
+1. Create an app at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
+2. Add Redirect URI: `http://127.0.0.1:8888/callback`
+3. Copy Client ID and Client Secret into SoulSync Settings
 
 More detail in [Support/DOCKER-OAUTH-FIX.md](Support/DOCKER-OAUTH-FIX.md).
 
 ### Step 3: Configure SoulSync
 
-Open SoulSync at `http://localhost:8008` (or your server's IP) and go to Settings.
+Open SoulSync at `http://localhost:8008` and go to Settings.
 
-**slskd Connection:**
-- **slskd URL**: If both containers are on the same machine, use `http://host.docker.internal:5030`. If that doesn't work, use your machine's local IP like `http://192.168.1.100:5030`. Don't use `localhost` - that refers to inside the SoulSync container itself.
-- **API Key**: Paste the API key you set up in slskd's config
+**Download Source**: Choose your preferred source (Soulseek, Deezer, Tidal, Qobuz, HiFi, YouTube, or Hybrid)
 
-**Paths:**
-- **Download Path**: This should be the container path where slskd's downloads are mapped. If you followed the volume mapping above, that's `/app/downloads`
-- **Transfer Path**: This is where SoulSync puts your organized/renamed music. The default is `/app/Transfer` - just make sure you have a volume mapping for it so the files persist and your media server can see them
-- **Staging Path**: Optional — for the Import page. Map a host folder to `/app/Staging`, drop audio files in, and use the Import page to match them to albums/tracks with full metadata processing
+**Paths**:
+- **Download Path**: Container path to slskd's download folder (e.g., `/app/downloads`)
+- **Transfer Path**: Where organized music goes (e.g., `/app/Transfer`)
+- **Staging Path**: Optional import folder (e.g., `/app/Staging`)
 
-**Media Server** (optional):
-- **Plex/Jellyfin/Navidrome URL**: Use your machine's actual IP address, not `localhost`. For example `http://192.168.1.100:32400` for Plex. Same reason as slskd - `localhost` inside Docker means the container, not your host machine.
-- After connecting, run a **Database Update** from the Dashboard to populate your library
+**Media Server** (optional): Use your machine's actual IP (not `localhost` — that means inside the container)
 
 ### Step 4: Docker Path Mapping
 
-This is where most issues come from. The key concept: SoulSync runs inside a Docker container and can only see folders you explicitly map in. Paths inside the container are different from paths on your host machine.
+| What | Container Path | Host Path |
+|------|---------------|-----------|
+| Config | `/app/config` | Your config folder |
+| Logs | `/app/logs` | Your logs folder |
+| Database | `/app/data` | Named volume (recommended) |
+| Downloads | `/app/downloads` | Same folder slskd downloads to |
+| Transfer | `/app/Transfer` | Where organized music goes |
+| Staging | `/app/Staging` | Optional import folder |
 
-**What you need mapped:**
-
-| What | Container Path | Host Path (your system) |
-|------|---------------|------------------------|
-| Config | `/app/config` | Wherever you want config stored |
-| Logs | `/app/logs` | Wherever you want logs stored |
-| Database | `/app/data` | Use a named volume (see below) |
-| slskd Downloads | `/app/downloads` | Same folder slskd downloads to |
-| Music Library/Transfer | `/app/Transfer` | Where you want organized music to go |
-| Import Staging | `/app/Staging` | Optional — folder for importing existing files |
-
-**Example docker-compose volumes for Linux:**
-```yaml
-volumes:
-  - ./config:/app/config
-  - ./logs:/app/logs
-  - soulsync_database:/app/data
-  - /path/to/slskd/downloads:/app/downloads
-  - /path/to/music/library:/app/Transfer
-  - ./staging:/app/Staging
-```
-
-**Example for Unraid:**
-```yaml
-volumes:
-  - /mnt/user/appdata/soulsync/config:/app/config
-  - /mnt/user/appdata/soulsync/logs:/app/logs
-  - soulsync_database:/app/data
-  - /mnt/user/Music/Downloads:/app/downloads
-  - /mnt/user/Music/Library:/app/Transfer
-  - /mnt/user/appdata/soulsync/staging:/app/Staging
-```
-
-**Important:** The database should use a named volume (`soulsync_database:/app/data`), not a direct host path mount. Mounting a host folder to `/app/database` will overwrite Python module files the app needs to run.
-
-The paths you enter in SoulSync's settings page should always be the **container paths** (left side), not the host paths (right side). SoulSync doesn't know about your host filesystem - it only sees what's inside the container.
-
-### Unraid Users
-
-If you're using the Unraid template from Community Applications:
-- PUID/PGID are shown during setup — set them to match your permissions (default 99/100)
-- The Music Share mount gives SoulSync access to your downloads and library
-- Make sure the Transfer Dir path is **writable** — read-only mounts will cause post-processing failures
-- After installing, run a **Database Update** from the Dashboard to populate your library
-
----
-
-## Who Should Use This
-
-**Perfect for:**
-- Self-hosters with Plex/Jellyfin/Navidrome
-- Music enthusiasts building and maintaining large collections
-- Electronic music fans (Beatport integration)
-- Former Spotify users wanting local discovery that actually works
-
-**Not ideal for:**
-- Casual users wanting simple one-click sync
-- Slow or metered internet connections
-- Users uncomfortable with APIs or Docker
+**Important:** Use a named volume for the database (`soulsync_database:/app/data`). Direct host path mounts to `/app/data` can overwrite Python module files.
 
 ---
 
@@ -337,123 +287,41 @@ If you're using the Unraid template from Community Applications:
 
 | Feature | SoulSync | Lidarr | Headphones | Beets |
 |---------|----------|--------|------------|-------|
-| Custom Discovery Playlists (12+) | ✓ | ✗ | ✗ | ✗ |
-| Seasonal/Personalized Playlists | ✓ | ✗ | ✗ | ✗ |
-| Beatport Integration | ✓ | ✗ | ✗ | ✗ |
-| ListenBrainz Playlists | ✓ | ✗ | ✗ | ✗ |
-| Multi-Source Playlists (Spotify/Tidal/YouTube) | ✓ | ✗ | ✗ | ✗ |
-| Tidal Downloads (Lossless/Hi-Res) | ✓ | ✗ | ✗ | ✗ |
+| Custom Discovery Playlists (15+) | ✓ | ✗ | ✗ | ✗ |
+| Cache-Powered Discovery (zero API) | ✓ | ✗ | ✗ | ✗ |
+| Listening Stats Dashboard | ✓ | ✗ | ✗ | ✗ |
+| Last.fm/ListenBrainz Scrobbling | ✓ | ✗ | ✗ | ✗ |
+| 6 Download Sources | ✓ | ✗ | ✗ | ✗ |
+| Deezer Downloads (FLAC) | ✓ | ✗ | ✗ | ✗ |
+| Tidal Downloads (Hi-Res) | ✓ | ✗ | ✗ | ✗ |
+| Qobuz Downloads (Hi-Res Max) | ✓ | ✗ | ✗ | ✗ |
 | Soulseek Downloads | ✓ | ✗ | ✗ | ✗ |
-| YouTube Downloads | ✓ | ✗ | ✗ | ✗ |
+| Beatport Integration | ✓ | ✗ | ✗ | ✗ |
 | Audio Fingerprint Verification | ✓ | ✗ | ✗ | ✓ |
-| Watchlist Monitoring | ✓ | ✓ | ✓ | ✗ |
-| LRC Lyrics | ✓ | ✗ | ✗ | Plugin |
-| Version-Aware Matching | ✓ | ✗ | ✗ | ✗ |
-| Quality Scanner + Duplicate Cleaner | ✓ | ✗ | ✗ | ✓ |
-| Template-Based Organization | ✓ | ✗ | ✗ | ✓ |
-| Built-in Streaming Player | ✓ | ✗ | ✗ | ✗ |
+| 9 Enrichment Workers | ✓ | ✗ | ✗ | Plugin |
+| Picard-Style Album Tagging | ✓ | ✗ | ✗ | ✗ |
 | Visual Automation Builder | ✓ | ✗ | ✗ | ✗ |
+| Enhanced Library Manager | ✓ | ✗ | ✗ | ✗ |
+| Library Maintenance Suite (10+ jobs) | ✓ | ✗ | ✗ | ✓ |
 | Multi-Profile Support | ✓ | ✗ | ✗ | ✗ |
-| Import Existing Files | ✓ | ✓ | ✗ | ✓ |
-| Web UI | ✓ | ✓ | ✓ | ✗ |
+| Mobile Responsive | ✓ | ✓ | ✗ | ✗ |
+| Built-in Media Player + Radio | ✓ | ✗ | ✗ | ✗ |
 
 ---
 
 ## Architecture
 
-**Scale**: ~100,000 lines across Python backend and JavaScript frontend, 60+ API endpoints, handles 10,000+ album libraries
+**Scale**: ~120,000 lines across Python backend and JavaScript frontend, 80+ API endpoints, handles 10,000+ album libraries
 
-**Integrations**: Spotify, iTunes/Apple Music, Tidal, YouTube, Soulseek (slskd), Beatport, ListenBrainz, MusicBrainz, AcoustID, LRClib, music-map.com, Plex, Jellyfin, Navidrome
+**Integrations**: Spotify, iTunes/Apple Music, Deezer, Tidal, Qobuz, YouTube, Soulseek (slskd), HiFi, Beatport, ListenBrainz, MusicBrainz, AcoustID, AudioDB, Last.fm, Genius, LRClib, music-map.com, Plex, Jellyfin, Navidrome
 
-**Stack**: Python 3.11, Flask, SQLite (WAL mode), vanilla JavaScript SPA
+**Stack**: Python 3.11, Flask, SQLite (WAL mode), vanilla JavaScript SPA, Chart.js
 
 **Core Components**:
-- **Matching Engine** — version-aware fuzzy matching with multi-strategy query generation and source-specific confidence weighting
-- **Download Orchestrator** — routes between Soulseek, Tidal, and YouTube with hybrid fallback, batch processing with concurrent workers, automatic retry on failure/timeout
-- **Discovery System** — custom algorithms for personalized playlists, seasonal content, and similar artist exploration
-- **Metadata Pipeline** — dual-source (Spotify/iTunes) with MusicBrainz enrichment, AcoustID verification, LRC lyrics, album art embedding via mutagen
-- **Database Update Worker** — incremental sync from media servers with smart early-stopping (Jellyfin fast-path: ~2 API calls vs thousands)
-- **Automation Engine** — event-driven workflow builder with triggers, actions, conditions, notifications, and cross-action guards
-- **Web Scan Manager** — debounced media server scanning with completion callbacks
-- **Template-based File Organization** — configurable folder structures with automatic fallback
-
----
-
-## File Organization
-
-**Default Structure**
-```
-Transfer/Artist/Artist - Album/01 - Track.flac
-```
-
-**Custom Templates**
-- Albums: `$albumartist/$albumartist - $album/$track - $title`
-- Singles: `$artist/$artist - $title/$title`
-- Playlists: `$playlist/$artist - $title`
-- Variables: `$artist`, `$albumartist`, `$album`, `$title`, `$track`, `$playlist`
-
-**Features**: Client-side validation, automatic fallback, instant apply
-
----
-
-## Troubleshooting
-
-**Enable Debug Logging**: Settings → Log Level → DEBUG → Check `logs/app.log`
-
-**Common Issues**
-
-| Problem | Solution |
-|---------|----------|
-| Library not showing up | Run a Database Update from Dashboard (full refresh for first time) |
-| Files not organizing | Verify transfer path is writable, check template syntax, try "Reset to Defaults" |
-| Docker path issues | Ensure host paths are mapped in docker-compose.yml, use container paths in SoulSync settings |
-| slskd not connecting | Use `host.docker.internal` or your machine's LAN IP, not `localhost` |
-| OAuth from remote machine | Manually change `127.0.0.1` to your server's IP in the callback URL |
-| Wishlist not processing | Auto-retry runs on a timer, check logs for persistent failures |
-| Wrong track downloaded | Enable AcoustID verification in settings for fingerprint-based checking |
-| Post-processing file not found | Check that download and transfer paths are correctly mapped and writable |
-| Unraid permission errors | Set PUID/PGID to match your user (typically 99/100) |
-
----
-
-## Roadmap
-
-### Planned
-- WebSocket support (replace polling)
-- Batch wishlist operations
-- Download history browser UI
-- Source reliability tracking
-- Mobile-responsive improvements
-
-### Under Consideration
-- Additional streaming sources (Deezer, Apple Music direct)
-- Playlist collaboration between instances
-- Machine learning for matching improvement
-
----
-
-## License
-
-MIT License - See [LICENSE](LICENSE) file for details
-
----
-
-## Acknowledgments
-
-**Services**: slskd, music-map.com, LRClib.net, Spotify, iTunes, Tidal, YouTube, Plex, Jellyfin, Navidrome, MusicBrainz, AcoustID, Beatport
-
-**Community**: Contributors, testers, and users providing feedback
-
----
-
-<p align="center">
-  <a href="https://ko-fi.com/boulderbadgedad">
-    <img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support on Ko-fi">
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://star-history.com/#Nezreka/SoulSync&type=date&legend=top-left">
-    <img src="https://api.star-history.com/svg?repos=Nezreka/SoulSync&type=date&legend=top-left" alt="Star History">
-  </a>
-</p>
+- **Matching Engine** — version-aware fuzzy matching with streaming source bypass
+- **Download Orchestrator** — routes between 6 sources with hybrid fallback and batch processing
+- **Discovery System** — personalized playlists, cache-powered sections, seasonal content
+- **Metadata Pipeline** — 9 enrichment workers, Picard-style album consistency, dual-source fallback
+- **Album Consistency** — pre-flight MusicBrainz release lookup before album downloads
+- **Automation Engine** — event-driven workflows with signal chains and pipeline deployment
+- **SoulID System** — deterministic cross-instance artist/album/track identifiers via track-verified API lookup
