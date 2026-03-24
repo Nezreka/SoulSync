@@ -45534,18 +45534,16 @@ tr.tag-diff-same {
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.5);
-    padding: 36px 0 14px;
+    color: rgba(255, 255, 255, 0.45);
+    padding: 32px 0 12px;
     padding-left: 14px;
     padding-right: 0;
     margin: 0;
-    margin-bottom: 0;
-    margin-top: 0;
     border: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-    border-left: 3px solid transparent;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-left: 2px solid rgba(var(--accent-rgb), 0.2);
     position: relative;
-    transition: color 0.25s, border-color 0.25s;
+    transition: color 0.25s, border-color 0.3s;
 }
 /* Kill the accent underline on h3 */
 #settings-page .settings-group > h3::after {
@@ -45556,8 +45554,8 @@ tr.tag-diff-same {
 /* Active section — accent bar + brighter title when interacting */
 #settings-page .settings-group:hover > h3,
 #settings-page .settings-group:focus-within > h3 {
-    border-left-color: var(--accent-color, #1db954);
-    color: rgba(255, 255, 255, 0.85);
+    border-left-color: rgb(var(--accent-rgb));
+    color: rgba(255, 255, 255, 0.8);
 }
 
 /* ── Form rows — label left, control right, help text wraps below ── */
@@ -45594,23 +45592,24 @@ tr.tag-diff-same {
     flex: 1;
     max-width: 340px;
     padding: 9px 14px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 8px;
-    color: #fff;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    color: rgba(255, 255, 255, 0.9);
     font-size: 0.88em;
     font-family: inherit;
     margin: 0;
-    transition: border-color 0.2s, background 0.2s;
+    transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
 }
 #settings-page .form-group > input:hover {
-    background: rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.1);
 }
 #settings-page .form-group > input:focus {
-    border-color: var(--accent-color, #1db954);
-    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    background: rgba(255, 255, 255, 0.06);
     outline: none;
-    box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 29, 185, 84), 0.12);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.1);
 }
 
 #settings-page .form-group > select,
@@ -45619,32 +45618,32 @@ tr.tag-diff-same {
     -moz-appearance: none;
     appearance: none;
     padding: 9px 36px 9px 14px;
-    background: rgba(255, 255, 255, 0.05);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='rgba(255,255,255,0.4)' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+    background: rgba(255, 255, 255, 0.04);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='rgba(255,255,255,0.35)' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 12px center;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 8px;
-    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    color: rgba(255, 255, 255, 0.85);
     font-size: 0.88em;
     font-family: inherit;
     cursor: pointer;
     min-width: 180px;
     margin: 0;
-    transition: border-color 0.2s, background-color 0.2s;
+    transition: border-color 0.25s, background-color 0.25s, box-shadow 0.25s;
 }
 #settings-page select:hover {
-    background-color: rgba(255, 255, 255, 0.07);
-    border-color: rgba(255, 255, 255, 0.12);
+    background-color: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.1);
 }
 #settings-page select:focus {
-    border-color: var(--accent-color, #1db954);
+    border-color: rgba(var(--accent-rgb), 0.4);
     outline: none;
-    background-color: rgba(255, 255, 255, 0.08);
-    box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 29, 185, 84), 0.12);
+    background-color: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.1);
 }
 #settings-page select option {
-    background: #1e1e2e;
+    background: #1a1a1e;
     color: #fff;
     padding: 8px;
 }
@@ -45699,8 +45698,9 @@ tr.tag-diff-same {
 #settings-page .settings-hint,
 #settings-page .setting-help-text {
     font-size: 0.8em;
-    color: rgba(255, 255, 255, 0.3);
-    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.35);
+    line-height: 1.6;
+    letter-spacing: 0.01em;
 }
 #settings-page .callback-info .callback-url {
     font-size: 0.82em;
@@ -45718,14 +45718,17 @@ tr.tag-diff-same {
     border-radius: 10px;
     padding: 10px 20px;
     font-size: 0.85em;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    font-weight: 500;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 #settings-page .server-toggle-btn:hover {
     transform: translateY(-1px);
-    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    border-color: rgba(var(--accent-rgb), 0.25);
 }
 #settings-page .server-toggle-btn:active {
-    transform: scale(0.97);
+    transform: translateY(0);
 }
 #settings-page .server-config-container {
     padding: 0;
@@ -45735,30 +45738,49 @@ tr.tag-diff-same {
 #settings-page .test-button,
 #settings-page .detect-button,
 #settings-page .auth-button {
-    padding: 8px 18px;
+    padding: 9px 18px;
     min-width: fit-content;
-    border-radius: 8px;
+    border-radius: 10px;
     font-size: 0.84em;
+    font-weight: 600;
     font-family: inherit;
-    background: rgba(255, 255, 255, 0.05);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
     border: 1px solid rgba(255, 255, 255, 0.08);
     color: rgba(255, 255, 255, 0.7);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+    letter-spacing: 0.01em;
+}
+#settings-page .test-button::before,
+#settings-page .detect-button::before,
+#settings-page .auth-button::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.05) 100%);
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+#settings-page .test-button:hover::before,
+#settings-page .detect-button:hover::before,
+#settings-page .auth-button:hover::before {
+    opacity: 1;
 }
 #settings-page .test-button:hover,
 #settings-page .detect-button:hover,
 #settings-page .auth-button:hover {
-    background: rgba(255, 255, 255, 0.1);
     color: #fff;
-    border-color: rgba(255, 255, 255, 0.15);
+    border-color: rgba(var(--accent-rgb), 0.35);
     transform: translateY(-1px);
-    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.15);
 }
 #settings-page .test-button:active,
 #settings-page .detect-button:active,
 #settings-page .auth-button:active {
-    transform: scale(0.97);
+    transform: translateY(0);
     box-shadow: none;
 }
 
