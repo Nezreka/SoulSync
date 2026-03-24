@@ -11213,6 +11213,33 @@ def reorganize_album_files(album_id):
                         # Move file
                         _safe_move_file(resolved, new_full)
 
+                        # Move sidecar files (LRC, cover.jpg, etc.)
+                        src_dir = os.path.dirname(resolved)
+                        dest_dir = os.path.dirname(new_full)
+                        src_stem = os.path.splitext(os.path.basename(resolved))[0]
+                        new_stem = os.path.splitext(os.path.basename(new_full))[0]
+
+                        # Track-level sidecars (same filename stem as audio)
+                        for sidecar_ext in ('.lrc', '.nfo', '.txt', '.cue'):
+                            sidecar_src = os.path.join(src_dir, src_stem + sidecar_ext)
+                            if os.path.isfile(sidecar_src):
+                                sidecar_dst = os.path.join(dest_dir, new_stem + sidecar_ext)
+                                try:
+                                    shutil.move(sidecar_src, sidecar_dst)
+                                except Exception:
+                                    pass
+
+                        # Album-level sidecars (cover art, folder images)
+                        for album_sidecar in ('cover.jpg', 'cover.jpeg', 'cover.png', 'folder.jpg', 'folder.png', 'front.jpg', 'front.png', 'album.jpg', 'album.png'):
+                            sidecar_src = os.path.join(src_dir, album_sidecar)
+                            if os.path.isfile(sidecar_src):
+                                sidecar_dst = os.path.join(dest_dir, album_sidecar)
+                                if not os.path.exists(sidecar_dst):
+                                    try:
+                                        shutil.move(sidecar_src, sidecar_dst)
+                                    except Exception:
+                                        pass
+
                         # Update DB file_path
                         bg_cursor = bg_conn.cursor()
                         bg_cursor.execute(
