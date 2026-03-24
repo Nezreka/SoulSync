@@ -322,12 +322,13 @@ class PersonalizedPlaylistsService:
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Get all tracks with genres from discovery pool, filtered by source
+                # Get all tracks with genres from discovery pool (source-agnostic —
+                # genres are artist metadata, not tied to a specific metadata source)
                 cursor.execute("""
                     SELECT artist_genres
                     FROM discovery_pool
-                    WHERE artist_genres IS NOT NULL AND source = ?
-                """, (active_source,))
+                    WHERE artist_genres IS NOT NULL
+                """)
                 rows = cursor.fetchall()
 
                 if not rows:
