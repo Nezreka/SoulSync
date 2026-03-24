@@ -45,10 +45,10 @@ const DOCS_SECTIONS = [
         content: () => `
             <div class="docs-subsection" id="gs-overview">
                 <h3 class="docs-subsection-title">Overview</h3>
-                <p class="docs-text">SoulSync is a self-hosted music download, sync, and library management platform. It connects to <strong>Spotify</strong>, <strong>Apple Music/iTunes</strong>, <strong>Tidal</strong>, <strong>Qobuz</strong>, <strong>YouTube</strong>, and <strong>Beatport</strong> for metadata, and uses <strong>Soulseek</strong> (via slskd) as the primary download source. Your library is served through <strong>Plex</strong>, <strong>Jellyfin</strong>, or <strong>Navidrome</strong>.</p>
+                <p class="docs-text">SoulSync is a self-hosted music download, sync, and library management platform. It connects to <strong>Spotify</strong>, <strong>Apple Music/iTunes</strong>, <strong>Deezer</strong>, <strong>Tidal</strong>, <strong>Qobuz</strong>, <strong>YouTube</strong>, and <strong>Beatport</strong> for metadata, and downloads from <strong>Soulseek</strong>, <strong>YouTube</strong>, <strong>Tidal</strong>, <strong>Qobuz</strong>, <strong>HiFi</strong>, and <strong>Deezer</strong>. Your library is served through <strong>Plex</strong>, <strong>Jellyfin</strong>, or <strong>Navidrome</strong>.</p>
                 ${docsImg('gs-overview.jpg', 'SoulSync dashboard overview')}
                 <div class="docs-features">
-                    <div class="docs-feature-card"><h4>&#x1F3B5; Download Music</h4><p>Search and download tracks in FLAC, MP3, and more from Soulseek, YouTube, Tidal, or Qobuz, with automatic metadata tagging and file organization.</p></div>
+                    <div class="docs-feature-card"><h4>&#x1F3B5; Download Music</h4><p>Search and download tracks in FLAC, MP3, and more from 6 sources (Soulseek, YouTube, Tidal, Qobuz, HiFi, Deezer), with automatic metadata tagging and file organization.</p></div>
                     <div class="docs-feature-card"><h4>&#x1F504; Playlist Sync</h4><p>Mirror playlists from Spotify, YouTube, Tidal, and Beatport. Discover official metadata and sync to your media server.</p></div>
                     <div class="docs-feature-card"><h4>&#x1F4DA; Library Management</h4><p>Browse, edit, and enrich your music library with metadata from 9 services. Write tags directly to audio files.</p></div>
                     <div class="docs-feature-card"><h4>&#x1F916; Automations</h4><p>Schedule tasks, chain workflows with signals, and get notified via Discord, Pushbullet, or Telegram.</p></div>
@@ -60,13 +60,13 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">First-Time Setup</h3>
                 <p class="docs-text">After launching SoulSync, head to the <strong>Settings</strong> page to configure your services. At minimum you need:</p>
                 <ol class="docs-steps">
-                    <li><strong>Download Source</strong> &mdash; Connect at least one download source: Soulseek (slskd), YouTube, Tidal, or Qobuz. Soulseek offers the best quality selection; YouTube, Tidal, and Qobuz work as alternatives or fallbacks in Hybrid mode.</li>
+                    <li><strong>Download Source</strong> &mdash; Connect at least one download source: Soulseek (slskd), YouTube, Tidal, Qobuz, HiFi, or Deezer. Soulseek offers the best quality selection; the others work as alternatives or fallbacks in Hybrid mode.</li>
                     <li><strong>Media Server</strong> &mdash; Connect Plex, Jellyfin, or Navidrome so SoulSync knows where your library lives and can trigger scans.</li>
                     <li><strong>Spotify (Recommended)</strong> &mdash; Connect Spotify for the richest metadata. Create an app at <strong>developer.spotify.com</strong>, enter your Client ID and Secret, then click Authenticate.</li>
                     <li><strong>Download Path</strong> &mdash; Set your download and transfer paths in the Download Settings section. The transfer path should point to your media server's monitored folder.</li>
                 </ol>
                 ${docsImg('gs-first-setup.jpg', 'Settings page first-time setup')}
-                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>You can start using SoulSync with just one download source (Soulseek, YouTube, Tidal, or Qobuz). Spotify and other services add metadata enrichment but aren't strictly required &mdash; iTunes/Apple Music is always available as a free fallback.</div></div>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>You can start using SoulSync with just one download source. Spotify and other services add metadata enrichment but aren't strictly required &mdash; iTunes/Apple Music and Deezer are always available as free fallbacks.</div></div>
             </div>
             <div class="docs-subsection" id="gs-connecting">
                 <h3 class="docs-subsection-title">Connecting Services</h3>
@@ -80,6 +80,8 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>YouTube</strong></td><td>Download source &mdash; audio extraction via yt-dlp</td><td>None (optional cookies browser)</td></tr>
                         <tr><td><strong>Tidal</strong></td><td>Download source + playlist import + enrichment</td><td>OAuth &mdash; Client ID + Secret</td></tr>
                         <tr><td><strong>Qobuz</strong></td><td>Download source + enrichment</td><td>Username + Password (app ID auto-fetched)</td></tr>
+                        <tr><td><strong>HiFi</strong></td><td>Download source &mdash; free lossless via community API</td><td>None</td></tr>
+                        <tr><td><strong>Deezer</strong></td><td>Download source + metadata fallback</td><td>ARL cookie token</td></tr>
                         <tr><td><strong>Plex</strong></td><td>Media server &mdash; library scanning, metadata sync, audio streaming</td><td>URL + Token</td></tr>
                         <tr><td><strong>Jellyfin</strong></td><td>Media server &mdash; library scanning, audio streaming</td><td>URL + API Key</td></tr>
                         <tr><td><strong>Navidrome</strong></td><td>Media server &mdash; auto-detects changes, audio streaming</td><td>URL + Username + Password</td></tr>
@@ -668,12 +670,13 @@ const DOCS_SECTIONS = [
         content: () => `
             <div class="docs-subsection" id="search-enhanced">
                 <h3 class="docs-subsection-title">Enhanced Search</h3>
-                <p class="docs-text">The default search mode. Type an artist, album, or track name and results appear in a categorized dropdown: <strong>In Your Library</strong>, <strong>Artists</strong>, <strong>Albums</strong>, <strong>Singles & EPs</strong>, and <strong>Tracks</strong>. Results come from Spotify (or iTunes if Spotify is unavailable).</p>
+                <p class="docs-text">The default search mode. Type an artist, album, or track name and results appear in a categorized dropdown: <strong>In Your Library</strong>, <strong>Artists</strong>, <strong>Albums</strong>, <strong>Singles & EPs</strong>, and <strong>Tracks</strong>. Results come from your primary metadata source (Spotify by default).</p>
                 <ul class="docs-list">
                     <li>Click an <strong>artist</strong> to view their full discography with download buttons on each release</li>
                     <li>Click an <strong>album</strong> to open the download modal with track selection</li>
-                    <li>Click a <strong>track</strong> to search Soulseek for that specific song</li>
+                    <li>Click a <strong>track</strong> to search your download source for that specific song</li>
                     <li><strong>Preview tracks</strong> &mdash; Play button on search result tracks lets you stream a preview directly from your download source before committing to a download</li>
+                    <li><strong>Multi-source tabs</strong> &mdash; Switch between metadata sources (Spotify, iTunes, Deezer) using tabs above the results. Each source returns its own catalog, so tracks missing on one may be found on another</li>
                 </ul>
                 ${docsImg('dl-enhanced-search.jpg', 'Enhanced search results')}
             </div>
@@ -693,10 +696,12 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>YouTube</strong></td><td>YouTube audio extraction via yt-dlp</td><td>Live performances, remixes, tracks not on Soulseek</td></tr>
                         <tr><td><strong>Tidal</strong></td><td>Tidal HiFi streaming rip (requires auth)</td><td>Guaranteed quality, official releases</td></tr>
                         <tr><td><strong>Qobuz</strong></td><td>Qobuz Hi-Res streaming rip (requires auth)</td><td>Audiophile quality, up to 24-bit/192kHz</td></tr>
+                        <tr><td><strong>HiFi</strong></td><td>Free lossless downloads via community-run API instances</td><td>No account needed, good FLAC availability</td></tr>
+                        <tr><td><strong>Deezer</strong></td><td>Deezer streaming rip via ARL token (FLAC/MP3)</td><td>Large catalog, easy setup, FLAC with HiFi sub</td></tr>
                         <tr><td><strong>Hybrid</strong></td><td>Tries your primary source first, then automatically falls back to alternates</td><td>Best overall success rate</td></tr>
                     </tbody>
                 </table>
-                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Hybrid mode</strong> is recommended for most users. It tries Soulseek first (best quality), then falls back to YouTube, Tidal, or Qobuz if no suitable results are found. The fallback order and priority are configurable via drag-and-drop in Settings.</div></div>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Hybrid mode</strong> is recommended for most users. It tries your primary source first, then falls back through your configured priority order. All six sources (Soulseek, YouTube, Tidal, Qobuz, HiFi, Deezer) can be ordered via drag-and-drop in Settings.</div></div>
                 <p class="docs-text"><strong>YouTube settings</strong> include cookies browser selection (for bot detection bypass), download delay (seconds between requests), and minimum confidence threshold for title matching.</p>
             </div>
             <div class="docs-subsection" id="search-downloading">
@@ -715,10 +720,10 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Post-Processing Pipeline</h3>
                 <p class="docs-text">After a file is downloaded, it goes through an automatic pipeline before appearing in your library:</p>
                 <ol class="docs-steps">
-                    <li><strong>AcoustID Fingerprint Verification</strong> &mdash; If AcoustID is configured, the downloaded file is fingerprinted and compared against the expected track. Title and artist are fuzzy-matched (title &ge; 70% similarity, artist &ge; 60%). Files that fail verification are <strong>quarantined</strong> instead of added to your library.</li>
+                    <li><strong>AcoustID Fingerprint Verification</strong> &mdash; If AcoustID is configured, the downloaded file is fingerprinted and compared against the expected track. Title and artist are fuzzy-matched (title &ge; 70% similarity, artist &ge; 60%). Files that fail verification are <strong>quarantined</strong> instead of added to your library. <em>Note: AcoustID is skipped for streaming sources (Tidal, Qobuz, Deezer, HiFi) since files are downloaded by exact track ID. However, streaming search results are still verified by artist and title matching before download to prevent wrong-track matches (e.g. same title, different artist).</em></li>
                     <li><strong>Metadata Tagging</strong> &mdash; The file is tagged with official metadata: title, artist, album artist, album, track number, disc number, year, genre, and composer. Tags are written using Mutagen (supports MP3, FLAC, OGG, M4A).</li>
                     <li><strong>Cover Art Embedding</strong> &mdash; Album artwork is downloaded from the metadata source and embedded directly into the audio file.</li>
-                    <li><strong>File Organization</strong> &mdash; The file is renamed and moved to your transfer path following the template: <code>Artist/Album/TrackNum - Title.ext</code>. For <strong>multi-disc albums</strong>, a <code>Disc N/</code> subfolder is automatically created when the album has more than one disc.</li>
+                    <li><strong>File Organization</strong> &mdash; The file is renamed and moved to your transfer path following customizable templates. Separate templates for albums, singles, and playlists are configured in Settings. Available variables include <code>$artist</code>, <code>$album</code>, <code>$title</code>, <code>$track</code>, <code>$year</code>, <code>$quality</code>, and <code>$albumtype</code> (resolves to Album, Single, EP, or Compilation). For <strong>multi-disc albums</strong>, a <code>Disc N/</code> subfolder is automatically created when the album has more than one disc (or use <code>$disc</code> in your template for manual control).</li>
                     <li><strong>Lyrics (LRC)</strong> &mdash; Synced lyrics are fetched from the LRClib API and saved as <code>.lrc</code> sidecar files alongside the audio file. Compatible media players (foobar2000, MusicBee, Plex, etc.) will display time-synced lyrics automatically. Falls back to plain-text lyrics if synced versions aren't available.</li>
                     <li><strong>Lossy Copy</strong> &mdash; If enabled in settings, a lower-bitrate copy is created alongside the original (useful for mobile device syncing).</li>
                     <li><strong>Media Server Scan</strong> &mdash; Your media server (Plex/Jellyfin) is notified to scan for the new file. Navidrome auto-detects changes.</li>
@@ -738,6 +743,7 @@ const DOCS_SECTIONS = [
                     </tbody>
                 </table>
                 <p class="docs-text">Each format has configurable bitrate ranges and a priority order. Enable <strong>Fallback</strong> to accept any quality when preferred formats aren't available.</p>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Streaming source quality</strong>: Tidal, Qobuz, HiFi, and Deezer each have their own quality dropdown in Settings. By default, if your preferred quality isn't available for a track, the source falls back to the next lower tier (e.g. FLAC &rarr; AAC 320). Disable <strong>Allow quality fallback</strong> next to the quality dropdown to enforce strict quality &mdash; the source will skip tracks it can't deliver at your chosen quality, and the orchestrator will try the next source in your priority list.</div></div>
                 ${docsImg('dl-quality-profiles.jpg', 'Quality profile settings')}
             </div>
             <div class="docs-subsection" id="search-manager">
@@ -1221,6 +1227,8 @@ const DOCS_SECTIONS = [
                     <li><strong>Last.fm</strong> &mdash; API key from last.fm/api</li>
                     <li><strong>Genius</strong> &mdash; Access token from genius.com/api-clients</li>
                     <li><strong>Qobuz</strong> &mdash; Username + Password (app ID is auto-fetched)</li>
+                    <li><strong>HiFi</strong> &mdash; No credentials needed, uses community-run API instances. Test Connection to verify.</li>
+                    <li><strong>Deezer</strong> &mdash; ARL cookie token from your browser (log into deezer.com &rarr; DevTools &rarr; Cookies &rarr; copy <code>arl</code>)</li>
                     <li><strong>AcoustID</strong> &mdash; API key from acoustid.org (enables fingerprint verification)</li>
                     <li><strong>ListenBrainz</strong> &mdash; Base URL + token for listening history and playlist import</li>
                 </ul>
@@ -1243,7 +1251,7 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="set-download">
                 <h3 class="docs-subsection-title">Download Settings</h3>
                 <ul class="docs-list">
-                    <li><strong>Download Source Mode</strong> &mdash; Soulseek, YouTube, Tidal, Qobuz, or Hybrid. Hybrid tries your primary source first, then falls back to alternates with configurable priority via drag-and-drop. See <em>Download Sources</em> in the Music Downloads section for details.</li>
+                    <li><strong>Download Source Mode</strong> &mdash; Soulseek, YouTube, Tidal, Qobuz, HiFi, Deezer, or Hybrid. Hybrid tries your primary source first, then falls back to alternates with configurable priority via drag-and-drop. Each streaming source has its own quality dropdown and an <strong>Allow quality fallback</strong> toggle. See <em>Download Sources</em> and <em>Quality Profiles</em> in the Music Downloads section for details.</li>
                     <li><strong>Download Path</strong> &mdash; The folder where files are initially downloaded. This <strong>must match</strong> the folder your download source (slskd) writes to. In Docker, this is the container-side mount point (e.g., <code>/app/downloads</code>), not the host path. SoulSync monitors this folder for completed downloads to begin post-processing.</li>
                     <li><strong>Transfer Path</strong> &mdash; The final destination for processed music files. After tagging, renaming, and organizing, files are moved here. This <strong>must</strong> point to your media server's monitored music folder (the folder Plex/Jellyfin/Navidrome watches for new content). In Docker, use the container-side path (e.g., <code>/app/Transfer</code>).</li>
                     <li><strong>Staging Path</strong> &mdash; Folder for the Import feature (files placed here appear on the Import page). Separate from the download/transfer pipeline.</li>
