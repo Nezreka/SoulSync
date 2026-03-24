@@ -284,6 +284,7 @@ class LibraryReorganizeJob(RepairJob):
         album_template = templates.get('album_path', '$albumartist/$albumartist - $album/$track - $title')
         single_template = templates.get('single_path', '$artist/$artist - $title/$title')
         disc_label = cm.get('file_organization.disc_label', 'Disc')
+        logger.info(f"Library Reorganize templates — album: '{album_template}', single: '{single_template}' (raw config: {templates})")
 
         dry_run = self._get_setting(context, 'dry_run', True)
         move_sidecars = self._get_setting(context, 'move_sidecars', True)
