@@ -320,7 +320,7 @@ class SoulseekClient:
     
     async def _make_request(self, method: str, endpoint: str, **kwargs) -> Optional[Dict[str, Any]]:
         if not self.base_url:
-            logger.error("Soulseek client not configured")
+            logger.debug("Soulseek client not configured")
             return None
         
         url = f"{self.base_url}/api/v0/{endpoint}"
@@ -386,7 +386,7 @@ class SoulseekClient:
     async def _make_direct_request(self, method: str, endpoint: str, **kwargs) -> Optional[Dict[str, Any]]:
         """Make a direct request to slskd without /api/v0/ prefix (for endpoints that work directly)"""
         if not self.base_url:
-            logger.error("Soulseek client not configured")
+            logger.debug("Soulseek client not configured")
             return None
         
         url = f"{self.base_url}/{endpoint}"
@@ -642,7 +642,7 @@ class SoulseekClient:
     
     async def search(self, query: str, timeout: int = None, progress_callback=None) -> tuple[List[TrackResult], List[AlbumResult]]:
         if not self.base_url:
-            logger.error("Soulseek client not configured")
+            logger.debug("Soulseek client not configured")
             return [], []
 
         # Get timeout from config if not specified
@@ -777,7 +777,7 @@ class SoulseekClient:
     
     async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
         if not self.base_url:
-            logger.error("Soulseek client not configured")
+            logger.debug("Soulseek client not configured")
             return None
         
         try:
@@ -1073,7 +1073,7 @@ class SoulseekClient:
             bool: True if signal was successful, False otherwise
         """
         if not self.base_url:
-            logger.error("Soulseek client not configured")
+            logger.debug("Soulseek client not configured")
             return False
         
         try:
@@ -1201,7 +1201,7 @@ class SoulseekClient:
             bool: True if successful, False otherwise
         """
         if not self.base_url:
-            logger.error("Soulseek client not configured")
+            logger.debug("Soulseek client not configured")
             return False
 
         try:
@@ -1253,7 +1253,7 @@ class SoulseekClient:
             bool: True if clearing was successful, False otherwise
         """
         if not self.base_url:
-            logger.error("Soulseek client not configured")
+            logger.debug("Soulseek client not configured")
             return False
         
         try:
@@ -1280,7 +1280,7 @@ class SoulseekClient:
             List[dict]: List of search objects from slskd API, empty list if error
         """
         if not self.base_url:
-            logger.error("Soulseek client not configured")
+            logger.debug("Soulseek client not configured")
             return []
         
         try:
@@ -1310,7 +1310,7 @@ class SoulseekClient:
             bool: True if deletion was successful, False otherwise
         """
         if not self.base_url:
-            logger.error("Soulseek client not configured")
+            logger.debug("Soulseek client not configured")
             return False
         
         try:
@@ -1338,7 +1338,7 @@ class SoulseekClient:
             bool: True if all searches were cleared successfully, False otherwise
         """
         if not self.base_url:
-            logger.error("Soulseek client not configured")
+            logger.debug("Soulseek client not configured")
             return False
         
         try:
