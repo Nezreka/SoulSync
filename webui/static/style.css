@@ -16827,6 +16827,71 @@ body {
     display: none;
 }
 
+/* ─── Artist Radio Button ─── */
+
+.library-artist-radio-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.85);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    outline: none;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(8px);
+}
+
+.library-artist-radio-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.05) 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.library-artist-radio-btn:hover::before {
+    opacity: 1;
+}
+
+.library-artist-radio-btn:hover {
+    color: #ffffff;
+    border-color: rgba(var(--accent-rgb), 0.35);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.2), 0 0 0 1px rgba(var(--accent-rgb), 0.1);
+}
+
+.library-artist-radio-btn:active {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+.library-artist-radio-btn .radio-icon {
+    font-size: 14px;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    z-index: 1;
+}
+
+.library-artist-radio-btn:hover .radio-icon {
+    transform: scale(1.15);
+}
+
+.library-artist-radio-btn .radio-text {
+    position: relative;
+    z-index: 1;
+}
+
 /* ─── Enhance Quality Modal ─── */
 
 .enhance-modal-overlay {
@@ -19648,6 +19713,11 @@ body {
     object-fit: contain;
     opacity: 0.8;
 }
+/* Invert dark SVG logos for Tidal and Qobuz */
+.artist-hero-badge[title="Tidal"] img,
+.artist-hero-badge[title="Qobuz"] img {
+    filter: invert(1);
+}
 .artist-hero-badge[data-url] {
     cursor: pointer;
 }
@@ -19936,6 +20006,30 @@ body {
 }
 .hero-top-track:hover {
     background: rgba(255, 255, 255, 0.04);
+}
+.hero-top-track-play {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(var(--accent-rgb), 0.15);
+    color: rgb(var(--accent-rgb));
+    font-size: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: all 0.2s;
+}
+.hero-top-track:hover .hero-top-track-play {
+    opacity: 1;
+}
+.hero-top-track-play:hover {
+    background: rgb(var(--accent-rgb));
+    color: #fff;
+    transform: scale(1.1);
 }
 .hero-top-track-num {
     font-size: 0.72em;
