@@ -451,7 +451,7 @@ class DeezerDownloadClient:
         # Determine quality and get media URL with fallback
         media_url = None
         actual_quality = None
-        allow_fallback = config_manager.get('deezer_download.allow_fallback', True)
+        allow_fallback = self._config.get('deezer_download.allow_fallback', True)
 
         if allow_fallback:
             quality_order = _QUALITY_ORDER.copy()
