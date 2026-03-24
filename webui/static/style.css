@@ -233,6 +233,26 @@ body {
 }
 
 /* Sidebar Header */
+.sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.sidebar-logo {
+    width: 38px;
+    height: 38px;
+    object-fit: contain;
+    filter: drop-shadow(0 2px 8px rgba(var(--accent-rgb), 0.3));
+    flex-shrink: 0;
+}
+
+.sidebar-brand-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
 .sidebar-header {
     min-height: 115px;
     background: linear-gradient(180deg,
