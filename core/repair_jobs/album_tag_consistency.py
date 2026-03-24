@@ -142,6 +142,14 @@ class AlbumTagConsistencyJob(RepairJob):
     }
     auto_fix = False
 
+    def _get_settings(self, context: JobContext) -> dict:
+        """Get job settings from config, merged with defaults."""
+        cfg = context.config_manager.get(f'repair.jobs.{self.job_id}.settings', {})
+        merged = dict(self.default_settings)
+        if isinstance(cfg, dict):
+            merged.update(cfg)
+        return merged
+
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
         settings = self._get_settings(context)
