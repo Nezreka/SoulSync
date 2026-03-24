@@ -517,6 +517,18 @@ class HydrabaseClient:
             '_source': 'hydrabase',
         }
 
+    def _get_artist_image_from_albums(self, artist_id: str):
+        """Get artist image from their album art — stub for interface parity with iTunes/Deezer clients."""
+        try:
+            albums = self.get_artist_albums(artist_id, limit=5)
+            if albums:
+                for album in albums:
+                    if album.image_url:
+                        return album.image_url
+        except Exception:
+            pass
+        return None
+
     def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
         """Get albums by artist — returns Album dataclass list.
 
