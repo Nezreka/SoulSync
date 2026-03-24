@@ -40177,6 +40177,66 @@ def delete_discovery_pool_cache_entry(entry_id):
         logger.error(f"Error deleting discovery cache entry: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/discovery-pool/rematch', methods=['POST'])
+def rematch_discovery_pool_track():
+    """Replace a discovery cache entry with a new match chosen by the user."""
+    try:
+        data = request.get_json()
+        cache_id = data.get('cache_id')
+        original_title = (data.get('original_title') or '').strip()
+        original_artist = (data.get('original_artist') or '').strip()
+        spotify_track = data.get('spotify_track')
+
+        if not cache_id:
+            return jsonify({"error": "cache_id required"}), 400
+
+        database = get_database()
+
+        # If no spotify_track provided, just delete the cache entry (phase 1 of rematch)
+        if not spotify_track:
+            database.delete_discovery_cache_entry(cache_id)
+            return jsonify({"success": True, "action": "cache_cleared"})
+
+        # spotify_track provided — delete old cache and save new match (phase 2)
+        database.delete_discovery_cache_entry(cache_id)
+
+        # Build cache entry in same format as discovery flow
+        artists = spotify_track.get('artists', [])
+        album_raw = spotify_track.get('album', '')
+        album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
+        image_url = spotify_track.get('image_url', '')
+        if not image_url and isinstance(album_raw, dict):
+            images = album_raw.get('images', [])
+            image_url = images[0].get('url', '') if images else ''
+
+        matched_data = {
+            'id': spotify_track.get('id', ''),
+            'name': spotify_track.get('name', ''),
+            'artists': [{'name': a} if isinstance(a, str) else a for a in artists],
+            'album': album_obj,
+            'duration_ms': spotify_track.get('duration_ms', 0),
+            'image_url': image_url,
+            'source': 'spotify',
+        }
+
+        # Save to discovery cache
+        normalized_title = matching_engine.normalize_string(original_title) if original_title else ''
+        normalized_artist = matching_engine.normalize_string(original_artist) if original_artist else ''
+        database.save_discovery_cache_match(
+            normalized_title=normalized_title,
+            normalized_artist=normalized_artist,
+            provider='spotify',
+            confidence=1.0,
+            matched_data=matched_data,
+            original_title=original_title,
+            original_artist=original_artist,
+        )
+
+        return jsonify({"success": True, "action": "rematched", "name": spotify_track.get('name', '')})
+    except Exception as e:
+        logger.error(f"Error in discovery pool rematch: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/mirrored-playlists/<int:playlist_id>/prepare-discovery', methods=['POST'])
 def prepare_mirrored_discovery(playlist_id):
     """Register a mirrored playlist into youtube_playlist_states so the YouTube discovery pipeline can run."""
