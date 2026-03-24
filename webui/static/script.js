@@ -8019,11 +8019,11 @@ function initializeSearchModeToggle() {
 
         // Add appropriate grid class to list
         if (isArtist) {
-            list.classList.add('artists-grid');
+            list.classList.add('enh-artists-grid');
         } else if (isAlbum) {
-            list.classList.add('albums-grid');
+            list.classList.add('enh-albums-grid');
         } else if (isTrack) {
-            list.classList.add('tracks-list');
+            list.classList.add('enh-tracks-list');
         }
 
         items.forEach(item => {
@@ -8505,6 +8505,13 @@ function initializeSearchModeToggle() {
             dropdown.classList.remove('hidden');
             updateToggleButtonState();
         }
+        // Hide the page header + search mode toggle to reclaim space
+        const header = document.querySelector('#downloads-page .downloads-header');
+        const modeToggle = document.querySelector('.search-mode-toggle-container');
+        const slskdPlaceholder = document.querySelector('#enhanced-search-section .search-results-container');
+        if (header) header.classList.add('enh-results-active-hide');
+        if (modeToggle) modeToggle.classList.add('enh-results-active-hide');
+        if (slskdPlaceholder) slskdPlaceholder.classList.add('enh-results-active-hide');
     }
 
     function hideDropdown() {
@@ -8513,6 +8520,13 @@ function initializeSearchModeToggle() {
             dropdown.classList.add('hidden');
             updateToggleButtonState();
         }
+        // Restore hidden elements
+        const header = document.querySelector('#downloads-page .downloads-header');
+        const modeToggle = document.querySelector('.search-mode-toggle-container');
+        const slskdPlaceholder = document.querySelector('#enhanced-search-section .search-results-container');
+        if (header) header.classList.remove('enh-results-active-hide');
+        if (modeToggle) modeToggle.classList.remove('enh-results-active-hide');
+        if (slskdPlaceholder) slskdPlaceholder.classList.remove('enh-results-active-hide');
     }
 
     function updateToggleButtonState() {
