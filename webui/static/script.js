@@ -39166,13 +39166,24 @@ async function _loadArtistTopTracks(artistName) {
             return n.toLocaleString();
         };
 
+        const _escAttr = (s) => (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         container.innerHTML = data.tracks.map((t, i) => `
             <div class="hero-top-track">
                 <span class="hero-top-track-num">${i + 1}</span>
-                <span class="hero-top-track-name" title="${t.name}">${t.name}</span>
+                <button class="hero-top-track-play" data-track="${_escAttr(t.name)}" data-artist="${_escAttr(artistName)}" title="Play">▶</button>
+                <span class="hero-top-track-name" title="${_escAttr(t.name)}">${_escAttr(t.name)}</span>
                 <span class="hero-top-track-plays">${_fmtNum(t.playcount)}</span>
             </div>
         `).join('');
+
+        // Attach play handlers via delegation (avoids inline JS escaping issues)
+        container.onclick = (e) => {
+            const btn = e.target.closest('.hero-top-track-play');
+            if (btn) {
+                e.stopPropagation();
+                playStatsTrack(btn.dataset.track, btn.dataset.artist, '');
+            }
+        };
         sidebar.style.display = '';
     } catch (e) {
         console.debug('Failed to load top tracks:', e);
@@ -61566,6 +61577,71 @@ async function checkArtistEnhanceEligibility(artistId) {
         }
     } catch (e) {
         console.debug('Enhance eligibility check failed:', e);
+    }
+}
+
+async function playArtistRadio() {
+    try {
+        const artistId = artistDetailPageState.currentArtistId;
+        const artistName = artistDetailPageState.currentArtistName || '';
+        if (!artistId) {
+            showToast('No artist selected', 'error');
+            return;
+        }
+
+        // Get tracks from this artist's library
+        const resp = await fetch(`/api/library/artist/${artistId}/enhanced`);
+        if (!resp.ok) throw new Error('Failed to load artist data');
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'Failed');
+
+        // Collect all tracks with file paths
+        const allTracks = [];
+        for (const album of (data.albums || [])) {
+            for (const track of (album.tracks || [])) {
+                if (track.file_path) {
+                    allTracks.push({ track, album });
+                }
+            }
+        }
+
+        if (!allTracks.length) {
+            showToast('No playable tracks found for this artist', 'error');
+            return;
+        }
+
+        // Pick a random track
+        const random = allTracks[Math.floor(Math.random() * allTracks.length)];
+        const albumArt = random.album.thumb_url || data.artist?.thumb_url || null;
+
+        // Clear existing queue and disable radio before starting fresh
+        npRadioMode = false;
+        clearQueue();
+        if (audioPlayer && !audioPlayer.paused) {
+            audioPlayer.pause();
+        }
+
+        // Play the track first, then enable radio mode after a short delay
+        // so currentTrack is set and the radio queue fill triggers
+        playLibraryTrack({
+            id: random.track.id,
+            title: random.track.title,
+            file_path: random.track.file_path,
+            bitrate: random.track.bitrate,
+            artist_id: artistId,
+            album_id: random.album.id,
+        }, random.album.title || '', artistName);
+
+        // Enable radio mode after track starts loading
+        setTimeout(() => {
+            npRadioMode = true;
+            const radioBtn = document.querySelector('.np-radio-btn');
+            if (radioBtn) radioBtn.classList.add('active');
+        }, 1000);
+
+        showToast(`Playing ${artistName} radio — similar tracks will auto-queue`, 'success');
+    } catch (e) {
+        showToast(`Failed to start artist radio: ${e.message}`, 'error');
     }
 }
 
