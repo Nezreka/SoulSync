@@ -894,7 +894,8 @@ class QobuzClient:
             # Quality fallback chain: hires_max → hires → lossless → mp3
             quality_chain = ['hires_max', 'hires', 'lossless', 'mp3']
             start_idx = quality_chain.index(quality_key) if quality_key in quality_chain else 2
-            chain = quality_chain[start_idx:]
+            allow_fallback = config_manager.get('qobuz.allow_fallback', True)
+            chain = quality_chain[start_idx:] if allow_fallback else [quality_key]
 
             stream_data = None
             actual_quality = None

@@ -443,7 +443,8 @@ class TidalDownloadClient:
             # files (stubs, empty HiRes responses) trigger a retry at the next tier.
             quality_chain = ['hires', 'lossless', 'high', 'low']
             start_idx = quality_chain.index(quality_key) if quality_key in quality_chain else 1
-            chain = quality_chain[start_idx:]
+            allow_fallback = config_manager.get('tidal_download.allow_fallback', True)
+            chain = quality_chain[start_idx:] if allow_fallback else [quality_key]
 
             MIN_AUDIO_SIZE = 100 * 1024  # 100KB
 

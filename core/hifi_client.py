@@ -568,7 +568,8 @@ class HiFiClient:
         quality_key = config_manager.get('hifi_download.quality', 'lossless')
         chain = ['hires', 'lossless', 'high', 'low']
         start = chain.index(quality_key) if quality_key in chain else 1
-        chain = chain[start:]
+        allow_fallback = config_manager.get('hifi_download.allow_fallback', True)
+        chain = chain[start:] if allow_fallback else [quality_key]
 
         MIN_AUDIO_SIZE = 100 * 1024  # 100KB
 
