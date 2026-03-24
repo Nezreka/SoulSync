@@ -5549,9 +5549,13 @@ async function loadSettingsData() {
         document.getElementById('download-source-mode').value = settings.download_source?.mode || 'soulseek';
         loadHybridSourceOrder(settings);
         document.getElementById('tidal-download-quality').value = settings.tidal_download?.quality || 'lossless';
+        document.getElementById('tidal-allow-fallback').checked = settings.tidal_download?.allow_fallback !== false;
         document.getElementById('qobuz-quality').value = settings.qobuz?.quality || 'lossless';
+        document.getElementById('qobuz-allow-fallback').checked = settings.qobuz?.allow_fallback !== false;
         document.getElementById('hifi-download-quality').value = settings.hifi_download?.quality || 'lossless';
+        document.getElementById('hifi-allow-fallback').checked = settings.hifi_download?.allow_fallback !== false;
         document.getElementById('deezer-download-quality').value = settings.deezer_download?.quality || 'flac';
+        document.getElementById('deezer-allow-fallback').checked = settings.deezer_download?.allow_fallback !== false;
         document.getElementById('deezer-download-arl').value = settings.deezer_download?.arl || '';
 
         // Populate YouTube settings
@@ -6549,19 +6553,23 @@ async function saveSettings(quiet = false) {
             hybrid_order: getHybridOrder(),
         },
         tidal_download: {
-            quality: document.getElementById('tidal-download-quality').value || 'lossless'
+            quality: document.getElementById('tidal-download-quality').value || 'lossless',
+            allow_fallback: document.getElementById('tidal-allow-fallback').checked,
         },
         hifi_download: {
-            quality: document.getElementById('hifi-download-quality').value || 'lossless'
+            quality: document.getElementById('hifi-download-quality').value || 'lossless',
+            allow_fallback: document.getElementById('hifi-allow-fallback').checked,
         },
         deezer_download: {
             quality: document.getElementById('deezer-download-quality').value || 'flac',
             arl: document.getElementById('deezer-download-arl').value || '',
+            allow_fallback: document.getElementById('deezer-allow-fallback').checked,
         },
         qobuz: {
             quality: document.getElementById('qobuz-quality').value || 'lossless',
             embed_tags: document.getElementById('embed-qobuz').checked,
-            tags: _collectServiceTags('qobuz')
+            tags: _collectServiceTags('qobuz'),
+            allow_fallback: document.getElementById('qobuz-allow-fallback').checked,
         },
         database: {
             max_workers: parseInt(document.getElementById('max-workers').value)
