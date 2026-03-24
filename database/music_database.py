@@ -2660,6 +2660,16 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_soul_id ON tracks (soul_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_soul_id ON tracks (album_soul_id)")
 
+            # v2.1 migration: regenerate artist soul_ids with new canonical ID algorithm
+            # (was name+debut_year, now name+max(deezer_id,itunes_id) via track-verified lookup)
+            cursor.execute("SELECT value FROM metadata WHERE key = 'soulid_v2_migration'")
+            if not cursor.fetchone():
+                cursor.execute("UPDATE artists SET soul_id = NULL")
+                cleared = cursor.rowcount
+                cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('soulid_v2_migration', '1')")
+                if cleared > 0:
+                    logger.info(f"🔄 SoulID v2 migration: cleared {cleared} artist soul_ids for regeneration")
+
         except Exception as e:
             logger.error(f"Error adding soul_id columns: {e}")
 

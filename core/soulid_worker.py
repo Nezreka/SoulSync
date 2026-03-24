@@ -205,7 +205,7 @@ class SoulIDWorker:
     # ── Artist processing (one at a time, API-based) ──
 
     def _process_next_artist(self) -> int:
-        """Process a single artist — queries iTunes + Deezer for debut year."""
+        """Process a single artist — uses track-verified API lookup for canonical ID."""
         conn = None
         try:
             conn = self.db._get_connection()
@@ -224,21 +224,36 @@ class SoulIDWorker:
             artist_id, name = row
             self.current_item = f"Artist: {name}"
 
-            # Get this artist's album names from our DB for cross-referencing
+            # Get a track title from this artist for verification lookup
             cursor.execute("""
-                SELECT title FROM albums
+                SELECT title FROM tracks
                 WHERE artist_id = ? AND title IS NOT NULL AND title != ''
+                ORDER BY title ASC
+                LIMIT 1
             """, (artist_id,))
-            db_album_names = [r[0] for r in cursor.fetchall()]
+            track_row = cursor.fetchone()
+            verify_track = track_row[0] if track_row else None
 
-            # Look up debut year from iTunes + Deezer APIs
-            debut_year = self._lookup_debut_year(name, db_album_names)
+            # Look up canonical artist ID from Deezer + iTunes using track verification
+            canonical_id = self._lookup_canonical_artist_id(name, verify_track)
 
-            if debut_year:
-                soul_id = generate_soul_id(name, debut_year)
-                self.current_item = f"Artist: {name} ({debut_year})"
+            if canonical_id:
+                soul_id = generate_soul_id(name, str(canonical_id))
+                self.current_item = f"Artist: {name} (id:{canonical_id})"
             else:
-                soul_id = generate_soul_id(name)
+                # Fallback: use name + first album title alphabetically
+                cursor.execute("""
+                    SELECT title FROM albums
+                    WHERE artist_id = ? AND title IS NOT NULL AND title != ''
+                    ORDER BY title ASC
+                    LIMIT 1
+                """, (artist_id,))
+                album_row = cursor.fetchone()
+                if album_row:
+                    soul_id = generate_soul_id(name, album_row[0])
+                    self.current_item = f"Artist: {name} (album fallback)"
+                else:
+                    soul_id = generate_soul_id(name)
 
             if not soul_id:
                 soul_id = f'soul_unnamed_{artist_id}'
@@ -249,7 +264,7 @@ class SoulIDWorker:
             )
             conn.commit()
             self.stats['artists_processed'] += 1
-            logger.info(f"Generated soul ID for artist: {name}" + (f" (debut {debut_year})" if debut_year else ""))
+            logger.info(f"Generated soul ID for artist: {name}" + (f" (canonical id: {canonical_id})" if canonical_id else ""))
 
             # Rate limit courtesy for API calls
             time.sleep(self.artist_sleep)
@@ -267,6 +282,82 @@ class SoulIDWorker:
         finally:
             if conn:
                 conn.close()
+
+    def _lookup_canonical_artist_id(self, artist_name: str, verify_track: Optional[str]) -> Optional[int]:
+        """Look up a canonical artist ID from Deezer and iTunes using track verification.
+
+        Searches both services for 'artist_name track_title' to find the exact artist,
+        then returns max(deezer_id, itunes_id) as a deterministic canonical identifier.
+        Any SoulSync instance with the same artist and at least one matching track
+        will arrive at the same canonical ID.
+
+        Args:
+            artist_name: Artist name to search for
+            verify_track: A track title from the artist's library for verification
+
+        Returns:
+            max(deezer_id, itunes_id) as int, or the single available ID, or None
+        """
+        if not verify_track:
+            return None
+
+        matching = self._get_matching_engine()
+        norm_artist = matching.normalize_string(artist_name) if matching else artist_name.lower().strip()
+
+        deezer_artist_id = None
+        itunes_artist_id = None
+
+        # Search Deezer by "artist track" to find the exact artist
+        deezer = self._get_deezer_client()
+        if deezer:
+            try:
+                import requests as req
+                query = f"{artist_name} {verify_track}"
+                resp = req.get('https://api.deezer.com/search', params={'q': query, 'limit': 5}, timeout=10)
+                if resp.ok:
+                    for item in resp.json().get('data', []):
+                        result_artist = item.get('artist', {}).get('name', '')
+                        norm_result = matching.normalize_string(result_artist) if matching else result_artist.lower().strip()
+                        if norm_result == norm_artist or (matching and matching.similarity_score(norm_artist, norm_result) >= 0.85):
+                            raw_id = item.get('artist', {}).get('id')
+                            if raw_id:
+                                deezer_artist_id = int(raw_id)
+                                logger.debug(f"Deezer artist ID for '{artist_name}': {deezer_artist_id}")
+                            break
+                time.sleep(0.3)
+            except Exception as e:
+                logger.debug(f"Deezer track search failed for '{artist_name}': {e}")
+
+        # Search iTunes by "artist track" to find the exact artist
+        itunes = self._get_itunes_client()
+        if itunes:
+            try:
+                query = f"{artist_name} {verify_track}"
+                raw_results = itunes._search(query, entity='song', limit=5)
+                if raw_results:
+                    for item in raw_results:
+                        result_artist = item.get('artistName', '')
+                        norm_result = matching.normalize_string(result_artist) if matching else result_artist.lower().strip()
+                        if norm_result == norm_artist or (matching and matching.similarity_score(norm_artist, norm_result) >= 0.85):
+                            raw_id = item.get('artistId')
+                            if raw_id:
+                                itunes_artist_id = int(raw_id)
+                                logger.debug(f"iTunes artist ID for '{artist_name}': {itunes_artist_id}")
+                            break
+                time.sleep(0.3)
+            except Exception as e:
+                logger.debug(f"iTunes track search failed for '{artist_name}': {e}")
+
+        # Return max of both IDs (deterministic regardless of which source each instance has)
+        if deezer_artist_id and itunes_artist_id:
+            canonical = max(deezer_artist_id, itunes_artist_id)
+            logger.debug(f"Canonical ID for '{artist_name}': {canonical} (deezer={deezer_artist_id}, itunes={itunes_artist_id})")
+            return canonical
+        elif deezer_artist_id:
+            return deezer_artist_id
+        elif itunes_artist_id:
+            return itunes_artist_id
+        return None
 
     def _lookup_debut_year(self, artist_name: str, db_album_names: List[str]) -> Optional[str]:
         """Look up an artist's debut year from iTunes and Deezer.
