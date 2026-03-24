@@ -22033,15 +22033,59 @@ def get_valid_candidates(results, spotify_track, query):
 
     # Streaming sources (YouTube, Tidal, Qobuz, HiFi, Deezer) return structured API results
     # with proper artist/title metadata — bypass Soulseek filename-parsing matching engine
-    # and trust the search API's results directly
+    # but still verify artist+title match to avoid wrong-track downloads (e.g. same title, different artist)
     _streaming_sources = ("youtube", "tidal", "qobuz", "hifi", "deezer_dl")
     if results[0].username in _streaming_sources:
         source_label = results[0].username.replace('_dl', '').title()
-        print(f"🎵 [{source_label}] Streaming source — using API results directly ({len(results)} candidates)")
+
+        # Verify artist/title against expected track before trusting
+        expected_artists = [a.lower().strip() for a in (spotify_track.artists or [])] if spotify_track else []
+        expected_title = matching_engine.normalize_string(spotify_track.name) if spotify_track and spotify_track.name else ''
+
+        from difflib import SequenceMatcher
+        verified = []
         for r in results:
-            r.confidence = 1.0
-            r.version_type = 'original'
-        return results
+            r_artist = matching_engine.normalize_string(r.artist or '')
+            r_title = matching_engine.normalize_string(r.title or '')
+
+            # Title must be a reasonable match
+            if expected_title and r_title:
+                title_sim = SequenceMatcher(None, expected_title, r_title).ratio()
+            else:
+                title_sim = 0.5  # No title to compare — allow through
+
+            # Artist must overlap with at least one expected artist
+            artist_match = False
+            if not expected_artists:
+                artist_match = True  # No artist info — can't filter
+            else:
+                r_artist_norm = r_artist.lower()
+                for exp_artist in expected_artists:
+                    exp_norm = matching_engine.normalize_string(exp_artist)
+                    if not exp_norm or not r_artist_norm:
+                        continue
+                    # Check substring containment or similarity
+                    if exp_norm in r_artist_norm or r_artist_norm in exp_norm:
+                        artist_match = True
+                        break
+                    artist_sim = SequenceMatcher(None, exp_norm, r_artist_norm).ratio()
+                    if artist_sim >= 0.6:
+                        artist_match = True
+                        break
+
+            if title_sim >= 0.5 and artist_match:
+                r.confidence = title_sim
+                r.version_type = 'original'
+                verified.append(r)
+
+        if verified:
+            # Sort by confidence (best title match first)
+            verified.sort(key=lambda x: x.confidence, reverse=True)
+            print(f"🎵 [{source_label}] Streaming source — {len(verified)}/{len(results)} candidates passed artist/title verification")
+            return verified
+        else:
+            print(f"⚠️ [{source_label}] No streaming results matched expected artist/title — falling through to matching engine")
+            # Fall through to standard matching engine below
 
     # Uses the existing, powerful matching engine for scoring (Soulseek P2P results)
     _max_q = config_manager.get('soulseek.max_peer_queue', 0) or 0
