@@ -57806,39 +57806,52 @@ function openPoolFixModal(trackId, trackName, artistName) {
     fixOverlay = document.createElement('div');
     fixOverlay.className = 'pool-fix-overlay';
     fixOverlay.id = 'pool-fix-overlay';
-    fixOverlay.onclick = (e) => { if (e.target === fixOverlay) closePoolFixModal(); };
+
+    // Only close on click to the overlay itself — use a dedicated close zone
+    // to prevent accidental dismissal when clicking near inputs
+    fixOverlay.addEventListener('mousedown', (e) => {
+        if (e.target === fixOverlay) {
+            e.preventDefault(); // Prevent stealing focus from inputs
+            closePoolFixModal();
+        }
+    });
 
     fixOverlay.innerHTML = `
-        <div class="pool-fix-modal">
-            <div class="discovery-fix-modal-header">
+        <div class="pool-fix-modal" onmousedown="event.stopPropagation()">
+            <div class="pool-fix-header">
                 <h2>Fix Track Match</h2>
-                <button class="modal-close-btn" onclick="closePoolFixModal()">✕</button>
+                <button class="pool-fix-close" onclick="closePoolFixModal()" title="Close">✕</button>
             </div>
-            <div class="discovery-fix-modal-content">
-                <div class="source-track-info">
-                    <h3>Source Track</h3>
-                    <div class="source-track-display">
-                        <div class="source-field"><label>Track:</label><span>${_esc(trackName)}</span></div>
-                        <div class="source-field"><label>Artist:</label><span>${_esc(artistName)}</span></div>
+            <div class="pool-fix-body">
+                <div class="pool-fix-source">
+                    <div class="pool-fix-source-label">Original Track</div>
+                    <div class="pool-fix-source-row">
+                        <span class="pool-fix-source-title">${_esc(trackName)}</span>
+                        <span class="pool-fix-source-sep">—</span>
+                        <span class="pool-fix-source-artist">${_esc(artistName)}</span>
                     </div>
                 </div>
-                <div class="search-inputs-section">
-                    <h3>Search for Match</h3>
-                    <div class="search-input-group">
-                        <input type="text" id="pool-fix-track-input" placeholder="Track name" class="fix-modal-input" value="${_escAttr(trackName)}">
-                        <input type="text" id="pool-fix-artist-input" placeholder="Artist name" class="fix-modal-input" value="${_escAttr(artistName)}">
-                        <button class="search-btn" onclick="searchPoolFix()">Search</button>
+                <div class="pool-fix-search">
+                    <div class="pool-fix-input-row">
+                        <div class="pool-fix-input-wrap">
+                            <label for="pool-fix-track-input">Track</label>
+                            <input type="text" id="pool-fix-track-input" placeholder="Track name" value="${_escAttr(trackName)}">
+                        </div>
+                        <div class="pool-fix-input-wrap">
+                            <label for="pool-fix-artist-input">Artist</label>
+                            <input type="text" id="pool-fix-artist-input" placeholder="Artist name" value="${_escAttr(artistName)}">
+                        </div>
+                        <button class="pool-fix-search-btn" onclick="searchPoolFix()">Search</button>
                     </div>
                 </div>
-                <div class="search-results-section">
-                    <h3>Results</h3>
-                    <div id="pool-fix-results" class="fix-modal-results">
-                        <div class="pool-empty">Searching...</div>
+                <div class="pool-fix-results-area">
+                    <div id="pool-fix-results" class="pool-fix-results-list">
+                        <div class="pool-fix-empty">Searching...</div>
                     </div>
                 </div>
             </div>
-            <div class="discovery-fix-modal-footer">
-                <button class="modal-btn secondary" onclick="closePoolFixModal()">Cancel</button>
+            <div class="pool-fix-footer">
+                <button class="pool-fix-cancel" onclick="closePoolFixModal()">Cancel</button>
             </div>
         </div>
     `;
@@ -57853,7 +57866,11 @@ function openPoolFixModal(trackId, trackName, artistName) {
     trackInput.addEventListener('keypress', enterHandler);
     artistInput.addEventListener('keypress', enterHandler);
 
-    // Auto-search (delay allows modal layout to settle and prevents accidental clicks)
+    // Focus the track input
+    trackInput.focus();
+    trackInput.select();
+
+    // Auto-search after a delay
     setTimeout(() => searchPoolFix(), 500);
 }
 
@@ -57871,42 +57888,42 @@ async function searchPoolFix() {
     const trackVal = trackInput.value.trim();
     const artistVal = artistInput.value.trim();
     if (!trackVal && !artistVal) {
-        resultsContainer.innerHTML = '<div class="pool-empty">Enter a search term</div>';
+        resultsContainer.innerHTML = '<div class="pool-fix-empty">Enter a search term</div>';
         return;
     }
 
-    resultsContainer.innerHTML = '<div class="pool-empty">Searching...</div>';
+    resultsContainer.innerHTML = '<div class="pool-fix-empty"><div class="pool-fix-spinner"></div>Searching...</div>';
 
     try {
         const params = new URLSearchParams();
         if (trackVal) params.set('track', trackVal);
         if (artistVal) params.set('artist', artistVal);
-        params.set('limit', '50');
+        params.set('limit', '20');
         const res = await fetch(`/api/spotify/search_tracks?${params.toString()}`);
         const data = await res.json();
         const tracks = data.tracks || [];
 
         if (tracks.length === 0) {
-            resultsContainer.innerHTML = '<div class="pool-empty">No results found</div>';
+            resultsContainer.innerHTML = '<div class="pool-fix-empty">No results found</div>';
             return;
         }
 
-        resultsContainer.innerHTML = tracks.map((track, i) => {
+        resultsContainer.innerHTML = tracks.map((track) => {
             const artists = (track.artists || []).join(', ');
             const duration = track.duration_ms ? formatDuration(track.duration_ms) : '';
+            const albumText = track.album ? ` · ${_esc(track.album)}` : '';
             return `
-                <div class="fix-result-card" onclick='selectPoolFixTrack(${JSON.stringify(track).replace(/'/g, "&#39;")})'>
-                    <div class="fix-result-card-content">
-                        <div class="fix-result-title">${_esc(track.name || 'Unknown')}</div>
-                        <div class="fix-result-artist">${_esc(artists)}</div>
-                        <div class="fix-result-album">${_esc(track.album || '')}</div>
-                        ${duration ? `<div class="fix-result-duration">${duration}</div>` : ''}
+                <div class="pool-fix-result" onclick='selectPoolFixTrack(${JSON.stringify(track).replace(/'/g, "&#39;")})'>
+                    <div class="pool-fix-result-main">
+                        <div class="pool-fix-result-title">${_esc(track.name || 'Unknown')}</div>
+                        <div class="pool-fix-result-meta">${_esc(artists)}${albumText}</div>
                     </div>
+                    ${duration ? `<div class="pool-fix-result-dur">${duration}</div>` : ''}
                 </div>
             `;
         }).join('');
     } catch (err) {
-        resultsContainer.innerHTML = `<div class="pool-empty">Search failed: ${_esc(err.message)}</div>`;
+        resultsContainer.innerHTML = `<div class="pool-fix-empty">Search failed: ${_esc(err.message)}</div>`;
     }
 }
 
