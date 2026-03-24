@@ -26434,7 +26434,42 @@ def get_playlist_tracks(playlist_id):
 
         # Fetch all tracks with full album data
         tracks = []
-        results = spotify_client._get_playlist_items_page(playlist_id, limit=100)
+        try:
+            results = spotify_client._get_playlist_items_page(playlist_id, limit=100)
+        except Exception as items_err:
+            # 403 on followed playlists — try the public embed scraper as fallback
+            logger.warning(f"Playlist items fetch failed ({items_err}), trying public embed scraper")
+            try:
+                from core.spotify_public_scraper import scrape_spotify_embed
+                embed_data = scrape_spotify_embed('playlist', playlist_id)
+                if embed_data and not embed_data.get('error') and embed_data.get('tracks'):
+                    for t in embed_data['tracks']:
+                        artists = t.get('artists', [])
+                        tracks.append({
+                            'id': t.get('id', ''),
+                            'name': t.get('name', ''),
+                            'artists': artists if artists else [{'name': 'Unknown'}],
+                            'album': {'name': '', 'images': []},
+                            'duration_ms': t.get('duration_ms', 0),
+                            'popularity': 0,
+                            'spotify_track_id': t.get('id', '')
+                        })
+                    playlist_dict = {
+                        'id': playlist_data['id'],
+                        'name': playlist_data['name'],
+                        'description': playlist_data.get('description', ''),
+                        'owner': playlist_data['owner']['display_name'],
+                        'public': playlist_data.get('public', False),
+                        'collaborative': playlist_data.get('collaborative', False),
+                        'track_count': len(tracks),
+                        'image_url': playlist_data['images'][0]['url'] if playlist_data.get('images') else None,
+                        'snapshot_id': playlist_data.get('snapshot_id', ''),
+                        'tracks': tracks
+                    }
+                    return jsonify(playlist_dict)
+            except Exception as scrape_err:
+                logger.warning(f"Public embed scraper also failed: {scrape_err}")
+            raise items_err  # Re-raise original error if both failed
 
         while results:
             for item in results['items']:
