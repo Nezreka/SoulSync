@@ -32828,6 +32828,12 @@ body {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
+/* Invert dark SVG logos on library artist cards (Tidal and Qobuz) */
+.library-artist-card .source-card-icon[title="Tidal"] img,
+.library-artist-card .source-card-icon[title="Qobuz"] img {
+    filter: invert(1);
+}
+
 .source-card-icon:hover {
     transform: scale(1.1);
     opacity: 1 !important;
