@@ -1447,8 +1447,16 @@ class RepairWorker:
         artist_name = details.get('artist', 'Unknown Artist')
         spotify_album_id = details.get('spotify_album_id', '')
 
-        if not album_id or not missing_tracks:
-            return {'success': False, 'error': 'Missing album_id or missing_tracks in finding details'}
+        if not album_id:
+            return {'success': False, 'error': 'Missing album_id in finding details'}
+
+        # If missing_tracks list is empty (scanner couldn't identify them), try to fetch now
+        if not missing_tracks:
+            missing_tracks = self._refetch_missing_tracks(album_id, details)
+            if not missing_tracks:
+                # Refetch found 0 missing — album is now complete (stale finding)
+                return {'success': True, 'action': 'auto_resolve',
+                        'message': f'Album "{album_title}" is now complete — no missing tracks found'}
 
         # Phase 1: Gather context from existing album tracks
         existing_tracks = self.db.get_tracks_by_album(album_id)
@@ -1481,6 +1489,14 @@ class RepairWorker:
             if rp:
                 resolved_paths.append(rp)
         filename_pattern = self._detect_filename_pattern(resolved_paths)
+
+        # Filter out tracks that have been added since the scan (stale finding)
+        owned_track_numbers = {t.track_number for t in existing_tracks if t.track_number}
+        missing_tracks = [mt for mt in missing_tracks
+                          if mt.get('track_number') not in owned_track_numbers]
+        if not missing_tracks:
+            return {'success': True, 'action': 'auto_resolve',
+                    'message': f'Album "{album_title}" is now complete — all tracks present'}
 
         # Phase 2-4: Process each missing track
         fixed_count = 0
@@ -1633,6 +1649,82 @@ class RepairWorker:
             'skipped': skipped_count,
             'details': track_details,
         }
+
+    def _refetch_missing_tracks(self, album_id, details):
+        """Re-fetch missing track list from APIs when the stored list is empty."""
+        spotify_album_id = details.get('spotify_album_id', '')
+        itunes_album_id = details.get('itunes_album_id', '')
+        deezer_album_id = details.get('deezer_album_id', '')
+        logger.debug("Refetch missing tracks for album %s: spotify=%s, itunes=%s, deezer=%s",
+                      album_id, spotify_album_id, itunes_album_id, deezer_album_id)
+
+        # Get track numbers we already own
+        owned_numbers = set()
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT track_number FROM tracks WHERE album_id = ? AND track_number IS NOT NULL",
+                (album_id,)
+            )
+            for row in cursor.fetchall():
+                owned_numbers.add(row[0])
+        except Exception:
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+        # Try Spotify first
+        api_tracks = None
+        if spotify_album_id:
+            try:
+                sp = self.spotify_client
+                if sp and hasattr(sp, 'get_album_tracks'):
+                    api_tracks = sp.get_album_tracks(spotify_album_id)
+            except Exception as e:
+                logger.debug("Refetch: Spotify album tracks failed for %s: %s", spotify_album_id, e)
+
+        # Try fallback client (iTunes/Deezer)
+        if not api_tracks or 'items' not in (api_tracks or {}):
+            itunes = self.itunes_client
+            if itunes:
+                is_deezer = type(itunes).__name__ == 'DeezerClient'
+                primary_id = deezer_album_id if is_deezer else itunes_album_id
+                secondary_id = itunes_album_id if is_deezer else deezer_album_id
+                for fid in [primary_id, secondary_id]:
+                    if not fid:
+                        continue
+                    try:
+                        api_tracks = itunes.get_album_tracks(fid)
+                        if api_tracks and 'items' in api_tracks:
+                            break
+                    except Exception as e:
+                        logger.debug("Refetch: fallback album tracks failed for %s: %s", fid, e)
+
+        if not api_tracks or 'items' not in api_tracks:
+            return []
+
+        missing = []
+        for item in api_tracks['items']:
+            tn = item.get('track_number')
+            if tn and tn not in owned_numbers:
+                track_artists = []
+                for a in item.get('artists', []):
+                    if isinstance(a, dict):
+                        track_artists.append(a.get('name', ''))
+                    elif isinstance(a, str):
+                        track_artists.append(a)
+                missing.append({
+                    'track_number': tn,
+                    'name': item.get('name', ''),
+                    'disc_number': item.get('disc_number', 1),
+                    'spotify_track_id': item.get('id', ''),
+                    'duration_ms': item.get('duration_ms', 0),
+                    'artists': track_artists,
+                })
+        return missing
 
     def _perform_album_fill(self, candidate, album_id, album_title, artist_name,
                             track_name, track_number, disc_number,
