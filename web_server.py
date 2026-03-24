@@ -14035,11 +14035,20 @@ def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> d
                 
                 if similarity > threshold:
                     print(f"✅ FOUND: '{track_name}' (track #{track_number}) matches '{clean_track}' (similarity: {similarity:.2f})")
-                    print(f"🎯 Forcing album classification for track in '{album.name}'")
-                    
-                    # Return album info - force album classification!
+
+                    # Classify as album vs single using same logic as _detect_album_info_web
+                    ctx_album_type = getattr(album, 'album_type', 'album') or 'album'
+                    ctx_total_tracks = getattr(album, 'total_tracks', 1) or 1
+                    ctx_is_album = (
+                        ctx_album_type == 'album' and
+                        ctx_total_tracks > 1 and
+                        matching_engine.normalize_string(album.name) != matching_engine.normalize_string(clean_track) and
+                        matching_engine.normalize_string(album.name) != matching_engine.normalize_string(artist_name)
+                    )
+                    print(f"📊 Album context classification: is_album={ctx_is_album} (type={ctx_album_type}, tracks={ctx_total_tracks})")
+
                     return {
-                        'is_album': True,  # Always true - we found it in an album!
+                        'is_album': ctx_is_album,
                         'album_name': album.name,
                         'track_number': track_number,
                         'clean_track_name': clean_track,  # Use the ORIGINAL download title, not the database match
