@@ -8449,13 +8449,56 @@ body {
 .pool-list-header {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
     padding: 16px 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     margin-bottom: 8px;
     position: sticky;
     top: 0;
     z-index: 3;
+}
+
+.pool-list-search {
+    margin-left: auto;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 7px 12px;
+    color: #fff;
+    font-size: 13px;
+    font-family: inherit;
+    width: 200px;
+    transition: border-color 0.15s ease, width 0.2s ease;
+}
+
+.pool-list-search:focus {
+    outline: none;
+    border-color: rgba(var(--accent-rgb), 0.4);
+    width: 260px;
+}
+
+.pool-list-search::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.pool-rematch-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.pool-rematch-btn:hover {
+    background: rgba(var(--accent-rgb), 0.15);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    color: rgba(255, 255, 255, 0.9);
 }
 
 .pool-back-btn {

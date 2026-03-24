@@ -57605,6 +57605,7 @@ async function openDiscoveryPoolModal(playlistId = null) {
                     <div class="pool-list-header">
                         <button class="pool-back-btn" onclick="showPoolCategories()">&larr; Back</button>
                         <span class="pool-list-title" id="pool-list-title"></span>
+                        <input type="text" class="pool-list-search" id="pool-list-search" placeholder="Filter tracks..." oninput="renderPoolList()">
                     </div>
                     <div class="pool-list-content" id="pool-list-content"></div>
                 </div>
@@ -57692,6 +57693,10 @@ function showPoolList(category) {
     const titleEl = document.getElementById('pool-list-title');
     if (titleEl) titleEl.textContent = category === 'failed' ? 'Failed Tracks' : 'Matched Tracks';
 
+    // Clear search filter when switching views
+    const searchEl = document.getElementById('pool-list-search');
+    if (searchEl) searchEl.value = '';
+
     renderPoolList();
 }
 
@@ -57735,10 +57740,23 @@ function renderPoolList() {
     const container = document.getElementById('pool-list-content');
     if (!container || !_discoveryPoolData) return;
 
+    // Client-side search filter
+    const searchEl = document.getElementById('pool-list-search');
+    const query = (searchEl ? searchEl.value : '').toLowerCase().trim();
+
     if (_discoveryPoolView === 'failed') {
-        const tracks = _discoveryPoolData.failed || [];
+        let tracks = _discoveryPoolData.failed || [];
+        if (query) {
+            tracks = tracks.filter(t =>
+                (t.track_name || '').toLowerCase().includes(query) ||
+                (t.artist_name || '').toLowerCase().includes(query) ||
+                (t.playlist_name || '').toLowerCase().includes(query)
+            );
+        }
         if (tracks.length === 0) {
-            container.innerHTML = '<div class="pool-empty">No failed discoveries. All tracks matched successfully.</div>';
+            container.innerHTML = query
+                ? '<div class="pool-empty">No failed tracks match your filter.</div>'
+                : '<div class="pool-empty">No failed discoveries. All tracks matched successfully.</div>';
             return;
         }
         container.innerHTML = tracks.map(t => `
@@ -57754,9 +57772,20 @@ function renderPoolList() {
             </div>
         `).join('');
     } else {
-        const entries = _discoveryPoolData.matched || [];
+        let entries = _discoveryPoolData.matched || [];
+        if (query) {
+            entries = entries.filter(e => {
+                const md = e.matched_data || {};
+                const matchedName = md.name || '';
+                return (e.original_title || '').toLowerCase().includes(query) ||
+                       (e.original_artist || '').toLowerCase().includes(query) ||
+                       matchedName.toLowerCase().includes(query);
+            });
+        }
         if (entries.length === 0) {
-            container.innerHTML = '<div class="pool-empty">No cached discovery matches yet.</div>';
+            container.innerHTML = query
+                ? '<div class="pool-empty">No matched tracks match your filter.</div>'
+                : '<div class="pool-empty">No cached discovery matches yet.</div>';
             return;
         }
         container.innerHTML = entries.map(e => {
@@ -57781,11 +57810,90 @@ function renderPoolList() {
                     </div>
                     <span class="pool-confidence-badge ${confClass}">${conf}%</span>
                     <span class="pool-use-count">${e.use_count}&times;</span>
+                    <button class="pool-rematch-btn" onclick="rematchPoolCacheEntry(${e.id}, '${_escAttr(e.original_title)}', '${_escAttr(e.original_artist)}')" title="Rematch this track">Rematch</button>
                     <button class="pool-remove-btn" onclick="removePoolCacheEntry(${e.id})" title="Remove cached match">&times;</button>
                 </div>
             `;
         }).join('');
     }
+}
+
+function rematchPoolCacheEntry(cacheId, originalTitle, originalArtist) {
+    // Open the fix modal in "rematch" mode — saves to cache instead of mirrored tracks
+    openPoolRematchModal(cacheId, originalTitle, originalArtist);
+}
+
+function openPoolRematchModal(cacheId, trackName, artistName) {
+    // Reuses the fix modal UI but saves via the rematch endpoint
+    let fixOverlay = document.getElementById('pool-fix-overlay');
+    if (fixOverlay) fixOverlay.remove();
+
+    fixOverlay = document.createElement('div');
+    fixOverlay.className = 'pool-fix-overlay';
+    fixOverlay.id = 'pool-fix-overlay';
+    fixOverlay.addEventListener('mousedown', (e) => {
+        if (e.target === fixOverlay) {
+            e.preventDefault();
+            closePoolFixModal();
+        }
+    });
+
+    fixOverlay.innerHTML = `
+        <div class="pool-fix-modal" onmousedown="event.stopPropagation()">
+            <div class="pool-fix-header">
+                <h2>Rematch Track</h2>
+                <button class="pool-fix-close" onclick="closePoolFixModal()" title="Close">✕</button>
+            </div>
+            <div class="pool-fix-body">
+                <div class="pool-fix-source">
+                    <div class="pool-fix-source-label">Current Match</div>
+                    <div class="pool-fix-source-row">
+                        <span class="pool-fix-source-title">${_esc(trackName)}</span>
+                        <span class="pool-fix-source-sep">—</span>
+                        <span class="pool-fix-source-artist">${_esc(artistName)}</span>
+                    </div>
+                </div>
+                <div class="pool-fix-search">
+                    <div class="pool-fix-input-row">
+                        <div class="pool-fix-input-wrap">
+                            <label for="pool-fix-track-input">Track</label>
+                            <input type="text" id="pool-fix-track-input" placeholder="Track name" value="${_escAttr(trackName)}">
+                        </div>
+                        <div class="pool-fix-input-wrap">
+                            <label for="pool-fix-artist-input">Artist</label>
+                            <input type="text" id="pool-fix-artist-input" placeholder="Artist name" value="${_escAttr(artistName)}">
+                        </div>
+                        <button class="pool-fix-search-btn" onclick="searchPoolFix()">Search</button>
+                    </div>
+                </div>
+                <div class="pool-fix-results-area">
+                    <div id="pool-fix-results" class="pool-fix-results-list">
+                        <div class="pool-fix-empty">Searching...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="pool-fix-footer">
+                <button class="pool-fix-cancel" onclick="closePoolFixModal()">Cancel</button>
+            </div>
+        </div>
+    `;
+
+    // Store rematch context
+    fixOverlay.dataset.mode = 'rematch';
+    fixOverlay.dataset.cacheId = cacheId;
+    fixOverlay.dataset.originalTitle = trackName;
+    fixOverlay.dataset.originalArtist = artistName;
+    document.body.appendChild(fixOverlay);
+
+    const trackInput = fixOverlay.querySelector('#pool-fix-track-input');
+    const artistInput = fixOverlay.querySelector('#pool-fix-artist-input');
+    const enterHandler = (e) => { if (e.key === 'Enter') searchPoolFix(); };
+    trackInput.addEventListener('keypress', enterHandler);
+    artistInput.addEventListener('keypress', enterHandler);
+    trackInput.focus();
+    trackInput.select();
+
+    setTimeout(() => searchPoolFix(), 500);
 }
 
 async function removePoolCacheEntry(entryId) {
@@ -57938,22 +58046,42 @@ async function searchPoolFix() {
 async function selectPoolFixTrack(track) {
     const fixOverlay = document.getElementById('pool-fix-overlay');
     if (!fixOverlay) return;
-    const trackId = parseInt(fixOverlay.dataset.trackId);
 
-    // Confirm selection to prevent accidental clicks from layout shift
+    // Confirm selection
     const artists = (track.artists || []).join(', ');
     if (!await showConfirmDialog({ title: 'Confirm Match', message: `Match to "${track.name}" by ${artists}?`, confirmText: 'Confirm' })) return;
 
+    const isRematch = fixOverlay.dataset.mode === 'rematch';
+
     try {
-        const res = await fetch('/api/discovery-pool/fix', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                track_id: trackId,
-                spotify_track: track,
-            }),
-        });
-        const data = await res.json();
+        let res, data;
+        if (isRematch) {
+            // Rematch mode: save new match to discovery cache
+            res = await fetch('/api/discovery-pool/rematch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cache_id: parseInt(fixOverlay.dataset.cacheId),
+                    original_title: fixOverlay.dataset.originalTitle,
+                    original_artist: fixOverlay.dataset.originalArtist,
+                    spotify_track: track,
+                }),
+            });
+            data = await res.json();
+        } else {
+            // Normal fix mode: save to mirrored track
+            const trackId = parseInt(fixOverlay.dataset.trackId);
+            res = await fetch('/api/discovery-pool/fix', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    track_id: trackId,
+                    spotify_track: track,
+                }),
+            });
+            data = await res.json();
+        }
+
         if (data.success) {
             showToast(`Matched: ${track.name}`, 'success');
             closePoolFixModal();
