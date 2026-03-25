@@ -26961,35 +26961,95 @@ def get_discover_album(source, album_id):
                 logger.warning(f"Hydrabase album_tracks failed for '{album_id}', falling back to {source}: {e}")
 
         if source == 'spotify':
-            if not spotify_client or not spotify_client.is_authenticated():
-                return jsonify({"error": "Spotify not authenticated."}), 401
+            album_data = spotify_client.get_album(album_id) if spotify_client and spotify_client.is_authenticated() else None
 
-            album_data = spotify_client.get_album(album_id)
-            if not album_data:
-                return jsonify({"error": "Album not found"}), 404
+            if album_data:
+                tracks = album_data.get('tracks', {}).get('items', [])
+                if not tracks:
+                    tracks_data = spotify_client.get_album_tracks(album_id)
+                    if tracks_data and 'items' in tracks_data:
+                        tracks = tracks_data['items']
 
-            tracks = album_data.get('tracks', {}).get('items', [])
-            if not tracks:
-                tracks_data = spotify_client.get_album_tracks(album_id)
-                if tracks_data and 'items' in tracks_data:
-                    tracks = tracks_data['items']
+                return jsonify({
+                    'id': album_data['id'],
+                    'name': album_data['name'],
+                    'artists': album_data.get('artists', []),
+                    'release_date': album_data.get('release_date', ''),
+                    'total_tracks': album_data.get('total_tracks', 0),
+                    'album_type': album_data.get('album_type', 'album'),
+                    'images': album_data.get('images', []),
+                    'tracks': tracks,
+                    'source': 'spotify'
+                })
 
-            return jsonify({
-                'id': album_data['id'],
-                'name': album_data['name'],
-                'artists': album_data.get('artists', []),
-                'release_date': album_data.get('release_date', ''),
-                'total_tracks': album_data.get('total_tracks', 0),
-                'album_type': album_data.get('album_type', 'album'),
-                'images': album_data.get('images', []),
-                'tracks': tracks,
-                'source': 'spotify'
-            })
+            # Spotify failed (not authenticated, album removed, rate limited) — try fallback
+            album_name = request.args.get('name', '')
+            album_artist = request.args.get('artist', '')
+            fallback = _get_metadata_fallback_client()
+            if fallback and (album_name or album_artist):
+                clean_name = album_name.replace(' - Single', '').replace(' - EP', '').replace(' (Single)', '').strip()
+                search_query = f"{album_artist} {clean_name}" if album_artist else clean_name
+                try:
+                    results = fallback.search_albums(search_query, limit=3)
+                    for r in (results or []):
+                        tracks_data = fallback.get_album_tracks(str(r.id))
+                        tracks = tracks_data.get('items', []) if tracks_data else []
+                        if tracks:
+                            return jsonify({
+                                'id': str(r.id),
+                                'name': r.name,
+                                'artists': [{'name': getattr(r, 'artist', album_artist) or album_artist}],
+                                'release_date': getattr(r, 'release_date', '') or '',
+                                'total_tracks': getattr(r, 'total_tracks', len(tracks)),
+                                'album_type': getattr(r, 'album_type', 'album') or 'album',
+                                'images': [{'url': r.image_url}] if getattr(r, 'image_url', None) else [],
+                                'tracks': tracks,
+                                'source': _get_metadata_fallback_source(),
+                            })
+                except Exception as e:
+                    logger.debug(f"Fallback album resolve failed: {e}")
+
+            return jsonify({"error": "Album not found"}), 404
 
         elif source in ('itunes', 'deezer'):
-            fallback_client = _get_metadata_fallback_client()
+            # Use the source-specific client, not just the active fallback
+            if source == 'deezer':
+                fallback_client = _get_deezer_client()
+                fallback_source = 'deezer'
+            else:
+                from core.itunes_client import iTunesClient
+                fallback_client = iTunesClient()
+                fallback_source = 'itunes'
 
             album_data = fallback_client.get_album(album_id)
+
+            # If ID doesn't resolve (cross-source ID), search by name+artist
+            if not album_data:
+                album_name = request.args.get('name', '')
+                album_artist = request.args.get('artist', '')
+                if album_name or album_artist:
+                    clean_name = album_name.replace(' - Single', '').replace(' - EP', '').replace(' (Single)', '').strip()
+                    search_query = f"{album_artist} {clean_name}" if album_artist else clean_name
+                    try:
+                        results = fallback_client.search_albums(search_query, limit=3)
+                        for r in (results or []):
+                            tracks_data = fallback_client.get_album_tracks(str(r.id))
+                            tracks = tracks_data.get('items', []) if tracks_data else []
+                            if tracks:
+                                return jsonify({
+                                    'id': str(r.id),
+                                    'name': r.name,
+                                    'artists': [{'name': getattr(r, 'artist', album_artist) or album_artist}],
+                                    'release_date': getattr(r, 'release_date', '') or '',
+                                    'total_tracks': getattr(r, 'total_tracks', len(tracks)),
+                                    'album_type': getattr(r, 'album_type', 'album') or 'album',
+                                    'images': [{'url': r.image_url}] if getattr(r, 'image_url', None) else [],
+                                    'tracks': tracks,
+                                    'source': fallback_source,
+                                })
+                    except Exception as e:
+                        logger.debug(f"Fallback album name search failed: {e}")
+
             if not album_data:
                 return jsonify({"error": "Album not found"}), 404
 
@@ -27005,7 +27065,7 @@ def get_discover_album(source, album_id):
                 'album_type': album_data.get('album_type', 'album'),
                 'images': album_data.get('images', []),
                 'tracks': tracks,
-                'source': source
+                'source': fallback_source,
             })
 
         else:
@@ -35801,12 +35861,12 @@ def get_discover_genre_new_releases():
     try:
         database = get_database()
         cache = get_metadata_cache()
-        active_source = _get_active_discovery_source()
         genres = database.get_genre_breakdown('all')
         genre_names = [g['genre'] for g in (genres or [])[:10] if g.get('genre')]
         if not genre_names:
             return jsonify({'success': True, 'albums': []})
-        albums = cache.get_genre_new_releases(genre_names, source=active_source, limit=20)
+        allowed = _get_genre_allowed_sources()
+        albums = cache.get_genre_new_releases(genre_names, source=allowed, limit=20)
         return jsonify({'success': True, 'albums': albums})
     except Exception as e:
         logger.error(f"Genre new releases endpoint error: {e}")
@@ -35852,16 +35912,25 @@ def get_discover_deep_cuts():
         logger.error(f"Deep cuts endpoint error: {e}")
         return jsonify({'success': True, 'tracks': []})
 
+def _get_genre_allowed_sources():
+    """Get allowed metadata sources for genre features.
+    Spotify authed → ['spotify', 'itunes', 'deezer']
+    Not authed → ['itunes', 'deezer']"""
+    sources = ['itunes', 'deezer']
+    if spotify_client and spotify_client.is_spotify_authenticated():
+        sources.append('spotify')
+    return sources
+
 @app.route('/api/discover/genre-explorer', methods=['GET'])
 def get_discover_genre_explorer():
     """Genre landscape from cached artists — highlights unexplored genres."""
     try:
         database = get_database()
         cache = get_metadata_cache()
-        active_source = _get_active_discovery_source()
         genres = database.get_genre_breakdown('all')
         user_genres = {g['genre'] for g in (genres or []) if g.get('genre')}
-        data = cache.get_genre_explorer(user_genres, source=active_source)
+        allowed = _get_genre_allowed_sources()
+        data = cache.get_genre_explorer(user_genres, sources=allowed)
         return jsonify({'success': True, 'genres': data})
     except Exception as e:
         logger.error(f"Genre explorer endpoint error: {e}")
@@ -35874,9 +35943,9 @@ def get_discover_genre_deep_dive():
         genre = request.args.get('genre', '').strip()
         if not genre:
             return jsonify({'success': False, 'error': 'genre required'}), 400
-        active_source = _get_active_discovery_source()
         cache = get_metadata_cache()
-        data = cache.get_genre_deep_dive(genre, source=active_source)
+        allowed = _get_genre_allowed_sources()
+        data = cache.get_genre_deep_dive(genre, sources=allowed)
         return jsonify({'success': True, **data})
     except Exception as e:
         logger.error(f"Genre albums endpoint error: {e}")
@@ -35895,18 +35964,43 @@ def resolve_cache_album():
         database = get_database()
         with database._get_connection() as conn:
             cursor = conn.cursor()
-            # Prefer active source, fall back to any source
+            # Strategy 1: exact match, prefer active source
             cursor.execute("""
                 SELECT entity_id, source FROM metadata_cache_entities
                 WHERE entity_type = 'album'
-                  AND LOWER(name) = LOWER(?)
-                  AND LOWER(artist_name) = LOWER(?)
+                  AND name COLLATE NOCASE = ? COLLATE NOCASE
+                  AND artist_name COLLATE NOCASE = ? COLLATE NOCASE
                 ORDER BY CASE WHEN source = ? THEN 0 ELSE 1 END
                 LIMIT 1
             """, (name, artist, active_source))
             row = cursor.fetchone()
             if row:
                 return jsonify({'success': True, 'entity_id': row['entity_id'], 'source': row['source']})
+
+            # Strategy 2: partial match (handles "Album - Single" vs "Album" naming)
+            cursor.execute("""
+                SELECT entity_id, source FROM metadata_cache_entities
+                WHERE entity_type = 'album'
+                  AND name COLLATE NOCASE LIKE ? COLLATE NOCASE
+                  AND artist_name COLLATE NOCASE LIKE ? COLLATE NOCASE
+                ORDER BY CASE WHEN source = ? THEN 0 ELSE 1 END
+                LIMIT 1
+            """, (f'%{name}%', f'%{artist}%', active_source))
+            row = cursor.fetchone()
+            if row:
+                return jsonify({'success': True, 'entity_id': row['entity_id'], 'source': row['source']})
+
+            # Strategy 3: not in cache — try searching the fallback client directly
+            fallback = _get_metadata_fallback_client()
+            if fallback:
+                try:
+                    results = fallback.search_albums(f"{artist} {name}", limit=3)
+                    if results:
+                        r = results[0]
+                        return jsonify({'success': True, 'entity_id': str(r.id), 'source': _get_metadata_fallback_source()})
+                except Exception:
+                    pass
+
             return jsonify({'success': False, 'error': 'Album not found in cache'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
