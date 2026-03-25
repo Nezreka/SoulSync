@@ -683,8 +683,15 @@ class DeezerClient:
 
             results = data.get('data', [])
             if results and len(results) > 0:
+                result = results[0]
+                # Cache the artist entity
+                try:
+                    cache = get_metadata_cache()
+                    cache.store_entity('deezer', 'artist', str(result.get('id', '')), result)
+                except Exception:
+                    pass
                 logger.debug(f"Found artist for query: {artist_name}")
-                return results[0]
+                return result
 
             logger.debug(f"No artist found for query: {artist_name}")
             return None
@@ -721,8 +728,15 @@ class DeezerClient:
 
             results = data.get('data', [])
             if results and len(results) > 0:
+                result = results[0]
+                # Cache the album entity
+                try:
+                    cache = get_metadata_cache()
+                    cache.store_entity('deezer', 'album', str(result.get('id', '')), result)
+                except Exception:
+                    pass
                 logger.debug(f"Found album for query: {artist_name} - {album_title}")
-                return results[0]
+                return result
 
             logger.debug(f"No album found for query: {artist_name} - {album_title}")
             return None
@@ -759,8 +773,15 @@ class DeezerClient:
 
             results = data.get('data', [])
             if results and len(results) > 0:
+                result = results[0]
+                # Cache the track entity
+                try:
+                    cache = get_metadata_cache()
+                    cache.store_entity('deezer', 'track', str(result.get('id', '')), result)
+                except Exception:
+                    pass
                 logger.debug(f"Found track for query: {artist_name} - {track_title}")
-                return results[0]
+                return result
 
             logger.debug(f"No track found for query: {artist_name} - {track_title}")
             return None
@@ -774,6 +795,7 @@ class DeezerClient:
         """
         Get full album details by ID — raw Deezer format (enrichment interface).
         Used by deezer_worker.py for label/genre/explicit enrichment.
+        Checks metadata cache first to avoid redundant API calls.
 
         Args:
             album_id: Deezer album ID
@@ -781,6 +803,17 @@ class DeezerClient:
         Returns:
             Full album dict with label, genres, explicit flag or None
         """
+        # Check cache first — get_album_raw is called on every enrichment cycle
+        try:
+            cache = get_metadata_cache()
+            cached = cache.get_entity('deezer', 'album', str(album_id))
+            if cached and cached.get('label'):
+                # Cache hit with full details (has label = was a get_album response, not just search)
+                logger.debug(f"Cache hit for album {album_id}")
+                return cached
+        except Exception:
+            pass
+
         try:
             response = self.session.get(
                 f"{self.BASE_URL}/album/{album_id}",
@@ -793,6 +826,12 @@ class DeezerClient:
                 logger.error(f"Deezer API error getting album {album_id}: {data['error']}")
                 return None
 
+            # Cache the full album (includes genres, label, explicit)
+            try:
+                cache = get_metadata_cache()
+                cache.store_entity('deezer', 'album', str(album_id), data)
+            except Exception:
+                pass
             logger.debug(f"Got full album details for ID: {album_id}")
             return data
 
@@ -805,6 +844,7 @@ class DeezerClient:
         """
         Get full track details by ID — raw Deezer format (enrichment interface, includes BPM).
         Used by deezer_worker.py for BPM enrichment.
+        Checks metadata cache first to avoid redundant API calls.
 
         Args:
             track_id: Deezer track ID
@@ -812,6 +852,16 @@ class DeezerClient:
         Returns:
             Full track dict with BPM or None
         """
+        # Check cache first
+        try:
+            cache = get_metadata_cache()
+            cached = cache.get_entity('deezer', 'track', str(track_id))
+            if cached and cached.get('bpm'):
+                logger.debug(f"Cache hit for track {track_id}")
+                return cached
+        except Exception:
+            pass
+
         try:
             response = self.session.get(
                 f"{self.BASE_URL}/track/{track_id}",
@@ -824,6 +874,12 @@ class DeezerClient:
                 logger.error(f"Deezer API error getting track {track_id}: {data['error']}")
                 return None
 
+            # Cache the full track (includes BPM, ISRC, etc.)
+            try:
+                cache = get_metadata_cache()
+                cache.store_entity('deezer', 'track', str(track_id), data)
+            except Exception:
+                pass
             logger.debug(f"Got full track details for ID: {track_id}")
             return data
 
