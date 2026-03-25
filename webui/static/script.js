@@ -50768,26 +50768,43 @@ async function openCacheDiscoverAlbum(sectionKey, index) {
     // Deep cuts / genre dive tracks — find the real album by searching the cache
     if (sectionKey === 'deep_cuts' || sectionKey === 'genre_dive_tracks') {
         document.getElementById('genre-deep-dive-modal')?.remove();
-        const albumName = item.album_name || '';
+        const albumName = item.album_name || item.name || '';
         const artistName = item.artist_name || '';
-        if (!albumName || !artistName) {
-            showToast('No album data available for this track', 'error');
+        const trackAlbumId = item.album_id || '';
+        const trackSource = item.source || source;
+
+        if (!artistName) {
+            showToast('No artist data available for this track', 'error');
             return;
         }
-        // Search for the album by name+artist to get the real album entity_id
+
         showLoadingOverlay(`Loading ${albumName}...`);
         try {
-            const searchResp = await fetch(`/api/discover/resolve-cache-album?name=${encodeURIComponent(albumName)}&artist=${encodeURIComponent(artistName)}`);
-            if (!searchResp.ok) throw new Error('Album not found in cache');
-            const searchData = await searchResp.json();
-            if (!searchData.success || !searchData.entity_id) throw new Error('Album not found in cache');
+            let resolvedSource = trackSource;
+            let resolvedId = trackAlbumId;
+            let response;
 
-            const resolvedSource = searchData.source || source;
-            const resolvedId = searchData.entity_id;
+            // If we have an album_id, use it directly
+            if (trackAlbumId) {
+                const _params = new URLSearchParams({ name: albumName, artist: artistName });
+                response = await fetch(`/api/discover/album/${trackSource}/${trackAlbumId}?${_params}`);
+            }
 
-            const _params = new URLSearchParams({ name: albumName, artist: artistName });
-            const response = await fetch(`/api/discover/album/${resolvedSource}/${resolvedId}?${_params}`);
-            if (!response.ok) throw new Error('Failed to fetch album tracks');
+            // Fallback: resolve by name+artist if no album_id or direct fetch failed
+            if (!trackAlbumId || (response && !response.ok)) {
+                const searchResp = await fetch(`/api/discover/resolve-cache-album?name=${encodeURIComponent(albumName)}&artist=${encodeURIComponent(artistName)}`);
+                if (searchResp.ok) {
+                    const searchData = await searchResp.json();
+                    if (searchData.success && searchData.entity_id) {
+                        resolvedSource = searchData.source || trackSource;
+                        resolvedId = searchData.entity_id;
+                        const _params = new URLSearchParams({ name: albumName, artist: artistName });
+                        response = await fetch(`/api/discover/album/${resolvedSource}/${resolvedId}?${_params}`);
+                    }
+                }
+            }
+
+            if (!response || !response.ok) throw new Error('Failed to fetch album tracks');
             const albumData = await response.json();
             if (!albumData.tracks || albumData.tracks.length === 0) throw new Error('No tracks found');
 
@@ -50885,7 +50902,7 @@ async function openCacheDiscoverAlbum(sectionKey, index) {
     }
 }
 
-function _insertCacheSection(id, title, subtitle, html) {
+function _insertCacheSection(id, title, subtitle, html, position) {
     const container = document.getElementById('discover-bylt-sections') || document.querySelector('.discover-container');
     if (!container) return;
     let section = document.getElementById(id);
@@ -50893,7 +50910,17 @@ function _insertCacheSection(id, title, subtitle, html) {
         section = document.createElement('div');
         section.id = id;
         section.className = 'discover-section';
-        container.appendChild(section);
+        if (position === 'top') {
+            // Insert after the hero section (first child), not before it
+            const hero = container.querySelector('.discover-hero');
+            if (hero && hero.nextSibling) {
+                container.insertBefore(section, hero.nextSibling);
+            } else {
+                container.prepend(section);
+            }
+        } else {
+            container.appendChild(section);
+        }
     }
     section.innerHTML = `
         <div class="discover-section-header">
@@ -50973,7 +51000,7 @@ async function loadCacheGenreExplorer() {
             </div>
         `).join('')}</div>`;
         _insertCacheSection('cache-genre-explorer',
-            'Genre Explorer', 'Tap a genre to explore', html);
+            'Genre Explorer', 'Tap a genre to explore', html, 'top');
     } catch (e) { console.debug('Cache genre explorer:', e); }
 }
 
@@ -51045,17 +51072,23 @@ async function openGenreDeepDive(genre) {
             </div>`;
         }
 
-        // Artists section — clickable, navigates to artist page directly
+        // Artists section — clickable, navigates to artist page
+        // Uses library_id for in-library artists (source-agnostic), falls back to search by name
         if (data.artists && data.artists.length) {
             html += `<div class="genre-dive-section">
                 <h3 class="genre-dive-section-title"><span class="genre-dive-icon">🎤</span> Artists in ${_esc(genre)}</h3>
                 <div class="genre-dive-artists">
                     ${data.artists.map(a => {
-                        const clickAction = `onclick="document.getElementById('genre-deep-dive-modal').remove();navigateToPage('artists');setTimeout(()=>selectArtistForDetail({id:'${_esc(a.entity_id)}',name:'${_esc(a.name)}',image_url:'${_esc(a.image_url||'')}'},{source:'${_esc(a.source||'spotify')}'}),300)"`;
+                        // Always open on Artists page with discography — pass source for correct routing
+                        const imgUrl = _esc(a.image_url || '');
+                        const artSource = _esc(a.source || '');
+                        const clickAction = `onclick="document.getElementById('genre-deep-dive-modal').remove();navigateToPage('artists');setTimeout(()=>selectArtistForDetail({id:'${_esc(a.entity_id)}',name:'${_esc(a.name)}',image_url:'${imgUrl}'},{source:'${artSource}'}),300)"`;
+                        const srcClass = (a.source || '').toLowerCase();
                         return `<div class="genre-dive-artist" ${clickAction}>
                             <div class="genre-dive-artist-img" style="${a.image_url ? `background-image:url('${_esc(a.image_url)}')` : ''}">
                                 ${!a.image_url ? '<span>🎤</span>' : ''}
                             </div>
+                            <span class="genre-dive-src-dot genre-dive-src-${srcClass}"></span>
                             <div class="genre-dive-artist-name">${_esc(a.name)}</div>
                             ${a.followers ? `<div class="genre-dive-artist-meta">${_fmtNum(a.followers)} followers</div>` : ''}
                             ${a.library_id ? '<div class="genre-dive-artist-badge">In Library</div>' : ''}
@@ -51071,7 +51104,9 @@ async function openGenreDeepDive(genre) {
             html += `<div class="genre-dive-section">
                 <h3 class="genre-dive-section-title"><span class="genre-dive-icon">🎵</span> Popular Tracks</h3>
                 <div class="genre-dive-tracks">
-                    ${data.tracks.map((t, i) => `
+                    ${data.tracks.map((t, i) => {
+                        const tSrcClass = (t.source || '').toLowerCase();
+                        return `
                         <div class="genre-dive-track" onclick="document.getElementById('genre-deep-dive-modal').remove();openCacheDiscoverAlbum('genre_dive_tracks',${i})">
                             <div class="genre-dive-track-num">${i + 1}</div>
                             <div class="genre-dive-track-img" style="${t.image_url ? `background-image:url('${_esc(t.image_url)}')` : ''}">
@@ -51081,9 +51116,10 @@ async function openGenreDeepDive(genre) {
                                 <div class="genre-dive-track-name">${_esc(t.name)}</div>
                                 <div class="genre-dive-track-artist">${_esc(t.artist_name)}${t.album_name ? ' · ' + _esc(t.album_name) : ''}</div>
                             </div>
+                            <span class="genre-dive-src-dot genre-dive-src-${tSrcClass}" style="flex-shrink:0"></span>
                             <div class="genre-dive-track-duration">${_fmtDur(t.duration_ms)}</div>
                         </div>
-                    `).join('')}
+                    `}).join('')}
                 </div>
             </div>`;
         }

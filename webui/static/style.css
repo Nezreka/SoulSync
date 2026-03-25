@@ -26923,6 +26923,32 @@ body {
     border-radius: 6px;
 }
 
+/* Source indicator dots */
+.genre-dive-src-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.genre-dive-src-spotify { background: #1db954; }
+.genre-dive-src-itunes { background: #fc3c44; }
+.genre-dive-src-deezer { background: #a238ff; }
+
+.genre-dive-artist .genre-dive-src-dot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.genre-dive-artist {
+    position: relative;
+}
+
 /* Tracks */
 .genre-dive-tracks {
     display: flex;

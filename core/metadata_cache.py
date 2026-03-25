@@ -18,13 +18,23 @@ _cache_instance = None
 _cache_lock = threading.Lock()
 
 
+_backfill_done = False
+
 def get_metadata_cache():
     """Get or create the singleton MetadataCache instance."""
-    global _cache_instance
+    global _cache_instance, _backfill_done
     if _cache_instance is None:
         with _cache_lock:
             if _cache_instance is None:
                 _cache_instance = MetadataCache()
+    # One-time backfill of Deezer album genres from stored raw_json
+    if not _backfill_done:
+        _backfill_done = True
+        try:
+            import threading
+            threading.Thread(target=_cache_instance.backfill_deezer_album_genres, daemon=True).start()
+        except Exception:
+            pass
     return _cache_instance
 
 
@@ -663,13 +673,28 @@ class MetadataCache:
 
         return fields
 
+    # Deezer genre_id → name mapping (from https://api.deezer.com/genre)
+    _DEEZER_GENRE_MAP = {
+        132: 'Pop', 116: 'Rap/Hip Hop', 122: 'Reggaeton', 152: 'Rock', 113: 'Dance',
+        165: 'R&B', 85: 'Alternative', 186: 'Christian', 106: 'Electro', 466: 'Folk',
+        144: 'Reggae', 129: 'Jazz', 84: 'Country', 67: 'Salsa', 173: 'Films/Games',
+        98: 'Classical', 169: 'Soul & Funk', 2: 'African Music', 16: 'Asian Music',
+        153: 'Blues', 75: 'Brazilian Music', 81: 'Indian Music', 95: 'Kids',
+        197: 'Latin Music', 73: 'Metal', 464: 'Rap', 174: 'Musicals',
+    }
+
     def _extract_deezer_fields(self, entity_type: str, data: dict) -> dict:
         """Extract fields from Deezer API response."""
         fields = {}
 
         if entity_type == 'artist':
             fields['name'] = data.get('name', '')
-            fields['genres'] = '[]'
+            # Deezer artists don't have genres directly, but may have genre_id from search context
+            genre_id = data.get('genre_id')
+            if genre_id and genre_id in self._DEEZER_GENRE_MAP:
+                fields['genres'] = json.dumps([self._DEEZER_GENRE_MAP[genre_id]])
+            else:
+                fields['genres'] = '[]'
             fields['popularity'] = 0
             fields['followers'] = data.get('nb_fan', 0)
             fields['image_url'] = data.get('picture_xl') or data.get('picture_big') or data.get('picture_medium')
@@ -689,6 +714,17 @@ class MetadataCache:
             fields['album_type'] = record_type if record_type in ('single', 'ep', 'album') else 'album'
             fields['label'] = data.get('label', '')
             fields['image_url'] = data.get('cover_xl') or data.get('cover_big') or data.get('cover_medium')
+            # Deezer full album response: genres in data.genres.data[].name
+            # Deezer search response: genre_id (numeric) — map to name
+            dz_genres = data.get('genres', {})
+            if isinstance(dz_genres, dict):
+                dz_genres = dz_genres.get('data', [])
+            if isinstance(dz_genres, list) and dz_genres:
+                fields['genres'] = json.dumps([g.get('name', '') for g in dz_genres if isinstance(g, dict) and g.get('name')])
+            else:
+                genre_id = data.get('genre_id')
+                if genre_id and genre_id in self._DEEZER_GENRE_MAP:
+                    fields['genres'] = json.dumps([self._DEEZER_GENRE_MAP[genre_id]])
             urls = {}
             if data.get('link'):
                 urls['deezer'] = data['link']
@@ -842,7 +878,7 @@ class MetadataCache:
             logger.error(f"Undiscovered albums error: {e}")
             return []
 
-    def get_genre_new_releases(self, user_genres, source=None, limit=20):
+    def get_genre_new_releases(self, user_genres, source=None, sources=None, limit=20):
         """Find recently released cached albums matching user's genres."""
         if not user_genres:
             return []
@@ -854,7 +890,11 @@ class MetadataCache:
                 genre_clauses = ' OR '.join(['genres LIKE ?' for _ in user_genres])
                 params = [f'%{g}%' for g in user_genres]
                 source_filter = ""
-                if source:
+                if sources:
+                    placeholders = ','.join(['?'] * len(sources))
+                    source_filter = f"AND source IN ({placeholders})"
+                    params.extend(sources)
+                elif source:
                     source_filter = "AND source = ?"
                     params.append(source)
                 cursor.execute(f"""
@@ -941,7 +981,7 @@ class MetadataCache:
             logger.error(f"Deep cuts error: {e}")
             return []
 
-    def get_genre_deep_dive(self, genre, source=None, artist_limit=12, album_limit=20, track_limit=15):
+    def get_genre_deep_dive(self, genre, source=None, sources=None, artist_limit=12, album_limit=20, track_limit=15):
         """Get artists, albums, and tracks for a genre. Albums don't have genres in Spotify,
         so we find artists with matching genres then fetch their cached albums and tracks."""
         if not genre:
@@ -952,11 +992,18 @@ class MetadataCache:
             try:
                 cursor = conn.cursor()
 
-                # Step 1: Find artists with this genre
-                params = [f'%{genre}%']
-                source_filter = "AND source = ?" if source else ""
-                if source:
-                    params.append(source)
+                # Build source filter for allowed sources
+                source_filter = ""
+                source_params = []
+                if sources:
+                    placeholders = ','.join(['?'] * len(sources))
+                    source_filter = f"AND source IN ({placeholders})"
+                    source_params = list(sources)
+                elif source:
+                    source_filter = "AND source = ?"
+                    source_params = [source]
+                params = [f'%{genre}%'] + source_params
+                # Fetch extra to allow dedup across sources
                 cursor.execute(f"""
                     SELECT name, image_url, popularity, followers, entity_id, source, genres
                     FROM metadata_cache_entities
@@ -965,61 +1012,129 @@ class MetadataCache:
                       {source_filter}
                     ORDER BY COALESCE(followers, 0) DESC, COALESCE(popularity, 0) DESC
                     LIMIT ?
-                """, params + [artist_limit])
-                artists = [dict(r) for r in cursor.fetchall()]
+                """, params + [artist_limit * 3])
+                # Deduplicate by name — prefer entry with image, then most followers
+                seen_artists = {}
+                for r in cursor.fetchall():
+                    r = dict(r)
+                    key = r['name'].lower().strip()
+                    existing = seen_artists.get(key)
+                    if not existing:
+                        seen_artists[key] = r
+                    elif not existing.get('image_url') and r.get('image_url'):
+                        seen_artists[key] = r
+                    elif (existing.get('followers') or 0) < (r.get('followers') or 0):
+                        seen_artists[key] = r
+                artists = list(seen_artists.values())[:artist_limit]
 
-                artist_names = [a['name'].lower() for a in artists if a.get('name')]
+                # If not enough artists found (e.g. Deezer), find artists via album genres
+                # Two-step: get artist names from albums, then look up artist entities
+                if len(artists) < artist_limit:
+                    existing_names = {a['name'].lower() for a in artists}
+                    album_params = [f'%{genre}%'] + source_params
+                    # Step 1b: Get distinct artist names from genre-matching albums
+                    cursor.execute(f"""
+                        SELECT DISTINCT artist_name FROM metadata_cache_entities
+                        WHERE entity_type = 'album' AND genres LIKE ?
+                          {source_filter}
+                        LIMIT 50
+                    """, album_params)
+                    album_artist_names = [r['artist_name'] for r in cursor.fetchall()
+                                          if r['artist_name'] and r['artist_name'].lower() not in existing_names]
+
+                    # Step 1c: Look up those artists by name (deduplicate across sources)
+                    if album_artist_names:
+                        name_ph = ','.join(['?'] * len(album_artist_names))
+                        art_params = list(album_artist_names) + source_params
+                        cursor.execute(f"""
+                            SELECT name, image_url, popularity, followers, entity_id, source, genres
+                            FROM metadata_cache_entities
+                            WHERE entity_type = 'artist'
+                              AND name COLLATE NOCASE IN ({name_ph})
+                              {source_filter}
+                            ORDER BY COALESCE(followers, 0) DESC
+                            LIMIT ?
+                        """, art_params + [(artist_limit - len(artists)) * 3])
+                        for row in cursor.fetchall():
+                            r = dict(row)
+                            key = r['name'].lower()
+                            if key not in existing_names:
+                                existing_names.add(key)
+                                artists.append(r)
+                                if len(artists) >= artist_limit:
+                                    break
+
                 albums = []
                 tracks = []
+                original_names = [a['name'] for a in artists if a.get('name')]
 
-                if artist_names:
-                    name_placeholders = ','.join(['?'] * len(artist_names))
-                    src_filter = "AND source = ?" if source else ""
+                if original_names:
+                    name_placeholders = ','.join(['?'] * len(original_names))
 
-                    # Step 2: Find albums by those artists
-                    album_params = list(artist_names)
-                    if source:
-                        album_params.append(source)
+                    # Step 2: Find albums by those artists (COLLATE NOCASE on column leverages index)
+                    album_params = list(original_names) + source_params
                     cursor.execute(f"""
                         SELECT name, artist_name, image_url, popularity, release_date, label,
-                               source, entity_id, album_type, total_tracks
+                               source, entity_id, album_type, total_tracks, genres
                         FROM metadata_cache_entities
                         WHERE entity_type = 'album'
-                          AND LOWER(artist_name) IN ({name_placeholders})
-                          {src_filter}
-                        ORDER BY COALESCE(popularity, 0) DESC, access_count DESC
+                          AND artist_name COLLATE NOCASE IN ({name_placeholders})
+                          {source_filter}
+                        ORDER BY COALESCE(popularity, 0) DESC, RANDOM()
                         LIMIT ?
                     """, album_params + [album_limit])
                     albums = [dict(r) for r in cursor.fetchall()]
 
                     # Step 3: Find tracks by those artists
-                    track_params = list(artist_names)
-                    if source:
-                        track_params.append(source)
+                    track_params = list(original_names) + source_params
                     cursor.execute(f"""
                         SELECT name, artist_name, image_url, popularity, album_name,
                                source, entity_id, duration_ms, album_id
                         FROM metadata_cache_entities
                         WHERE entity_type = 'track'
-                          AND LOWER(artist_name) IN ({name_placeholders})
-                          {src_filter}
-                        ORDER BY COALESCE(popularity, 0) DESC, access_count DESC
+                          AND artist_name COLLATE NOCASE IN ({name_placeholders})
+                          {source_filter}
+                        ORDER BY COALESCE(popularity, 0) DESC, RANDOM()
                         LIMIT ?
                     """, track_params + [track_limit])
                     tracks = [dict(r) for r in cursor.fetchall()]
 
-                # Step 4: Find related genres (co-occurring on same artists)
+                # Step 4: Find related genres from artist genres + ALL albums by these artists
                 related_genres = {}
+                genre_lower = genre.lower()
+
+                # From artist genre data (Spotify/iTunes — multiple genres per artist)
                 for artist in artists:
                     try:
                         artist_genres = json.loads(artist.get('genres', '[]'))
                         if isinstance(artist_genres, list):
                             for g in artist_genres:
                                 g_lower = g.strip().lower()
-                                if g_lower and g_lower != genre.lower():
+                                if g_lower and g_lower != genre_lower:
                                     related_genres[g_lower] = related_genres.get(g_lower, 0) + 1
                     except (json.JSONDecodeError, TypeError):
                         pass
+
+                # From ALL albums by these artists (not just the 20 we fetched)
+                # This finds cross-genre artists (e.g., artist has Pop AND R&B albums)
+                if original_names:
+                    cursor.execute(f"""
+                        SELECT DISTINCT genres FROM metadata_cache_entities
+                        WHERE entity_type = 'album'
+                          AND artist_name COLLATE NOCASE IN ({name_placeholders})
+                          AND genres IS NOT NULL AND genres != '[]'
+                          {source_filter}
+                    """, list(original_names) + source_params)
+                    for row in cursor.fetchall():
+                        try:
+                            parsed = json.loads(row['genres'])
+                            if isinstance(parsed, list):
+                                for g in parsed:
+                                    g_lower = g.strip().lower()
+                                    if g_lower and g_lower != genre_lower:
+                                        related_genres[g_lower] = related_genres.get(g_lower, 0) + 1
+                        except (json.JSONDecodeError, TypeError):
+                            pass
                 related = sorted(
                     [{'genre': g.title(), 'count': c} for g, c in related_genres.items()],
                     key=lambda x: x['count'], reverse=True
@@ -1041,16 +1156,20 @@ class MetadataCache:
                     for album in albums:
                         album['in_library'] = (album['name'].lower().strip(), album['artist_name'].lower().strip()) in lib_set
 
-                # Step 6: Resolve library artist IDs for navigation
-                for artist in artists:
+                # Step 6: Resolve library artist IDs for navigation (batched)
+                if artists:
+                    lib_name_placeholders = ','.join(['LOWER(?)'] * len(artists))
+                    lib_name_params = [a['name'] for a in artists]
                     try:
-                        cursor.execute("""
-                            SELECT id FROM artists WHERE LOWER(name) = LOWER(?) LIMIT 1
-                        """, (artist['name'],))
-                        row = cursor.fetchone()
-                        artist['library_id'] = row['id'] if row else None
+                        cursor.execute(f"""
+                            SELECT id, LOWER(name) as lname FROM artists
+                            WHERE LOWER(name) IN ({lib_name_placeholders})
+                        """, lib_name_params)
+                        lib_id_map = {r['lname']: r['id'] for r in cursor.fetchall()}
                     except Exception:
-                        artist['library_id'] = None
+                        lib_id_map = {}
+                    for artist in artists:
+                        artist['library_id'] = lib_id_map.get(artist['name'].lower())
 
                 return {'artists': artists, 'albums': albums, 'tracks': tracks, 'related_genres': related}
             finally:
@@ -1059,8 +1178,21 @@ class MetadataCache:
             logger.error(f"Genre deep dive error: {e}")
             return {'artists': [], 'albums': [], 'tracks': []}
 
-    def get_genre_explorer(self, user_genres_set, source=None):
-        """Aggregate genres from cached artists, highlight unexplored ones."""
+    _genre_explorer_cache = {}  # {source: (timestamp, results)}
+    _GENRE_EXPLORER_TTL = 86400  # 24 hours
+
+    def get_genre_explorer(self, user_genres_set, source=None, sources=None):
+        """Aggregate genres from cached artists and albums, highlight unexplored ones."""
+        import time
+        cache_key = ','.join(sorted(sources)) if sources else (source or '_all')
+        cached = self._genre_explorer_cache.get(cache_key)
+        if cached:
+            ts, raw_results = cached
+            if time.time() - ts < self._GENRE_EXPLORER_TTL:
+                user_lower = {g.lower() for g in user_genres_set} if user_genres_set else set()
+                for r in raw_results:
+                    r['explored'] = r['genre'].lower() in user_lower
+                return raw_results
         try:
             db = self._get_db()
             conn = db._get_connection()
@@ -1068,38 +1200,166 @@ class MetadataCache:
                 cursor = conn.cursor()
                 params = []
                 source_filter = ""
-                if source:
+                if sources:
+                    placeholders = ','.join(['?'] * len(sources))
+                    source_filter = f"AND source IN ({placeholders})"
+                    params.extend(sources)
+                elif source:
                     source_filter = "AND source = ?"
                     params.append(source)
+
+                # Count unique artists per genre from both artist and album entities
+                # Artists have genres directly; albums have genre_id-mapped genres + artist_name
+                genre_artists = {}  # {genre_lower: set(artist_names)}
+
+                # From artist entities
                 cursor.execute(f"""
-                    SELECT genres FROM metadata_cache_entities
+                    SELECT name, genres FROM metadata_cache_entities
                     WHERE entity_type = 'artist'
                       AND genres IS NOT NULL AND genres != '' AND genres != '[]'
                       {source_filter}
                 """, params)
-                genre_counts = {}
                 for row in cursor.fetchall():
                     try:
                         parsed = json.loads(row['genres'])
                         if isinstance(parsed, list):
+                            artist_key = (row['name'] or '').lower()
                             for g in parsed:
                                 g_lower = g.strip().lower()
                                 if g_lower:
-                                    genre_counts[g_lower] = genre_counts.get(g_lower, 0) + 1
+                                    genre_artists.setdefault(g_lower, set()).add(artist_key)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                # From album entities (for Deezer where artists lack genres)
+                cursor.execute(f"""
+                    SELECT artist_name, genres FROM metadata_cache_entities
+                    WHERE entity_type = 'album'
+                      AND genres IS NOT NULL AND genres != '' AND genres != '[]'
+                      {source_filter}
+                """, params)
+                for row in cursor.fetchall():
+                    try:
+                        parsed = json.loads(row['genres'])
+                        if isinstance(parsed, list):
+                            artist_key = (row['artist_name'] or '').lower()
+                            if artist_key:
+                                for g in parsed:
+                                    g_lower = g.strip().lower()
+                                    if g_lower:
+                                        genre_artists.setdefault(g_lower, set()).add(artist_key)
                     except (json.JSONDecodeError, TypeError):
                         pass
 
                 user_lower = {g.lower() for g in user_genres_set} if user_genres_set else set()
                 results = []
-                for genre, count in sorted(genre_counts.items(), key=lambda x: x[1], reverse=True)[:50]:
+                for genre, artists_set in sorted(genre_artists.items(), key=lambda x: len(x[1]), reverse=True)[:50]:
+                    if len(artists_set) < 2:
+                        continue  # Skip genres with only 1 artist
                     results.append({
                         'genre': genre.title(),
-                        'artist_count': count,
+                        'artist_count': len(artists_set),
                         'explored': genre in user_lower,
                     })
+                # Cache for subsequent requests
+                self._genre_explorer_cache[cache_key] = (time.time(), results)
                 return results
             finally:
                 conn.close()
         except Exception as e:
             logger.error(f"Genre explorer error: {e}")
             return []
+
+    def backfill_deezer_album_genres(self):
+        """One-time backfill: extract genres from raw_json for Deezer albums that have genres: '[]'.
+        Deezer album API responses include genres in data.genres.data[].name but this wasn't
+        extracted in earlier versions. This parses the stored raw_json and updates the genres field."""
+        try:
+            db = self._get_db()
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, raw_json FROM metadata_cache_entities
+                    WHERE source = 'deezer' AND entity_type = 'album'
+                      AND (genres IS NULL OR genres = '' OR genres = '[]')
+                      AND raw_json IS NOT NULL
+                    LIMIT 50000
+                """)
+                updated = 0
+                for row in cursor.fetchall():
+                    try:
+                        raw = json.loads(row['raw_json'])
+                        genre_names = []
+
+                        # Try full genres object (from get_album responses)
+                        dz_genres = raw.get('genres', {})
+                        if isinstance(dz_genres, dict):
+                            dz_genres = dz_genres.get('data', [])
+                        if isinstance(dz_genres, list) and dz_genres:
+                            genre_names = [g.get('name', '') for g in dz_genres if isinstance(g, dict) and g.get('name')]
+
+                        # Fallback: genre_id from search responses
+                        if not genre_names:
+                            genre_id = raw.get('genre_id')
+                            if genre_id and genre_id in self._DEEZER_GENRE_MAP:
+                                genre_names = [self._DEEZER_GENRE_MAP[genre_id]]
+
+                        if genre_names:
+                            cursor.execute(
+                                "UPDATE metadata_cache_entities SET genres = ? WHERE id = ?",
+                                (json.dumps(genre_names), row['id'])
+                            )
+                            updated += 1
+                    except Exception:
+                        continue
+                conn.commit()
+                logger.info(f"Deezer album genre backfill: updated {updated} albums")
+
+                # Phase 2: Propagate album genres to Deezer artist entities
+                # Match by artist_name or artist_id from albums that have genres
+                artist_updated = 0
+                cursor.execute("""
+                    SELECT DISTINCT artist_name, artist_id, genres
+                    FROM metadata_cache_entities
+                    WHERE source = 'deezer' AND entity_type = 'album'
+                      AND genres IS NOT NULL AND genres != '' AND genres != '[]'
+                      AND (artist_name != '' OR artist_id != '')
+                """)
+                album_artists = {}  # {artist_identifier: set(genres)}
+                for row in cursor.fetchall():
+                    try:
+                        names = json.loads(row['genres'])
+                        if not isinstance(names, list):
+                            continue
+                        # Key by artist_name or artist_id
+                        key_name = row['artist_name'] or ''
+                        key_id = row['artist_id'] or ''
+                        for key in [k for k in [key_name, key_id] if k]:
+                            album_artists.setdefault(key, set()).update(names)
+                    except Exception:
+                        continue
+
+                # Update artist entities that have empty genres
+                cursor.execute("""
+                    SELECT id, name, entity_id FROM metadata_cache_entities
+                    WHERE source = 'deezer' AND entity_type = 'artist'
+                      AND (genres IS NULL OR genres = '' OR genres = '[]')
+                """)
+                for row in cursor.fetchall():
+                    genres = album_artists.get(row['name']) or album_artists.get(row['entity_id']) or set()
+                    if genres:
+                        cursor.execute(
+                            "UPDATE metadata_cache_entities SET genres = ? WHERE id = ?",
+                            (json.dumps(list(genres)), row['id'])
+                        )
+                        artist_updated += 1
+                conn.commit()
+                logger.info(f"Deezer artist genre backfill: updated {artist_updated} artists from album genres")
+
+                return updated + artist_updated
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Deezer genre backfill error: {e}")
+            return 0
