@@ -9238,10 +9238,108 @@ def get_artist_discography(artist_id):
         for single in singles_list:
             print(f"🎵 Single/EP: {single['name']} ({single['album_type']}) - {single['release_date']}")
         
+        # Gather artist enrichment info from cache + library
+        artist_info = {}
+        try:
+            cache = get_metadata_cache()
+            # Try metadata cache for genres, image, followers
+            cached = cache.get_entity(active_source or 'spotify', 'artist', artist_id)
+            if not cached and active_source != 'spotify':
+                cached = cache.get_entity('spotify', 'artist', artist_id)
+            if not cached:
+                # Try by name across all sources
+                for src in ['spotify', 'itunes', 'deezer']:
+                    if artist_name:
+                        db_tmp = get_database()
+                        conn_tmp = db_tmp._get_connection()
+                        try:
+                            cur = conn_tmp.cursor()
+                            cur.execute("""
+                                SELECT genres, image_url, followers, popularity, external_urls
+                                FROM metadata_cache_entities
+                                WHERE entity_type = 'artist' AND name COLLATE NOCASE = ? AND source = ?
+                                LIMIT 1
+                            """, (artist_name, src))
+                            row = cur.fetchone()
+                            if row:
+                                cached = dict(row)
+                                break
+                        finally:
+                            conn_tmp.close()
+            if cached:
+                try:
+                    artist_info['genres'] = json.loads(cached.get('genres', '[]')) if isinstance(cached.get('genres'), str) else (cached.get('genres') or [])
+                except Exception:
+                    artist_info['genres'] = []
+                artist_info['image_url'] = cached.get('image_url')
+                artist_info['followers'] = cached.get('followers')
+                artist_info['popularity'] = cached.get('popularity')
+                try:
+                    artist_info['external_urls'] = json.loads(cached.get('external_urls', '{}')) if isinstance(cached.get('external_urls'), str) else (cached.get('external_urls') or {})
+                except Exception:
+                    artist_info['external_urls'] = {}
+
+            # Try library for full enrichment (Last.fm bio, stats, service IDs)
+            if artist_name:
+                db_lib = get_database()
+                conn_lib = db_lib._get_connection()
+                try:
+                    cur_lib = conn_lib.cursor()
+                    cur_lib.execute("""
+                        SELECT id, summary, genres, thumb_url,
+                               spotify_artist_id, musicbrainz_id, deezer_id, itunes_artist_id,
+                               audiodb_id, tidal_id, qobuz_id, genius_id, soul_id,
+                               lastfm_bio, lastfm_listeners, lastfm_playcount, lastfm_tags,
+                               lastfm_url, genius_url, style, mood, label
+                        FROM artists WHERE name COLLATE NOCASE = ? LIMIT 1
+                    """, (artist_name,))
+                    lib_row = cur_lib.fetchone()
+                    if lib_row:
+                        lib = dict(lib_row)
+                        artist_info['library_id'] = lib['id']
+                        # Image fallback
+                        if not artist_info.get('image_url') and lib['thumb_url']:
+                            artist_info['image_url'] = fix_artist_image_url(lib['thumb_url'])
+                        # Genres fallback
+                        if not artist_info.get('genres') and lib['genres']:
+                            try:
+                                artist_info['genres'] = json.loads(lib['genres'])
+                            except Exception:
+                                pass
+                        # Last.fm enrichment
+                        if lib.get('lastfm_bio'):
+                            artist_info['lastfm_bio'] = lib['lastfm_bio']
+                        if lib.get('lastfm_listeners'):
+                            artist_info['lastfm_listeners'] = lib['lastfm_listeners']
+                        if lib.get('lastfm_playcount'):
+                            artist_info['lastfm_playcount'] = lib['lastfm_playcount']
+                        if lib.get('lastfm_tags'):
+                            try:
+                                artist_info['lastfm_tags'] = json.loads(lib['lastfm_tags']) if isinstance(lib['lastfm_tags'], str) else lib['lastfm_tags']
+                            except Exception:
+                                pass
+                        if lib.get('lastfm_url'):
+                            artist_info['lastfm_url'] = lib['lastfm_url']
+                        if lib.get('genius_url'):
+                            artist_info['genius_url'] = lib['genius_url']
+                        # Service IDs for badges
+                        for key in ['spotify_artist_id', 'musicbrainz_id', 'deezer_id', 'itunes_artist_id',
+                                    'audiodb_id', 'tidal_id', 'qobuz_id', 'genius_id', 'soul_id']:
+                            if lib.get(key):
+                                artist_info[key] = lib[key]
+                        # Bio fallback from summary
+                        if not artist_info.get('lastfm_bio') and lib.get('summary'):
+                            artist_info['bio'] = lib['summary']
+                finally:
+                    conn_lib.close()
+        except Exception as e:
+            logger.debug(f"Artist info enrichment failed (non-fatal): {e}")
+
         return jsonify({
             "albums": album_list,
             "singles": singles_list,
-            "source": active_source or "spotify"
+            "source": active_source or "spotify",
+            "artist_info": artist_info,
         })
 
     except Exception as e:

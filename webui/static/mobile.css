@@ -912,7 +912,68 @@
 
     .album-cards-container,
     .singles-cards-container {
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 10px;
+    }
+
+    .album-card-content {
+        padding: 10px;
+    }
+
+    .album-card-name {
+        font-size: 12px;
+    }
+
+    /* Artists page hero — mobile */
+    .artists-hero-section {
+        border-radius: 12px;
+    }
+
+    .artists-hero-main {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 16px;
+    }
+
+    .artists-hero-image {
+        width: 140px;
+        height: 175px;
+        border-radius: 10px;
+    }
+
+    .artists-hero-name {
+        font-size: 1.5em;
+    }
+
+    .artists-hero-genres {
+        justify-content: center;
+    }
+
+    .artists-hero-badges {
+        justify-content: center;
+    }
+
+    .artists-hero-content {
+        padding: 16px 14px 20px;
+    }
+
+    .artists-hero-actions {
+        position: static;
+        justify-content: center;
+        margin-top: 8px;
+    }
+
+    .artists-hero-bio {
+        text-align: left;
+    }
+
+    .artists-hero-stats {
+        justify-content: center;
+    }
+
+    .artists-hero-stat strong {
+        font-size: 15px;
     }
 
     /* --- Phase 5B: Library --- */

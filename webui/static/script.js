@@ -31909,9 +31909,18 @@ async function loadArtistDiscography(artistId, artistName = null, sourceOverride
                 ...artistsPageState.selectedArtist,
                 ...data.artist
             };
-            // Refresh header to show MusicBrainz link
-            updateArtistDetailHeader(artistsPageState.selectedArtist);
         }
+
+        // Merge artist_info enrichment from discography response
+        if (data.artist_info) {
+            artistsPageState.selectedArtist = {
+                ...artistsPageState.selectedArtist,
+                artist_info: data.artist_info,
+            };
+        }
+
+        // Refresh header with all available data
+        updateArtistDetailHeader(artistsPageState.selectedArtist);
 
         console.log(`✅ Loaded ${discography.albums.length} albums and ${discography.singles.length} singles`);
 
@@ -32887,62 +32896,131 @@ function retryLastSearch() {
  * Update artist detail header with artist info
  */
 function updateArtistDetailHeader(artist) {
-    const imageElement = document.getElementById('search-artist-detail-image');
-    const nameElement = document.getElementById('search-artist-detail-name');
-    const genresElement = document.getElementById('search-artist-detail-genres');
+    const _esc = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const info = artist.artist_info || {};
+    const imageUrl = artist.image_url || info.image_url || '';
 
-    if (imageElement) {
-        if (artist.image_url) {
-            imageElement.style.backgroundImage = `url('${artist.image_url}')`;
+    // Background blur
+    const heroBg = document.getElementById('artists-hero-bg');
+    if (heroBg) {
+        heroBg.style.backgroundImage = imageUrl ? `url('${imageUrl}')` : 'none';
+    }
+
+    // Artist image
+    const heroImage = document.getElementById('artists-hero-image');
+    if (heroImage) {
+        if (imageUrl) {
+            heroImage.style.backgroundImage = `url('${imageUrl}')`;
+            heroImage.innerHTML = '';
         } else {
-            // Lazy load image if missing (common for iTunes artists)
-            console.log(`🖼️ Lazy loading detail image for ${artist.name} (${artist.id})`);
+            heroImage.style.backgroundImage = 'none';
+            heroImage.innerHTML = '<span class="artists-hero-image-fallback">🎤</span>';
+            // Lazy load
             fetch(`/api/artist/${artist.id}/image`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success && data.image_url) {
-                        console.log(`✅ Loaded detail image for ${artist.name}`);
-                        imageElement.style.backgroundImage = `url('${data.image_url}')`;
-                        // Update the artist object in memory too
-                        artist.image_url = data.image_url;
+                .then(r => r.json())
+                .then(d => {
+                    if (d.success && d.image_url) {
+                        heroImage.style.backgroundImage = `url('${d.image_url}')`;
+                        heroImage.innerHTML = '';
+                        if (heroBg) heroBg.style.backgroundImage = `url('${d.image_url}')`;
+                        artist.image_url = d.image_url;
                     }
-                })
-                .catch(err => console.error('❌ Failed to load detail image:', err));
+                }).catch(() => {});
         }
     }
 
-    if (nameElement) {
-        nameElement.textContent = artist.name;
+    // Name
+    const heroName = document.getElementById('artists-hero-name');
+    if (heroName) heroName.textContent = artist.name || 'Unknown Artist';
 
-        // Add MusicBrainz link if available
-        if (artist.musicbrainz_id) {
-            // Remove existing MB link if any
-            const existingMb = nameElement.parentNode.querySelector('.mb-link-btn');
-            if (existingMb) existingMb.remove();
+    // Badges (service links — real logos matching library page)
+    const badgesEl = document.getElementById('artists-hero-badges');
+    if (badgesEl) {
+        const _hb = (logo, fallback, title, url) => {
+            const attr = url ? `data-url="${_esc(url)}" onclick="window.open(this.dataset.url,'_blank')"` : '';
+            const inner = logo
+                ? `<img src="${logo}" alt="${fallback}" onerror="this.parentNode.textContent='${fallback}'">`
+                : `<span style="font-size:9px;font-weight:700;">${fallback}</span>`;
+            return `<div class="artists-hero-badge" title="${title}" ${attr}>${inner}</div>`;
+        };
+        const badges = [];
+        if (info.spotify_artist_id) badges.push(_hb(SPOTIFY_LOGO_URL, 'SP', 'Spotify', `https://open.spotify.com/artist/${info.spotify_artist_id}`));
+        if (info.musicbrainz_id || artist.musicbrainz_id) badges.push(_hb(MUSICBRAINZ_LOGO_URL, 'MB', 'MusicBrainz', `https://musicbrainz.org/artist/${info.musicbrainz_id || artist.musicbrainz_id}`));
+        if (info.deezer_id) badges.push(_hb(DEEZER_LOGO_URL, 'Dz', 'Deezer', `https://www.deezer.com/artist/${info.deezer_id}`));
+        if (info.itunes_artist_id) badges.push(_hb(ITUNES_LOGO_URL, 'IT', 'Apple Music', `https://music.apple.com/artist/${info.itunes_artist_id}`));
+        if (info.lastfm_url) badges.push(_hb(LASTFM_LOGO_URL, 'LFM', 'Last.fm', info.lastfm_url));
+        if (info.genius_url) badges.push(_hb(GENIUS_LOGO_URL, 'GEN', 'Genius', info.genius_url));
+        if (info.tidal_id) badges.push(_hb(TIDAL_LOGO_URL, 'TD', 'Tidal', `https://tidal.com/browse/artist/${info.tidal_id}`));
+        if (info.qobuz_id) badges.push(_hb(QOBUZ_LOGO_URL, 'Qz', 'Qobuz', `https://www.qobuz.com/artist/${info.qobuz_id}`));
+        badgesEl.innerHTML = badges.join('');
+    }
 
-            const mbLink = document.createElement('a');
-            mbLink.className = 'mb-link-btn';
-            mbLink.href = `https://musicbrainz.org/artist/${artist.musicbrainz_id}`;
-            mbLink.target = '_blank';
-            mbLink.title = 'View on MusicBrainz';
-            mbLink.innerHTML = `
-                <img src="https://custom-icon-badges.demolab.com/badge/-MusicBrainz-353535?style=flat&logo=musicbrainz&logoColor=white" style="width: auto; height: 16px; margin: 0;">
-            `;
-            // Simplified button style to just be the badge/icon for cleaner look header
-            mbLink.style.padding = '0';
-            mbLink.style.border = 'none';
-            mbLink.style.background = 'transparent';
-            mbLink.style.marginLeft = '12px';
-            mbLink.style.verticalAlign = 'middle';
-
-            nameElement.appendChild(mbLink);
+    // Genres (pill tags — merge with Last.fm tags, deduplicated)
+    const genresEl = document.getElementById('artists-hero-genres');
+    if (genresEl) {
+        let genres = info.genres || artist.genres || [];
+        // Merge Last.fm tags
+        const lfmTags = info.lastfm_tags || [];
+        if (Array.isArray(lfmTags) && lfmTags.length > 0) {
+            const existing = new Set(genres.map(g => g.toLowerCase()));
+            const newTags = lfmTags.filter(t => !existing.has(t.toLowerCase()));
+            genres = [...genres, ...newTags];
+        }
+        if (genres.length > 0) {
+            genresEl.innerHTML = genres.slice(0, 8).map(g =>
+                `<span class="artists-hero-genre-pill">${_esc(g)}</span>`
+            ).join('');
+        } else {
+            genresEl.innerHTML = '';
         }
     }
 
-    if (genresElement) {
-        const genres = artist.genres?.slice(0, 4).join(' • ') || 'Various genres';
-        genresElement.textContent = genres;
+    // Bio (Last.fm bio or summary fallback — matching library page pattern)
+    const bioEl = document.getElementById('artists-hero-bio');
+    if (bioEl) {
+        const bio = info.lastfm_bio || info.bio || '';
+        if (bio) {
+            // Strip HTML tags and "Read more on Last.fm" links
+            let cleanBio = bio.replace(/<a\b[^>]*>.*?<\/a>/gi, '').replace(/<[^>]+>/g, '').trim();
+            if (cleanBio) {
+                bioEl.innerHTML = `<span class="artists-hero-bio-text">${_esc(cleanBio)}</span>
+                    <span class="artists-hero-bio-toggle" onclick="this.parentElement.classList.toggle('expanded');this.textContent=this.parentElement.classList.contains('expanded')?'Show less':'Read more'">Read more</span>`;
+                bioEl.style.display = '';
+            } else {
+                bioEl.style.display = 'none';
+            }
+        } else {
+            bioEl.style.display = 'none';
+        }
     }
+
+    // Stats (Last.fm listeners + playcount, with followers fallback)
+    const statsEl = document.getElementById('artists-hero-stats');
+    if (statsEl) {
+        const _fmtNum = (n) => {
+            if (!n || n <= 0) return '0';
+            if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+            if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+            return n.toLocaleString();
+        };
+        let stats = '';
+        if (info.lastfm_listeners) {
+            stats += `<span class="artists-hero-stat"><strong>${_fmtNum(info.lastfm_listeners)}</strong> listeners</span>`;
+        }
+        if (info.lastfm_playcount) {
+            stats += `<span class="artists-hero-stat"><strong>${_fmtNum(info.lastfm_playcount)}</strong> plays</span>`;
+        }
+        if (!stats && info.followers) {
+            stats += `<span class="artists-hero-stat"><strong>${_fmtNum(info.followers)}</strong> followers</span>`;
+        }
+        statsEl.innerHTML = stats;
+    }
+
+    // Also update old hidden elements for any JS that references them
+    const oldImage = document.getElementById('search-artist-detail-image');
+    if (oldImage && imageUrl) oldImage.style.backgroundImage = `url('${imageUrl}')`;
+    const oldName = document.getElementById('search-artist-detail-name');
+    if (oldName) oldName.textContent = artist.name;
 
     // Initialize watchlist button
     initializeArtistDetailWatchlistButton(artist);

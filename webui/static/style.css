@@ -16890,6 +16890,298 @@ body {
     transform: translateY(0);
 }
 
+/* ========================================= */
+/* ARTISTS PAGE - HERO SECTION              */
+/* ========================================= */
+
+.artists-hero-section {
+    position: relative;
+    border-radius: 20px;
+    overflow: hidden;
+    margin-bottom: 28px;
+    min-height: 300px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.artists-hero-bg {
+    position: absolute;
+    inset: -20px;
+    background-size: cover;
+    background-position: center top;
+    filter: blur(50px) brightness(0.35) saturate(1.4);
+    transform: scale(1.3);
+    z-index: 0;
+}
+
+.artists-hero-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg,
+        rgba(8, 8, 8, 0.5) 0%,
+        rgba(12, 12, 12, 0.75) 50%,
+        rgba(12, 12, 12, 0.92) 100%);
+    z-index: 1;
+}
+
+.artists-hero-content {
+    position: relative;
+    z-index: 2;
+    padding: 32px 36px 36px;
+}
+
+.artists-hero-back {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 6px 14px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    margin-bottom: 24px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    letter-spacing: 0.02em;
+}
+
+.artists-hero-back:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+.artists-hero-main {
+    display: flex;
+    gap: 36px;
+    align-items: center;
+}
+
+.artists-hero-image {
+    width: 400px;
+    height: 480px;
+    border-radius: 14px;
+    background-size: cover;
+    background-position: center top;
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    flex-shrink: 0;
+    box-shadow:
+        0 16px 48px rgba(0, 0, 0, 0.6),
+        0 0 0 1px rgba(255, 255, 255, 0.04);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.artists-hero-section:hover .artists-hero-image {
+    border-color: rgba(var(--accent-rgb), 0.2);
+    box-shadow:
+        0 16px 48px rgba(0, 0, 0, 0.6),
+        0 0 30px rgba(var(--accent-rgb), 0.1);
+    transform: scale(1.02);
+}
+
+.artists-hero-image-fallback {
+    font-size: 64px;
+    opacity: 0.2;
+}
+
+.artists-hero-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.artists-hero-name {
+    font-size: 2.6em;
+    font-weight: 800;
+    color: #fff;
+    margin: 0;
+    line-height: 1.1;
+    letter-spacing: -1px;
+    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+
+.artists-hero-badges {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.artists-hero-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    overflow: hidden;
+    backdrop-filter: blur(8px);
+}
+
+.artists-hero-badge img {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+}
+
+.artists-hero-badge:hover {
+    background: rgba(255, 255, 255, 0.14);
+    transform: translateY(-2px) scale(1.08);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.artists-hero-genres {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+}
+
+.artists-hero-genre-pill {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.65);
+    letter-spacing: 0.01em;
+    backdrop-filter: blur(4px);
+    transition: all 0.15s ease;
+}
+
+.artists-hero-genre-pill:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.artists-hero-bio {
+    max-width: 600px;
+    max-height: 3.9em;
+    overflow: hidden;
+    position: relative;
+    transition: max-height 0.3s ease;
+}
+
+.artists-hero-bio.expanded {
+    max-height: 500px;
+}
+
+.artists-hero-bio-text {
+    font-size: 13px;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.55);
+    margin: 0;
+    display: inline;
+}
+
+.artists-hero-bio-toggle {
+    background: none;
+    border: none;
+    color: rgba(var(--accent-rgb), 0.9);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+    margin-left: 4px;
+    display: inline;
+}
+
+.artists-hero-bio-toggle:hover {
+    color: rgb(var(--accent-rgb));
+}
+
+.artists-hero-stats {
+    display: flex;
+    gap: 24px;
+    margin-top: 4px;
+}
+
+.artists-hero-stat {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.4);
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+}
+
+.artists-hero-stat strong {
+    font-size: 18px;
+    color: #fff;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+}
+
+.artists-hero-actions {
+    position: absolute;
+    top: 32px;
+    right: 36px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .artists-hero-section {
+        border-radius: 14px;
+        min-height: 0;
+    }
+
+    .artists-hero-main {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 20px;
+    }
+
+    .artists-hero-image {
+        width: 160px;
+        height: 200px;
+    }
+
+    .artists-hero-name {
+        font-size: 1.6em;
+    }
+
+    .artists-hero-genres {
+        justify-content: center;
+    }
+
+    .artists-hero-badges {
+        justify-content: center;
+    }
+
+    .artists-hero-stats {
+        justify-content: center;
+    }
+
+    .artists-hero-content {
+        padding: 20px 16px 24px;
+    }
+
+    .artists-hero-actions {
+        position: static;
+        justify-content: center;
+        margin-top: 8px;
+    }
+
+    .artists-hero-stat strong {
+        font-size: 16px;
+    }
+}
+
 .artist-detail-header {
     display: flex;
     align-items: center;
@@ -17737,122 +18029,147 @@ body {
 .album-cards-container,
 .singles-cards-container {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 24px;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 20px;
 }
 
-/* Album Card Styles */
+/* Album Card — full-bleed image with info overlay, matching similar artist cards */
 .album-card {
     position: relative;
-    background: linear-gradient(135deg,
-            rgba(26, 26, 26, 0.95) 0%,
-            rgba(18, 18, 18, 0.98) 100%);
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(18, 18, 18, 1);
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
     overflow: hidden;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-
-    box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.4),
-        0 0 0 1px rgba(var(--accent-rgb), 0.05),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    aspect-ratio: 1;
 }
 
 .album-card:hover {
-    transform: translateY(-6px) scale(1.03);
-
-    box-shadow:
-        0 16px 40px rgba(0, 0, 0, 0.5),
-        0 0 0 1px rgba(var(--accent-rgb), 0.15),
-        0 0 20px rgba(var(--accent-rgb), 0.08),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    transform: translateY(-5px) scale(1.02);
+    border-color: rgba(var(--accent-rgb), 0.25);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5),
+                0 0 24px rgba(var(--accent-rgb), 0.12);
 }
 
-/* Dynamic glow effects for album cards */
 .album-card.has-dynamic-glow {
-    position: relative;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-        filter 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .album-card.has-dynamic-glow:hover {
-    filter: drop-shadow(0 0 6px var(--glow-color-1, rgb(var(--accent-rgb)))) drop-shadow(0 0 12px var(--glow-color-2, rgb(var(--accent-light-rgb))));
-    border-color: var(--glow-color-1, rgba(var(--accent-rgb), 0.3));
+    filter: none;
+    border-color: color-mix(in srgb, var(--glow-color-1) 30%, transparent);
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.5),
+        0 0 20px color-mix(in srgb, var(--glow-color-1) 15%, transparent);
+}
+
+/* Gradient overlay for text readability */
+.album-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(0deg,
+        rgba(0, 0, 0, 0.88) 0%,
+        rgba(0, 0, 0, 0.35) 40%,
+        transparent 65%);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.album-card:hover::after {
+    background: linear-gradient(0deg,
+        rgba(0, 0, 0, 0.92) 0%,
+        rgba(0, 0, 0, 0.3) 45%,
+        transparent 70%);
 }
 
 .album-card-image {
+    position: absolute;
+    inset: 0;
     width: 100%;
-    aspect-ratio: 1;
+    height: 100%;
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    position: relative;
+    background-color: rgba(255, 255, 255, 0.03);
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 0;
+}
 
-    /* Fallback gradient if no image */
-    background-image: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.2) 0%,
-            rgba(24, 156, 71, 0.1) 100%);
+.album-card:hover .album-card-image {
+    transform: scale(1.06);
 }
 
 .album-card-image::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(180deg,
-            transparent 0%,
-            transparent 60%,
-            rgba(0, 0, 0, 0.3) 100%);
-    opacity: 0;
-    transition: opacity 0.3s ease;
+    display: none;
 }
 
-.album-card:hover .album-card-image::after {
-    opacity: 1;
-}
-
+/* Info pinned at bottom over gradient */
 .album-card-content {
-    padding: 20px;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 14px;
+    z-index: 2;
 }
 
 .album-card-name {
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 700;
-    color: #ffffff;
-    margin-bottom: 6px;
-    line-height: 1.3;
-    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
-
-    /* Text overflow handling */
+    color: #fff;
+    margin-bottom: 3px;
+    line-height: 1.25;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    letter-spacing: -0.2px;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
 }
 
 .album-card-year {
-    font-size: 13px;
+    font-size: 12px;
     color: rgba(255, 255, 255, 0.6);
     font-weight: 500;
-    margin-bottom: 8px;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+    margin-bottom: 0;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
 .album-card-type {
-    display: inline-block;
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    display: none; /* Type is in the completion overlay or implied by the tab */
+}
 
-    background: rgba(var(--accent-rgb), 0.15);
-    color: rgba(var(--accent-rgb), 0.9);
-    border-radius: 8px;
-    border: 1px solid rgba(var(--accent-rgb), 0.2);
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
+@media (max-width: 900px) {
+    .album-cards-container,
+    .singles-cards-container {
+        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+        gap: 14px;
+    }
+}
+
+@media (max-width: 600px) {
+    .album-cards-container,
+    .singles-cards-container {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 10px;
+    }
+
+    .album-card {
+        border-radius: 10px;
+    }
+
+    .album-card-content {
+        padding: 10px;
+    }
+
+    .album-card-name {
+        font-size: 12px;
+    }
 }
 
 /* Completion Status Overlay */
@@ -24635,85 +24952,66 @@ body {
     background: rgba(255, 255, 255, 0.3);
 }
 
-/* Artist Bubble Card */
+/* Similar Artist Card — full-bleed image, library-card style */
 .similar-artist-bubble {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    padding: 20px 16px;
-    border-radius: 16px;
+    display: block;
+    position: relative;
+    overflow: hidden;
+    border-radius: 14px;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-
-    /* Subtle background */
-    background: linear-gradient(135deg,
-            rgba(26, 26, 26, 0.6) 0%,
-            rgba(18, 18, 18, 0.7) 100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background: rgba(18, 18, 18, 1);
     border: 1px solid rgba(255, 255, 255, 0.06);
-
-    /* Elegant shadow */
-    box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    aspect-ratio: 0.8;
 
     /* Progressive load animation */
     opacity: 0;
-    transform: translateY(20px);
-    animation: fadeInUp 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    transform: translateY(16px) scale(0.97);
+    animation: fadeInUp 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
-/* Keyframe animation for bubbles */
 @keyframes fadeInUp {
-    from {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+    from { opacity: 0; transform: translateY(16px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .similar-artist-bubble:hover {
-    transform: translateY(-6px) scale(1.02);
-    background: linear-gradient(135deg,
-            rgba(32, 32, 32, 0.8) 0%,
-            rgba(24, 24, 24, 0.9) 100%);
-    border-color: rgba(var(--accent-rgb), 0.3);
-
-    box-shadow:
-        0 8px 20px rgba(0, 0, 0, 0.4),
-        0 0 20px rgba(var(--accent-rgb), 0.15),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    transform: translateY(-5px) scale(1.02);
+    border-color: rgba(var(--accent-rgb), 0.25);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5),
+                0 0 24px rgba(var(--accent-rgb), 0.12);
 }
 
-/* Circular Image Container */
+/* Gradient overlay for text readability */
+.similar-artist-bubble::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(0deg,
+        rgba(0, 0, 0, 0.85) 0%,
+        rgba(0, 0, 0, 0.3) 40%,
+        transparent 65%);
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* Image fills the card */
 .similar-artist-bubble-image {
-    position: relative;
-    width: 120px;
-    height: 120px;
-    margin: 0 auto;
-    border-radius: 50%;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
     overflow: hidden;
-
-    /* Premium border */
-    border: 3px solid rgba(255, 255, 255, 0.1);
-    box-shadow:
-        0 4px 15px rgba(0, 0, 0, 0.4),
-        inset 0 2px 4px rgba(0, 0, 0, 0.3);
-
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border: none;
+    box-shadow: none;
+    transition: transform 0.3s ease;
 }
 
 .similar-artist-bubble:hover .similar-artist-bubble-image {
-    border-color: rgba(var(--accent-rgb), 0.5);
-    box-shadow:
-        0 6px 20px rgba(0, 0, 0, 0.5),
-        0 0 25px rgba(var(--accent-rgb), 0.2),
-        inset 0 2px 4px rgba(0, 0, 0, 0.3);
-    transform: scale(1.05);
+    transform: scale(1.06);
 }
 
 .similar-artist-bubble-image img {
@@ -24723,27 +25021,32 @@ body {
     display: block;
 }
 
-/* Fallback for images that fail to load */
 .similar-artist-bubble-image-fallback {
     width: 100%;
     height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.2) 0%,
-            rgba(var(--accent-light-rgb), 0.15) 100%);
+    background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
     font-size: 40px;
+    color: rgba(255, 255, 255, 0.2);
 }
 
-/* Artist Name */
+/* Name pinned at bottom over gradient */
 .similar-artist-bubble-name {
-    text-align: center;
-    font-size: 14px;
-    font-weight: 600;
-    color: #ffffff;
-    line-height: 1.3;
-    width: 100%;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 12px;
+    z-index: 2;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.25;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+    width: auto;
 
     /* Truncate long names */
     display: -webkit-box;
@@ -24761,6 +25064,7 @@ body {
 
 /* Genres (Optional - hidden by default for cleaner look) */
 .similar-artist-bubble-genres {
+    display: none; /* Hidden in card layout — name + image is enough */
     font-size: 11px;
     color: rgba(255, 255, 255, 0.5);
     text-align: center;
@@ -24808,17 +25112,9 @@ body {
         gap: 16px;
     }
 
-    .similar-artist-bubble {
-        padding: 16px 12px;
-    }
-
-    .similar-artist-bubble-image {
-        width: 100px;
-        height: 100px;
-    }
-
     .similar-artist-bubble-name {
-        font-size: 13px;
+        font-size: 12px;
+        padding: 10px;
     }
 }
 
