@@ -1617,14 +1617,49 @@ class SoulseekClient:
                 else:
                     logger.debug(f"Quality Filter: {quality_key} rejected via size fallback - {file_size_mb:.1f} MB outside {size_min}-{size_max} MB safety limits")
 
-        # Sort each bucket by quality score and effective bitrate
+        # Sort each bucket: effective bitrate first (prefer highest audio quality),
+        # then peer quality score as tiebreaker (prefer fastest peer at same quality)
         for bucket in quality_buckets.values():
-            bucket.sort(key=lambda x: (x.quality_score, self._calculate_effective_kbps(x.size, x.duration) or 0), reverse=True)
+            bucket.sort(key=lambda x: (self._calculate_effective_kbps(x.size, x.duration) or 0, x.quality_score), reverse=True)
+
+        # Enforce FLAC bit depth preference from quality profile
+        flac_config = profile['qualities'].get('flac', {})
+        bit_depth_pref = flac_config.get('bit_depth', 'any')
+        bit_depth_fallback = flac_config.get('bit_depth_fallback', True)
+
+        if bit_depth_pref != 'any' and quality_buckets['flac']:
+            # 16-bit/44.1kHz FLAC theoretical max is 1411 kbps; 24-bit starts at ~2116 kbps
+            # Real-world compressed: 16-bit = 800-1400 kbps, 24-bit = 1500+ kbps
+            DEPTH_THRESHOLD = 1450
+
+            if bit_depth_pref == '24':
+                hi_res = [c for c in quality_buckets['flac']
+                          if (self._calculate_effective_kbps(c.size, c.duration) or 0) > DEPTH_THRESHOLD]
+                if hi_res:
+                    logger.info(f"Quality Filter: Bit depth 24-bit preference — {len(hi_res)}/{len(quality_buckets['flac'])} FLAC candidates are hi-res")
+                    quality_buckets['flac'] = hi_res
+                elif not bit_depth_fallback:
+                    logger.info(f"Quality Filter: No 24-bit FLAC found and fallback disabled — rejecting all FLAC")
+                    quality_buckets['flac'] = []
+                else:
+                    logger.info(f"Quality Filter: No 24-bit FLAC found — falling back to 16-bit")
+
+            elif bit_depth_pref == '16':
+                lo_res = [c for c in quality_buckets['flac']
+                          if (self._calculate_effective_kbps(c.size, c.duration) or 0) <= DEPTH_THRESHOLD]
+                if lo_res:
+                    logger.info(f"Quality Filter: Bit depth 16-bit preference — {len(lo_res)}/{len(quality_buckets['flac'])} FLAC candidates are standard")
+                    quality_buckets['flac'] = lo_res
+                elif not bit_depth_fallback:
+                    logger.info(f"Quality Filter: No 16-bit FLAC found and fallback disabled — rejecting all FLAC")
+                    quality_buckets['flac'] = []
+                else:
+                    logger.info(f"Quality Filter: No 16-bit FLAC found — falling back to 24-bit")
 
         # Debug logging
         for quality, bucket in quality_buckets.items():
             if bucket:
-                logger.debug(f"Quality Filter: Found {len(bucket)} '{quality}' candidates (after bitrate filtering)")
+                logger.debug(f"Quality Filter: Found {len(bucket)} '{quality}' candidates (after bitrate + bit depth filtering)")
 
         # Waterfall priority logic: try qualities in priority order
         # Build priority list from enabled qualities
