@@ -1,10 +1,21 @@
 // ===============================
-// INTERACTIVE CONTEXTUAL HELP SYSTEM
+// INTERACTIVE CONTEXTUAL HELP SYSTEM V2
 // ===============================
+
+// ── State ────────────────────────────────────────────────────────────────
+
+const HelperState = {
+    mode: null,           // null | 'info' | 'tour'
+    menuOpen: false,
+    tourStep: 0,
+    tourId: null,
+};
 
 let helperModeActive = false;
 let _helperPopover = null;
 let _helperHighlighted = null;
+let _helperMenu = null;
+let _tourOverlay = null;
 
 // ── Content Database ─────────────────────────────────────────────────────
 // Keys: CSS selectors matched via element.matches()
@@ -2119,35 +2130,552 @@ function _navigateToDocsSection(docsId) {
     }, 600);
 }
 
-// ── Helper Mode Toggle ───────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPER MENU & MODE SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
+
+const HELPER_MENU_ITEMS = [
+    { id: 'info', icon: '🎯', label: 'Element Info', desc: 'Click any element to learn about it' },
+    { id: 'tour', icon: '🚶', label: 'Guided Tour', desc: 'Step-by-step walkthrough' },
+];
 
 function toggleHelperMode() {
-    helperModeActive = !helperModeActive;
-    document.body.classList.toggle('helper-mode-active', helperModeActive);
+    // If a mode is active, deactivate everything
+    if (HelperState.mode) {
+        exitHelperMode();
+        return;
+    }
+    // If menu is open, close it
+    if (HelperState.menuOpen) {
+        closeHelperMenu();
+        return;
+    }
+    // Otherwise, open the menu
+    openHelperMenu();
+}
+
+function openHelperMenu() {
+    closeHelperMenu();
+    HelperState.menuOpen = true;
 
     const floatBtn = document.getElementById('helper-float-btn');
-    if (floatBtn) floatBtn.classList.toggle('active', helperModeActive);
+    if (!floatBtn) return;
+    floatBtn.classList.add('menu-open');
 
-    if (!helperModeActive) {
-        dismissHelperPopover();
+    const menu = document.createElement('div');
+    menu.className = 'helper-menu';
+    menu.innerHTML = HELPER_MENU_ITEMS.map((item, i) => `
+        <button class="helper-menu-item" onclick="activateHelperMode('${item.id}')" style="animation-delay:${i * 0.04}s">
+            <span class="helper-menu-icon">${item.icon}</span>
+            <span class="helper-menu-label">${item.label}</span>
+        </button>
+    `).join('');
+
+    document.body.appendChild(menu);
+    _helperMenu = menu;
+
+    // Position above the float button
+    const btnRect = floatBtn.getBoundingClientRect();
+    menu.style.right = (window.innerWidth - btnRect.right) + 'px';
+    menu.style.bottom = (window.innerHeight - btnRect.top + 8) + 'px';
+
+    requestAnimationFrame(() => menu.classList.add('visible'));
+
+    // Close on click outside
+    setTimeout(() => {
+        document.addEventListener('click', _helperMenuOutsideClick);
+    }, 10);
+}
+
+function _helperMenuOutsideClick(e) {
+    const floatBtn = document.getElementById('helper-float-btn');
+    if (_helperMenu && !_helperMenu.contains(e.target) && !(floatBtn && floatBtn.contains(e.target))) {
+        closeHelperMenu();
     }
 }
 
-// ── Click Interception ───────────────────────────────────────────────────
+function closeHelperMenu() {
+    document.removeEventListener('click', _helperMenuOutsideClick);
+    if (_helperMenu) {
+        _helperMenu.remove();
+        _helperMenu = null;
+    }
+    HelperState.menuOpen = false;
+    const floatBtn = document.getElementById('helper-float-btn');
+    if (floatBtn) floatBtn.classList.remove('menu-open');
+}
+
+function activateHelperMode(mode) {
+    closeHelperMenu();
+    HelperState.mode = mode;
+
+    const floatBtn = document.getElementById('helper-float-btn');
+    if (floatBtn) floatBtn.classList.add('active');
+
+    if (mode === 'info') {
+        helperModeActive = true;
+        document.body.classList.add('helper-mode-active');
+    } else if (mode === 'tour') {
+        openTourSelector();
+    }
+}
+
+function exitHelperMode() {
+    helperModeActive = false;
+    HelperState.mode = null;
+    document.body.classList.remove('helper-mode-active');
+    dismissHelperPopover();
+    dismissTour();
+
+    const floatBtn = document.getElementById('helper-float-btn');
+    if (floatBtn) floatBtn.classList.remove('active');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GUIDED TOUR ENGINE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const HELPER_TOURS = {
+    'dashboard': {
+        title: 'Dashboard Tour',
+        description: 'Learn what each section of the dashboard does.',
+        icon: '📊',
+        steps: [
+            // Header area (top of page)
+            { page: 'dashboard', selector: '.dashboard-header', title: 'Welcome to SoulSync', description: 'This is your System Dashboard — the central hub for monitoring your music system. Let\'s walk through everything from top to bottom.' },
+            { page: 'dashboard', selector: '#watchlist-button', title: 'Watchlist', description: 'Artists you follow for new releases. Click to manage watched artists, run scans, and configure per-artist download preferences.' },
+            { page: 'dashboard', selector: '#wishlist-button', title: 'Wishlist', description: 'Tracks queued for download. Failed downloads, watchlist discoveries, and manual additions all land here for retry.' },
+
+            // Service cards
+            { page: 'dashboard', selector: '#spotify-service-card', title: 'Metadata Source', description: 'Shows your metadata source connection (Spotify, iTunes, or Deezer). This determines where album, artist, and track info comes from. Click "Test Connection" to verify.' },
+            { page: 'dashboard', selector: '#media-server-service-card', title: 'Media Server', description: 'Your media server (Plex, Jellyfin, or Navidrome). This is where your music library lives. SoulSync reads your collection and sends downloads here.' },
+            { page: 'dashboard', selector: '#soulseek-service-card', title: 'Download Source', description: 'Your primary download source status. In hybrid mode, shows the first source in your priority chain.' },
+
+            // System stats
+            { page: 'dashboard', selector: '.stats-grid-dashboard', title: 'System Stats', description: 'Real-time metrics: active downloads, speed, sync operations, uptime, and memory usage. Updates live via WebSocket.' },
+
+            // Tools — in page order
+            { page: 'dashboard', selector: '#db-updater-card', title: 'Database Updater', description: 'Syncs your media server\'s library into SoulSync\'s database. Three modes: Incremental (fast, new content only), Full Refresh (rebuilds everything), Deep Scan (finds and removes stale entries).' },
+            { page: 'dashboard', selector: '#metadata-updater-card', title: 'Metadata Enrichment', description: 'Background workers that enrich your library from 9 services — Spotify, MusicBrainz, Deezer, Last.fm, iTunes, AudioDB, Genius, Tidal, Qobuz. Runs automatically at the configured interval.' },
+            { page: 'dashboard', selector: '#quality-scanner-card', title: 'Quality Scanner', description: 'Analyzes audio files for quality integrity. Calculates bitrate density to detect transcodes (e.g., an MP3 re-encoded as FLAC). Scan by Full Library, New Only, or Single Artist.' },
+            { page: 'dashboard', selector: '#duplicate-cleaner-card', title: 'Duplicate Cleaner', description: 'Finds and removes duplicate tracks by comparing title, artist, album, and audio characteristics. Always reviews before deleting.' },
+            { page: 'dashboard', selector: '#discovery-pool-card', title: 'Discovery Pool', description: 'Tracks from similar artists found during watchlist scans. Matched tracks feed the Discover page playlists and genre browser. Fix failed matches manually.' },
+            { page: 'dashboard', selector: '#retag-tool-card', title: 'Retag Tool', description: 'Queue of tracks needing metadata corrections. When enrichment detects better tags than what\'s in your files, they appear here for batch review.' },
+            { page: 'dashboard', selector: '#media-scan-card', title: 'Media Server Scan', description: 'Manually trigger a library scan on your media server. Usually automatic after downloads, but useful after bulk imports.' },
+            { page: 'dashboard', selector: '#backup-manager-card', title: 'Backup Manager', description: 'Create and manage database backups. Includes all metadata, settings, enrichment data, and automation configs — everything except audio files.' },
+            { page: 'dashboard', selector: '#metadata-cache-card', title: 'Metadata Cache', description: 'Browse cached API responses from all metadata searches. Every artist, album, and track looked up is stored here, speeding up future lookups and feeding the Genre Explorer.' },
+
+            // Activity feed (bottom)
+            { page: 'dashboard', selector: '#dashboard-activity-feed', title: 'Activity Feed', description: 'Live stream of system events — downloads, syncs, enrichment updates, errors. Newest at the top, updates in real-time via WebSocket. That\'s the dashboard! 🎉' },
+        ]
+    },
+    'first-download': {
+        title: 'Your First Download',
+        description: 'Step-by-step guide to downloading your first album.',
+        icon: '⬇️',
+        steps: [
+            // Search page layout (top-to-bottom, elements visible on load)
+            { page: 'downloads', selector: '.search-mode-toggle', title: 'Search Modes', description: 'Two search modes: Enhanced Search (default) shows categorized results from your metadata source. Classic Search queries your download source directly for raw file results.' },
+            { page: 'downloads', selector: '.enhanced-search-input-wrapper', title: 'Search for Music', description: 'Type an artist or album name here. Results appear in categorized sections — Artists, Albums, Singles/EPs, and Tracks. Try searching for your favorite artist now!' },
+            { page: 'downloads', selector: '#toggle-download-manager-btn', title: 'Download Manager', description: 'This button toggles the download manager panel on the right side. It shows active downloads with progress bars, queued items, and completed downloads with their file paths.' },
+
+            // What results look like (describe since they appear after searching)
+            { page: 'downloads', selector: '#enh-results-container', title: 'Search Results', description: 'After searching, results appear here organized by type: Artists at the top as cards, then Albums, Singles/EPs, and individual Tracks. "In Library" badges mark items you already own.' },
+            { page: 'downloads', selector: '.search-mode-toggle', title: 'Downloading an Album', description: 'Click any album card to open the download modal. You\'ll see the tracklist, quality options, and a big "Download Album" button. Individual tracks have a play button to preview before downloading.' },
+            { page: 'downloads', selector: '.enhanced-search-input-wrapper', title: 'That\'s It!', description: 'Search, click, download — it\'s that simple. Albums go to your configured download path, get tagged with metadata, and sync to your media server automatically. 🎉' },
+        ]
+    },
+    'sync-playlist': {
+        title: 'Sync a Playlist',
+        description: 'Import and download playlists from streaming services.',
+        icon: '🔄',
+        steps: [
+            // Header
+            { page: 'sync', selector: '.sync-header', title: 'Playlist Sync', description: 'Import playlists from any streaming service, match tracks to your download sources, and sync them to your media server. Everything happens from this page.' },
+            { page: 'sync', selector: '.sync-history-btn', title: 'Sync History', description: 'View a log of all past sync operations — when they ran, how many tracks matched, and which ones failed. Useful for tracking down missing tracks.' },
+
+            // Source tabs (left to right)
+            { page: 'sync', selector: '.sync-tab-button[data-tab="spotify"]', title: 'Spotify Playlists', description: 'If Spotify is connected, click "Refresh" to load all your playlists. Select ones you want, then hit Start Sync in the sidebar.' },
+            { page: 'sync', selector: '.sync-tab-button[data-tab="spotify-public"]', title: 'Spotify Link', description: 'Don\'t have a Spotify account? Paste any public Spotify playlist or album URL here to import it without authentication.' },
+            { page: 'sync', selector: '.sync-tab-button[data-tab="tidal"]', title: 'Tidal Playlists', description: 'Same as Spotify — connect Tidal in Settings, refresh to load your playlists, then sync.' },
+            { page: 'sync', selector: '.sync-tab-button[data-tab="deezer"]', title: 'Deezer', description: 'Paste a Deezer playlist URL to import. No account needed — just the public URL.' },
+            { page: 'sync', selector: '.sync-tab-button[data-tab="youtube"]', title: 'YouTube Music', description: 'Paste a YouTube Music playlist URL. The parser extracts track titles and artists, then matches them against your metadata source.' },
+            { page: 'sync', selector: '.sync-tab-button[data-tab="beatport"]', title: 'Beatport', description: 'For electronic music — paste a Beatport playlist URL to import DJ sets and charts.' },
+            { page: 'sync', selector: '.sync-tab-button[data-tab="import-file"]', title: 'File Import', description: 'Import a playlist from a local file — M3U, CSV, or plain text. Map columns to track/artist/album fields.' },
+            { page: 'sync', selector: '.sync-tab-button[data-tab="mirrored"]', title: 'Mirrored Playlists', description: 'Every imported playlist is saved here permanently. Re-sync anytime to catch new additions, check match status, or view the Discovery Pool for unmatched tracks.' },
+
+            // Sidebar
+            { page: 'sync', selector: '.sync-sidebar', title: 'Sync Controls', description: 'The command center. Select playlists with checkboxes on the left, then click "Start Sync" here. Progress bars, match counts, and logs update in real-time. That\'s the sync flow! 🎉' },
+        ]
+    },
+    'artists-browse': {
+        title: 'Browse Artists',
+        description: 'Search for artists and explore their discography.',
+        icon: '🎤',
+        steps: [
+            // Artists list page (visible on load)
+            { page: 'artists', selector: '#artists-search-input', title: 'Search for an Artist', description: 'Type any artist name to search your metadata source. Results appear instantly as cards below. Click one to open their full profile and discography.' },
+
+            // Artist detail page (describe what they'll see after clicking)
+            { page: 'artists', selector: '#artists-search-input', title: 'Artist Profile', description: 'After clicking an artist, you\'ll see a rich hero section with their photo, bio, genres, listening stats from Last.fm, and links to external services like Spotify and MusicBrainz.' },
+            { page: 'artists', selector: '#artists-search-input', title: 'Discography & Downloads', description: 'Below the hero, tabs show Albums and Singles/EPs. Click any release to open the download modal. The "Similar Artists" section at the bottom shows recommendations — click any to keep exploring.' },
+            { page: 'artists', selector: '#artists-search-input', title: 'Try It Now!', description: 'Search for your favorite artist above to see their full profile. From there you can download albums, explore similar artists, and add them to your watchlist. 🎉' },
+        ]
+    },
+    'automations': {
+        title: 'Build an Automation',
+        description: 'Create automated workflows with triggers and actions.',
+        icon: '🤖',
+        steps: [
+            // List view (visible on load)
+            { page: 'automations', selector: '#automations-list-view', title: 'Automations Overview', description: 'All your automations live here, organized into System (built-in), Custom groups, and My Automations. Each card shows its WHEN trigger, DO action, and THEN notifications.' },
+            { page: 'automations', selector: '#automations-stats', title: 'Stats Bar', description: 'Quick counts of total automations, how many are active, paused, and custom. Also shows system automations running background tasks like enrichment and watchlist scanning.' },
+            { page: 'automations', selector: '.auto-new-btn', title: 'Create New Automation', description: 'Opens the visual builder. Choose a trigger (WHEN), an action (DO), and optional notifications (THEN). Triggers include schedules, events (download complete, new release), and signals from other automations.' },
+
+            // Builder (describe since it requires clicking)
+            { page: 'automations', selector: '.auto-new-btn', title: 'The Builder', description: 'The builder has a sidebar with draggable blocks and a canvas. Drag a WHEN block (e.g., "Every 6 hours"), a DO block (e.g., "Run Watchlist Scan"), and optionally a THEN block (e.g., "Send Discord notification").' },
+            { page: 'automations', selector: '.auto-new-btn', title: 'Signals & Chains', description: 'Advanced: automations can fire "signals" that trigger other automations, creating chains. Example: Watchlist scan → fires "new_release" signal → Download automation picks it up. Max chain depth is 5.' },
+
+            // Hub section
+            { page: 'automations', selector: '#auto-section-hub', title: 'Automation Hub', description: 'Pre-built templates, pipeline recipes, quick-start guides, and reference docs. Browse Pipelines for ready-made multi-step workflows, or check Recipes for common automation patterns. Great starting point! 🎉' },
+        ]
+    },
+    'library': {
+        title: 'Library Management',
+        description: 'Browse and manage your music collection.',
+        icon: '📚',
+        steps: [
+            // Header
+            { page: 'library', selector: '.library-header', title: 'Music Library', description: 'Your complete music collection synced from your media server. The header shows your total artist count. Everything here comes from your last Database Updater run.' },
+
+            // Controls
+            { page: 'library', selector: '#library-search-input', title: 'Search Artists', description: 'Type to filter your library by artist name. Results update instantly as you type.' },
+            { page: 'library', selector: '#watchlist-filter', title: 'Watchlist Filter', description: 'Filter by watchlist status: All, Watched (artists you follow for new releases), or Unwatched. The "Watch All Unwatched" button adds every remaining artist to your watchlist in one click.' },
+            { page: 'library', selector: '#alphabet-selector', title: 'Alphabet Jump', description: 'Click any letter to jump directly to artists starting with that letter. Great for navigating large libraries.' },
+
+            // Grid
+            { page: 'library', selector: '#library-artists-grid', title: 'Artist Grid', description: 'Your artists as cards with photos, track counts, and service badges (Spotify, MusicBrainz, etc.). Click any card to open their artist detail page with full discography.' },
+
+            // Pagination
+            { page: 'library', selector: '#library-pagination', title: 'Pagination', description: 'Shows 75 artists per page. Use Previous/Next to browse, or combine with the alphabet selector and search to find artists faster.' },
+
+            // Artist detail (describe what they'll see)
+            { page: 'library', selector: '#library-artists-grid', title: 'Artist Detail View', description: 'Clicking an artist opens their detail page. From there you can view/download their discography, toggle "Enhanced Management" mode for inline tag editing, bulk operations, and writing tags to files. 🎉' },
+        ]
+    },
+    'discover': {
+        title: 'Discover Music',
+        description: 'Explore personalized playlists, genre browsing, and new music.',
+        icon: '🔮',
+        steps: [
+            // Hero section
+            { page: 'discover', selector: '.discover-hero', title: 'Featured Artists', description: 'The hero slideshow showcases recommended artists based on your library. Use the arrows to browse, or click "View Discography" to explore their music. "Add to Watchlist" starts monitoring them for new releases.' },
+            { page: 'discover', selector: '#discover-hero-view-all', title: 'View All Recommendations', description: 'Opens a modal with all recommended artists at once. "Watch All" adds every recommended artist to your watchlist in one click.' },
+
+            // Content sections (top to bottom)
+            { page: 'discover', selector: '#spotify-library-section', title: 'Your Spotify Library', description: 'If Spotify is connected, this shows all your saved albums. Filter by Missing/Owned, sort by date, and click "Download Missing" to grab everything you don\'t have yet. Only visible with Spotify connected.' },
+            { page: 'discover', selector: '#recent-releases-carousel', title: 'Recent Releases', description: 'New music from artists in your watchlist. Album cards show cover art — click any to open the download modal. Updates automatically when watchlist scans find new releases.' },
+            { page: 'discover', selector: '#seasonal-albums-section', title: 'Seasonal Content', description: 'Season-aware sections that appear automatically — Christmas albums in December, summer vibes in July. Includes curated albums and a Seasonal Mix playlist you can sync to your server.' },
+
+            // Playlists
+            { page: 'discover', selector: '#release-radar-playlist', title: 'Fresh Tape', description: 'A playlist of brand-new tracks from recent releases. Each has Download and Sync buttons — sync sends the playlist directly to your media server as a new playlist.' },
+            { page: 'discover', selector: '#discovery-weekly-playlist', title: 'The Archives', description: 'Curated tracks from your existing collection. Every playlist section has Download (grab missing tracks) and Sync (push to media server) buttons.' },
+
+            // Build a playlist
+            { page: 'discover', selector: '.build-playlist-container', title: 'Build a Playlist', description: 'Create custom playlists from seed artists. Search and select 1-5 artists, hit Generate, and get a 50-track playlist mixing your picks with similar artist discoveries. Download or sync the result.' },
+
+            // ListenBrainz
+            { page: 'discover', selector: '.listenbrainz-tabs', title: 'ListenBrainz Playlists', description: 'If ListenBrainz is connected, algorithmic playlists generated from your listening history appear here — weekly jams, exploration picks, and more.' },
+
+            // Time Machine & Genre
+            { page: 'discover', selector: '#decade-tabs', title: 'Time Machine', description: 'Browse music by decade — click a decade tab to see tracks from that era in your library. Great for rediscovering older music.' },
+            { page: 'discover', selector: '#genre-tabs', title: 'Browse by Genre', description: 'Explore your library organized by genre. Click a genre pill to see artists and tracks in that category. Genres come from all your metadata sources. 🎉' },
+        ]
+    },
+    'stats': {
+        title: 'Listening Stats',
+        description: 'Understand your listening habits and library health.',
+        icon: '📊',
+        steps: [
+            // Header controls
+            { page: 'stats', selector: '#stats-time-range', title: 'Time Range', description: 'Switch between 7 Days, 30 Days, 12 Months, and All Time. All charts and rankings below update to reflect the selected period.' },
+            { page: 'stats', selector: '#stats-sync-btn', title: 'Sync Now', description: 'Pulls the latest listening data from your media server (Plex, Jellyfin, or Navidrome). Data syncs automatically, but you can force a refresh here.' },
+
+            // Overview cards
+            { page: 'stats', selector: '#stats-overview', title: 'Overview Cards', description: 'At-a-glance metrics: Total Plays, Listening Time, unique Artists, Albums, and Tracks you\'ve listened to in the selected time range.' },
+
+            // Charts (left column)
+            { page: 'stats', selector: '#stats-timeline-chart', title: 'Listening Activity', description: 'A timeline chart showing your listening pattern over time. Spot trends — are you listening more on weekends? Did you binge a new album last week?' },
+            { page: 'stats', selector: '#stats-genre-chart', title: 'Genre Breakdown', description: 'Pie chart showing which genres you listen to most. The legend shows exact percentages. Useful for understanding your taste profile.' },
+            { page: 'stats', selector: '#stats-recent-plays', title: 'Recently Played', description: 'A live feed of your most recent plays with timestamps, artist, and album info.' },
+
+            // Rankings (right column)
+            { page: 'stats', selector: '#stats-top-artists', title: 'Top Artists', description: 'Your most-played artists ranked by play count. The visual bar chart at the top shows relative listening time.' },
+            { page: 'stats', selector: '#stats-top-albums', title: 'Top Albums', description: 'Most-played albums in the selected time range. Click any to navigate to the artist detail page.' },
+            { page: 'stats', selector: '#stats-top-tracks', title: 'Top Tracks', description: 'Your most-played individual tracks. Great for building playlists from your actual favorites.' },
+
+            // Library health
+            { page: 'stats', selector: '#stats-library-health', title: 'Library Health', description: 'Technical metrics about your collection: audio format breakdown (FLAC vs MP3 vs others), unplayed tracks count, total duration, and total track count.' },
+            { page: 'stats', selector: '#stats-enrichment-coverage', title: 'Enrichment Coverage', description: 'Shows how much of your library has been enriched with metadata from external services. Higher coverage means better search results and recommendations.' },
+
+            // Storage
+            { page: 'stats', selector: '#stats-db-storage-chart', title: 'Database Storage', description: 'A donut chart showing how your database space is used — metadata, cache, enrichment data, settings, etc. Helps you understand what\'s using disk space. 🎉' },
+        ]
+    },
+    'import-music': {
+        title: 'Import Music',
+        description: 'Import existing audio files into your organized library.',
+        icon: '📥',
+        steps: [
+            // Header
+            { page: 'import', selector: '.import-page-header', title: 'Import Music', description: 'Import audio files from your staging folder into your organized library. Files are matched to album metadata, tagged, and moved to the correct location.' },
+            { page: 'import', selector: '.import-page-staging-bar', title: 'Staging Folder', description: 'Shows your configured staging folder path and stats (file count, total size). This is where you drop audio files before importing. Configure the path in Settings → Downloads.' },
+            { page: 'import', selector: '.import-page-refresh-btn', title: 'Refresh', description: 'Re-scans your staging folder for new audio files. Hit this after dropping new files in.' },
+
+            // Queue
+            { page: 'import', selector: '#import-page-queue', title: 'Processing Queue', description: 'When you process albums or singles, jobs appear here with progress indicators. "Clear finished" removes completed jobs from the list.' },
+
+            // Tabs
+            { page: 'import', selector: '.import-page-tab-bar', title: 'Albums vs Singles', description: 'Two modes: Albums tab matches full albums to metadata (cover art, track numbers, disc info). Singles tab processes individual files one at a time.' },
+
+            // Album workflow
+            { page: 'import', selector: '#import-page-suggestions', title: 'Album Suggestions', description: 'The importer analyzes your staging files and suggests album matches based on embedded tags. Click a suggestion to start the matching process.' },
+            { page: 'import', selector: '#import-page-album-search-input', title: 'Album Search', description: 'If suggestions don\'t match, search manually. Type an album name, click Search, and select the correct result.' },
+            { page: 'import', selector: '#import-page-album-search-input', title: 'Track Matching', description: 'After selecting an album, you\'ll see a track matching table. Files are auto-matched to tracks by name/number. Drag unmatched files from the pool to the correct track slot, then click "Process Album".' },
+
+            // Singles workflow
+            { page: 'import', selector: '#import-page-tab-singles', title: 'Singles Import', description: 'The Singles tab lists all individual audio files. Select files with checkboxes (or "Select All"), then click "Process Selected" to tag and move them into your library. 🎉' },
+        ]
+    },
+    'settings-tour': {
+        title: 'Settings Walkthrough',
+        description: 'Configure services, downloads, and preferences.',
+        icon: '⚙️',
+        steps: [
+            // Tab bar
+            { page: 'settings', selector: '.stg-tabbar', title: 'Settings Tabs', description: 'Settings are organized into 5 tabs: Connections (API keys, server setup), Downloads (sources, paths, quality), Library (file organization, post-processing), Appearance (theme, colors), and Advanced.' },
+
+            // Connections
+            { page: 'settings', selector: '.stg-tab[data-tab="connections"]', title: 'Connections Tab', description: 'This is where you connect all your services. API keys for Spotify, Tidal, Last.fm, Genius, AcoustID, and your metadata source preference. Plus your media server (Plex, Jellyfin, or Navidrome).' },
+            { page: 'settings', selector: '.api-service-frame', title: 'API Configuration', description: 'Each service has its own frame with credential fields and an Authenticate/Test button. Spotify needs a Client ID + Secret from the Developer Dashboard. Last.fm needs an API key for scrobbling and stats.' },
+            { page: 'settings', selector: '.server-toggle-container', title: 'Media Server', description: 'Toggle on your media server — Plex, Jellyfin, or Navidrome. Enter the server URL and token/API key. This is where your music library lives and where downloads get synced to.' },
+
+            // Downloads
+            { page: 'settings', selector: '.stg-tab[data-tab="downloads"]', title: 'Downloads Tab', description: 'Configure where music comes from and where it goes. Set your download source (Soulseek, YouTube, Tidal, Qobuz, HiFi, Deezer, or Hybrid mode), download paths, and quality preferences.' },
+            { page: 'settings', selector: '.stg-tab[data-tab="downloads"]', title: 'Quality Profiles', description: 'Quality profiles control what files are acceptable — format (FLAC, MP3, etc.), minimum bitrate, bit depth preference, and peer speed requirements. The waterfall filter tries your preferred format first, then falls back.' },
+
+            // Library
+            { page: 'settings', selector: '.stg-tab[data-tab="library"]', title: 'Library Tab', description: 'File organization templates (folder structure, naming), post-processing rules (auto-tag, convert formats), M3U playlist export settings, and content filtering options.' },
+
+            // Appearance
+            { page: 'settings', selector: '.stg-tab[data-tab="appearance"]', title: 'Appearance Tab', description: 'Customize the UI — accent color picker to theme the entire interface to your taste.' },
+
+            // Advanced
+            { page: 'settings', selector: '.stg-tab[data-tab="advanced"]', title: 'Advanced Tab', description: 'Power-user settings, logging configuration, and system-level options. Most users won\'t need to touch this.' },
+
+            // Save
+            { page: 'settings', selector: '.save-button', title: 'Save Settings', description: 'Don\'t forget to save! Changes aren\'t applied until you click this button. Some settings (like download source changes) take effect immediately after saving. 🎉' },
+        ]
+    },
+    'issues-tour': {
+        title: 'Issues Tracker',
+        description: 'Track and resolve problems in your library.',
+        icon: '🐛',
+        steps: [
+            { page: 'issues', selector: '.issues-header', title: 'Issues Tracker', description: 'A built-in issue tracker for your music library. Report wrong tracks, bad metadata, missing albums, audio quality problems, and more. Issues are tracked through open → in progress → resolved.' },
+            { page: 'issues', selector: '#issues-filters', title: 'Filters', description: 'Filter by status (Open, In Progress, Resolved, Dismissed) and category (Wrong Track, Wrong Artist, Audio Quality, Missing Tracks, Incomplete Album, etc.).' },
+            { page: 'issues', selector: '#issues-stats', title: 'Stats Bar', description: 'Quick count of issues by status. Helps you see at a glance how many open issues need attention.' },
+            { page: 'issues', selector: '#issues-list', title: 'Issues List', description: 'All issues matching your current filters. Click any issue to see details, add notes, change status, or take action (like re-downloading a track). 🎉' },
+        ]
+    },
+};
+
+function openTourSelector() {
+    dismissHelperPopover();
+    const popover = document.createElement('div');
+    popover.className = 'helper-popover helper-tour-selector';
+    popover.innerHTML = `
+        <div class="helper-popover-header">
+            <div class="helper-popover-title">Choose a Tour</div>
+            <button class="helper-popover-close" onclick="exitHelperMode()">&times;</button>
+        </div>
+        <div class="helper-tour-list">
+            ${Object.entries(HELPER_TOURS).map(([id, tour]) => `
+                <button class="helper-tour-option" onclick="startTour('${id}')">
+                    <span class="helper-tour-option-icon">${tour.icon || '🚶'}</span>
+                    <div class="helper-tour-option-body">
+                        <div class="helper-tour-option-title">${tour.title}</div>
+                        <div class="helper-tour-option-desc">${tour.description}</div>
+                    </div>
+                    <div class="helper-tour-option-steps">${tour.steps.length} steps</div>
+                </button>
+            `).join('')}
+        </div>
+    `;
+    document.body.appendChild(popover);
+    _helperPopover = popover;
+
+    // Position near the float button
+    const floatBtn = document.getElementById('helper-float-btn');
+    if (floatBtn) {
+        const btnRect = floatBtn.getBoundingClientRect();
+        popover.style.right = (window.innerWidth - btnRect.right) + 'px';
+        popover.style.bottom = (window.innerHeight - btnRect.top + 8) + 'px';
+        popover.style.left = 'auto';
+        popover.style.top = 'auto';
+    }
+    requestAnimationFrame(() => popover.classList.add('visible'));
+}
+
+function startTour(tourId) {
+    const tour = HELPER_TOURS[tourId];
+    if (!tour) return;
+
+    dismissHelperPopover();
+    HelperState.tourId = tourId;
+    HelperState.tourStep = 0;
+
+    showTourStep();
+}
+
+function showTourStep() {
+    const tour = HELPER_TOURS[HelperState.tourId];
+    if (!tour) return;
+
+    const step = tour.steps[HelperState.tourStep];
+    if (!step) { dismissTour(); return; }
+
+    dismissHelperPopover();
+    removeTourOverlay();
+
+    // Navigate to the correct page if needed
+    if (step.page) {
+        const currentPage = document.querySelector('.page.active')?.id?.replace('-page', '') || '';
+        if (currentPage !== step.page) {
+            navigateToPage(step.page);
+            // Wait for page to render, then show the step
+            setTimeout(() => _renderTourStep(tour, step), 350);
+            return;
+        }
+    }
+
+    _renderTourStep(tour, step);
+}
+
+function _renderTourStep(tour, step) {
+    const target = document.querySelector(step.selector);
+
+    // Create spotlight overlay
+    _tourOverlay = document.createElement('div');
+    _tourOverlay.className = 'helper-tour-overlay';
+    _tourOverlay.addEventListener('click', (e) => {
+        if (e.target === _tourOverlay) dismissTour();
+    });
+    document.body.appendChild(_tourOverlay);
+
+    // Highlight target
+    if (target) {
+        target.classList.add('helper-tour-target');
+        _helperHighlighted = target;
+        setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+    }
+
+    // Build tour popover
+    const stepNum = HelperState.tourStep + 1;
+    const totalSteps = tour.steps.length;
+    const isFirst = stepNum === 1;
+    const isLast = stepNum === totalSteps;
+    const progressPct = (stepNum / totalSteps * 100).toFixed(0);
+
+    const popover = document.createElement('div');
+    popover.className = 'helper-popover helper-tour-popover';
+    popover.innerHTML = `
+        <div class="helper-popover-arrow"></div>
+        <div class="helper-tour-progress-bar">
+            <div class="helper-tour-progress-fill" style="width:${progressPct}%"></div>
+        </div>
+        <div class="helper-tour-step-counter">Step ${stepNum} of ${totalSteps}</div>
+        <div class="helper-popover-header">
+            <div class="helper-popover-title">${step.title}</div>
+        </div>
+        <div class="helper-popover-desc">${step.description}</div>
+        <div class="helper-tour-nav">
+            ${!isFirst ? '<button class="helper-tour-btn" onclick="prevTourStep()">← Back</button>' : '<div></div>'}
+            <button class="helper-tour-btn helper-tour-btn-skip" onclick="dismissTour()">Exit Tour</button>
+            ${!isLast ? '<button class="helper-tour-btn helper-tour-btn-next" onclick="nextTourStep()">Next →</button>'
+                       : '<button class="helper-tour-btn helper-tour-btn-next" onclick="dismissTour()">Done ✓</button>'}
+        </div>
+    `;
+    document.body.appendChild(popover);
+    _helperPopover = popover;
+
+    // Position near target with smooth animation
+    if (target) {
+        requestAnimationFrame(() => {
+            setTimeout(() => positionPopover(popover, target), 100);
+        });
+    } else {
+        // Target not found on this page — center the popover
+        popover.style.left = '50%';
+        popover.style.top = '40%';
+        popover.style.transform = 'translate(-50%, -50%)';
+        requestAnimationFrame(() => popover.classList.add('visible'));
+    }
+}
+
+function nextTourStep() {
+    const tour = HELPER_TOURS[HelperState.tourId];
+    if (!tour) return;
+    if (HelperState.tourStep < tour.steps.length - 1) {
+        HelperState.tourStep++;
+        showTourStep();
+    } else {
+        dismissTour();
+    }
+}
+
+function prevTourStep() {
+    if (HelperState.tourStep > 0) {
+        HelperState.tourStep--;
+        showTourStep();
+    }
+}
+
+function dismissTour() {
+    HelperState.tourId = null;
+    HelperState.tourStep = 0;
+    removeTourOverlay();
+    dismissHelperPopover();
+    if (HelperState.mode === 'tour') {
+        HelperState.mode = null;
+        const floatBtn = document.getElementById('helper-float-btn');
+        if (floatBtn) floatBtn.classList.remove('active');
+    }
+}
+
+function removeTourOverlay() {
+    if (_tourOverlay) {
+        _tourOverlay.remove();
+        _tourOverlay = null;
+    }
+    // Clean up ALL tour targets (not just the tracked one — page nav can lose reference)
+    document.querySelectorAll('.helper-tour-target').forEach(el => el.classList.remove('helper-tour-target'));
+    document.querySelectorAll('.helper-highlight').forEach(el => el.classList.remove('helper-highlight'));
+    _helperHighlighted = null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CLICK INTERCEPTION (Element Info mode)
+// ═══════════════════════════════════════════════════════════════════════════
 
 document.addEventListener('click', function(e) {
     if (!helperModeActive) return;
 
-    // Allow clicking the helper button itself to toggle
+    // Allow clicking helper UI elements
     const floatBtn = document.getElementById('helper-float-btn');
-    if (floatBtn && (e.target === floatBtn || floatBtn.contains(e.target))) {
-        return;
-    }
-
-    // Allow clicking popover links/close
-    if (_helperPopover && _helperPopover.contains(e.target)) {
-        return;
-    }
+    if (floatBtn && (e.target === floatBtn || floatBtn.contains(e.target))) return;
+    if (_helperPopover && _helperPopover.contains(e.target)) return;
+    if (_helperMenu && _helperMenu.contains(e.target)) return;
 
     e.preventDefault();
     e.stopPropagation();
@@ -2166,32 +2694,35 @@ document.addEventListener('click', function(e) {
         target = target.parentElement;
     }
 
-    // No match — dismiss
     dismissHelperPopover();
 }, true);
 
-// ── Escape Key ───────────────────────────────────────────────────────────
+// ── Keyboard Navigation ──────────────────────────────────────────────────
 
 document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && helperModeActive) {
-        if (_helperPopover) {
-            dismissHelperPopover();
-        } else {
-            toggleHelperMode();
-        }
+    if (e.key === 'Escape') {
+        if (_helperPopover) { dismissHelperPopover(); return; }
+        if (HelperState.tourId) { dismissTour(); return; }
+        if (helperModeActive) { exitHelperMode(); return; }
+        if (HelperState.menuOpen) { closeHelperMenu(); return; }
+    }
+    // Arrow keys for tour navigation
+    if (HelperState.tourId) {
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); nextTourStep(); }
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); prevTourStep(); }
     }
 });
 
-// ── Popover Display ──────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// POPOVER DISPLAY
+// ═══════════════════════════════════════════════════════════════════════════
 
 function showHelperPopover(targetEl, content) {
     dismissHelperPopover();
 
-    // Highlight target
     targetEl.classList.add('helper-highlight');
     _helperHighlighted = targetEl;
 
-    // Build popover
     const popover = document.createElement('div');
     popover.className = 'helper-popover';
 
@@ -2224,8 +2755,6 @@ function showHelperPopover(targetEl, content) {
 
     document.body.appendChild(popover);
     _helperPopover = popover;
-
-    // Position
     requestAnimationFrame(() => positionPopover(popover, targetEl));
 }
 
@@ -2235,37 +2764,28 @@ function positionPopover(popover, targetEl) {
     const margin = 14;
     const arrowEl = popover.querySelector('.helper-popover-arrow');
 
-    // Try right side first
     let left = rect.right + margin;
     let top = rect.top + (rect.height / 2) - (popRect.height / 2);
     let arrowSide = 'left';
 
-    // If overflows right, try left
     if (left + popRect.width > window.innerWidth - 20) {
         left = rect.left - popRect.width - margin;
         arrowSide = 'right';
     }
-
-    // If overflows left, try below
     if (left < 20) {
         left = rect.left + (rect.width / 2) - (popRect.width / 2);
         top = rect.bottom + margin;
         arrowSide = 'top';
     }
 
-    // Clamp to viewport
     left = Math.max(12, Math.min(left, window.innerWidth - popRect.width - 12));
     top = Math.max(12, Math.min(top, window.innerHeight - popRect.height - 12));
 
     popover.style.left = left + 'px';
     popover.style.top = top + 'px';
 
-    // Position arrow
-    if (arrowEl) {
-        arrowEl.className = 'helper-popover-arrow arrow-' + arrowSide;
-    }
+    if (arrowEl) arrowEl.className = 'helper-popover-arrow arrow-' + arrowSide;
 
-    // Animate in
     popover.classList.add('visible');
 }
 
