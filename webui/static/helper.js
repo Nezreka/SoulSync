@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'Launch PIN Lock Screen',       desc: 'Protect SoulSync with a PIN on every page load — toggle in Settings → Advanced', page: 'settings', selector: '.stg-tab[data-tab="advanced"]' },
         { title: 'Interactive Help System',     desc: 'Guided tours, search, shortcuts, setup tracking, troubleshooting — all from the ? button', selector: '#helper-float-btn' },
         { title: 'Rich Artist Profiles',        desc: 'Full-bleed hero section with bio, stats, genres, and service links', page: 'artists', selector: '#artists-search-input' },
         { title: 'In Library Badges',           desc: 'Search results show "In Library" badges for albums and tracks you already own', page: 'downloads', selector: '.enhanced-search-input-wrapper' },

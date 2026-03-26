@@ -37016,6 +37016,138 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     word-break: break-word;
 }
 
+/* ── Launch PIN Lock Screen ─────────────────────────────────────────── */
+
+.launch-pin-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000000;
+    background: rgba(8, 8, 8, 0.97);
+    backdrop-filter: blur(24px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.launch-pin-container {
+    text-align: center;
+    max-width: 320px;
+    width: 100%;
+    padding: 40px 32px;
+    background: rgba(20, 20, 20, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 20px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+
+.launch-pin-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.launch-pin-title {
+    font-size: 22px;
+    font-weight: 800;
+    color: #fff;
+    margin: 0 0 6px;
+    letter-spacing: -0.3px;
+}
+
+.launch-pin-subtitle {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.4);
+    margin: 0 0 24px;
+}
+
+.launch-pin-input {
+    width: 100%;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1.5px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    color: #fff;
+    font-size: 18px;
+    font-weight: 600;
+    text-align: center;
+    letter-spacing: 4px;
+    outline: none;
+    transition: border-color 0.2s ease;
+    box-sizing: border-box;
+    font-family: inherit;
+}
+
+.launch-pin-input:focus {
+    border-color: rgba(var(--accent-rgb), 0.5);
+}
+
+.launch-pin-input::placeholder {
+    letter-spacing: normal;
+    font-weight: 400;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.2);
+}
+
+.launch-pin-submit {
+    width: 100%;
+    margin-top: 12px;
+    padding: 12px;
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.7));
+    border: none;
+    border-radius: 12px;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: inherit;
+}
+
+.launch-pin-submit:hover {
+    filter: brightness(1.1);
+    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.3);
+}
+
+.launch-pin-submit:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.launch-pin-error {
+    margin: 12px 0 0;
+    font-size: 13px;
+    color: #ff5252;
+    font-weight: 600;
+}
+
+.launch-pin-forgot {
+    display: block;
+    margin: 16px auto 0;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: color 0.15s ease;
+    padding: 4px 8px;
+}
+
+.launch-pin-forgot:hover {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.launch-pin-container.shake {
+    animation: launchPinShake 0.4s ease;
+}
+
+@keyframes launchPinShake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-10px); }
+    40% { transform: translateX(10px); }
+    60% { transform: translateX(-6px); }
+    80% { transform: translateX(6px); }
+}
+
 /* ── Profile Picker ─────────────────────────────────────────────── */
 
 .profile-picker-overlay {

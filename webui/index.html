@@ -11,6 +11,32 @@
 </head>
 
 <body>
+    <!-- Launch PIN Lock Screen -->
+    <div id="launch-pin-overlay" class="launch-pin-overlay" style="display: none;">
+        <div class="launch-pin-container" id="launch-pin-container">
+            <!-- PIN Entry (default view) -->
+            <div id="launch-pin-entry">
+                <div class="launch-pin-icon">🔒</div>
+                <h2 class="launch-pin-title">SoulSync is Locked</h2>
+                <p class="launch-pin-subtitle">Enter your PIN to continue</p>
+                <input type="password" id="launch-pin-input" class="launch-pin-input" maxlength="20" placeholder="PIN" autocomplete="off">
+                <button id="launch-pin-submit" class="launch-pin-submit">Unlock</button>
+                <p id="launch-pin-error" class="launch-pin-error" style="display: none;"></p>
+                <button class="launch-pin-forgot" onclick="showForgotPinView()">Forgot PIN?</button>
+            </div>
+            <!-- Forgot PIN (recovery view) -->
+            <div id="launch-pin-recovery" style="display: none;">
+                <div class="launch-pin-icon">🔑</div>
+                <h2 class="launch-pin-title">Verify Your Identity</h2>
+                <p class="launch-pin-subtitle">Enter any API key, token, or secret you configured in SoulSync settings</p>
+                <input type="password" id="launch-recovery-input" class="launch-pin-input" maxlength="200" placeholder="Paste any API credential..." autocomplete="off" style="letter-spacing: 1px;">
+                <button id="launch-recovery-submit" class="launch-pin-submit" onclick="submitRecoveryCredential()">Verify & Reset PIN</button>
+                <p id="launch-recovery-error" class="launch-pin-error" style="display: none;"></p>
+                <button class="launch-pin-forgot" onclick="showPinEntryView()">← Back to PIN</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Profile Picker Overlay -->
     <div id="profile-picker-overlay" class="profile-picker-overlay" style="display: none;">
         <div class="profile-picker-container">
@@ -4783,6 +4809,36 @@
                                 <div class="help-text">
                                     Polls your active media server (Plex, Jellyfin, or Navidrome) for play history
                                     and displays stats on the Stats page.
+                                </div>
+                            </div>
+
+                            <!-- Security Settings -->
+                            <div class="settings-group" data-stg="advanced">
+                                <h3>🔒 Security</h3>
+
+                                <div class="form-group" id="security-pin-setup" style="display: none;">
+                                    <label>Set Admin PIN:</label>
+                                    <div class="setting-help-text" style="margin-bottom: 8px;">
+                                        You need to set a PIN before enabling the lock screen.
+                                    </div>
+                                    <input type="password" id="security-new-pin" placeholder="Enter PIN" maxlength="20" autocomplete="off" style="margin-bottom: 6px;">
+                                    <input type="password" id="security-confirm-pin" placeholder="Confirm PIN" maxlength="20" autocomplete="off" style="margin-bottom: 6px;">
+                                    <button class="auth-button" id="security-save-pin-btn" onclick="saveSecurityPin()">Save PIN</button>
+                                    <p id="security-pin-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="toggle-label">
+                                        <input type="checkbox" id="security-require-pin" onchange="handleSecurityPinToggle(this)">
+                                        <span>Require PIN to access SoulSync</span>
+                                    </label>
+                                    <div class="setting-help-text">
+                                        When enabled, a lock screen appears on every page load. PIN is verified against the admin account. Closing the browser tab requires re-entry.
+                                    </div>
+                                </div>
+
+                                <div class="form-group" id="security-change-pin-section" style="display: none;">
+                                    <button class="auth-button" onclick="showChangeSecurityPin()">Change PIN</button>
                                 </div>
                             </div>
 

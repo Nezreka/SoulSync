@@ -4499,7 +4499,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -18888,6 +18888,17 @@ def get_version_info():
                     "• Deezer enrichment worker caches API calls through metadata cache",
                     "• Per-source quality fallback toggles for streaming download sources"
                 ]
+            },
+            {
+                "title": "🔒 Launch PIN Lock Screen",
+                "description": "Protect SoulSync access with a PIN on every page load",
+                "features": [
+                    "• Toggle in Settings → Advanced → Security to require PIN on launch",
+                    "• Full-screen lock overlay with PIN input — closing the tab requires re-entry",
+                    "• PIN validated server-side against admin profile (bcrypt hashed)",
+                    "• Inline PIN creation if admin has no PIN set",
+                    "• Shake animation on wrong PIN, auto-focus input"
+                ]
             }
         ]
     }
@@ -33163,6 +33174,10 @@ def select_profile():
                 return jsonify({'success': False, 'error': 'Invalid PIN'}), 401
 
         session['profile_id'] = profile_id
+        # If PIN was just validated, also mark launch PIN as verified
+        # so the subsequent page reload doesn't ask again
+        if pin:
+            session['launch_pin_verified'] = True
         return jsonify({'success': True, 'profile': profile})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -33181,7 +33196,76 @@ def get_current_profile():
             session.pop('profile_id', None)
             return jsonify({'success': False, 'error': 'Profile not found'}), 200
 
-        return jsonify({'success': True, 'profile': profile})
+        # Check if launch PIN is required
+        require_pin = config_manager.get('security.require_pin_on_launch', False) if config_manager else False
+        # Check if PIN was verified this page load, then consume the flag
+        pin_verified = session.pop('launch_pin_verified', False)
+
+        return jsonify({
+            'success': True,
+            'profile': profile,
+            'launch_pin_required': bool(require_pin) and not pin_verified,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles/verify-launch-pin', methods=['POST'])
+def verify_launch_pin():
+    """Verify PIN for launch lock screen"""
+    try:
+        data = request.json or {}
+        pin = data.get('pin', '')
+        if not pin:
+            return jsonify({'success': False, 'error': 'PIN required'}), 401
+
+        database = get_database()
+        # Validate against admin profile (ID 1)
+        if not database.verify_profile_pin(1, pin):
+            return jsonify({'success': False, 'error': 'Invalid PIN'}), 401
+
+        session['launch_pin_verified'] = True
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/profiles/reset-pin-via-credential', methods=['POST'])
+def reset_pin_via_credential():
+    """Reset admin PIN by verifying a known API credential"""
+    try:
+        data = request.json or {}
+        credential = (data.get('credential') or '').strip()
+        if not credential or len(credential) < 4:
+            return jsonify({'success': False, 'error': 'Enter a valid credential'}), 400
+
+        # Check credential against all stored API secrets/tokens
+        checks = [
+            ('Spotify Client Secret',  config_manager.get('spotify.client_secret', '')),
+            ('Tidal Client Secret',    config_manager.get('tidal.client_secret', '')),
+            ('Plex Token',             config_manager.get('plex.token', '')),
+            ('Jellyfin API Key',       config_manager.get('jellyfin.api_key', '')),
+            ('Navidrome Password',     config_manager.get('navidrome.password', '')),
+            ('ListenBrainz Token',     config_manager.get('listenbrainz.token', '')),
+            ('AcoustID API Key',       config_manager.get('acoustid.api_key', '')),
+            ('Last.fm API Secret',     config_manager.get('lastfm.api_secret', '')),
+            ('Genius Access Token',    config_manager.get('genius.access_token', '')),
+        ]
+
+        matched = False
+        for name, stored in checks:
+            if stored and credential == stored:
+                matched = True
+                break
+
+        if not matched:
+            return jsonify({'success': False, 'error': 'Credential does not match any configured service'}), 401
+
+        # Credential verified — clear admin PIN and disable launch lock
+        database = get_database()
+        database.update_profile(1, pin_hash=None)
+        config_manager.set('security.require_pin_on_launch', False)
+        session['launch_pin_verified'] = True
+
+        return jsonify({'success': True, 'message': 'PIN cleared and lock screen disabled. You can set a new PIN in Settings.'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
