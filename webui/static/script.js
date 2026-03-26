@@ -966,6 +966,13 @@ async function initProfileSystem() {
         if (currentData.success && currentData.profile) {
             currentProfile = currentData.profile;
             updateProfileIndicator();
+
+            // Check if launch PIN is required
+            if (currentData.launch_pin_required) {
+                showLaunchPinScreen();
+                return false; // Defer app init until PIN verified
+            }
+
             return true; // Profile already selected, skip picker
         }
 
@@ -983,6 +990,15 @@ async function initProfileSystem() {
         if (profiles.length === 1) {
             // Only one profile — always auto-select (PIN only matters with multiple profiles)
             await selectProfile(profiles[0].id);
+
+            // Re-check for launch PIN after auto-select
+            const recheck = await fetch('/api/profiles/current');
+            const recheckData = await recheck.json();
+            if (recheckData.launch_pin_required) {
+                showLaunchPinScreen();
+                return false;
+            }
+
             return true;
         }
 
@@ -993,6 +1009,199 @@ async function initProfileSystem() {
         console.error('Profile init error:', e);
         return true; // Fall through to normal init
     }
+}
+
+// ── Launch PIN Lock Screen ─────────────────────────────────────────────
+
+function showLaunchPinScreen() {
+    const overlay = document.getElementById('launch-pin-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+
+    const input = document.getElementById('launch-pin-input');
+    const submit = document.getElementById('launch-pin-submit');
+    const error = document.getElementById('launch-pin-error');
+
+    input.value = '';
+    error.style.display = 'none';
+    setTimeout(() => input.focus(), 100);
+
+    const doSubmit = async () => {
+        const pin = input.value.trim();
+        if (!pin) return;
+
+        submit.disabled = true;
+        submit.textContent = 'Verifying...';
+
+        try {
+            const res = await fetch('/api/profiles/verify-launch-pin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                // Server session flag set by verify endpoint — consumed on next /api/profiles/current call
+                overlay.style.display = 'none';
+                initApp(); // Now safe to load the full app
+            } else {
+                error.textContent = data.error || 'Invalid PIN';
+                error.style.display = 'block';
+                input.value = '';
+                input.focus();
+                // Shake animation
+                overlay.querySelector('.launch-pin-container').classList.add('shake');
+                setTimeout(() => overlay.querySelector('.launch-pin-container').classList.remove('shake'), 500);
+            }
+        } catch (e) {
+            error.textContent = 'Connection error';
+            error.style.display = 'block';
+        }
+
+        submit.disabled = false;
+        submit.textContent = 'Unlock';
+    };
+
+    // Remove old listeners to prevent stacking
+    const newSubmit = submit.cloneNode(true);
+    submit.parentNode.replaceChild(newSubmit, submit);
+    newSubmit.addEventListener('click', doSubmit);
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doSubmit();
+    });
+}
+
+// ── Security Settings Helpers ──────────────────────────────────────────
+
+async function saveSecurityPin() {
+    const pin = document.getElementById('security-new-pin').value;
+    const confirm = document.getElementById('security-confirm-pin').value;
+    const msg = document.getElementById('security-pin-msg');
+
+    if (!pin || pin.length < 4) {
+        msg.textContent = 'PIN must be at least 4 characters';
+        msg.style.display = 'block';
+        msg.style.color = '#ff5252';
+        return;
+    }
+    if (pin !== confirm) {
+        msg.textContent = 'PINs do not match';
+        msg.style.display = 'block';
+        msg.style.color = '#ff5252';
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/profiles/1/set-pin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            msg.textContent = 'PIN saved! You can now enable the lock screen.';
+            msg.style.color = '#4caf50';
+            msg.style.display = 'block';
+
+            // Update UI — hide setup, show change, enable toggle
+            document.getElementById('security-pin-setup').style.display = 'none';
+            document.getElementById('security-change-pin-section').style.display = 'block';
+            document.getElementById('security-require-pin').disabled = false;
+
+            // Clear inputs
+            document.getElementById('security-new-pin').value = '';
+            document.getElementById('security-confirm-pin').value = '';
+        } else {
+            msg.textContent = data.error || 'Failed to save PIN';
+            msg.style.color = '#ff5252';
+            msg.style.display = 'block';
+        }
+    } catch (e) {
+        msg.textContent = 'Connection error';
+        msg.style.color = '#ff5252';
+        msg.style.display = 'block';
+    }
+}
+
+function handleSecurityPinToggle(checkbox) {
+    // If trying to enable but no PIN, show the setup section
+    if (checkbox.checked) {
+        const setupSection = document.getElementById('security-pin-setup');
+        if (setupSection.style.display !== 'none' || checkbox.disabled) {
+            checkbox.checked = false;
+            setupSection.style.display = 'block';
+            document.getElementById('security-new-pin').focus();
+            return;
+        }
+    }
+    // Auto-save this setting
+    saveSettings(true);
+}
+
+function showChangeSecurityPin() {
+    document.getElementById('security-pin-setup').style.display = 'block';
+    document.getElementById('security-new-pin').focus();
+}
+
+// ── Forgot PIN Recovery ────────────────────────────────────────────────
+
+function showForgotPinView() {
+    document.getElementById('launch-pin-entry').style.display = 'none';
+    document.getElementById('launch-pin-recovery').style.display = 'block';
+    document.getElementById('launch-recovery-input').value = '';
+    document.getElementById('launch-recovery-error').style.display = 'none';
+    setTimeout(() => document.getElementById('launch-recovery-input').focus(), 100);
+}
+
+function showPinEntryView() {
+    document.getElementById('launch-pin-recovery').style.display = 'none';
+    document.getElementById('launch-pin-entry').style.display = 'block';
+    setTimeout(() => document.getElementById('launch-pin-input').focus(), 100);
+}
+
+async function submitRecoveryCredential() {
+    const input = document.getElementById('launch-recovery-input');
+    const error = document.getElementById('launch-recovery-error');
+    const btn = document.getElementById('launch-recovery-submit');
+    const credential = input.value.trim();
+
+    if (!credential) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Verifying...';
+    error.style.display = 'none';
+
+    try {
+        const res = await fetch('/api/profiles/reset-pin-via-credential', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ credential })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            sessionStorage.setItem('soulsync_pin_ok', '1');
+            document.getElementById('launch-pin-overlay').style.display = 'none';
+            initApp();
+            setTimeout(() => showToast('PIN cleared. You can set a new one in Settings → Advanced.', 'success'), 1000);
+        } else {
+            error.textContent = data.error || 'Credential not recognized';
+            error.style.display = 'block';
+            input.value = '';
+            input.focus();
+            document.getElementById('launch-pin-container').classList.add('shake');
+            setTimeout(() => document.getElementById('launch-pin-container').classList.remove('shake'), 500);
+        }
+    } catch (e) {
+        error.textContent = 'Connection error';
+        error.style.display = 'block';
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Verify & Reset PIN';
 }
 
 function showProfilePicker(profiles, canCancel = false) {
@@ -5706,6 +5915,30 @@ async function loadSettingsData() {
             console.error('Error loading log level:', error);
         }
 
+        // Load security settings
+        try {
+            const requirePin = settings.security?.require_pin_on_launch || false;
+            document.getElementById('security-require-pin').checked = requirePin;
+
+            // Check if admin has a PIN set
+            const profilesRes = await fetch('/api/profiles');
+            const profilesData = await profilesRes.json();
+            const adminProfile = (profilesData.profiles || []).find(p => p.is_admin);
+            const adminHasPin = adminProfile?.has_pin || false;
+
+            // Show/hide PIN setup vs change sections
+            document.getElementById('security-pin-setup').style.display = adminHasPin ? 'none' : 'block';
+            document.getElementById('security-change-pin-section').style.display = adminHasPin ? 'block' : 'none';
+
+            // If no PIN, disable the toggle
+            if (!adminHasPin) {
+                document.getElementById('security-require-pin').checked = false;
+                document.getElementById('security-require-pin').disabled = true;
+            }
+        } catch (error) {
+            console.error('Error loading security settings:', error);
+        }
+
         // Check dev mode status
         try {
             const devResponse = await fetch('/api/dev-mode');
@@ -6638,6 +6871,9 @@ async function saveSettings(quiet = false) {
         youtube: {
             cookies_browser: document.getElementById('youtube-cookies-browser').value,
             download_delay: parseInt(document.getElementById('youtube-download-delay').value) || 3,
+        },
+        security: {
+            require_pin_on_launch: document.getElementById('security-require-pin')?.checked || false,
         }
     };
 
