@@ -1855,8 +1855,13 @@ def get_cached_transfer_data():
         # Cache expired or empty, fetch new data
         live_transfers_lookup = {}
         try:
+            # Skip Soulseek API call if we already know it's disconnected (avoid timeout spam)
+            soulseek_known_down = not _status_cache.get('soulseek', {}).get('connected', True)
+
             # First, get Soulseek downloads from API
-            transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
+            transfers_data = None
+            if not soulseek_known_down:
+                transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 all_transfers = []
                 for user_data in transfers_data:
@@ -1872,8 +1877,9 @@ def get_cached_transfer_data():
                     live_transfers_lookup[key] = transfer
 
             # Also add YouTube/Tidal/Qobuz downloads (through orchestrator)
+            # Note: get_all_downloads() also hits slskd API — skip if we know it's down
             try:
-                all_downloads = run_async(soulseek_client.get_all_downloads())
+                all_downloads = run_async(soulseek_client.get_all_downloads()) if not soulseek_known_down else []
                 for download in all_downloads:
                     # Only add streaming source downloads (Soulseek ones are already in the lookup)
                     if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
