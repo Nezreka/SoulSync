@@ -6561,8 +6561,8 @@ class MusicDatabase:
                 cursor.execute("""
                     UPDATE watchlist_artists
                     SET image_url = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE spotify_artist_id = ? OR itunes_artist_id = ?
-                """, (image_url, artist_id, artist_id))
+                    WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+                """, (image_url, artist_id, artist_id, artist_id))
 
                 conn.commit()
                 return cursor.rowcount > 0

@@ -33388,20 +33388,12 @@ def add_to_watchlist():
                     # For numeric IDs, fetch image from the configured fallback source
                     try:
                         if fallback_source == 'deezer':
-                            # Deezer artists have direct image URLs via picture_xl
-                            fallback = _get_metadata_fallback_client()
-                            artist_info = fallback.get_artist_info(str(artist_id)) if hasattr(fallback, 'get_artist_info') else None
-                            image_url = artist_info.get('images', [{}])[0].get('url') if artist_info and artist_info.get('images') else None
-                            # Fallback: try Deezer API directly for picture
-                            if not image_url:
-                                try:
-                                    import requests as req
-                                    resp = req.get(f'https://api.deezer.com/artist/{artist_id}', timeout=5)
-                                    if resp.ok:
-                                        dz = resp.json()
-                                        image_url = dz.get('picture_xl') or dz.get('picture_big') or dz.get('picture_medium')
-                                except Exception:
-                                    pass
+                            # Deezer: fetch artist image directly from API
+                            dz_resp = requests.get(f'https://api.deezer.com/artist/{artist_id}', timeout=5)
+                            if dz_resp.ok:
+                                dz_data = dz_resp.json()
+                                image_url = dz_data.get('picture_xl') or dz_data.get('picture_big') or dz_data.get('picture_medium')
+                                print(f"🖼️ Deezer artist image: {image_url[:60] if image_url else 'None'}")
                         else:
                             # iTunes: look up album entity for artwork
                             itunes_url = f"https://itunes.apple.com/lookup?id={artist_id}&entity=album&limit=5"
