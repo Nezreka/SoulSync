@@ -13452,13 +13452,23 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     transform: scale(0.98);
 }
 
-.watchlist-detail-settings-btn {
-    background: rgba(var(--accent-rgb), 0.15);
+.watchlist-detail-discog-btn {
+    background: rgba(var(--accent-rgb), 0.2);
     color: rgb(var(--accent-rgb));
+    font-weight: 600;
+}
+
+.watchlist-detail-discog-btn:hover {
+    background: rgba(var(--accent-rgb), 0.35);
+}
+
+.watchlist-detail-settings-btn {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.7);
 }
 
 .watchlist-detail-settings-btn:hover {
-    background: rgba(var(--accent-rgb), 0.25);
+    background: rgba(255, 255, 255, 0.12);
 }
 
 .watchlist-detail-remove-btn {
