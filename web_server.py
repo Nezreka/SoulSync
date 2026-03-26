@@ -7152,6 +7152,55 @@ def enhanced_search_source(source_name):
         return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
 
 
+@app.route('/api/enhanced-search/library-check', methods=['POST'])
+def enhanced_search_library_check():
+    """Batch check which albums/tracks from search results exist in the library.
+    Called async after search results render — doesn't block the search."""
+    try:
+        data = request.get_json() or {}
+        albums = data.get('albums', [])
+        tracks = data.get('tracks', [])
+
+        database = get_database()
+        conn = database._get_connection()
+        try:
+            cursor = conn.cursor()
+
+            # Build lookup sets from library — two fast queries
+            cursor.execute("SELECT LOWER(al.title) || '|||' || LOWER(ar.name) FROM albums al JOIN artists ar ON ar.id = al.artist_id")
+            owned_albums = {r[0] for r in cursor.fetchall()}
+
+            cursor.execute("""
+                SELECT LOWER(t.title) || '|||' || LOWER(a.name), t.id, t.file_path, t.title, a.name, al.title
+                FROM tracks t JOIN artists a ON a.id = t.artist_id JOIN albums al ON al.id = t.album_id
+            """)
+            owned_tracks = {}
+            for r in cursor.fetchall():
+                if r[0] not in owned_tracks:  # Keep first match only
+                    owned_tracks[r[0]] = {'track_id': r[1], 'file_path': r[2], 'title': r[3], 'artist_name': r[4], 'album_title': r[5]}
+
+            # O(1) lookups per item
+            album_results = []
+            for a in albums:
+                key = (a.get('name', '').lower() + '|||' + a.get('artist', '').split(',')[0].strip().lower())
+                album_results.append(key in owned_albums)
+
+            track_results = []
+            for t in tracks:
+                key = (t.get('name', '').lower() + '|||' + t.get('artist', '').split(',')[0].strip().lower())
+                match = owned_tracks.get(key)
+                if match:
+                    track_results.append({'in_library': True, **match})
+                else:
+                    track_results.append({'in_library': False})
+        finally:
+            conn.close()
+
+        return jsonify({'albums': album_results, 'tracks': track_results})
+    except Exception as e:
+        logger.debug(f"Library check error: {e}")
+        return jsonify({'albums': [], 'tracks': []})
+
 @app.route('/api/enhanced-search/stream-track', methods=['POST'])
 def stream_enhanced_search_track():
     """

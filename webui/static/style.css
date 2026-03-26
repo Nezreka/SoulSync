@@ -18276,18 +18276,20 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     position: absolute;
     inset: 0;
     background: linear-gradient(0deg,
-        rgba(0, 0, 0, 0.88) 0%,
-        rgba(0, 0, 0, 0.35) 40%,
-        transparent 65%);
+        rgba(0, 0, 0, 0.95) 0%,
+        rgba(0, 0, 0, 0.7) 25%,
+        rgba(0, 0, 0, 0.2) 50%,
+        transparent 70%);
     pointer-events: none;
     z-index: 1;
 }
 
 .album-card:hover::after {
     background: linear-gradient(0deg,
-        rgba(0, 0, 0, 0.92) 0%,
-        rgba(0, 0, 0, 0.3) 45%,
-        transparent 70%);
+        rgba(0, 0, 0, 0.95) 0%,
+        rgba(0, 0, 0, 0.6) 30%,
+        rgba(0, 0, 0, 0.15) 55%,
+        transparent 75%);
 }
 
 .album-card-image {
@@ -29802,6 +29804,38 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: none;
 }
 
+/* In Library badge on search results */
+.enh-item-lib-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: rgba(var(--accent-rgb), 0.85);
+    color: #fff;
+    padding: 3px 7px;
+    z-index: 5;
+    animation: libBadgeFadeIn 0.3s ease;
+    border-radius: 6px;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+/* Track items need relative positioning for the badge */
+@keyframes libBadgeFadeIn {
+    from { opacity: 0; transform: scale(0.8); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.enh-compact-item.track-item .enh-item-lib-badge {
+    position: static;
+    flex-shrink: 0;
+    margin-left: auto;
+    font-size: 9px;
+}
+
 /* Hydrabase badge (dev mode) */
 .enh-badge-hydrabase {
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(139, 92, 246, 0.3));
@@ -29928,39 +29962,48 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .enh-compact-item.album-card .enh-item-info {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
     padding: 10px 12px 12px;
+    z-index: 3;
+}
+
+/* Gradient overlay for text readability on enhanced search album cards */
+.enh-compact-item.album-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(0deg,
+        rgba(0, 0, 0, 0.9) 0%,
+        rgba(0, 0, 0, 0.5) 30%,
+        transparent 60%);
+    pointer-events: none;
+    z-index: 2;
 }
 
 .enh-compact-item.album-card .enh-item-name {
     font-size: 13px;
     font-weight: 600;
     color: #fff;
-    margin: 0 0 3px 0;
+    margin: 0 0 2px 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    display: block;
-    -webkit-line-clamp: unset;
-    -webkit-box-orient: unset;
-    line-height: 1.4;
-    max-height: none;
-    letter-spacing: -0.1px;
-    position: relative;
-    z-index: 1;
+    line-height: 1.3;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
 }
 
 .enh-compact-item.album-card .enh-item-meta {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.45);
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.6);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    display: block;
-    -webkit-line-clamp: unset;
-    -webkit-box-orient: unset;
-    line-height: 1.4;
+    line-height: 1.3;
     margin: 0;
-    position: relative;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
     z-index: 1;
 }
 

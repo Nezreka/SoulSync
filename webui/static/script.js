@@ -2477,8 +2477,8 @@ function initializeDownloadManagerToggle() {
         return;
     }
 
-    // Load saved state from localStorage
-    const isHidden = localStorage.getItem('downloadManagerHidden') === 'true';
+    // Load saved state from localStorage (hidden by default for more search space)
+    const isHidden = localStorage.getItem('downloadManagerHidden') !== 'false';
     if (isHidden) {
         downloadsContent.classList.add('manager-hidden');
     }
@@ -7856,6 +7856,81 @@ function initializeSearchModeToggle() {
 
         // Lazy load artist images that are missing
         lazyLoadEnhancedSearchArtistImages();
+
+        // Async library ownership check — doesn't block rendering
+        _checkSearchResultsLibraryOwnership(data);
+    }
+
+    async function _checkSearchResultsLibraryOwnership(data) {
+        try {
+            const allAlbums = data.spotify_albums || [];
+            const allTracks = data.spotify_tracks || [];
+            if (!allAlbums.length && !allTracks.length) return;
+
+            const resp = await fetch('/api/enhanced-search/library-check', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    albums: allAlbums.map(a => ({ name: a.name, artist: a.artist })),
+                    tracks: allTracks.map(t => ({ name: t.name, artist: t.artist })),
+                }),
+            });
+            const result = await resp.json();
+
+            // Tag album cards with staggered animation
+            const albumCards = document.querySelectorAll('#enh-albums-list .enh-compact-item, #enh-singles-list .enh-compact-item');
+            const albumResults = result.albums || [];
+            let delay = 0;
+            albumCards.forEach((card, i) => {
+                if (albumResults[i]) {
+                    setTimeout(() => {
+                        const badge = document.createElement('div');
+                        badge.className = 'enh-item-lib-badge';
+                        badge.textContent = 'In Library';
+                        card.appendChild(badge);
+                    }, delay);
+                    delay += 30;
+                }
+            });
+
+            // Tag track rows + wire up library playback
+            const trackCards = document.querySelectorAll('#enh-tracks-list .enh-compact-item');
+            const trackResults = result.tracks || [];
+            trackCards.forEach((card, i) => {
+                const tr = trackResults[i];
+                if (tr && tr.in_library) {
+                    setTimeout(() => {
+                        const badge = document.createElement('div');
+                        badge.className = 'enh-item-lib-badge';
+                        badge.textContent = 'In Library';
+                        card.appendChild(badge);
+
+                        // Replace stream button to play from library instead of searching
+                        if (tr.file_path) {
+                            const playBtn = card.querySelector('.enh-item-play-btn');
+                            if (playBtn) {
+                                const newBtn = playBtn.cloneNode(true);
+                                newBtn.title = 'Play from library';
+                                newBtn.textContent = '▶';
+                                const trackInfo = tr;
+                                newBtn.addEventListener('click', (e) => {
+                                    e.stopPropagation();
+                                    playLibraryTrack(
+                                        { id: trackInfo.track_id, title: trackInfo.title, file_path: trackInfo.file_path },
+                                        trackInfo.album_title || '',
+                                        trackInfo.artist_name || ''
+                                    );
+                                });
+                                playBtn.replaceWith(newBtn);
+                            }
+                        }
+                    }, delay);
+                    delay += 30;
+                }
+            });
+        } catch (e) {
+            console.debug('Library check failed:', e);
+        }
     }
 
     async function _fetchAlternateSource(sourceName, query) {
