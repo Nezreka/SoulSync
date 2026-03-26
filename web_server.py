@@ -18820,6 +18820,74 @@ def get_version_info():
                     "• Database storage donut chart in Library Health section",
                     "• Play buttons on stats page tracks with cover art"
                 ]
+            },
+            {
+                "title": "❓ Interactive Help System",
+                "description": "Full contextual help platform accessible from the floating ? button",
+                "features": [
+                    "• 200+ contextual help entries — click any UI element to learn what it does",
+                    "• 11 guided tours covering every page (97 steps total) with spotlight overlay",
+                    "• Page-aware menu suggests the relevant tour for your current page",
+                    "• Search across all help topics, tours, and keyboard shortcuts (Ctrl+K)",
+                    "• Setup Progress tracker with auto-detection — checks your services, library, and watchlist",
+                    "• What's New panel with version-tagged highlights and 'Show me' navigation",
+                    "• Troubleshoot mode scans for disconnected services and shows fix steps",
+                    "• Keyboard shortcut overlay showing all hotkeys grouped by scope",
+                    "• Quick action buttons in popovers (e.g., 'Open Settings' on service cards)",
+                    "• First-launch welcome prompt for new users"
+                ]
+            },
+            {
+                "title": "🎤 Rich Artist Profiles",
+                "description": "Full-bleed hero section on the Artists page with deep metadata",
+                "features": [
+                    "• Large portrait image with blurred background, glassmorphic design",
+                    "• Bio, genres, listening stats from Last.fm, service logo badges",
+                    "• Multi-source genre explorer with Deezer genre support",
+                    "• Similar artist cards with full-bleed library-card styling"
+                ]
+            },
+            {
+                "title": "📚 Enhanced Library Manager",
+                "description": "Inline metadata editing and tag writing from the library view",
+                "features": [
+                    "• Toggle between Standard and Enhanced view on any artist detail page",
+                    "• Inline-edit track title, number, BPM; album and artist fields editable",
+                    "• Write tags directly to audio files (MP3, FLAC, OGG, M4A) with diff preview",
+                    "• Bulk select tracks across albums for batch edit and batch tag write",
+                    "• Server sync after writes — Plex per-track, Jellyfin library scan"
+                ]
+            },
+            {
+                "title": "🏷️ In Library Badges + Search Improvements",
+                "description": "Know what you already own before downloading",
+                "features": [
+                    "• 'In Library' badges on enhanced search album and track results",
+                    "• Async post-render matching — search results appear instantly, badges fill in",
+                    "• Multi-source search tabs: compare results from Spotify, iTunes, and Deezer",
+                    "• Clickable artist name in download modal navigates to discography"
+                ]
+            },
+            {
+                "title": "🎵 FLAC Bit Depth + Quality Filter",
+                "description": "Finer control over audio quality preferences",
+                "features": [
+                    "• Quality profile enforces 16-bit vs 24-bit FLAC preference",
+                    "• Bit depth fallback option: accept other bit depth if preferred unavailable",
+                    "• 1450 kbps threshold separates 16-bit from 24-bit FLAC",
+                    "• Sort prioritizes audio quality (effective kbps) over peer speed"
+                ]
+            },
+            {
+                "title": "🔧 Enrichment Worker Improvements",
+                "description": "Better name matching and quieter logs across all 8+ workers",
+                "features": [
+                    "• Dash-suffix normalization: 'Title - Remix' now matches 'Title (Remix)' across all workers",
+                    "• AcoustID log noise reduced — individual recording matches moved to DEBUG",
+                    "• Streaming source verification: artist/title fuzzy match prevents wrong track downloads",
+                    "• Deezer enrichment worker caches API calls through metadata cache",
+                    "• Per-source quality fallback toggles for streaming download sources"
+                ]
             }
         ]
     }

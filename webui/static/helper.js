@@ -3397,24 +3397,20 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
-    '2.2': [
-        { title: 'Interactive Help System',     desc: 'Full contextual help with guided tours, search, shortcuts, setup tracking, and troubleshooting', selector: '#helper-float-btn' },
-        { title: 'Genre Explorer',              desc: 'Browse music by genre across all metadata sources (Spotify, iTunes, Deezer)', page: 'discover', selector: '#genre-tabs' },
-        { title: 'In Library Badges',           desc: 'Search results now show "In Library" badges for albums and tracks you already own', page: 'downloads', selector: '.enhanced-search-input-wrapper' },
-        { title: 'Rich Artist Profiles',        desc: 'Full-bleed hero section with bio, stats, genres, and service links', page: 'artists', selector: '#artists-search-input' },
-        { title: 'FLAC Bit Depth Control',      desc: 'Quality profiles now enforce 16-bit vs 24-bit preference with fallback' },
-        { title: 'Multi-Source Search Tabs',     desc: 'View results from Spotify, iTunes, and Deezer side by side', page: 'downloads', selector: '.search-mode-toggle' },
-        { title: 'Automation Signals',           desc: 'Chain automations together using fire/receive signals', page: 'automations', selector: '#auto-section-hub' },
-        { title: 'Enhanced Library Manager',     desc: 'Inline tag editing, bulk operations, and write-to-file from the library', page: 'library', selector: '.library-controls' },
-        { title: 'Deezer Download Source',       desc: 'Deezer added as 5th download source with quality fallback' },
-        { title: 'Streaming Source Verification', desc: 'Artist/title fuzzy matching prevents wrong track downloads from streaming sources' },
-    ],
     '2.1': [
-        { title: 'Personalized Discovery',  desc: 'Daily Mixes, Hidden Gems, Forgotten Favorites, and more', page: 'discover' },
-        { title: 'ListenBrainz Integration', desc: 'Algorithmic playlists from your listening history', page: 'discover' },
-        { title: 'Build a Playlist',         desc: 'Custom playlist generator from seed artists', page: 'discover' },
-        { title: 'Time Machine',             desc: 'Browse music by decade from your library', page: 'discover' },
-        { title: 'Listening Stats',          desc: 'Charts, rankings, and library health metrics from your media server', page: 'stats' },
+        // Newest features first
+        { title: 'Interactive Help System',     desc: 'Guided tours, search, shortcuts, setup tracking, troubleshooting — all from the ? button', selector: '#helper-float-btn' },
+        { title: 'Rich Artist Profiles',        desc: 'Full-bleed hero section with bio, stats, genres, and service links', page: 'artists', selector: '#artists-search-input' },
+        { title: 'In Library Badges',           desc: 'Search results show "In Library" badges for albums and tracks you already own', page: 'downloads', selector: '.enhanced-search-input-wrapper' },
+        { title: 'Enhanced Library Manager',     desc: 'Inline tag editing, bulk operations, and write-to-file from the library', page: 'library', selector: '.library-controls' },
+        { title: 'Genre Explorer',              desc: 'Browse music by genre across all metadata sources (Spotify, iTunes, Deezer)', page: 'discover', selector: '#genre-tabs' },
+        { title: 'Multi-Source Search Tabs',     desc: 'Compare results from Spotify, iTunes, and Deezer side by side', page: 'downloads', selector: '.search-mode-toggle' },
+        { title: 'Automation Signals',           desc: 'Chain automations together using fire/receive signals', page: 'automations', selector: '#auto-section-hub' },
+        { title: 'FLAC Bit Depth Control',      desc: 'Quality profiles now enforce 16-bit vs 24-bit preference with fallback' },
+        { title: 'Deezer Download Source',       desc: 'Deezer added as 5th download source with quality fallback' },
+        { title: 'Personalized Discovery',       desc: 'Daily Mixes, Hidden Gems, Forgotten Favorites, Build a Playlist, and more', page: 'discover' },
+        { title: 'ListenBrainz Integration',     desc: 'Algorithmic playlists from your listening history', page: 'discover' },
+        { title: 'Listening Stats',              desc: 'Charts, rankings, and library health metrics from your media server', page: 'stats', selector: '#stats-overview' },
     ],
 };
 
