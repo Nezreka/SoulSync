@@ -15339,6 +15339,18 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-weight: 500;
     margin: 0;
     opacity: 0.9;
+}
+
+.hero-artist-link {
+    color: rgb(var(--accent-light-rgb));
+    text-decoration: none;
+    transition: color 0.15s ease, opacity 0.15s ease;
+    cursor: pointer;
+}
+
+.hero-artist-link:hover {
+    color: rgb(var(--accent-rgb));
+    text-decoration: underline;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

@@ -8261,10 +8261,13 @@ function initializeSearchModeToggle() {
             // Format playlist name
             const playlistName = `[${album.artist}] ${albumData.name}`;
 
-            // Create minimal artist object for the modal
+            // Create artist object for the modal — extract ID from album data
+            const firstArtist = (albumData.artists || [])[0] || {};
             const artistObject = {
-                id: null, // No artist ID from enhanced search
-                name: album.artist
+                id: firstArtist.id || album.id?.split?.('_')?.[0] || '',
+                name: firstArtist.name || album.artist,
+                image_url: firstArtist.image_url || firstArtist.images?.[0]?.url || '',
+                source: _activeSearchSource || '',
             };
 
             // Prepare full album object for modal
@@ -10710,7 +10713,7 @@ function generateDownloadModalHeroSection(context) {
                     </div>
                     <div class="download-missing-modal-hero-metadata">
                         <h1 class="download-missing-modal-hero-title">${escapeHtml(album.name || 'Unknown Album')}</h1>
-                        <div class="download-missing-modal-hero-subtitle">by ${escapeHtml(artist.name || 'Unknown Artist')}</div>
+                        <div class="download-missing-modal-hero-subtitle">by <a href="#" class="hero-artist-link" onclick="event.preventDefault();_navigateToArtistFromModal('${escapeHtml(artist.id || '')}','${escapeForInlineJs(artist.name || '')}','${escapeHtml(artist.image_url || '')}','${escapeHtml(artist.source || '')}','${escapeHtml(context.playlistId || '')}')">${escapeHtml(artist.name || 'Unknown Artist')}</a></div>
                         <div class="download-missing-modal-hero-details">
                             <span class="download-missing-modal-hero-detail">${album.album_type || 'Album'}</span>
                             <span class="download-missing-modal-hero-detail">${trackCount} tracks</span>
@@ -11443,6 +11446,22 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     applyProgressiveTrackRendering(virtualPlaylistId, spotifyTracks.length);
     modal.style.display = 'flex';
     hideLoadingOverlay();
+}
+
+function _navigateToArtistFromModal(artistId, artistName, imageUrl, source, playlistId) {
+    if (!artistName) return;
+    // Close the download modal
+    if (playlistId) closeDownloadMissingModal(playlistId);
+    // Navigate to Artists page and load discography
+    navigateToPage('artists');
+    setTimeout(() => {
+        // If we have an artist ID, use it directly
+        // If not, search by name — selectArtistForDetail handles both
+        selectArtistForDetail(
+            { id: artistId || artistName, name: artistName, image_url: imageUrl || '' },
+            source ? { source: source } : undefined
+        );
+    }, 200);
 }
 
 async function closeDownloadMissingModal(playlistId) {
