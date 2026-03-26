@@ -6427,7 +6427,13 @@
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <!-- Floating helper toggle — always accessible above modals -->
+    <button class="helper-float-btn" id="helper-float-btn" onclick="toggleHelperMode()" title="Interactive Help — click any element to learn about it">
+        <span>?</span>
+    </button>
+
     <script src="{{ url_for('static', filename='docs.js') }}"></script>
+    <script src="{{ url_for('static', filename='helper.js') }}"></script>
     <script src="{{ url_for('static', filename='particles.js') }}"></script>
     <script src="{{ url_for('static', filename='worker-orbs.js') }}"></script>
 </body>

@@ -1241,6 +1241,240 @@ body {
     transform: scale(0.97);
 }
 
+/* ========================================= */
+/* INTERACTIVE HELPER SYSTEM                */
+/* ========================================= */
+
+/* (Sidebar helper button removed — using floating button instead) */
+
+/* Floating helper button — always visible, always above everything */
+.helper-float-btn {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: rgba(30, 30, 30, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 18px;
+    font-weight: 900;
+    cursor: pointer;
+    z-index: 999999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    transition: all 0.25s ease;
+    backdrop-filter: blur(12px);
+}
+
+.helper-float-btn:hover {
+    transform: scale(1.1);
+    background: rgba(var(--accent-rgb), 0.2);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: #fff;
+    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.3), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.helper-float-btn.active {
+    background: rgb(var(--accent-rgb));
+    border-color: rgb(var(--accent-rgb));
+    color: #fff;
+    box-shadow: 0 4px 24px rgba(var(--accent-rgb), 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+    animation: helperFloatPulse 2s ease-in-out infinite;
+}
+
+@keyframes helperFloatPulse {
+    0%, 100% { box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.4), 0 2px 8px rgba(0, 0, 0, 0.3); }
+    50% { box-shadow: 0 4px 32px rgba(var(--accent-rgb), 0.6), 0 2px 8px rgba(0, 0, 0, 0.3); }
+}
+
+/* Help mode — cursor + hover highlights */
+body.helper-mode-active {
+    cursor: help;
+}
+
+body.helper-mode-active * {
+    cursor: help !important;
+}
+
+/* Highlight on hoverable elements in help mode */
+body.helper-mode-active .nav-button:hover,
+body.helper-mode-active .tool-card:hover,
+body.helper-mode-active .service-card:hover,
+body.helper-mode-active .stat-card:hover,
+body.helper-mode-active .version-button:hover,
+body.helper-mode-active .support-button:hover,
+body.helper-mode-active .status-indicator:hover,
+body.helper-mode-active #media-player:hover,
+body.helper-mode-active #dashboard-activity-feed:hover {
+    outline: 2px solid rgba(var(--accent-rgb), 0.4) !important;
+    outline-offset: 2px;
+}
+
+/* Active highlight on clicked element */
+.helper-highlight {
+    outline: 2px solid rgb(var(--accent-rgb)) !important;
+    outline-offset: 3px;
+    animation: helperHighlightPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes helperHighlightPulse {
+    0%, 100% { outline-color: rgba(var(--accent-rgb), 0.8); }
+    50% { outline-color: rgba(var(--accent-rgb), 0.4); }
+}
+
+/* Popover */
+.helper-popover {
+    position: fixed;
+    z-index: 100000;
+    max-width: 340px;
+    min-width: 240px;
+    background: rgba(16, 16, 16, 0.97);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 0;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(20px);
+    opacity: 0;
+    transform: scale(0.95) translateY(4px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    pointer-events: auto;
+}
+
+.helper-popover.visible {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+}
+
+.helper-popover-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 16px 0;
+}
+
+.helper-popover-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.2px;
+}
+
+.helper-popover-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    transition: color 0.15s ease;
+}
+
+.helper-popover-close:hover {
+    color: #fff;
+}
+
+.helper-popover-desc {
+    padding: 10px 16px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.helper-popover-tips {
+    padding: 0 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.helper-popover-tip {
+    font-size: 12px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.5);
+    padding-left: 20px;
+    position: relative;
+}
+
+.helper-popover-tip::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 5px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(var(--accent-rgb), 0.5);
+}
+
+/* Docs link */
+.helper-popover-docs {
+    padding: 0 16px 14px;
+}
+
+.helper-popover-docs a {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(var(--accent-rgb), 0.8);
+    text-decoration: none;
+    transition: color 0.15s ease;
+}
+
+.helper-popover-docs a:hover {
+    color: rgb(var(--accent-rgb));
+}
+
+/* Arrow */
+.helper-popover-arrow {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background: rgba(16, 16, 16, 0.97);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transform: rotate(45deg);
+}
+
+.helper-popover-arrow.arrow-left {
+    left: -6px;
+    top: 50%;
+    margin-top: -5px;
+    border-right: none;
+    border-top: none;
+}
+
+.helper-popover-arrow.arrow-right {
+    right: -6px;
+    top: 50%;
+    margin-top: -5px;
+    border-left: none;
+    border-bottom: none;
+}
+
+.helper-popover-arrow.arrow-top {
+    top: -6px;
+    left: 50%;
+    margin-left: -5px;
+    border-bottom: none;
+    border-right: none;
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+    .helper-popover {
+        max-width: calc(100vw - 24px);
+        left: 12px !important;
+        right: 12px;
+    }
+
+    .helper-popover-arrow {
+        display: none;
+    }
+}
+
 .version-button.update-available {
     color: rgb(var(--accent-light-rgb));
     border-color: rgba(var(--accent-rgb), 0.4);
