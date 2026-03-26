@@ -647,6 +647,1423 @@ const HELPER_CONTENT = {
         description: 'The main action button — starts library analysis and downloads missing tracks. Changes label based on current state (Begin Analysis → Download Missing → Complete).',
     },
 
+    // ─── SYNC PAGE ───────────────────────────────────────────────────
+
+    // Tabs
+    '.sync-tab-button[data-tab="spotify"]': {
+        title: 'Spotify Playlists',
+        description: 'Your Spotify playlists. Select one or more and click "Start Sync" to download missing tracks. Requires Spotify OAuth connection in Settings.',
+        tips: ['Click a playlist card to open the detail/download modal', 'Checkbox selects playlists for batch sync', 'Green badge = fully synced, blue = in progress'],
+        docsId: 'sync-spotify'
+    },
+    '.sync-tab-button[data-tab="spotify-public"]': {
+        title: 'Spotify Public Links',
+        description: 'Load any public Spotify playlist or album by URL — no Spotify account needed. Paste the URL and click Load.',
+        tips: ['Works with playlist and album URLs', 'No OAuth credentials required', 'Previously loaded URLs appear in the history bar'],
+        docsId: 'sync-spotify-public'
+    },
+    '.sync-tab-button[data-tab="tidal"]': {
+        title: 'Tidal Playlists',
+        description: 'Your Tidal playlists. Import and sync playlists from your Tidal account. Requires Tidal authentication in Settings.',
+        docsId: 'sync-tidal'
+    },
+    '.sync-tab-button[data-tab="deezer"]': {
+        title: 'Deezer Playlists',
+        description: 'Import Deezer playlists by URL. Paste a playlist URL, load it, then discover and sync tracks.',
+        docsId: 'sync-deezer'
+    },
+    '.sync-tab-button[data-tab="youtube"]': {
+        title: 'YouTube Playlists',
+        description: 'Import YouTube Music playlists by URL. Tracks go through the discovery pipeline to match official metadata before downloading.',
+        tips: ['Paste any YouTube Music playlist URL', 'Discovery matches video titles to official tracks', 'Unmatched tracks can be fixed manually'],
+        docsId: 'sync-youtube'
+    },
+    '.sync-tab-button[data-tab="beatport"]': {
+        title: 'Beatport Charts',
+        description: 'Browse Beatport charts, genres, and curated playlists. Find electronic music by genre, chart type, or editorial picks.',
+        tips: ['Browse 12+ electronic genres', 'Top 100 and Hype charts with full track listings', 'Tracks can be matched to Spotify for metadata'],
+        docsId: 'sync-beatport'
+    },
+    '.sync-tab-button[data-tab="import-file"]': {
+        title: 'Import from File',
+        description: 'Import track lists from CSV, TSV, or plain text files. Drag and drop or browse for a file, map columns, then create a playlist for sync.',
+        tips: ['Supports CSV, TSV, and plain text (one track per line)', 'Column mapping for CSV/TSV files', 'Creates a mirrored playlist for persistent state'],
+        docsId: 'sync-import-file'
+    },
+    '.sync-tab-button[data-tab="mirrored"]': {
+        title: 'Mirrored Playlists',
+        description: 'All imported playlists from every source, saved persistently. Shows discovery status, download progress, and allows re-syncing.',
+        tips: ['Every parsed playlist is automatically mirrored here', 'Cards show live state: Discovering, Discovered, Syncing, Complete', 'Re-parsing the same URL updates the existing mirror'],
+        docsId: 'sync-mirrored'
+    },
+
+    // Sync page header & history
+    '.sync-history-btn': {
+        title: 'Sync History',
+        description: 'View a log of all sync operations — playlist syncs, album downloads, and wishlist processing. Shows timestamps, track counts, and completion status.',
+        docsId: 'sync-history'
+    },
+    '.sync-header': {
+        title: 'Playlist Sync',
+        description: 'Import and sync playlists from multiple sources. Select playlists, match tracks to your library, and download what\'s missing.',
+        docsId: 'sync-overview'
+    },
+
+    // Spotify tab elements
+    '#spotify-refresh-btn': {
+        title: 'Refresh Playlists',
+        description: 'Reload your Spotify playlists from the API. Use when you\'ve created or modified playlists in Spotify and they\'re not showing here.',
+    },
+    '.playlist-card': {
+        title: 'Playlist Card',
+        description: 'A playlist from your connected account. Click to open the detail view with track listing and download options. Use the checkbox to select for batch sync.',
+        tips: ['Status badge shows sync state (synced, in progress, new)', 'Click the card to open the download modal', 'Select multiple with checkboxes, then click Start Sync'],
+    },
+
+    // URL input sections
+    '#youtube-url-input': {
+        title: 'YouTube URL Input',
+        description: 'Paste a YouTube Music playlist URL here. Click "Parse Playlist" or press Enter to import the tracks.',
+        docsId: 'sync-youtube'
+    },
+    '#deezer-url-input': {
+        title: 'Deezer URL Input',
+        description: 'Paste a Deezer playlist URL here. Click "Load Playlist" or press Enter to import the tracks.',
+        docsId: 'sync-deezer'
+    },
+    '#spotify-public-url-input': {
+        title: 'Spotify Public URL',
+        description: 'Paste any public Spotify playlist or album URL. No Spotify account needed — works with share links.',
+        docsId: 'sync-spotify-public'
+    },
+
+    // Playlist card action buttons
+    '.playlist-card-action-btn': {
+        title: 'Playlist Action',
+        description: 'The action depends on the playlist state: "Discover" matches tracks to metadata, "Sync" downloads missing tracks, "Download" processes the playlist.',
+    },
+    '.youtube-playlist-card': {
+        title: 'Imported Playlist',
+        description: 'An imported playlist card. Shows track count, discovery status, and sync progress. Click the action button to advance to the next step.',
+        tips: ['Progress shows: total tracks / matched / failed / percentage', 'Phase colors: gray=fresh, blue=discovering, green=discovered, orange=syncing'],
+    },
+
+    // Sidebar
+    '.sync-sidebar': {
+        title: 'Sync Actions',
+        description: 'Select playlists from the left panel, then use these controls to start syncing. Progress and logs appear below.',
+        docsId: 'sync-overview'
+    },
+    '#start-sync-btn': {
+        title: 'Start Sync',
+        description: 'Begin downloading missing tracks from all selected playlists. Playlists are processed sequentially — each one completes before the next starts.',
+        tips: ['Select playlists first using checkboxes on the cards', 'Progress bar and log update in real-time', 'Button is disabled until at least one playlist is selected'],
+    },
+    '#sync-log-area': {
+        title: 'Sync Log',
+        description: 'Live log of sync operations. Shows each track as it\'s matched, downloaded, or skipped. Auto-scrolls to show the latest activity.',
+    },
+
+    // Import file elements
+    '#import-file-dropzone': {
+        title: 'File Drop Zone',
+        description: 'Drag and drop a CSV, TSV, or text file here, or click to browse. The file will be parsed and previewed before importing.',
+        docsId: 'sync-import-file'
+    },
+    '#import-file-import-btn': {
+        title: 'Import as Playlist',
+        description: 'Creates a mirrored playlist from the parsed file. Give it a name and click Import — the playlist will appear in the Mirrored tab for discovery and sync.',
+    },
+
+    // Beatport elements
+    '.beatport-chart-item': {
+        title: 'Beatport Chart',
+        description: 'A Beatport chart or playlist. Click to view tracks and download. Charts are cached and refreshed daily.',
+        docsId: 'sync-beatport'
+    },
+    '.beatport-genre-item': {
+        title: 'Beatport Genre',
+        description: 'Click to explore this genre\'s charts, top tracks, staff picks, and new releases.',
+        docsId: 'sync-beatport'
+    },
+    '#beatport-top100-btn': {
+        title: 'Beatport Top 100',
+        description: 'Load the Beatport Top 100 overall chart — the most popular tracks across all genres.',
+    },
+
+    // Mirrored tab
+    '.pool-trigger-btn': {
+        title: 'Discovery Pool',
+        description: 'Open the Discovery Pool to view matched and failed track discoveries across all mirrored playlists. Fix failed matches manually.',
+        docsId: 'sync-discovery'
+    },
+    '#mirrored-refresh-btn': {
+        title: 'Refresh Mirrored',
+        description: 'Reload all mirrored playlists from the database.',
+    },
+
+    // ─── DISCOVERY MODAL (used by YouTube, Tidal, Deezer, Beatport, ListenBrainz, Mirrored) ───
+
+    '.youtube-discovery-modal .modal-header': {
+        title: 'Discovery Modal Header',
+        description: 'Shows the playlist name, track count, and current phase description. The discovery pipeline matches raw track titles from the source to official metadata on your configured metadata service.',
+        docsId: 'sync-discovery'
+    },
+    '.progress-section': {
+        title: 'Discovery Progress',
+        description: 'Real-time progress of the track matching process. Each track from the source playlist is compared against your metadata service (Spotify, iTunes, or Deezer) using fuzzy matching with a 0.7 confidence threshold.',
+        tips: [
+            'Green progress = tracks successfully matched',
+            'Progress text shows matched/total count',
+            'Matching runs server-side — you can close the modal and it continues'
+        ],
+        docsId: 'sync-discovery'
+    },
+    '.discovery-table-container': {
+        title: 'Discovery Results Table',
+        description: 'Shows each source track alongside its matched metadata result. Green rows = matched, red = failed, gray = pending. Failed matches can be fixed manually.',
+        tips: [
+            'Source columns show the original track/artist from the playlist',
+            'Matched columns show the official metadata found',
+            'Status shows confidence score for each match',
+            'Actions column: "Fix Match" lets you manually search for the correct track'
+        ]
+    },
+    '.discovery-fix-modal-overlay': {
+        title: 'Fix Track Match',
+        description: 'Manually search for the correct track when automatic matching fails. Edit the track name and artist, search, then select the right result.',
+        tips: [
+            'Edit the search terms to improve results',
+            'Results come from your active metadata source',
+            'Selecting a match updates the discovery cache for future use'
+        ]
+    },
+    '[id^="youtube-discovery-modal"] .modal-footer': {
+        title: 'Discovery Actions',
+        description: 'Action buttons change based on the current phase. "Start Discovery" begins matching, "Sync to Wishlist" queues matched tracks for download, "Download Missing" starts downloading immediately.',
+        tips: [
+            'Discovery: matches source tracks to official metadata',
+            'Sync: adds matched tracks to your wishlist',
+            'Download: searches your download sources and downloads missing tracks',
+            'You can close the modal — operations continue in the background'
+        ]
+    },
+
+    // ─── SEARCH / DOWNLOADS PAGE ────────────────────────────────────
+
+    // Header & Mode Toggle
+    '.downloads-header': {
+        title: 'Music Downloads',
+        description: 'Search for music across your configured metadata sources and download from Soulseek, YouTube, Tidal, Qobuz, HiFi, or Deezer.',
+        docsId: 'search'
+    },
+    '#toggle-download-manager-btn': {
+        title: 'Toggle Download Manager',
+        description: 'Show or hide the download manager panel on the right side. The panel shows active downloads, finished downloads, and queue management.',
+        docsId: 'search-manager'
+    },
+    '.search-mode-toggle': {
+        title: 'Search Mode',
+        description: 'Switch between Enhanced Search (categorized metadata results with album art) and Basic Search (raw Soulseek results with detailed file info and filters).',
+        tips: [
+            'Enhanced: shows Artists, Albums, Singles, Tracks from your metadata source',
+            'Basic: shows raw Soulseek P2P results with format, bitrate, size, uploader info'
+        ],
+        docsId: 'search-enhanced'
+    },
+
+    // Enhanced Search
+    '.enhanced-search-input-wrapper': {
+        title: 'Enhanced Search',
+        description: 'Type an artist, album, or track name. Results appear in categorized sections: Library Artists, Artists, Albums, Singles & EPs, and Tracks. Results come from your active metadata source.',
+        tips: [
+            'Click an album to open the download modal',
+            'Click a track to search your download source',
+            'Play button previews tracks from your download source',
+            'Multi-source tabs compare results across Spotify, iTunes, and Deezer'
+        ],
+        docsId: 'search-enhanced'
+    },
+    '.enh-source-tabs': {
+        title: 'Source Tabs',
+        description: 'Switch between metadata sources to see results from Spotify, iTunes, or Deezer. Each source has its own catalog — tracks missing on one may be found on another.',
+        docsId: 'search-enhanced'
+    },
+    '#enh-db-artists-section': {
+        title: 'Library Artists',
+        description: 'Artists from your local music library that match the search. Click to view their collection on the Library page.',
+    },
+    '#enh-spotify-artists-section': {
+        title: 'Artists',
+        description: 'Artists from your metadata source matching the search. Click to view their full discography on the Artists page.',
+    },
+    '#enh-albums-section': {
+        title: 'Albums',
+        description: 'Full-length albums matching the search. Click to open the download modal where you can select tracks and start downloading. "In Library" badge means you already own it.',
+        docsId: 'search-downloading'
+    },
+    '#enh-singles-section': {
+        title: 'Singles & EPs',
+        description: 'Singles and EPs matching the search. Same as albums — click to open the download modal.',
+        docsId: 'search-downloading'
+    },
+    '#enh-tracks-section': {
+        title: 'Tracks',
+        description: 'Individual tracks matching the search. Click to search your download source for that specific track. Play button streams a preview. "In Library" badge means it\'s already in your collection.',
+        docsId: 'search-downloading'
+    },
+
+    // Basic Search
+    '#basic-search-section .search-bar-container': {
+        title: 'Basic Search',
+        description: 'Direct search query sent to Soulseek. Enter artist name, song title, or any keywords. Results show raw P2P file listings.',
+        docsId: 'search-basic'
+    },
+    '#filter-toggle-btn': {
+        title: 'Filters',
+        description: 'Toggle the filter panel to narrow results by type (Albums/Singles), format (FLAC/MP3/OGG/AAC/WMA), and sort order.',
+        docsId: 'search-basic'
+    },
+    '#filter-content': {
+        title: 'Search Filters',
+        description: 'Filter and sort Soulseek results. Type filters hide non-matching results. Format filters show only specific audio formats. Sort reorders by relevance, quality, bitrate, size, speed, or name.',
+        tips: [
+            'Type: All, Albums (grouped results), or Singles (individual files)',
+            'Format: FLAC for lossless, MP3 for compressed, or specific formats',
+            'Sort: Relevance uses the matching engine score; Quality uses bitrate density'
+        ],
+        docsId: 'search-basic'
+    },
+    '.search-status-container': {
+        title: 'Search Status',
+        description: 'Shows the current search state — ready, searching, or results count. The spinner animates while Soulseek is being queried.',
+    },
+    '#search-results-area': {
+        title: 'Search Results',
+        description: 'Raw Soulseek results grouped by album or listed individually. Each result shows filename, format, bitrate, quality score, file size, uploader name, upload speed, and availability.',
+        tips: [
+            'Click a result to start downloading',
+            'Album results group files from the same folder',
+            'Quality score combines format, bitrate, peer speed, and availability',
+            'Green = high quality, Yellow = medium, Red = low'
+        ],
+        docsId: 'search-basic'
+    },
+
+    // Download Manager Side Panel
+    '.downloads-side-panel': {
+        title: 'Download Manager',
+        description: 'Shows all active and completed downloads. Manage downloads, clear completed items, or cancel active transfers.',
+        docsId: 'search-manager'
+    },
+    '.controls-panel': {
+        title: 'Download Controls',
+        description: 'Overview of active and finished download counts. Clear Completed removes finished items from the list. Clear Current cancels all active downloads.',
+        docsId: 'search-manager'
+    },
+    '.controls-panel__clear-btn': {
+        title: 'Clear Completed',
+        description: 'Remove all finished downloads from the download manager list. Doesn\'t affect the downloaded files — they\'re already in your library.',
+    },
+    '.controls-panel__cancel-all-btn': {
+        title: 'Clear Current',
+        description: 'Cancel all active downloads in progress. Files that were partially downloaded will be cleaned up.',
+    },
+    '#active-queue': {
+        title: 'Download Queue',
+        description: 'Active downloads in progress. Each item shows track name, format, download speed, progress, and a cancel button.',
+    },
+    '#finished-queue': {
+        title: 'Finished Downloads',
+        description: 'Completed downloads. Shows track name, format, file size, and final status (success or error).',
+    },
+
+    // ─── DISCOVER PAGE ────────────────────────────────────────────────
+
+    // Hero
+    '.discover-hero': {
+        title: 'Featured Artists',
+        description: 'Rotating showcase of recommended artists from your watchlist and discovery pool. Navigate with arrows or dot indicators.',
+        tips: [
+            '"View Discography" opens the artist on the Artists page',
+            '"Add to Watchlist" monitors them for new releases',
+            '"Watch All" adds all featured artists to your watchlist at once',
+            '"View Recommended" opens a full list of recommended artists'
+        ],
+        docsId: 'disc-hero'
+    },
+    '#discover-hero-discography': {
+        title: 'View Discography',
+        description: 'Navigate to the Artists page and load this artist\'s full album, single, and EP discography for browsing and downloading.',
+    },
+    '#discover-hero-add': {
+        title: 'Add to Watchlist',
+        description: 'Add this artist to your Watchlist. SoulSync will scan for their new releases and add them to your Wishlist for download.',
+    },
+    '#discover-hero-watch-all': {
+        title: 'Watch All',
+        description: 'Add ALL featured artists from the hero slider to your Watchlist in one click.',
+    },
+    '#discover-hero-view-all': {
+        title: 'View Recommended',
+        description: 'Open a modal showing all recommended artists — not just the ones in the hero slider. Browse, add to watchlist, or view discographies.',
+    },
+
+    // Recent Releases
+    '#recent-releases-carousel': {
+        title: 'Recent Releases',
+        description: 'New albums and singles from artists you follow. These are found during watchlist scans. Click any release to open the download modal.',
+        docsId: 'disc-hero'
+    },
+
+    // Seasonal
+    '#seasonal-albums-section': {
+        title: 'Seasonal Albums',
+        description: 'Albums curated for the current season based on mood, genre, and release timing. Refreshes with each season change.',
+        docsId: 'disc-seasonal'
+    },
+    '#seasonal-playlist-section': {
+        title: 'Seasonal Mix',
+        description: 'A curated playlist of tracks matching the current season\'s vibe. Download missing tracks or sync to your media server.',
+        docsId: 'disc-seasonal'
+    },
+
+    // Personalized Playlists
+    '#personalized-recently-added': {
+        title: 'Recently Added',
+        description: 'The latest tracks added to your library. A quick way to see what\'s new in your collection.',
+    },
+    '#personalized-popular-picks': {
+        title: 'Popular Picks',
+        description: 'Trending tracks from your discovery pool artists. These are the most popular songs from artists similar to the ones you follow.',
+        tips: ['Download or Sync buttons queue tracks for your library', 'Tracks come from the discovery pool (built during watchlist scans)'],
+        docsId: 'disc-playlists'
+    },
+    '#personalized-hidden-gems': {
+        title: 'Hidden Gems',
+        description: 'Rare and deeper cuts from your discovery pool artists. Lower popularity tracks that you might not find on mainstream playlists.',
+        docsId: 'disc-playlists'
+    },
+    '#personalized-top-tracks': {
+        title: 'Your Top 50',
+        description: 'Your all-time most played tracks from listening history. A snapshot of your personal favorites.',
+    },
+    '#personalized-forgotten-favorites': {
+        title: 'Forgotten Favorites',
+        description: 'Tracks you used to play frequently but haven\'t listened to in a while. Rediscover music you loved.',
+    },
+    '#personalized-discovery-shuffle': {
+        title: 'Discovery Shuffle',
+        description: 'Random tracks from your entire discovery pool — different every time you load. A surprise mix for when you want something new.',
+        docsId: 'disc-playlists'
+    },
+    '#personalized-familiar-favorites': {
+        title: 'Familiar Favorites',
+        description: 'Your reliable go-to tracks. Consistently played songs that define your taste.',
+    },
+
+    // Curated Playlists
+    '#release-radar-playlist': {
+        title: 'Fresh Tape',
+        description: 'New releases from recent additions to your library and discovery pool. Refreshes regularly with the latest drops.',
+        docsId: 'disc-playlists'
+    },
+    '#discovery-weekly-playlist': {
+        title: 'The Archives',
+        description: 'Curated selection from your full collection — a weekly-style playlist that highlights tracks across your library.',
+        docsId: 'disc-playlists'
+    },
+
+    // Build a Playlist — section container and all inner elements
+    '.build-playlist-container': {
+        title: 'Build a Playlist',
+        description: 'Create a custom playlist by selecting seed artists. SoulSync finds similar artists, pulls their albums, and assembles a 50-track playlist mixing your picks with new discoveries.',
+        tips: [
+            'Search and select 1-5 seed artists',
+            'Hit Generate for a fresh playlist every time',
+            'The more seed artists, the more variety in the playlist'
+        ],
+        docsId: 'disc-build'
+    },
+    '#bp-info-panel': {
+        title: 'How Build a Playlist Works',
+        description: 'Search for seed artists → SoulSync finds similar artists → pulls their albums → picks random tracks → creates a 50-track playlist. More seed artists = more variety.',
+        docsId: 'disc-build'
+    },
+    '#build-playlist-search': {
+        title: 'Artist Search',
+        description: 'Search for artists to include in your custom playlist. Select multiple artists and generate a playlist of their top tracks.',
+        tips: [
+            'Search and click artists to add them to your selection',
+            'Selected artists appear below the search with remove buttons',
+            'Click "Generate Playlist" when you\'ve chosen your artists'
+        ],
+        docsId: 'disc-build'
+    },
+    '#build-playlist-generate-btn': {
+        title: 'Generate Playlist',
+        description: 'Creates a playlist from top tracks of all your selected artists. The playlist can then be downloaded or synced to your media server.',
+    },
+    '#build-playlist-results-wrapper': {
+        title: 'Generated Playlist',
+        description: 'Your custom-built playlist. Download missing tracks or sync to your media server. Tracks are sorted by popularity across the selected artists.',
+    },
+
+    // Cache-based Discovery Sections
+    '#cache-genre-explorer': {
+        title: 'Genre Explorer',
+        description: 'Browse music by genre across all your metadata sources. Click any genre pill to open a deep dive with artists, albums, tracks, and related genres.',
+        tips: [
+            'Genres are weighted: library and discovery pool count more than cache',
+            '"New" badge means this genre isn\'t in your library yet',
+            'Data comes from Spotify, iTunes, and Deezer caches combined'
+        ],
+        docsId: 'discover'
+    },
+    '#cache-undiscovered': {
+        title: 'Undiscovered Albums',
+        description: 'Albums from cached artists that you don\'t have in your library. A great way to find new music from artists you\'ve already searched for.',
+    },
+    '#cache-genre-releases': {
+        title: 'Genre New Releases',
+        description: 'Recently released albums matching your top library genres. Found in the metadata cache from recent searches.',
+    },
+    '#cache-label-explorer': {
+        title: 'Label Explorer',
+        description: 'Albums grouped by record label. Discover new music from labels whose artists you already enjoy.',
+    },
+    '#cache-deep-cuts': {
+        title: 'Deep Cuts',
+        description: 'Low-popularity tracks from artists in your metadata cache. These are the album tracks that never became singles — often the most interesting finds.',
+    },
+
+    // ListenBrainz — match both the tabs container and the parent section
+    '#listenbrainz-tabs': {
+        title: 'ListenBrainz Playlists',
+        description: 'Playlists from your ListenBrainz account. Three categories: "Created For You" (algorithmic), "Your Playlists" (manually created), and "Collaborative" (shared).',
+        tips: [
+            'Requires ListenBrainz connection in Settings',
+            'Click any playlist to view tracks and download',
+            'Refresh button reloads from ListenBrainz API'
+        ],
+        docsId: 'sync-listenbrainz'
+    },
+    '#listenbrainz-tab-content': {
+        title: 'ListenBrainz Playlist Content',
+        description: 'Track listings for the selected ListenBrainz playlist. Click a track to download or stream it.',
+        docsId: 'sync-listenbrainz'
+    },
+    '#listenbrainz-refresh-btn': {
+        title: 'Refresh ListenBrainz',
+        description: 'Reload playlists from your ListenBrainz account. Fetches the latest "Created For You", personal, and collaborative playlists.',
+    },
+    '.listenbrainz-tab': {
+        title: 'ListenBrainz Tab',
+        description: 'Switch between playlist categories: "Created For You" (algorithm-generated), "Your Playlists" (manually created), and "Collaborative" (shared with others).',
+    },
+
+    // Time Machine — match tabs, tab contents, and individual tabs
+    '#decade-tabs': {
+        title: 'Time Machine',
+        description: 'Browse music by decade — from the 1950s to the 2020s. Each tab shows top tracks from your discovery pool artists active in that era.',
+        tips: [
+            'Download or Sync buttons queue decade tracks for your library',
+            'Tracks come from discovery pool artists with releases in that decade'
+        ],
+        docsId: 'disc-timemachine'
+    },
+    '#decade-tab-contents': {
+        title: 'Decade Tracks',
+        description: 'Tracks from the selected decade. Download missing tracks or sync them to your media server.',
+        docsId: 'disc-timemachine'
+    },
+    '.decade-tab': {
+        title: 'Decade Tab',
+        description: 'Click to browse music from this decade. Shows top tracks from your discovery pool artists who released music in this era.',
+        docsId: 'disc-timemachine'
+    },
+
+    // Browse by Genre (discovery pool tabs)
+    '#genre-tabs': {
+        title: 'Browse by Genre',
+        description: 'Genre-filtered playlists from your discovery pool. Each tab shows tracks matching that genre from artists in your discovery pool.',
+        tips: [
+            'Genres are consolidated from Spotify/iTunes categories',
+            'Download or Sync buttons queue genre tracks for download',
+            'Requires discovery pool data (run a watchlist scan first)'
+        ],
+        docsId: 'discover'
+    },
+    '#genre-tab-contents': {
+        title: 'Genre Tracks',
+        description: 'Tracks from the selected genre. Download or sync to add them to your library.',
+    },
+    '.genre-tab': {
+        title: 'Genre Tab',
+        description: 'Click to browse tracks in this genre from your discovery pool.',
+    },
+
+    // Spotify Library
+    '#spotify-library-section': {
+        title: 'Your Spotify Library',
+        description: 'Albums saved in your Spotify account. Browse, search, and download albums you\'ve saved on Spotify but don\'t have locally.',
+        tips: [
+            'Search and filter by status (All/Missing/Owned)',
+            'Sort by date saved, artist, album name, or release date',
+            '"Download Missing" downloads all albums not in your library'
+        ],
+    },
+
+    // Playlist Sync/Download buttons (generic — matches all discover playlist sections)
+    '.discover-section-actions .action-button.primary': {
+        title: 'Sync to Media Server',
+        description: 'Start syncing this playlist — matches tracks to your library, searches download sources for missing ones, and downloads them. Progress shows matched, pending, and failed counts.',
+    },
+    '.discover-section-actions .action-button.secondary': {
+        title: 'Download Missing',
+        description: 'Opens the download modal for this playlist. Review tracks, select which ones to download, and start the download process.',
+    },
+
+    // Daily Mixes
+    '#daily-mixes-grid': {
+        title: 'Daily Mixes',
+        description: 'Personalized mixes generated from your listening patterns. Each mix focuses on a different aspect of your taste — genre clusters, mood, or artist groups.',
+    },
+
+    // ─── ARTISTS PAGE ─────────────────────────────────────────────────
+
+    // Search State
+    '.artists-search-state': {
+        title: 'Artist Search',
+        description: 'Search for any artist by name. Results show artist cards with images — click one to view their full discography.',
+        docsId: 'art-search'
+    },
+    '#artists-search-input': {
+        title: 'Search Input',
+        description: 'Type an artist name to search across your active metadata source. Results appear as you type with a short debounce delay.',
+        docsId: 'art-search'
+    },
+    '#artists-search-status': {
+        title: 'Search Status',
+        description: 'Shows the current search state — ready, searching, or result count.',
+    },
+
+    // Results State
+    '#artists-results-state': {
+        title: 'Search Results',
+        description: 'Artist cards matching your search. Click any artist to view their full discography with albums, singles, and EPs.',
+        docsId: 'art-search'
+    },
+    '#artists-back-button': {
+        title: 'Back to Search',
+        description: 'Return to the initial search view to start a new artist search.',
+    },
+    '#artists-cards-container': {
+        title: 'Artist Cards',
+        description: 'Each card shows an artist from your metadata source. Click to load their full discography.',
+    },
+
+    // Artist Detail — Hero
+    '#artists-hero-section': {
+        title: 'Artist Profile',
+        description: 'Rich artist profile with photo, name, genres, bio, and service links. Data comes from your metadata cache and library enrichment (Last.fm, Spotify, MusicBrainz, etc.).',
+        tips: [
+            'Service badges link to the artist on each platform',
+            'Bio comes from Last.fm enrichment if the artist is in your library',
+            'Listener and play count stats from Last.fm',
+            'Genre pills combine metadata source genres with Last.fm tags'
+        ],
+        docsId: 'art-detail'
+    },
+    '.artists-hero-name': {
+        title: 'Artist Name',
+        description: 'The artist\'s official name from your metadata source.',
+    },
+    '.artists-hero-badges': {
+        title: 'Service Badges',
+        description: 'Links to this artist on external services. Click any badge to open the artist\'s page on that platform. Badges appear for services where this artist has been enriched.',
+        tips: [
+            'Spotify, MusicBrainz, Deezer, iTunes, Last.fm, Genius, Tidal, Qobuz',
+            'Badges only appear when the artist has an ID for that service',
+            'Data comes from library enrichment workers'
+        ]
+    },
+    '.artists-hero-genres': {
+        title: 'Genres',
+        description: 'Genre tags for this artist. Combines genres from your metadata source with Last.fm tags for comprehensive coverage.',
+    },
+    '.artists-hero-bio': {
+        title: 'Artist Bio',
+        description: 'Biography from Last.fm. Click "Read more" to expand. Only available for artists in your library that have been enriched by the Last.fm worker.',
+    },
+    '.artists-hero-stats': {
+        title: 'Listener Stats',
+        description: 'Last.fm listener count and total play count. Shows how popular this artist is globally on Last.fm.',
+    },
+    '#artist-detail-watchlist-btn': {
+        title: 'Watchlist',
+        description: 'Add or remove this artist from your Watchlist. Watched artists are scanned for new releases which get added to your Wishlist for download.',
+        docsId: 'art-watchlist'
+    },
+    '#artist-detail-watchlist-settings-btn': {
+        title: 'Watchlist Settings',
+        description: 'Configure which release types to monitor for this artist — Albums, EPs, Singles, and content filters (live, remixes, acoustic, compilations).',
+        docsId: 'art-settings'
+    },
+
+    // Discography Tabs
+    '.artist-detail-tabs': {
+        title: 'Discography Tabs',
+        description: 'Switch between Albums and Singles & EPs. Each tab shows the artist\'s releases in that category.',
+        docsId: 'art-detail'
+    },
+    '#albums-tab': {
+        title: 'Albums',
+        description: 'Full-length studio albums by this artist. Click any album card to open the download modal.',
+    },
+    '#singles-tab': {
+        title: 'Singles & EPs',
+        description: 'Singles and extended plays by this artist. Includes single tracks, 2-3 track releases, and EPs.',
+    },
+
+    // Album Cards
+    '#album-cards-container': {
+        title: 'Album Grid',
+        description: 'Album cards with cover art. Click any album to open the download modal where you can select tracks, check library matches, and start downloading.',
+        tips: [
+            'Cover art fills the card with album name overlaid at the bottom',
+            'Completion badges show ownership status (Complete, Partial, Missing)',
+            'Cards check your library automatically after loading'
+        ],
+        docsId: 'art-detail'
+    },
+    '#singles-cards-container': {
+        title: 'Singles Grid',
+        description: 'Single and EP cards. Same behavior as albums — click to open the download modal.',
+    },
+    '.album-card': {
+        title: 'Release Card',
+        description: 'An album, single, or EP from this artist. Click to open the download modal with track selection, library matching, and download controls.',
+        tips: [
+            'Completion overlay shows how many tracks you own',
+            'Green = complete, Yellow = partial, Red = missing',
+            '"Checking..." means library match is in progress'
+        ]
+    },
+    '.completion-overlay': {
+        title: 'Completion Status',
+        description: 'Shows how many tracks from this release are in your library. "Complete" means you have all tracks, "Partial" shows owned/total, "Missing" means none found.',
+    },
+
+    // Similar Artists
+    '#similar-artists-section': {
+        title: 'Similar Artists',
+        description: 'Artists with a similar sound, streamed in real-time from your metadata source. Click any card to view that artist\'s discography.',
+        tips: [
+            'Cards load progressively as the server finds matches',
+            'Click a card to navigate to that artist\'s discography',
+            'Images are lazy-loaded for performance'
+        ],
+        docsId: 'art-detail'
+    },
+    '.similar-artist-bubble': {
+        title: 'Similar Artist',
+        description: 'An artist similar to the one you\'re viewing. Click to load their discography and browse their releases.',
+    },
+
+    // ─── AUTOMATIONS PAGE ─────────────────────────────────────────────
+
+    // List View
+    '#automations-list-view': {
+        title: 'Automations List',
+        description: 'All your automations — system and custom. Each card shows the trigger → action → then flow, run status, and controls.',
+        docsId: 'auto-overview'
+    },
+    '.auto-new-btn': {
+        title: 'New Automation',
+        description: 'Open the visual builder to create a new automation. Choose a trigger (WHEN), an action (DO), and optional notifications (THEN).',
+        docsId: 'auto-builder'
+    },
+    '#auto-filter-search': {
+        title: 'Search Automations',
+        description: 'Filter the list by name, trigger type, or action type. Matches are highlighted as you type.',
+    },
+    '#auto-filter-trigger': {
+        title: 'Filter by Trigger',
+        description: 'Show only automations with a specific trigger type (Schedule, Daily, Weekly, Event-based, Signal).',
+    },
+    '#auto-filter-action': {
+        title: 'Filter by Action',
+        description: 'Show only automations with a specific action type (Library Scan, Watchlist Scan, Process Wishlist, etc.).',
+    },
+    '#automations-stats': {
+        title: 'Automation Stats',
+        description: 'Quick overview: total active automations, system automations (built-in), and custom automations you\'ve created.',
+    },
+
+    // Automation Cards
+    '.automation-card': {
+        title: 'Automation',
+        description: 'A single automation showing its trigger → action → notification flow. Use the controls on the right to run, edit, enable/disable, duplicate, or delete.',
+        tips: [
+            'Green dot = enabled and running on schedule',
+            'Gray dot = disabled',
+            'Blue dot = currently executing',
+            'Click the run count to view execution history'
+        ],
+        docsId: 'auto-overview'
+    },
+    '.automation-flow': {
+        title: 'Automation Flow',
+        description: 'Visual representation of this automation: WHEN (trigger) → DO (action) → THEN (notification/signal). Each step shows its type and configuration.',
+    },
+    '.automation-run-btn': {
+        title: 'Run Now',
+        description: 'Execute this automation immediately, regardless of its schedule. The automation runs as if its trigger just fired.',
+    },
+    '.automation-toggle': {
+        title: 'Enable/Disable',
+        description: 'Toggle this automation on or off. Disabled automations keep their configuration but won\'t trigger.',
+    },
+    '.automation-edit-btn': {
+        title: 'Edit',
+        description: 'Open this automation in the visual builder to modify its trigger, action, or notification settings.',
+    },
+    '.automation-dupe-btn': {
+        title: 'Duplicate',
+        description: 'Create a copy of this automation with all the same settings. Useful for creating variations of existing workflows.',
+    },
+    '.automation-delete-btn': {
+        title: 'Delete',
+        description: 'Permanently delete this automation. Requires confirmation. Cannot be undone.',
+    },
+    '.auto-runs-link': {
+        title: 'Run History',
+        description: 'Click to view the execution history for this automation — timestamps, duration, status, and detailed logs for each run.',
+        docsId: 'auto-history'
+    },
+    '.auto-group-btn': {
+        title: 'Group',
+        description: 'Assign this automation to a group for organization. Groups appear as collapsible sections in the list. Create new groups or assign to existing ones.',
+    },
+
+    // Automation Hub
+    '#auto-section-hub': {
+        title: 'Automation Hub',
+        description: 'Guides, recipes, and reference material for building automations. Pipelines are pre-built workflow templates, recipes are common patterns, and guides explain concepts.',
+        docsId: 'auto-overview'
+    },
+    '.auto-hub-tab[data-tab="pipelines"]': {
+        title: 'Pipelines',
+        description: 'Pre-built multi-step workflow templates. Each pipeline deploys several linked automations that work together — like a complete "new release → download → notify" chain.',
+    },
+    '.auto-hub-tab[data-tab="recipes"]': {
+        title: 'Recipes',
+        description: 'Single-automation patterns for common tasks. Quick one-click creation of popular automations.',
+    },
+    '.auto-hub-tab[data-tab="guides"]': {
+        title: 'Guides',
+        description: 'Step-by-step walkthroughs explaining how to build specific workflows and use advanced features like signals and conditions.',
+    },
+    '.auto-hub-tab[data-tab="tips"]': {
+        title: 'Tips & Tricks',
+        description: 'Best practices, performance tips, and common pitfalls when building automations.',
+    },
+    '.auto-hub-tab[data-tab="reference"]': {
+        title: 'Reference',
+        description: 'Complete list of all available triggers, actions, and then-actions with their configuration options.',
+        docsId: 'auto-triggers'
+    },
+
+    // Builder View
+    '#automations-builder-view': {
+        title: 'Automation Builder',
+        description: 'Visual editor for creating and editing automations. Drag blocks from the sidebar into the WHEN → DO → THEN flow slots.',
+        docsId: 'auto-builder'
+    },
+    '#builder-name': {
+        title: 'Automation Name',
+        description: 'Give your automation a descriptive name. This appears in the list view and notifications.',
+    },
+    '#builder-group-name': {
+        title: 'Group',
+        description: 'Optionally assign this automation to a group. Groups organize automations into collapsible sections.',
+    },
+    '#builder-sidebar': {
+        title: 'Block Library',
+        description: 'Available triggers, actions, and then-actions. Drag a block to the canvas, or click to place it in the next empty slot.',
+        tips: [
+            'Triggers (WHEN): Schedule, Daily Time, Weekly Time, Events, Signals',
+            'Actions (DO): Library Scan, Watchlist Scan, Process Wishlist, and more',
+            'Then (THEN): Discord, Pushbullet, Telegram, Gotify, Fire Signal'
+        ],
+        docsId: 'auto-triggers'
+    },
+    '#slot-when': {
+        title: 'WHEN — Trigger',
+        description: 'Drop a trigger here to define WHEN this automation fires. Options: on a schedule, at a specific time, when an event occurs, or when a signal is received.',
+        docsId: 'auto-triggers'
+    },
+    '#slot-do': {
+        title: 'DO — Action',
+        description: 'Drop an action here to define WHAT happens when the trigger fires. Options: scan library, check watchlist, process wishlist, refresh playlists, and more.',
+        docsId: 'auto-actions'
+    },
+    '[id^="slot-then"]': {
+        title: 'THEN — Notification/Signal',
+        description: 'Drop a then-action here to define what happens AFTER the action completes. Send notifications via Discord, Pushbullet, Telegram, or fire a signal to chain automations.',
+        tips: [
+            'Up to 3 THEN actions per automation',
+            'Signals let you chain automations together',
+            'Message templates support variables: {time}, {name}, {status}'
+        ],
+        docsId: 'auto-then'
+    },
+    '.block-item': {
+        title: 'Automation Block',
+        description: 'A trigger, action, or notification type. Drag to a flow slot, or click to auto-place. The ? button shows detailed help for each block type.',
+    },
+    '.placed-block': {
+        title: 'Placed Block',
+        description: 'A configured block in the flow. Click the X to remove it. Configure options using the fields below the block.',
+    },
+    '.btn-save': {
+        title: 'Save Automation',
+        description: 'Save this automation. It will appear in the list view and start running according to its trigger configuration.',
+    },
+
+    // History Modal
+    '.automation-history-modal': {
+        title: 'Execution History',
+        description: 'Detailed log of every time this automation ran. Shows timestamp, duration, status (success/error), and expandable logs with step-by-step details.',
+        docsId: 'auto-history'
+    },
+
+    // ─── LIBRARY PAGE ─────────────────────────────────────────────────
+
+    // Library Grid View
+    '#library-page .library-controls': {
+        title: 'Library Controls',
+        description: 'Search, filter, and navigate your music library. Find artists by name, filter by watchlist status, or jump to a letter.',
+        docsId: 'lib-standard'
+    },
+    '#library-search-input': {
+        title: 'Search Library',
+        description: 'Search your library by artist name. Results filter in real-time as you type.',
+    },
+    '#watchlist-filter': {
+        title: 'Watchlist Filter',
+        description: 'Filter artists by watchlist status: All shows everyone, Watched shows only artists you follow, Unwatched shows artists not on your watchlist.',
+    },
+    '#alphabet-selector': {
+        title: 'Alphabet Jump',
+        description: 'Jump to artists starting with a specific letter. Click "All" to reset. "#" shows artists starting with numbers.',
+    },
+    '#library-artists-grid': {
+        title: 'Artist Grid',
+        description: 'Your music library organized by artist. Each card shows the artist photo, name, track count, and service badges. Click any card to view their collection.',
+        docsId: 'lib-standard'
+    },
+    '.library-artist-card': {
+        title: 'Library Artist',
+        description: 'An artist in your library. Click to view their full collection with albums, EPs, and singles. Service badges show which metadata sources have enriched this artist.',
+        tips: [
+            'Badge icons link to the artist on external services',
+            'Eye icon toggles watchlist status',
+            'Track count shows total tracks in your library for this artist'
+        ]
+    },
+    '#library-pagination': {
+        title: 'Pagination',
+        description: 'Navigate through pages of artists. Your library shows 75 artists per page.',
+    },
+
+    // Artist Detail — Hero Section
+    '#artist-hero-section': {
+        title: 'Artist Profile',
+        description: 'Full artist profile with image, name, service badges, genres, bio, listening stats, and collection overview. Data is enriched from up to 9 metadata services.',
+        docsId: 'lib-standard'
+    },
+    '#artist-detail-name': {
+        title: 'Artist Name',
+        description: 'The artist\'s name as it appears in your library.',
+    },
+    '#artist-hero-badges': {
+        title: 'Service Badges',
+        description: 'Links to this artist on external platforms. Each badge indicates which services have matched and enriched this artist with metadata.',
+        tips: [
+            'Click any badge to open the artist on that platform',
+            'More badges = more complete metadata enrichment',
+            'Run the Metadata Updater on the dashboard to enrich more artists'
+        ],
+        docsId: 'lib-matching'
+    },
+    '#artist-genres': {
+        title: 'Genres',
+        description: 'Genre tags from Spotify, Last.fm, and other metadata sources. Merged and deduplicated across all enrichment sources.',
+    },
+    '#artist-hero-bio': {
+        title: 'Artist Biography',
+        description: 'Biography from Last.fm. Click "Read more" to expand. Populated by the Last.fm enrichment worker.',
+    },
+    '#artist-hero-listeners': {
+        title: 'Listeners',
+        description: 'Total unique listeners on Last.fm. Shows global popularity of this artist.',
+    },
+    '#artist-hero-playcount': {
+        title: 'Play Count',
+        description: 'Total plays on Last.fm across all listeners worldwide.',
+    },
+    '.collection-overview': {
+        title: 'Collection Overview',
+        description: 'Progress bars showing how complete your collection is for this artist — Albums, EPs, and Singles separately. Numbers show owned/total from the metadata source.',
+    },
+    '#artist-enrichment-coverage': {
+        title: 'Enrichment Coverage',
+        description: 'Animated rings showing metadata enrichment percentage per service. Each ring represents one metadata source — higher percentage means more tracks have been enriched by that service.',
+        docsId: 'lib-matching'
+    },
+
+    // Artist Detail — Action Buttons
+    '#library-artist-watchlist-btn': {
+        title: 'Watchlist',
+        description: 'Add or remove this artist from your Watchlist for new release monitoring.',
+        docsId: 'art-watchlist'
+    },
+    '#library-artist-enhance-btn': {
+        title: 'Enhance Quality',
+        description: 'Scan your collection for this artist and find higher-quality versions of tracks you own. Compares bitrate and format against available sources.',
+    },
+    '#library-artist-radio-btn': {
+        title: 'Artist Radio',
+        description: 'Generate and play a radio mix of this artist\'s tracks from your library. Streams directly from your media server.',
+    },
+
+    // Discography Filters
+    '#discography-filters': {
+        title: 'Discography Filters',
+        description: 'Filter the artist\'s releases by category, content type, and ownership status. Multiple filters can be combined.',
+        tips: [
+            'Category: toggle Albums, EPs, Singles on/off',
+            'Content: show/hide Live, Compilations, Featured releases',
+            'Ownership: All, Owned (in library), or Missing (not in library)'
+        ],
+        docsId: 'lib-standard'
+    },
+    '.discography-filter-btn[data-filter="ownership"][data-value="missing"]': {
+        title: 'Missing Releases',
+        description: 'Show only releases NOT in your library. Great for finding what to download next.',
+    },
+    '.discography-filter-btn[data-filter="ownership"][data-value="owned"]': {
+        title: 'Owned Releases',
+        description: 'Show only releases you already have in your library.',
+    },
+
+    // View Toggle
+    '.enhanced-view-toggle-btn[data-view="standard"]': {
+        title: 'Standard View',
+        description: 'Card grid view of releases. Click any card to open the download modal.',
+        docsId: 'lib-standard'
+    },
+    '.enhanced-view-toggle-btn[data-view="enhanced"]': {
+        title: 'Enhanced View',
+        description: 'Advanced management mode with accordion layout, inline editing, tag writing, and bulk operations. Admin-only feature.',
+        tips: [
+            'Expand albums to see track tables with editable fields',
+            'Select tracks across albums for batch operations',
+            'Write tags directly to audio files',
+            'Reorganize files with the album reorganize tool'
+        ],
+        docsId: 'lib-enhanced'
+    },
+
+    // Discography Sections
+    '#albums-section': {
+        title: 'Albums',
+        description: 'Full-length studio albums. Shows owned and missing counts in the header. Click any release card to download.',
+    },
+    '#eps-section': {
+        title: 'EPs',
+        description: 'Extended plays (4-6 tracks). Shows owned and missing counts.',
+    },
+    '#singles-section': {
+        title: 'Singles',
+        description: 'Single tracks and 2-3 track releases. Shows owned and missing counts.',
+    },
+    '.release-card': {
+        title: 'Release Card',
+        description: 'An album, EP, or single in the discography. Shows cover art, title, year, track count, and ownership status. Click to open the download modal.',
+    },
+
+    // Enhanced View
+    '#enhanced-view-container': {
+        title: 'Enhanced Library Manager',
+        description: 'Accordion layout with expandable albums showing track tables. Edit metadata inline, write tags to files, and perform bulk operations across albums.',
+        docsId: 'lib-enhanced'
+    },
+    '.enhanced-track-checkbox': {
+        title: 'Track Selection',
+        description: 'Select tracks for bulk operations. Hold Ctrl+Click for range selection. Selected tracks appear in the bulk actions bar at the bottom.',
+        docsId: 'lib-bulk'
+    },
+
+    // Bulk Actions Bar
+    '#enhanced-bulk-bar': {
+        title: 'Bulk Actions',
+        description: 'Appears when tracks are selected. Edit metadata for all selected tracks at once, write tags to files, or clear the selection.',
+        tips: [
+            'Edit Selected: opens a modal to change metadata fields for all selected tracks',
+            'Write Tags: writes database metadata to the actual audio files',
+            'Clear Selection: deselects all tracks'
+        ],
+        docsId: 'lib-bulk'
+    },
+
+    // Tag Preview Modal
+    '#tag-preview-overlay': {
+        title: 'Tag Preview',
+        description: 'Compare current file tags against database metadata before writing. Shows a diff table highlighting what will change. Choose whether to embed cover art and sync to your media server.',
+        docsId: 'lib-tags'
+    },
+    '#batch-tag-preview-overlay': {
+        title: 'Batch Tag Preview',
+        description: 'Preview tag changes for multiple tracks at once. Each track shows its own diff table. Write all tags in one batch operation.',
+        docsId: 'lib-tags'
+    },
+
+    // Reorganize Modal
+    '#reorganize-overlay': {
+        title: 'Reorganize Album',
+        description: 'Move and rename files in an album to match your file organization template. Preview the changes before applying.',
+    },
+
+    // ─── STATS PAGE ──────────────────────────────────────────────────
+
+    '.stats-container': {
+        title: 'Listening Stats',
+        description: 'Analytics dashboard showing your listening activity, top artists/albums/tracks, genre breakdown, library health, and storage usage. Data syncs from your media server.',
+    },
+    '#stats-time-range': {
+        title: 'Time Range',
+        description: 'Filter all stats by time period: 7 Days, 30 Days, 12 Months, or All Time. Charts and rankings update instantly.',
+    },
+    '#stats-sync-btn': {
+        title: 'Sync Now',
+        description: 'Manually sync listening data from your media server. Pulls the latest play history, scrobbles, and library changes.',
+    },
+    '#stats-overview': {
+        title: 'Overview Cards',
+        description: 'Key metrics at a glance: Total Plays, Listening Time, unique Artists, Albums, and Tracks played in the selected time range.',
+    },
+    '#stats-timeline-chart': {
+        title: 'Listening Activity',
+        description: 'Chart showing your listening activity over time. Each bar represents plays in that time period. Helps visualize listening patterns and trends.',
+    },
+    '#stats-genre-chart': {
+        title: 'Genre Breakdown',
+        description: 'Pie/donut chart showing the genre distribution of your listening. Based on genre tags from your library\'s metadata enrichment.',
+    },
+    '#stats-recent-plays': {
+        title: 'Recently Played',
+        description: 'Your most recent listening history from the media server. Shows track, artist, album, and when it was played.',
+    },
+    '#stats-top-artists': {
+        title: 'Top Artists',
+        description: 'Your most-played artists in the selected time range, ranked by play count.',
+    },
+    '#stats-top-albums': {
+        title: 'Top Albums',
+        description: 'Your most-played albums in the selected time range, ranked by play count.',
+    },
+    '#stats-top-tracks': {
+        title: 'Top Tracks',
+        description: 'Your most-played individual tracks in the selected time range.',
+    },
+    '#stats-library-health': {
+        title: 'Library Health',
+        description: 'Overview of your library\'s format distribution, unplayed tracks, total duration, and track count. The format bar shows FLAC vs MP3 vs other formats.',
+    },
+    '#stats-enrichment-coverage': {
+        title: 'Enrichment Coverage',
+        description: 'How thoroughly your library has been enriched by each metadata service. Higher percentages mean more complete metadata.',
+    },
+    '#stats-db-storage-chart': {
+        title: 'Database Storage',
+        description: 'Breakdown of your SoulSync database size by category: library data, metadata cache, discovery pool, settings, and more.',
+    },
+
+    // ─── IMPORT PAGE ────────────────────────────────────────────────
+
+    '.import-page-container': {
+        title: 'Import Music',
+        description: 'Import audio files from your staging folder into your library. Match files to album metadata, tag them, and organize into your collection.',
+        docsId: 'import'
+    },
+    '.import-page-refresh-btn': {
+        title: 'Refresh',
+        description: 'Re-scan your staging folder for new audio files. Use after dropping new files into the staging path.',
+    },
+    '#import-staging-bar': {
+        title: 'Staging Folder',
+        description: 'Shows your configured staging folder path and the number of audio files found. Set the staging path in Settings → Download Settings.',
+        docsId: 'imp-setup'
+    },
+    '#import-page-queue': {
+        title: 'Processing Queue',
+        description: 'Shows albums and singles currently being processed. Each job goes through matching, tagging, cover art embedding, and file organization.',
+    },
+    '#import-page-tab-album': {
+        title: 'Albums Tab',
+        description: 'Import complete albums. Search for an album, match staging files to tracks, then process. Suggestions appear automatically from your staging folder.',
+        docsId: 'imp-workflow'
+    },
+    '#import-page-tab-singles': {
+        title: 'Singles Tab',
+        description: 'Import individual audio files as single tracks. Select files, and SoulSync identifies them using AcoustID fingerprinting or filename matching.',
+        docsId: 'imp-singles'
+    },
+    '#import-page-suggestions-grid': {
+        title: 'Suggestions',
+        description: 'Albums automatically detected from your staging folder based on folder names and file metadata. Click a suggestion to start the matching process.',
+    },
+    '#import-page-album-search-input': {
+        title: 'Album Search',
+        description: 'Search your metadata source for an album to match against staging files. Enter the album name or artist + album.',
+    },
+    '#import-page-album-match-section': {
+        title: 'Track Matching',
+        description: 'Match your staging files to album tracks. Drag files from the unmatched pool onto tracks, or let auto-matching do it. Green = matched, red = unmatched.',
+        tips: [
+            'Drag and drop files from the unmatched pool to track slots',
+            '"Re-match Automatically" re-runs the matching algorithm',
+            '"Back to Search" returns to the album search view'
+        ],
+        docsId: 'imp-matching'
+    },
+    '#import-page-unmatched-pool': {
+        title: 'Unmatched Files',
+        description: 'Audio files in your staging folder that haven\'t been matched to an album track yet. Drag them onto the correct track slot above.',
+        docsId: 'imp-matching'
+    },
+    '#import-page-album-process-btn': {
+        title: 'Process Album',
+        description: 'Start processing the matched album. Tags files with metadata, embeds cover art, renames and organizes files into your library, then triggers a media server scan.',
+    },
+    '#import-page-singles-list': {
+        title: 'Singles List',
+        description: 'Individual audio files in your staging folder. Select files and click "Process Selected" to identify and import them as single tracks.',
+        docsId: 'imp-singles'
+    },
+    '#import-page-singles-process-btn': {
+        title: 'Process Singles',
+        description: 'Identify and import selected singles. Uses AcoustID fingerprinting to match files to tracks, then tags and organizes them.',
+    },
+
+    // ─── SETTINGS PAGE ────────────────────────────────────────────────
+
+    // Tabs
+    '.stg-tab[data-tab="connections"]': {
+        title: 'Connections',
+        description: 'Configure credentials for metadata sources (Spotify, Tidal, Last.fm, etc.) and media server connections (Plex, Jellyfin, Navidrome).',
+        docsId: 'set-services'
+    },
+    '.stg-tab[data-tab="downloads"]': {
+        title: 'Downloads',
+        description: 'Configure download sources, paths, quality profiles, and hybrid mode priority order.',
+        docsId: 'set-download'
+    },
+    '.stg-tab[data-tab="library"]': {
+        title: 'Library',
+        description: 'File organization templates, post-processing options, tag embedding, lossy copy, listening stats, and content filtering.',
+        docsId: 'set-processing'
+    },
+    '.stg-tab[data-tab="appearance"]': {
+        title: 'Appearance',
+        description: 'Customize the accent color, sidebar visualizer style, and UI effects like particles and worker orbs.',
+    },
+    '.stg-tab[data-tab="advanced"]': {
+        title: 'Advanced',
+        description: 'Database workers, discovery pool settings, API key management, developer mode, and logging configuration.',
+    },
+
+    // Connections — API Services
+    '.api-test-buttons': {
+        title: 'Test Connections',
+        description: 'Test each configured service to verify credentials are working. Green = connected, Red = failed.',
+        docsId: 'set-services'
+    },
+
+    // Connections — Media Server
+    '#plex-container': {
+        title: 'Plex Configuration',
+        description: 'Connect your Plex server. Enter the URL and token, then select your Music Library. SoulSync reads your library from Plex and triggers scans after downloads.',
+        tips: [
+            'URL format: http://IP:32400 (or your custom port)',
+            'Token: find in Plex settings or browser URL bar while logged in',
+            'Select the correct Music Library after connecting'
+        ],
+        docsId: 'set-media'
+    },
+    '#jellyfin-container': {
+        title: 'Jellyfin Configuration',
+        description: 'Connect your Jellyfin server. Enter URL, API key, then select a user and music library.',
+        docsId: 'set-media'
+    },
+    '#navidrome-container': {
+        title: 'Navidrome Configuration',
+        description: 'Connect your Navidrome server. Enter URL, username, password, then select the music folder. Navidrome auto-detects new files.',
+        docsId: 'set-media'
+    },
+
+    // Downloads — Source & Paths
+    '#download-source-mode': {
+        title: 'Download Source Mode',
+        description: 'Choose your primary download source. Hybrid mode tries multiple sources in priority order with automatic fallback.',
+        tips: [
+            'Soulseek: P2P network via slskd — best for lossless and rare music',
+            'YouTube: audio extraction via yt-dlp',
+            'Tidal/Qobuz/HiFi/Deezer: streaming source downloads',
+            'Hybrid: tries sources in your configured priority order'
+        ],
+        docsId: 'set-download'
+    },
+    '#hybrid-settings-container': {
+        title: 'Hybrid Source Priority',
+        description: 'Drag and drop to reorder your download source priority. The first source is tried first; if it fails or finds nothing, the next source is tried.',
+        docsId: 'set-download'
+    },
+    '#soulseek-settings-container': {
+        title: 'Soulseek Settings',
+        description: 'Configure your slskd connection (URL + API key), search timeout, peer speed limits, queue limits, and download timeout.',
+        docsId: 'set-download'
+    },
+    '#tidal-download-settings-container': {
+        title: 'Tidal Download Settings',
+        description: 'Quality selection for Tidal downloads. Authenticate with your Tidal account. "Allow quality fallback" controls whether lower quality is accepted when preferred isn\'t available.',
+        docsId: 'set-download'
+    },
+    '#qobuz-settings-container': {
+        title: 'Qobuz Settings',
+        description: 'Quality selection and authentication for Qobuz downloads. Sign in with your Qobuz account credentials.',
+        docsId: 'set-download'
+    },
+    '#hifi-download-settings-container': {
+        title: 'HiFi Settings',
+        description: 'Quality selection for HiFi downloads. No authentication needed — uses community API instances. Test connection to verify availability.',
+        docsId: 'set-download'
+    },
+    '#deezer-download-settings-container': {
+        title: 'Deezer Download Settings',
+        description: 'Quality selection and ARL token for Deezer downloads. FLAC requires HiFi subscription. Paste your ARL cookie from the browser.',
+        docsId: 'set-download'
+    },
+    '#youtube-settings-container': {
+        title: 'YouTube Settings',
+        description: 'Browser cookies selection for bot detection bypass and download delay between requests.',
+    },
+
+    // Quality Profile
+    '#quality-profile-section': {
+        title: 'Quality Profile',
+        description: 'Configure which audio formats and bitrates are preferred for Soulseek downloads. Quick presets or custom per-format settings with bitrate ranges.',
+        tips: [
+            'Audiophile: FLAC only, strict — fails if no lossless found',
+            'Balanced: FLAC preferred, MP3 320 fallback (default)',
+            'Space Saver: MP3 preferred, smallest files',
+            'FLAC bit depth: choose 16-bit, 24-bit, or any',
+            'Fallback toggle: when off, only downloads at preferred quality'
+        ],
+        docsId: 'set-quality'
+    },
+    '.preset-button': {
+        title: 'Quality Preset',
+        description: 'One-click quality configuration. Presets set all format enables, priorities, and bitrate ranges at once.',
+    },
+    '.bit-depth-btn': {
+        title: 'FLAC Bit Depth',
+        description: 'Prefer 16-bit (CD quality, smaller), 24-bit (hi-res, larger), or Any. When a specific depth is chosen, the fallback toggle controls whether other depths are accepted.',
+        docsId: 'set-quality'
+    },
+    '#quality-fallback-enabled': {
+        title: 'Allow Lossy Fallback',
+        description: 'When enabled, accepts any quality if no preferred formats are found. When disabled, downloads fail rather than grabbing lower quality — use for strict lossless libraries.',
+        docsId: 'set-quality'
+    },
+
+    // Library — File Organization
+    '#file-organization-enabled': {
+        title: 'File Organization',
+        description: 'When enabled, downloaded files are renamed and moved to your transfer path using customizable templates. Separate templates for albums, singles, and playlists.',
+        tips: [
+            'Variables: $artist, $album, $title, $track, $year, $quality, $albumtype, $disc',
+            '$albumtype resolves to Album, Single, EP, or Compilation',
+            'Multi-disc albums auto-create Disc N subfolders'
+        ],
+        docsId: 'set-processing'
+    },
+
+    // Library — Post-Processing
+    '#metadata-enabled': {
+        title: 'Post-Processing',
+        description: 'Master toggle for all post-download processing: metadata tagging, cover art embedding, lyrics, and tag embedding from external services.',
+        docsId: 'set-processing'
+    },
+    '#post-processing-options': {
+        title: 'Post-Processing Options',
+        description: 'Configure which metadata to embed in downloaded files. Per-service toggle controls whether that service\'s IDs and data are written to file tags.',
+        tips: [
+            'Album art: embeds cover art directly in the audio file',
+            'LRC lyrics: fetches synced lyrics from LRClib',
+            'Per-service tags: embed Spotify IDs, MusicBrainz IDs, etc.'
+        ],
+        docsId: 'set-processing'
+    },
+
+    // Library — Lossy Copy
+    '#lossy-copy-enabled': {
+        title: 'Lossy Copy',
+        description: 'Create a lower-bitrate copy of every downloaded file alongside the original. Useful for syncing to mobile devices or bandwidth-limited streaming.',
+        docsId: 'set-processing'
+    },
+
+    // Library — Listening Stats
+    '#listening-stats-enabled': {
+        title: 'Listening Stats',
+        description: 'Track your listening activity from your media server. When enabled, SoulSync periodically syncs play history for the Stats page.',
+    },
+
+    // Advanced — API Keys
+    '#api-keys-list': {
+        title: 'API Keys',
+        description: 'Manage API keys for external access to SoulSync\'s REST API. Generate keys with labels for different integrations.',
+    },
+
+    // Advanced — Discovery Pool
+    '#discovery-lookback-period': {
+        title: 'Discovery Lookback',
+        description: 'How far back to look for new releases during watchlist scans. Shorter periods find only recent releases; longer periods catch older missed ones.',
+    },
+    '#discovery-hemisphere': {
+        title: 'Hemisphere',
+        description: 'Your geographic hemisphere for seasonal content. Affects which seasonal playlists and albums appear on the Discover page.',
+    },
+
+    // Appearance
+    '#accent-preset': {
+        title: 'Accent Color',
+        description: 'Choose a color theme for the entire app. Affects buttons, badges, highlights, and interactive elements throughout SoulSync.',
+    },
+    '#sidebar-visualizer-type': {
+        title: 'Sidebar Visualizer',
+        description: 'Audio visualization style in the sidebar player. Choose from bars, wave, spectrum, mirror, equalizer, or none.',
+    },
+
+    // Save Button
+    '.save-settings': {
+        title: 'Save Settings',
+        description: 'Save all settings changes. Some changes take effect immediately; others require a restart.',
+    },
+
     // ─── DASHBOARD: ACTIVITY FEED ───────────────────────────────────
 
     '#dashboard-activity-feed': {

@@ -561,11 +561,15 @@ const DOCS_SECTIONS = [
         children: [
             { id: 'sync-overview', title: 'Overview' },
             { id: 'sync-spotify', title: 'Spotify Playlists' },
+            { id: 'sync-spotify-public', title: 'Spotify Public Links' },
             { id: 'sync-youtube', title: 'YouTube Playlists' },
             { id: 'sync-tidal', title: 'Tidal Playlists' },
+            { id: 'sync-deezer', title: 'Deezer Playlists' },
             { id: 'sync-listenbrainz', title: 'ListenBrainz' },
             { id: 'sync-beatport', title: 'Beatport' },
+            { id: 'sync-import-file', title: 'Import from File' },
             { id: 'sync-mirrored', title: 'Mirrored Playlists' },
+            { id: 'sync-history', title: 'Sync History' },
             { id: 'sync-m3u', title: 'M3U Export' },
             { id: 'sync-discovery', title: 'Discovery Pipeline' }
         ],
@@ -623,6 +627,45 @@ const DOCS_SECTIONS = [
                 <p class="docs-text"><strong>Charts</strong> &mdash; Top 100 and Hype charts with full track listings. Each track can be manually matched against Spotify for metadata, then synced and downloaded.</p>
                 ${docsImg('sync-beatport.jpg', 'Beatport genre browser')}
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Beatport data is cached with a configurable TTL. The system automation <strong>Refresh Beatport Cache</strong> runs every 24 hours to keep content fresh.</div></div>
+            </div>
+            <div class="docs-subsection" id="sync-spotify-public">
+                <h3 class="docs-subsection-title">Spotify Public Links</h3>
+                <p class="docs-text">Sync Spotify playlists and albums <strong>without OAuth credentials</strong>. Paste any public Spotify playlist or album URL and SoulSync will load the tracks for download. Useful when you don't want to connect a Spotify account or want to sync from someone else's public playlist.</p>
+                <ul class="docs-list">
+                    <li>Paste any <code>open.spotify.com/playlist/...</code> or <code>open.spotify.com/album/...</code> URL</li>
+                    <li>Works without Spotify API credentials</li>
+                    <li>Previously loaded URLs appear in the history bar for quick re-access</li>
+                    <li>Loaded playlists become mirrored for persistent state</li>
+                </ul>
+            </div>
+            <div class="docs-subsection" id="sync-deezer">
+                <h3 class="docs-subsection-title">Deezer Playlists</h3>
+                <p class="docs-text">Import Deezer playlists by URL. Paste a Deezer playlist URL, click <strong>Load Playlist</strong>, and SoulSync parses the tracks for discovery and download. Tracks go through the same discovery pipeline as YouTube and Tidal playlists.</p>
+                <ul class="docs-list">
+                    <li>Paste any <code>deezer.com/playlist/...</code> URL</li>
+                    <li>Track matching uses the same fuzzy discovery pipeline</li>
+                    <li>Previously loaded URLs appear in the history bar</li>
+                    <li>Loaded playlists are mirrored for persistent state</li>
+                </ul>
+            </div>
+            <div class="docs-subsection" id="sync-import-file">
+                <h3 class="docs-subsection-title">Import from File</h3>
+                <p class="docs-text">Import track lists from <strong>CSV, TSV, or plain text files</strong>. Drag and drop a file or click to browse. SoulSync parses the file, lets you preview and map columns, then creates a mirrored playlist for discovery and download.</p>
+                <ul class="docs-list">
+                    <li><strong>CSV/TSV</strong>: Auto-detects columns; map Artist, Title, and Album from dropdowns</li>
+                    <li><strong>Text files</strong>: One track per line; choose Artist-Title or Title-Artist order and separator (dash, tab, pipe, etc.)</li>
+                    <li>Preview parsed tracks before importing</li>
+                    <li>Name your playlist and it becomes a mirrored playlist for sync</li>
+                </ul>
+            </div>
+            <div class="docs-subsection" id="sync-history">
+                <h3 class="docs-subsection-title">Sync History</h3>
+                <p class="docs-text">View a log of all sync operations. The <strong>Sync History</strong> button in the page header opens a modal showing every playlist sync, album download, and wishlist processing operation with timestamps, track counts, and completion status.</p>
+                <ul class="docs-list">
+                    <li>Shows playlist name, source, track count, and completion stats</li>
+                    <li>Filter by source (Spotify, YouTube, Tidal, etc.)</li>
+                    <li>Entries update in-place when the same playlist is re-synced</li>
+                </ul>
             </div>
             <div class="docs-subsection" id="sync-mirrored">
                 <h3 class="docs-subsection-title">Mirrored Playlists</h3>
