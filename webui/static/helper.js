@@ -469,6 +469,184 @@ const HELPER_CONTENT = {
         ]
     },
 
+    // ─── WISHLIST MODAL ───────────────────────────────────────────────
+
+    '#wishlist-overview-modal .playlist-modal-header': {
+        title: 'Wishlist Header',
+        description: 'Shows total track count across all categories and countdown to the next automatic processing cycle. The wishlist alternates between Albums/EPs and Singles each cycle.',
+        tips: [
+            '"Next Auto" shows which category processes next and when',
+            'Cycles alternate: Albums/EPs → Singles → Albums/EPs → ...',
+            'Auto-processing is triggered by the Watchlist automation'
+        ],
+        docsId: 'art-wishlist'
+    },
+    '.wishlist-category-card[data-category="albums"]': {
+        title: 'Albums & EPs',
+        description: 'Tracks from full albums and EPs waiting to be downloaded. Click to view and manage individual tracks. "Next in Queue" means this category will be processed in the next automatic cycle.',
+        tips: [
+            'Click to see all album/EP tracks in the wishlist',
+            'Mosaic background shows cover art from queued items',
+            'Select individual tracks or use "Select All" for batch operations'
+        ],
+        docsId: 'art-wishlist'
+    },
+    '.wishlist-category-card[data-category="singles"]': {
+        title: 'Singles',
+        description: 'Individual tracks and single releases waiting to be downloaded. These come from failed single-track downloads, manual additions, or watchlist new release scans.',
+        tips: [
+            'Click to see all single tracks in the wishlist',
+            'Singles are processed in alternating cycles with Albums/EPs',
+            'Failed downloads from search automatically land here'
+        ],
+        docsId: 'art-wishlist'
+    },
+    '.wishlist-back-btn': {
+        title: 'Back to Categories',
+        description: 'Return to the category selection view showing Albums/EPs and Singles cards.',
+    },
+    '#wishlist-select-all-btn': {
+        title: 'Select All',
+        description: 'Toggle selection on all tracks in the current category. Selected tracks can be batch-removed or batch-downloaded.',
+    },
+    '#wishlist-batch-bar': {
+        title: 'Batch Actions',
+        description: 'Appears when tracks are selected. Shows selection count and provides batch operations like removing selected tracks from the wishlist.',
+    },
+    '.wishlist-batch-remove-btn': {
+        title: 'Remove Selected',
+        description: 'Removes all selected tracks from the wishlist. They will no longer be queued for download unless re-added.',
+    },
+    '#wishlist-download-btn': {
+        title: 'Download Selection',
+        description: 'Start downloading all tracks in the currently visible category. Uses your configured download sources with quality profile and fallback settings.',
+        tips: [
+            'Downloads use the same pipeline as manual searches',
+            'Each track goes through post-processing (tagging, cover art, organization)',
+            'Failed downloads return to the wishlist for retry'
+        ]
+    },
+    '.playlist-modal-btn-danger': {
+        title: 'Clear Wishlist',
+        description: 'Removes ALL tracks from the wishlist across all categories. This action requires confirmation and cannot be undone.',
+    },
+    '.playlist-modal-btn-warning': {
+        title: 'Cleanup Wishlist',
+        description: 'Removes tracks that already exist in your library. Useful after manual imports or when tracks were downloaded outside of SoulSync.',
+    },
+
+    // ─── WISHLIST: TRACK LIST VIEW ─────────────────────────────────
+
+    '.wishlist-category-header': {
+        title: 'Category Header',
+        description: 'Navigation and selection controls for the current wishlist category. Use the back button to return to the overview, or Select All to batch-manage tracks.',
+    },
+    '.wishlist-album-card': {
+        title: 'Wishlist Album',
+        description: 'An album with tracks waiting to be downloaded. Click the header to expand/collapse the track list. Use the checkbox to select all tracks in this album, or the trash icon to remove the entire album from the wishlist.',
+        tips: [
+            'Expand to see individual tracks and their status',
+            'Checkbox selects all tracks in this album for batch operations',
+            'Trash icon removes all of this album\'s tracks from the wishlist'
+        ]
+    },
+    '.wishlist-track-item': {
+        title: 'Wishlist Track',
+        description: 'An individual track queued for download. Select with the checkbox for batch operations, or remove individually with the trash icon.',
+    },
+
+    // ─── DOWNLOAD MODAL (used across the entire app) ────────────────
+
+    '.download-missing-modal-hero': {
+        title: 'Download Modal',
+        description: 'Shows album/playlist info and real-time download statistics. The stats update live as tracks are analyzed and downloaded.',
+        tips: [
+            'Total: number of tracks in this batch',
+            'Found: tracks already in your library (skipped)',
+            'Missing: tracks that need to be downloaded',
+            'Downloaded: successfully completed downloads'
+        ]
+    },
+    '.stat-total': {
+        title: 'Total Tracks',
+        description: 'Total number of tracks in this download batch. Includes both tracks already in your library and ones that need downloading.',
+    },
+    '.stat-found': {
+        title: 'Found in Library',
+        description: 'Tracks that already exist in your media server library. These are skipped — no need to download them again.',
+    },
+    '.stat-missing': {
+        title: 'Missing Tracks',
+        description: 'Tracks not found in your library that will be searched and downloaded from your configured sources.',
+    },
+    '.stat-downloaded': {
+        title: 'Downloaded',
+        description: 'Tracks successfully downloaded, processed, and added to your library in this session.',
+    },
+    '.download-tracks-title': {
+        title: 'Track Analysis & Status',
+        description: 'Detailed per-track breakdown showing library match status, download progress, and available actions for each track.',
+        tips: [
+            'Library Match: shows if the track already exists in your library',
+            'Download Status: real-time progress for each track',
+            'Actions: cancel individual downloads or view download candidates'
+        ]
+    },
+    '.track-select-all': {
+        title: 'Select/Deselect All',
+        description: 'Toggle selection for all tracks. Deselected tracks will be skipped during download. Useful for downloading only specific tracks from an album.',
+    },
+    'tr[data-track-index]': {
+        title: 'Track Row',
+        description: 'A single track in the download batch. Shows track number, name, artist, duration, library match status, download progress, and available actions.',
+        tips: [
+            'Checkbox on the left: deselect to skip this track during download',
+            'Library Match: green "Found" means it\'s already in your library, red "Missing" means it needs downloading',
+            'Download Status updates in real-time: Searching → Downloading → Processing → Complete',
+            'Actions column: cancel an active download or view alternative download candidates if the first choice fails'
+        ]
+    },
+    '.track-match-status': {
+        title: 'Library Match',
+        description: 'Shows whether this track was found in your media server library. "Found" means it\'s already there; "Missing" means it needs to be downloaded.',
+    },
+    '.track-download-status': {
+        title: 'Download Status',
+        description: 'Real-time status for this track: Pending → Searching → Downloading → Processing → Complete or Failed.',
+    },
+    '.force-download-toggle': {
+        title: 'Download Options',
+        description: '"Force Download All" skips the library check and downloads every track regardless of whether it already exists. "Organize by Playlist" puts files in a playlist-named folder instead of the normal artist/album structure.',
+        tips: [
+            'Force Download: useful for re-downloading with different quality settings',
+            'Playlist folder: creates Downloads/PlaylistName/Artist - Track.ext structure'
+        ]
+    },
+    '[id^="begin-analysis-btn"]': {
+        title: 'Begin Analysis',
+        description: 'Starts the download process: first checks your library for existing tracks, then searches your download sources for missing ones, and downloads them with full post-processing.',
+        tips: [
+            'Analysis runs through every track in order',
+            'Found tracks are marked green and skipped',
+            'Missing tracks are searched and queued for download',
+            'Post-processing includes tagging, cover art, and file organization'
+        ]
+    },
+
+    '[id^="add-to-wishlist-btn"]': {
+        title: 'Add to Wishlist',
+        description: 'Adds all missing tracks from this batch to your Wishlist for later download. Useful when you want to queue tracks but not download them right now.',
+        tips: [
+            'Only missing tracks are added (already-owned tracks are skipped)',
+            'Tracks appear in the Wishlist modal under the appropriate category',
+            'The Wishlist auto-processes on a schedule via the Automations system'
+        ]
+    },
+    '.download-control-btn.primary': {
+        title: 'Download / Analyze',
+        description: 'The main action button — starts library analysis and downloads missing tracks. Changes label based on current state (Begin Analysis → Download Missing → Complete).',
+    },
+
     // ─── DASHBOARD: ACTIVITY FEED ───────────────────────────────────
 
     '#dashboard-activity-feed': {
