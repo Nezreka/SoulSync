@@ -1277,6 +1277,22 @@ body {
     display: block;
 }
 
+/* Subtle idle glow for users who haven't opened help yet */
+.helper-float-btn.undiscovered {
+    animation: helperIdleGlow 3s ease-in-out infinite;
+}
+
+@keyframes helperIdleGlow {
+    0%, 100% {
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 0 0 rgba(var(--accent-rgb), 0), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        border-color: rgba(var(--accent-rgb), 0.25);
+    }
+    50% {
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 16px rgba(var(--accent-rgb), 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        border-color: rgba(var(--accent-rgb), 0.5);
+    }
+}
+
 .helper-float-btn:hover {
     transform: scale(1.1);
     background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.3) 0%, rgba(30, 30, 30, 0.95) 60%);

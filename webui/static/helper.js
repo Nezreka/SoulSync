@@ -2197,6 +2197,10 @@ function openHelperMenu() {
 
     const floatBtn = document.getElementById('helper-float-btn');
     if (!floatBtn) return;
+
+    // User has discovered the help system — stop the idle glow permanently
+    floatBtn.classList.remove('undiscovered');
+    localStorage.setItem('soulsync_helper_discovered', '1');
     floatBtn.classList.add('menu-open');
 
     // Detect current page for contextual tour suggestion
@@ -3780,5 +3784,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // What's New badge
         _updateHelperBadge();
+
+        // Idle glow for undiscovered help button
+        if (!localStorage.getItem('soulsync_helper_discovered')) {
+            const btn = document.getElementById('helper-float-btn');
+            if (btn) btn.classList.add('undiscovered');
+        }
     }, 2500);
 });
