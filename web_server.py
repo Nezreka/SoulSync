@@ -42055,7 +42055,11 @@ try:
     )
     # Start worker automatically (can be paused via UI)
     mb_worker.start()
-    print("✅ MusicBrainz enrichment worker initialized and started")
+    if config_manager.get('musicbrainz_enrichment_paused', False):
+        mb_worker.pause()
+        print("✅ MusicBrainz enrichment worker initialized (paused — restored from config)")
+    else:
+        print("✅ MusicBrainz enrichment worker initialized and started")
 except Exception as e:
     print(f"⚠️ MusicBrainz worker initialization failed: {e}")
     mb_worker = None
@@ -42090,6 +42094,7 @@ def musicbrainz_pause():
             return jsonify({'error': 'MusicBrainz worker not initialized'}), 400
         
         mb_worker.pause()
+        config_manager.set('musicbrainz_enrichment_paused', True)
         logger.info("MusicBrainz worker paused via UI")
         return jsonify({'status': 'paused'}), 200
     except Exception as e:
@@ -42104,6 +42109,7 @@ def musicbrainz_resume():
             return jsonify({'error': 'MusicBrainz worker not initialized'}), 400
         
         mb_worker.resume()
+        config_manager.set('musicbrainz_enrichment_paused', False)
         logger.info("MusicBrainz worker resumed via UI")
         return jsonify({'status': 'running'}), 200
     except Exception as e:
@@ -42126,7 +42132,11 @@ try:
     audiodb_db = MusicDatabase()
     audiodb_worker = AudioDBWorker(database=audiodb_db)
     audiodb_worker.start()
-    print("✅ AudioDB enrichment worker initialized and started")
+    if config_manager.get('audiodb_enrichment_paused', False):
+        audiodb_worker.pause()
+        print("✅ AudioDB enrichment worker initialized (paused — restored from config)")
+    else:
+        print("✅ AudioDB enrichment worker initialized and started")
 except Exception as e:
     print(f"⚠️ AudioDB worker initialization failed: {e}")
     audiodb_worker = None
@@ -42161,6 +42171,7 @@ def audiodb_pause():
             return jsonify({'error': 'AudioDB worker not initialized'}), 400
 
         audiodb_worker.pause()
+        config_manager.set('audiodb_enrichment_paused', True)
         logger.info("AudioDB worker paused via UI")
         return jsonify({'status': 'paused'}), 200
     except Exception as e:
@@ -42175,6 +42186,7 @@ def audiodb_resume():
             return jsonify({'error': 'AudioDB worker not initialized'}), 400
 
         audiodb_worker.resume()
+        config_manager.set('audiodb_enrichment_paused', False)
         logger.info("AudioDB worker resumed via UI")
         return jsonify({'status': 'running'}), 200
     except Exception as e:
@@ -42197,7 +42209,11 @@ try:
     deezer_db = MusicDatabase()
     deezer_worker = DeezerWorker(database=deezer_db)
     deezer_worker.start()
-    print("✅ Deezer enrichment worker initialized and started")
+    if config_manager.get('deezer_enrichment_paused', False):
+        deezer_worker.pause()
+        print("✅ Deezer enrichment worker initialized (paused — restored from config)")
+    else:
+        print("✅ Deezer enrichment worker initialized and started")
 except Exception as e:
     print(f"⚠️ Deezer worker initialization failed: {e}")
     deezer_worker = None
@@ -42232,6 +42248,7 @@ def deezer_pause():
             return jsonify({'error': 'Deezer worker not initialized'}), 400
 
         deezer_worker.pause()
+        config_manager.set('deezer_enrichment_paused', True)
         logger.info("Deezer worker paused via UI")
         return jsonify({'status': 'paused'}), 200
     except Exception as e:
@@ -42246,6 +42263,7 @@ def deezer_resume():
             return jsonify({'error': 'Deezer worker not initialized'}), 400
 
         deezer_worker.resume()
+        config_manager.set('deezer_enrichment_paused', False)
         logger.info("Deezer worker resumed via UI")
         return jsonify({'status': 'running'}), 200
     except Exception as e:
@@ -42268,7 +42286,11 @@ try:
     spotify_enrichment_db = MusicDatabase()
     spotify_enrichment_worker = SpotifyWorker(database=spotify_enrichment_db)
     spotify_enrichment_worker.start()
-    print("✅ Spotify enrichment worker initialized and started")
+    if config_manager.get('spotify_enrichment_paused', False):
+        spotify_enrichment_worker.pause()
+        print("✅ Spotify enrichment worker initialized (paused — restored from config)")
+    else:
+        print("✅ Spotify enrichment worker initialized and started")
 except Exception as e:
     print(f"⚠️ Spotify enrichment worker initialization failed: {e}")
     spotify_enrichment_worker = None
@@ -42303,6 +42325,7 @@ def spotify_enrichment_pause():
             return jsonify({'error': 'Spotify enrichment worker not initialized'}), 400
 
         spotify_enrichment_worker.pause()
+        config_manager.set('spotify_enrichment_paused', True)
         logger.info("Spotify enrichment worker paused via UI")
         return jsonify({'status': 'paused'}), 200
     except Exception as e:
@@ -42321,6 +42344,7 @@ def spotify_enrichment_resume():
             return jsonify({'error': 'Cannot resume while Spotify is rate limited', 'rate_limited': True}), 429
 
         spotify_enrichment_worker.resume()
+        config_manager.set('spotify_enrichment_paused', False)
         logger.info("Spotify enrichment worker resumed via UI")
         return jsonify({'status': 'running'}), 200
     except Exception as e:
@@ -42343,7 +42367,11 @@ try:
     itunes_enrichment_db = MusicDatabase()
     itunes_enrichment_worker = iTunesWorker(database=itunes_enrichment_db)
     itunes_enrichment_worker.start()
-    print("✅ iTunes enrichment worker initialized and started")
+    if config_manager.get('itunes_enrichment_paused', False):
+        itunes_enrichment_worker.pause()
+        print("✅ iTunes enrichment worker initialized (paused — restored from config)")
+    else:
+        print("✅ iTunes enrichment worker initialized and started")
 except Exception as e:
     print(f"⚠️ iTunes enrichment worker initialization failed: {e}")
     itunes_enrichment_worker = None
@@ -42378,6 +42406,7 @@ def itunes_enrichment_pause():
             return jsonify({'error': 'iTunes enrichment worker not initialized'}), 400
 
         itunes_enrichment_worker.pause()
+        config_manager.set('itunes_enrichment_paused', True)
         logger.info("iTunes enrichment worker paused via UI")
         return jsonify({'status': 'paused'}), 200
     except Exception as e:
@@ -42392,6 +42421,7 @@ def itunes_enrichment_resume():
             return jsonify({'error': 'iTunes enrichment worker not initialized'}), 400
 
         itunes_enrichment_worker.resume()
+        config_manager.set('itunes_enrichment_paused', False)
         logger.info("iTunes enrichment worker resumed via UI")
         return jsonify({'status': 'running'}), 200
     except Exception as e:
@@ -42413,7 +42443,11 @@ try:
     lastfm_db = MusicDatabase()
     lastfm_worker = LastFMWorker(database=lastfm_db)
     lastfm_worker.start()
-    print("✅ Last.fm enrichment worker initialized and started")
+    if config_manager.get('lastfm_enrichment_paused', False):
+        lastfm_worker.pause()
+        print("✅ Last.fm enrichment worker initialized (paused — restored from config)")
+    else:
+        print("✅ Last.fm enrichment worker initialized and started")
 except Exception as e:
     print(f"⚠️ Last.fm worker initialization failed: {e}")
     lastfm_worker = None
@@ -42448,6 +42482,7 @@ def lastfm_enrichment_pause():
             return jsonify({'error': 'Last.fm worker not initialized'}), 400
 
         lastfm_worker.pause()
+        config_manager.set('lastfm_enrichment_paused', True)
         logger.info("Last.fm worker paused via UI")
         return jsonify({'status': 'paused'}), 200
     except Exception as e:
@@ -42462,6 +42497,7 @@ def lastfm_enrichment_resume():
             return jsonify({'error': 'Last.fm worker not initialized'}), 400
 
         lastfm_worker.resume()
+        config_manager.set('lastfm_enrichment_paused', False)
         logger.info("Last.fm worker resumed via UI")
         return jsonify({'status': 'running'}), 200
     except Exception as e:
@@ -42547,7 +42583,11 @@ try:
     genius_db = MusicDatabase()
     genius_worker = GeniusWorker(database=genius_db)
     genius_worker.start()
-    print("✅ Genius enrichment worker initialized and started")
+    if config_manager.get('genius_enrichment_paused', False):
+        genius_worker.pause()
+        print("✅ Genius enrichment worker initialized (paused — restored from config)")
+    else:
+        print("✅ Genius enrichment worker initialized and started")
 except Exception as e:
     print(f"⚠️ Genius worker initialization failed: {e}")
     genius_worker = None
@@ -42582,6 +42622,7 @@ def genius_enrichment_pause():
             return jsonify({'error': 'Genius worker not initialized'}), 400
 
         genius_worker.pause()
+        config_manager.set('genius_enrichment_paused', True)
         logger.info("Genius worker paused via UI")
         return jsonify({'status': 'paused'}), 200
     except Exception as e:
@@ -42596,6 +42637,7 @@ def genius_enrichment_resume():
             return jsonify({'error': 'Genius worker not initialized'}), 400
 
         genius_worker.resume()
+        config_manager.set('genius_enrichment_paused', False)
         logger.info("Genius worker resumed via UI")
         return jsonify({'status': 'running'}), 200
     except Exception as e:
@@ -42616,7 +42658,11 @@ try:
     tidal_enrich_db = MusicDatabase()
     tidal_enrichment_worker = TidalWorker(database=tidal_enrich_db, client=tidal_client)
     tidal_enrichment_worker.start()
-    print("✅ Tidal enrichment worker initialized and started")
+    if config_manager.get('tidal_enrichment_paused', False):
+        tidal_enrichment_worker.pause()
+        print("✅ Tidal enrichment worker initialized (paused — restored from config)")
+    else:
+        print("✅ Tidal enrichment worker initialized and started")
 except Exception as e:
     print(f"⚠️ Tidal worker initialization failed: {e}")
     tidal_enrichment_worker = None
@@ -42652,6 +42698,7 @@ def tidal_enrichment_pause():
             return jsonify({'error': 'Tidal worker not initialized'}), 400
 
         tidal_enrichment_worker.pause()
+        config_manager.set('tidal_enrichment_paused', True)
         logger.info("Tidal worker paused via UI")
         return jsonify({'status': 'paused'}), 200
     except Exception as e:
@@ -42666,6 +42713,7 @@ def tidal_enrichment_resume():
             return jsonify({'error': 'Tidal worker not initialized'}), 400
 
         tidal_enrichment_worker.resume()
+        config_manager.set('tidal_enrichment_paused', False)
         logger.info("Tidal worker resumed via UI")
         return jsonify({'status': 'running'}), 200
     except Exception as e:
@@ -42684,7 +42732,11 @@ try:
     qobuz_enrich_client = QobuzClient()  # Separate client instance for thread safety
     qobuz_enrichment_worker = QobuzWorker(database=qobuz_enrich_db, client=qobuz_enrich_client)
     qobuz_enrichment_worker.start()
-    print("✅ Qobuz enrichment worker initialized and started")
+    if config_manager.get('qobuz_enrichment_paused', False):
+        qobuz_enrichment_worker.pause()
+        print("✅ Qobuz enrichment worker initialized (paused — restored from config)")
+    else:
+        print("✅ Qobuz enrichment worker initialized and started")
 except Exception as e:
     print(f"⚠️ Qobuz worker initialization failed: {e}")
     qobuz_enrichment_worker = None
@@ -42720,6 +42772,7 @@ def qobuz_enrichment_pause():
             return jsonify({'error': 'Qobuz worker not initialized'}), 400
 
         qobuz_enrichment_worker.pause()
+        config_manager.set('qobuz_enrichment_paused', True)
         logger.info("Qobuz worker paused via UI")
         return jsonify({'status': 'paused'}), 200
     except Exception as e:
@@ -42734,6 +42787,7 @@ def qobuz_enrichment_resume():
             return jsonify({'error': 'Qobuz worker not initialized'}), 400
 
         qobuz_enrichment_worker.resume()
+        config_manager.set('qobuz_enrichment_paused', False)
         logger.info("Qobuz worker resumed via UI")
         return jsonify({'status': 'running'}), 200
     except Exception as e:
