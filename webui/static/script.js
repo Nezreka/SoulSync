@@ -57586,7 +57586,8 @@ function renderMirroredCard(p, container) {
     let ratioHtml = '';
     if (disc > 0) {
         const complete = disc >= tot;
-        ratioHtml = `<span class="discovery-ratio${complete ? ' complete' : ''}">${disc}/${tot} discovered</span>`;
+        const srcName = typeof currentMusicSourceName !== 'undefined' ? currentMusicSourceName : 'metadata';
+        ratioHtml = `<span class="discovery-ratio${complete ? ' complete' : ''}">${disc}/${tot} discovered on ${srcName}</span>`;
     }
 
     const card = document.createElement('div');

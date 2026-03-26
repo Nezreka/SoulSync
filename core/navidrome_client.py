@@ -301,8 +301,19 @@ class NavidromeClient:
             'f': 'json'  # Response format
         }
 
+    # Subsonic endpoints that modify data — use POST to avoid URL length limits
+    _WRITE_ENDPOINTS = frozenset({
+        'createPlaylist', 'updatePlaylist', 'deletePlaylist',
+        'star', 'unstar', 'scrobble', 'setRating',
+        'createShare', 'updateShare', 'deleteShare',
+        'createUser', 'updateUser', 'deleteUser',
+        'createBookmark', 'deleteBookmark',
+        'startScan',
+    })
+
     def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-        """Make authenticated request to Navidrome Subsonic API"""
+        """Make authenticated request to Navidrome Subsonic API.
+        Uses POST for write operations (avoids URL length limits with large playlists)."""
         if not self.base_url or not self.username:
             return None
 
@@ -314,7 +325,12 @@ class NavidromeClient:
             auth_params.update(params)
 
         try:
-            response = requests.get(url, params=auth_params, timeout=10)
+            # Use POST for write operations to avoid URL length limits
+            # (e.g., createPlaylist with 161 songId params would exceed GET URL limits)
+            if endpoint in self._WRITE_ENDPOINTS:
+                response = requests.post(url, data=auth_params, timeout=30)
+            else:
+                response = requests.get(url, params=auth_params, timeout=10)
             response.raise_for_status()
 
             data = response.json()
