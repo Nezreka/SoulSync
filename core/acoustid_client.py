@@ -422,7 +422,7 @@ class AcoustIDClient:
                         'artist': artist,
                         'score': score,
                     })
-                    logger.info(f"Found match: {title} by {artist} (MBID: {recording_id}, score: {score})")
+                    logger.debug(f"Found match: {title} by {artist} (MBID: {recording_id}, score: {score})")
 
             if not recordings:
                 logger.info(f"No AcoustID matches found for: {audio_file}")

@@ -238,6 +238,7 @@ class GeniusWorker:
     def _normalize_name(self, name: str) -> str:
         """Normalize name for comparison"""
         name = name.lower().strip()
+        name = re.sub(r'\s+[-–—]\s+.*$', '', name)
         name = re.sub(r'\s*\(.*?\)\s*', ' ', name)
         name = re.sub(r'\s*\[.*?\]\s*', ' ', name)  # Also strip brackets (Genius uses these)
         name = re.sub(r'\s*feat\.?\s+.*$', '', name)  # Strip featuring
