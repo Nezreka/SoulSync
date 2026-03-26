@@ -5,10 +5,11 @@
 // ── State ────────────────────────────────────────────────────────────────
 
 const HelperState = {
-    mode: null,           // null | 'info' | 'tour'
+    mode: null,           // null | 'info' | 'tour' | 'search' | 'shortcuts' | 'setup' | 'whats-new' | 'troubleshoot'
     menuOpen: false,
     tourStep: 0,
     tourId: null,
+    setupData: null,
 };
 
 let helperModeActive = false;
@@ -16,6 +17,10 @@ let _helperPopover = null;
 let _helperHighlighted = null;
 let _helperMenu = null;
 let _tourOverlay = null;
+let _setupPanel = null;
+let _shortcutsOverlay = null;
+let _helperSearchPanel = null;
+let _troubleshootActive = false;
 
 // ── Content Database ─────────────────────────────────────────────────────
 // Keys: CSS selectors matched via element.matches()
@@ -221,7 +226,11 @@ const HELPER_CONTENT = {
             'Response time indicates network latency to the service',
             'If stuck on "Checking...", the service may be rate-limited'
         ],
-        docsId: 'gs-connecting'
+        docsId: 'gs-connecting',
+        actions: [
+            { label: 'Open Settings', onClick: () => navigateToPage('settings') },
+            { label: 'View Docs', onClick: () => _navigateToDocsSection('gs-connecting') }
+        ]
     },
     '#media-server-service-card': {
         title: 'Media Server Status',
@@ -231,7 +240,11 @@ const HELPER_CONTENT = {
             'Select your Music Library in Settings after first connecting',
             'Navidrome auto-detects new files — no scan trigger needed'
         ],
-        docsId: 'set-media'
+        docsId: 'set-media',
+        actions: [
+            { label: 'Open Settings', onClick: () => navigateToPage('settings') },
+            { label: 'View Docs', onClick: () => _navigateToDocsSection('set-media') }
+        ]
     },
     '#soulseek-service-card': {
         title: 'Download Source Status',
@@ -241,7 +254,11 @@ const HELPER_CONTENT = {
             'Soulseek requires a running slskd instance with API key',
             'Streaming sources (Tidal, Qobuz) need active subscriptions'
         ],
-        docsId: 'search-sources'
+        docsId: 'search-sources',
+        actions: [
+            { label: 'Open Settings', onClick: () => { navigateToPage('settings'); setTimeout(() => typeof switchSettingsTab === 'function' && switchSettingsTab('downloads'), 400); } },
+            { label: 'View Docs', onClick: () => _navigateToDocsSection('search-sources') }
+        ]
     },
 
     // ─── DASHBOARD: SYSTEM STATS ────────────────────────────────────
@@ -2135,8 +2152,13 @@ function _navigateToDocsSection(docsId) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const HELPER_MENU_ITEMS = [
-    { id: 'info', icon: '🎯', label: 'Element Info', desc: 'Click any element to learn about it' },
-    { id: 'tour', icon: '🚶', label: 'Guided Tour', desc: 'Step-by-step walkthrough' },
+    { id: 'info',         icon: '🎯', label: 'Element Info',    desc: 'Click any element to learn about it' },
+    { id: 'tour',         icon: '🚶', label: 'Guided Tour',     desc: 'Step-by-step walkthrough' },
+    { id: 'search',       icon: '🔍', label: 'Search Help',     desc: 'Find answers fast' },
+    { id: 'shortcuts',    icon: '⌨️', label: 'Shortcuts',       desc: 'Keyboard reference' },
+    { id: 'setup',        icon: '📋', label: 'Setup Progress',  desc: 'Onboarding checklist' },
+    { id: 'whats-new',    icon: '✨', label: "What's New",      desc: 'Latest features' },
+    { id: 'troubleshoot', icon: '🔧', label: 'Troubleshoot',    desc: 'Fix common issues' },
 ];
 
 function toggleHelperMode() {
@@ -2154,6 +2176,21 @@ function toggleHelperMode() {
     openHelperMenu();
 }
 
+// Map page IDs → tour IDs (only where they differ)
+const PAGE_TOUR_MAP = {
+    'dashboard':   'dashboard',
+    'sync':        'sync-playlist',
+    'downloads':   'first-download',
+    'discover':    'discover',
+    'artists':     'artists-browse',
+    'automations': 'automations',
+    'library':     'library',
+    'stats':       'stats',
+    'import':      'import-music',
+    'settings':    'settings-tour',
+    'issues':      'issues-tour',
+};
+
 function openHelperMenu() {
     closeHelperMenu();
     HelperState.menuOpen = true;
@@ -2162,10 +2199,29 @@ function openHelperMenu() {
     if (!floatBtn) return;
     floatBtn.classList.add('menu-open');
 
+    // Detect current page for contextual tour suggestion
+    const currentPage = document.querySelector('.page.active')?.id?.replace('-page', '') || '';
+    const suggestedTourId = PAGE_TOUR_MAP[currentPage];
+    const suggestedTour = suggestedTourId ? HELPER_TOURS[suggestedTourId] : null;
+
     const menu = document.createElement('div');
     menu.className = 'helper-menu';
-    menu.innerHTML = HELPER_MENU_ITEMS.map((item, i) => `
-        <button class="helper-menu-item" onclick="activateHelperMode('${item.id}')" style="animation-delay:${i * 0.04}s">
+
+    let contextualBtn = '';
+    if (suggestedTour) {
+        contextualBtn = `
+            <button class="helper-menu-item helper-menu-contextual" onclick="closeHelperMenu();HelperState.mode='tour';document.getElementById('helper-float-btn')?.classList.add('active');startTour('${suggestedTourId}')" style="animation-delay:0s">
+                <span class="helper-menu-icon">${suggestedTour.icon}</span>
+                <span class="helper-menu-label">${suggestedTour.title}</span>
+                <span class="helper-menu-badge">${suggestedTour.steps.length} steps</span>
+            </button>
+            <div class="helper-menu-divider"></div>
+        `;
+    }
+
+    const offset = suggestedTour ? 1 : 0;
+    menu.innerHTML = contextualBtn + HELPER_MENU_ITEMS.map((item, i) => `
+        <button class="helper-menu-item" onclick="activateHelperMode('${item.id}')" style="animation-delay:${(i + offset) * 0.04}s">
             <span class="helper-menu-icon">${item.icon}</span>
             <span class="helper-menu-label">${item.label}</span>
         </button>
@@ -2212,11 +2268,17 @@ function activateHelperMode(mode) {
     const floatBtn = document.getElementById('helper-float-btn');
     if (floatBtn) floatBtn.classList.add('active');
 
-    if (mode === 'info') {
-        helperModeActive = true;
-        document.body.classList.add('helper-mode-active');
-    } else if (mode === 'tour') {
-        openTourSelector();
+    switch (mode) {
+        case 'info':
+            helperModeActive = true;
+            document.body.classList.add('helper-mode-active');
+            break;
+        case 'tour':        openTourSelector(); break;
+        case 'search':      openHelperSearch(); break;
+        case 'shortcuts':   openShortcutsOverlay(); break;
+        case 'setup':       openSetupPanel(); break;
+        case 'whats-new':   openWhatsNew(); break;
+        case 'troubleshoot': activateTroubleshootMode(); break;
     }
 }
 
@@ -2226,6 +2288,10 @@ function exitHelperMode() {
     document.body.classList.remove('helper-mode-active');
     dismissHelperPopover();
     dismissTour();
+    closeSetupPanel();
+    closeShortcutsOverlay();
+    closeHelperSearch();
+    closeTroubleshootMode();
 
     const floatBtn = document.getElementById('helper-float-btn');
     if (floatBtn) floatBtn.classList.remove('active');
@@ -2703,13 +2769,28 @@ document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
         if (_helperPopover) { dismissHelperPopover(); return; }
         if (HelperState.tourId) { dismissTour(); return; }
-        if (helperModeActive) { exitHelperMode(); return; }
+        if (HelperState.mode) { exitHelperMode(); return; }
         if (HelperState.menuOpen) { closeHelperMenu(); return; }
     }
     // Arrow keys for tour navigation
     if (HelperState.tourId) {
         if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); nextTourStep(); }
         if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); prevTourStep(); }
+    }
+    // ? opens helper menu (when not typing in an input)
+    if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
+        const tag = document.activeElement?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        if (document.activeElement?.isContentEditable) return;
+        e.preventDefault();
+        toggleHelperMode();
+    }
+    // Ctrl+K / Cmd+K opens helper search
+    if (e.key === 'k' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (HelperState.mode === 'search') { exitHelperMode(); return; }
+        if (HelperState.mode) exitHelperMode();
+        activateHelperMode('search');
     }
 });
 
@@ -2742,6 +2823,13 @@ function showHelperPopover(targetEl, content) {
         </div>`;
     }
 
+    let actionsHtml = '';
+    if (content.actions && content.actions.length) {
+        actionsHtml = `<div class="helper-popover-actions">
+            ${content.actions.map(a => `<button class="helper-action-btn">${a.label}</button>`).join('')}
+        </div>`;
+    }
+
     popover.innerHTML = `
         <div class="helper-popover-arrow"></div>
         <div class="helper-popover-header">
@@ -2750,8 +2838,19 @@ function showHelperPopover(targetEl, content) {
         </div>
         <div class="helper-popover-desc">${content.description}</div>
         ${tipsHtml}
+        ${actionsHtml}
         ${docsLink}
     `;
+
+    // Bind action click handlers
+    if (content.actions && content.actions.length) {
+        popover.querySelectorAll('.helper-action-btn').forEach((btn, i) => {
+            btn.addEventListener('click', () => {
+                exitHelperMode();
+                content.actions[i].onClick();
+            });
+        });
+    }
 
     document.body.appendChild(popover);
     _helperPopover = popover;
@@ -2799,3 +2898,891 @@ function dismissHelperPopover() {
         _helperHighlighted = null;
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SETUP PROGRESS TRACKER (Phase 2)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const SETUP_STEPS = [
+    { id: 'metadata-source', label: 'Connect Metadata Source',      desc: 'Spotify, iTunes, or Deezer for album/artist info',   icon: '🎵', page: 'settings' },
+    { id: 'media-server',    label: 'Connect Media Server',         desc: 'Plex, Jellyfin, or Navidrome',                       icon: '🖥️', page: 'settings' },
+    { id: 'download-source', label: 'Set Up Download Source',       desc: 'Soulseek, YouTube, Tidal, Qobuz, HiFi, or Deezer',  icon: '⬇️', page: 'settings', settingsTab: 'downloads' },
+    { id: 'download-paths',  label: 'Configure Download Paths',     desc: 'Where music is saved and organized',                 icon: '📁', page: 'settings', settingsTab: 'downloads' },
+    { id: 'first-scan',      label: 'Run First Library Scan',       desc: 'Import your existing collection from media server',  icon: '🔍', page: 'dashboard', selector: '#db-updater-card' },
+    { id: 'first-download',  label: 'Download Your First Track',    desc: 'Search for and download something',                  icon: '🎶', page: 'downloads' },
+    { id: 'watchlist',       label: 'Add an Artist to Watchlist',   desc: 'Monitor for new releases automatically',             icon: '👁️', page: 'library' },
+    { id: 'automation',      label: 'Create an Automation',         desc: 'Schedule tasks and build workflows',                 icon: '🤖', page: 'automations' },
+];
+
+function _getSetupCompletion() {
+    return JSON.parse(localStorage.getItem('soulsync_setup') || '{}');
+}
+
+function _markSetupComplete(stepId) {
+    const stored = _getSetupCompletion();
+    stored[stepId] = Date.now();
+    localStorage.setItem('soulsync_setup', JSON.stringify(stored));
+}
+
+async function _checkSetupStatus() {
+    const completion = _getSetupCompletion();
+    const results = { ...completion };
+
+    // ── /status — checks services (spotify, media_server, soulseek) ─────
+    try {
+        const resp = await fetch('/status');
+        if (resp.ok) {
+            const data = await resp.json();
+            // Metadata source: spotify.connected is always true (iTunes fallback), check .source
+            if (data.spotify?.connected && data.spotify?.source) {
+                results['metadata-source'] = results['metadata-source'] || Date.now();
+                _markSetupComplete('metadata-source');
+            }
+            // Media server: single object, not per-server keys
+            if (data.media_server?.connected) {
+                results['media-server'] = results['media-server'] || Date.now();
+                _markSetupComplete('media-server');
+            }
+            // Download source
+            if (data.soulseek?.connected) {
+                results['download-source'] = results['download-source'] || Date.now();
+                _markSetupComplete('download-source');
+            }
+        }
+    } catch (e) { /* API unavailable — use cached */ }
+
+    // ── /api/settings — checks download paths (nested under soulseek.*) ─
+    try {
+        const resp = await fetch('/api/settings');
+        if (resp.ok) {
+            const cfg = await resp.json();
+            if (cfg.soulseek?.download_path || cfg.soulseek?.transfer_path) {
+                results['download-paths'] = results['download-paths'] || Date.now();
+                _markSetupComplete('download-paths');
+            }
+        }
+    } catch (e) { /* skip */ }
+
+    // ── /api/library/artists — checks if library has been scanned ────────
+    if (!results['first-scan']) {
+        try {
+            const resp = await fetch('/api/library/artists?page=1&limit=1');
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data.total_count > 0 || (data.artists && data.artists.length > 0)) {
+                    results['first-scan'] = Date.now();
+                    _markSetupComplete('first-scan');
+                }
+            }
+        } catch (e) { /* skip */ }
+    }
+
+    // ── /api/watchlist/count — checks if any artist is watched ───────────
+    if (!results['watchlist']) {
+        try {
+            const resp = await fetch('/api/watchlist/count');
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data.count > 0) {
+                    results['watchlist'] = Date.now();
+                    _markSetupComplete('watchlist');
+                }
+            }
+        } catch (e) { /* skip */ }
+    }
+
+    // ── /api/automations — checks if any custom automations exist ────────
+    if (!results['automation']) {
+        try {
+            const resp = await fetch('/api/automations');
+            if (resp.ok) {
+                const autos = await resp.json();
+                // Filter to custom (non-system) automations
+                const custom = Array.isArray(autos) ? autos.filter(a => !a.is_system) : [];
+                if (custom.length > 0) {
+                    results['automation'] = Date.now();
+                    _markSetupComplete('automation');
+                }
+            }
+        } catch (e) { /* skip */ }
+    }
+
+    // ── first-download: check dashboard stat card or finished queue ────────
+    if (!results['first-download']) {
+        // Dashboard stat card shows "X Completed this session"
+        const finishedCard = document.querySelector('#finished-downloads-card .stat-card-value');
+        const finishedVal = finishedCard ? parseInt(finishedCard.textContent) : 0;
+        if (finishedVal > 0) {
+            results['first-download'] = Date.now();
+            _markSetupComplete('first-download');
+        }
+        // Also check the finished queue (if on downloads page)
+        if (!results['first-download']) {
+            const fq = document.querySelector('#finished-queue');
+            if (fq && fq.querySelector('.download-item')) {
+                results['first-download'] = Date.now();
+                _markSetupComplete('first-download');
+            }
+        }
+    }
+
+    return results;
+}
+
+async function openSetupPanel() {
+    closeSetupPanel();
+
+    // Show loading state immediately
+    const loader = document.createElement('div');
+    loader.className = 'helper-setup-panel visible';
+    loader.innerHTML = `
+        <div class="helper-setup-header">
+            <div class="helper-setup-title-row">
+                <h3 class="helper-setup-title">Setup Progress</h3>
+                <button class="helper-popover-close" onclick="exitHelperMode()">&times;</button>
+            </div>
+        </div>
+        <div class="helper-setup-loading">
+            <div class="loading-spinner"></div>
+            <span>Checking your setup...</span>
+        </div>
+    `;
+    document.body.appendChild(loader);
+    _setupPanel = loader;
+
+    const status = await _checkSetupStatus();
+
+    // Replace loader with real panel
+    if (_setupPanel) _setupPanel.remove();
+    const completedCount = SETUP_STEPS.filter(s => status[s.id]).length;
+    const totalCount = SETUP_STEPS.length;
+    const pct = Math.round((completedCount / totalCount) * 100);
+
+    const panel = document.createElement('div');
+    panel.className = 'helper-setup-panel';
+    panel.innerHTML = `
+        <div class="helper-setup-header">
+            <div class="helper-setup-title-row">
+                <h3 class="helper-setup-title">Setup Progress</h3>
+                <button class="helper-popover-close" onclick="exitHelperMode()">&times;</button>
+            </div>
+            <div class="helper-setup-ring-row">
+                <div class="helper-setup-ring">
+                    <svg viewBox="0 0 36 36" class="helper-setup-ring-svg">
+                        <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                              fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="3"/>
+                        <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                              fill="none" stroke="rgb(var(--accent-rgb))" stroke-width="3"
+                              stroke-dasharray="${pct}, 100" stroke-linecap="round"
+                              class="helper-setup-ring-progress"/>
+                    </svg>
+                    <span class="helper-setup-ring-text">${pct}%</span>
+                </div>
+                <div class="helper-setup-summary">
+                    <span class="helper-setup-count">${completedCount} of ${totalCount}</span>
+                    <span class="helper-setup-label">steps complete</span>
+                </div>
+            </div>
+        </div>
+        <div class="helper-setup-list">
+            ${SETUP_STEPS.map(step => {
+                const done = !!status[step.id];
+                return `
+                    <div class="helper-setup-item ${done ? 'done' : ''}" data-step="${step.id}">
+                        <div class="helper-setup-check">${done ? '✓' : step.icon}</div>
+                        <div class="helper-setup-body">
+                            <div class="helper-setup-item-label">${step.label}</div>
+                            <div class="helper-setup-item-desc">${step.desc}</div>
+                        </div>
+                        ${!done ? `<button class="helper-setup-go" onclick="setupGoTo('${step.id}')">Start →</button>` : ''}
+                    </div>`;
+            }).join('')}
+        </div>
+        ${pct === 100 ? '<div class="helper-setup-done">All set! SoulSync is fully configured. 🎉</div>' : ''}
+    `;
+
+    document.body.appendChild(panel);
+    _setupPanel = panel;
+    requestAnimationFrame(() => panel.classList.add('visible'));
+}
+
+function setupGoTo(stepId) {
+    const step = SETUP_STEPS.find(s => s.id === stepId);
+    if (!step) return;
+    exitHelperMode();
+    navigateToPage(step.page);
+    if (step.settingsTab) {
+        setTimeout(() => typeof switchSettingsTab === 'function' && switchSettingsTab(step.settingsTab), 400);
+    }
+    if (step.selector) {
+        setTimeout(() => {
+            const el = document.querySelector(step.selector);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 500);
+    }
+}
+
+function closeSetupPanel() {
+    if (_setupPanel) { _setupPanel.remove(); _setupPanel = null; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// KEYBOARD SHORTCUT OVERLAY (Phase 4)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const KEYBOARD_SHORTCUTS = [
+    // Global
+    { key: '?',     desc: 'Open helper menu',             scope: 'Global' },
+    { key: 'Ctrl+K', desc: 'Search help topics',          scope: 'Global' },
+    { key: 'Esc',   desc: 'Close modal / Exit helper',    scope: 'Global' },
+
+    // Player
+    { key: 'Space', desc: 'Play / Pause',                 scope: 'Player' },
+    { key: '←',     desc: 'Skip back 5 seconds',          scope: 'Player' },
+    { key: '→',     desc: 'Skip forward 5 seconds',       scope: 'Player' },
+    { key: '↑',     desc: 'Volume up 5%',                 scope: 'Player' },
+    { key: '↓',     desc: 'Volume down 5%',               scope: 'Player' },
+    { key: 'M',     desc: 'Mute / Unmute',                scope: 'Player' },
+
+    // Helper
+    { key: '←/→',   desc: 'Navigate tour steps',          scope: 'Helper Tours' },
+
+    // Forms
+    { key: 'Enter', desc: 'Submit / Confirm / Search',    scope: 'Forms & Search' },
+    { key: 'Esc',   desc: 'Cancel edit / Close search',   scope: 'Forms & Search' },
+];
+
+let _shortcutsCloseHandler = null;
+
+function openShortcutsOverlay() {
+    closeShortcutsOverlay();
+
+    // Group by scope
+    const groups = {};
+    KEYBOARD_SHORTCUTS.forEach(s => {
+        if (!groups[s.scope]) groups[s.scope] = [];
+        groups[s.scope].push(s);
+    });
+
+    const overlay = document.createElement('div');
+    overlay.className = 'helper-shortcuts-overlay';
+    overlay.innerHTML = `
+        <div class="helper-shortcuts-panel">
+            <div class="helper-shortcuts-header">
+                <h3>Keyboard Shortcuts</h3>
+                <span class="helper-shortcuts-hint">Press any key to dismiss</span>
+            </div>
+            <div class="helper-shortcuts-grid">
+                ${Object.entries(groups).map(([scope, shortcuts]) => `
+                    <div class="helper-shortcuts-group">
+                        <div class="helper-shortcuts-scope">${scope}</div>
+                        ${shortcuts.map(s => `
+                            <div class="helper-shortcut-row">
+                                <kbd class="helper-kbd">${s.key}</kbd>
+                                <span class="helper-shortcut-desc">${s.desc}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) exitHelperMode();
+    });
+    document.body.appendChild(overlay);
+    _shortcutsOverlay = overlay;
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    // Dismiss on any keypress (except the initial ?)
+    _shortcutsCloseHandler = (e) => {
+        if (e.key === '?') return; // ignore the key that opened us
+        exitHelperMode();
+    };
+    setTimeout(() => document.addEventListener('keydown', _shortcutsCloseHandler), 200);
+}
+
+function closeShortcutsOverlay() {
+    if (_shortcutsCloseHandler) {
+        document.removeEventListener('keydown', _shortcutsCloseHandler);
+        _shortcutsCloseHandler = null;
+    }
+    if (_shortcutsOverlay) { _shortcutsOverlay.remove(); _shortcutsOverlay = null; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SEARCH WITHIN HELPER (Phase 5)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function openHelperSearch() {
+    closeHelperSearch();
+
+    const panel = document.createElement('div');
+    panel.className = 'helper-search-panel';
+    panel.innerHTML = `
+        <div class="helper-search-header">
+            <div class="helper-search-input-wrap">
+                <span class="helper-search-icon">🔍</span>
+                <input type="text" class="helper-search-input" placeholder="Search help topics..." autofocus>
+            </div>
+            <button class="helper-popover-close" onclick="exitHelperMode()">&times;</button>
+        </div>
+        <div class="helper-search-results">
+            <div class="helper-search-hint">Type to search 200+ help topics, tours, and shortcuts...</div>
+        </div>
+    `;
+
+    document.body.appendChild(panel);
+    _helperSearchPanel = panel;
+
+    const input = panel.querySelector('.helper-search-input');
+    const resultsContainer = panel.querySelector('.helper-search-results');
+
+    input.addEventListener('input', () => {
+        const q = input.value.trim().toLowerCase();
+        if (q.length < 2) {
+            resultsContainer.innerHTML = '<div class="helper-search-hint">Type to search 200+ help topics, tours, and shortcuts...</div>';
+            return;
+        }
+
+        const matches = [];
+
+        // Search HELPER_CONTENT
+        for (const [selector, content] of Object.entries(HELPER_CONTENT)) {
+            const haystack = (content.title + ' ' + content.description + ' ' + (content.tips || []).join(' ')).toLowerCase();
+            const idx = haystack.indexOf(q);
+            if (idx !== -1) {
+                matches.push({ type: 'content', selector, title: content.title, desc: content.description, score: idx });
+            }
+        }
+
+        // Search HELPER_TOURS
+        for (const [id, tour] of Object.entries(HELPER_TOURS)) {
+            const haystack = (tour.title + ' ' + tour.description).toLowerCase();
+            const idx = haystack.indexOf(q);
+            if (idx !== -1) {
+                matches.push({ type: 'tour', tourId: id, title: tour.icon + ' ' + tour.title, desc: tour.description + ` (${tour.steps.length} steps)`, score: idx });
+            }
+        }
+
+        // Search KEYBOARD_SHORTCUTS
+        for (const shortcut of KEYBOARD_SHORTCUTS) {
+            const haystack = (shortcut.key + ' ' + shortcut.desc + ' ' + shortcut.scope).toLowerCase();
+            const idx = haystack.indexOf(q);
+            if (idx !== -1) {
+                matches.push({ type: 'shortcut', title: shortcut.key + ' — ' + shortcut.desc, desc: 'Scope: ' + shortcut.scope, score: idx + 100 });
+            }
+        }
+
+        // Sort: title matches first, then by position
+        matches.sort((a, b) => a.score - b.score);
+
+        if (matches.length === 0) {
+            resultsContainer.innerHTML = '<div class="helper-search-hint">No results found for "' + q.replace(/</g, '&lt;') + '"</div>';
+            return;
+        }
+
+        resultsContainer.innerHTML = matches.slice(0, 20).map((m, i) => {
+            const typeIcon = m.type === 'tour' ? '🚶' : m.type === 'shortcut' ? '⌨️' : '🎯';
+            const typeLabel = m.type === 'tour' ? 'Tour' : m.type === 'shortcut' ? 'Shortcut' : 'Help';
+            return `
+                <button class="helper-search-result" data-idx="${i}">
+                    <span class="helper-search-result-type" title="${typeLabel}">${typeIcon}</span>
+                    <div class="helper-search-result-body">
+                        <div class="helper-search-result-title">${_highlightMatch(m.title, q)}</div>
+                        <div class="helper-search-result-desc">${m.desc.slice(0, 120)}${m.desc.length > 120 ? '...' : ''}</div>
+                    </div>
+                </button>`;
+        }).join('');
+
+        // Bind click handlers
+        const displayedMatches = matches.slice(0, 20);
+        resultsContainer.querySelectorAll('.helper-search-result').forEach((btn, i) => {
+            btn.addEventListener('click', () => _handleSearchResultClick(displayedMatches[i]));
+        });
+    });
+
+    // Position near float button
+    const floatBtn = document.getElementById('helper-float-btn');
+    if (floatBtn) {
+        const btnRect = floatBtn.getBoundingClientRect();
+        panel.style.right = (window.innerWidth - btnRect.right) + 'px';
+        panel.style.bottom = (window.innerHeight - btnRect.top + 8) + 'px';
+    }
+
+    requestAnimationFrame(() => {
+        panel.classList.add('visible');
+        input.focus();
+    });
+}
+
+function _highlightMatch(text, query) {
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return text;
+    return text.slice(0, idx) + '<mark>' + text.slice(idx, idx + query.length) + '</mark>' + text.slice(idx + query.length);
+}
+
+function _handleSearchResultClick(match) {
+    if (match.type === 'tour') {
+        exitHelperMode();
+        setTimeout(() => {
+            HelperState.mode = 'tour';
+            const floatBtn = document.getElementById('helper-float-btn');
+            if (floatBtn) floatBtn.classList.add('active');
+            startTour(match.tourId);
+        }, 100);
+    } else if (match.type === 'content') {
+        exitHelperMode();
+
+        // Try to find the element on the current page first
+        let el = document.querySelector(match.selector);
+        if (el && el.offsetParent !== null) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setTimeout(() => showHelperPopover(el, HELPER_CONTENT[match.selector]), 300);
+            return;
+        }
+
+        // Element not visible — try to detect which page it's on from the selector
+        const pageHint = _guessPageFromSelector(match.selector);
+        if (pageHint) {
+            navigateToPage(pageHint);
+            setTimeout(() => {
+                const el2 = document.querySelector(match.selector);
+                if (el2) {
+                    el2.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    setTimeout(() => showHelperPopover(el2, HELPER_CONTENT[match.selector]), 300);
+                }
+            }, 400);
+        }
+    } else if (match.type === 'shortcut') {
+        exitHelperMode();
+        setTimeout(() => activateHelperMode('shortcuts'), 100);
+    }
+}
+
+function _guessPageFromSelector(selector) {
+    // Map well-known selector prefixes/patterns to pages
+    const pageHints = {
+        'sync':        ['sync-tab', 'sync-header', 'sync-sidebar', 'playlist-header', 'spotify-refresh', 'tidal-refresh', 'deezer-url', 'youtube-url', 'spotify-public', 'import-file-icon', 'mirrored'],
+        'downloads':   ['enh-', 'enhanced-search', 'search-mode', 'download-manager', 'toggle-download-manager'],
+        'discover':    ['discover-', 'spotify-library', 'recent-releases', 'seasonal', 'release-radar', 'discovery-weekly', 'build-playlist', 'listenbrainz', 'decade-tabs', 'genre-tabs', 'daily-mixes', 'personalized-'],
+        'artists':     ['artists-search', 'artists-hero', 'artist-detail', 'similar-artists'],
+        'automations': ['automations-', 'auto-', 'builder-'],
+        'library':     ['library-', 'alphabet-selector', 'watchlist-filter'],
+        'stats':       ['stats-'],
+        'import':      ['import-page-'],
+        'settings':    ['settings-', 'stg-tab', 'api-service', 'server-toggle', 'save-button', 'spotify-client', 'soulseek-url', 'quality-profile'],
+        'issues':      ['issues-'],
+        'dashboard':   ['dashboard-', 'service-card', 'watchlist-button', 'wishlist-button', 'db-updater', 'metadata-updater', 'quality-scanner', 'duplicate-cleaner', 'discovery-pool-card', 'retag-tool', 'media-scan', 'backup-manager', 'metadata-cache'],
+    };
+
+    const selectorLower = selector.toLowerCase();
+    for (const [page, patterns] of Object.entries(pageHints)) {
+        for (const pattern of patterns) {
+            if (selectorLower.includes(pattern.toLowerCase())) {
+                return page;
+            }
+        }
+    }
+    return null;
+}
+
+function closeHelperSearch() {
+    if (_helperSearchPanel) { _helperSearchPanel.remove(); _helperSearchPanel = null; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WHAT'S NEW (Phase 6)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const WHATS_NEW = {
+    '2.2': [
+        { title: 'Interactive Help System',     desc: 'Full contextual help with guided tours, search, shortcuts, setup tracking, and troubleshooting', selector: '#helper-float-btn' },
+        { title: 'Genre Explorer',              desc: 'Browse music by genre across all metadata sources (Spotify, iTunes, Deezer)', page: 'discover', selector: '#genre-tabs' },
+        { title: 'In Library Badges',           desc: 'Search results now show "In Library" badges for albums and tracks you already own', page: 'downloads', selector: '.enhanced-search-input-wrapper' },
+        { title: 'Rich Artist Profiles',        desc: 'Full-bleed hero section with bio, stats, genres, and service links', page: 'artists', selector: '#artists-search-input' },
+        { title: 'FLAC Bit Depth Control',      desc: 'Quality profiles now enforce 16-bit vs 24-bit preference with fallback' },
+        { title: 'Multi-Source Search Tabs',     desc: 'View results from Spotify, iTunes, and Deezer side by side', page: 'downloads', selector: '.search-mode-toggle' },
+        { title: 'Automation Signals',           desc: 'Chain automations together using fire/receive signals', page: 'automations', selector: '#auto-section-hub' },
+        { title: 'Enhanced Library Manager',     desc: 'Inline tag editing, bulk operations, and write-to-file from the library', page: 'library', selector: '.library-controls' },
+        { title: 'Deezer Download Source',       desc: 'Deezer added as 5th download source with quality fallback' },
+        { title: 'Streaming Source Verification', desc: 'Artist/title fuzzy matching prevents wrong track downloads from streaming sources' },
+    ],
+    '2.1': [
+        { title: 'Personalized Discovery',  desc: 'Daily Mixes, Hidden Gems, Forgotten Favorites, and more', page: 'discover' },
+        { title: 'ListenBrainz Integration', desc: 'Algorithmic playlists from your listening history', page: 'discover' },
+        { title: 'Build a Playlist',         desc: 'Custom playlist generator from seed artists', page: 'discover' },
+        { title: 'Time Machine',             desc: 'Browse music by decade from your library', page: 'discover' },
+        { title: 'Listening Stats',          desc: 'Charts, rankings, and library health metrics from your media server', page: 'stats' },
+    ],
+};
+
+function _getCurrentVersion() {
+    const btn = document.querySelector('.version-button');
+    return btn ? btn.textContent.trim().replace('v', '') : '2.1';
+}
+
+function _getLatestWhatsNewVersion() {
+    const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
+    return versions[0] || '2.1';
+}
+
+function openWhatsNew() {
+    dismissHelperPopover();
+    const latestVersion = _getLatestWhatsNewVersion();
+    const notes = WHATS_NEW[latestVersion];
+
+    // Mark as seen
+    localStorage.setItem('soulsync_helper_version_seen', latestVersion);
+    _updateHelperBadge();
+
+    if (!notes || !notes.length) {
+        // Fall back to existing version modal
+        exitHelperMode();
+        const versionBtn = document.querySelector('.version-button');
+        if (versionBtn) versionBtn.click();
+        return;
+    }
+
+    const panel = document.createElement('div');
+    panel.className = 'helper-popover helper-whats-new-panel';
+    panel.innerHTML = `
+        <div class="helper-popover-header">
+            <div class="helper-popover-title">What's New in v${latestVersion}</div>
+            <button class="helper-popover-close" onclick="exitHelperMode()">&times;</button>
+        </div>
+        <div class="helper-whats-new-list">
+            ${notes.map(h => {
+                const hasTarget = !!(h.selector || h.page);
+                const linkText = h.selector ? 'Show me →' : h.page ? 'Go to page →' : '';
+                return `
+                <div class="helper-whats-new-item ${hasTarget ? 'clickable' : ''}"
+                     ${h.selector ? `data-selector="${h.selector}"` : ''} ${h.page ? `data-page="${h.page}"` : ''}>
+                    <div class="helper-whats-new-title">${h.title}</div>
+                    <div class="helper-whats-new-desc">${h.desc}</div>
+                    ${linkText ? `<span class="helper-whats-new-show">${linkText}</span>` : ''}
+                </div>`;
+            }).join('')}
+        </div>
+        <div class="helper-whats-new-footer">
+            <button class="helper-tour-btn" onclick="_openFullChangelog()">Full Changelog</button>
+            ${Object.keys(WHATS_NEW).length > 1 ? `<button class="helper-tour-btn" onclick="_showOlderNotes()">Older Versions</button>` : ''}
+        </div>
+    `;
+
+    // "Show me" click handlers
+    panel.querySelectorAll('.helper-whats-new-item.clickable').forEach(item => {
+        item.addEventListener('click', () => {
+            const page = item.getAttribute('data-page');
+            const sel = item.getAttribute('data-selector');
+            exitHelperMode();
+            if (page) navigateToPage(page);
+            if (sel) {
+                setTimeout(() => {
+                    const el = document.querySelector(sel);
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        el.classList.add('helper-highlight');
+                        setTimeout(() => el.classList.remove('helper-highlight'), 3000);
+                    }
+                }, page ? 400 : 50);
+            }
+        });
+    });
+
+    document.body.appendChild(panel);
+    _helperPopover = panel;
+
+    const floatBtn = document.getElementById('helper-float-btn');
+    if (floatBtn) {
+        const btnRect = floatBtn.getBoundingClientRect();
+        panel.style.right = (window.innerWidth - btnRect.right) + 'px';
+        panel.style.bottom = (window.innerHeight - btnRect.top + 8) + 'px';
+        panel.style.left = 'auto';
+        panel.style.top = 'auto';
+    }
+    requestAnimationFrame(() => panel.classList.add('visible'));
+}
+
+function _openFullChangelog() {
+    exitHelperMode();
+    const versionBtn = document.querySelector('.version-button');
+    if (versionBtn) versionBtn.click();
+}
+
+function _showOlderNotes() {
+    // Cycle to next older version in the what's new panel
+    const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
+    const panel = _helperPopover;
+    if (!panel) return;
+    const currentTitle = panel.querySelector('.helper-popover-title');
+    const currentVer = currentTitle?.textContent.match(/v([\d.]+)/)?.[1] || versions[0];
+    const currentIdx = versions.indexOf(currentVer);
+    const nextIdx = (currentIdx + 1) % versions.length;
+    const nextVer = versions[nextIdx];
+
+    // Rebuild the list content
+    const notes = WHATS_NEW[nextVer];
+    if (currentTitle) currentTitle.textContent = `What's New in v${nextVer}`;
+    const listEl = panel.querySelector('.helper-whats-new-list');
+    if (listEl && notes) {
+        listEl.innerHTML = notes.map(h => {
+            const hasTarget = !!(h.selector || h.page);
+            const linkText = h.selector ? 'Show me →' : h.page ? 'Go to page →' : '';
+            return `
+            <div class="helper-whats-new-item ${hasTarget ? 'clickable' : ''}"
+                 ${h.selector ? `data-selector="${h.selector}"` : ''} ${h.page ? `data-page="${h.page}"` : ''}>
+                <div class="helper-whats-new-title">${h.title}</div>
+                <div class="helper-whats-new-desc">${h.desc}</div>
+                ${linkText ? `<span class="helper-whats-new-show">${linkText}</span>` : ''}
+            </div>`;
+        }).join('');
+
+        // Rebind click handlers
+        listEl.querySelectorAll('.helper-whats-new-item.clickable').forEach(item => {
+            item.addEventListener('click', () => {
+                const page = item.getAttribute('data-page');
+                const sel = item.getAttribute('data-selector');
+                exitHelperMode();
+                if (page) navigateToPage(page);
+                if (sel) {
+                    setTimeout(() => {
+                        const el = document.querySelector(sel);
+                        if (el) {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            el.classList.add('helper-highlight');
+                            setTimeout(() => el.classList.remove('helper-highlight'), 3000);
+                        }
+                    }, page ? 400 : 50);
+                }
+            });
+        });
+    }
+}
+
+function _updateHelperBadge() {
+    const floatBtn = document.getElementById('helper-float-btn');
+    if (!floatBtn) return;
+    const seen = localStorage.getItem('soulsync_helper_version_seen');
+    const latest = _getLatestWhatsNewVersion();
+    if (seen !== latest) {
+        floatBtn.classList.add('has-badge');
+    } else {
+        floatBtn.classList.remove('has-badge');
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TROUBLESHOOT MODE (Phase 7)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TROUBLESHOOT_RULES = [
+    {
+        selector: '#spotify-service-card .status-dot.disconnected, #spotify-service-card .status-dot.error',
+        title: 'Metadata Source Disconnected',
+        steps: [
+            'Go to Settings → Connections and verify your API credentials',
+            'Click "Authenticate" to re-connect to Spotify',
+            'If rate limited, wait for the countdown timer to expire',
+            'Try switching to iTunes (no authentication required) as a fallback'
+        ],
+        action: { label: 'Open Settings', fn: () => navigateToPage('settings') }
+    },
+    {
+        selector: '#media-server-service-card .status-dot.disconnected, #media-server-service-card .status-dot.error',
+        title: 'Media Server Disconnected',
+        steps: [
+            'Check that your media server (Plex/Jellyfin/Navidrome) is running',
+            'Verify the server URL and API token in Settings → Connections',
+            'Ensure the server is accessible from the SoulSync host machine',
+            'Try clicking "Test Connection" on the service card'
+        ],
+        action: { label: 'Open Settings', fn: () => navigateToPage('settings') }
+    },
+    {
+        selector: '#soulseek-service-card .status-dot.disconnected, #soulseek-service-card .status-dot.error',
+        title: 'Download Source Disconnected',
+        steps: [
+            'Verify your Soulseek/download client is running and reachable',
+            'Check the API URL and credentials in Settings → Downloads',
+            'For streaming sources (Tidal, Qobuz), verify your subscription is active',
+            'Try restarting the download client application'
+        ],
+        action: { label: 'Configure Downloads', fn: () => { navigateToPage('settings'); setTimeout(() => typeof switchSettingsTab === 'function' && switchSettingsTab('downloads'), 400); } }
+    },
+    {
+        selector: '.spotify-rate-limit-modal:not(.hidden), .rate-limit-banner',
+        title: 'Spotify Rate Limited',
+        steps: [
+            'Spotify has temporarily blocked API requests due to too many calls',
+            'Wait for the countdown timer to expire — requests auto-resume',
+            'Avoid running multiple bulk operations (enrichment + search) simultaneously',
+            'Consider switching to iTunes temporarily to continue working'
+        ]
+    },
+    {
+        selector: '.issue-card.status-open, .issues-stat-open',
+        title: 'Open Issues in Library',
+        steps: [
+            'Open issues have been reported for tracks in your library',
+            'Go to the Issues page to review and resolve them',
+            'Common issues: wrong track downloaded, bad metadata, low audio quality',
+            'Each issue has fix suggestions and action buttons'
+        ],
+        action: { label: 'View Issues', fn: () => navigateToPage('issues') }
+    },
+];
+
+function activateTroubleshootMode() {
+    closeTroubleshootMode();
+    _troubleshootActive = true;
+
+    // We need to be on the dashboard to scan service cards
+    const currentPage = document.querySelector('.page.active')?.id?.replace('-page', '') || '';
+    if (currentPage !== 'dashboard') {
+        navigateToPage('dashboard');
+        setTimeout(() => _runTroubleshootScan(), 400);
+    } else {
+        _runTroubleshootScan();
+    }
+}
+
+function _runTroubleshootScan() {
+    const issues = [];
+
+    TROUBLESHOOT_RULES.forEach(rule => {
+        const selectors = rule.selector.split(',').map(s => s.trim());
+        selectors.forEach(sel => {
+            try {
+                const els = document.querySelectorAll(sel);
+                els.forEach(el => {
+                    if (el.offsetParent !== null || el.offsetWidth > 0) {
+                        issues.push({ el, rule });
+                        el.classList.add('helper-troubleshoot-target');
+                    }
+                });
+            } catch (e) { /* invalid selector */ }
+        });
+    });
+
+    // Deduplicate by rule title
+    const seen = new Set();
+    const uniqueIssues = issues.filter(i => {
+        if (seen.has(i.rule.title)) return false;
+        seen.add(i.rule.title);
+        return true;
+    });
+
+    if (uniqueIssues.length === 0) {
+        // All clear!
+        const panel = document.createElement('div');
+        panel.className = 'helper-popover helper-troubleshoot-panel';
+        panel.innerHTML = `
+            <div class="helper-popover-header">
+                <div class="helper-popover-title">System Health Check</div>
+                <button class="helper-popover-close" onclick="exitHelperMode()">&times;</button>
+            </div>
+            <div class="helper-troubleshoot-clear">
+                <div class="helper-troubleshoot-clear-icon">✅</div>
+                <div class="helper-troubleshoot-clear-text">All Clear!</div>
+                <div class="helper-troubleshoot-clear-desc">All services are connected and running normally. No issues detected.</div>
+            </div>
+        `;
+        document.body.appendChild(panel);
+        _helperPopover = panel;
+        _positionPanelNearFloatBtn(panel);
+        return;
+    }
+
+    // Show issues
+    const panel = document.createElement('div');
+    panel.className = 'helper-popover helper-troubleshoot-panel';
+    panel.innerHTML = `
+        <div class="helper-popover-header">
+            <div class="helper-popover-title">⚠️ ${uniqueIssues.length} Issue${uniqueIssues.length > 1 ? 's' : ''} Found</div>
+            <button class="helper-popover-close" onclick="exitHelperMode()">&times;</button>
+        </div>
+        <div class="helper-troubleshoot-list">
+            ${uniqueIssues.map((issue, i) => `
+                <div class="helper-troubleshoot-issue">
+                    <div class="helper-troubleshoot-issue-title">${issue.rule.title}</div>
+                    <div class="helper-troubleshoot-steps">
+                        ${issue.rule.steps.map(s => `<div class="helper-troubleshoot-step">• ${s}</div>`).join('')}
+                    </div>
+                    ${issue.rule.action ? `<button class="helper-action-btn" data-tshoot-idx="${i}">${issue.rule.action.label}</button>` : ''}
+                </div>
+            `).join('')}
+        </div>
+    `;
+
+    // Action click handlers
+    panel.querySelectorAll('[data-tshoot-idx]').forEach(btn => {
+        const idx = parseInt(btn.getAttribute('data-tshoot-idx'));
+        btn.addEventListener('click', () => {
+            exitHelperMode();
+            if (uniqueIssues[idx]?.rule.action?.fn) uniqueIssues[idx].rule.action.fn();
+        });
+    });
+
+    document.body.appendChild(panel);
+    _helperPopover = panel;
+    _positionPanelNearFloatBtn(panel);
+}
+
+function _positionPanelNearFloatBtn(panel) {
+    const floatBtn = document.getElementById('helper-float-btn');
+    if (floatBtn) {
+        const btnRect = floatBtn.getBoundingClientRect();
+        panel.style.right = (window.innerWidth - btnRect.right) + 'px';
+        panel.style.bottom = (window.innerHeight - btnRect.top + 8) + 'px';
+        panel.style.left = 'auto';
+        panel.style.top = 'auto';
+    }
+    requestAnimationFrame(() => panel.classList.add('visible'));
+}
+
+function closeTroubleshootMode() {
+    _troubleshootActive = false;
+    document.querySelectorAll('.helper-troubleshoot-target').forEach(el => el.classList.remove('helper-troubleshoot-target'));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FIRST-LAUNCH & PAGE-LOAD HOOKS
+// ═══════════════════════════════════════════════════════════════════════════
+
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+        // First-launch welcome prompt
+        const hasSetup = localStorage.getItem('soulsync_setup');
+        const hasDismissed = localStorage.getItem('soulsync_setup_welcome_dismissed');
+        if (!hasSetup && !hasDismissed) {
+            const floatBtn = document.getElementById('helper-float-btn');
+            if (floatBtn) {
+                floatBtn.classList.add('first-launch-pulse');
+                const tip = document.createElement('div');
+                tip.className = 'helper-first-launch-tip';
+                tip.textContent = 'New here? Click for setup help!';
+                tip.addEventListener('click', () => {
+                    tip.remove();
+                    floatBtn.classList.remove('first-launch-pulse');
+                    localStorage.setItem('soulsync_setup_welcome_dismissed', '1');
+                    activateHelperMode('setup');
+                });
+                document.body.appendChild(tip);
+
+                // Auto-dismiss after 12 seconds
+                setTimeout(() => {
+                    if (tip.parentElement) {
+                        tip.classList.add('fading');
+                        setTimeout(() => tip.remove(), 500);
+                        floatBtn.classList.remove('first-launch-pulse');
+                    }
+                }, 12000);
+            }
+        }
+
+        // What's New badge
+        _updateHelperBadge();
+    }, 2500);
+});
