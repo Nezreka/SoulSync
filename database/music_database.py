@@ -7235,6 +7235,21 @@ class MusicDatabase:
             logger.error(f"Error getting discovery recent albums: {e}")
             return []
 
+    def update_discovery_recent_album_cover(self, album_id: str, cover_url: str) -> bool:
+        """Backfill a missing cover URL on a recent album entry."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE discovery_recent_albums SET album_cover_url = ?
+                    WHERE album_spotify_id = ? OR album_itunes_id = ? OR album_deezer_id = ?
+                """, (cover_url, album_id, album_id, album_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug(f"Error updating recent album cover: {e}")
+            return False
+
     def clear_discovery_recent_albums(self, profile_id: int = 1) -> bool:
         """Clear cached recent albums for a profile"""
         try:
