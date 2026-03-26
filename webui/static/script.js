@@ -36806,7 +36806,7 @@ async function openWatchlistArtistDetailView(artistId, artistName) {
             return;
         }
 
-        const { config, artist, recent_releases } = data;
+        const { config, artist, recent_releases, spotify_artist_id, itunes_artist_id, deezer_artist_id } = data;
 
         // Remove existing overlay if any
         const existing = document.querySelector('.watchlist-artist-detail-overlay');
@@ -36917,6 +36917,7 @@ async function openWatchlistArtistDetailView(artistId, artistName) {
                 </div>
 
                 <div class="watchlist-detail-actions">
+                    <button class="watchlist-detail-discog-btn watchlist-detail-discog-action">View Discography</button>
                     <button class="watchlist-detail-settings-btn watchlist-detail-settings-action">Settings</button>
                     <button class="watchlist-detail-remove-btn watchlist-detail-remove-action">Remove from Watchlist</button>
                 </div>
@@ -36926,6 +36927,35 @@ async function openWatchlistArtistDetailView(artistId, artistName) {
         // Wire up event listeners (avoids inline onclick escaping issues)
         overlay.querySelector('.watchlist-detail-back-btn').addEventListener('click', () => {
             closeWatchlistArtistDetailView();
+        });
+
+        overlay.querySelector('.watchlist-detail-discog-action').addEventListener('click', () => {
+            // Use the ID matching the active metadata source
+            let discogId, source;
+            const activeSrc = (currentMusicSourceName || '').toLowerCase();
+            if (activeSrc.includes('spotify') && spotify_artist_id) {
+                discogId = spotify_artist_id; source = 'spotify';
+            } else if (activeSrc.includes('deezer') && deezer_artist_id) {
+                discogId = deezer_artist_id; source = 'deezer';
+            } else if (itunes_artist_id) {
+                discogId = itunes_artist_id; source = 'itunes';
+            } else {
+                discogId = spotify_artist_id || deezer_artist_id || itunes_artist_id;
+                source = spotify_artist_id ? 'spotify' : deezer_artist_id ? 'deezer' : 'itunes';
+            }
+            if (discogId) {
+                // Close watchlist modal + detail overlay
+                closeWatchlistArtistDetailView();
+                closeWatchlistModal();
+                // Navigate to Artists page and load discography
+                navigateToPage('artists');
+                setTimeout(() => {
+                    selectArtistForDetail(
+                        { id: discogId, name: artistName, image_url: artist.image_url || '' },
+                        { source: source }
+                    );
+                }, 200);
+            }
         });
 
         overlay.querySelector('.watchlist-detail-settings-action').addEventListener('click', () => {
