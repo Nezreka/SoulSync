@@ -35785,6 +35785,40 @@ def get_discover_recent_releases():
         # Get cached recent albums filtered by source (max 20)
         albums = database.get_discovery_recent_albums(limit=20, source=active_source, profile_id=get_current_profile_id())
 
+        # Backfill missing cover art from metadata source
+        for album in albums:
+            if not album.get('album_cover_url'):
+                cover = None
+                album_id = album.get('album_deezer_id') or album.get('album_itunes_id') or album.get('album_spotify_id')
+                try:
+                    # Try direct ID lookup first
+                    if album_id:
+                        fallback = _get_metadata_fallback_client()
+                        if fallback:
+                            album_data = fallback.get_album(str(album_id))
+                            if album_data:
+                                imgs = album_data.get('images', [])
+                                cover = album_data.get('image_url') or (imgs[0].get('url') if imgs else None)
+
+                    # Fallback: search by name
+                    if not cover and album.get('album_name') and album.get('artist_name'):
+                        fallback = _get_metadata_fallback_client()
+                        if fallback:
+                            results = fallback.search_albums(f"{album['artist_name']} {album['album_name']}", limit=1)
+                            if results and hasattr(results[0], 'image_url') and results[0].image_url:
+                                cover = results[0].image_url
+                                album_id = str(results[0].id)
+
+                    if cover:
+                        album['album_cover_url'] = cover
+                        if album_id:
+                            try:
+                                database.update_discovery_recent_album_cover(album_id, cover)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
         return jsonify({"success": True, "albums": albums, "source": active_source})
 
     except Exception as e:
