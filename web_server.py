@@ -19070,6 +19070,68 @@ def get_version_info():
                     "• Inline PIN creation if admin has no PIN set",
                     "• Shake animation on wrong PIN, auto-focus input"
                 ]
+            },
+            {
+                "title": "🎵 Stream Source Setting",
+                "description": "Choose where track previews come from — independent of download source",
+                "features": [
+                    "• New dropdown in Settings → Downloads: YouTube (instant, default) or Active Download Source",
+                    "• If active source is Soulseek, automatically falls back to YouTube",
+                    "• YouTube streams require no auth — instant playback"
+                ]
+            },
+            {
+                "title": "🔧 YouTube Download Fix",
+                "description": "Fixed 'Requested format not available' errors affecting all YouTube downloads",
+                "features": [
+                    "• Removed stale player_client and HLS/DASH skip overrides that blocked audio formats",
+                    "• Browser cookie fallback — retries without cookies when authenticated sessions restrict formats",
+                    "• Docker containers auto-update yt-dlp on every start"
+                ]
+            },
+            {
+                "title": "📊 Accurate Album Completion Badges",
+                "description": "Album completion now uses exact track counts instead of percentage rounding",
+                "features": [
+                    "• Exact match: 'Complete' only when all tracks are present — no more 90% rounding",
+                    "• Deduplicated counting: duplicate album entries don't inflate track counts",
+                    "• Multi-artist album detection: finds albums filed under different artists in your library",
+                    "• Censored title matching: 'B*****t Faucet' now matches 'Bullshit Faucet' (Apple Music)"
+                ]
+            },
+            {
+                "title": "👥 Collaborative Album Handling",
+                "description": "Smart folder naming and matching for albums with multiple artists",
+                "features": [
+                    "• New setting: Collaborative Album Artist — use first listed artist or all combined",
+                    "• Spotify: picks first from separate artist objects. Deezer: already first-only",
+                    "• iTunes: resolves primary artist via artistId API lookup (safe for 'Tyler, the Creator')",
+                    "• Album-aware track matching prevents re-downloads of collab albums filed under different artists"
+                ]
+            },
+            {
+                "title": "🔄 Per-Artist Library Sync",
+                "description": "Validate and clean up individual artist library entries",
+                "features": [
+                    "• New 'Sync' button on enhanced library view",
+                    "• Checks each track's file exists on disk, removes stale entries",
+                    "• Cleans empty albums and updates track counts",
+                    "• Per-artist watchlist lookback period override"
+                ]
+            },
+            {
+                "title": "🛠️ Stability & Bug Fixes",
+                "description": "Various fixes for crashes, data integrity, and UX",
+                "features": [
+                    "• Enrichment worker pause state persists across restarts",
+                    "• Soulseek timeout spam prevention — skips API calls when disconnected",
+                    "• Navidrome playlist sync uses POST (fixes truncation on large playlists)",
+                    "• Deezer metadata cache no longer serves stale data missing track numbers/year",
+                    "• Track numbering fix for non-Spotify metadata sources (Deezer/iTunes)",
+                    "• Album delete endpoint accepts all ID formats (fixes Navidrome string IDs)",
+                    "• Hydrabase auto-reconnect when server restarts",
+                    "• Wishlist process API endpoint for external apps"
+                ]
             }
         ]
     }
