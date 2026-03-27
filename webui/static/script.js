@@ -40110,10 +40110,9 @@ function updateLibraryReleaseCard(data) {
         card.classList.add('missing');
     }
 
-    // If backend says "completed" (>=90%), trust it — Spotify metadata track counts
-    // can be wrong (e.g. total_tracks=15 but API only returns 14 actual tracks)
-    const isComplete = data.status === 'completed';
-    const effectiveMissing = isComplete ? 0 : (data.expected_tracks - data.owned_tracks);
+    // Use real numbers — no rounding or overrides
+    const isComplete = data.owned_tracks >= data.expected_tracks && data.owned_tracks > 0;
+    const effectiveMissing = data.expected_tracks - data.owned_tracks;
 
     // Update the mutable release data on the card
     if (card._releaseData) {

@@ -9736,12 +9736,10 @@ def _check_album_completion(db, album_data: dict, artist_name: str, test_mode: b
         else:
             completion_percentage = 100 if owned_tracks > 0 else 0
         
-        # Determine completion status based on percentage
-        if completion_percentage >= 90 and owned_tracks > 0:
+        # Determine completion status — exact match, no percentage rounding
+        if owned_tracks > 0 and owned_tracks >= (expected_tracks or total_tracks):
             status = "completed"
-        elif completion_percentage >= 60:
-            status = "nearly_complete"
-        elif completion_percentage > 0:
+        elif owned_tracks > 0:
             status = "partial"
         else:
             status = "missing"
@@ -9820,12 +9818,10 @@ def _check_single_completion(db, single_data: dict, artist_name: str, test_mode:
             else:
                 completion_percentage = (owned_tracks / total_tracks) * 100
 
-            # Determine status
-            if completion_percentage >= 90 and owned_tracks > 0:
+            # Determine status — exact match, no percentage rounding
+            if owned_tracks > 0 and owned_tracks >= (expected_tracks or total_tracks):
                 status = "completed"
-            elif completion_percentage >= 60:
-                status = "nearly_complete"
-            elif completion_percentage > 0:
+            elif owned_tracks > 0:
                 status = "partial"
             else:
                 status = "missing"

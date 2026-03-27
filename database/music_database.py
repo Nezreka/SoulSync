@@ -4991,12 +4991,19 @@ class MusicDatabase:
             sibling_ids = [row['id'] for row in cursor.fetchall()]
 
             # Get actual track count across all sibling album entries
+            # Count DISTINCT titles to deduplicate across split/duplicate album entries
+            # (e.g., 3 "GNX" albums with 12+1+2 tracks = 15 rows but only 12 unique songs)
             placeholders = ','.join('?' for _ in sibling_ids)
-            cursor.execute(f"SELECT COUNT(*) FROM tracks WHERE album_id IN ({placeholders})", sibling_ids)
+            cursor.execute(f"""
+                SELECT COUNT(*) FROM (
+                    SELECT DISTINCT LOWER(title), track_number FROM tracks
+                    WHERE album_id IN ({placeholders}) AND file_path IS NOT NULL AND file_path != ''
+                )
+            """, sibling_ids)
             owned_tracks = cursor.fetchone()[0]
 
-            # Get combined expected track count from all sibling album entries
-            cursor.execute(f"SELECT SUM(track_count) FROM albums WHERE id IN ({placeholders})", sibling_ids)
+            # Get the max track_count from sibling albums (not SUM — avoids inflating from duplicates)
+            cursor.execute(f"SELECT MAX(track_count) FROM albums WHERE id IN ({placeholders})", sibling_ids)
             result = cursor.fetchone()
             stored_track_count = result[0] if result and result[0] else 0
 
@@ -5008,9 +5015,7 @@ class MusicDatabase:
             if (expected_track_count is not None and stored_track_count > 0
                     and owned_tracks >= stored_track_count
                     and stored_track_count >= expected_track_count * 0.6):
-                # Album is complete by its own metadata — don't inflate expected with a different edition's count.
-                # Guard: stored count must be >=60% of expected to look like a plausible edition variant
-                # (standard 12 vs deluxe 20 = 60%), not just Plex's leafCount reflecting partial ownership.
+                # Album is complete by its own metadata — standard vs deluxe edition difference
                 expected_tracks = stored_track_count
             elif expected_track_count is not None:
                 expected_tracks = expected_track_count
@@ -5019,11 +5024,10 @@ class MusicDatabase:
 
             # Determine completeness with refined thresholds
             if expected_tracks and expected_tracks > 0:
-                completion_ratio = owned_tracks / expected_tracks
-                # Complete: 90%+, Nearly Complete: 80-89%, Partial: <80%
-                is_complete = completion_ratio >= 0.9 and owned_tracks > 0
+                # Exact match — complete only when owned == expected
+                is_complete = owned_tracks >= expected_tracks
             else:
-                # Fallback: if we have any tracks, consider it owned
+                # No expected count known — complete if we have any tracks
                 is_complete = owned_tracks > 0
 
             # Get distinct format strings for owned tracks
@@ -5166,6 +5170,26 @@ class MusicDatabase:
             if best_match and best_confidence >= confidence_threshold:
                  logger.debug(f"✅ Fallback match succeeded: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
                  return best_match, best_confidence
+
+            # Multi-artist fallback: search by title only (any artist)
+            # Handles collaborative albums filed under a different artist in the library
+            if best_confidence < confidence_threshold:
+                logger.debug(f"⚠️ Artist-specific search failed, trying title-only fallback for '{title}'")
+                try:
+                    title_only_albums = self.search_albums(title=title, artist="", limit=20, server_source=server_source)
+                    for album in title_only_albums:
+                        confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
+                        # Slightly penalize cross-artist matches to prefer same-artist when possible
+                        if confidence > best_confidence:
+                            best_confidence = confidence
+                            best_match = album
+                            logger.debug(f"  🎯 Title-only match: '{album.title}' (confidence: {confidence:.3f})")
+                except Exception as title_error:
+                    logger.warning(f"Title-only fallback search failed: {title_error}")
+
+            if best_match and best_confidence >= confidence_threshold:
+                logger.debug(f"✅ Title-only match succeeded: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
+                return best_match, best_confidence
 
             logger.debug(f"❌ No confident edition match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
             return None, best_confidence
