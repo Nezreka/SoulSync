@@ -43225,6 +43225,27 @@ async function playLibraryTrack(track, albumTitle, artistName) {
 
         const result = await response.json();
         if (!result.success) {
+            // File not on disk — fall back to streaming from configured source
+            console.warn('Library file not found, falling back to stream source');
+            hideLoadingAnimation();
+            const streamRes = await fetch('/api/enhanced-search/stream-track', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    track_name: track.title || '',
+                    artist_name: artistName || '',
+                    album_name: albumTitle || '',
+                })
+            });
+            const streamData = await streamRes.json();
+            if (streamData.success && streamData.result) {
+                streamData.result.artist = artistName;
+                streamData.result.title = track.title;
+                streamData.result.album = albumTitle;
+                streamData.result.image_url = track._stats_image || null;
+                startStream(streamData.result);
+                return;
+            }
             throw new Error(result.error || 'Failed to start library playback');
         }
 
