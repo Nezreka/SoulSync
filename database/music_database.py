@@ -4830,10 +4830,13 @@ class MusicDatabase:
             return list(set(variations))
 
     
-    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None) -> Tuple[Optional[DatabaseTrack], float]:
+    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None) -> Tuple[Optional[DatabaseTrack], float]:
         """
         Check if a track exists in the database with enhanced fuzzy matching and confidence scoring.
-        Now uses the same sophisticated matching approach as album checking for consistency.
+
+        Args:
+            album: Optional album name — enables album-aware matching for multi-artist albums
+
         Returns (track, confidence) tuple where confidence is 0.0-1.0
         """
         try:
@@ -4873,9 +4876,57 @@ class MusicDatabase:
             if best_match and best_confidence >= confidence_threshold:
                 logger.debug(f"✅ Enhanced track match found: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
                 return best_match, best_confidence
-            else:
-                logger.debug(f"❌ No confident track match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
-                return None, best_confidence
+
+            # Album-aware fallback: find album by title (any artist), check tracks on it
+            # Handles multi-artist albums filed under a different artist in the library
+            if album and best_confidence < confidence_threshold:
+                logger.debug(f"⚠️ Artist-specific search failed, trying album-aware fallback: '{title}' on '{album}'")
+                try:
+                    album_candidates = self.search_albums(title=album, artist="", limit=10, server_source=server_source)
+                    for album_candidate in album_candidates:
+                        album_title_sim = max(
+                            self._string_similarity(self._normalize_for_comparison(album), self._normalize_for_comparison(album_candidate.title)),
+                            self._string_similarity(self._clean_album_title_for_comparison(album), self._clean_album_title_for_comparison(album_candidate.title))
+                        )
+                        if album_title_sim < 0.8:
+                            continue
+
+                        conn = self._get_connection()
+                        cursor = conn.cursor()
+                        source_filter = "AND t.server_source = ?" if server_source else ""
+                        params = [album_candidate.id] + ([server_source] if server_source else [])
+                        cursor.execute(f"""
+                            SELECT t.*, a.name as artist_name, al.title as album_title
+                            FROM tracks t
+                            JOIN artists a ON a.id = t.artist_id
+                            JOIN albums al ON al.id = t.album_id
+                            WHERE t.album_id = ? {source_filter}
+                        """, params)
+
+                        for row in cursor.fetchall():
+                            db_track = DatabaseTrack(
+                                id=row['id'], title=row['title'], artist_name=row['artist_name'],
+                                album_title=row['album_title'], album_id=row['album_id'],
+                                track_number=row['track_number'], duration=row['duration'],
+                                file_path=row['file_path'], bitrate=row['bitrate'],
+                                artist_id=row['artist_id'], server_source=row['server_source']
+                            )
+                            title_sim = max(
+                                self._string_similarity(self._normalize_for_comparison(title), self._normalize_for_comparison(db_track.title)),
+                                self._string_similarity(self._clean_track_title_for_comparison(title), self._clean_track_title_for_comparison(db_track.title))
+                            )
+                            if title_sim > best_confidence and title_sim >= 0.7:
+                                best_confidence = title_sim
+                                best_match = db_track
+
+                        if best_match and best_confidence >= 0.7:
+                            logger.debug(f"✅ Album-aware fallback matched: '{title}' on '{album}' -> '{best_match.title}' by '{best_match.artist_name}' (title_sim: {best_confidence:.3f})")
+                            return best_match, best_confidence
+                except Exception as album_fallback_err:
+                    logger.debug(f"Album-aware fallback error: {album_fallback_err}")
+
+            logger.debug(f"❌ No confident track match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
+            return None, best_confidence
             
         except Exception as e:
             logger.error(f"Error checking track existence for '{title}' by '{artist}': {e}")
