@@ -12474,7 +12474,7 @@ def library_delete_track(track_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/library/album/<int:album_id>', methods=['DELETE'])
+@app.route('/api/library/album/<album_id>', methods=['DELETE'])
 def library_delete_album(album_id):
     """Delete an album and all its tracks from the database (does NOT delete files on disk)."""
     try:
