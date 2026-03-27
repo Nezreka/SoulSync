@@ -148,14 +148,7 @@ class YouTubeClient:
                 'preferredquality': '320',
             }],
             'progress_hooks': [self._progress_hook],  # Track download progress
-            # Bot detection bypass options
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android', 'web'],  # Try multiple clients
-                    'skip': ['hls', 'dash'],  # Skip problematic formats
-                }
-            },
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
             'age_limit': None,  # Don't skip age-restricted
         }
 
@@ -226,14 +219,7 @@ class YouTubeClient:
                     'quiet': True,
                     'no_warnings': True,
                     'extract_flat': True,  # Don't download, just extract info
-                    # Bot detection bypass
-                    'extractor_args': {
-                        'youtube': {
-                            'player_client': ['android', 'web'],
-                            'skip': ['hls', 'dash'],
-                        }
-                    },
-                    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
                 }
 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -597,14 +583,7 @@ class YouTubeClient:
                     'no_warnings': True,
                     'extract_flat': True, # Fast mode: Don't fetch formats (massive speedup)
                     'default_search': 'ytsearch',
-                    # Bot detection bypass (same as download options)
-                    'extractor_args': {
-                        'youtube': {
-                            'player_client': ['android', 'web'],
-                            'skip': ['hls', 'dash'],
-                        }
-                    },
-                    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
                 }
 
                 # Add cookie support for search (avoids bot detection)
@@ -956,19 +935,22 @@ class YouTubeClient:
                     download_opts['format'] = 'bestaudio/best'
                     download_opts['noplaylist'] = True
 
-                    # On retry, try different player client
+                    # On retry, try different strategies
                     if attempt == 1:
-                        logger.info(f"🔄 Retry {attempt + 1}/{max_retries} with different player client")
-                        download_opts['extractor_args'] = {
-                            'youtube': {
-                                'player_client': ['web'],  # Try web-only on retry
-                                'skip': ['hls', 'dash'],
+                        # Drop browser cookies — authenticated sessions sometimes get restricted formats
+                        if 'cookiesfrombrowser' in download_opts:
+                            logger.info(f"🔄 Retry {attempt + 1}/{max_retries} without browser cookies")
+                            download_opts.pop('cookiesfrombrowser', None)
+                        else:
+                            logger.info(f"🔄 Retry {attempt + 1}/{max_retries} with web_creator client")
+                            download_opts['extractor_args'] = {
+                                'youtube': { 'player_client': ['web_creator'] }
                             }
-                        }
                     elif attempt >= 2:
                         logger.info(f"🔄 Retry {attempt + 1}/{max_retries} with 'best' format (video fallback)")
-                        download_opts['format'] = 'best'  # Fallback to best available (including video)
-                        download_opts.pop('extractor_args', None) # Reset extractor args
+                        download_opts['format'] = 'best'
+                        download_opts.pop('cookiesfrombrowser', None)
+                        download_opts.pop('extractor_args', None)
 
 
                     # Perform download
