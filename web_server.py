@@ -24552,23 +24552,43 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                         enhanced_payload['artists'] = [{'name': artist} for artist in track.artists] if track.artists else []
                         print(f"✨ [Context] Using clean Spotify metadata - Album: '{track.album}', Title: '{track.name}'")
                         
-                        # CRITICAL FIX: Get track_number and disc_number from Spotify API like GUI does
-                        if hasattr(track, 'id') and track.id:
+                        # Get track_number and disc_number — prefer track data we already have,
+                        # fall back to detailed API call only if needed
+                        got_track_number = False
+
+                        # 1. Try track_info (from frontend, has album track data)
+                        tn = track_info.get('track_number', 0) if isinstance(track_info, dict) else 0
+                        dn = track_info.get('disc_number', 1) if isinstance(track_info, dict) else 1
+                        if tn and tn > 0:
+                            enhanced_payload['track_number'] = tn
+                            enhanced_payload['disc_number'] = dn
+                            got_track_number = True
+                            print(f"🔢 [Context] Added track_number from track_info: {tn}, disc_number: {dn}")
+
+                        # 2. Try the track object itself (from album tracks response)
+                        if not got_track_number and hasattr(track, 'track_number') and track.track_number:
+                            enhanced_payload['track_number'] = track.track_number
+                            enhanced_payload['disc_number'] = getattr(track, 'disc_number', 1) or 1
+                            got_track_number = True
+                            print(f"🔢 [Context] Added track_number from track object: {track.track_number}, disc_number: {enhanced_payload['disc_number']}")
+
+                        # 3. Last resort — fetch from metadata source API
+                        if not got_track_number and hasattr(track, 'id') and track.id:
                             try:
                                 detailed_track = spotify_client.get_track_details(track.id)
-                                if detailed_track and 'track_number' in detailed_track:
+                                if detailed_track and detailed_track.get('track_number'):
                                     enhanced_payload['track_number'] = detailed_track['track_number']
                                     enhanced_payload['disc_number'] = detailed_track.get('disc_number', 1)
-                                    print(f"🔢 [Context] Added Spotify track_number: {detailed_track['track_number']}, disc_number: {enhanced_payload['disc_number']}")
+                                    got_track_number = True
+                                    print(f"🔢 [Context] Added track_number from API: {detailed_track['track_number']}, disc_number: {enhanced_payload['disc_number']}")
 
                                     # Backfill album metadata from detailed track when fallback path
-                                    # produced incomplete data (e.g. album was a plain string from
-                                    # discovery playlists, or release_date missing from track listing)
+                                    # produced incomplete data
                                     if not has_explicit_context and isinstance(detailed_track.get('album'), dict):
                                         dt_album = detailed_track['album']
                                         if not spotify_album_context.get('release_date') and dt_album.get('release_date'):
                                             spotify_album_context['release_date'] = dt_album['release_date']
-                                            print(f"📅 [Context] Backfilled release_date from Spotify API: {dt_album['release_date']}")
+                                            print(f"📅 [Context] Backfilled release_date from API: {dt_album['release_date']}")
                                         if dt_album.get('album_type') and not fallback_album.get('album_type'):
                                             spotify_album_context['album_type'] = dt_album['album_type']
                                         if not spotify_album_context.get('total_tracks') and dt_album.get('total_tracks'):
@@ -24576,18 +24596,13 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                                         if not spotify_album_context.get('name') or spotify_album_context['name'] == track.album:
                                             if dt_album.get('name'):
                                                 spotify_album_context['name'] = dt_album['name']
-                                else:
-                                    enhanced_payload['track_number'] = track_info.get('track_number', 1)
-                                    enhanced_payload['disc_number'] = track_info.get('disc_number', 1)
-                                    print(f"⚠️ [Context] No track_number in detailed_track, using track_info fallback: {enhanced_payload['track_number']}")
                             except Exception as e:
-                                enhanced_payload['track_number'] = track_info.get('track_number') or track.track_number if hasattr(track, 'track_number') else 0
-                                enhanced_payload['disc_number'] = track_info.get('disc_number') or track.disc_number if hasattr(track, 'disc_number') else 1
-                                print(f"❌ [Context] Error getting track_number, using track_info fallback: {enhanced_payload['track_number']} ({e})")
-                        else:
-                            enhanced_payload['track_number'] = track_info.get('track_number', 1)
-                            enhanced_payload['disc_number'] = track_info.get('disc_number', 1)
-                            print(f"⚠️ [Context] No track.id available, using track_info fallback track_number: {enhanced_payload['track_number']}")
+                                print(f"⚠️ [Context] API track details failed: {e}")
+
+                        if not got_track_number:
+                            enhanced_payload.setdefault('track_number', 0)
+                            enhanced_payload.setdefault('disc_number', 1)
+                            print(f"⚠️ [Context] No track_number found from any source")
                         
                         # Determine if this should be treated as album download
                         # First check if we have explicit album context from artist page
