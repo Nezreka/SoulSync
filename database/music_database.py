@@ -96,6 +96,7 @@ class WatchlistArtist:
     include_acoustic: bool = False
     include_compilations: bool = False
     include_instrumentals: bool = False
+    lookback_days: Optional[int] = None  # Per-artist override; None = use global setting
     profile_id: int = 1
 
 @dataclass
@@ -304,6 +305,9 @@ class MusicDatabase:
 
             # Add content type filter columns to watchlist_artists (migration)
             self._add_watchlist_content_type_filters(cursor)
+
+            # Add per-artist lookback_days column to watchlist_artists (migration)
+            self._add_watchlist_lookback_days_column(cursor)
 
             # Add iTunes artist ID column to watchlist_artists (migration)
             self._add_watchlist_itunes_id_column(cursor)
@@ -1167,6 +1171,17 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding content type filter columns to watchlist_artists: {e}")
             # Don't raise - this is a migration, database can still function
+
+    def _add_watchlist_lookback_days_column(self, cursor):
+        """Add per-artist lookback_days column to watchlist_artists table"""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = [column[1] for column in cursor.fetchall()]
+            if 'lookback_days' not in columns:
+                cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN lookback_days INTEGER DEFAULT NULL")
+                logger.info("Added lookback_days column to watchlist_artists table")
+        except Exception as e:
+            logger.error(f"Error adding lookback_days column to watchlist_artists: {e}")
 
     def _add_watchlist_itunes_id_column(self, cursor):
         """Add iTunes artist ID column to watchlist_artists table for cross-provider support"""
@@ -6318,7 +6333,7 @@ class MusicDatabase:
                                'last_scan_timestamp', 'created_at', 'updated_at']
                 optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
-                                   'include_instrumentals']
+                                   'include_instrumentals', 'lookback_days']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
@@ -6352,6 +6367,7 @@ class MusicDatabase:
                     include_acoustic = bool(row['include_acoustic']) if 'include_acoustic' in existing_columns else False
                     include_compilations = bool(row['include_compilations']) if 'include_compilations' in existing_columns else False
                     include_instrumentals = bool(row['include_instrumentals']) if 'include_instrumentals' in existing_columns else False
+                    lookback_days = row['lookback_days'] if 'lookback_days' in existing_columns else None
 
                     watchlist_artists.append(WatchlistArtist(
                         id=row['id'],
@@ -6372,6 +6388,7 @@ class MusicDatabase:
                         include_acoustic=include_acoustic,
                         include_compilations=include_compilations,
                         include_instrumentals=include_instrumentals,
+                        lookback_days=lookback_days,
                         profile_id=profile_id
                     ))
 

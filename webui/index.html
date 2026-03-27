@@ -5925,6 +5925,24 @@
                         </div>
                     </div>
 
+                    <div class="config-section">
+                        <h3 class="config-section-title">Scan Lookback</h3>
+                        <p class="config-section-subtitle">How far back to look for releases on first scan of this artist</p>
+                        <div class="form-group" style="margin: 12px 0 0;">
+                            <select id="config-lookback-days" class="form-select">
+                                <option value="">Use Global Setting</option>
+                                <option value="7">Last 7 days</option>
+                                <option value="30">Last 30 days</option>
+                                <option value="90">Last 90 days</option>
+                                <option value="180">Last 6 months</option>
+                                <option value="365">Last year</option>
+                                <option value="730">Last 2 years</option>
+                                <option value="1825">Last 5 years</option>
+                                <option value="36500">Entire discography</option>
+                            </select>
+                        </div>
+                    </div>
+
                     <!-- Linked Provider Section -->
                     <div class="config-section" id="watchlist-linked-provider-section" style="display:none">
                         <h3 class="config-section-title">Linked Artist</h3>
