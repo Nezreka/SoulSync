@@ -12474,6 +12474,77 @@ def library_delete_track(track_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/library/artist/<int:artist_id>/sync', methods=['POST'])
+def sync_artist_library(artist_id):
+    """Validate an artist's library entries — remove stale tracks/albums, recount."""
+    try:
+        database = get_database()
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Get all tracks for this artist
+            cursor.execute("""
+                SELECT t.id, t.file_path, t.title, t.album_id
+                FROM tracks t WHERE t.artist_id = ?
+            """, (artist_id,))
+            tracks = cursor.fetchall()
+
+            # Get artist name for logging
+            cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,))
+            artist_row = cursor.fetchone()
+            artist_name = artist_row['name'] if artist_row else f'ID {artist_id}'
+
+            stale_tracks = []
+            valid_tracks = 0
+
+            for track in tracks:
+                file_path = track['file_path']
+                if not file_path:
+                    stale_tracks.append(track['id'])
+                    continue
+
+                # Check if file exists on disk
+                resolved = _resolve_library_file_path(file_path)
+                if resolved and os.path.exists(resolved):
+                    valid_tracks += 1
+                else:
+                    stale_tracks.append(track['id'])
+
+            # Remove stale tracks
+            if stale_tracks:
+                placeholders = ','.join('?' for _ in stale_tracks)
+                cursor.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", stale_tracks)
+
+            # Remove empty albums (no tracks left from ANY artist)
+            cursor.execute("""
+                DELETE FROM albums WHERE artist_id = ?
+                AND id NOT IN (SELECT DISTINCT album_id FROM tracks)
+            """, (artist_id,))
+            empty_albums_removed = cursor.rowcount
+
+            # Update track_count on remaining albums
+            cursor.execute("""
+                UPDATE albums SET track_count = (
+                    SELECT COUNT(*) FROM tracks WHERE tracks.album_id = albums.id
+                ) WHERE artist_id = ?
+            """, (artist_id,))
+
+            conn.commit()
+
+            print(f"🔄 [Artist Sync] {artist_name}: {valid_tracks} valid, {len(stale_tracks)} stale removed, {empty_albums_removed} empty albums cleaned")
+
+            return jsonify({
+                "success": True,
+                "artist_name": artist_name,
+                "valid_tracks": valid_tracks,
+                "stale_removed": len(stale_tracks),
+                "empty_albums_removed": empty_albums_removed
+            })
+
+    except Exception as e:
+        print(f"❌ Error syncing artist {artist_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/library/album/<album_id>', methods=['DELETE'])
 def library_delete_album(album_id):
     """Delete an album and all its tracks from the database (does NOT delete files on disk)."""

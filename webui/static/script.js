@@ -40669,6 +40669,39 @@ function renderArtistMetaPanel(artist) {
         headerRight.appendChild(enrichWrap);
     }
 
+    // Sync / Validate button
+    const syncBtn = document.createElement('button');
+    syncBtn.className = 'enhanced-sync-btn';
+    syncBtn.innerHTML = '&#x1f504; Sync';
+    syncBtn.title = 'Validate files — removes stale entries for tracks no longer on disk';
+    syncBtn.onclick = async (e) => {
+        e.stopPropagation();
+        syncBtn.disabled = true;
+        syncBtn.textContent = 'Syncing...';
+        try {
+            const res = await fetch(`/api/library/artist/${artist.id}/sync`, { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                const parts = [];
+                if (data.stale_removed > 0) parts.push(`${data.stale_removed} stale tracks removed`);
+                if (data.empty_albums_removed > 0) parts.push(`${data.empty_albums_removed} empty albums cleaned`);
+                if (parts.length === 0) parts.push('All files verified');
+                showToast(`${data.artist_name}: ${parts.join(', ')}`, 'success');
+                // Refresh enhanced view if anything changed
+                if (data.stale_removed > 0 || data.empty_albums_removed > 0) {
+                    loadEnhancedViewData(artist.id);
+                }
+            } else {
+                showToast(`Sync failed: ${data.error}`, 'error');
+            }
+        } catch (err) {
+            showToast(`Sync failed: ${err.message}`, 'error');
+        }
+        syncBtn.disabled = false;
+        syncBtn.innerHTML = '&#x1f504; Sync';
+    };
+    headerRight.appendChild(syncBtn);
+
     header.appendChild(headerRight);
 
     panel.appendChild(header);
