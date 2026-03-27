@@ -34538,7 +34538,8 @@ def watchlist_artist_config(artist_id):
                 SELECT include_albums, include_eps, include_singles,
                        include_live, include_remixes, include_acoustic, include_compilations,
                        artist_name, image_url, spotify_artist_id, itunes_artist_id,
-                       last_scan_timestamp, date_added, include_instrumentals, deezer_artist_id
+                       last_scan_timestamp, date_added, include_instrumentals, deezer_artist_id,
+                       lookback_days
                 FROM watchlist_artists
                 WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
             """, (artist_id, artist_id, artist_id))
@@ -34640,6 +34641,7 @@ def watchlist_artist_config(artist_id):
                 'include_instrumentals': bool(result[13]) if result[13] is not None else False,
                 'last_scan_timestamp': result[11],
                 'date_added': result[12],
+                'lookback_days': result[15] if len(result) > 15 else None,
             }
 
             return jsonify({
@@ -34666,6 +34668,10 @@ def watchlist_artist_config(artist_id):
             include_acoustic = data.get('include_acoustic', False)
             include_compilations = data.get('include_compilations', False)
             include_instrumentals = data.get('include_instrumentals', False)
+            lookback_days = data.get('lookback_days', None)  # None = use global setting
+            # Validate lookback_days if provided
+            if lookback_days is not None:
+                lookback_days = int(lookback_days) if lookback_days != '' else None
 
             # Validate at least one release type is selected
             if not (include_albums or include_eps or include_singles):
@@ -34674,16 +34680,27 @@ def watchlist_artist_config(artist_id):
             # Update database
             conn = sqlite3.connect(str(database.database_path))
             cursor = conn.cursor()
+
+            # Check if lookback_days changed — if so, clear last_scan_timestamp to force rescan
+            cursor.execute("""
+                SELECT lookback_days FROM watchlist_artists
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+            """, (artist_id, artist_id, artist_id))
+            old_row = cursor.fetchone()
+            old_lookback = old_row[0] if old_row else None
+            lookback_changed = old_lookback != lookback_days
+
             cursor.execute("""
                 UPDATE watchlist_artists
                 SET include_albums = ?, include_eps = ?, include_singles = ?,
                     include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
-                    include_instrumentals = ?,
+                    include_instrumentals = ?, lookback_days = ?,
+                    last_scan_timestamp = CASE WHEN ? THEN NULL ELSE last_scan_timestamp END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
-                  int(include_instrumentals),
+                  int(include_instrumentals), lookback_days, lookback_changed,
                   artist_id, artist_id, artist_id))
             conn.commit()
 

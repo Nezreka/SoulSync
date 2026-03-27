@@ -502,7 +502,7 @@ class WatchlistScanner:
             logger.warning(f"No valid client/ID for {watchlist_artist.artist_name}")
             return None
 
-        albums = self._get_artist_discography_with_client(client, artist_id, last_scan_timestamp)
+        albums = self._get_artist_discography_with_client(client, artist_id, last_scan_timestamp, lookback_days=watchlist_artist.lookback_days)
 
         # If primary provider returned nothing, try the other provider as fallback
         if not albums:
@@ -533,7 +533,7 @@ class WatchlistScanner:
 
             if fallback_client and fallback_id:
                 logger.info(f"{provider.capitalize()} returned no albums for {watchlist_artist.artist_name}, falling back to {'iTunes' if provider == 'spotify' else 'Spotify'}")
-                albums = self._get_artist_discography_with_client(fallback_client, fallback_id, last_scan_timestamp)
+                albums = self._get_artist_discography_with_client(fallback_client, fallback_id, last_scan_timestamp, lookback_days=watchlist_artist.lookback_days)
 
         return albums
 
@@ -725,7 +725,7 @@ class WatchlistScanner:
                 logger.warning(f"Could not update artist image for {watchlist_artist.artist_name}: {img_error}")
 
             # Get artist discography using active provider
-            albums = self._get_artist_discography_with_client(client, artist_id, watchlist_artist.last_scan_timestamp)
+            albums = self._get_artist_discography_with_client(client, artist_id, watchlist_artist.last_scan_timestamp, lookback_days=watchlist_artist.lookback_days)
 
             if albums is None:
                 return ScanResult(
@@ -863,14 +863,19 @@ class WatchlistScanner:
             # Determine cutoff date for filtering
             cutoff_timestamp = last_scan_timestamp
 
-            # If no last scan timestamp, use lookback period setting
+            # If no last scan timestamp, use per-artist lookback or global setting
             if cutoff_timestamp is None:
-                lookback_period = self._get_lookback_period_setting()
-                if lookback_period != 'all':
-                    # Convert period to days and create cutoff date (use UTC)
-                    days = int(lookback_period)
-                    cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=days)
-                    logger.info(f"Using lookback period: {lookback_period} days (cutoff: {cutoff_timestamp})")
+                if lookback_days is not None:
+                    # Per-artist override
+                    cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+                    logger.info(f"Using per-artist lookback: {lookback_days} days (cutoff: {cutoff_timestamp})")
+                else:
+                    # Global setting
+                    lookback_period = self._get_lookback_period_setting()
+                    if lookback_period != 'all':
+                        days = int(lookback_period)
+                        cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=days)
+                        logger.info(f"Using global lookback period: {lookback_period} days (cutoff: {cutoff_timestamp})")
 
             # Filter by release date if we have a cutoff timestamp
             if cutoff_timestamp:
@@ -889,7 +894,7 @@ class WatchlistScanner:
             logger.error(f"Error getting discography for artist {spotify_artist_id}: {e}")
             return None
 
-    def _get_artist_discography_with_client(self, client, artist_id: str, last_scan_timestamp: Optional[datetime] = None) -> Optional[List]:
+    def _get_artist_discography_with_client(self, client, artist_id: str, last_scan_timestamp: Optional[datetime] = None, lookback_days: Optional[int] = None) -> Optional[List]:
         """
         Get artist's discography using the specified client, optionally filtered by release date.
 
@@ -898,6 +903,7 @@ class WatchlistScanner:
             artist_id: Artist ID for the given client
             last_scan_timestamp: Only return releases after this date (for incremental scans)
                                 If None, uses lookback period setting from database
+            lookback_days: Per-artist override for lookback period (None = use global setting)
         """
         try:
             # Get all artist albums (albums + singles)

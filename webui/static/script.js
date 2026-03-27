@@ -36986,6 +36986,7 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
         document.getElementById('config-include-acoustic').checked = config.include_acoustic || false;
         document.getElementById('config-include-compilations').checked = config.include_compilations || false;
         document.getElementById('config-include-instrumentals').checked = config.include_instrumentals || false;
+        document.getElementById('config-lookback-days').value = config.lookback_days != null ? String(config.lookback_days) : '';
 
         // Show global override notice if active
         const existingNotice = document.querySelector('.global-override-notice');
@@ -37443,6 +37444,8 @@ async function saveWatchlistArtistConfig(artistId) {
         const includeAcoustic = document.getElementById('config-include-acoustic').checked;
         const includeCompilations = document.getElementById('config-include-compilations').checked;
         const includeInstrumentals = document.getElementById('config-include-instrumentals').checked;
+        const lookbackDaysVal = document.getElementById('config-lookback-days').value;
+        const lookbackDays = lookbackDaysVal !== '' ? parseInt(lookbackDaysVal) : null;
 
         // Validate at least one release type is selected
         if (!includeAlbums && !includeEps && !includeSingles) {
@@ -37470,6 +37473,7 @@ async function saveWatchlistArtistConfig(artistId) {
                 include_acoustic: includeAcoustic,
                 include_compilations: includeCompilations,
                 include_instrumentals: includeInstrumentals,
+                lookback_days: lookbackDays,
             })
         });
 
