@@ -20239,6 +20239,22 @@ def get_database_stats():
         print(f"Error getting database stats: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/wishlist/process', methods=['POST'])
+def process_wishlist_api():
+    """Trigger wishlist processing via API. Processes pending wishlist tracks in the background."""
+    try:
+        if wishlist_auto_processing:
+            return jsonify({"success": False, "error": "Wishlist processing already in progress"}), 409
+
+        # Run in background thread (same as automation trigger)
+        import threading
+        thread = threading.Thread(target=_process_wishlist_automatically, daemon=True)
+        thread.start()
+
+        return jsonify({"success": True, "message": "Wishlist processing started"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/wishlist/count', methods=['GET'])
 def get_wishlist_count():
     """Endpoint to get current wishlist count."""
