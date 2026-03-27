@@ -779,7 +779,7 @@ class WatchlistScanner:
                         if not self._should_include_track(track, album_data, watchlist_artist):
                             continue  # Skip this track based on content type preferences
 
-                        if self.is_track_missing_from_library(track):
+                        if self.is_track_missing_from_library(track, album_name=album_data.get('name')):
                             new_tracks_found += 1
 
                             # Add to wishlist
@@ -1337,9 +1337,9 @@ class WatchlistScanner:
             logger.warning(f"Error checking track content type inclusion: {e}")
             return True  # Default to including on error
 
-    def is_track_missing_from_library(self, track) -> bool:
+    def is_track_missing_from_library(self, track, album_name: str = None) -> bool:
         """
-        Check if a track is missing from the local Plex library.
+        Check if a track is missing from the local library.
         Uses the same matching logic as the download missing tracks modals.
         """
         try:
@@ -1374,7 +1374,7 @@ class WatchlistScanner:
                     # Use same database check as modals with server awareness
                     from config.settings import config_manager
                     active_server = config_manager.get_active_media_server()
-                    db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server)
+                    db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server, album=album_name)
                     
                     if db_track and confidence >= 0.7:
                         logger.debug(f"✔️ Track found in library: '{original_title}' by '{artist_name}' (confidence: {confidence:.2f})")

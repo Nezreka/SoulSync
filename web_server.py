@@ -18584,11 +18584,12 @@ def _automatic_wishlist_cleanup_after_db_update():
             track_name = track.get('name', '')
             artists = track.get('artists', [])
             spotify_track_id = track.get('spotify_track_id') or track.get('id')
-            
+            track_album = track.get('album', {}).get('name') if isinstance(track.get('album'), dict) else track.get('album')
+
             # Skip if no essential data
             if not track_name or not artists or not spotify_track_id:
                 continue
-            
+
             # Check each artist
             found_in_db = False
             for artist in artists:
@@ -18599,12 +18600,13 @@ def _automatic_wishlist_cleanup_after_db_update():
                     artist_name = artist['name']
                 else:
                     artist_name = str(artist)
-                
+
                 try:
                     db_track, confidence = db.check_track_exists(
-                        track_name, artist_name, 
-                        confidence_threshold=0.7, 
-                        server_source=active_server
+                        track_name, artist_name,
+                        confidence_threshold=0.7,
+                        server_source=active_server,
+                        album=track_album
                     )
                     
                     if db_track and confidence >= 0.7:
@@ -19786,6 +19788,7 @@ def _process_wishlist_automatically(automation_id=None):
                 track_name = track.get('name', '')
                 artists = track.get('artists', [])
                 spotify_track_id = track.get('spotify_track_id') or track.get('id')
+                track_album = track.get('album', {}).get('name') if isinstance(track.get('album'), dict) else track.get('album')
 
                 if not track_name or not artists or not spotify_track_id:
                     continue
@@ -19804,7 +19807,8 @@ def _process_wishlist_automatically(automation_id=None):
                         db_track, confidence = db.check_track_exists(
                             track_name, artist_name,
                             confidence_threshold=0.7,
-                            server_source=active_server
+                            server_source=active_server,
+                            album=track_album
                         )
 
                         if db_track and confidence >= 0.7:
@@ -20658,6 +20662,7 @@ def start_wishlist_missing_downloads():
             track_name = track.get('name', '')
             artists = track.get('artists', [])
             spotify_track_id = track.get('spotify_track_id') or track.get('id')
+            track_album = track.get('album', {}).get('name') if isinstance(track.get('album'), dict) else track.get('album')
 
             if not track_name or not artists or not spotify_track_id:
                 continue
@@ -20676,7 +20681,8 @@ def start_wishlist_missing_downloads():
                     db_track, confidence = db.check_track_exists(
                         track_name, artist_name,
                         confidence_threshold=0.7,
-                        server_source=active_server
+                        server_source=active_server,
+                        album=track_album
                     )
 
                     if db_track and confidence >= 0.7:
@@ -20890,13 +20896,14 @@ def cleanup_wishlist():
             track_name = track.get('name', '')
             artists = track.get('artists', [])
             spotify_track_id = track.get('spotify_track_id') or track.get('id')
-            
+            track_album = track.get('album', {}).get('name') if isinstance(track.get('album'), dict) else track.get('album')
+
             # Skip if no essential data
             if not track_name or not artists or not spotify_track_id:
                 continue
-            
+
             print(f"📋 [Wishlist Cleanup] Checking track {processed_count}/{len(wishlist_tracks)}: '{track_name}'")
-            
+
             # Check each artist
             found_in_db = False
             for artist in artists:
@@ -20907,12 +20914,13 @@ def cleanup_wishlist():
                     artist_name = artist['name']
                 else:
                     artist_name = str(artist)
-                
+
                 try:
                     db_track, confidence = db.check_track_exists(
-                        track_name, artist_name, 
-                        confidence_threshold=0.7, 
-                        server_source=active_server
+                        track_name, artist_name,
+                        confidence_threshold=0.7,
+                        server_source=active_server,
+                        album=track_album
                     )
                     
                     if db_track and confidence >= 0.7:
@@ -23324,6 +23332,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         found, confidence = True, best_sim
                     else:
                         # Fall back to global per-track search for this track
+                        _fallback_album = batch_album_context.get('name') if batch_album_context else None
                         for artist in artists:
                             if isinstance(artist, str):
                                 artist_name = artist
@@ -23332,7 +23341,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                             else:
                                 artist_name = str(artist)
                             db_track, track_confidence = db.check_track_exists(
-                                track_name, artist_name, confidence_threshold=0.7, server_source=active_server
+                                track_name, artist_name, confidence_threshold=0.7, server_source=active_server, album=_fallback_album
                             )
                             if db_track and track_confidence >= 0.7:
                                 found, confidence = True, track_confidence
