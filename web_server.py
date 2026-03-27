@@ -44672,6 +44672,59 @@ def _build_watchlist_count_payload(profile_id=1):
         'next_run_in_seconds': next_run_in_seconds
     }
 
+def _hydrabase_reconnect_loop():
+    """Background thread that monitors Hydrabase connection and auto-reconnects if needed."""
+    global _hydrabase_ws
+    _consecutive_failures = 0
+
+    while True:
+        socketio.sleep(30)
+        try:
+            # Only attempt reconnect if auto_connect is enabled
+            hydra_cfg = config_manager.get_hydrabase_config()
+            if not hydra_cfg.get('auto_connect') or not hydra_cfg.get('url') or not hydra_cfg.get('api_key'):
+                _consecutive_failures = 0
+                continue
+
+            # Check if already connected
+            try:
+                if _hydrabase_ws is not None and _hydrabase_ws.connected:
+                    _consecutive_failures = 0
+                    continue
+            except Exception:
+                pass  # Socket in bad state — treat as disconnected
+
+            # Disconnected with auto_connect enabled — try to reconnect
+            # Back off: 30s, 60s, 120s, max 300s between attempts
+            backoff = min(30 * (2 ** _consecutive_failures), 300)
+            if _consecutive_failures > 0:
+                socketio.sleep(backoff - 30)  # Already slept 30s at top of loop
+
+            import websocket
+            try:
+                with _hydrabase_lock:
+                    if _hydrabase_ws:
+                        try:
+                            _hydrabase_ws.close()
+                        except:
+                            pass
+                    ws = websocket.create_connection(
+                        hydra_cfg['url'],
+                        header={"x-api-key": hydra_cfg['api_key']},
+                        timeout=10
+                    )
+                    _hydrabase_ws = ws
+                _consecutive_failures = 0
+                print(f"🔄 [Hydrabase] Auto-reconnected to {hydra_cfg['url']}")
+            except Exception as e:
+                _consecutive_failures += 1
+                if _consecutive_failures <= 3:
+                    print(f"⚠️ [Hydrabase] Reconnect attempt failed ({_consecutive_failures}): {e}")
+                elif _consecutive_failures == 4:
+                    print(f"⚠️ [Hydrabase] Reconnect failing repeatedly — suppressing further logs until success")
+        except Exception:
+            pass  # Don't crash the monitor loop
+
 def _emit_service_status_loop():
     """Background thread that pushes service status every 5 seconds."""
     while True:
@@ -45183,6 +45236,8 @@ if __name__ == '__main__':
     socketio.start_background_task(_emit_automation_progress_loop)
     # Phase 7: Repair job progress
     socketio.start_background_task(_emit_repair_progress_loop)
+    # Hydrabase auto-reconnect monitor
+    socketio.start_background_task(_hydrabase_reconnect_loop)
     print("✅ WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair)")
 
     socketio.run(app, host='0.0.0.0', port=8008, debug=False, allow_unsafe_werkzeug=True)
