@@ -14684,6 +14684,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
         playlist_name = track_info.get("_playlist_name", "Unknown Playlist")
         track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
 
+        _artists = original_search.get('artists') or track_info.get('artists') or []
+
         template_context = {
             'artist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
             'albumartist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
@@ -14695,6 +14697,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'year': year,
             'quality': context.get('_audio_quality', ''),
             'albumtype': album_type_display,
+            '_artists_list': _artists,
+            '_itunes_artist_id': str(spotify_artist.get('id', '')) if isinstance(spotify_artist, dict) and str(spotify_artist.get('id', '')).isdigit() and (original_search.get('_source') == 'itunes' or track_info.get('_source') == 'itunes') else None,
         }
 
         folder_path, filename_base = _get_file_path_from_template(template_context, 'playlist_path')
@@ -14729,6 +14733,22 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
         # Multi-disc album subfolder support
         disc_number = album_info.get('disc_number', 1)
 
+        # Get structured artists list for collab artist handling
+        _artists = original_search.get('artists') or track_info.get('artists') or []
+        # Extract iTunes artist ID for primary artist resolution (only for iTunes source)
+        _spotify_album = context.get('spotify_album', {})
+        _itunes_aid = None
+        _track_source = original_search.get('_source') or track_info.get('_source', '')
+        _is_itunes = _track_source == 'itunes' or (isinstance(spotify_artist, dict) and str(spotify_artist.get('id', '')).isdigit() and _track_source != 'deezer')
+        if _is_itunes and isinstance(spotify_artist, dict):
+            _aid = spotify_artist.get('id', '')
+            if str(_aid).isdigit():
+                _itunes_aid = str(_aid)
+        if not _itunes_aid and _spotify_album:
+            _ext = _spotify_album.get('external_urls', {})
+            if isinstance(_ext, dict) and _ext.get('itunes_artist_id'):
+                _itunes_aid = _ext['itunes_artist_id']
+
         template_context = {
             'artist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
             'albumartist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
@@ -14739,6 +14759,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'year': year,
             'quality': context.get('_audio_quality', ''),
             'albumtype': album_type_display,
+            '_artists_list': _artists,
+            '_itunes_artist_id': _itunes_aid,
         }
         spotify_album = context.get('spotify_album', {})
         total_discs = spotify_album.get('total_discs', 1) if spotify_album else 1
@@ -15212,7 +15234,31 @@ def _apply_path_template(template: str, context: dict) -> str:
     # (e.g., $albumartist must be replaced before $album to prevent "Scorpionartist" from typo "$albumartis")
 
     # Longest variables first
-    result = result.replace('$albumartist', clean_context.get('albumartist', clean_context.get('artist', 'Unknown Artist')))
+    album_artist_value = clean_context.get('albumartist', clean_context.get('artist', 'Unknown Artist'))
+    # Collaborative album artist handling: "first" uses only the primary artist for folder names
+    collab_mode = config_manager.get('file_organization.collab_artist_mode', 'first')
+    if collab_mode == 'first' and album_artist_value:
+        # Use structured artists list to safely extract first artist
+        # Only splits when we have multiple distinct artist objects (Spotify provides these)
+        # Avoids string splitting which breaks names like "Tyler, the Creator" or "Simon & Garfunkel"
+        artists_list = context.get('_artists_list')
+        if artists_list and len(artists_list) > 1:
+            # Multiple artist objects (Spotify) — use first
+            first = artists_list[0]
+            album_artist_value = first.get('name', first) if isinstance(first, dict) else str(first)
+        elif artists_list and len(artists_list) == 1:
+            # Single artist string — could be a combined name from iTunes
+            # Resolve via artistId if available (safe: "Simon & Garfunkel" ID → "Simon & Garfunkel")
+            itunes_artist_id = context.get('_itunes_artist_id')
+            if itunes_artist_id and (',' in album_artist_value or ' & ' in album_artist_value):
+                try:
+                    from core.itunes_client import iTunesClient
+                    resolved = iTunesClient().resolve_primary_artist(itunes_artist_id)
+                    if resolved and resolved != album_artist_value:
+                        album_artist_value = resolved
+                except Exception:
+                    pass
+    result = result.replace('$albumartist', album_artist_value)
     result = result.replace('$albumtype', clean_context.get('albumtype', 'Album'))
     result = result.replace('$playlist', clean_context.get('playlist_name', ''))
 
@@ -15639,7 +15685,29 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
         metadata['artist'] = artist.get('name', '')
         print(f"🎵 Metadata: Using primary artist: '{metadata['artist']}'")
 
-    metadata['album_artist'] = artist.get('name', '') # Crucial for library organization
+    # Resolve album_artist for collab albums (match folder path logic)
+    _raw_album_artist = artist.get('name', '')
+    collab_mode = config_manager.get('file_organization.collab_artist_mode', 'first')
+    if collab_mode == 'first' and _raw_album_artist:
+        original_search = context.get("original_search_result", {})
+        _ctx_artists = original_search.get('artists') or context.get('track_info', {}).get('artists') or []
+        if len(_ctx_artists) > 1:
+            # Multiple artist objects (Spotify) — use first
+            first = _ctx_artists[0]
+            _raw_album_artist = first.get('name', first) if isinstance(first, dict) else str(first)
+        elif len(_ctx_artists) == 1 and (',' in _raw_album_artist or ' & ' in _raw_album_artist):
+            # Single combined string (iTunes) — resolve via artist ID
+            _aid = str(artist.get('id', ''))
+            _src = original_search.get('_source') or context.get('track_info', {}).get('_source', '')
+            if _aid.isdigit() and _src != 'deezer':
+                try:
+                    from core.itunes_client import iTunesClient
+                    resolved = iTunesClient().resolve_primary_artist(_aid)
+                    if resolved and resolved != _raw_album_artist:
+                        _raw_album_artist = resolved
+                except Exception:
+                    pass
+    metadata['album_artist'] = _raw_album_artist  # Crucial for library organization
 
     if album_info.get('is_album'):
         metadata['album'] = album_info.get('album_name', 'Unknown Album')

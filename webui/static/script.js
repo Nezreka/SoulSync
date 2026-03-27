@@ -5813,6 +5813,7 @@ async function loadSettingsData() {
         document.getElementById('template-single-path').value = settings.file_organization?.templates?.single_path || '$artist/$artist - $title/$title';
         document.getElementById('template-playlist-path').value = settings.file_organization?.templates?.playlist_path || '$playlist/$artist - $title';
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
+        document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
 
         // Populate Playlist Sync settings
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup !== false;
@@ -6834,6 +6835,7 @@ async function saveSettings(quiet = false) {
         file_organization: {
             enabled: document.getElementById('file-organization-enabled').checked,
             disc_label: document.getElementById('disc-label').value,
+            collab_artist_mode: document.getElementById('collab-artist-mode').value,
             templates: {
                 album_path: document.getElementById('template-album-path').value,
                 single_path: document.getElementById('template-single-path').value,

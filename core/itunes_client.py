@@ -194,6 +194,10 @@ class Album:
         if 'compilation' in collection_type.lower():
             album_type = 'compilation'
         
+        # Store artistId for primary artist resolution (collab album support)
+        if album_data.get('artistId'):
+            external_urls['itunes_artist_id'] = str(album_data['artistId'])
+
         return cls(
             id=str(album_data.get('collectionId', '')),
             name=_clean_itunes_album_name(album_data.get('collectionName', '')),
@@ -843,6 +847,20 @@ class iTunesClient:
         return None
 
     @rate_limited
+    def resolve_primary_artist(self, artist_id: str) -> Optional[str]:
+        """Resolve an iTunes artist ID to the primary artist name.
+        For collab albums, iTunes uses the primary artist's ID but a combined display name.
+        Looking up the ID returns the real primary artist name.
+        e.g., artistId 675391681 → 'Larry June' (not 'Larry June, Curren$y & The Alchemist')"""
+        try:
+            results = self._lookup(id=artist_id)
+            for item in results:
+                if item.get('wrapperType') == 'artist' and item.get('artistName'):
+                    return item['artistName']
+        except Exception:
+            pass
+        return None
+
     def search_artists(self, query: str, limit: int = 20) -> List[Artist]:
         """Search for artists using iTunes API.
 
