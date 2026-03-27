@@ -7234,18 +7234,34 @@ def stream_enhanced_search_track():
             'duration_ms': duration_ms
         })()
 
-        # Generate search queries based on download source mode
-        # - Soulseek: Track name only (avoids keyword filtering on artist names)
-        # - YouTube: Include artist name (provides context to find actual music)
+        # Determine effective stream source
+        # stream_source: "youtube" (default, instant) or "active" (use download source)
+        stream_source = config_manager.get('download_source.stream_source', 'youtube')
         download_mode = config_manager.get('download_source.mode', 'soulseek')
+
+        # Resolve the effective mode for streaming
+        if stream_source == 'youtube':
+            effective_mode = 'youtube'
+        else:
+            # "active" mode — use download source, but fall back to YouTube if Soulseek
+            _hybrid_order = config_manager.get('download_source.hybrid_order', [])
+            _hybrid_first = _hybrid_order[0] if _hybrid_order else config_manager.get('download_source.hybrid_primary', 'soulseek')
+            if download_mode == 'soulseek' or (download_mode == 'hybrid' and _hybrid_first == 'soulseek'):
+                effective_mode = 'youtube'  # Soulseek is too slow for streaming preview
+                logger.info("▶️ Stream source is 'active' but primary is Soulseek — falling back to YouTube")
+            elif download_mode == 'hybrid':
+                effective_mode = _hybrid_first
+            else:
+                effective_mode = download_mode
+
+        logger.info(f"▶️ Stream source: {stream_source} → effective: {effective_mode}")
+
+        # Generate search queries based on effective stream mode
         search_queries = []
         import re
 
-        _hybrid_order = config_manager.get('download_source.hybrid_order', [])
-        _hybrid_first = _hybrid_order[0] if _hybrid_order else config_manager.get('download_source.hybrid_primary', 'soulseek')
-        if download_mode in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl') or (download_mode == 'hybrid' and _hybrid_first in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl')):
-            # YouTube/Tidal mode: Include artist for better context
-            # Primary query: Artist + Track
+        if effective_mode in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
+            # Streaming sources: Include artist for better context
             if artist_name and track_name:
                 search_queries.append(f"{artist_name} {track_name}".strip())
 
@@ -7255,14 +7271,12 @@ def stream_enhanced_search_track():
             if cleaned_name and cleaned_name.lower() != track_name.lower():
                 search_queries.append(f"{artist_name} {cleaned_name}".strip())
 
-            logger.info(f"🔍 {download_mode.title()} mode: Searching with artist + track name: {search_queries}")
+            logger.info(f"🔍 {effective_mode.title()} stream: Searching with artist + track name: {search_queries}")
         else:
             # Soulseek mode: Track name only to avoid keyword filtering
-            # Primary query: Full track name
             if track_name.strip():
                 search_queries.append(track_name.strip())
 
-            # Cleaned query: Remove parentheses and brackets
             cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
             cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
 
@@ -7281,13 +7295,27 @@ def stream_enhanced_search_track():
 
         search_queries = unique_queries
 
+        # Select the search client based on effective stream mode
+        _stream_clients = {
+            'youtube': soulseek_client.youtube,
+            'tidal': soulseek_client.tidal,
+            'qobuz': soulseek_client.qobuz,
+            'hifi': soulseek_client.hifi,
+            'deezer_dl': soulseek_client.deezer_dl,
+        }
+        stream_client = _stream_clients.get(effective_mode)
+        use_direct_client = stream_client is not None
+
         # Try queries sequentially until we find a good match
         for query_index, query in enumerate(search_queries):
             logger.info(f"🔍 Query {query_index + 1}/{len(search_queries)}: '{query}'")
 
             try:
-                # Search slskd with timeout
-                tracks_result, _ = run_async(soulseek_client.search(query, timeout=15))
+                # Search using the stream source client (not the download source)
+                if use_direct_client:
+                    tracks_result, _ = run_async(stream_client.search(query, timeout=15))
+                else:
+                    tracks_result, _ = run_async(soulseek_client.search(query, timeout=15))
 
                 if tracks_result:
                     logger.info(f"✅ Found {len(tracks_result)} results for query: '{query}'")
