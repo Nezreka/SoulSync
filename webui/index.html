@@ -4507,6 +4507,17 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>Collaborative Album Artist:</label>
+                                    <select id="collab-artist-mode" class="form-select">
+                                        <option value="first">First Listed Artist (recommended)</option>
+                                        <option value="all">All Artists Combined</option>
+                                    </select>
+                                    <small class="settings-hint">How $albumartist resolves for albums with multiple artists.
+                                        "First Listed" uses only the primary artist for folder names (e.g., "Larry June" instead of "Larry June, Curren$y & The Alchemist").
+                                        Full artist list is always preserved in file metadata tags.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <button class="test-button" onclick="resetFileOrganizationTemplates()"
                                         style="background: #666;">
                                         🔄 Reset to Defaults
