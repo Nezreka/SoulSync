@@ -4980,10 +4980,39 @@ class MusicDatabase:
         """
         if s1 == s2:
             return 1.0
-        
+
         if not s1 or not s2:
             return 0.0
-        
+
+        # Censored title detection: Apple Music returns "B*****t" for "Bullshit"
+        # Asterisks replace middle characters — word count matches, non-censored words match,
+        # censored words share first char and non-asterisk trailing chars
+        if '*' in s1 or '*' in s2:
+            censored, uncensored = (s1, s2) if '*' in s1 else (s2, s1)
+            c_words = censored.lower().split()
+            u_words = uncensored.lower().split()
+            if len(c_words) == len(u_words):
+                all_match = True
+                for cw, uw in zip(c_words, u_words):
+                    if '*' in cw:
+                        # Strip asterisks to get the visible prefix/suffix
+                        # "b*****t" → prefix "b", suffix "t"
+                        # "f**k" → prefix "f", suffix "k"
+                        prefix = cw.split('*')[0]
+                        suffix = cw.rstrip('*').split('*')[-1] if not cw.endswith('*') else ''
+                        if not uw.startswith(prefix):
+                            all_match = False
+                            break
+                        if suffix and not uw.endswith(suffix):
+                            all_match = False
+                            break
+                    else:
+                        if cw != uw:
+                            all_match = False
+                            break
+                if all_match:
+                    return 1.0
+
         # Use enhanced similarity from matching engine if available
         if _matching_engine:
             return _matching_engine.similarity_score(s1, s2)
