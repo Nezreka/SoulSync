@@ -423,11 +423,16 @@ class DeezerClient:
         is get_album_raw() (used by deezer_worker.py)."""
         cache = get_metadata_cache()
         cached = cache.get_entity('deezer', 'album', str(album_id))
-        if cached and cached.get('title'):
+        # Only use cache if it has full album data (release_date indicates full API response,
+        # not just a search result which lacks release_date and track details)
+        if cached and cached.get('title') and cached.get('release_date'):
             return self._build_album_result(cached, album_id, include_tracks)
 
         data = self._api_get(f'album/{album_id}')
         if not data:
+            # Fall back to cached if API fails
+            if cached and cached.get('title'):
+                return self._build_album_result(cached, album_id, include_tracks)
             return None
 
         cache.store_entity('deezer', 'album', str(album_id), data)

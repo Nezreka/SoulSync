@@ -24581,8 +24581,8 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                                     enhanced_payload['disc_number'] = track_info.get('disc_number', 1)
                                     print(f"⚠️ [Context] No track_number in detailed_track, using track_info fallback: {enhanced_payload['track_number']}")
                             except Exception as e:
-                                enhanced_payload['track_number'] = track_info.get('track_number', 1)
-                                enhanced_payload['disc_number'] = track_info.get('disc_number', 1)
+                                enhanced_payload['track_number'] = track_info.get('track_number') or track.track_number if hasattr(track, 'track_number') else 0
+                                enhanced_payload['disc_number'] = track_info.get('disc_number') or track.disc_number if hasattr(track, 'disc_number') else 1
                                 print(f"❌ [Context] Error getting track_number, using track_info fallback: {enhanced_payload['track_number']} ({e})")
                         else:
                             enhanced_payload['track_number'] = track_info.get('track_number', 1)
