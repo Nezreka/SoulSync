@@ -15626,7 +15626,7 @@ def _verify_metadata_written(file_path: str) -> bool:
                 return False
             except APENoHeaderError:
                 pass
-        elif isinstance(check, (FLAC, OggVorbis)):
+        elif isinstance(check, (FLAC, OggVorbis)) or _is_ogg_opus(check):
             title_found = bool(check.get('title'))
             artist_found = bool(check.get('artist'))
         elif isinstance(check, MP4):
@@ -15640,6 +15640,10 @@ def _verify_metadata_written(file_path: str) -> bool:
     except Exception as e:
         print(f"⚠️ [VERIFY] Verification error (non-fatal): {e}")
         return False
+
+def _is_ogg_opus(audio_file):
+    """Check if a Mutagen file object is OggOpus (uses VorbisComment tags like FLAC/OGG)."""
+    return type(audio_file).__name__ == 'OggOpus'
 
 def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
     """
@@ -15716,8 +15720,8 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
                 if metadata.get('disc_number'):
                     audio_file.tags.add(TPOS(encoding=3, text=[str(metadata['disc_number'])]))
 
-            elif isinstance(audio_file, (FLAC, OggVorbis)):
-                # FLAC / OGG Vorbis: dict-style VorbisComment tags
+            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
+                # FLAC / OGG Vorbis / OGG Opus: dict-style VorbisComment tags
                 if metadata.get('title'):
                     audio_file['title'] = [metadata['title']]
                 if metadata.get('artist'):
@@ -15766,7 +15770,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
             if quality and config_manager.get('metadata_enhancement.tags.quality_tag', True) is not False:
                 if isinstance(audio_file.tags, ID3):
                     audio_file.tags.add(TXXX(encoding=3, desc='QUALITY', text=[quality]))
-                elif isinstance(audio_file, (FLAC, OggVorbis)):
+                elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
                     audio_file['quality'] = [quality]
                 elif isinstance(audio_file, MP4):
                     audio_file['----:com.apple.iTunes:QUALITY'] = [MP4FreeForm(quality.encode('utf-8'))]
@@ -16561,7 +16565,7 @@ def _embed_source_ids(audio_file, metadata: dict):
                     written.append(f'TXXX:{tag_name}')
 
         # FLAC / OGG Vorbis
-        elif isinstance(audio_file, (FLAC, OggVorbis)):
+        elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
             for tag_name, value in filtered_tags.items():
                 vorbis_key = _VORBIS_TAG_MAP.get(tag_name, tag_name)
                 audio_file[vorbis_key] = [str(value)]
@@ -16582,7 +16586,7 @@ def _embed_source_ids(audio_file, metadata: dict):
         if _needs_date_tag and release_year:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TDRC(encoding=3, text=[release_year]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)):
+            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
                 audio_file['date'] = [release_year]
             elif isinstance(audio_file, MP4):
                 audio_file['\xa9day'] = [release_year]
@@ -16593,7 +16597,7 @@ def _embed_source_ids(audio_file, metadata: dict):
             bpm_int = int(deezer_bpm)
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TBPM(encoding=3, text=[str(bpm_int)]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)):
+            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
                 audio_file['BPM'] = [str(bpm_int)]
             elif isinstance(audio_file, MP4):
                 audio_file['tmpo'] = [bpm_int]
@@ -16603,7 +16607,7 @@ def _embed_source_ids(audio_file, metadata: dict):
         if _tag_enabled('audiodb.tags.mood') and audiodb_mood:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TXXX(encoding=3, desc='MOOD', text=[audiodb_mood]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)):
+            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
                 audio_file['MOOD'] = [audiodb_mood]
             elif isinstance(audio_file, MP4):
                 audio_file['----:com.apple.iTunes:MOOD'] = [MP4FreeForm(audiodb_mood.encode('utf-8'))]
@@ -16613,7 +16617,7 @@ def _embed_source_ids(audio_file, metadata: dict):
         if _tag_enabled('audiodb.tags.style') and audiodb_style:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TXXX(encoding=3, desc='STYLE', text=[audiodb_style]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)):
+            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
                 audio_file['STYLE'] = [audiodb_style]
             elif isinstance(audio_file, MP4):
                 audio_file['----:com.apple.iTunes:STYLE'] = [MP4FreeForm(audiodb_style.encode('utf-8'))]
@@ -16640,7 +16644,7 @@ def _embed_source_ids(audio_file, metadata: dict):
                     genre_string = ', '.join(merged)
                     if isinstance(audio_file.tags, ID3):
                         audio_file.tags.add(TCON(encoding=3, text=[genre_string]))
-                    elif isinstance(audio_file, (FLAC, OggVorbis)):
+                    elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
                         audio_file['GENRE'] = [genre_string]
                     elif isinstance(audio_file, MP4):
                         audio_file['\xa9gen'] = [genre_string]
@@ -16660,7 +16664,7 @@ def _embed_source_ids(audio_file, metadata: dict):
             source, final_isrc = _isrc_candidates[0]
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TSRC(encoding=3, text=[final_isrc]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)):
+            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
                 audio_file['ISRC'] = [final_isrc]
             elif isinstance(audio_file, MP4):
                 audio_file['----:com.apple.iTunes:ISRC'] = [MP4FreeForm(final_isrc.encode('utf-8'))]
@@ -16676,7 +16680,7 @@ def _embed_source_ids(audio_file, metadata: dict):
             source, final_copyright = _copyright_candidates[0]
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TCOP(encoding=3, text=[final_copyright]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)):
+            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
                 audio_file['COPYRIGHT'] = [final_copyright]
             elif isinstance(audio_file, MP4):
                 audio_file['cprt'] = [final_copyright]
@@ -16686,7 +16690,7 @@ def _embed_source_ids(audio_file, metadata: dict):
         if _tag_enabled('qobuz.tags.label') and qobuz_label:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TPUB(encoding=3, text=[qobuz_label]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)):
+            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
                 audio_file['LABEL'] = [qobuz_label]
             elif isinstance(audio_file, MP4):
                 audio_file['----:com.apple.iTunes:LABEL'] = [MP4FreeForm(qobuz_label.encode('utf-8'))]
@@ -16696,7 +16700,7 @@ def _embed_source_ids(audio_file, metadata: dict):
         if _tag_enabled('lastfm.tags.url') and lastfm_url:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TXXX(encoding=3, desc='LASTFM_URL', text=[lastfm_url]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)):
+            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
                 audio_file['LASTFM_URL'] = [lastfm_url]
             elif isinstance(audio_file, MP4):
                 audio_file['----:com.apple.iTunes:LASTFM_URL'] = [MP4FreeForm(lastfm_url.encode('utf-8'))]
@@ -16704,7 +16708,7 @@ def _embed_source_ids(audio_file, metadata: dict):
         if _tag_enabled('genius.tags.url') and genius_url:
             if isinstance(audio_file.tags, ID3):
                 audio_file.tags.add(TXXX(encoding=3, desc='GENIUS_URL', text=[genius_url]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)):
+            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
                 audio_file['GENIUS_URL'] = [genius_url]
             elif isinstance(audio_file, MP4):
                 audio_file['----:com.apple.iTunes:GENIUS_URL'] = [MP4FreeForm(genius_url.encode('utf-8'))]

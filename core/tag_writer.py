@@ -77,7 +77,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                     pass
             result['has_cover_art'] = bool(audio.tags.getall('APIC'))
 
-        elif isinstance(audio, (FLAC, OggVorbis)):
+        elif isinstance(audio, (FLAC, OggVorbis)) or type(audio).__name__ == 'OggOpus':
             # FLAC / OGG
             result['title'] = _vorbis_first(audio, 'title')
             result['artist'] = _vorbis_first(audio, 'artist')
@@ -252,7 +252,7 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
             written = _write_id3(audio, title, artist, album_artist, album,
                                  year, genre_str, track_num, total_tracks,
                                  disc_num, bpm)
-        elif isinstance(audio, (FLAC, OggVorbis)):
+        elif isinstance(audio, (FLAC, OggVorbis)) or type(audio).__name__ == 'OggOpus':
             written = _write_vorbis(audio, title, artist, album_artist, album,
                                     year, genre_str, track_num, total_tracks,
                                     disc_num, bpm)
