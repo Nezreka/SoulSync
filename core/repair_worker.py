@@ -1973,24 +1973,30 @@ class RepairWorker:
         rel_from = details.get('from', '')
         rel_to = details.get('to', '')
         if not rel_from or not rel_to:
+            logger.warning("Path mismatch fix: missing from/to in details")
             return {'success': False, 'error': 'Missing from/to paths in finding details'}
 
         transfer = self.transfer_folder
         src = os.path.normpath(os.path.join(transfer, rel_from))
         dst = os.path.normpath(os.path.join(transfer, rel_to))
 
+        logger.info("Path mismatch fix: src=%s dst=%s transfer=%s", src, dst, transfer)
+
         # Safety: both paths must be inside transfer folder
         transfer_norm = os.path.normpath(transfer)
         if not src.startswith(transfer_norm + os.sep) or not dst.startswith(transfer_norm + os.sep):
+            logger.warning("Path mismatch fix: path escapes transfer folder. src=%s, dst=%s, transfer=%s", src, dst, transfer_norm)
             return {'success': False, 'error': 'Path escapes transfer folder'}
 
         if not os.path.isfile(src):
             # Source may have been moved already — check if destination already exists
             if os.path.isfile(dst):
                 return {'success': True, 'action': 'already_moved', 'message': 'File already at expected location'}
+            logger.warning("Path mismatch fix: source file not found: %s", src)
             return {'success': False, 'error': f'Source file not found: {rel_from}'}
 
         if os.path.exists(dst) and not os.path.samefile(src, dst):
+            logger.warning("Path mismatch fix: destination already exists (different file): %s", dst)
             return {'success': False, 'error': 'Destination already exists (different file)'}
 
         try:
