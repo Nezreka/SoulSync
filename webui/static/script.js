@@ -32285,6 +32285,13 @@ async function loadArtistDiscography(artistId, artistName = null, sourceOverride
 function displayArtistDiscography(discography) {
     console.log(`📀 Displaying discography: ${discography.albums?.length || 0} albums, ${discography.singles?.length || 0} singles`);
 
+    // Show Download Discography button(s) if there are any releases
+    const _totalReleases = (discography.albums?.length || 0) + (discography.eps?.length || 0) + (discography.singles?.length || 0);
+    const _discogWrap = document.getElementById('discog-download-wrap');
+    if (_discogWrap) _discogWrap.style.display = _totalReleases > 0 ? '' : 'none';
+    const _discogBtnArtists = document.getElementById('discog-download-btn-artists');
+    if (_discogBtnArtists) _discogBtnArtists.style.display = _totalReleases > 0 ? '' : 'none';
+
     // Populate albums
     const albumsContainer = document.getElementById('album-cards-container');
     if (albumsContainer) {
@@ -39536,6 +39543,13 @@ function updateArtistHeroSection(artist, discography) {
     updateCategoryStats('eps', discography.eps);
     updateCategoryStats('singles', discography.singles);
 
+    // Show Download Discography button(s) if there are any releases
+    const _totalReleases = (discography.albums?.length || 0) + (discography.eps?.length || 0) + (discography.singles?.length || 0);
+    const _discogWrap = document.getElementById('discog-download-wrap');
+    if (_discogWrap) _discogWrap.style.display = _totalReleases > 0 ? '' : 'none';
+    const _discogBtnArtists = document.getElementById('discog-download-btn-artists');
+    if (_discogBtnArtists) _discogBtnArtists.style.display = _totalReleases > 0 ? '' : 'none';
+
     // Last.fm stats (listeners / playcount)
     const _fmtNum = (n) => {
         if (!n || n <= 0) return '0';
@@ -40387,6 +40401,343 @@ function applyDiscographyFilters() {
 
         // Hide section entirely if all cards are hidden
         section.style.display = visibleCount === 0 ? 'none' : '';
+    }
+}
+
+// ==================== Download Discography Modal ====================
+
+function openDiscographyModal() {
+    // Support both Artists search page and Library artist detail page
+    let artist = artistsPageState.selectedArtist;
+    let discography = artistsPageState.artistDiscography;
+    let completionCache = artistsPageState.cache.completionData;
+
+    // Fallback to Library page state if Artists page has no data
+    if (!artist || !discography) {
+        const libId = artistDetailPageState.currentArtistId;
+        const libName = artistDetailPageState.currentArtistName;
+        if (libId && libName) {
+            artist = { id: libId, name: libName, image_url: document.getElementById('artist-detail-image')?.src || '' };
+            // Library page stores discography in the same artistsPageState when viewing from library
+            discography = artistsPageState.artistDiscography;
+        }
+    }
+
+    if (!artist || !discography) {
+        showToast('No discography data available', 'error');
+        return;
+    }
+
+    const completionData = (completionCache || {})[artist.id] || {};
+    const allReleases = [
+        ...(discography.albums || []).map(a => ({ ...a, _type: 'album' })),
+        ...(discography.eps || []).map(a => ({ ...a, _type: 'ep' })),
+        ...(discography.singles || []).map(a => ({ ...a, _type: 'single' })),
+    ];
+
+    // Build modal
+    const overlay = document.createElement('div');
+    overlay.className = 'discog-modal-overlay';
+    overlay.id = 'discog-modal-overlay';
+
+    const artistImg = artist.image_url || '';
+
+    overlay.innerHTML = `
+        <div class="discog-modal">
+            <div class="discog-modal-hero" ${artistImg ? `style="background-image:url('${artistImg}')"` : ''}>
+                <div class="discog-modal-hero-overlay"></div>
+                <div class="discog-modal-hero-content">
+                    <h2 class="discog-modal-title">Download Discography</h2>
+                    <p class="discog-modal-artist">${_esc(artist.name)}</p>
+                </div>
+                <button class="discog-modal-close" onclick="closeDiscographyModal()">&times;</button>
+            </div>
+            <div class="discog-filter-bar">
+                <div class="discog-filters">
+                    <button class="discog-filter active" data-type="album" onclick="toggleDiscogFilter(this)">Albums</button>
+                    <button class="discog-filter active" data-type="ep" onclick="toggleDiscogFilter(this)">EPs</button>
+                    <button class="discog-filter active" data-type="single" onclick="toggleDiscogFilter(this)">Singles</button>
+                </div>
+                <div class="discog-select-actions">
+                    <button class="discog-select-btn" onclick="discogSelectAll(true)">Select All</button>
+                    <button class="discog-select-btn" onclick="discogSelectAll(false)">Deselect All</button>
+                </div>
+            </div>
+            <div class="discog-grid" id="discog-grid">
+                ${allReleases.map((r, i) => _renderDiscogCard(r, i, completionData)).join('')}
+            </div>
+            <div class="discog-progress" id="discog-progress" style="display:none;"></div>
+            <div class="discog-footer" id="discog-footer">
+                <div class="discog-footer-info" id="discog-footer-info"></div>
+                <div class="discog-footer-actions">
+                    <button class="discog-cancel-btn" onclick="closeDiscographyModal()">Cancel</button>
+                    <button class="discog-submit-btn" id="discog-submit-btn">
+                        <span class="discog-submit-icon">⬇</span>
+                        <span id="discog-submit-text">Add to Wishlist</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+    _updateDiscogFooterCount();
+
+    // Bind submit button (avoids onclick being intercepted by helper system)
+    document.getElementById('discog-submit-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        startDiscographyDownload();
+    });
+}
+
+function _esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function _renderDiscogCard(release, index, completionData) {
+    const comp = completionData?.albums?.find(c => c.id === release.id) || completionData?.singles?.find(c => c.id === release.id);
+    const status = comp?.status || 'unknown';
+    const isOwned = status === 'completed';
+    const isPartial = status === 'partial' || status === 'nearly_complete';
+    const year = release.release_date ? release.release_date.substring(0, 4) : '';
+    const tracks = release.total_tracks || 0;
+    const img = release.image_url || '';
+    const checked = !isOwned;
+    const statusClass = isOwned ? 'owned' : isPartial ? 'partial' : '';
+    const statusIcon = isOwned ? '✓' : isPartial ? '◐' : '';
+
+    return `
+        <label class="discog-card ${statusClass}" data-type="${release._type}" style="animation-delay:${index * 0.03}s">
+            <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-tracks="${tracks}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
+            <div class="discog-card-art">
+                ${img ? `<img src="${img}" alt="" loading="lazy">` : '<div class="discog-card-art-placeholder">🎵</div>'}
+                ${statusIcon ? `<span class="discog-card-status">${statusIcon}</span>` : ''}
+            </div>
+            <div class="discog-card-info">
+                <div class="discog-card-title">${_esc(release.name)}</div>
+                <div class="discog-card-meta">${year}${year && tracks ? ' · ' : ''}${tracks ? tracks + ' tracks' : ''}</div>
+            </div>
+            <div class="discog-card-check"></div>
+        </label>
+    `;
+}
+
+function toggleDiscogFilter(btn) {
+    btn.classList.toggle('active');
+    const type = btn.dataset.type;
+    document.querySelectorAll(`.discog-card[data-type="${type}"]`).forEach(card => {
+        card.style.display = btn.classList.contains('active') ? '' : 'none';
+    });
+    _updateDiscogFooterCount();
+}
+
+function discogSelectAll(select) {
+    document.querySelectorAll('.discog-card-cb').forEach(cb => {
+        if (cb.closest('.discog-card').style.display !== 'none') {
+            cb.checked = select;
+        }
+    });
+    _updateDiscogFooterCount();
+}
+
+function _updateDiscogFooterCount() {
+    const checked = document.querySelectorAll('.discog-card-cb:checked');
+    let releases = 0, tracks = 0;
+    checked.forEach(cb => {
+        if (cb.closest('.discog-card').style.display !== 'none') {
+            releases++;
+            tracks += parseInt(cb.dataset.tracks) || 0;
+        }
+    });
+    const info = document.getElementById('discog-footer-info');
+    const btn = document.getElementById('discog-submit-text');
+    if (info) info.textContent = `${releases} release${releases !== 1 ? 's' : ''} · ${tracks} tracks`;
+    if (btn) btn.textContent = releases > 0 ? `Add ${releases} to Wishlist` : 'Select releases';
+    const submitBtn = document.getElementById('discog-submit-btn');
+    if (submitBtn) submitBtn.disabled = releases === 0;
+}
+
+async function startDiscographyDownload() {
+    let artist = artistsPageState.selectedArtist;
+    // Fallback to library page state
+    if (!artist && artistDetailPageState.currentArtistId) {
+        artist = { id: artistDetailPageState.currentArtistId, name: artistDetailPageState.currentArtistName || 'Unknown' };
+    }
+    if (!artist || !artist.id) {
+        showToast('No artist data available', 'error');
+        return;
+    }
+
+    const checked = document.querySelectorAll('.discog-card-cb:checked');
+    const albumEntries = [];
+    checked.forEach(cb => {
+        if (cb.closest('.discog-card').style.display !== 'none') {
+            albumEntries.push({
+                id: cb.dataset.albumId,
+                tracks: parseInt(cb.dataset.tracks) || 0
+            });
+        }
+    });
+    // Sort by track count descending — process Deluxe/expanded editions first
+    // so their tracks get added before standard editions (which then get deduped)
+    albumEntries.sort((a, b) => b.tracks - a.tracks);
+    const albumIds = albumEntries.map(e => e.id);
+
+    if (albumIds.length === 0) return;
+
+    // Switch to progress view
+    const grid = document.getElementById('discog-grid');
+    const progress = document.getElementById('discog-progress');
+    const footer = document.getElementById('discog-footer');
+    const filterBar = document.querySelector('.discog-filter-bar');
+
+    if (grid) grid.style.display = 'none';
+    if (filterBar) filterBar.style.display = 'none';
+    if (progress) {
+        progress.style.display = '';
+        progress.innerHTML = '';
+    }
+
+    // Build progress items
+    const albumMap = {};
+    checked.forEach(cb => {
+        if (cb.closest('.discog-card').style.display !== 'none') {
+            const card = cb.closest('.discog-card');
+            const id = cb.dataset.albumId;
+            const title = card.querySelector('.discog-card-title')?.textContent || '';
+            const img = card.querySelector('.discog-card-art img')?.src || '';
+            albumMap[id] = { title, img };
+
+            const item = document.createElement('div');
+            item.className = 'discog-progress-item';
+            item.id = `discog-prog-${id}`;
+            item.innerHTML = `
+                <div class="discog-prog-art">${img ? `<img src="${img}">` : '🎵'}</div>
+                <div class="discog-prog-info">
+                    <div class="discog-prog-title">${_esc(title)}</div>
+                    <div class="discog-prog-status">Waiting...</div>
+                </div>
+                <div class="discog-prog-icon"><div class="discog-spinner"></div></div>
+            `;
+            progress.appendChild(item);
+        }
+    });
+
+    // Update footer
+    const submitBtn = document.getElementById('discog-submit-btn');
+    if (submitBtn) submitBtn.style.display = 'none';
+    if (footer) {
+        const info = document.getElementById('discog-footer-info');
+        if (info) info.textContent = 'Processing... this may take a moment';
+    }
+
+    // Mark all items as active
+    document.querySelectorAll('.discog-progress-item').forEach(item => item.classList.add('active'));
+
+    try {
+        const response = await fetch(`/api/artist/${artist.id}/download-discography`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ album_ids: albumIds, artist_name: artist.name })
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep incomplete line in buffer
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const data = JSON.parse(line);
+
+                    if (data.status === 'complete') {
+                        _handleDiscogProgress({ type: 'complete', total_added: data.total_added, total_skipped: data.total_skipped });
+                    } else {
+                        // Per-album update
+                        const item = document.getElementById(`discog-prog-${data.album_id}`);
+                        if (!item) continue;
+
+                        const statusEl = item.querySelector('.discog-prog-status');
+                        const iconEl = item.querySelector('.discog-prog-icon');
+                        item.classList.remove('active');
+
+                        if (data.status === 'done') {
+                            const parts = [];
+                            if (data.tracks_added > 0) parts.push(`${data.tracks_added} added`);
+                            if (data.tracks_skipped > 0) parts.push(`${data.tracks_skipped} skipped`);
+                            statusEl.textContent = parts.join(', ') || 'No new tracks';
+                            iconEl.innerHTML = data.tracks_added > 0 ? '<span class="discog-check">✓</span>' : '<span class="discog-skip">—</span>';
+                            item.classList.add(data.tracks_added > 0 ? 'done' : 'skipped');
+                        } else if (data.status === 'error') {
+                            statusEl.textContent = data.message || 'Error';
+                            iconEl.innerHTML = '<span class="discog-error">✗</span>';
+                            item.classList.add('error');
+                        }
+                    }
+                } catch (e) { /* skip malformed line */ }
+            }
+        }
+    } catch (err) {
+        showToast(`Discography download failed: ${err.message}`, 'error');
+    }
+}
+
+function _handleDiscogProgress(data) {
+    if (data.type === 'album') {
+        const item = document.getElementById(`discog-prog-${data.album_id}`);
+        if (!item) return;
+
+        const statusEl = item.querySelector('.discog-prog-status');
+        const iconEl = item.querySelector('.discog-prog-icon');
+
+        if (data.status === 'processing') {
+            statusEl.textContent = `Processing ${data.tracks_total} tracks...`;
+            item.classList.add('active');
+        } else if (data.status === 'done') {
+            const parts = [];
+            if (data.tracks_added > 0) parts.push(`${data.tracks_added} added`);
+            if (data.tracks_skipped > 0) parts.push(`${data.tracks_skipped} skipped`);
+            statusEl.textContent = parts.join(', ') || 'No new tracks';
+            iconEl.innerHTML = data.tracks_added > 0 ? '<span class="discog-check">✓</span>' : '<span class="discog-skip">—</span>';
+            item.classList.remove('active');
+            item.classList.add(data.tracks_added > 0 ? 'done' : 'skipped');
+        } else if (data.status === 'error') {
+            statusEl.textContent = data.message || 'Error';
+            iconEl.innerHTML = '<span class="discog-error">✗</span>';
+            item.classList.add('error');
+        }
+    } else if (data.type === 'complete') {
+        const info = document.getElementById('discog-footer-info');
+        if (info) info.textContent = `Done — ${data.total_added} tracks added, ${data.total_skipped} skipped`;
+
+        // Show "Process Wishlist" button
+        const footer = document.querySelector('.discog-footer-actions');
+        if (footer && data.total_added > 0) {
+            footer.innerHTML = `
+                <button class="discog-cancel-btn" onclick="closeDiscographyModal()">Close</button>
+                <button class="discog-submit-btn" onclick="closeDiscographyModal();fetch('/api/wishlist/process',{method:'POST'});showToast('Wishlist processing started','success')">
+                    <span class="discog-submit-icon">🚀</span>
+                    <span>Process Wishlist Now</span>
+                </button>
+            `;
+        } else if (footer) {
+            footer.innerHTML = '<button class="discog-cancel-btn" onclick="closeDiscographyModal()">Close</button>';
+        }
+    }
+}
+
+function closeDiscographyModal() {
+    const overlay = document.getElementById('discog-modal-overlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+        setTimeout(() => overlay.remove(), 300);
     }
 }
 
