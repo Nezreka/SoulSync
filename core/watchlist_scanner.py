@@ -701,26 +701,25 @@ class WatchlistScanner:
 
             logger.info(f"Using {provider} provider for {watchlist_artist.artist_name} (ID: {artist_id})")
 
-            # Update artist image (cached for performance)
+            # Update artist image if missing or on every scan to keep fresh
             try:
+                image_url = None
                 artist_data = client.get_artist(artist_id)
-                if artist_data and 'images' in artist_data and artist_data['images']:
-                    # Get medium-sized image (usually the second one, or first if only one)
-                    image_url = None
-                    if len(artist_data['images']) > 1:
-                        image_url = artist_data['images'][1]['url']
-                    else:
-                        image_url = artist_data['images'][0]['url']
+                if artist_data:
+                    if 'images' in artist_data and artist_data['images']:
+                        # Spotify/Deezer format: array of {url, height, width}
+                        image_url = artist_data['images'][1]['url'] if len(artist_data['images']) > 1 else artist_data['images'][0]['url']
+                    elif artist_data.get('image_url'):
+                        # Direct image_url format (iTunes/some providers)
+                        image_url = artist_data['image_url']
 
-                    # Update in database (use spotify_artist_id as the key for consistency)
-                    if image_url:
-                        db_artist_id = watchlist_artist.spotify_artist_id or artist_id
-                        self.database.update_watchlist_artist_image(db_artist_id, image_url)
-                        logger.info(f"Updated artist image for {watchlist_artist.artist_name}")
-                    else:
-                        logger.warning(f"No image URL found for {watchlist_artist.artist_name}")
+                if image_url:
+                    db_artist_id = watchlist_artist.spotify_artist_id or watchlist_artist.itunes_artist_id or watchlist_artist.deezer_artist_id or artist_id
+                    self.database.update_watchlist_artist_image(db_artist_id, image_url)
+                    if not watchlist_artist.image_url:
+                        logger.info(f"Backfilled artist image for {watchlist_artist.artist_name}")
                 else:
-                    logger.warning(f"No images in {provider} data for {watchlist_artist.artist_name}")
+                    logger.debug(f"No image available for {watchlist_artist.artist_name} from {provider}")
             except Exception as img_error:
                 logger.warning(f"Could not update artist image for {watchlist_artist.artist_name}: {img_error}")
 
