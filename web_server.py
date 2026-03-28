@@ -9622,6 +9622,139 @@ def get_artist_album_tracks(artist_id, album_id):
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/artist/<artist_id>/download-discography', methods=['POST'])
+def download_discography(artist_id):
+    """Add selected albums from an artist's discography to the wishlist."""
+    try:
+        data = request.get_json()
+        if not data or 'album_ids' not in data:
+            return jsonify({"success": False, "error": "album_ids required"}), 400
+
+        album_ids = data['album_ids']
+        artist_name = data.get('artist_name', 'Unknown Artist')
+
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        profile_id = get_current_profile_id()
+        active_server = config_manager.get_active_media_server()
+
+        # Resolve metadata client
+        client = None
+        if spotify_client and spotify_client.is_authenticated():
+            client = spotify_client
+        else:
+            fallback_src = _get_metadata_fallback_source()
+            if fallback_src == 'itunes':
+                from core.itunes_client import iTunesClient
+                client = iTunesClient()
+            elif fallback_src == 'deezer':
+                client = _get_deezer_client()
+
+        if not client:
+            return jsonify({"success": False, "error": "No metadata source available"}), 500
+
+        total_added = 0
+        total_skipped = 0
+
+        def generate_ndjson():
+            nonlocal total_added, total_skipped
+
+            for album_id in album_ids:
+                try:
+                    album_data = client.get_album(album_id)
+                    if not album_data:
+                        yield json.dumps({"album_id": album_id, "status": "error", "message": "Album not found"}) + '\n'
+                        continue
+
+                    album_name = album_data.get('name', 'Unknown')
+                    album_images = album_data.get('images', [])
+                    album_type = album_data.get('album_type', 'album')
+                    release_date = album_data.get('release_date', '')
+                    album_artists = album_data.get('artists', [])
+
+                    tracks = album_data.get('tracks', {}).get('items', [])
+                    if not tracks:
+                        tracks_data = client.get_album_tracks(album_id)
+                        if tracks_data and 'items' in tracks_data:
+                            tracks = tracks_data['items']
+
+                    if not tracks:
+                        yield json.dumps({"album_id": album_id, "name": album_name, "status": "error", "message": "No tracks"}) + '\n'
+                        continue
+
+                    added = 0
+                    skipped = 0
+
+                    for track in tracks:
+                        track_name = track.get('name', '')
+                        track_artists = track.get('artists', [])
+                        track_id = track.get('id', '')
+
+                        if not track_name:
+                            continue
+
+                        spotify_track_data = {
+                            'id': track_id,
+                            'name': track_name,
+                            'artists': track_artists if isinstance(track_artists, list) else [{'name': str(track_artists)}],
+                            'album': {
+                                'id': str(album_id),
+                                'name': album_name,
+                                'artists': album_artists,
+                                'images': album_images,
+                                'album_type': album_type,
+                                'release_date': release_date,
+                                'total_tracks': len(tracks)
+                            },
+                            'duration_ms': track.get('duration_ms', 0),
+                            'explicit': track.get('explicit', False),
+                            'track_number': track.get('track_number', 0),
+                            'disc_number': track.get('disc_number', 1),
+                            'uri': track.get('uri', ''),
+                            'preview_url': track.get('preview_url'),
+                            'external_urls': track.get('external_urls', {}),
+                            'is_local': False
+                        }
+
+                        try:
+                            was_added = db.add_to_wishlist(
+                                spotify_track_data=spotify_track_data,
+                                failure_reason="Added via Download Discography",
+                                source_type="discography",
+                                source_info=json.dumps({
+                                    'artist_name': artist_name,
+                                    'album_name': album_name,
+                                    'album_type': album_type
+                                }),
+                                profile_id=profile_id
+                            )
+                            if was_added:
+                                added += 1
+                            else:
+                                skipped += 1
+                        except Exception:
+                            skipped += 1
+
+                    total_added += added
+                    total_skipped += skipped
+                    print(f"📥 [Discography] {album_name}: {added} added, {skipped} skipped")
+                    yield json.dumps({
+                        "album_id": album_id, "name": album_name, "status": "done",
+                        "tracks_added": added, "tracks_skipped": skipped, "tracks_total": len(tracks)
+                    }) + '\n'
+
+                except Exception as album_err:
+                    yield json.dumps({"album_id": album_id, "status": "error", "message": str(album_err)}) + '\n'
+
+            print(f"📥 [Discography] Complete for {artist_name}: {total_added} tracks added, {total_skipped} skipped across {len(album_ids)} albums")
+            yield json.dumps({"status": "complete", "total_added": total_added, "total_skipped": total_skipped, "total_albums": len(album_ids)}) + '\n'
+
+        return app.response_class(generate_ndjson(), mimetype='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
+
+    except Exception as e:
+        print(f"❌ Error in download discography: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/artist/<artist_id>/completion', methods=['POST'])
 def check_artist_discography_completion(artist_id):
     """Check completion status for artist's albums and singles"""
