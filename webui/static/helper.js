@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'Fix Wrong Spotify IDs',         desc: 'Manual match no longer stores iTunes IDs as Spotify IDs — detects actual provider from results' },
         { title: 'Spotify Enrichment Budget',   desc: 'Background enrichment worker caps at 3,000 items/day to prevent rate limit bans — resets at midnight' },
         { title: 'Per-Artist Library Sync',      desc: 'Validate files and clean stale entries per artist from the enhanced library view', page: 'library', selector: '.library-controls' },
         { title: 'Collaborative Album Handling',  desc: 'Smart folder naming for multi-artist albums — uses first listed artist', page: 'settings', selector: '#collab-artist-mode' },

@@ -18530,6 +18530,7 @@ async function performArtistSearch(query) {
 
         const data = await response.json();
         console.log('Manual search response:', data);
+        if (data.provider) currentMatchingData.provider = data.provider;
         if (data.results) {
             console.log('Results array:', data.results);
             renderArtistSearchResults(data.results);
@@ -42772,14 +42773,15 @@ async function doManualMatchSearch(service, entityType, query, container, entity
             }
             const idLine = document.createElement('div');
             idLine.className = 'enhanced-match-result-id';
-            idLine.textContent = `ID: ${result.id}`;
+            const providerLabel = result.provider && result.provider !== service ? ` (${result.provider})` : '';
+            idLine.textContent = `ID: ${result.id}${providerLabel}`;
             info.appendChild(idLine);
             row.appendChild(info);
 
             const matchBtn = document.createElement('button');
             matchBtn.className = 'enhanced-meta-save-btn';
             matchBtn.textContent = 'Match';
-            matchBtn.onclick = () => applyManualMatch(entityType, entityId, service, result.id, artistId);
+            matchBtn.onclick = () => applyManualMatch(entityType, entityId, result.provider || service, result.id, artistId);
             row.appendChild(matchBtn);
 
             container.appendChild(row);
