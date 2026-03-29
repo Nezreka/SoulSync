@@ -19000,6 +19000,15 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔧 Fix Watch All Unwatched Skipping Deezer Artists",
+                "description": "Watch All Unwatched now supports Deezer as an ID source",
+                "features": [
+                    "• Added Deezer ID support to the bulk watchlist add flow",
+                    "• Source detection based on actual ID field used instead of numeric heuristic",
+                    "• Fallback chain: active source first, then Spotify, iTunes, Deezer"
+                ]
+            },
+            {
                 "title": "🔧 Fix Library Maintenance Path Fixes Failing Silently",
                 "description": "Path mismatch fixes now use fresh config and report errors to the UI",
                 "features": [
@@ -34257,11 +34266,14 @@ def watchlist_all_unwatched_library_artists():
             artist_id = None
             if active_source == 'spotify' and artist.get('spotify_artist_id'):
                 artist_id = artist['spotify_artist_id']
+            elif active_source == 'deezer' and artist.get('deezer_id'):
+                artist_id = artist['deezer_id']
+            elif artist.get('spotify_artist_id'):
+                artist_id = artist['spotify_artist_id']
             elif artist.get('itunes_artist_id'):
                 artist_id = artist['itunes_artist_id']
-            elif artist.get('spotify_artist_id'):
-                # Fallback: use spotify if itunes not available
-                artist_id = artist['spotify_artist_id']
+            elif artist.get('deezer_id'):
+                artist_id = artist['deezer_id']
 
             if not artist_id:
                 skipped_no_id += 1
@@ -34276,9 +34288,13 @@ def watchlist_all_unwatched_library_artists():
                 skipped_already += 1
                 continue
 
-            is_numeric = artist_id.isdigit()
-            fb_source = _get_metadata_fallback_source()
-            src = fb_source if is_numeric else 'spotify'
+            # Determine source based on which ID field we picked
+            if artist_id == artist.get('spotify_artist_id'):
+                src = 'spotify'
+            elif artist_id == artist.get('deezer_id'):
+                src = 'deezer'
+            else:
+                src = _get_metadata_fallback_source()
             success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=src)
             if success:
                 added += 1

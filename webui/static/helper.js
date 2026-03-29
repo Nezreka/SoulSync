@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'Fix Watch All Unwatched',           desc: 'Watch All Unwatched now works for Deezer users — was silently skipping artists with only Deezer IDs' },
         { title: 'Fix Path Mismatch Fixes',         desc: 'Library Maintenance path fixes now use fresh config and show error reasons in the toast' },
         { title: 'Fix Wrong Spotify IDs',         desc: 'Manual match no longer stores iTunes IDs as Spotify IDs — detects actual provider from results' },
         { title: 'Spotify Enrichment Budget',   desc: 'Background enrichment worker caps at 3,000 items/day to prevent rate limit bans — resets at midnight' },
