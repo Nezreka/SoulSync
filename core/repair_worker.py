@@ -757,6 +757,11 @@ class RepairWorker:
             finding_id: ID of the finding to fix
             fix_action: Optional action override (e.g. 'staging' or 'delete' for orphan files)
         """
+        # Refresh transfer folder from config before each fix — same logic as _run_next_job
+        if self._config_manager:
+            raw = self._config_manager.get('soulseek.transfer_path', './Transfer')
+            self.transfer_folder = self._resolve_path(raw)
+
         conn = None
         try:
             conn = self.db._get_connection()
@@ -2301,14 +2306,18 @@ class RepairWorker:
 
             fixed = 0
             failed = 0
+            errors = []
             for fid in ids_to_fix:
                 result = self.fix_finding(fid, fix_action=fix_action)
                 if result.get('success'):
                     fixed += 1
                 else:
+                    error_msg = result.get('error', 'unknown error')
+                    logger.warning("Fix failed for finding #%s: %s", fid, error_msg)
+                    errors.append({'id': fid, 'error': error_msg})
                     failed += 1
 
-            return {'fixed': fixed, 'failed': failed, 'total': len(ids_to_fix)}
+            return {'fixed': fixed, 'failed': failed, 'total': len(ids_to_fix), 'errors': errors}
         except Exception as e:
             logger.error("Error bulk fixing findings: %s", e, exc_info=True)
             return {'fixed': 0, 'failed': 0, 'total': 0, 'error': str(e)}

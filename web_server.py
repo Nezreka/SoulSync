@@ -19000,6 +19000,15 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔧 Fix Library Maintenance Path Fixes Failing Silently",
+                "description": "Path mismatch fixes now use fresh config and report errors to the UI",
+                "features": [
+                    "• Transfer folder path is re-read from config before each fix attempt",
+                    "• Fix failure reasons are now shown in the toast notification",
+                    "• Bulk fix failures are logged individually with finding ID and error details"
+                ]
+            },
+            {
                 "title": "🔧 Fix Spotify Manual Match Storing Wrong IDs",
                 "description": "Manual match modals no longer store iTunes/Deezer IDs in Spotify ID columns",
                 "features": [
@@ -44034,7 +44043,8 @@ def repair_findings_bulk_fix():
             'success': True,
             'fixed': result.get('fixed', 0),
             'failed': result.get('failed', 0),
-            'total': result.get('total', 0)
+            'total': result.get('total', 0),
+            'errors': result.get('errors', [])
         }), 200
     except Exception as e:
         logger.error(f"Error bulk fixing findings: {e}")
