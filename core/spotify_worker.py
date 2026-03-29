@@ -431,18 +431,25 @@ class SpotifyWorker:
             logger.debug(f"No Spotify results for artist '{artist_name}'")
             return
 
-        # Find best fuzzy match
+        # Find best fuzzy match — score all candidates, pick highest above threshold
+        best_obj = None
+        best_score = 0
         for artist_obj in results:
-            if self._name_matches(artist_name, artist_obj.name):
-                if not self._is_spotify_id(artist_obj.id):
-                    logger.warning(f"Rejecting non-Spotify ID '{artist_obj.id}' for artist '{artist_name}' (iTunes fallback leak)")
-                    self._mark_status('artist', artist_id, 'error')
-                    self.stats['errors'] += 1
-                    return
-                self._update_artist(artist_id, artist_obj)
-                self.stats['matched'] += 1
-                logger.info(f"Matched artist '{artist_name}' -> Spotify ID: {artist_obj.id}")
+            score = self._name_similarity(artist_name, artist_obj.name)
+            if score >= self.name_similarity_threshold and score > best_score:
+                best_obj = artist_obj
+                best_score = score
+
+        if best_obj:
+            if not self._is_spotify_id(best_obj.id):
+                logger.warning(f"Rejecting non-Spotify ID '{best_obj.id}' for artist '{artist_name}' (iTunes fallback leak)")
+                self._mark_status('artist', artist_id, 'error')
+                self.stats['errors'] += 1
                 return
+            self._update_artist(artist_id, best_obj)
+            self.stats['matched'] += 1
+            logger.info(f"Matched artist '{artist_name}' -> Spotify ID: {best_obj.id} (score: {best_score:.2f})")
+            return
 
         self._mark_status('artist', artist_id, 'not_found')
         self.stats['not_found'] += 1
@@ -595,17 +602,24 @@ class SpotifyWorker:
             logger.debug(f"No Spotify results for album '{album_name}'")
             return
 
+        best_obj = None
+        best_score = 0
         for album_obj in results:
-            if self._name_matches(album_name, album_obj.name):
-                if not self._is_spotify_id(album_obj.id):
-                    logger.warning(f"Rejecting non-Spotify ID '{album_obj.id}' for album '{album_name}'")
-                    self._mark_status('album', album_id, 'error')
-                    self.stats['errors'] += 1
-                    return
-                self._update_album(album_id, album_obj)
-                self.stats['matched'] += 1
-                logger.info(f"Matched album '{album_name}' -> Spotify ID: {album_obj.id}")
+            score = self._name_similarity(album_name, album_obj.name)
+            if score >= self.name_similarity_threshold and score > best_score:
+                best_obj = album_obj
+                best_score = score
+
+        if best_obj:
+            if not self._is_spotify_id(best_obj.id):
+                logger.warning(f"Rejecting non-Spotify ID '{best_obj.id}' for album '{album_name}'")
+                self._mark_status('album', album_id, 'error')
+                self.stats['errors'] += 1
                 return
+            self._update_album(album_id, best_obj)
+            self.stats['matched'] += 1
+            logger.info(f"Matched album '{album_name}' -> Spotify ID: {best_obj.id} (score: {best_score:.2f})")
+            return
 
         self._mark_status('album', album_id, 'not_found')
         self.stats['not_found'] += 1
@@ -625,17 +639,24 @@ class SpotifyWorker:
             logger.debug(f"No Spotify results for track '{track_name}'")
             return
 
+        best_obj = None
+        best_score = 0
         for track_obj in results:
-            if self._name_matches(track_name, track_obj.name):
-                if not self._is_spotify_id(track_obj.id):
-                    logger.warning(f"Rejecting non-Spotify ID '{track_obj.id}' for track '{track_name}'")
-                    self._mark_status('track', track_id, 'error')
-                    self.stats['errors'] += 1
-                    return
-                self._update_track_from_search(track_id, track_obj)
-                self.stats['matched'] += 1
-                logger.info(f"Matched track '{track_name}' -> Spotify ID: {track_obj.id}")
+            score = self._name_similarity(track_name, track_obj.name)
+            if score >= self.name_similarity_threshold and score > best_score:
+                best_obj = track_obj
+                best_score = score
+
+        if best_obj:
+            if not self._is_spotify_id(best_obj.id):
+                logger.warning(f"Rejecting non-Spotify ID '{best_obj.id}' for track '{track_name}'")
+                self._mark_status('track', track_id, 'error')
+                self.stats['errors'] += 1
                 return
+            self._update_track_from_search(track_id, best_obj)
+            self.stats['matched'] += 1
+            logger.info(f"Matched track '{track_name}' -> Spotify ID: {best_obj.id} (score: {best_score:.2f})")
+            return
 
         self._mark_status('track', track_id, 'not_found')
         self.stats['not_found'] += 1
@@ -997,9 +1018,12 @@ class SpotifyWorker:
         name = re.sub(r'\s+', ' ', name).strip()
         return name
 
-    def _name_matches(self, query_name: str, result_name: str) -> bool:
+    def _name_similarity(self, query_name: str, result_name: str) -> float:
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
-        similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
+        return SequenceMatcher(None, norm_query, norm_result).ratio()
+
+    def _name_matches(self, query_name: str, result_name: str) -> bool:
+        similarity = self._name_similarity(query_name, result_name)
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")
         return similarity >= self.name_similarity_threshold
