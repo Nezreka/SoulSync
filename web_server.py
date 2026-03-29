@@ -18982,6 +18982,16 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🛡️ Spotify Enrichment Daily Budget",
+                "description": "The background enrichment worker now caps itself at 3,000 items per day to prevent rate limit bans",
+                "features": [
+                    "• Worker-only daily budget — user-initiated searches, playlist operations, etc. are unaffected",
+                    "• Counter resets automatically at midnight each day",
+                    "• Worker sleeps when budget is exhausted and resumes the next day",
+                    "• Budget status exposed in the enrichment worker dashboard widget"
+                ]
+            },
+            {
                 "title": "🎧 Deezer Download Source",
                 "description": "Download music directly from Deezer with ARL authentication",
                 "features": [

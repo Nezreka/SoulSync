@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'Spotify Enrichment Budget',   desc: 'Background enrichment worker caps at 3,000 items/day to prevent rate limit bans — resets at midnight' },
         { title: 'Per-Artist Library Sync',      desc: 'Validate files and clean stale entries per artist from the enhanced library view', page: 'library', selector: '.library-controls' },
         { title: 'Collaborative Album Handling',  desc: 'Smart folder naming for multi-artist albums — uses first listed artist', page: 'settings', selector: '#collab-artist-mode' },
         { title: 'Accurate Completion Badges',    desc: 'Exact track counts, deduplication, multi-artist and censored title matching', page: 'artists', selector: '#artists-search-input' },

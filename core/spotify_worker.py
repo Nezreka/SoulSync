@@ -4,7 +4,7 @@ import threading
 import time
 from difflib import SequenceMatcher
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.spotify_client import SpotifyClient, SpotifyRateLimitError
@@ -52,6 +52,11 @@ class SpotifyWorker:
         # Rate limiting (SpotifyClient already rate-limits at 200ms between API calls)
         self.inter_item_sleep = 0.5       # Between top-level items
         self.batch_inter_item_sleep = 0.1  # Between local matches within a batch (no API calls)
+
+        # Daily budget — caps how many items this worker processes per calendar day
+        self.daily_budget = 3000
+        self._daily_items_processed = 0
+        self._daily_date = date.today()
 
         logger.info("Spotify background worker initialized")
 
@@ -116,9 +121,40 @@ class SpotifyWorker:
             'idle': is_idle,
             'authenticated': authenticated,
             'rate_limited': rate_limited,
+            'daily_budget': self._get_daily_budget_info(),
             'current_item': self.current_item,
             'stats': self.stats.copy(),
             'progress': progress
+        }
+
+    # ── Daily budget ──────────────────────────────────────────────────
+
+    def _increment_daily_budget(self):
+        """Increment the daily processed counter, resetting on a new calendar day."""
+        today = date.today()
+        if self._daily_date != today:
+            self._daily_items_processed = 0
+            self._daily_date = today
+        self._daily_items_processed += 1
+
+    def _is_daily_budget_exhausted(self) -> bool:
+        today = date.today()
+        if self._daily_date != today:
+            return False
+        return self._daily_items_processed >= self.daily_budget
+
+    def _get_daily_budget_info(self) -> dict:
+        today = date.today()
+        used = self._daily_items_processed if self._daily_date == today else 0
+        now = datetime.now()
+        midnight = datetime.combine(today + timedelta(days=1), datetime.min.time())
+        resets_in = int((midnight - now).total_seconds())
+        return {
+            'used': used,
+            'limit': self.daily_budget,
+            'remaining': max(0, self.daily_budget - used),
+            'exhausted': used >= self.daily_budget,
+            'resets_in_seconds': resets_in
         }
 
     # ── Main loop ──────────────────────────────────────────────────────
@@ -137,6 +173,15 @@ class SpotifyWorker:
                     remaining = info['remaining_seconds'] if info else 60
                     logger.debug(f"Spotify globally rate limited, sleeping {remaining}s...")
                     time.sleep(min(remaining, 60))  # Check again every 60s max
+                    continue
+
+                # Daily budget guard — worker-only cap to avoid saturating Spotify rate limits
+                if self._is_daily_budget_exhausted():
+                    budget = self._get_daily_budget_info()
+                    resets_in = budget['resets_in_seconds']
+                    logger.info(f"Daily enrichment budget exhausted ({budget['used']}/{budget['limit']}), "
+                                f"resets in {resets_in // 3600}h {(resets_in % 3600) // 60}m")
+                    time.sleep(min(resets_in, 300))  # Check every 5 min max
                     continue
 
                 # Post-ban cooldown guard — after ban expires, wait before resuming
@@ -180,6 +225,7 @@ class SpotifyWorker:
                     continue
 
                 self._process_item(item)
+                self._increment_daily_budget()
                 time.sleep(self.inter_item_sleep)
 
             except SpotifyRateLimitError:
