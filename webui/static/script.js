@@ -55821,7 +55821,11 @@ async function fixAllMatchingFindings() {
         });
         const result = await response.json();
         if (result.success) {
-            showToast(`Fixed ${result.fixed}${result.failed ? `, ${result.failed} failed` : ''} of ${result.total}`, result.fixed > 0 ? 'success' : 'error');
+            let msg = `Fixed ${result.fixed}${result.failed ? `, ${result.failed} failed` : ''} of ${result.total}`;
+            if (result.errors && result.errors.length > 0) {
+                msg += `: ${result.errors[0].error}`;
+            }
+            showToast(msg, result.fixed > 0 ? 'success' : 'error');
         } else {
             showToast(result.error || 'Bulk fix failed', 'error');
         }
@@ -56013,7 +56017,7 @@ async function bulkFixFindings() {
         if (!orphanFixAction) return;
     }
 
-    let fixed = 0, failed = 0;
+    let fixed = 0, failed = 0, lastError = '';
     showToast(`Fixing ${ids.length} findings...`, 'info');
 
     for (const id of ids) {
@@ -56030,14 +56034,16 @@ async function bulkFixFindings() {
             });
             const result = await response.json();
             if (result.success) fixed++;
-            else failed++;
+            else { failed++; lastError = result.error || 'unknown error'; }
         } catch {
             failed++;
         }
     }
 
     _repairSelectedFindings.clear();
-    showToast(`Fixed ${fixed}${failed ? `, ${failed} failed` : ''}`, fixed > 0 ? 'success' : 'error');
+    let fixMsg = `Fixed ${fixed}${failed ? `, ${failed} failed` : ''}`;
+    if (failed && lastError) fixMsg += `: ${lastError}`;
+    showToast(fixMsg, fixed > 0 ? 'success' : 'error');
     loadRepairFindingsDashboard();
     loadRepairFindings();
     updateRepairStatus();
