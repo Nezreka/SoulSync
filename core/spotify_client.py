@@ -46,7 +46,6 @@ _ESCALATION_MAX = 14400     # 4 hours max ban
 _BASE_UNKNOWN_BAN = 1800    # 30 min default when Retry-After header is missing
 _BASE_MAX_RETRIES_BAN = 3600  # 1 hour default when spotipy exhausted all retries
 
-
 class SpotifyRateLimitError(Exception):
     """Raised when Spotify API calls are blocked due to active global rate limit ban."""
     def __init__(self, retry_after, endpoint=None):
@@ -618,6 +617,7 @@ class SpotifyClient:
     def get_post_ban_cooldown_remaining():
         """Get remaining seconds in post-ban cooldown, or 0 if not in cooldown."""
         return _get_post_ban_cooldown_remaining()
+
 
     def _ensure_user_id(self) -> bool:
         """Ensure user_id is loaded (may make API call)"""
