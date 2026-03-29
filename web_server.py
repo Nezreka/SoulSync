@@ -12304,6 +12304,15 @@ def library_search_service():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _detect_provider(items, client):
+    """Detect actual provider from result IDs. Spotify IDs are alphanumeric;
+    iTunes/Deezer IDs are purely numeric. If the results have numeric IDs,
+    they came from the fallback source, not Spotify."""
+    if items and str(items[0].id).isdigit():
+        return client._fallback_source
+    return 'spotify'
+
+
 def _search_service(service, entity_type, query):
     """Search a service and return normalized results."""
     import requests as req_lib
@@ -12314,13 +12323,18 @@ def _search_service(service, entity_type, query):
         client = spotify_enrichment_worker.client
         if entity_type == 'artist':
             items = client.search_artists(query, limit=8)
-            return [{'id': a.id, 'name': a.name, 'image': a.image_url, 'extra': ', '.join(a.genres[:3]) if a.genres else ''} for a in items]
+            # Detect actual provider from result IDs — Spotify IDs are alphanumeric,
+            # iTunes/Deezer IDs are purely numeric. Prevents storing wrong IDs.
+            provider = _detect_provider(items, client)
+            return [{'id': a.id, 'name': a.name, 'image': a.image_url, 'extra': ', '.join(a.genres[:3]) if a.genres else '', 'provider': provider} for a in items]
         elif entity_type == 'album':
             items = client.search_albums(query, limit=8)
-            return [{'id': a.id, 'name': a.name, 'image': a.image_url, 'extra': f"{', '.join(a.artists)} · {a.release_date or ''}"} for a in items]
+            provider = _detect_provider(items, client)
+            return [{'id': a.id, 'name': a.name, 'image': a.image_url, 'extra': f"{', '.join(a.artists)} · {a.release_date or ''}", 'provider': provider} for a in items]
         elif entity_type == 'track':
             items = client.search_tracks(query, limit=8)
-            return [{'id': t.id, 'name': t.name, 'image': t.image_url, 'extra': f"{', '.join(t.artists)} · {t.album or ''}"} for t in items]
+            provider = _detect_provider(items, client)
+            return [{'id': t.id, 'name': t.name, 'image': t.image_url, 'extra': f"{', '.join(t.artists)} · {t.album or ''}", 'provider': provider} for t in items]
 
     elif service == 'itunes':
         if not itunes_enrichment_worker or not itunes_enrichment_worker.client:
@@ -13186,17 +13200,19 @@ def search_match():
             # Search for artists
             if use_hydrabase:
                 artist_matches = hydrabase_client.search_artists(query, limit=8)
+                provider = 'hydrabase'
             else:
                 artist_matches = spotify_client.search_artists(query, limit=8)
+                provider = _detect_provider(artist_matches, spotify_client)
             results = []
-            
+
             for artist in artist_matches:
                 # Calculate confidence based on search similarity
                 confidence = matching_engine.similarity_score(
                     matching_engine.normalize_string(query),
                     matching_engine.normalize_string(artist.name)
                 )
-                
+
                 results.append({
                     "artist": {
                         "id": artist.id,
@@ -13208,8 +13224,8 @@ def search_match():
                     },
                     "confidence": confidence
                 })
-            
-            return jsonify({"results": results})
+
+            return jsonify({"results": results, "provider": provider})
             
         elif context == 'album':
             # Search for albums by specific artist
@@ -13218,11 +13234,13 @@ def search_match():
             if use_hydrabase:
                 # Hydrabase: search albums by query directly
                 album_matches = hydrabase_client.search_albums(query, limit=20)
+                provider = 'hydrabase'
             else:
                 if not artist_id:
                     return jsonify({"error": "Artist ID required for album search"}), 400
                 # Get artist's albums and filter by query
                 album_matches = spotify_client.get_artist_albums(artist_id)
+                provider = _detect_provider(album_matches, spotify_client)
 
             results = []
             for album in album_matches:
@@ -13248,7 +13266,7 @@ def search_match():
 
             # Sort by confidence
             results.sort(key=lambda x: x['confidence'], reverse=True)
-            return jsonify({"results": results[:8]})
+            return jsonify({"results": results[:8], "provider": provider})
         
         else:
             return jsonify({"error": "Invalid context. Must be 'artist' or 'album'"}), 400
@@ -18981,6 +18999,16 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "🔧 Fix Spotify Manual Match Storing Wrong IDs",
+                "description": "Manual match modals no longer store iTunes/Deezer IDs in Spotify ID columns",
+                "features": [
+                    "• Detects actual provider from result IDs — Spotify IDs are alphanumeric, iTunes/Deezer are numeric",
+                    "• Match button now stores IDs in the correct service column (itunes_artist_id vs spotify_artist_id)",
+                    "• Results show provider label when falling back (e.g. 'ID: 312095 (itunes)')",
+                    "• Fixes broken Spotify links on artist pages caused by stored iTunes IDs"
+                ]
+            },
             {
                 "title": "🛡️ Spotify Enrichment Daily Budget",
                 "description": "The background enrichment worker now caps itself at 3,000 items per day to prevent rate limit bans",
