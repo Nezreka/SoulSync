@@ -36239,15 +36239,55 @@ function renderEnrichmentCards(enrichment) {
         const clickAttr = selector
             ? `onclick="navigateToPage('settings'); setTimeout(() => { switchSettingsTab('connections'); setTimeout(() => { const el = document.querySelector('${selector}'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100); }, 50);"`
             : '';
-        const titleAttr = selector && statusClass === 'not-configured'
-            ? 'title="Click to configure in Settings"'
-            : `title="${svc.name} — ${statusLabel}"`;
+
+        // Build activity display — human-readable, not cryptic numbers
+        let activityHtml = '';
+        let metaHtml = '';
+        const isSpotify = key === 'spotify_enrichment';
+
+        if ('running' in svc && svc.configured) {
+            const c1h = svc.calls_1h || 0;
+            const c24h = svc.calls_24h || 0;
+
+            if (isSpotify && svc.daily_budget) {
+                // Spotify: show budget usage prominently
+                const b = svc.daily_budget;
+                const pct = Math.min(100, Math.round((b.used / b.limit) * 100));
+                const barClass = b.exhausted ? 'exhausted' : pct > 80 ? 'high' : '';
+                activityHtml = `<span class="enrichment-chip-activity">${b.used.toLocaleString()} / ${b.limit.toLocaleString()}</span>`;
+                metaHtml = `<div class="enrichment-chip-budget">
+                    <div class="enrichment-chip-budget-bar ${barClass}" style="width: ${pct}%"></div>
+                </div>`;
+            } else if (c24h > 0) {
+                // Other services: show 24h count
+                activityHtml = `<span class="enrichment-chip-activity">${c24h.toLocaleString()} / 24h</span>`;
+            }
+        }
+
+        // Tooltip: full details including 1h breakdown
+        let tooltipLines = [svc.name + ' — ' + statusLabel];
+        if ('running' in svc && svc.configured) {
+            const c1h = svc.calls_1h || 0;
+            const c24h = svc.calls_24h || 0;
+            if (c24h > 0 || c1h > 0) tooltipLines.push('Last hour: ' + c1h + ' · Last 24h: ' + c24h);
+        }
+        if (isSpotify && svc.daily_budget) {
+            const b = svc.daily_budget;
+            tooltipLines.push('Daily budget: ' + b.used + ' / ' + b.limit + (b.exhausted ? ' (exhausted)' : ''));
+        }
+        if (selector && statusClass === 'not-configured') {
+            tooltipLines = ['Click to configure in Settings'];
+        }
+
+        const statusDisplay = statusClass === 'not-configured' && selector ? 'Configure →' : statusLabel;
 
         chips.push(`
-            <div class="enrichment-chip status-${statusClass}" ${clickAttr} ${titleAttr}>
+            <div class="enrichment-chip status-${statusClass}" ${clickAttr} title="${tooltipLines.join('\n')}">
                 <span class="enrichment-chip-dot"></span>
                 <span class="enrichment-chip-name">${svc.name}</span>
-                <span class="enrichment-chip-status">${statusLabel}</span>
+                ${activityHtml}
+                <span class="enrichment-chip-status">${statusDisplay}</span>
+                ${metaHtml}
             </div>
         `);
     }

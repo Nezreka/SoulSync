@@ -7462,14 +7462,31 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 
-/* Enrichment Services Grid */
+/* Enrichment Services Section */
+.enrichment-section {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.enrichment-section-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.enrichment-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: rgba(255, 255, 255, 0.3);
+}
+
 .enrichment-status-grid {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-top: 16px;
-    padding-top: 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .enrichment-chip {
@@ -7594,8 +7611,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-size: 10px;
     color: rgba(255, 255, 255, 0.4);
     white-space: nowrap;
-    margin-left: auto;
-    padding-left: 8px;
 }
 
 .enrichment-chip.status-not-configured .enrichment-chip-status {
@@ -7608,6 +7623,46 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .enrichment-chip.status-stopped .enrichment-chip-status {
     color: rgba(255, 71, 87, 0.7);
+}
+
+.enrichment-chip-activity {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.35);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    margin-left: auto;
+    padding-left: 8px;
+}
+
+/* Spotify budget bar — parent chip needs extra bottom padding */
+.enrichment-chip:has(.enrichment-chip-budget) {
+    padding-bottom: 12px;
+}
+
+.enrichment-chip-budget {
+    position: absolute;
+    bottom: 3px;
+    left: 8px;
+    right: 8px;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.enrichment-chip-budget-bar {
+    height: 100%;
+    background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.7), var(--accent));
+    border-radius: 3px;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.enrichment-chip-budget-bar.high {
+    background: linear-gradient(90deg, rgba(245, 166, 35, 0.7), #f5a623);
+}
+
+.enrichment-chip-budget-bar.exhausted {
+    background: linear-gradient(90deg, rgba(255, 71, 87, 0.7), #ff4757);
 }
 
 

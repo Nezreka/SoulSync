@@ -3406,7 +3406,7 @@ const WHATS_NEW = {
         { title: 'Fix Collab Artist on Singles',            desc: 'Single/playlist path templates now respect First Listed Artist setting — $albumartist available for all template types' },
         { title: 'Fix Enrichment Breaking Manual Matches', desc: 'Enriching a manually matched artist no longer reverts status to not_found — uses stored ID for direct lookup' },
         { title: 'Fix Spotify OAuth Empty Response',       desc: 'OAuth callback server now always sends a response in Docker — added health check and proper logging' },
-        { title: 'All Services on Dashboard',             desc: 'Dashboard shows all enrichment services as live-status chips — click unconfigured ones to jump to Settings. Spotify card no longer shows "Apple Music"', page: 'dashboard' },
+        { title: 'All Services on Dashboard',             desc: 'Dashboard shows all enrichment services with live API call counts (1h/24h), Spotify budget bar, and click-to-configure', page: 'dashboard' },
         { title: 'Qobuz on Connections Tab',              desc: 'Qobuz credentials now on Settings → Connections for metadata enrichment without needing it as download source' },
         { title: 'Fix Enrichment Status Widget',         desc: 'Enrichment tooltip now shows Rate Limited or Daily Limit instead of stuck on Running' },
         { title: 'Cache Maintenance',                    desc: 'Cache evictor now cleans junk entities, orphaned searches, and stale MusicBrainz nulls' },
