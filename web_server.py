@@ -19137,6 +19137,17 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔧 Fix Spotify OAuth ERR_EMPTY_RESPONSE in Docker (#220)",
+                "description": "OAuth callback server hardened for Docker/SSH tunnel setups",
+                "features": [
+                    "• Top-level error handler ensures an HTTP response is always sent (no more ERR_EMPTY_RESPONSE)",
+                    "• All callback logging now goes to app.log (was only in Docker stdout before)",
+                    "• Health check at http://localhost:8888/ to verify the callback server is running",
+                    "• Startup logs the actual bind address for diagnosing port conflicts",
+                    "• Port-in-use errors now logged clearly with explanation"
+                ]
+            },
+            {
                 "title": "📊 Show All Services on Dashboard (#219)",
                 "description": "Dashboard now shows connection status for all external services, not just the core three",
                 "features": [
@@ -42369,111 +42380,140 @@ def start_oauth_callback_servers():
     import urllib.parse
     
     # Spotify callback server (port 8888 — for direct/local access only)
+    _oauth_logger = get_logger("oauth_callback")
+
     class SpotifyCallbackHandler(BaseHTTPRequestHandler):
         def do_GET(self):
-            parsed_url = urllib.parse.urlparse(self.path)
+            try:
+                parsed_url = urllib.parse.urlparse(self.path)
 
-            # Only process requests to /callback — ignore everything else
-            if parsed_url.path != '/callback':
-                self.send_response(404)
-                self.send_header('Content-type', 'text/plain')
-                self.end_headers()
-                self.wfile.write(b'Not found. Spotify callback is at /callback')
-                return
+                # Health check at root — lets users verify the server is running
+                if parsed_url.path == '/':
+                    self.send_response(200)
+                    self.send_header('Content-type', 'text/plain')
+                    self.end_headers()
+                    self.wfile.write(b'SoulSync Spotify OAuth callback server is running. Callback URL: /callback')
+                    return
 
-            query_params = urllib.parse.parse_qs(parsed_url.query)
-            print(f"🎵 Spotify callback received on port 8888: {self.path}")
+                # Only process requests to /callback — ignore everything else
+                if parsed_url.path != '/callback':
+                    self.send_response(404)
+                    self.send_header('Content-type', 'text/plain')
+                    self.end_headers()
+                    self.wfile.write(b'Not found. Spotify callback is at /callback')
+                    return
 
-            if 'code' in query_params:
-                auth_code = query_params['code'][0]
-                print(f"🎵 Received Spotify authorization code: {auth_code[:10]}...")
+                query_params = urllib.parse.parse_qs(parsed_url.query)
+                _oauth_logger.info(f"Spotify callback received on port 8888: {self.path}")
 
-                # Manually trigger the token exchange using spotipy's auth manager
-                try:
-                    from core.spotify_client import SpotifyClient
-                    from spotipy.oauth2 import SpotifyOAuth
-                    from config.settings import config_manager
+                if 'code' in query_params:
+                    auth_code = query_params['code'][0]
+                    _oauth_logger.info(f"Received Spotify authorization code: {auth_code[:10]}...")
 
-                    # Get Spotify config
-                    config = config_manager.get_spotify_config()
-                    configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
-                    print(f"🎵 Using redirect_uri for token exchange: {configured_uri}")
+                    # Manually trigger the token exchange using spotipy's auth manager
+                    try:
+                        from core.spotify_client import SpotifyClient
+                        from spotipy.oauth2 import SpotifyOAuth
+                        from config.settings import config_manager
 
-                    # Create auth manager and exchange code for token
-                    auth_manager = SpotifyOAuth(
-                        client_id=config['client_id'],
-                        client_secret=config['client_secret'],
-                        redirect_uri=configured_uri,
-                        scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
-                        cache_path='config/.spotify_cache'
-                    )
+                        # Get Spotify config
+                        config = config_manager.get_spotify_config()
+                        configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
+                        _oauth_logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
 
-                    # Extract the authorization code and exchange it for tokens
-                    token_info = auth_manager.get_access_token(auth_code, as_dict=True)
+                        # Create auth manager and exchange code for token
+                        auth_manager = SpotifyOAuth(
+                            client_id=config['client_id'],
+                            client_secret=config['client_secret'],
+                            redirect_uri=configured_uri,
+                            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
+                            cache_path='config/.spotify_cache'
+                        )
 
-                    if token_info:
-                        # Reinitialize the global client with new tokens
-                        global spotify_client
-                        spotify_client = SpotifyClient()
+                        # Extract the authorization code and exchange it for tokens
+                        token_info = auth_manager.get_access_token(auth_code, as_dict=True)
 
-                        if spotify_client.is_authenticated():
-                            # Invalidate status cache so next poll picks up the new connection
-                            _status_cache_timestamps['spotify'] = 0
-                            # Refresh enrichment worker's client so it picks up new auth
-                            if spotify_enrichment_worker and hasattr(spotify_enrichment_worker, 'client'):
-                                spotify_enrichment_worker.client.reload_config()
-                            add_activity_item("✅", "Spotify Auth Complete", "Successfully authenticated with Spotify", "Now")
-                            self.send_response(200)
-                            self.send_header('Content-type', 'text/html')
-                            self.end_headers()
-                            self.wfile.write(b'<h1>Spotify Authentication Successful!</h1><p>You can close this window.</p>')
+                        if token_info:
+                            # Reinitialize the global client with new tokens
+                            global spotify_client
+                            spotify_client = SpotifyClient()
+
+                            if spotify_client.is_authenticated():
+                                # Invalidate status cache so next poll picks up the new connection
+                                _status_cache_timestamps['spotify'] = 0
+                                # Refresh enrichment worker's client so it picks up new auth
+                                if spotify_enrichment_worker and hasattr(spotify_enrichment_worker, 'client'):
+                                    spotify_enrichment_worker.client.reload_config()
+                                add_activity_item("✅", "Spotify Auth Complete", "Successfully authenticated with Spotify", "Now")
+                                self.send_response(200)
+                                self.send_header('Content-type', 'text/html')
+                                self.end_headers()
+                                self.wfile.write(b'<h1>Spotify Authentication Successful!</h1><p>You can close this window.</p>')
+                            else:
+                                raise Exception("Token exchange succeeded but authentication validation failed")
                         else:
-                            raise Exception("Token exchange succeeded but authentication validation failed")
-                    else:
-                        raise Exception("Failed to exchange authorization code for access token")
-                except Exception as e:
-                    print(f"🔴 Spotify token processing error: {e}")
-                    add_activity_item("❌", "Spotify Auth Failed", f"Token processing failed: {str(e)}", "Now")
+                            raise Exception("Failed to exchange authorization code for access token")
+                    except Exception as e:
+                        _oauth_logger.error(f"Spotify token processing error: {e}")
+                        add_activity_item("❌", "Spotify Auth Failed", f"Token processing failed: {str(e)}", "Now")
+                        self.send_response(400)
+                        self.send_header('Content-type', 'text/html')
+                        self.end_headers()
+                        self.wfile.write(f'<h1>Spotify Authentication Failed</h1><p>{str(e)}</p>'.encode())
+                elif 'error' in query_params:
+                    error = query_params['error'][0]
+                    _oauth_logger.error(f"Spotify OAuth error returned by Spotify: {error}")
+                    _oauth_logger.error(f"Full callback URL: {self.path}")
+                    add_activity_item("❌", "Spotify Auth Failed", f"Spotify returned error: {error}", "Now")
                     self.send_response(400)
                     self.send_header('Content-type', 'text/html')
                     self.end_headers()
-                    self.wfile.write(f'<h1>Spotify Authentication Failed</h1><p>{str(e)}</p>'.encode())
-            elif 'error' in query_params:
-                error = query_params['error'][0]
-                print(f"🔴 Spotify OAuth error returned by Spotify: {error}")
-                print(f"🔴 Full callback URL: {self.path}")
-                add_activity_item("❌", "Spotify Auth Failed", f"Spotify returned error: {error}", "Now")
-                self.send_response(400)
-                self.send_header('Content-type', 'text/html')
-                self.end_headers()
-                self.wfile.write(f'<h1>Spotify Authentication Failed</h1><p>Spotify returned error: {error}</p>'.encode())
-            else:
-                # No code AND no error — callback was hit without OAuth params
-                print(f"🔴 Spotify callback received without OAuth parameters (no code or error)")
-                print(f"🔴 Path: {self.path} | Query params: {query_params}")
-                print(f"🔴 This usually means the redirect lost its query parameters (reverse proxy issue)")
-                self.send_response(400)
-                self.send_header('Content-type', 'text/html')
-                self.end_headers()
-                msg = (
-                    '<h1>Spotify Authentication Failed</h1>'
-                    '<p>The callback was received but no authorization code or error was included.</p>'
-                    '<p><strong>If you are using a reverse proxy:</strong> Your proxy may be stripping query parameters '
-                    'during the redirect. Try setting your Spotify redirect URI to use port 8008 instead '
-                    '(e.g. <code>https://yourdomain.com/callback</code>) — the main app handles callbacks too.</p>'
-                )
-                self.wfile.write(msg.encode())
-        
+                    self.wfile.write(f'<h1>Spotify Authentication Failed</h1><p>Spotify returned error: {error}</p>'.encode())
+                else:
+                    # No code AND no error — callback was hit without OAuth params
+                    _oauth_logger.error(f"Spotify callback received without OAuth parameters (no code or error)")
+                    _oauth_logger.error(f"Path: {self.path} | Query params: {query_params}")
+                    _oauth_logger.error(f"This usually means the redirect lost its query parameters (reverse proxy issue)")
+                    self.send_response(400)
+                    self.send_header('Content-type', 'text/html')
+                    self.end_headers()
+                    msg = (
+                        '<h1>Spotify Authentication Failed</h1>'
+                        '<p>The callback was received but no authorization code or error was included.</p>'
+                        '<p><strong>If you are using a reverse proxy:</strong> Your proxy may be stripping query parameters '
+                        'during the redirect. Try setting your Spotify redirect URI to use port 8008 instead '
+                        '(e.g. <code>https://yourdomain.com/callback</code>) — the main app handles callbacks too.</p>'
+                    )
+                    self.wfile.write(msg.encode())
+            except Exception as e:
+                # Top-level catch-all — ensures we ALWAYS send an HTTP response.
+                # Without this, BaseHTTPRequestHandler silently closes the connection
+                # on unhandled exceptions, producing ERR_EMPTY_RESPONSE in the browser.
+                _oauth_logger.error(f"Unhandled error in Spotify callback handler: {e}", exc_info=True)
+                try:
+                    self.send_response(500)
+                    self.send_header('Content-type', 'text/html')
+                    self.end_headers()
+                    self.wfile.write(f'<h1>Internal Server Error</h1><p>{str(e)}</p>'.encode())
+                except Exception:
+                    pass  # Connection already broken, nothing more we can do
+
         def log_message(self, format, *args):
-            pass  # Suppress server logs
+            pass  # Suppress BaseHTTPRequestHandler access logs (we use our own logger)
     
     # Start Spotify callback server
     def run_spotify_server():
         try:
-            spotify_server = HTTPServer(('0.0.0.0', 8888), SpotifyCallbackHandler)
-            print("🎵 Started Spotify OAuth callback server on port 8888")
+            bind_addr = ('0.0.0.0', 8888)
+            spotify_server = HTTPServer(bind_addr, SpotifyCallbackHandler)
+            _oauth_logger.info(f"Spotify OAuth callback server listening on {bind_addr[0]}:{bind_addr[1]}")
+            print(f"🎵 Started Spotify OAuth callback server on {bind_addr[0]}:{bind_addr[1]}")
             spotify_server.serve_forever()
+        except OSError as e:
+            _oauth_logger.error(f"Failed to start Spotify callback server on port 8888: {e} — port may already be in use")
+            print(f"🔴 Failed to start Spotify callback server on port 8888: {e}")
         except Exception as e:
+            _oauth_logger.error(f"Failed to start Spotify callback server: {e}")
             print(f"🔴 Failed to start Spotify callback server: {e}")
     
     # Tidal callback server  
