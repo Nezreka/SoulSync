@@ -3396,7 +3396,7 @@ def run_service_test(service, test_config):
                      return True, "Spotify connection successful!"
                  else:
                      # Using fallback metadata source
-                     fallback_name = 'Deezer' if _get_metadata_fallback_source() == 'deezer' else 'Apple Music'
+                     fallback_name = 'Deezer' if _get_metadata_fallback_source() == 'deezer' else 'iTunes'
                      if spotify_configured:
                          return True, f"{fallback_name} connection successful! (Spotify configured but not authenticated)"
                      else:
@@ -3866,6 +3866,70 @@ def index():
 
 # --- API Endpoints ---
 
+def _get_enrichment_status():
+    """Get lightweight status for all enrichment services (no DB queries).
+    Reads worker properties directly to avoid expensive get_stats() calls."""
+    services = {}
+
+    # Worker-based enrichment services: (key, display_name, worker_var)
+    workers_info = [
+        ('musicbrainz', 'MusicBrainz', lambda: mb_worker),
+        ('spotify_enrichment', 'Spotify', lambda: spotify_enrichment_worker),
+        ('itunes_enrichment', 'iTunes', lambda: itunes_enrichment_worker),
+        ('deezer_enrichment', 'Deezer', lambda: deezer_worker),
+        ('tidal_enrichment', 'Tidal', lambda: tidal_enrichment_worker),
+        ('qobuz_enrichment', 'Qobuz', lambda: qobuz_enrichment_worker),
+        ('lastfm', 'Last.fm', lambda: lastfm_worker),
+        ('genius', 'Genius', lambda: genius_worker),
+        ('audiodb', 'AudioDB', lambda: audiodb_worker),
+    ]
+
+    # Config-based "configured" checks for services that need API keys/credentials
+    configured_checks = {
+        'spotify_enrichment': lambda: bool(config_manager.get('spotify.client_id') and config_manager.get('spotify.client_secret')),
+        'tidal_enrichment': lambda: bool(tidal_client and getattr(tidal_client, 'access_token', None)),
+        'qobuz_enrichment': lambda: bool(qobuz_enrichment_worker and qobuz_enrichment_worker.client and qobuz_enrichment_worker.client.user_auth_token),
+        'lastfm': lambda: bool(config_manager.get('lastfm.api_key', '')),
+        'genius': lambda: bool(config_manager.get('genius.access_token', '')),
+    }
+
+    for key, name, get_worker in workers_info:
+        worker = get_worker()
+        if worker is not None:
+            is_alive = worker.thread is not None and worker.thread.is_alive()
+            try:
+                configured = configured_checks.get(key, lambda: True)()
+            except Exception:
+                configured = False
+            services[key] = {
+                'name': name,
+                'configured': configured,
+                'running': worker.running and is_alive and not worker.paused,
+                'paused': worker.paused,
+                'idle': is_alive and not worker.paused and getattr(worker, 'current_item', None) is None,
+            }
+        else:
+            services[key] = {
+                'name': name,
+                'configured': False,
+                'running': False,
+                'paused': False,
+                'idle': False,
+            }
+
+    # Non-worker services (configured status only)
+    services['acoustid'] = {
+        'name': 'AcoustID',
+        'configured': bool(config_manager.get('acoustid.api_key', '')),
+    }
+    services['listenbrainz'] = {
+        'name': 'ListenBrainz',
+        'configured': bool(config_manager.get('listenbrainz.token', '')),
+    }
+
+    return services
+
+
 # Status check caching to reduce unnecessary API calls
 _status_cache = {
     'spotify': {'connected': False, 'response_time': 0, 'source': 'itunes'},
@@ -3963,7 +4027,8 @@ def get_status():
             'spotify': _status_cache['spotify'],
             'media_server': _status_cache['media_server'],
             'soulseek': _status_cache['soulseek'],
-            'active_media_server': active_server
+            'active_media_server': active_server,
+            'enrichment': _get_enrichment_status()
         }
         return jsonify(status_data)
     except Exception as e:
@@ -6214,7 +6279,7 @@ def spotify_disconnect():
             'rate_limit': None
         }
         _status_cache_timestamps['spotify'] = time.time()
-        fallback_label = 'Deezer' if fallback_src == 'deezer' else 'Apple Music/iTunes'
+        fallback_label = 'Deezer' if fallback_src == 'deezer' else 'iTunes'
         add_activity_item("🔌", "Spotify Disconnected", f"Switched to {fallback_label} metadata source", "Now")
         return jsonify({'success': True, 'message': f'Spotify disconnected. Now using {fallback_label}.'})
     except Exception as e:
@@ -19071,6 +19136,18 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "📊 Show All Services on Dashboard (#219)",
+                "description": "Dashboard now shows connection status for all external services, not just the core three",
+                "features": [
+                    "• Enrichment services shown as color-coded chips below core service cards",
+                    "• Status indicators: Running, Idle, Paused, Stopped, or Not Configured with accent-colored left borders",
+                    "• Unconfigured services show dashed border — click to jump directly to their Settings section",
+                    "• All configurable services clickable — navigates to Settings → Connections and scrolls to the service",
+                    "• Spotify card always labeled 'Spotify' — no longer confusingly switches to 'Apple Music'",
+                    "• Fallback state (using iTunes/Deezer) shown with amber indicator when Spotify is not connected"
+                ]
+            },
             {
                 "title": "🔧 Add Qobuz to Connections Tab (#218)",
                 "description": "Qobuz credentials now available on the Connections tab for metadata enrichment",
@@ -45284,7 +45361,8 @@ def _build_status_payload():
         'spotify': spotify_data,
         'media_server': _status_cache.get('media_server', {}),
         'soulseek': soulseek_data,
-        'active_media_server': config_manager.get_active_media_server()
+        'active_media_server': config_manager.get_active_media_server(),
+        'enrichment': _get_enrichment_status()
     }
 
 def _build_watchlist_count_payload(profile_id=1):
