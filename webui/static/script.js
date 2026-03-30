@@ -55468,9 +55468,145 @@ async function loadRepairFindingsDashboard() {
         }
 
         dashboard.innerHTML = html;
+
+        // Load cache health stats
+        _loadCacheHealthStats(dashboard);
     } catch (error) {
         console.error('Error loading findings dashboard:', error);
         dashboard.innerHTML = '';
+    }
+}
+
+async function _loadCacheHealthStats(dashboard) {
+    try {
+        const response = await fetch('/api/repair/cache-health');
+        if (!response.ok) return;
+        const stats = await response.json();
+        if (!stats.total_entities && !stats.total_searches) return;
+
+        const healthScore = stats.junk_entities === 0 && stats.stale_mb_nulls === 0 ? 'healthy' : stats.junk_entities > 50 ? 'poor' : 'fair';
+        const healthLabel = healthScore === 'healthy' ? 'Healthy' : healthScore === 'fair' ? 'Needs Cleanup' : 'Needs Attention';
+
+        const section = document.createElement('div');
+        section.className = 'repair-cache-health';
+        section.innerHTML = `
+            <div class="repair-cache-health-bar" onclick="openCacheHealthModal()">
+                <span class="repair-cache-health-dot ${healthScore}"></span>
+                <span class="repair-cache-health-title">Metadata Cache</span>
+                <span class="repair-cache-health-summary">${stats.total_entities.toLocaleString()} entities · ${healthLabel}</span>
+                <span class="repair-cache-health-action">View Details ›</span>
+            </div>
+        `;
+        dashboard.appendChild(section);
+    } catch (error) {
+        console.error('Error loading cache health:', error);
+    }
+}
+
+async function openCacheHealthModal() {
+    if (document.getElementById('cache-health-modal-overlay')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'cache-health-modal-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    overlay.innerHTML = `
+        <div class="cache-health-modal">
+            <div class="cache-health-header">
+                <div class="cache-health-header-content">
+                    <div class="cache-health-header-icon">&#128202;</div>
+                    <div>
+                        <h2 class="cache-health-title">Cache Health</h2>
+                        <p class="cache-health-subtitle">Metadata cache status across all sources</p>
+                    </div>
+                </div>
+                <button class="watch-all-close" onclick="document.getElementById('cache-health-modal-overlay').remove()">&times;</button>
+            </div>
+            <div class="cache-health-body">
+                <div class="cache-health-loading">
+                    <div class="watch-all-loading-spinner"></div>
+                    <div>Loading cache stats...</div>
+                </div>
+            </div>
+            <div class="cache-health-footer">
+                <button class="watch-all-btn watch-all-btn-cancel" onclick="document.getElementById('cache-health-modal-overlay').remove()">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    try {
+        const response = await fetch('/api/repair/cache-health');
+        if (!response.ok) throw new Error('Failed to load');
+        const s = await response.json();
+
+        const body = overlay.querySelector('.cache-health-body');
+        const healthScore = s.junk_entities === 0 && s.stale_mb_nulls === 0 ? 'healthy' : s.junk_entities > 50 ? 'poor' : 'fair';
+        const healthEmoji = healthScore === 'healthy' ? '&#10003;' : healthScore === 'fair' ? '&#9888;' : '&#10060;';
+        const healthLabel = healthScore === 'healthy' ? 'Cache is healthy' : healthScore === 'fair' ? 'Minor issues detected' : 'Cleanup recommended';
+
+        body.innerHTML = `
+            <div class="cache-health-status ${healthScore}">
+                <div class="cache-health-status-icon">${healthEmoji}</div>
+                <div class="cache-health-status-text">${healthLabel}</div>
+            </div>
+
+            <div class="cache-health-cards">
+                <div class="cache-health-card">
+                    <div class="cache-health-card-value">${s.total_entities.toLocaleString()}</div>
+                    <div class="cache-health-card-label">Total Entities</div>
+                </div>
+                <div class="cache-health-card">
+                    <div class="cache-health-card-value">${s.total_searches.toLocaleString()}</div>
+                    <div class="cache-health-card-label">Search Results</div>
+                </div>
+                <div class="cache-health-card">
+                    <div class="cache-health-card-value ${s.junk_entities > 0 ? 'warn' : ''}">${s.junk_entities}</div>
+                    <div class="cache-health-card-label">Junk Entries</div>
+                </div>
+                <div class="cache-health-card">
+                    <div class="cache-health-card-value ${s.stale_mb_nulls > 10 ? 'warn' : ''}">${s.stale_mb_nulls}</div>
+                    <div class="cache-health-card-label">Failed Lookups</div>
+                </div>
+            </div>
+
+            <div class="cache-health-section">
+                <div class="cache-health-section-title">By Source</div>
+                <div class="cache-health-source-bars">
+                    ${Object.entries(s.by_source || {}).map(([src, count]) => {
+                        const pct = s.total_entities > 0 ? Math.round(count / s.total_entities * 100) : 0;
+                        const color = src === 'spotify' ? '#1DB954' : src === 'itunes' ? '#FC3C44' : src === 'deezer' ? '#A238FF' : '#666';
+                        return `<div class="cache-health-source-row">
+                            <span class="cache-health-source-name">${src}</span>
+                            <div class="cache-health-source-track"><div class="cache-health-source-fill" style="width:${pct}%;background:${color}"></div></div>
+                            <span class="cache-health-source-count">${count.toLocaleString()}</span>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+
+            <div class="cache-health-section">
+                <div class="cache-health-section-title">By Type</div>
+                <div class="cache-health-type-pills">
+                    ${Object.entries(s.by_type || {}).map(([type, count]) => `<span class="cache-health-pill">${type}s <strong>${count.toLocaleString()}</strong></span>`).join('')}
+                </div>
+            </div>
+
+            <div class="cache-health-section">
+                <div class="cache-health-section-title">Metrics</div>
+                <div class="cache-health-metrics">
+                    <div class="cache-health-metric"><span class="cache-health-metric-label">Average Age</span><span class="cache-health-metric-value">${s.avg_age_days} days</span></div>
+                    <div class="cache-health-metric"><span class="cache-health-metric-label">Total Cache Hits</span><span class="cache-health-metric-value">${s.total_access_hits.toLocaleString()}</span></div>
+                    <div class="cache-health-metric"><span class="cache-health-metric-label">Expiring in 24h</span><span class="cache-health-metric-value">${s.expiring_24h}</span></div>
+                    <div class="cache-health-metric"><span class="cache-health-metric-label">Expiring in 7 days</span><span class="cache-health-metric-value">${s.expiring_7d}</span></div>
+                    <div class="cache-health-metric"><span class="cache-health-metric-label">MusicBrainz Entries</span><span class="cache-health-metric-value">${s.total_musicbrainz}</span></div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        const body = overlay.querySelector('.cache-health-body');
+        body.innerHTML = '<div class="cache-health-loading">Failed to load cache stats</div>';
     }
 }
 
