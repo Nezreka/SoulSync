@@ -38975,13 +38975,171 @@ function showLibraryEmpty(show) {
     }
 }
 
-async function addAllUnwatchedToWatchlist(btn) {
-    if (btn.classList.contains('adding') || btn.classList.contains('all-added')) return;
+async function openWatchAllUnwatchedModal() {
+    if (document.getElementById('watch-all-modal-overlay')) return;
 
-    btn.classList.add('adding');
-    const textSpan = btn.querySelector('.watchlist-all-text');
-    const originalText = textSpan.textContent;
-    textSpan.textContent = 'Adding...';
+    const sourceIdField = currentMusicSourceName === 'Apple Music' ? 'itunes_artist_id'
+        : currentMusicSourceName === 'Deezer' ? 'deezer_id' : 'spotify_artist_id';
+    const sourceName = currentMusicSourceName || 'Spotify';
+
+    const overlay = document.createElement('div');
+    overlay.id = 'watch-all-modal-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) closeWatchAllUnwatchedModal(); };
+
+    overlay.innerHTML = `
+        <div class="watch-all-modal">
+            <div class="watch-all-header">
+                <div class="watch-all-header-content">
+                    <div class="watch-all-header-icon">&#128065;</div>
+                    <div>
+                        <h2 class="watch-all-title">Watch All Unwatched</h2>
+                        <p class="watch-all-subtitle">Add unwatched artists with ${_esc(sourceName)} IDs to your watchlist</p>
+                    </div>
+                </div>
+                <button class="watch-all-close" onclick="closeWatchAllUnwatchedModal()">&times;</button>
+            </div>
+            <div class="watch-all-body">
+                <div class="watch-all-loading-state">
+                    <div class="watch-all-loading-spinner"></div>
+                    <div class="watch-all-loading-text">Loading unwatched artists...</div>
+                    <div class="watch-all-loading-count" id="watch-all-load-count"></div>
+                </div>
+            </div>
+            <div class="watch-all-footer">
+                <button class="watch-all-btn watch-all-btn-cancel" onclick="closeWatchAllUnwatchedModal()">Cancel</button>
+                <button class="watch-all-btn watch-all-btn-primary" id="watch-all-confirm-btn" disabled>Watch All</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Fetch all unwatched artists paginated (SQLite variable limit safe)
+    try {
+        const eligible = [];
+        const ineligible = [];
+        let page = 1;
+        const pageSize = 400;
+        const countEl = document.getElementById('watch-all-load-count');
+
+        while (true) {
+            if (!document.getElementById('watch-all-modal-overlay')) return;
+            if (countEl) countEl.textContent = `${eligible.length + ineligible.length} artists loaded...`;
+
+            const params = new URLSearchParams({ search: '', letter: 'all', page, limit: pageSize, watchlist: 'unwatched' });
+            const response = await fetch(`/api/library/artists?${params}`);
+            const data = await response.json();
+            if (!data.success) throw new Error(data.error || 'Failed to load artists');
+
+            for (const a of (data.artists || [])) {
+                if (a[sourceIdField]) eligible.push(a);
+                else ineligible.push(a);
+            }
+
+            if (!data.pagination.has_next) break;
+            page++;
+        }
+
+        _renderWatchAllModalContent(overlay, eligible, ineligible, sourceName);
+    } catch (error) {
+        console.error('Error loading unwatched artists:', error);
+        const body = overlay.querySelector('.watch-all-body');
+        if (body) body.innerHTML = `<div class="watch-all-empty-state"><div class="watch-all-empty-icon">&#9888;</div><div>Failed to load artists</div><a href="#" onclick="closeWatchAllUnwatchedModal(); openWatchAllUnwatchedModal(); return false;" class="watch-all-retry-link">Retry</a></div>`;
+    }
+}
+
+function _renderWatchAllModalContent(overlay, eligible, ineligible, sourceName) {
+    const body = overlay.querySelector('.watch-all-body');
+    const confirmBtn = overlay.querySelector('#watch-all-confirm-btn');
+
+    if (eligible.length === 0 && ineligible.length === 0) {
+        body.innerHTML = '<div class="watch-all-empty-state"><div class="watch-all-empty-icon">&#127925;</div><div>No unwatched artists found</div></div>';
+        return;
+    }
+
+    // Store data for search filtering
+    overlay._watchAllEligible = eligible;
+    overlay._watchAllIneligible = ineligible;
+
+    let html = '';
+
+    // Summary bar (sticky)
+    html += '<div class="watch-all-stats">';
+    html += `<div class="watch-all-stat-card eligible"><div class="watch-all-stat-value">${eligible.length}</div><div class="watch-all-stat-label">Ready to watch</div></div>`;
+    html += `<div class="watch-all-stat-card ineligible"><div class="watch-all-stat-value">${ineligible.length}</div><div class="watch-all-stat-label">No ${_esc(sourceName)} ID</div></div>`;
+    html += `<div class="watch-all-stat-card total"><div class="watch-all-stat-value">${eligible.length + ineligible.length}</div><div class="watch-all-stat-label">Total unwatched</div></div>`;
+    html += '</div>';
+
+    // Search filter
+    if (eligible.length > 10) {
+        html += '<div class="watch-all-search-wrap"><input type="text" class="watch-all-search" id="watch-all-search" placeholder="Search artists..." oninput="_filterWatchAllList(this.value)"></div>';
+    }
+
+    // Eligible grid
+    if (eligible.length > 0) {
+        html += '<div class="watch-all-section-label">Artists to be watched</div>';
+        html += '<div class="watch-all-grid" id="watch-all-eligible-grid">';
+        html += _buildWatchAllRows(eligible, false);
+        html += '</div>';
+    }
+
+    // Ineligible section
+    if (ineligible.length > 0) {
+        html += `<div class="watch-all-ineligible">
+            <div class="watch-all-ineligible-header" onclick="this.parentElement.classList.toggle('expanded')">
+                <div class="watch-all-ineligible-label">
+                    <span class="watch-all-ineligible-icon">&#9888;</span>
+                    <span>${ineligible.length} artist${ineligible.length !== 1 ? 's' : ''} without ${_esc(sourceName)} ID</span>
+                </div>
+                <span class="watch-all-chevron">&#9660;</span>
+            </div>
+            <div class="watch-all-ineligible-body">
+                <div class="watch-all-ineligible-hint">These artists haven't been matched to ${_esc(sourceName)} yet. The background enrichment worker will match them over time.</div>
+                <div class="watch-all-grid" id="watch-all-ineligible-grid">${_buildWatchAllRows(ineligible, true)}</div>
+            </div>
+        </div>`;
+    }
+
+    if (eligible.length === 0) {
+        html += `<div class="watch-all-empty-state"><div class="watch-all-empty-icon">&#128268;</div><div>None of your unwatched artists have a ${_esc(sourceName)} ID yet</div><div class="watch-all-empty-hint">The background enrichment worker will match them over time.</div></div>`;
+    }
+
+    body.innerHTML = html;
+
+    if (eligible.length > 0 && confirmBtn) {
+        confirmBtn.textContent = `Watch All (${eligible.length})`;
+        confirmBtn.disabled = false;
+        confirmBtn.onclick = () => _confirmWatchAllUnwatched(overlay, eligible.length);
+    }
+}
+
+function _buildWatchAllRows(artists, dimmed) {
+    let html = '';
+    for (const a of artists) {
+        const img = a.image_url
+            ? `<img src="${_esc(a.image_url)}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'" loading="lazy"><div class="watch-all-cell-placeholder" style="display:none">&#127925;</div>`
+            : `<div class="watch-all-cell-placeholder">&#127925;</div>`;
+        html += `<div class="watch-all-cell${dimmed ? ' dimmed' : ''}" data-name="${_esc(a.name.toLowerCase())}">
+            <div class="watch-all-cell-img">${img}</div>
+            <div class="watch-all-cell-name" title="${_esc(a.name)}">${_esc(a.name)}</div>
+            <div class="watch-all-cell-meta">${a.track_count || 0} tracks</div>
+        </div>`;
+    }
+    return html;
+}
+
+function _filterWatchAllList(query) {
+    const q = query.toLowerCase().trim();
+    document.querySelectorAll('#watch-all-eligible-grid .watch-all-cell').forEach(cell => {
+        cell.style.display = !q || cell.dataset.name.includes(q) ? '' : 'none';
+    });
+}
+
+async function _confirmWatchAllUnwatched(overlay, expectedCount) {
+    const confirmBtn = overlay.querySelector('#watch-all-confirm-btn');
+    const cancelBtn = overlay.querySelector('.watch-all-btn-cancel');
+    if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Adding...'; }
+    if (cancelBtn) cancelBtn.disabled = true;
 
     try {
         const response = await fetch('/api/library/watchlist-all-unwatched', {
@@ -38991,41 +39149,34 @@ async function addAllUnwatchedToWatchlist(btn) {
         const data = await response.json();
 
         if (data.success) {
-            btn.classList.remove('adding');
-            btn.classList.add('all-added');
+            const body = overlay.querySelector('.watch-all-body');
+            body.innerHTML = `<div class="watch-all-results">
+                <div class="watch-all-results-icon">&#10003;</div>
+                <div class="watch-all-results-title">Added ${data.added} artist${data.added !== 1 ? 's' : ''} to watchlist</div>
+                ${data.skipped_already > 0 ? `<div class="watch-all-results-detail">${data.skipped_already} already watched</div>` : ''}
+                ${data.skipped_no_id > 0 ? `<div class="watch-all-results-detail">${data.skipped_no_id} skipped (no external ID)</div>` : ''}
+            </div>`;
 
-            let resultText = `Added ${data.added}`;
-            if (data.skipped_no_id > 0) {
-                resultText += ` (${data.skipped_no_id} unmatched)`;
-            }
-            textSpan.textContent = resultText;
-
-            if (data.added > 0) {
-                showToast(data.message, 'success');
-                // Reload the library to reflect changes
-                setTimeout(() => {
-                    loadLibraryArtists();
-                }, 1500);
-            } else if (data.skipped_no_id > 0) {
-                showToast(`No artists could be added — ${data.skipped_no_id} don't have matching IDs yet. Background workers will match them over time.`, 'warning');
-            } else {
-                showToast('No unwatched artists found', 'info');
-            }
-
-            // Reset button after a delay
-            setTimeout(() => {
-                btn.classList.remove('all-added');
-                textSpan.textContent = originalText;
-            }, 5000);
+            if (confirmBtn) confirmBtn.style.display = 'none';
+            if (cancelBtn) { cancelBtn.disabled = false; cancelBtn.textContent = 'Close'; }
+            overlay.dataset.needsRefresh = 'true';
         } else {
             throw new Error(data.error || 'Failed to add artists');
         }
     } catch (error) {
-        console.error('Error bulk adding unwatched artists:', error);
-        btn.classList.remove('adding');
-        textSpan.textContent = originalText;
+        console.error('Error in watch all:', error);
+        if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = `Watch All (${expectedCount})`; }
+        if (cancelBtn) cancelBtn.disabled = false;
         showToast('Failed to add artists to watchlist', 'error');
     }
+}
+
+function closeWatchAllUnwatchedModal() {
+    const overlay = document.getElementById('watch-all-modal-overlay');
+    if (!overlay) return;
+    const needsRefresh = overlay.dataset.needsRefresh === 'true';
+    overlay.remove();
+    if (needsRefresh) loadLibraryArtists();
 }
 
 async function toggleLibraryCardWatchlist(btn, artist) {
