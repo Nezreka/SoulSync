@@ -1000,6 +1000,16 @@
         padding: 5px 12px;
     }
 
+    .watch-all-modal { max-width: 95vw; width: 95vw; }
+    .watch-all-grid { grid-template-columns: 1fr; }
+    .watch-all-stats { flex-wrap: wrap; gap: 8px; padding: 12px 14px; }
+    .watch-all-stat-card { padding: 8px 12px; }
+    .watch-all-stat-value { font-size: 18px; }
+    .watch-all-cell { padding: 6px 8px; }
+    .watch-all-cell-img, .watch-all-cell-placeholder { width: 32px; height: 32px; }
+    .watch-all-header { padding: 16px 18px; }
+    .watch-all-search-wrap { padding: 8px 14px 4px; }
+
     .library-card-watchlist-btn {
         opacity: 1;
     }

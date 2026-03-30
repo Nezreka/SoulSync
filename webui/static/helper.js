@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'Watch All Preview Modal',           desc: 'Watch All Unwatched now opens a modal showing which artists will be added before confirming', page: 'library', selector: '#library-watchlist-all-btn' },
         { title: 'Fix Watch All Unwatched',           desc: 'Watch All Unwatched now works for Deezer users — was silently skipping artists with only Deezer IDs' },
         { title: 'Fix Path Mismatch Fixes',         desc: 'Library Maintenance path fixes now use fresh config and show error reasons in the toast' },
         { title: 'Fix Wrong Spotify IDs',         desc: 'Manual match no longer stores iTunes IDs as Spotify IDs — detects actual provider from results' },

@@ -19000,6 +19000,17 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "👁️ Watch All Unwatched Preview Modal",
+                "description": "The Watch All Unwatched button now opens a modal showing exactly which artists will be added",
+                "features": [
+                    "• Preview list shows all eligible artists with images, track counts, and matched sources",
+                    "• Clear separation of eligible vs ineligible artists (no external ID)",
+                    "• Collapsible section explains why some artists can't be added yet",
+                    "• Confirm before adding — no more silent 'Added 0' surprises",
+                    "• Results summary shown after completion"
+                ]
+            },
+            {
                 "title": "🔧 Fix Watch All Unwatched Skipping Deezer Artists",
                 "description": "Watch All Unwatched now supports Deezer as an ID source",
                 "features": [
@@ -34246,34 +34257,36 @@ def watchlist_all_unwatched_library_artists():
         database = get_database()
         active_source = _get_active_discovery_source()
 
-        # Get ALL unwatched artists from library (no pagination)
-        result = database.get_library_artists(
-            search_query='',
-            letter='all',
-            page=1,
-            limit=99999,
-            watchlist_filter='unwatched',
-            profile_id=get_current_profile_id()
-        )
-
-        unwatched_artists = result.get('artists', [])
+        # Fetch all unwatched artists in pages (SQLite variable limit safe)
+        unwatched_artists = []
+        page = 1
+        page_size = 400
+        while True:
+            result = database.get_library_artists(
+                search_query='',
+                letter='all',
+                page=page,
+                limit=page_size,
+                watchlist_filter='unwatched',
+                profile_id=get_current_profile_id()
+            )
+            unwatched_artists.extend(result.get('artists', []))
+            if not result.get('pagination', {}).get('has_next', False):
+                break
+            page += 1
         added = 0
         skipped_no_id = 0
         skipped_already = 0
 
         for artist in unwatched_artists:
-            # Determine the external ID to use based on active source
+            # Use only the active source's ID — matches frontend modal filtering
             artist_id = None
-            if active_source == 'spotify' and artist.get('spotify_artist_id'):
-                artist_id = artist['spotify_artist_id']
-            elif active_source == 'deezer' and artist.get('deezer_id'):
-                artist_id = artist['deezer_id']
-            elif artist.get('spotify_artist_id'):
-                artist_id = artist['spotify_artist_id']
-            elif artist.get('itunes_artist_id'):
-                artist_id = artist['itunes_artist_id']
-            elif artist.get('deezer_id'):
-                artist_id = artist['deezer_id']
+            if active_source == 'spotify':
+                artist_id = artist.get('spotify_artist_id')
+            elif active_source == 'itunes':
+                artist_id = artist.get('itunes_artist_id')
+            elif active_source == 'deezer':
+                artist_id = artist.get('deezer_id')
 
             if not artist_id:
                 skipped_no_id += 1
@@ -34288,13 +34301,7 @@ def watchlist_all_unwatched_library_artists():
                 skipped_already += 1
                 continue
 
-            # Determine source based on which ID field we picked
-            if artist_id == artist.get('spotify_artist_id'):
-                src = 'spotify'
-            elif artist_id == artist.get('deezer_id'):
-                src = 'deezer'
-            else:
-                src = _get_metadata_fallback_source()
+            src = active_source if active_source in ('spotify', 'itunes', 'deezer') else _get_metadata_fallback_source()
             success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=src)
             if success:
                 added += 1
