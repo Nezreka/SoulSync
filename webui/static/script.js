@@ -7602,21 +7602,80 @@ async function checkQobuzAuthStatus() {
     try {
         const resp = await fetch('/api/qobuz/auth/status');
         const data = await resp.json();
+
+        // Update downloads tab section
         const formEl = document.getElementById('qobuz-auth-form');
         const loggedInEl = document.getElementById('qobuz-auth-logged-in');
         const userInfoEl = document.getElementById('qobuz-auth-user-info');
 
+        // Update connections tab section
+        const connFormEl = document.getElementById('qobuz-connection-form');
+        const connLoggedInEl = document.getElementById('qobuz-connection-logged-in');
+        const connUserInfoEl = document.getElementById('qobuz-connection-user-info');
+
         if (data.authenticated) {
             const user = data.user || {};
-            userInfoEl.textContent = `Connected: ${user.display_name || 'Qobuz User'} (${user.subscription || 'Active'})`;
-            loggedInEl.style.display = 'flex';
-            formEl.style.display = 'none';
+            const label = `Connected: ${user.display_name || 'Qobuz User'} (${user.subscription || 'Active'})`;
+
+            if (userInfoEl) { userInfoEl.textContent = label; }
+            if (loggedInEl) loggedInEl.style.display = 'flex';
+            if (formEl) formEl.style.display = 'none';
+
+            if (connUserInfoEl) { connUserInfoEl.textContent = label; }
+            if (connLoggedInEl) connLoggedInEl.style.display = 'flex';
+            if (connFormEl) connFormEl.style.display = 'none';
         } else {
-            loggedInEl.style.display = 'none';
-            formEl.style.display = 'block';
+            if (loggedInEl) loggedInEl.style.display = 'none';
+            if (formEl) formEl.style.display = 'block';
+
+            if (connLoggedInEl) connLoggedInEl.style.display = 'none';
+            if (connFormEl) connFormEl.style.display = 'block';
         }
     } catch (e) {
         console.error('Qobuz auth status check failed:', e);
+    }
+}
+
+async function loginQobuzFromConnections() {
+    const btn = document.getElementById('qobuz-connection-login-btn');
+    const statusEl = document.getElementById('qobuz-connection-status');
+    const email = document.getElementById('qobuz-connection-email').value.trim();
+    const password = document.getElementById('qobuz-connection-password').value;
+
+    if (!email || !password) {
+        showToast('Please enter your Qobuz email and password', 'warning');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Connecting...';
+    statusEl.textContent = '';
+
+    try {
+        const resp = await fetch('/api/qobuz/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            showToast('Qobuz connected successfully!', 'success');
+            document.getElementById('qobuz-connection-password').value = '';
+            checkQobuzAuthStatus();
+        } else {
+            statusEl.textContent = data.error || 'Login failed';
+            statusEl.style.color = '#ff5555';
+            showToast(data.error || 'Qobuz login failed', 'error');
+        }
+    } catch (error) {
+        console.error('Qobuz login error:', error);
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#ff5555';
+        showToast('Failed to connect to Qobuz', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Connect Qobuz';
     }
 }
 

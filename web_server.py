@@ -19072,6 +19072,15 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔧 Add Qobuz to Connections Tab (#218)",
+                "description": "Qobuz credentials now available on the Connections tab for metadata enrichment",
+                "features": [
+                    "• New Qobuz section on Settings → Connections tab for enrichment auth",
+                    "• Users can connect Qobuz for metadata enrichment regardless of download source",
+                    "• Auth status syncs between Connections and Downloads tabs"
+                ]
+            },
+            {
                 "title": "🔧 Fix Enrichment Widget Showing 'Running' When Rate Limited",
                 "description": "Enrichment tooltip now shows Rate Limited or Daily Limit Reached instead of stuck on Running",
                 "features": [
