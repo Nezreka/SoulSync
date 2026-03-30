@@ -107,11 +107,13 @@ class SpotifyWorker:
             # every 60 seconds indefinitely, wasting API quota and risking rate limits.
             # Instead, use sp presence as a lightweight proxy for "configured".
             rate_limited = self.client.is_rate_limited()
+            rate_limit_info = self.client.get_rate_limit_info() if rate_limited else None
             in_cooldown = self.client.get_post_ban_cooldown_remaining() > 0
             authenticated = self.client.sp is not None
         except Exception:
             authenticated = False
             rate_limited = False
+            rate_limit_info = None
             in_cooldown = False
 
         return {
@@ -121,6 +123,7 @@ class SpotifyWorker:
             'idle': is_idle,
             'authenticated': authenticated,
             'rate_limited': rate_limited,
+            'rate_limit': rate_limit_info,
             'daily_budget': self._get_daily_budget_info(),
             'current_item': self.current_item,
             'stats': self.stats.copy(),

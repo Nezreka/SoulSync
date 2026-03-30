@@ -19072,6 +19072,15 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔧 Fix Enrichment Widget Showing 'Running' When Rate Limited",
+                "description": "Enrichment tooltip now shows Rate Limited or Daily Limit Reached instead of stuck on Running",
+                "features": [
+                    "• Shows 'Rate Limited' with countdown when Spotify rate limit is active",
+                    "• Shows 'Daily Limit Reached' with reset time when daily budget is exhausted",
+                    "• Shows 'Waiting for next item...' instead of blank when no current item"
+                ]
+            },
+            {
                 "title": "🧹 Metadata Cache Maintenance",
                 "description": "The cache evictor now runs four maintenance phases to keep the metadata cache clean",
                 "features": [
