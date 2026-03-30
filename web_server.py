@@ -14,6 +14,7 @@ import uuid
 import re
 import sqlite3
 import types
+import collections
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -3866,6 +3867,36 @@ def index():
 
 # --- API Endpoints ---
 
+# Tracks cumulative item-processed totals over time for windowed counting.
+# Each entry: (timestamp, cumulative_total). Polled every ~5s, 24h = ~17280 entries.
+_enrichment_activity_log = {}  # key -> deque of (timestamp, total)
+
+def _get_windowed_calls(key, current_total):
+    """Record current cumulative total and return (calls_1h, calls_24h).
+    Deque stores (timestamp, cumulative_total) in chronological order.
+    To get calls in a window: current_total minus the oldest total within that window."""
+    now = time.time()
+    history = _enrichment_activity_log.setdefault(key, collections.deque(maxlen=17300))
+    history.append((now, current_total))
+
+    cutoff_1h = now - 3600
+    cutoff_24h = now - 86400
+
+    # Forward scan: first entry with ts >= cutoff is the oldest in that window
+    oldest_1h_total = current_total
+    oldest_24h_total = current_total
+    found_24h = False
+    for ts, total in history:
+        if not found_24h and ts >= cutoff_24h:
+            oldest_24h_total = total
+            found_24h = True
+        if ts >= cutoff_1h:
+            oldest_1h_total = total
+            break
+
+    return max(0, current_total - oldest_1h_total), max(0, current_total - oldest_24h_total)
+
+
 def _get_enrichment_status():
     """Get lightweight status for all enrichment services (no DB queries).
     Reads worker properties directly to avoid expensive get_stats() calls."""
@@ -3901,13 +3932,30 @@ def _get_enrichment_status():
                 configured = configured_checks.get(key, lambda: True)()
             except Exception:
                 configured = False
-            services[key] = {
+
+            # Compute windowed API call counts from cumulative stats
+            stats = worker.stats
+            total_processed = stats.get('matched', 0) + stats.get('not_found', 0) + stats.get('errors', 0)
+            calls_1h, calls_24h = _get_windowed_calls(key, total_processed)
+
+            svc_data = {
                 'name': name,
                 'configured': configured,
                 'running': worker.running and is_alive and not worker.paused,
                 'paused': worker.paused,
                 'idle': is_alive and not worker.paused and getattr(worker, 'current_item', None) is None,
+                'calls_1h': calls_1h,
+                'calls_24h': calls_24h,
             }
+
+            # Spotify-specific: include daily budget info
+            if key == 'spotify_enrichment':
+                try:
+                    svc_data['daily_budget'] = worker._get_daily_budget_info()
+                except Exception:
+                    pass
+
+            services[key] = svc_data
         else:
             services[key] = {
                 'name': name,
@@ -3915,6 +3963,8 @@ def _get_enrichment_status():
                 'running': False,
                 'paused': False,
                 'idle': False,
+                'calls_1h': 0,
+                'calls_24h': 0,
             }
 
     # Non-worker services (configured status only)
@@ -19190,7 +19240,8 @@ def get_version_info():
                 "description": "Dashboard now shows connection status for all external services, not just the core three",
                 "features": [
                     "• Enrichment services shown as color-coded chips below core service cards",
-                    "• Status indicators: Running, Idle, Paused, Stopped, or Not Configured with accent-colored left borders",
+                    "• API call counts per service: 1-hour and 24-hour windowed totals shown on each chip",
+                    "• Spotify chip includes daily budget bar (used/3000) with color-coded fill",
                     "• Unconfigured services show dashed border — click to jump directly to their Settings section",
                     "• All configurable services clickable — navigates to Settings → Connections and scrolls to the service",
                     "• Spotify card always labeled 'Spotify' — no longer confusingly switches to 'Apple Music'",
