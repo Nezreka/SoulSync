@@ -54012,12 +54012,16 @@ function updateSpotifyEnrichmentStatusFromData(data) {
     if (!button) return;
 
     const notAuthenticated = data.authenticated === false;
+    const isRateLimited = data.rate_limited === true;
+    const budgetExhausted = data.daily_budget && data.daily_budget.exhausted;
 
     button.classList.remove('active', 'paused', 'complete', 'no-auth');
     if (data.paused) {
         button.classList.add('paused');
     } else if (notAuthenticated) {
         button.classList.add('no-auth');
+    } else if (isRateLimited || budgetExhausted) {
+        button.classList.add('paused');
     } else if (data.idle) {
         button.classList.add('complete');
     } else if (data.running && !data.paused) {
@@ -54031,6 +54035,8 @@ function updateSpotifyEnrichmentStatusFromData(data) {
     if (tooltipStatus) {
         if (data.paused) { tooltipStatus.textContent = 'Paused'; }
         else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
+        else if (isRateLimited) { tooltipStatus.textContent = 'Rate Limited'; }
+        else if (budgetExhausted) { tooltipStatus.textContent = 'Daily Limit Reached'; }
         else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
         else if (data.running) { tooltipStatus.textContent = 'Running'; }
         else { tooltipStatus.textContent = 'Idle'; }
@@ -54041,10 +54047,21 @@ function updateSpotifyEnrichmentStatusFromData(data) {
             tooltipCurrent.textContent = notAuthenticated ? 'Connect Spotify in Settings to enrich' : 'Click to resume';
         } else if (notAuthenticated) {
             tooltipCurrent.textContent = 'Connect Spotify in Settings to enrich';
+        } else if (isRateLimited) {
+            const info = data.rate_limit || {};
+            const remaining = info.remaining_seconds || 0;
+            tooltipCurrent.textContent = remaining > 0 ? `Waiting ${Math.ceil(remaining / 60)}m for rate limit to clear` : 'Waiting for rate limit to clear';
+        } else if (budgetExhausted) {
+            const resets = data.daily_budget.resets_in_seconds || 0;
+            const hours = Math.floor(resets / 3600);
+            const mins = Math.floor((resets % 3600) / 60);
+            tooltipCurrent.textContent = `Resets in ${hours}h ${mins}m`;
         } else if (data.idle) {
             tooltipCurrent.textContent = 'All items processed';
         } else if (data.current_item && data.current_item.name) {
             tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        } else {
+            tooltipCurrent.textContent = 'Waiting for next item...';
         }
     }
 
