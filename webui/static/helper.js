@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'Fix Junk Tags Surviving',            desc: 'Soulseek source tags are now wiped to disk immediately — no more album fragmentation from partial metadata' },
         { title: 'Watch All Preview Modal',           desc: 'Watch All Unwatched now opens a modal showing which artists will be added before confirming', page: 'library', selector: '#library-watchlist-all-btn' },
         { title: 'Fix Watch All Unwatched',           desc: 'Watch All Unwatched now works for Deezer users — was silently skipping artists with only Deezer IDs' },
         { title: 'Fix Path Mismatch Fixes',         desc: 'Library Maintenance path fixes now use fresh config and show error reasons in the toast' },
