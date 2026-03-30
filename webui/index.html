@@ -3632,6 +3632,38 @@
                                 </div>
 
 
+                                <!-- Qobuz Metadata/Enrichment Auth -->
+                                <div class="api-service-frame">
+                                    <h4 class="service-title qobuz-title">Qobuz (Metadata & Enrichment)</h4>
+                                    <div id="qobuz-connection-logged-in" style="display: none; margin-bottom: 8px;">
+                                        <span id="qobuz-connection-user-info" class="setting-help-text" style="color: #4caf50;"></span>
+                                        <button class="auth-button" onclick="logoutQobuz()" style="margin-left: 8px;">
+                                            Disconnect
+                                        </button>
+                                    </div>
+                                    <div id="qobuz-connection-form">
+                                        <div class="form-group">
+                                            <label>Email:</label>
+                                            <input type="email" id="qobuz-connection-email" class="form-input"
+                                                placeholder="Qobuz email" autocomplete="email">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Password:</label>
+                                            <input type="password" id="qobuz-connection-password" class="form-input"
+                                                placeholder="Qobuz password" autocomplete="current-password">
+                                        </div>
+                                        <div class="form-actions">
+                                            <button class="auth-button" id="qobuz-connection-login-btn" onclick="loginQobuzFromConnections()">
+                                                Connect Qobuz
+                                            </button>
+                                            <span id="qobuz-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                        </div>
+                                    </div>
+                                    <div class="setting-help-text" style="margin-top: 6px;">
+                                        Connects Qobuz for metadata enrichment (ISRC, labels, copyright). Also used for downloads if Qobuz is your download source.
+                                    </div>
+                                </div>
+
                                 <!-- ListenBrainz Settings -->
                                 <div class="api-service-frame">
                                     <h4 class="service-title listenbrainz-title">ListenBrainz</h4>
