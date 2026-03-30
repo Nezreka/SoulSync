@@ -276,8 +276,46 @@ class GeniusWorker:
             except Exception as e2:
                 logger.error(f"Error updating item status: {e2}")
 
+    def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
+        """Check if an entity already has a genius_id (e.g. from manual match)."""
+        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
+        table = table_map.get(entity_type)
+        if not table:
+            return None
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT genius_id FROM {table} WHERE id = ?", (entity_id,))
+            row = cursor.fetchone()
+            return row[0] if row and row[0] else None
+        except Exception:
+            return None
+        finally:
+            if conn:
+                conn.close()
+
     def _process_artist(self, artist_id: int, artist_name: str):
-        """Process an artist: search Genius, get full artist details"""
+        """Process an artist: search Genius, get full artist details.
+        If the artist already has a genius_id (e.g. from manual match),
+        uses it for direct lookup instead of searching by name."""
+
+        # Check for existing ID (manual match) — use direct lookup instead of name search
+        existing_id = self._get_existing_id('artist', artist_id)
+        if existing_id:
+            try:
+                full_artist = self.client.get_artist(int(existing_id))
+                if full_artist:
+                    self._update_artist(artist_id, full_artist, full_artist)
+                    self.stats['matched'] += 1
+                    logger.info(f"Enriched artist '{artist_name}' from existing Genius ID: {existing_id}")
+                    return
+            except Exception as e:
+                logger.warning(f"Direct lookup failed for existing Genius ID {existing_id}: {e}")
+            # Direct lookup failed — don't overwrite manual match, just return
+            logger.debug(f"Preserving manual match for artist '{artist_name}' (Genius ID: {existing_id})")
+            return
+
         result = self.client.search_artist(artist_name)
         if result:
             result_name = result.get('name', '')
@@ -310,7 +348,32 @@ class GeniusWorker:
             logger.debug(f"No match for artist '{artist_name}'")
 
     def _process_track(self, track_id: int, track_name: str, artist_name: str):
-        """Process a track: search Genius, get full song details + lyrics"""
+        """Process a track: search Genius, get full song details + lyrics.
+        If the track already has a genius_id (e.g. from manual match),
+        uses it for direct lookup instead of searching by name."""
+
+        # Check for existing ID (manual match) — use direct lookup instead of name search
+        existing_id = self._get_existing_id('track', track_id)
+        if existing_id:
+            try:
+                full_song = self.client.get_song(int(existing_id))
+                if full_song:
+                    lyrics = None
+                    song_url = full_song.get('url')
+                    if song_url:
+                        try:
+                            lyrics = self.client.get_lyrics(song_url)
+                        except Exception:
+                            pass
+                    self._update_track(track_id, full_song, full_song, lyrics)
+                    self.stats['matched'] += 1
+                    logger.info(f"Enriched track '{track_name}' from existing Genius ID: {existing_id}")
+                    return
+            except Exception as e:
+                logger.warning(f"Direct lookup failed for existing Genius ID {existing_id}: {e}")
+            logger.debug(f"Preserving manual match for track '{track_name}' (Genius ID: {existing_id})")
+            return
+
         result = self.client.search_song(artist_name, track_name)
         if result:
             result_title = result.get('title', '')
