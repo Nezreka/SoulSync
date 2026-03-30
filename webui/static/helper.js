@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'All Services on Dashboard',             desc: 'Dashboard shows all enrichment services as live-status chips — click unconfigured ones to jump to Settings. Spotify card no longer shows "Apple Music"', page: 'dashboard' },
         { title: 'Qobuz on Connections Tab',              desc: 'Qobuz credentials now on Settings → Connections for metadata enrichment without needing it as download source' },
         { title: 'Fix Enrichment Status Widget',         desc: 'Enrichment tooltip now shows Rate Limited or Daily Limit instead of stuck on Running' },
         { title: 'Cache Maintenance',                    desc: 'Cache evictor now cleans junk entities, orphaned searches, and stale MusicBrainz nulls' },

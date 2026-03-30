@@ -11,7 +11,7 @@ let currentStream = {
     progress: 0,
     track: null
 };
-let currentMusicSourceName = 'Spotify'; // 'Spotify' or 'Apple Music' - updated from status endpoint
+let currentMusicSourceName = 'Spotify'; // 'Spotify', 'iTunes', or 'Deezer' - updated from status endpoint
 
 // Streaming state management (enhanced functionality)
 let streamStatusPoller = null;
@@ -381,6 +381,9 @@ function handleServiceStatusUpdate(data) {
     updateSidebarServiceStatus('spotify', data.spotify);
     updateSidebarServiceStatus('media-server', data.media_server);
     updateSidebarServiceStatus('soulseek', data.soulseek);
+
+    // Update enrichment service cards
+    if (data.enrichment) renderEnrichmentCards(data.enrichment);
 
     // Spotify rate limit / cooldown / recovery
     if (data.spotify?.rate_limited && data.spotify.rate_limit) {
@@ -6974,7 +6977,7 @@ async function testConnection(service) {
         const result = await response.json();
 
         if (result.success) {
-            // Use backend's message which contains dynamic source name (Spotify or Apple Music)
+            // Use backend's message which contains dynamic source name
             showToast(result.message || `${service} connection successful`, 'success');
 
             // Load music libraries after successful connection
@@ -7141,7 +7144,7 @@ async function testDashboardConnection(service) {
         const result = await response.json();
 
         if (result.success) {
-            // Use backend's message which contains dynamic source name (Spotify or Apple Music)
+            // Use backend's message which contains dynamic source name
             showToast(result.message || `${service} service verified`, 'success');
             // Refresh status indicators immediately so UI reflects the new state
             fetchAndUpdateServiceStatus();
@@ -36048,6 +36051,9 @@ async function fetchAndUpdateServiceStatus() {
         updateSidebarServiceStatus('media-server', data.media_server);
         updateSidebarServiceStatus('soulseek', data.soulseek);
 
+        // Update enrichment service cards
+        if (data.enrichment) renderEnrichmentCards(data.enrichment);
+
         // Check for Spotify rate limit
         if (data.spotify && data.spotify.rate_limited && data.spotify.rate_limit) {
             handleSpotifyRateLimit(data.spotify.rate_limit);
@@ -36071,7 +36077,7 @@ function updateServiceStatus(service, statusData) {
                 ? formatRateLimitDuration(statusData.rate_limit?.remaining_seconds || 0)
                 : formatRateLimitDuration(statusData.post_ban_cooldown);
             const phase = statusData.rate_limited ? 'paused' : 'recovering';
-            const fallbackLabel = statusData.source === 'deezer' ? 'Deezer' : 'Apple Music';
+            const fallbackLabel = statusData.source === 'deezer' ? 'Deezer' : 'iTunes';
             statusText.textContent = `${fallbackLabel} (Spotify ${phase} \u2014 ${remaining})`;
             statusText.className = 'service-card-status-text rate-limited';
         } else if (statusData.connected) {
@@ -36085,14 +36091,27 @@ function updateServiceStatus(service, statusData) {
         }
     }
 
-    // Update music source title (Spotify or Apple Music) based on active source
+    // Update music source title and status based on active source
     if (service === 'spotify' && statusData.source) {
         const musicSourceTitleElement = document.getElementById('music-source-title');
         if (musicSourceTitleElement) {
-            const sourceName = statusData.source === 'spotify' ? 'Spotify' : statusData.source === 'deezer' ? 'Deezer' : 'Apple Music';
-            musicSourceTitleElement.textContent = sourceName;
+            // Card title always says "Spotify" — it represents the metadata source slot
+            musicSourceTitleElement.textContent = 'Spotify';
             // Update global variable for use in discovery modals
+            const sourceName = statusData.source === 'spotify' ? 'Spotify' : statusData.source === 'deezer' ? 'Deezer' : 'iTunes';
             currentMusicSourceName = sourceName;
+        }
+
+        // When using fallback, update status text to show which fallback is active
+        if (statusData.source !== 'spotify' && !statusData.rate_limited && !statusData.post_ban_cooldown) {
+            const fallbackName = statusData.source === 'deezer' ? 'Deezer' : 'iTunes';
+            if (statusText) {
+                statusText.textContent = `Using ${fallbackName}`;
+                statusText.className = 'service-card-status-text fallback';
+            }
+            if (indicator) {
+                indicator.className = 'service-card-indicator fallback';
+            }
         }
 
         // Show/hide Spotify disconnect button based on connection state
@@ -36141,12 +36160,20 @@ function updateSidebarServiceStatus(service, statusData) {
             }
         }
 
-        // Update music source name (Spotify or Apple Music) based on active source
+        // Update music source name — always "Spotify" in sidebar
         if (service === 'spotify' && statusData.source) {
             const musicSourceNameElement = document.getElementById('music-source-name');
             if (musicSourceNameElement) {
-                const sourceName = statusData.source === 'spotify' ? 'Spotify' : statusData.source === 'deezer' ? 'Deezer' : 'Apple Music';
-                musicSourceNameElement.textContent = sourceName;
+                musicSourceNameElement.textContent = 'Spotify';
+            }
+
+            // Show fallback state in sidebar dot
+            if (statusData.source !== 'spotify' && !statusData.rate_limited && !statusData.post_ban_cooldown) {
+                if (dot) {
+                    dot.className = 'status-dot fallback';
+                    const fallbackName = statusData.source === 'deezer' ? 'Deezer' : 'iTunes';
+                    dot.title = `Using ${fallbackName} fallback`;
+                }
             }
         }
 
@@ -36158,6 +36185,74 @@ function updateSidebarServiceStatus(service, statusData) {
             if (sidebarName) sidebarName.textContent = displayName;
         }
     }
+}
+
+function renderEnrichmentCards(enrichment) {
+    const grid = document.getElementById('enrichment-status-grid');
+    if (!grid || !enrichment) return;
+
+    // Service display order
+    const serviceOrder = [
+        'musicbrainz', 'spotify_enrichment', 'itunes_enrichment', 'deezer_enrichment',
+        'tidal_enrichment', 'qobuz_enrichment', 'lastfm', 'genius', 'audiodb',
+        'acoustid', 'listenbrainz'
+    ];
+
+    // Map service keys to their settings page selector for click-to-configure
+    const settingsSelectors = {
+        'spotify_enrichment': '.spotify-title',
+        'tidal_enrichment': '.tidal-title',
+        'qobuz_enrichment': '.qobuz-title',
+        'lastfm': '.lastfm-title',
+        'genius': '.genius-title',
+        'acoustid': '.acoustid-title',
+        'listenbrainz': '.listenbrainz-title',
+    };
+
+    const chips = [];
+    for (const key of serviceOrder) {
+        const svc = enrichment[key];
+        if (!svc) continue;
+
+        // Determine status class and text
+        let statusClass, statusLabel;
+        if ('running' in svc) {
+            if (!svc.configured) {
+                statusClass = 'not-configured';
+                statusLabel = 'Set up';
+            } else if (svc.paused) {
+                statusClass = 'paused';
+                statusLabel = 'Paused';
+            } else if (svc.running) {
+                statusClass = svc.idle ? 'idle' : 'running';
+                statusLabel = svc.idle ? 'Idle' : 'Running';
+            } else {
+                statusClass = 'stopped';
+                statusLabel = 'Stopped';
+            }
+        } else {
+            statusClass = svc.configured ? 'running' : 'not-configured';
+            statusLabel = svc.configured ? 'Ready' : 'Set up';
+        }
+
+        const selector = settingsSelectors[key];
+        const clickAttr = selector
+            ? `onclick="navigateToPage('settings'); setTimeout(() => { switchSettingsTab('connections'); setTimeout(() => { const el = document.querySelector('${selector}'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100); }, 50);"`
+            : '';
+        const titleAttr = selector && statusClass === 'not-configured'
+            ? 'title="Click to configure in Settings"'
+            : `title="${svc.name} — ${statusLabel}"`;
+
+        chips.push(`
+            <div class="enrichment-chip status-${statusClass}" ${clickAttr} ${titleAttr}>
+                <span class="enrichment-chip-dot"></span>
+                <span class="enrichment-chip-name">${svc.name}</span>
+                <span class="enrichment-chip-status">${statusLabel}</span>
+            </div>
+        `);
+    }
+
+    grid.innerHTML = chips.join('');
 }
 
 async function fetchAndUpdateSystemStats() {
@@ -38939,7 +39034,7 @@ function buildLibraryArtistCardHTML(artist, index) {
     if (artist.soul_id && !artist.soul_id.startsWith('soul_unnamed_')) badges.push({ logo: '/static/trans2.png', fb: 'SS', title: `SoulID: ${artist.soul_id}`, url: null });
 
     // Watchlist badge
-    const hasActiveSourceId = currentMusicSourceName === 'Apple Music'
+    const hasActiveSourceId = currentMusicSourceName === 'iTunes'
         ? (artist.itunes_artist_id || artist.spotify_artist_id)
         : (artist.spotify_artist_id || artist.itunes_artist_id);
     let watchBadgeHTML = '';
@@ -39047,7 +39142,7 @@ function showLibraryEmpty(show) {
 async function openWatchAllUnwatchedModal() {
     if (document.getElementById('watch-all-modal-overlay')) return;
 
-    const sourceIdField = currentMusicSourceName === 'Apple Music' ? 'itunes_artist_id'
+    const sourceIdField = currentMusicSourceName === 'iTunes' ? 'itunes_artist_id'
         : currentMusicSourceName === 'Deezer' ? 'deezer_id' : 'spotify_artist_id';
     const sourceName = currentMusicSourceName || 'Spotify';
 
@@ -39260,7 +39355,7 @@ async function toggleLibraryCardWatchlist(btn, artist) {
 
     try {
         // Use the ID matching the active metadata source
-        const artistId = currentMusicSourceName === 'Apple Music'
+        const artistId = currentMusicSourceName === 'iTunes'
             ? (artist.itunes_artist_id || artist.spotify_artist_id)
             : (artist.spotify_artist_id || artist.itunes_artist_id);
         if (!artistId) throw new Error('No iTunes or Spotify ID available for this artist');
