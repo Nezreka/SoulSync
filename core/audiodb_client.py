@@ -152,3 +152,60 @@ class AudioDBClient:
         except Exception as e:
             logger.error(f"Error searching for track '{artist_name} - {track_title}': {e}")
             return None
+
+    @rate_limited
+    def lookup_artist_by_id(self, artist_id: str) -> Optional[Dict[str, Any]]:
+        """Lookup an artist directly by AudioDB ID."""
+        try:
+            response = self.session.get(
+                f"{self.BASE_URL}/artist.php",
+                params={'i': artist_id},
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            artists = data.get('artists')
+            if artists and len(artists) > 0:
+                return artists[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error looking up artist by ID {artist_id}: {e}")
+            return None
+
+    @rate_limited
+    def lookup_album_by_id(self, album_id: str) -> Optional[Dict[str, Any]]:
+        """Lookup an album directly by AudioDB ID."""
+        try:
+            response = self.session.get(
+                f"{self.BASE_URL}/album.php",
+                params={'m': album_id},
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            albums = data.get('album')
+            if albums and len(albums) > 0:
+                return albums[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error looking up album by ID {album_id}: {e}")
+            return None
+
+    @rate_limited
+    def lookup_track_by_id(self, track_id: str) -> Optional[Dict[str, Any]]:
+        """Lookup a track directly by AudioDB ID."""
+        try:
+            response = self.session.get(
+                f"{self.BASE_URL}/track.php",
+                params={'m': track_id},
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            tracks = data.get('track')
+            if tracks and len(tracks) > 0:
+                return tracks[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error looking up track by ID {track_id}: {e}")
+            return None

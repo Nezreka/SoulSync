@@ -19137,6 +19137,17 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔧 Fix Enrichment Overwriting Manual Matches (#221)",
+                "description": "Enriching an entity that was manually matched no longer reverts the status to not_found",
+                "features": [
+                    "• Genius and AudioDB workers now check for existing service IDs before searching by name",
+                    "• Manual matches are used for direct API lookup instead of re-searching by name",
+                    "• If the direct lookup succeeds, metadata is enriched and match status is preserved",
+                    "• If the direct lookup fails, the manual match status is preserved (not overwritten to not_found)",
+                    "• Added AudioDB lookup-by-ID methods for artist, album, and track"
+                ]
+            },
+            {
                 "title": "🔧 Fix Spotify OAuth ERR_EMPTY_RESPONSE in Docker (#220)",
                 "description": "OAuth callback server hardened for Docker/SSH tunnel setups",
                 "features": [

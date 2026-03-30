@@ -315,14 +315,64 @@ class AudioDBWorker:
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")
         return similarity >= self.name_similarity_threshold
 
+    def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
+        """Check if an entity already has an audiodb_id (e.g. from manual match)."""
+        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
+        table = table_map.get(entity_type)
+        if not table:
+            return None
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT audiodb_id FROM {table} WHERE id = ?", (entity_id,))
+            row = cursor.fetchone()
+            return row[0] if row and row[0] else None
+        except Exception:
+            return None
+        finally:
+            if conn:
+                conn.close()
+
     def _process_item(self, item: Dict[str, Any]):
-        """Process a single item (artist, album, or track)"""
+        """Process a single item (artist, album, or track).
+        If the entity already has an audiodb_id (e.g. from manual match),
+        uses it for direct lookup instead of searching by name."""
         try:
             item_type = item['type']
             item_id = item['id']
             item_name = item['name']
 
             logger.debug(f"Processing {item_type} #{item_id}: {item_name}")
+
+            # Check for existing ID (manual match) — use direct lookup instead of name search
+            existing_id = self._get_existing_id(item_type, item_id)
+            if existing_id:
+                lookup_methods = {
+                    'artist': self.client.lookup_artist_by_id,
+                    'album': self.client.lookup_album_by_id,
+                    'track': self.client.lookup_track_by_id,
+                }
+                update_methods = {
+                    'artist': lambda r: self._update_artist(item_id, r),
+                    'album': lambda r: (self._verify_artist_id(item, r), self._update_album(item_id, r)),
+                    'track': lambda r: (self._verify_artist_id(item, r), self._update_track(item_id, r)),
+                }
+                lookup = lookup_methods.get(item_type)
+                update = update_methods.get(item_type)
+                if lookup and update:
+                    try:
+                        result = lookup(existing_id)
+                        if result:
+                            update(result)
+                            self.stats['matched'] += 1
+                            logger.info(f"Enriched {item_type} '{item_name}' from existing AudioDB ID: {existing_id}")
+                            return
+                    except Exception as e:
+                        logger.warning(f"Direct lookup failed for existing AudioDB ID {existing_id}: {e}")
+                    # Direct lookup failed — don't overwrite manual match
+                    logger.debug(f"Preserving manual match for {item_type} '{item_name}' (AudioDB ID: {existing_id})")
+                    return
 
             if item_type == 'artist':
                 result = self.client.search_artist(item_name)
