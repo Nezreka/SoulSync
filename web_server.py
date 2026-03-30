@@ -19010,6 +19010,15 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔧 Fix AcoustID False Positives for Non-English Tracks",
+                "description": "AcoustID no longer quarantines correct files when titles are in different languages",
+                "features": [
+                    "• High-confidence fingerprint matches (95%+) now SKIP instead of FAIL when title/artist don't match",
+                    "• Prevents Japanese, Chinese, Korean, and other non-Latin tracks from being falsely quarantined",
+                    "• Audio fingerprint confirms the recording is correct — metadata mismatch is just a language difference"
+                ]
+            },
+            {
                 "title": "🔧 Fix Soulseek Junk Tags Surviving Post-Processing",
                 "description": "Tags from Soulseek source files are now wiped to disk immediately, before metadata enhancement",
                 "features": [
