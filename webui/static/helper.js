@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'Fix AcoustID False Positives',        desc: 'High-confidence fingerprints no longer quarantine correct files when titles are in different languages' },
         { title: 'Fix Junk Tags Surviving',            desc: 'Soulseek source tags are now wiped to disk immediately — no more album fragmentation from partial metadata' },
         { title: 'Watch All Preview Modal',           desc: 'Watch All Unwatched now opens a modal showing which artists will be added before confirming', page: 'library', selector: '#library-watchlist-all-btn' },
         { title: 'Fix Watch All Unwatched',           desc: 'Watch All Unwatched now works for Deezer users — was silently skipping artists with only Deezer IDs' },

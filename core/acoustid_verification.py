@@ -330,8 +330,22 @@ class AcoustIDVerification:
                     logger.info(f"AcoustID verification PASSED (scan match) - {msg}")
                     return VerificationResult.PASS, msg
 
-            # No match found — this file is likely wrong
-            # Report what AcoustID thinks the file actually is (top result by score)
+            # No match found — but if fingerprint score is very high (≥0.95),
+            # the audio IS correct and the title mismatch is likely a language
+            # difference (e.g. Japanese kanji vs English title for the same song).
+            # Skip rather than quarantine a correct file.
+            if best_score >= 0.95:
+                top = recordings[0]
+                msg = (
+                    f"Title/artist mismatch but fingerprint confidence very high ({best_score:.2f}): "
+                    f"AcoustID='{top.get('title', '?')}' by '{top.get('artist', '?')}', "
+                    f"expected '{expected_track_name}' by '{expected_artist_name}' — "
+                    f"likely same song in different language/script"
+                )
+                logger.info(f"AcoustID verification SKIPPED (high confidence) - {msg}")
+                return VerificationResult.SKIP, msg
+
+            # Low fingerprint score + no metadata match — file is likely wrong
             top = recordings[0]
             top_title = top.get('title', '?')
             top_artist = top.get('artist', '?')
