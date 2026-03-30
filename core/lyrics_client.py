@@ -50,10 +50,11 @@ class LyricsClient:
         try:
             # Generate LRC file path (same name as audio file, .lrc extension)
             lrc_path = os.path.splitext(audio_file_path)[0] + '.lrc'
+            txt_path = os.path.splitext(audio_file_path)[0] + '.txt'
 
-            # Skip if LRC file already exists
-            if os.path.exists(lrc_path):
-                logger.debug(f"LRC file already exists: {os.path.basename(lrc_path)}")
+            # Skip if lyrics file already exists (either .lrc or .txt)
+            if os.path.exists(lrc_path) or os.path.exists(txt_path):
+                logger.debug(f"Lyrics file already exists for: {os.path.basename(audio_file_path)}")
                 return True
 
             # Fetch lyrics from LRClib
@@ -95,27 +96,31 @@ class LyricsClient:
                 logger.debug(f"No lyrics found for: {artist_name} - {track_name}")
                 return False
 
-            # Prefer synced lyrics, fallback to plain text
-            # LRClib API uses synced_lyrics and plain_lyrics attributes
-            lrc_content = getattr(lyrics_data, 'synced_lyrics', None) or getattr(lyrics_data, 'plain_lyrics', None)
+            # LRClib API provides synced_lyrics (timestamped) and plain_lyrics (text only)
+            synced = getattr(lyrics_data, 'synced_lyrics', None)
+            plain = getattr(lyrics_data, 'plain_lyrics', None)
 
-            logger.debug(f"Synced lyrics available: {bool(getattr(lyrics_data, 'synced_lyrics', None))}")
-            logger.debug(f"Plain lyrics available: {bool(getattr(lyrics_data, 'plain_lyrics', None))}")
-            logger.debug(f"LRC content found: {bool(lrc_content)}")
+            logger.debug(f"Synced lyrics available: {bool(synced)}")
+            logger.debug(f"Plain lyrics available: {bool(plain)}")
 
-            if not lrc_content:
+            if not synced and not plain:
                 logger.debug(f"No usable lyrics content for: {artist_name} - {track_name}")
                 return False
 
-            # Write LRC file
-            with open(lrc_path, 'w', encoding='utf-8') as f:
-                f.write(lrc_content)
-
-            # Embed lyrics directly in audio file tags (Navidrome/Jellyfin read these)
-            self._embed_lyrics(audio_file_path, lrc_content)
-
-            lyrics_type = "synced" if getattr(lyrics_data, 'synced_lyrics', None) else "plain"
-            logger.info(f"✅ Created {lyrics_type} LRC file + embedded: {os.path.basename(lrc_path)}")
+            if synced:
+                # Synced lyrics have timestamps → valid .lrc format
+                with open(lrc_path, 'w', encoding='utf-8') as f:
+                    f.write(synced)
+                # Embed synced lyrics in audio tags
+                self._embed_lyrics(audio_file_path, synced)
+                logger.info(f"✅ Created synced LRC + embedded: {os.path.basename(lrc_path)}")
+            else:
+                # Plain lyrics only → write as .txt (not .lrc, which requires timestamps)
+                with open(txt_path, 'w', encoding='utf-8') as f:
+                    f.write(plain)
+                # Still embed plain lyrics in audio tags (players can display unsynced lyrics)
+                self._embed_lyrics(audio_file_path, plain)
+                logger.info(f"✅ Created plain lyrics .txt + embedded: {os.path.basename(txt_path)}")
             return True
 
         except Exception as e:
