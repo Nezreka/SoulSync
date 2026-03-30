@@ -90,12 +90,27 @@ class MetadataCache:
             logger.debug(f"Cache lookup error ({source}/{entity_type}/{entity_id}): {e}")
             return None
 
+    # Names that indicate junk/placeholder data — should not be cached
+    _JUNK_NAMES = frozenset({
+        '', 'unknown', 'unknown artist', 'unknown album', 'unknown track',
+        'untitled', 'none', 'n/a', 'null',
+    })
+
+    def _is_junk_entity(self, fields: dict) -> bool:
+        """Check if extracted fields represent junk/placeholder data."""
+        name = (fields.get('name') or '').strip().lower()
+        return name in self._JUNK_NAMES
+
     def store_entity(self, source: str, entity_type: str, entity_id: str, raw_data: dict) -> None:
         """Store an entity in the cache. Extracts structured fields from raw_data."""
         if not entity_id or not raw_data:
             return
         try:
             fields = self._extract_fields(source, entity_type, raw_data)
+            # Skip validation for synthetic cache entries (_features, _tracks suffixes)
+            if not entity_id.endswith('_features') and not entity_id.endswith('_tracks') and self._is_junk_entity(fields):
+                logger.debug(f"Rejecting junk entity ({source}/{entity_type}/{entity_id}): name='{fields.get('name')}'")
+                return
             raw_json = json.dumps(raw_data, default=str)
             db = self._get_db()
             conn = db._get_connection()
@@ -175,6 +190,8 @@ class MetadataCache:
                             continue
 
                     fields = self._extract_fields(source, entity_type, raw_data)
+                    if self._is_junk_entity(fields):
+                        continue
                     raw_json = json.dumps(raw_data, default=str)
                     cursor.execute("""
                         INSERT OR REPLACE INTO metadata_cache_entities
@@ -555,6 +572,187 @@ class MetadataCache:
         except Exception as e:
             logger.error(f"Cache eviction error: {e}")
             return 0
+
+    def clean_junk_entities(self) -> int:
+        """Delete cached entities with empty/placeholder names."""
+        try:
+            db = self._get_db()
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+                junk_names = "', '".join(self._JUNK_NAMES - {''})  # exclude empty, handled separately
+                cursor.execute(f"""
+                    DELETE FROM metadata_cache_entities
+                    WHERE (name IS NULL
+                       OR TRIM(name) = ''
+                       OR LOWER(TRIM(name)) IN ('{junk_names}'))
+                      AND entity_id NOT LIKE '%\\_features' ESCAPE '\\'
+                      AND entity_id NOT LIKE '%\\_tracks' ESCAPE '\\'
+                """)
+                count = cursor.rowcount
+                conn.commit()
+                if count > 0:
+                    logger.info(f"Cleaned {count} junk entities from cache")
+                return count
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Junk cleanup error: {e}")
+            return 0
+
+    def clean_orphaned_searches(self) -> int:
+        """Delete search results where <50% of referenced entities still exist."""
+        try:
+            db = self._get_db()
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, source, search_type, result_ids FROM metadata_cache_searches")
+                rows = cursor.fetchall()
+
+                dead_ids = []
+                for row in rows:
+                    try:
+                        result_ids = json.loads(row['result_ids'] or '[]')
+                    except (json.JSONDecodeError, TypeError):
+                        dead_ids.append(row['id'])
+                        continue
+
+                    if not result_ids:
+                        dead_ids.append(row['id'])
+                        continue
+
+                    # Check how many referenced entities still exist
+                    placeholders = ','.join('?' * len(result_ids))
+                    cursor.execute(f"""
+                        SELECT COUNT(*) FROM metadata_cache_entities
+                        WHERE source = ? AND entity_type = ? AND entity_id IN ({placeholders})
+                    """, [row['source'], row['search_type']] + list(result_ids))
+                    found = cursor.fetchone()[0]
+
+                    if found < len(result_ids) * 0.5:
+                        dead_ids.append(row['id'])
+
+                if dead_ids:
+                    # Delete in chunks to stay under SQLite variable limit
+                    for i in range(0, len(dead_ids), 400):
+                        chunk = dead_ids[i:i + 400]
+                        placeholders = ','.join('?' * len(chunk))
+                        cursor.execute(f"DELETE FROM metadata_cache_searches WHERE id IN ({placeholders})", chunk)
+                    conn.commit()
+
+                count = len(dead_ids)
+                if count > 0:
+                    logger.info(f"Cleaned {count} orphaned search results from cache")
+                return count
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Orphan search cleanup error: {e}")
+            return 0
+
+    def clean_stale_musicbrainz_nulls(self, max_age_days: int = 30) -> int:
+        """Delete MusicBrainz cache entries where lookup found nothing (null MBID) and age > max_age_days."""
+        try:
+            db = self._get_db()
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    DELETE FROM musicbrainz_cache
+                    WHERE musicbrainz_id IS NULL
+                      AND julianday('now') - julianday(last_updated) > ?
+                """, (max_age_days,))
+                count = cursor.rowcount
+                conn.commit()
+                if count > 0:
+                    logger.info(f"Cleaned {count} stale MusicBrainz null entries (>{max_age_days} days)")
+                return count
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"MusicBrainz null cleanup error: {e}")
+            return 0
+
+    def get_health_stats(self) -> dict:
+        """Return cache health statistics for the repair dashboard."""
+        try:
+            db = self._get_db()
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+                stats = {}
+
+                # Total counts
+                cursor.execute("SELECT COUNT(*) FROM metadata_cache_entities")
+                stats['total_entities'] = cursor.fetchone()[0]
+
+                cursor.execute("SELECT COUNT(*) FROM metadata_cache_searches")
+                stats['total_searches'] = cursor.fetchone()[0]
+
+                # Junk entity count
+                junk_names = "', '".join(self._JUNK_NAMES - {''})
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM metadata_cache_entities
+                    WHERE (name IS NULL OR TRIM(name) = '' OR LOWER(TRIM(name)) IN ('{junk_names}'))
+                      AND entity_id NOT LIKE '%\\_features' ESCAPE '\\'
+                      AND entity_id NOT LIKE '%\\_tracks' ESCAPE '\\'
+                """)
+                stats['junk_entities'] = cursor.fetchone()[0]
+
+                # By source
+                cursor.execute("""
+                    SELECT source, COUNT(*) FROM metadata_cache_entities GROUP BY source
+                """)
+                stats['by_source'] = {row[0]: row[1] for row in cursor.fetchall()}
+
+                # By entity type
+                cursor.execute("""
+                    SELECT entity_type, COUNT(*) FROM metadata_cache_entities GROUP BY entity_type
+                """)
+                stats['by_type'] = {row[0]: row[1] for row in cursor.fetchall()}
+
+                # Expiring soon
+                cursor.execute("""
+                    SELECT COUNT(*) FROM metadata_cache_entities
+                    WHERE julianday('now') - julianday(updated_at) > ttl_days - 1
+                """)
+                stats['expiring_24h'] = cursor.fetchone()[0]
+
+                cursor.execute("""
+                    SELECT COUNT(*) FROM metadata_cache_entities
+                    WHERE julianday('now') - julianday(updated_at) > ttl_days - 7
+                """)
+                stats['expiring_7d'] = cursor.fetchone()[0]
+
+                # Average age
+                cursor.execute("""
+                    SELECT AVG(julianday('now') - julianday(updated_at)) FROM metadata_cache_entities
+                """)
+                avg = cursor.fetchone()[0]
+                stats['avg_age_days'] = round(avg, 1) if avg else 0
+
+                # MusicBrainz stats
+                try:
+                    cursor.execute("SELECT COUNT(*) FROM musicbrainz_cache")
+                    stats['total_musicbrainz'] = cursor.fetchone()[0]
+                    cursor.execute("SELECT COUNT(*) FROM musicbrainz_cache WHERE musicbrainz_id IS NULL")
+                    stats['stale_mb_nulls'] = cursor.fetchone()[0]
+                except Exception:
+                    stats['total_musicbrainz'] = 0
+                    stats['stale_mb_nulls'] = 0
+
+                # Total access hits
+                cursor.execute("SELECT SUM(access_count) FROM metadata_cache_entities")
+                hits = cursor.fetchone()[0]
+                stats['total_access_hits'] = hits or 0
+
+                return stats
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Cache health stats error: {e}")
+            return {}
 
     def clear(self, source: str = None, entity_type: str = None) -> int:
         """Clear cache entries. Optional filters by source and/or entity_type."""

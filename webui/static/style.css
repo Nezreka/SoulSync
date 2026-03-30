@@ -46650,6 +46650,124 @@ tr.tag-diff-same {
     box-shadow: 0 0 4px rgba(59, 130, 246, 0.3);
 }
 
+/* ── Cache Health Bar (Repair Dashboard) ── */
+.repair-cache-health { margin-top: 12px; }
+.repair-cache-health-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px; border-radius: 10px; cursor: pointer;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    transition: all 0.2s;
+}
+.repair-cache-health-bar:hover { background: rgba(255,255,255,0.05); border-color: rgba(var(--accent-rgb), 0.15); }
+.repair-cache-health-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.repair-cache-health-dot.healthy { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.4); }
+.repair-cache-health-dot.fair { background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.4); }
+.repair-cache-health-dot.poor { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.4); }
+.repair-cache-health-title { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.7); }
+.repair-cache-health-summary { flex: 1; font-size: 12px; color: rgba(255,255,255,0.3); }
+.repair-cache-health-action { font-size: 12px; color: rgb(var(--accent-rgb)); white-space: nowrap; }
+
+/* ── Cache Health Modal ── */
+.cache-health-modal {
+    width: 680px; max-width: 95vw; max-height: 85vh;
+    background: linear-gradient(135deg, rgba(20,20,20,0.97) 0%, rgba(12,12,12,0.99) 100%);
+    backdrop-filter: blur(20px) saturate(1.2);
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-top: 1px solid rgba(255,255,255,0.15);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 8px 32px rgba(0,0,0,0.4),
+                0 0 40px rgba(var(--accent-rgb), 0.08), inset 0 1px 0 rgba(255,255,255,0.1);
+    display: flex; flex-direction: column; overflow: hidden;
+}
+.cache-health-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 24px;
+    background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.06) 0%, transparent 60%);
+    border-bottom: 1px solid rgba(var(--accent-rgb), 0.12);
+}
+.cache-health-header-content { display: flex; align-items: center; gap: 14px; }
+.cache-health-header-icon { font-size: 28px; opacity: 0.9; }
+.cache-health-title {
+    font-size: 20px; font-weight: 700; color: #fff; letter-spacing: -0.3px;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.cache-health-subtitle { font-size: 13px; color: rgba(255,255,255,0.45); margin-top: 2px; }
+.cache-health-body { flex: 1; overflow-y: auto; padding: 20px 24px; }
+.cache-health-footer {
+    display: flex; justify-content: flex-end; padding: 16px 24px;
+    border-top: 1px solid rgba(255,255,255,0.06); background: rgba(0,0,0,0.2);
+}
+.cache-health-loading {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 48px; gap: 12px; color: rgba(255,255,255,0.5); font-size: 14px;
+}
+
+/* Status banner */
+.cache-health-status {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 18px; border-radius: 12px; margin-bottom: 20px;
+}
+.cache-health-status.healthy { background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.2); }
+.cache-health-status.fair { background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2); }
+.cache-health-status.poor { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); }
+.cache-health-status-icon { font-size: 20px; }
+.cache-health-status.healthy .cache-health-status-icon { color: #22c55e; }
+.cache-health-status.fair .cache-health-status-icon { color: #f59e0b; }
+.cache-health-status.poor .cache-health-status-icon { color: #ef4444; }
+.cache-health-status-text { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.8); }
+
+/* Stat cards */
+.cache-health-cards {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;
+}
+.cache-health-card {
+    text-align: center; padding: 14px 8px; border-radius: 12px;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    transition: border-color 0.2s;
+}
+.cache-health-card:hover { border-color: rgba(255,255,255,0.1); }
+.cache-health-card-value { font-size: 22px; font-weight: 700; color: #fff; }
+.cache-health-card-value.warn { color: rgba(255,180,80,0.9); }
+.cache-health-card-label { font-size: 10px; color: rgba(255,255,255,0.35); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+
+/* Sections */
+.cache-health-section { margin-bottom: 16px; }
+.cache-health-section-title {
+    font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.35);
+    text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;
+}
+
+/* Source bars */
+.cache-health-source-bars { display: flex; flex-direction: column; gap: 8px; }
+.cache-health-source-row { display: flex; align-items: center; gap: 10px; }
+.cache-health-source-name { font-size: 13px; color: rgba(255,255,255,0.6); width: 60px; text-transform: capitalize; }
+.cache-health-source-track {
+    flex: 1; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.06); overflow: hidden;
+}
+.cache-health-source-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+.cache-health-source-count { font-size: 12px; color: rgba(255,255,255,0.4); width: 50px; text-align: right; }
+
+/* Type pills */
+.cache-health-type-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+.cache-health-pill {
+    padding: 6px 14px; border-radius: 20px; font-size: 13px; color: rgba(255,255,255,0.5);
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+    text-transform: capitalize;
+}
+.cache-health-pill strong { color: #fff; margin-left: 4px; }
+
+/* Metrics grid */
+.cache-health-metrics { display: flex; flex-direction: column; gap: 6px; }
+.cache-health-metric {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.cache-health-metric:last-child { border-bottom: none; }
+.cache-health-metric-label { font-size: 13px; color: rgba(255,255,255,0.4); }
+.cache-health-metric-value { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.8); }
+
 /* ── Findings Tab ── */
 .repair-findings-toolbar {
     display: flex;

@@ -60,10 +60,11 @@ class MusicBrainzService:
             row = cursor.fetchone()
             
             if row:
-                # Don't use cache if it's older than 90 days
+                # Shorter TTL for null results (failed lookups) so they get retried sooner
                 last_updated = datetime.fromisoformat(row[3]) if row[3] else None
-                if last_updated and (datetime.now() - last_updated).days > 90:
-                    logger.debug(f"Cache entry for {entity_type} '{entity_name}' is stale (> 90 days)")
+                ttl_days = 30 if row[0] is None else 90  # row[0] is musicbrainz_id
+                if last_updated and (datetime.now() - last_updated).days > ttl_days:
+                    logger.debug(f"Cache entry for {entity_type} '{entity_name}' is stale (> {ttl_days} days)")
                     return None
                 
                 # Parse JSON with error handling

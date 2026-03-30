@@ -19072,6 +19072,17 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🧹 Metadata Cache Maintenance",
+                "description": "The cache evictor now runs four maintenance phases to keep the metadata cache clean",
+                "features": [
+                    "• Input validation prevents junk entities (Unknown Artist, empty names) from being cached",
+                    "• Junk cleanup removes existing placeholder entries from the cache",
+                    "• Orphan cleanup removes search results pointing to deleted entities",
+                    "• MusicBrainz null cleanup removes failed lookups after 30 days (was 90) so they get retried",
+                    "• Health stats available in the repair dashboard"
+                ]
+            },
+            {
                 "title": "🔧 Fix Wishlist Download Selection Ignoring Checkboxes",
                 "description": "Download Selection now respects which tracks are checked in the wishlist overview",
                 "features": [
@@ -44128,6 +44139,17 @@ def repair_findings_counts():
     except Exception as e:
         logger.error(f"Error getting findings counts: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/cache-health', methods=['GET'])
+def repair_cache_health():
+    """Get metadata cache health stats for the repair dashboard"""
+    try:
+        from core.metadata_cache import get_metadata_cache
+        cache = get_metadata_cache()
+        return jsonify(cache.get_health_stats()), 200
+    except Exception as e:
+        logger.error(f"Error getting cache health: {e}")
+        return jsonify({}), 500
 
 @app.route('/api/repair/findings/<int:finding_id>/fix', methods=['POST'])
 def repair_finding_fix(finding_id):
