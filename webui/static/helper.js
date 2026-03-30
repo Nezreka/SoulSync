@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'Fix Tidal OAuth in Docker',            desc: 'Tidal redirect URI now uses configured setting instead of Docker container hostname' },
         { title: 'High-Res Cover Art',                  desc: 'Album art now sourced from Cover Art Archive (1200x1200+) when MusicBrainz release ID is available' },
         { title: 'Embedded Lyrics',                     desc: 'Lyrics now embedded directly in audio file tags — Navidrome, Jellyfin, and Plex can display them' },
         { title: 'Fix AcoustID False Positives',        desc: 'High-confidence fingerprints no longer quarantine correct files when titles are in different languages' },

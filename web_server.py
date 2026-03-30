@@ -5977,12 +5977,19 @@ def auth_tidal():
             tidal_oauth_state["code_verifier"] = temp_tidal_client.code_verifier
             tidal_oauth_state["code_challenge"] = temp_tidal_client.code_challenge
         
-        # Dynamically set redirect_uri based on how the user is accessing the app
-        request_host = request.host.split(':')[0]
-        if request_host not in ('127.0.0.1', 'localhost'):
-            dynamic_redirect = f"http://{request_host}:8889/tidal/callback"
-            temp_tidal_client.redirect_uri = dynamic_redirect
-            print(f"🔗 Tidal redirect_uri updated for remote access: {dynamic_redirect}")
+        # Use the user's configured redirect_uri from settings — don't override
+        # with request.host, which in Docker returns the container hostname
+        configured_redirect = config_manager.get('tidal.redirect_uri', '')
+        if configured_redirect:
+            temp_tidal_client.redirect_uri = configured_redirect
+            print(f"🔗 Using configured Tidal redirect_uri: {configured_redirect}")
+        else:
+            # Fallback: dynamically set based on request host (non-Docker local access)
+            request_host = request.host.split(':')[0]
+            if request_host not in ('127.0.0.1', 'localhost'):
+                dynamic_redirect = f"http://{request_host}:8889/tidal/callback"
+                temp_tidal_client.redirect_uri = dynamic_redirect
+                print(f"🔗 Tidal redirect_uri set from request host: {dynamic_redirect}")
 
         # Store PKCE + redirect_uri for callback to use the same values
         with tidal_oauth_lock:
@@ -19064,6 +19071,15 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "🔧 Fix Tidal OAuth Redirect URI in Docker",
+                "description": "Tidal OAuth now uses the configured redirect URI instead of the Docker container hostname",
+                "features": [
+                    "• Respects the redirect URI set in Settings instead of overriding with request hostname",
+                    "• Falls back to dynamic host detection only if no redirect URI is configured",
+                    "• Fixes Tidal authentication failing in Docker due to internal hostname in OAuth URL"
+                ]
+            },
             {
                 "title": "🎨 High-Resolution Cover Art from Cover Art Archive",
                 "description": "Album art now sourced from Cover Art Archive when available — often 1200x1200+ original quality",
