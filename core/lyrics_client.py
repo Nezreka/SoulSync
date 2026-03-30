@@ -111,13 +111,51 @@ class LyricsClient:
             with open(lrc_path, 'w', encoding='utf-8') as f:
                 f.write(lrc_content)
 
+            # Embed lyrics directly in audio file tags (Navidrome/Jellyfin read these)
+            self._embed_lyrics(audio_file_path, lrc_content)
+
             lyrics_type = "synced" if getattr(lyrics_data, 'synced_lyrics', None) else "plain"
-            logger.info(f"✅ Created {lyrics_type} LRC file: {os.path.basename(lrc_path)}")
+            logger.info(f"✅ Created {lyrics_type} LRC file + embedded: {os.path.basename(lrc_path)}")
             return True
 
         except Exception as e:
             logger.error(f"Error creating LRC file for {track_name}: {e}")
             return False
+
+
+    def _embed_lyrics(self, audio_file_path: str, lyrics_text: str):
+        """Embed lyrics directly into audio file tags."""
+        try:
+            from mutagen import File as MutagenFile
+            from mutagen.flac import FLAC
+            from mutagen.oggvorbis import OggVorbis
+            from mutagen.mp4 import MP4
+            from mutagen.id3 import ID3, USLT
+
+            audio = MutagenFile(audio_file_path)
+            if audio is None:
+                return
+
+            if audio.tags is None:
+                return  # Don't create tags just for lyrics
+
+            if isinstance(audio.tags, ID3):
+                audio.tags.delall('USLT')
+                audio.tags.add(USLT(encoding=3, lang='eng', desc='', text=lyrics_text))
+                audio.save(v1=0, v2_version=4)
+            elif isinstance(audio, (FLAC, OggVorbis)) or type(audio).__name__ == 'OggOpus':
+                audio['lyrics'] = [lyrics_text]
+                if isinstance(audio, FLAC):
+                    audio.save(deleteid3=True)
+                else:
+                    audio.save()
+            elif isinstance(audio, MP4):
+                audio['\xa9lyr'] = [lyrics_text]
+                audio.save()
+
+            logger.debug(f"Embedded lyrics in: {os.path.basename(audio_file_path)}")
+        except Exception as e:
+            logger.warning(f"Could not embed lyrics in {os.path.basename(audio_file_path)}: {e}")
 
 
 # Global instance for easy import
