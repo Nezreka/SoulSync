@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'Fix Invalid .LRC Lyrics Files',            desc: 'Plain lyrics now saved as .txt — only synced (timestamped) lyrics get the .lrc extension' },
         { title: 'Fix Collab Artist on Singles',            desc: 'Single/playlist path templates now respect First Listed Artist setting — $albumartist available for all template types' },
         { title: 'Fix Enrichment Breaking Manual Matches', desc: 'Enriching a manually matched artist no longer reverts status to not_found — uses stored ID for direct lookup' },
         { title: 'Fix Spotify OAuth Empty Response',       desc: 'OAuth callback server now always sends a response in Docker — added health check and proper logging' },

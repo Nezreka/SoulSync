@@ -15393,11 +15393,12 @@ def _downsample_hires_flac(final_path, context):
             try:
                 os.rename(final_path, new_path)
                 print(f"📝 [Downsample] Renamed: {os.path.basename(final_path)} → {new_basename}")
-                # Rename matching LRC file if it exists
-                old_lrc = os.path.splitext(final_path)[0] + '.lrc'
-                if os.path.isfile(old_lrc):
-                    new_lrc = os.path.splitext(new_path)[0] + '.lrc'
-                    os.rename(old_lrc, new_lrc)
+                # Rename matching lyrics sidecar file if it exists (.lrc or .txt)
+                for lyrics_ext in ('.lrc', '.txt'):
+                    old_lyrics = os.path.splitext(final_path)[0] + lyrics_ext
+                    if os.path.isfile(old_lyrics):
+                        new_lyrics = os.path.splitext(new_path)[0] + lyrics_ext
+                        os.rename(old_lyrics, new_lyrics)
                 return new_path
             except Exception as rename_err:
                 print(f"⚠️ [Downsample] Could not rename file: {rename_err}")
@@ -15551,15 +15552,16 @@ def _create_lossy_copy(final_path):
                         if test_audio is not None:
                             os.remove(final_path)
                             print(f"🔥 [Blasphemy Mode] Deleted original: {os.path.basename(final_path)}")
-                            # Rename LRC file to match the output filename
-                            flac_lrc = os.path.splitext(final_path)[0] + '.lrc'
-                            if os.path.isfile(flac_lrc):
-                                out_lrc = os.path.splitext(out_path)[0] + '.lrc'
-                                try:
-                                    os.rename(flac_lrc, out_lrc)
-                                    print(f"🔥 [Blasphemy Mode] Renamed LRC: {os.path.basename(flac_lrc)} -> {os.path.basename(out_lrc)}")
-                                except Exception as lrc_err:
-                                    print(f"⚠️ [Blasphemy Mode] Could not rename LRC: {lrc_err}")
+                            # Rename lyrics sidecar file to match the output filename
+                            for lyrics_ext in ('.lrc', '.txt'):
+                                src_lyrics = os.path.splitext(final_path)[0] + lyrics_ext
+                                if os.path.isfile(src_lyrics):
+                                    dst_lyrics = os.path.splitext(out_path)[0] + lyrics_ext
+                                    try:
+                                        os.rename(src_lyrics, dst_lyrics)
+                                        print(f"🔥 [Blasphemy Mode] Renamed {lyrics_ext}: {os.path.basename(src_lyrics)} -> {os.path.basename(dst_lyrics)}")
+                                    except Exception as lrc_err:
+                                        print(f"⚠️ [Blasphemy Mode] Could not rename {lyrics_ext}: {lrc_err}")
                             return out_path
                         else:
                             print(f"⚠️ [Blasphemy Mode] Output failed audio validation, keeping original: {os.path.basename(final_path)}")
@@ -18802,15 +18804,16 @@ def _execute_retag(group_id, album_id):
                     os.makedirs(os.path.dirname(new_path), exist_ok=True)
                     _safe_move_file(current_file_path, new_path)
 
-                    # Move .lrc file alongside audio file if it exists
-                    old_lrc = os.path.splitext(current_file_path)[0] + '.lrc'
-                    if os.path.exists(old_lrc):
-                        new_lrc = os.path.splitext(new_path)[0] + '.lrc'
-                        try:
-                            _safe_move_file(old_lrc, new_lrc)
-                            print(f"📝 [Retag] Moved .lrc file alongside audio")
-                        except Exception as lrc_err:
-                            print(f"⚠️ [Retag] Failed to move .lrc file: {lrc_err}")
+                    # Move lyrics sidecar file alongside audio file if it exists
+                    for lyrics_ext in ('.lrc', '.txt'):
+                        old_lyrics = os.path.splitext(current_file_path)[0] + lyrics_ext
+                        if os.path.exists(old_lyrics):
+                            new_lyrics = os.path.splitext(new_path)[0] + lyrics_ext
+                            try:
+                                _safe_move_file(old_lyrics, new_lyrics)
+                                print(f"📝 [Retag] Moved {lyrics_ext} file alongside audio")
+                            except Exception as lrc_err:
+                                print(f"⚠️ [Retag] Failed to move {lyrics_ext} file: {lrc_err}")
 
                     # Remove old cover.jpg if directory changed and old dir is now empty of audio
                     new_dir = os.path.dirname(new_path)
@@ -19204,6 +19207,16 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "🔧 Fix .LRC Files Written Without Timestamps",
+                "description": "Plain lyrics now saved as .txt instead of invalid .lrc files",
+                "features": [
+                    "• Synced (timestamped) lyrics → .lrc file — valid format for Plex, Navidrome, Jellyfin",
+                    "• Plain (unsynced) lyrics → .txt file — no longer written with incorrect .lrc extension",
+                    "• Lyrics still embedded in audio file tags regardless of type (players can display both)",
+                    "• File move/rename operations updated to handle both .lrc and .txt sidecars"
+                ]
+            },
             {
                 "title": "🔧 Fix Collaborative Album Artist Not Applied to Singles (#215)",
                 "description": "Single path template now respects the First Listed Artist setting",
