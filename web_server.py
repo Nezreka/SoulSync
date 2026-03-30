@@ -15690,14 +15690,16 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
                 print(f"❌ Could not load audio file with Mutagen: {file_path}")
                 return False
 
-            # ── Wipe ALL existing tags in memory (NO save yet) ──
+            # ── Wipe ALL existing tags and save immediately ──
             # Files from Soulseek carry random metadata (wrong comments,
             # encoder info, ReplayGain, old album art, random TXXX frames).
+            # Save the cleared state FIRST so that if anything below throws,
+            # the file at least has clean (empty) tags instead of junk that
+            # causes album fragmentation in media servers.
             if hasattr(audio_file, 'clear_pictures'):
                 audio_file.clear_pictures()
 
             if audio_file.tags is not None:
-                # Log what's being cleared for debugging
                 if len(audio_file.tags) > 0:
                     tag_keys = list(audio_file.tags.keys())[:15]
                     print(f"🧹 Clearing {len(audio_file.tags)} existing tags: "
@@ -15705,6 +15707,14 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
                 audio_file.tags.clear()
             else:
                 audio_file.add_tags()
+
+            # Persist the wipe — guarantees junk tags are gone even if later steps fail
+            if isinstance(audio_file.tags, ID3):
+                audio_file.save(v1=0, v2_version=4)
+            elif isinstance(audio_file, FLAC):
+                audio_file.save(deleteid3=True)
+            else:
+                audio_file.save()
 
             metadata = _extract_spotify_metadata(context, artist, album_info)
             if not metadata:
@@ -18999,6 +19009,16 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "🔧 Fix Soulseek Junk Tags Surviving Post-Processing",
+                "description": "Tags from Soulseek source files are now wiped to disk immediately, before metadata enhancement",
+                "features": [
+                    "• Clears and saves tags before any API calls or metadata extraction",
+                    "• If enhancement fails, file has clean empty tags instead of inconsistent junk",
+                    "• Fixes album fragmentation in Navidrome/Jellyfin/Plex caused by partial MusicBrainz data",
+                    "• Happy path unchanged — full metadata still written on success"
+                ]
+            },
             {
                 "title": "👁️ Watch All Unwatched Preview Modal",
                 "description": "The Watch All Unwatched button now opens a modal showing exactly which artists will be added",
