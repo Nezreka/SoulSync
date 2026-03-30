@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'Fix Collab Artist on Singles',            desc: 'Single/playlist path templates now respect First Listed Artist setting — $albumartist available for all template types' },
         { title: 'Fix Enrichment Breaking Manual Matches', desc: 'Enriching a manually matched artist no longer reverts status to not_found — uses stored ID for direct lookup' },
         { title: 'Fix Spotify OAuth Empty Response',       desc: 'OAuth callback server now always sends a response in Docker — added health check and proper logging' },
         { title: 'All Services on Dashboard',             desc: 'Dashboard shows all enrichment services as live-status chips — click unconfigured ones to jump to Settings. Spotify card no longer shows "Apple Music"', page: 'dashboard' },

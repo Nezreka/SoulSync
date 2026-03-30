@@ -15099,6 +15099,22 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
         else:
             clean_track_name = original_search.get('title', 'Unknown Track')
 
+        # Get structured artists list for collab artist handling (same as album/playlist modes)
+        _artists = original_search.get('artists') or track_info.get('artists') or []
+        # Extract iTunes artist ID for primary artist resolution (only for iTunes source)
+        _spotify_album = context.get('spotify_album', {})
+        _itunes_aid = None
+        _track_source = original_search.get('_source') or track_info.get('_source', '')
+        _is_itunes = _track_source == 'itunes' or (isinstance(spotify_artist, dict) and str(spotify_artist.get('id', '')).isdigit() and _track_source != 'deezer')
+        if _is_itunes and isinstance(spotify_artist, dict):
+            _aid = spotify_artist.get('id', '')
+            if str(_aid).isdigit():
+                _itunes_aid = str(_aid)
+        if not _itunes_aid and _spotify_album:
+            _ext = _spotify_album.get('external_urls', {})
+            if isinstance(_ext, dict) and _ext.get('itunes_artist_id'):
+                _itunes_aid = _ext['itunes_artist_id']
+
         template_context = {
             'artist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
             'albumartist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
@@ -15109,6 +15125,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'year': year,
             'quality': context.get('_audio_quality', ''),
             'albumtype': album_type_display,
+            '_artists_list': _artists,
+            '_itunes_artist_id': _itunes_aid,
         }
 
         folder_path, filename_base = _get_file_path_from_template(template_context, 'single_path')
@@ -19136,6 +19154,15 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "🔧 Fix Collaborative Album Artist Not Applied to Singles (#215)",
+                "description": "Single path template now respects the First Listed Artist setting",
+                "features": [
+                    "• Single downloads now include structured artists list for collab artist extraction",
+                    "• $albumartist variable now works in single and playlist path templates",
+                    "• Settings UI updated to show $albumartist as available for single and playlist templates"
+                ]
+            },
             {
                 "title": "🔧 Fix Enrichment Overwriting Manual Matches (#221)",
                 "description": "Enriching an entity that was manually matched no longer reverts the status to not_found",
