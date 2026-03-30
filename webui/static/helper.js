@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'High-Res Cover Art',                  desc: 'Album art now sourced from Cover Art Archive (1200x1200+) when MusicBrainz release ID is available' },
         { title: 'Embedded Lyrics',                     desc: 'Lyrics now embedded directly in audio file tags — Navidrome, Jellyfin, and Plex can display them' },
         { title: 'Fix AcoustID False Positives',        desc: 'High-confidence fingerprints no longer quarantine correct files when titles are in different languages' },
         { title: 'Fix Junk Tags Surviving',            desc: 'Soulseek source tags are now wiped to disk immediately — no more album fragmentation from partial metadata' },

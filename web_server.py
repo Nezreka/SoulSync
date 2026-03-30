@@ -15786,12 +15786,14 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
                 if metadata.get('disc_number'):
                     audio_file['disk'] = [(metadata['disc_number'], 0)]
 
+            # ── Embed source IDs (Spotify, MusicBrainz, etc.) on the same object ──
+            # Runs before album art so MusicBrainz release ID is available for
+            # Cover Art Archive high-resolution lookup.
+            _embed_source_ids(audio_file, metadata)
+
             # ── Embed album art on the same object ──
             if config_manager.get('metadata_enhancement.embed_album_art', True):
                 _embed_album_art_metadata(audio_file, metadata)
-
-            # ── Embed source IDs (Spotify, MusicBrainz, etc.) on the same object ──
-            _embed_source_ids(audio_file, metadata)
 
             # ── Embed audio quality tag ──
             quality = context.get('_audio_quality', '')
@@ -16014,17 +16016,64 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
 
     return metadata
 
-def _embed_album_art_metadata(audio_file, metadata: dict):
-    """Downloads and embeds high-quality Spotify album art into the file."""
+def _get_image_dimensions(data: bytes):
+    """Extract width/height from JPEG or PNG image data without PIL."""
     try:
-        art_url = metadata.get('album_art_url')
-        if not art_url:
-            print("🎨 No album art URL available for embedding.")
-            return
+        if data[:8] == b'\x89PNG\r\n\x1a\n':
+            # PNG: width and height at bytes 16-23
+            import struct
+            w, h = struct.unpack('>II', data[16:24])
+            return w, h
+        if data[:2] == b'\xff\xd8':
+            # JPEG: scan for SOF0/SOF2 marker
+            import struct
+            i = 2
+            while i < len(data) - 9:
+                if data[i] != 0xFF:
+                    break
+                marker = data[i + 1]
+                if marker in (0xC0, 0xC2):
+                    h, w = struct.unpack('>HH', data[i + 5:i + 9])
+                    return w, h
+                length = struct.unpack('>H', data[i + 2:i + 4])[0]
+                i += 2 + length
+    except Exception:
+        pass
+    return None, None
 
-        with urllib.request.urlopen(art_url, timeout=10) as response:
-            image_data = response.read()
-            mime_type = response.info().get_content_type()
+
+def _embed_album_art_metadata(audio_file, metadata: dict):
+    """Downloads and embeds album art — tries Cover Art Archive (full resolution)
+    first if MusicBrainz release ID is available, falls back to Spotify/iTunes URL."""
+    try:
+        image_data = None
+        mime_type = None
+
+        # Try Cover Art Archive first (often 1200x1200+, original quality)
+        release_mbid = metadata.get('musicbrainz_release_id')
+        if release_mbid:
+            try:
+                caa_url = f"https://coverartarchive.org/release/{release_mbid}/front"
+                req = urllib.request.Request(caa_url, headers={'Accept': 'image/*'})
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    image_data = response.read()
+                    mime_type = response.info().get_content_type() or 'image/jpeg'
+                if image_data and len(image_data) > 1000:
+                    print(f"🎨 Cover art from Cover Art Archive ({len(image_data) // 1024}KB)")
+                else:
+                    image_data = None  # Too small, likely an error page
+            except Exception:
+                image_data = None  # Fall through to Spotify/iTunes URL
+
+        # Fallback to Spotify/iTunes/Deezer URL (typically 640x640)
+        if not image_data:
+            art_url = metadata.get('album_art_url')
+            if not art_url:
+                print("🎨 No album art URL available for embedding.")
+                return
+            with urllib.request.urlopen(art_url, timeout=10) as response:
+                image_data = response.read()
+                mime_type = response.info().get_content_type()
 
         if not image_data:
             print("❌ Failed to download album art data.")
@@ -16039,8 +16088,10 @@ def _embed_album_art_metadata(audio_file, metadata: dict):
             picture.data = image_data
             picture.type = 3
             picture.mime = mime_type
-            picture.width = 640
-            picture.height = 640
+            # Detect actual dimensions from image data
+            _img_w, _img_h = _get_image_dimensions(image_data)
+            picture.width = _img_w or 640
+            picture.height = _img_h or 640
             picture.depth = 24
             audio_file.add_picture(picture)
         # MP4/M4A
@@ -16208,6 +16259,10 @@ def _embed_source_ids(audio_file, metadata: dict):
             yr = str(metadata['date'])[:4]
             if yr.isdigit():
                 release_year = yr
+
+        # Store release MBID in metadata for downstream use (e.g. Cover Art Archive)
+        if _rc_mbid:
+            metadata['musicbrainz_release_id'] = _rc_mbid
 
         # Write release year to file tags if not already present
         if release_year and 'ORIGINALDATE' not in id_tags:
@@ -19009,6 +19064,15 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "🎨 High-Resolution Cover Art from Cover Art Archive",
+                "description": "Album art now sourced from Cover Art Archive when available — often 1200x1200+ original quality",
+                "features": [
+                    "• Tries Cover Art Archive first using MusicBrainz release ID (full resolution)",
+                    "• Falls back to Spotify/iTunes/Deezer URL (640x640) if CAA unavailable",
+                    "• Source ID embedding now runs before art embedding to make release ID available"
+                ]
+            },
             {
                 "title": "🎵 Embedded Lyrics in Audio Files",
                 "description": "Lyrics are now embedded directly in audio file tags alongside the .lrc sidecar file",
