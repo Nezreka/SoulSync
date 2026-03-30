@@ -13039,11 +13039,15 @@ async function downloadSelectedCategory() {
         return;
     }
 
+    // Collect checked track IDs BEFORE closing the modal (checkboxes are destroyed on close)
+    const checkedBoxes = document.querySelectorAll('.wishlist-select-cb:checked');
+    const selectedTrackIds = new Set(Array.from(checkedBoxes).map(cb => cb.dataset.trackId).filter(Boolean));
+
     closeWishlistOverviewModal();
-    await openDownloadMissingWishlistModal(category);
+    await openDownloadMissingWishlistModal(category, selectedTrackIds.size > 0 ? selectedTrackIds : null);
 }
 
-async function openDownloadMissingWishlistModal(category = null) {
+async function openDownloadMissingWishlistModal(category = null, selectedTrackIds = null) {
     showLoadingOverlay('Loading wishlist...');
     const playlistId = "wishlist"; // Use a consistent ID for wishlist
 
@@ -13089,6 +13093,12 @@ async function openDownloadMissingWishlistModal(category = null) {
         }
         const tracksData = await tracksResponse.json();
         tracks = tracksData.tracks || [];
+
+        // Filter to only selected tracks if user made a selection
+        if (selectedTrackIds && selectedTrackIds.size > 0) {
+            tracks = tracks.filter(t => selectedTrackIds.has(t.id) || selectedTrackIds.has(t.spotify_track_id));
+            console.log(`📥 Filtered to ${tracks.length} selected tracks (from ${tracksData.tracks?.length || 0} total)`);
+        }
 
     } catch (error) {
         showToast(`Failed to fetch wishlist data: ${error.message}`, 'error');

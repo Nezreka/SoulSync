@@ -19072,6 +19072,15 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔧 Fix Wishlist Download Selection Ignoring Checkboxes",
+                "description": "Download Selection now respects which tracks are checked in the wishlist overview",
+                "features": [
+                    "• Selected track IDs are collected before closing the overview modal",
+                    "• Only checked tracks are sent to the download analysis board",
+                    "• If nothing is checked, downloads the full category (same as before)"
+                ]
+            },
+            {
                 "title": "🔧 Fix Tidal OAuth Redirect URI in Docker",
                 "description": "Tidal OAuth now uses the configured redirect URI instead of the Docker container hostname",
                 "features": [
