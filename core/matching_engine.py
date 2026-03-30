@@ -420,15 +420,25 @@ class MusicMatchingEngine:
         Returns queries in order of preference (cleaned titles first, then original).
         """
         queries = []
-        
+
         if not spotify_track.artists:
             # No artist info - just use track name variations
             queries.append(self.clean_title(spotify_track.name))
             return queries
-            
+
+        # If artist or title contains non-ASCII (e.g. Japanese, Chinese, Korean),
+        # add a raw query first — Soulseek filenames often use original characters,
+        # and unidecode mangles CJK text into wrong romanizations (Chinese pinyin for Japanese kanji).
+        raw_artist = spotify_track.artists[0].strip()
+        raw_title = spotify_track.name.strip()
+        if raw_artist and raw_title and not (raw_artist + raw_title).isascii():
+            raw_query = f"{raw_artist} {raw_title}".strip()
+            queries.append(raw_query)
+            logger.debug(f"NON-ASCII: Raw original query: '{raw_query}'")
+
         artist = self.clean_artist(spotify_track.artists[0])
         original_title = spotify_track.name
-        
+
         # Get album name if available - try multiple attribute names
         album_name = None
         for attr in ['album', 'album_name', 'album_title']:
