@@ -19010,6 +19010,15 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🎵 Embedded Lyrics in Audio Files",
+                "description": "Lyrics are now embedded directly in audio file tags alongside the .lrc sidecar file",
+                "features": [
+                    "• Lyrics embedded as USLT (MP3), lyrics (FLAC/OGG), or ©lyr (M4A) tags",
+                    "• Navidrome, Jellyfin, and Plex can now display lyrics without .lrc file support",
+                    "• .lrc sidecar files are still created for compatibility with other players"
+                ]
+            },
+            {
                 "title": "🔧 Fix AcoustID False Positives for Non-English Tracks",
                 "description": "AcoustID no longer quarantines correct files when titles are in different languages",
                 "features": [
