@@ -23,6 +23,7 @@ class SyncResult:
     sync_time: datetime
     errors: List[str]
     wishlist_added_count: int = 0
+    match_details: list = None  # Per-track match data for sync history
 
     @property
     def success_rate(self) -> float:
@@ -362,6 +363,48 @@ class PlaylistSyncService:
                     logger.warning(f"Failed to auto-add tracks to wishlist: {e}")
                     # Don't fail the sync if wishlist add fails
 
+            # Build per-track match details for sync history
+            _match_details = []
+            for i, mr in enumerate(match_results):
+                t = mr.spotify_track
+                artists = t.artists if hasattr(t, 'artists') and t.artists else []
+                first_artist = artists[0] if artists else ''
+                if isinstance(first_artist, dict):
+                    first_artist = first_artist.get('name', '')
+                album = getattr(t, 'album', '')
+                if isinstance(album, dict):
+                    album = album.get('name', '')
+
+                # Extract image URL from track's album data
+                image_url = getattr(t, 'image_url', None) or ''
+                if not image_url:
+                    t_album = getattr(t, 'album', None)
+                    if isinstance(t_album, dict):
+                        imgs = t_album.get('images', [])
+                        if imgs and isinstance(imgs, list) and len(imgs) > 0:
+                            image_url = imgs[0].get('url', '') if isinstance(imgs[0], dict) else ''
+
+                detail = {
+                    'index': i,
+                    'name': t.name if hasattr(t, 'name') else '',
+                    'artist': str(first_artist),
+                    'album': str(album or ''),
+                    'duration_ms': getattr(t, 'duration_ms', 0),
+                    'source_track_id': getattr(t, 'id', ''),
+                    'image_url': image_url,
+                    'status': 'found' if mr.is_match else 'not_found',
+                    'confidence': round(mr.confidence, 3),
+                    'matched_track': None,
+                    'download_status': 'wishlist' if not mr.is_match else None,
+                }
+                if mr.plex_track:
+                    detail['matched_track'] = {
+                        'title': getattr(mr.plex_track, 'title', ''),
+                        'artist_name': getattr(mr.plex_track, 'artist', ''),
+                        'album_title': getattr(mr.plex_track, 'album', ''),
+                    }
+                _match_details.append(detail)
+
             result = SyncResult(
                 playlist_name=playlist.name,
                 total_tracks=len(playlist.tracks),
@@ -371,7 +414,8 @@ class PlaylistSyncService:
                 failed_tracks=failed_tracks,
                 sync_time=datetime.now(),
                 errors=errors,
-                wishlist_added_count=wishlist_added_count
+                wishlist_added_count=wishlist_added_count,
+                match_details=_match_details
             )
 
             logger.info(f"Sync completed: {result.success_rate:.1f}% success rate")
