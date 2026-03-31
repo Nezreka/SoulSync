@@ -133,16 +133,26 @@ class DownloadOrchestrator:
         elif self.mode == 'deezer_dl':
             return await self.deezer_dl.check_connection()
         elif self.mode == 'hybrid':
-            soulseek_ok = await self.soulseek.check_connection()
-            youtube_ok = await self.youtube.check_connection()
-            tidal_ok = await self.tidal.check_connection()
-            qobuz_ok = await self.qobuz.check_connection()
-            hifi_ok = await self.hifi.check_connection()
-            deezer_ok = await self.deezer_dl.check_connection()
+            # Only check sources that are in the configured hybrid order
+            clients = {
+                'soulseek': self.soulseek, 'youtube': self.youtube,
+                'tidal': self.tidal, 'qobuz': self.qobuz,
+                'hifi': self.hifi, 'deezer_dl': self.deezer_dl,
+            }
+            sources_to_check = self.hybrid_order if self.hybrid_order else list(clients.keys())
+            results = {}
+            for source in sources_to_check:
+                client = clients.get(source)
+                if client:
+                    try:
+                        results[source] = await client.check_connection()
+                    except Exception:
+                        results[source] = False
 
-            logger.info(f"   Soulseek: {'✅' if soulseek_ok else '❌'} | YouTube: {'✅' if youtube_ok else '❌'} | Tidal: {'✅' if tidal_ok else '❌'} | Qobuz: {'✅' if qobuz_ok else '❌'} | HiFi: {'✅' if hifi_ok else '❌'} | Deezer: {'✅' if deezer_ok else '❌'}")
+            status_parts = [f"{s}: {'✅' if ok else '❌'}" for s, ok in results.items()]
+            logger.info(f"   {' | '.join(status_parts)}")
 
-            return soulseek_ok or youtube_ok or tidal_ok or qobuz_ok or hifi_ok or deezer_ok
+            return any(results.values())
 
         return False
 
