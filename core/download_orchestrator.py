@@ -49,7 +49,7 @@ class DownloadOrchestrator:
         self.mode = config_manager.get('download_source.mode', 'soulseek')
         self.hybrid_primary = config_manager.get('download_source.hybrid_primary', 'soulseek')
         self.hybrid_secondary = config_manager.get('download_source.hybrid_secondary', 'youtube')
-        self.hybrid_order = config_manager.get('download_source.hybrid_order', [])
+        self.hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
 
         logger.info(f"🎛️  Download Orchestrator initialized - Mode: {self.mode}")
         if self.mode == 'hybrid':
@@ -63,7 +63,7 @@ class DownloadOrchestrator:
         self.mode = config_manager.get('download_source.mode', 'soulseek')
         self.hybrid_primary = config_manager.get('download_source.hybrid_primary', 'soulseek')
         self.hybrid_secondary = config_manager.get('download_source.hybrid_secondary', 'youtube')
-        self.hybrid_order = config_manager.get('download_source.hybrid_order', [])
+        self.hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
 
         # Reload underlying client configs (SLSKD URL, API key, etc.)
         self.soulseek._setup_client()
