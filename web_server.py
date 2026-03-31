@@ -28619,7 +28619,8 @@ def start_tidal_discovery(playlist_id):
         # Add activity for discovery start
         add_activity_item("🔍", "Tidal Discovery Started", f"'{target_playlist.name}' - {len(target_playlist.tracks)} tracks", "Now")
         
-        # Start discovery worker
+        # Start discovery worker (capture profile ID while we have Flask context)
+        state['_profile_id'] = get_current_profile_id()
         future = tidal_discovery_executor.submit(_run_tidal_discovery_worker, playlist_id)
         state['discovery_future'] = future
         
@@ -28950,13 +28951,12 @@ def _resume_enrichment_workers(was_running, label='discovery'):
             pass
 
 
-def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discovery_results, discovery_source):
+def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discovery_results, discovery_source, profile_id=1):
     """Write discovery results back to the mirrored playlist's extra_data.
     Called after Tidal/Deezer/Beatport discovery completes.
     Matches by source_track_id first, then by track position (index)."""
     try:
         db = get_database()
-        profile_id = get_current_profile_id()
         playlists = db.get_mirrored_playlists(profile_id=profile_id)
         mirrored_pl = None
         for pl in playlists:
@@ -28965,8 +28965,10 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
                 break
 
         if not mirrored_pl:
+            print(f"⚠️ [Discovery Sync] No mirrored playlist found for {source_type}:{source_playlist_id} (profile {profile_id})")
             return
 
+        print(f"📝 [Discovery Sync] Found mirrored playlist '{mirrored_pl.get('name')}' (DB id={mirrored_pl['id']}) for {source_type}:{source_playlist_id}")
         mirrored_tracks = db.get_mirrored_playlist_tracks(mirrored_pl['id'])
         if not mirrored_tracks:
             return
@@ -29024,7 +29026,9 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
             print(f"📝 Synced {updated} discovery results back to mirrored playlist '{mirrored_pl.get('name', '')}'")
 
     except Exception as e:
+        import traceback
         print(f"⚠️ Failed to sync discovery results to mirrored playlist: {e}")
+        traceback.print_exc()
 
 
 def _run_playlist_discovery_worker(playlists, automation_id=None):
@@ -29619,7 +29623,7 @@ def _run_tidal_discovery_worker(playlist_id):
         print(f"✅ Tidal discovery complete ({source_label}): {successful_discoveries}/{len(playlist.tracks)} tracks found")
 
         # Sync discovery results back to mirrored playlist
-        _sync_discovery_results_to_mirrored('tidal', playlist_id, state.get('discovery_results', []), discovery_source)
+        _sync_discovery_results_to_mirrored('tidal', playlist_id, state.get('discovery_results', []), discovery_source, profile_id=state.get('_profile_id', 1))
 
     except Exception as e:
         print(f"❌ Error in Tidal discovery worker: {e}")
@@ -30082,7 +30086,8 @@ def start_deezer_discovery(playlist_id):
         track_count = len(state['playlist']['tracks'])
         add_activity_item("🔍", "Deezer Discovery Started", f"'{playlist_name}' - {track_count} tracks", "Now")
 
-        # Start discovery worker
+        # Start discovery worker (capture profile ID while we have Flask context)
+        deezer_discovery_states[playlist_id]['_profile_id'] = get_current_profile_id()
         future = deezer_discovery_executor.submit(_run_deezer_discovery_worker, playlist_id)
         state['discovery_future'] = future
 
@@ -30611,7 +30616,7 @@ def _run_deezer_discovery_worker(playlist_id):
         print(f"✅ Deezer discovery complete ({source_label}): {successful_discoveries}/{len(tracks)} tracks found")
 
         # Sync discovery results back to mirrored playlist
-        _sync_discovery_results_to_mirrored('deezer', playlist_id, state.get('discovery_results', []), discovery_source)
+        _sync_discovery_results_to_mirrored('deezer', playlist_id, state.get('discovery_results', []), discovery_source, profile_id=state.get('_profile_id', 1))
 
     except Exception as e:
         print(f"❌ Error in Deezer discovery worker: {e}")
@@ -40715,7 +40720,8 @@ def start_beatport_discovery(url_hash):
         track_count = len(chart_data['tracks'])
         add_activity_item("🔍", "Beatport Discovery Started", f"'{chart_name}' - {track_count} tracks", "Now")
 
-        # Start discovery worker
+        # Start discovery worker (capture profile ID while we have Flask context)
+        beatport_chart_states[url_hash]['_profile_id'] = get_current_profile_id()
         future = beatport_discovery_executor.submit(_run_beatport_discovery_worker, url_hash)
         state['discovery_future'] = future
 
@@ -41136,7 +41142,7 @@ def _run_beatport_discovery_worker(url_hash):
         print(f"✅ Beatport discovery complete ({source_label}): {state['spotify_matches']}/{len(tracks)} tracks found")
 
         # Sync discovery results back to mirrored playlist
-        _sync_discovery_results_to_mirrored('beatport', url_hash, state.get('discovery_results', []), discovery_source)
+        _sync_discovery_results_to_mirrored('beatport', url_hash, state.get('discovery_results', []), discovery_source, profile_id=state.get('_profile_id', 1))
 
     except Exception as e:
         print(f"❌ Error in Beatport discovery worker: {e}")
