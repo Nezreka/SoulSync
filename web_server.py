@@ -3514,7 +3514,7 @@ def run_service_test(service, test_config):
                 return False, "Download orchestrator failed to initialize. Check server logs for startup errors."
 
             # Test the orchestrator's configured download source (not just Soulseek)
-            download_mode = config_manager.get('download_source.mode', 'soulseek')
+            download_mode = config_manager.get('download_source.mode', 'hybrid')
 
             if run_async(soulseek_client.check_connection()):
                 # Success message based on active mode
@@ -4109,7 +4109,7 @@ def get_status():
             _status_cache_timestamps['soulseek'] = current_time
 
         # Include download source mode so frontend can update labels
-        download_mode = config_manager.get('download_source.mode', 'soulseek')
+        download_mode = config_manager.get('download_source.mode', 'hybrid')
         _status_cache['soulseek']['source'] = download_mode
 
         status_data = {
@@ -4365,7 +4365,7 @@ def get_debug_info():
         'media_server_type': media_server_cache.get('type', 'none'),
         'media_server_connected': media_server_cache.get('connected', False),
         'soulseek_connected': soulseek_cache.get('connected', False),
-        'download_source': config_manager.get('download_source.mode', 'soulseek'),
+        'download_source': config_manager.get('download_source.mode', 'hybrid'),
         'tidal_connected': _safe_check(lambda: bool(tidal_client and tidal_client.is_authenticated())),
         'qobuz_connected': _safe_check(lambda: bool(qobuz_enrichment_worker and qobuz_enrichment_worker.client and qobuz_enrichment_worker.client.is_authenticated())),
     }
@@ -4431,7 +4431,7 @@ def get_debug_info():
 
     # Config settings relevant to troubleshooting
     info['config'] = {
-        'source_mode': config_manager.get('download_source.mode', 'soulseek'),
+        'source_mode': config_manager.get('download_source.mode', 'hybrid'),
         'quality_profile': config_manager.get('download_source.quality_profile', 'default'),
         'organization_template': config_manager.get('organization.folder_template', ''),
         'post_processing_enabled': config_manager.get('post_processing.enabled', True),
@@ -7398,15 +7398,15 @@ def stream_enhanced_search_track():
         # Determine effective stream source
         # stream_source: "youtube" (default, instant) or "active" (use download source)
         stream_source = config_manager.get('download_source.stream_source', 'youtube')
-        download_mode = config_manager.get('download_source.mode', 'soulseek')
+        download_mode = config_manager.get('download_source.mode', 'hybrid')
 
         # Resolve the effective mode for streaming
         if stream_source == 'youtube':
             effective_mode = 'youtube'
         else:
             # "active" mode — use download source, but fall back to YouTube if Soulseek
-            _hybrid_order = config_manager.get('download_source.hybrid_order', [])
-            _hybrid_first = _hybrid_order[0] if _hybrid_order else config_manager.get('download_source.hybrid_primary', 'soulseek')
+            _hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
+            _hybrid_first = _hybrid_order[0] if _hybrid_order else config_manager.get('download_source.hybrid_primary', 'hifi')
             if download_mode == 'soulseek' or (download_mode == 'hybrid' and _hybrid_first == 'soulseek'):
                 effective_mode = 'youtube'  # Soulseek is too slow for streaming preview
                 logger.info("▶️ Stream source is 'active' but primary is Soulseek — falling back to YouTube")
@@ -24340,9 +24340,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
         # Only run pre-flight when Soulseek is the download source (or hybrid with soulseek)
         preflight_source = None
         preflight_tracks = None
-        dl_source_mode = config_manager.get('download_source.mode', 'soulseek')
-        _dl_hybrid_order = config_manager.get('download_source.hybrid_order', [])
-        _dl_hybrid_first = _dl_hybrid_order[0] if _dl_hybrid_order else config_manager.get('download_source.hybrid_primary', 'soulseek')
+        dl_source_mode = config_manager.get('download_source.mode', 'hybrid')
+        _dl_hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
+        _dl_hybrid_first = _dl_hybrid_order[0] if _dl_hybrid_order else config_manager.get('download_source.hybrid_primary', 'hifi')
         soulseek_is_source = dl_source_mode == 'soulseek' or (
             dl_source_mode == 'hybrid' and _dl_hybrid_first == 'soulseek'
         )
@@ -29895,7 +29895,7 @@ def _get_deezer_client():
 def _get_metadata_fallback_source():
     """Get the configured metadata fallback source ('itunes', 'deezer', or 'hydrabase')."""
     try:
-        return config_manager.get('metadata.fallback_source', 'itunes') or 'itunes'
+        return config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
     except Exception:
         return 'itunes'
 
@@ -45954,7 +45954,7 @@ def import_staging_suggestions():
 
 def _build_status_payload():
     """Build the same status payload used by GET /status, reading from the cache."""
-    download_mode = config_manager.get('download_source.mode', 'soulseek')
+    download_mode = config_manager.get('download_source.mode', 'hybrid')
     soulseek_data = dict(_status_cache.get('soulseek', {}))
     soulseek_data['source'] = download_mode
 
