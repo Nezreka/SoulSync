@@ -338,9 +338,35 @@ class iTunesWorker:
 
     # ── Artist processing ──────────────────────────────────────────────
 
+    def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
+        """Check if an entity already has an itunes_artist_id/itunes_album_id/itunes_track_id."""
+        col_map = {'artist': 'itunes_artist_id', 'album': 'itunes_album_id', 'track': 'itunes_track_id'}
+        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
+        col = col_map.get(entity_type)
+        table = table_map.get(entity_type)
+        if not col or not table:
+            return None
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT {col} FROM {table} WHERE id = ?", (entity_id,))
+            row = cursor.fetchone()
+            return row[0] if row and row[0] else None
+        except Exception:
+            return None
+        finally:
+            if conn:
+                conn.close()
+
     def _process_artist(self, item: Dict[str, Any]):
         artist_id = item['id']
         artist_name = item['name']
+
+        existing_id = self._get_existing_id('artist', artist_id)
+        if existing_id:
+            logger.debug(f"Preserving existing iTunes ID for artist '{artist_name}': {existing_id}")
+            return
 
         results = self.client.search_artists(artist_name, limit=5)
         if not results:

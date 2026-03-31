@@ -373,8 +373,32 @@ class TidalWorker:
             except Exception as e2:
                 logger.error(f"Error updating item status: {e2}")
 
+    def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
+        """Check if an entity already has a tidal_id (e.g. from manual match)."""
+        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
+        table = table_map.get(entity_type)
+        if not table:
+            return None
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT tidal_id FROM {table} WHERE id = ?", (entity_id,))
+            row = cursor.fetchone()
+            return row[0] if row and row[0] else None
+        except Exception:
+            return None
+        finally:
+            if conn:
+                conn.close()
+
     def _process_artist(self, artist_id: int, artist_name: str):
         """Process an artist: search Tidal, verify, store metadata"""
+        existing_id = self._get_existing_id('artist', artist_id)
+        if existing_id:
+            logger.debug(f"Preserving existing Tidal ID for artist '{artist_name}': {existing_id}")
+            return
+
         result = self.client.search_artist(artist_name)
         if result:
             result_name = result.get('name', '')
@@ -407,6 +431,11 @@ class TidalWorker:
 
     def _process_album(self, album_id: int, album_name: str, artist_name: str, item: Dict[str, Any]):
         """Process an album: search Tidal, verify, fetch full details, store metadata"""
+        existing_id = self._get_existing_id('album', album_id)
+        if existing_id:
+            logger.debug(f"Preserving existing Tidal ID for album '{album_name}': {existing_id}")
+            return
+
         result = self.client.search_album(artist_name, album_name)
         if result:
             result_name = result.get('title', '')
@@ -450,6 +479,11 @@ class TidalWorker:
 
     def _process_track(self, track_id: int, track_name: str, artist_name: str, item: Dict[str, Any]):
         """Process a track: search Tidal, verify, fetch full details, store metadata"""
+        existing_id = self._get_existing_id('track', track_id)
+        if existing_id:
+            logger.debug(f"Preserving existing Tidal ID for track '{track_name}': {existing_id}")
+            return
+
         result = self.client.search_track(artist_name, track_name)
         if result:
             result_name = result.get('title', '')
