@@ -1316,6 +1316,10 @@ def _register_automation_handlers():
     def _auto_clean_search_history(config):
         """Remove old searches from Soulseek."""
         automation_id = config.get('_automation_id')
+        if not config_manager.get('soulseek.auto_clear_searches', True):
+            _update_automation_progress(automation_id,
+                log_line='Auto-clear disabled in settings', log_type='skip')
+            return {'status': 'skipped'}
         try:
             success = run_async(soulseek_client.maintain_search_history_with_buffer(
                 keep_searches=50, trigger_threshold=200
@@ -1458,15 +1462,20 @@ def _register_automation_handlers():
         _update_automation_progress(automation_id,
             log_line=f'Staging: removed {s_removed} empty directories', log_type='success' if s_removed else 'info')
 
-        # --- 5. Clean search history ---
+        # --- 5. Clean search history (if enabled) ---
         _update_automation_progress(automation_id, phase='Cleaning search history...', progress=80)
         try:
-            run_async(soulseek_client.maintain_search_history_with_buffer(
-                keep_searches=50, trigger_threshold=200
-            ))
-            steps.append('Search history: cleaned')
-            _update_automation_progress(automation_id,
-                log_line='Search history: cleaned', log_type='success')
+            if not config_manager.get('soulseek.auto_clear_searches', True):
+                steps.append('Search cleanup: disabled in settings')
+                _update_automation_progress(automation_id,
+                    log_line='Search cleanup: disabled in settings', log_type='skip')
+            else:
+                run_async(soulseek_client.maintain_search_history_with_buffer(
+                    keep_searches=50, trigger_threshold=200
+                ))
+                steps.append('Search history: cleaned')
+                _update_automation_progress(automation_id,
+                    log_line='Search history: cleaned', log_type='success')
         except Exception as e:
             steps.append(f'Search history: error ({e})')
             _update_automation_progress(automation_id,
