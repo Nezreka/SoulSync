@@ -5242,12 +5242,24 @@ function closeSupportModal() {
 
 async function copyAddress(address, cryptoName) {
     try {
-        await navigator.clipboard.writeText(address);
+        // navigator.clipboard requires HTTPS — use fallback for HTTP (Docker)
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(address);
+        } else {
+            const textarea = document.createElement('textarea');
+            textarea.value = address;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+        }
         showToast(`${cryptoName} address copied to clipboard`, 'success');
-        console.log(`Copied ${cryptoName} address: ${address}`);
     } catch (error) {
         console.error('Failed to copy address:', error);
-        showToast(`Failed to copy ${cryptoName} address`, 'error');
+        // Show the address so user can copy manually
+        showToast(`${cryptoName}: ${address}`, 'info');
     }
 }
 
