@@ -23296,8 +23296,39 @@ async function handleTidalCardClick(playlistId) {
     console.log(`🎵 [Card Click] Tidal card clicked: ${playlistId}, Phase: ${state.phase}`);
 
     if (state.phase === 'fresh') {
-        // No need to fetch data - we already have all tracks from initial load (like sync.py)
-        console.log(`🎵 Using pre-loaded Tidal playlist data for: ${state.playlist.name}`);
+        // Fetch tracks if not yet loaded (metadata-only listing doesn't include them)
+        if (!state.playlist.tracks || state.playlist.tracks.length === 0) {
+            console.log(`🎵 Fetching tracks for Tidal playlist: ${state.playlist.name}`);
+            showLoadingOverlay(`Loading ${state.playlist.name}...`);
+            try {
+                const resp = await fetch(`/api/tidal/playlist/${playlistId}`);
+                if (resp.ok) {
+                    const fullData = await resp.json();
+                    if (fullData.tracks && fullData.tracks.length > 0) {
+                        // Convert to Track-like objects for the discovery modal
+                        state.playlist.tracks = fullData.tracks.map(t => ({
+                            id: t.id, name: t.name, artists: t.artists || [],
+                            album: t.album || '', duration_ms: t.duration_ms || 0,
+                            track_number: t.track_number || 0
+                        }));
+                        // Update card count
+                        const countEl = document.querySelector(`#tidal-card-${playlistId} .playlist-card-track-count`);
+                        if (countEl) countEl.textContent = `${state.playlist.tracks.length} tracks`;
+                    }
+                }
+            } catch (e) {
+                console.error(`Failed to fetch Tidal playlist tracks: ${e}`);
+                hideLoadingOverlay();
+            }
+        }
+
+        if (!state.playlist.tracks || state.playlist.tracks.length === 0) {
+            hideLoadingOverlay();
+            showToast('Could not load tracks for this playlist', 'error');
+            return;
+        }
+
+        hideLoadingOverlay();
         console.log(`🎵 Ready with ${state.playlist.tracks.length} Tidal tracks for discovery`);
 
         // Open discovery modal - phase will be updated when discovery actually starts
