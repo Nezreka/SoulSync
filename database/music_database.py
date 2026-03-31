@@ -518,11 +518,22 @@ class MusicDatabase:
                     is_album_download INTEGER DEFAULT 0,
                     playlist_folder_mode INTEGER DEFAULT 0,
                     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    completed_at TIMESTAMP
+                    completed_at TIMESTAMP,
+                    track_results TEXT
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sh_started_at ON sync_history (started_at DESC)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sh_source ON sync_history (source)")
+
+            # Migration: add track_results column to existing sync_history tables
+            try:
+                cursor.execute("SELECT track_results FROM sync_history LIMIT 1")
+            except Exception:
+                try:
+                    cursor.execute("ALTER TABLE sync_history ADD COLUMN track_results TEXT")
+                    logger.info("Added track_results column to sync_history table")
+                except Exception:
+                    pass
 
             conn.commit()
             logger.info("Database initialized successfully")
@@ -6059,6 +6070,7 @@ class MusicDatabase:
 
                 # Check for duplicates by track name + artist (not just Spotify ID)
                 # When allow_duplicates is True (default), same song from different albums can coexist
+                from config.settings import config_manager
                 allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
 
                 if not allow_duplicates:
@@ -9010,6 +9022,20 @@ class MusicDatabase:
             return cursor.rowcount > 0
         except Exception as e:
             logger.debug(f"Error updating sync history completion: {e}")
+            return False
+
+    def update_sync_history_track_results(self, batch_id, track_results_json):
+        """Store per-track match/download results on a sync_history entry."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE sync_history SET track_results = ? WHERE batch_id = ?
+            """, (track_results_json, batch_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug(f"Error updating sync history track results: {e}")
             return False
 
     def refresh_sync_history_entry(self, entry_id, tracks_found=0, tracks_downloaded=0, tracks_failed=0):
