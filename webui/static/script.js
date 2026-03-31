@@ -7328,6 +7328,29 @@ async function disconnectSpotify() {
     }
 }
 
+async function clearSpotifyCacheAndFallback() {
+    const fallbackName = currentMusicSourceName !== 'Spotify' ? currentMusicSourceName : 'the configured fallback source';
+    if (!await showConfirmDialog({
+        title: 'Clear Spotify Cache',
+        message: `This will clear the Spotify token cache and switch metadata to ${fallbackName}. You can re-authenticate later.`
+    })) return;
+    try {
+        showLoadingOverlay('Clearing Spotify cache...');
+        const response = await fetch('/api/spotify/disconnect', { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            showToast(data.message || `Switched to ${fallbackName}`, 'success');
+            await fetchAndUpdateServiceStatus();
+        } else {
+            showToast(`Failed: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        showToast('Failed to clear Spotify cache', 'error');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
 // ── Spotify Rate Limit Handling ───────────────────────────────────────────
 let _spotifyRateLimitShown = false;
 let _spotifyInCooldown = false;
@@ -36094,27 +36117,13 @@ function updateServiceStatus(service, statusData) {
         }
     }
 
-    // Update music source title and status based on active source
+    // Update music source title based on active source
     if (service === 'spotify' && statusData.source) {
         const musicSourceTitleElement = document.getElementById('music-source-title');
         if (musicSourceTitleElement) {
-            // Card title always says "Spotify" — it represents the metadata source slot
-            musicSourceTitleElement.textContent = 'Spotify';
-            // Update global variable for use in discovery modals
             const sourceName = statusData.source === 'spotify' ? 'Spotify' : statusData.source === 'deezer' ? 'Deezer' : 'iTunes';
+            musicSourceTitleElement.textContent = sourceName;
             currentMusicSourceName = sourceName;
-        }
-
-        // When using fallback, update status text to show which fallback is active
-        if (statusData.source !== 'spotify' && !statusData.rate_limited && !statusData.post_ban_cooldown) {
-            const fallbackName = statusData.source === 'deezer' ? 'Deezer' : 'iTunes';
-            if (statusText) {
-                statusText.textContent = `Using ${fallbackName}`;
-                statusText.className = 'service-card-status-text fallback';
-            }
-            if (indicator) {
-                indicator.className = 'service-card-indicator fallback';
-            }
         }
 
         // Show/hide Spotify disconnect button based on connection state
@@ -36163,20 +36172,12 @@ function updateSidebarServiceStatus(service, statusData) {
             }
         }
 
-        // Update music source name — always "Spotify" in sidebar
+        // Update music source name in sidebar based on active source
         if (service === 'spotify' && statusData.source) {
             const musicSourceNameElement = document.getElementById('music-source-name');
             if (musicSourceNameElement) {
-                musicSourceNameElement.textContent = 'Spotify';
-            }
-
-            // Show fallback state in sidebar dot
-            if (statusData.source !== 'spotify' && !statusData.rate_limited && !statusData.post_ban_cooldown) {
-                if (dot) {
-                    dot.className = 'status-dot fallback';
-                    const fallbackName = statusData.source === 'deezer' ? 'Deezer' : 'iTunes';
-                    dot.title = `Using ${fallbackName} fallback`;
-                }
+                const sourceName = statusData.source === 'spotify' ? 'Spotify' : statusData.source === 'deezer' ? 'Deezer' : 'iTunes';
+                musicSourceNameElement.textContent = sourceName;
             }
         }
 
