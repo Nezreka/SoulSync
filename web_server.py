@@ -834,8 +834,47 @@ def _register_automation_handlers():
                     'id': md.get('id', ''),
                 })
             else:
-                # NOT discovered — skip to prevent garbage in wishlist
-                skipped_count += 1
+                # NOT discovered — try to include using available metadata so the
+                # track can still be searched on Soulseek and added to wishlist.
+                # Without this, failed discovery blocks the entire download pipeline.
+                #
+                # Priority: spotify_hint (has real Spotify ID from embed scraper)
+                #           > raw playlist fields (only if source_track_id is valid)
+                hint = extra.get('spotify_hint', {})
+                # Build album object with cover art from the mirrored playlist track
+                track_image = (t.get('image_url') or '').strip()
+                album_obj = {
+                    'name': (t.get('album_name') or '').strip(),
+                    'images': [{'url': track_image, 'height': 300, 'width': 300}] if track_image else [],
+                }
+
+                if hint.get('id') and hint.get('name'):
+                    # spotify_hint has proper Spotify track ID + metadata from embed scraper
+                    hint_artists = hint.get('artists', [])
+                    if hint_artists and isinstance(hint_artists[0], str):
+                        hint_artists = [{'name': a} for a in hint_artists]
+                    elif hint_artists and isinstance(hint_artists[0], dict):
+                        pass  # Already in correct format
+                    else:
+                        hint_artists = [{'name': t.get('artist_name', '')}]
+                    tracks_json.append({
+                        'name': hint['name'],
+                        'artists': hint_artists,
+                        'album': album_obj,
+                        'duration_ms': t.get('duration_ms', 0),
+                        'id': hint['id'],
+                    })
+                elif t.get('source_track_id') and (t.get('track_name') or '').strip():
+                    # Has a valid source ID and track name — usable for wishlist
+                    tracks_json.append({
+                        'name': t['track_name'].strip(),
+                        'artists': [{'name': (t.get('artist_name') or '').strip() or 'Unknown Artist'}],
+                        'album': album_obj,
+                        'duration_ms': t.get('duration_ms', 0),
+                        'id': t['source_track_id'],
+                    })
+                else:
+                    skipped_count += 1  # No usable ID or name — truly can't process
 
         if not tracks_json:
             _update_automation_progress(auto_id,
@@ -19207,6 +19246,15 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "🔧 Fix Pipeline Stops When Metadata Match Fails (#224)",
+                "description": "Playlist sync no longer drops tracks that failed iTunes/Apple Music discovery",
+                "features": [
+                    "• Tracks that fail metadata discovery now continue through the pipeline using original playlist data",
+                    "• Track name and artist from the source playlist are used for Soulseek search when discovery fails",
+                    "• Only tracks with completely missing name/artist are skipped (not tracks that simply failed matching)"
+                ]
+            },
             {
                 "title": "🌳 Playlist Explorer — Visual Discovery Tree",
                 "description": "Use playlists as seeds to discover full albums and discographies",
