@@ -28485,8 +28485,8 @@ def get_tidal_playlists():
         
         playlist_data = []
         for p in playlists:
-            # Get track count from actual tracks if available
-            track_count = len(p.tracks) if hasattr(p, 'tracks') and p.tracks else 0
+            # Get track count from metadata (set during listing) or actual tracks
+            track_count = getattr(p, 'track_count', 0) or (len(p.tracks) if hasattr(p, 'tracks') and p.tracks else 0)
             
             playlist_dict = {
                 "id": p.id, 
