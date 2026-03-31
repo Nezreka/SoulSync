@@ -28950,6 +28950,83 @@ def _resume_enrichment_workers(was_running, label='discovery'):
             pass
 
 
+def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discovery_results, discovery_source):
+    """Write discovery results back to the mirrored playlist's extra_data.
+    Called after Tidal/Deezer/Beatport discovery completes.
+    Matches by source_track_id first, then by track position (index)."""
+    try:
+        db = get_database()
+        profile_id = get_current_profile_id()
+        playlists = db.get_mirrored_playlists(profile_id=profile_id)
+        mirrored_pl = None
+        for pl in playlists:
+            if pl.get('source') == source_type and str(pl.get('source_playlist_id')) == str(source_playlist_id):
+                mirrored_pl = pl
+                break
+
+        if not mirrored_pl:
+            return
+
+        mirrored_tracks = db.get_mirrored_playlist_tracks(mirrored_pl['id'])
+        if not mirrored_tracks:
+            return
+
+        # Build lookup maps: source_track_id → db_id AND position → db_id
+        source_id_to_db_id = {}
+        position_to_db_id = {}
+        for mt in mirrored_tracks:
+            sid = mt.get('source_track_id', '')
+            if sid:
+                source_id_to_db_id[str(sid)] = mt['id']
+            pos = mt.get('position')
+            if pos is not None:
+                position_to_db_id[pos] = mt['id']
+
+        updated = 0
+        for result in discovery_results:
+            if result.get('status') != 'found':
+                continue
+
+            match_data = result.get('match_data') or result.get('spotify_data')
+            if not match_data:
+                continue
+
+            confidence = result.get('confidence', 0.85)
+
+            # Try to find the mirrored track DB ID
+            db_track_id = None
+
+            # Method 1: match by source track ID
+            source_track = result.get('tidal_track') or result.get('source_track') or {}
+            source_tid = str(source_track.get('id', '')) if source_track else ''
+            if source_tid and source_tid in source_id_to_db_id:
+                db_track_id = source_id_to_db_id[source_tid]
+
+            # Method 2: match by position/index
+            if not db_track_id:
+                idx = result.get('index')
+                if idx is not None and idx in position_to_db_id:
+                    db_track_id = position_to_db_id[idx]
+
+            if not db_track_id:
+                continue
+
+            extra_data = {
+                'discovered': True,
+                'provider': discovery_source,
+                'confidence': confidence,
+                'matched_data': match_data,
+            }
+            db.update_mirrored_track_extra_data(db_track_id, extra_data)
+            updated += 1
+
+        if updated > 0:
+            print(f"📝 Synced {updated} discovery results back to mirrored playlist '{mirrored_pl.get('name', '')}'")
+
+    except Exception as e:
+        print(f"⚠️ Failed to sync discovery results to mirrored playlist: {e}")
+
+
 def _run_playlist_discovery_worker(playlists, automation_id=None):
     """Background worker that discovers Spotify/iTunes metadata for undiscovered
     mirrored playlist tracks. Stores results in extra_data for use by sync."""
@@ -29540,6 +29617,9 @@ def _run_tidal_discovery_worker(playlist_id):
         add_activity_item("✅", f"Tidal Discovery Complete ({source_label})", f"'{playlist.name}' - {successful_discoveries}/{len(playlist.tracks)} tracks found", "Now")
 
         print(f"✅ Tidal discovery complete ({source_label}): {successful_discoveries}/{len(playlist.tracks)} tracks found")
+
+        # Sync discovery results back to mirrored playlist
+        _sync_discovery_results_to_mirrored('tidal', playlist_id, state.get('discovery_results', []), discovery_source)
 
     except Exception as e:
         print(f"❌ Error in Tidal discovery worker: {e}")
@@ -30529,6 +30609,9 @@ def _run_deezer_discovery_worker(playlist_id):
         add_activity_item("✅", f"Deezer Discovery Complete ({source_label})", f"'{playlist['name']}' - {successful_discoveries}/{len(tracks)} tracks found", "Now")
 
         print(f"✅ Deezer discovery complete ({source_label}): {successful_discoveries}/{len(tracks)} tracks found")
+
+        # Sync discovery results back to mirrored playlist
+        _sync_discovery_results_to_mirrored('deezer', playlist_id, state.get('discovery_results', []), discovery_source)
 
     except Exception as e:
         print(f"❌ Error in Deezer discovery worker: {e}")
@@ -41051,6 +41134,9 @@ def _run_beatport_discovery_worker(url_hash):
                          f"'{chart_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
 
         print(f"✅ Beatport discovery complete ({source_label}): {state['spotify_matches']}/{len(tracks)} tracks found")
+
+        # Sync discovery results back to mirrored playlist
+        _sync_discovery_results_to_mirrored('beatport', url_hash, state.get('discovery_results', []), discovery_source)
 
     except Exception as e:
         print(f"❌ Error in Beatport discovery worker: {e}")
