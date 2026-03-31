@@ -5832,6 +5832,7 @@ async function loadSettingsData() {
         document.getElementById('template-playlist-path').value = settings.file_organization?.templates?.playlist_path || '$playlist/$artist - $title';
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
         document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
+        document.getElementById('allow-duplicate-tracks').checked = settings.wishlist?.allow_duplicate_tracks !== false;
 
         // Populate Playlist Sync settings
         document.getElementById('create-backup').checked = settings.playlist_sync?.create_backup !== false;
@@ -6859,6 +6860,9 @@ async function saveSettings(quiet = false) {
                 single_path: document.getElementById('template-single-path').value,
                 playlist_path: document.getElementById('template-playlist-path').value
             }
+        },
+        wishlist: {
+            allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked
         },
         playlist_sync: {
             create_backup: document.getElementById('create-backup').checked

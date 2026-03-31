@@ -6058,52 +6058,55 @@ class MusicDatabase:
                     logger.info(f"Wishlist add: missing album name for '{track_name}', using track name as fallback")
 
                 # Check for duplicates by track name + artist (not just Spotify ID)
-                # This prevents adding the same track multiple times with different IDs or edge cases
-                cursor.execute("""
-                    SELECT id, spotify_track_id, spotify_data FROM wishlist_tracks
-                    WHERE profile_id = ?
-                """, (profile_id,))
+                # When allow_duplicates is True (default), same song from different albums can coexist
+                allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
 
-                existing_tracks = cursor.fetchall()
+                if not allow_duplicates:
+                    cursor.execute("""
+                        SELECT id, spotify_track_id, spotify_data FROM wishlist_tracks
+                        WHERE profile_id = ?
+                    """, (profile_id,))
 
-                # Check if any existing track has matching name AND artist
-                for existing in existing_tracks:
-                    try:
-                        existing_data = json.loads(existing['spotify_data'])
-                        existing_name = existing_data.get('name', '')
-                        existing_artists = existing_data.get('artists', [])
-                        if existing_artists:
-                            existing_first = existing_artists[0]
-                            if isinstance(existing_first, str):
-                                existing_artist = existing_first
-                            elif isinstance(existing_first, dict):
-                                existing_artist = existing_first.get('name', '')
+                    existing_tracks = cursor.fetchall()
+
+                    # Check if any existing track has matching name AND artist
+                    for existing in existing_tracks:
+                        try:
+                            existing_data = json.loads(existing['spotify_data'])
+                            existing_name = existing_data.get('name', '')
+                            existing_artists = existing_data.get('artists', [])
+                            if existing_artists:
+                                existing_first = existing_artists[0]
+                                if isinstance(existing_first, str):
+                                    existing_artist = existing_first
+                                elif isinstance(existing_first, dict):
+                                    existing_artist = existing_first.get('name', '')
+                                else:
+                                    existing_artist = ''
                             else:
                                 existing_artist = ''
-                        else:
-                            existing_artist = ''
 
-                        # Case-insensitive comparison of track name and primary artist
-                        if (existing_name.lower() == track_name.lower() and
-                            existing_artist.lower() == artist_name.lower()):
-                            # Enhance mode: upsert existing entry with enhance bypass context
-                            if source_type == 'enhance':
-                                source_json = json.dumps(source_info or {})
-                                cursor.execute("""
-                                    UPDATE wishlist_tracks
-                                    SET source_type = ?, source_info = ?, failure_reason = ?,
-                                        spotify_data = ?, spotify_track_id = ?
-                                    WHERE id = ?
-                                """, (source_type, source_json, failure_reason,
-                                      json.dumps(spotify_track_data), track_id, existing['id']))
-                                conn.commit()
-                                logger.info(f"Upserted wishlist entry to enhance mode: '{track_name}' by {artist_name}")
-                                return True
-                            logger.info(f"Skipping duplicate wishlist entry: '{track_name}' by {artist_name} (already exists as ID: {existing['id']})")
-                            return False  # Already exists, don't add duplicate
-                    except Exception as parse_error:
-                        logger.warning(f"Error parsing existing wishlist track data: {parse_error}")
-                        continue
+                            # Case-insensitive comparison of track name and primary artist
+                            if (existing_name.lower() == track_name.lower() and
+                                existing_artist.lower() == artist_name.lower()):
+                                # Enhance mode: upsert existing entry with enhance bypass context
+                                if source_type == 'enhance':
+                                    source_json = json.dumps(source_info or {})
+                                    cursor.execute("""
+                                        UPDATE wishlist_tracks
+                                        SET source_type = ?, source_info = ?, failure_reason = ?,
+                                            spotify_data = ?, spotify_track_id = ?
+                                        WHERE id = ?
+                                    """, (source_type, source_json, failure_reason,
+                                          json.dumps(spotify_track_data), track_id, existing['id']))
+                                    conn.commit()
+                                    logger.info(f"Upserted wishlist entry to enhance mode: '{track_name}' by {artist_name}")
+                                    return True
+                                logger.info(f"Skipping duplicate wishlist entry: '{track_name}' by {artist_name} (already exists as ID: {existing['id']})")
+                                return False  # Already exists, don't add duplicate
+                        except Exception as parse_error:
+                            logger.warning(f"Error parsing existing wishlist track data: {parse_error}")
+                            continue
 
                 # Convert data to JSON strings
                 spotify_json = json.dumps(spotify_track_data)
