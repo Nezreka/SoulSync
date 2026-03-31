@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'Fix Pipeline Blocking on Discovery Fail',  desc: 'Playlist sync no longer drops tracks that failed metadata discovery — continues with original name/artist for download' },
         { title: 'Playlist Explorer',                         desc: 'New page: expand playlists into visual discovery trees of albums and discographies — select and add to wishlist', page: 'playlist-explorer' },
         { title: 'Fix Invalid .LRC Lyrics Files',            desc: 'Plain lyrics now saved as .txt — only synced (timestamped) lyrics get the .lrc extension' },
         { title: 'Fix Collab Artist on Singles',            desc: 'Single/playlist path templates now respect First Listed Artist setting — $albumartist available for all template types' },
