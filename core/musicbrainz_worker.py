@@ -249,6 +249,25 @@ class MusicBrainzWorker:
             if conn:
                 conn.close()
 
+    def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
+        """Check if an entity already has a musicbrainz_id (e.g. from manual match)."""
+        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
+        table = table_map.get(entity_type)
+        if not table:
+            return None
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT musicbrainz_id FROM {table} WHERE id = ?", (entity_id,))
+            row = cursor.fetchone()
+            return row[0] if row and row[0] else None
+        except Exception:
+            return None
+        finally:
+            if conn:
+                conn.close()
+
     def _process_item(self, item: Dict[str, Any]):
         """Process a single item (artist, album, or track)"""
         try:
@@ -257,6 +276,12 @@ class MusicBrainzWorker:
             item_name = item['name']
 
             logger.debug(f"Processing {item_type} #{item_id}: {item_name}")
+
+            # Preserve existing manual matches
+            existing_id = self._get_existing_id(item_type, item_id)
+            if existing_id:
+                logger.debug(f"Preserving existing MusicBrainz ID for {item_type} '{item_name}': {existing_id}")
+                return
 
             if item_type == 'artist':
                 result = self.mb_service.match_artist(item_name)
