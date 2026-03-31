@@ -67,8 +67,16 @@ class MusicMatchingEngine:
         # Apply the character replacements before other normalization steps
         for original, replacement in char_map.items():
             text = text.replace(original, replacement)
-        text = unidecode(text)
-        text = text.lower()
+
+        # Skip unidecode for CJK text — it converts Japanese kanji to Chinese pinyin,
+        # producing gibberish like "tvanimedei" for "命の灯火". Preserve original characters
+        # so Soulseek searches use the real title. Only apply unidecode to non-CJK text.
+        if any('\u2e80' <= c <= '\u9fff' or '\u3040' <= c <= '\u30ff' or '\uff00' <= c <= '\uffef' or '\uac00' <= c <= '\ud7af' for c in text):
+            # CJK detected — just lowercase, don't transliterate
+            text = text.lower()
+        else:
+            text = unidecode(text)
+            text = text.lower()
         
         # Expand specific abbreviations for better matching
         abbreviation_map = {

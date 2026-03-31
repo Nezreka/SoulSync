@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'Fix Japanese/CJK Soulseek Searches',       desc: 'Japanese kanji no longer mangled into Chinese pinyin — searches now use original characters' },
         { title: 'Fix Partial Title Matching',               desc: '"Believe" no longer falsely matches "Believe In Me" — length ratio penalty prevents prefix false positives' },
         { title: 'Fix Pipeline Blocking on Discovery Fail',  desc: 'Playlist sync no longer drops tracks that failed metadata discovery — continues with original name/artist for download' },
         { title: 'Playlist Explorer',                         desc: 'New page: expand playlists into visual discovery trees of albums and discographies — select and add to wishlist', page: 'playlist-explorer' },
