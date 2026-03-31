@@ -5710,6 +5710,7 @@ async function loadSettingsData() {
         document.getElementById('soulseek-min-peer-speed').value = settings.soulseek?.min_peer_upload_speed || 0;
         document.getElementById('soulseek-max-peer-queue').value = settings.soulseek?.max_peer_queue || 0;
         document.getElementById('soulseek-download-timeout').value = Math.round((settings.soulseek?.download_timeout || 600) / 60);
+        document.getElementById('soulseek-auto-clear-searches').checked = settings.soulseek?.auto_clear_searches !== false;
 
         // Populate ListenBrainz settings
         document.getElementById('listenbrainz-base-url').value = settings.listenbrainz?.base_url || '';
@@ -6764,7 +6765,8 @@ async function saveSettings(quiet = false) {
             search_timeout_buffer: parseInt(document.getElementById('soulseek-search-timeout-buffer').value) || 15,
             min_peer_upload_speed: parseInt(document.getElementById('soulseek-min-peer-speed').value) || 0,
             max_peer_queue: parseInt(document.getElementById('soulseek-max-peer-queue').value) || 0,
-            download_timeout: (parseInt(document.getElementById('soulseek-download-timeout').value) || 10) * 60
+            download_timeout: (parseInt(document.getElementById('soulseek-download-timeout').value) || 10) * 60,
+            auto_clear_searches: document.getElementById('soulseek-auto-clear-searches').checked
         },
         listenbrainz: {
             base_url: document.getElementById('listenbrainz-base-url').value,
