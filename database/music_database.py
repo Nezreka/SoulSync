@@ -5547,6 +5547,18 @@ class MusicDatabase:
             # Use the best title similarity (direct or cleaned)
             best_title_similarity = max(title_similarity, clean_title_similarity)
 
+            # Length ratio penalty: if the DB title is significantly longer/shorter than the
+            # search title, it's likely a different track (e.g. "Believe" vs "Believe In Me").
+            # SequenceMatcher gives high scores when the shorter string is fully contained
+            # in the longer one, which causes false positives for prefix/suffix matches.
+            len_search = len(clean_search_title) if clean_search_title else len(search_title_norm)
+            len_db = len(clean_db_title) if clean_db_title else len(db_title_norm)
+            if len_search > 0 and len_db > 0:
+                len_ratio = min(len_search, len_db) / max(len_search, len_db)
+                if len_ratio < 0.7:
+                    # Titles differ in length by more than 30% — penalize heavily
+                    best_title_similarity *= len_ratio
+
             # Require minimum title similarity to prevent a perfect artist match from
             # carrying a bad title match over the threshold (e.g. "Time" vs "Time Flies")
             if best_title_similarity < 0.6:
