@@ -19247,6 +19247,15 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔧 Fix Partial Name Matching False Positives (#225)",
+                "description": "Track ownership check no longer falsely matches prefix/suffix variations",
+                "features": [
+                    "• 'Believe' no longer matches 'Believe In Me' — length ratio penalty prevents partial title matches",
+                    "• Titles differing in length by more than 30% get their similarity score penalized proportionally",
+                    "• Exact matches and cleaned matches (e.g. remastered tags stripped) are unaffected"
+                ]
+            },
+            {
                 "title": "🔧 Fix Pipeline Stops When Metadata Match Fails (#224)",
                 "description": "Playlist sync no longer drops tracks that failed iTunes/Apple Music discovery",
                 "features": [
