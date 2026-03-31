@@ -2784,6 +2784,7 @@ async function loadPageData(pageId) {
         switch (pageId) {
             case 'dashboard':
                 await loadDashboardData();
+                loadDashboardSyncHistory();
                 break;
             case 'sync':
                 initializeSyncPage();
@@ -9122,6 +9123,7 @@ async function loadInitialData() {
             navigateToPage(homePage);
         } else {
             await loadDashboardData();
+            loadDashboardSyncHistory();
         }
     } catch (error) {
         console.error('Error loading initial data:', error);
@@ -64510,3 +64512,279 @@ window.addEventListener('resize', () => {
     clearTimeout(_explorer._resizeTimer);
     _explorer._resizeTimer = setTimeout(() => _explorerRedrawAllConnections(), 150);
 });
+
+
+// ==================================================================================
+// DASHBOARD — Recent Syncs Section
+// ==================================================================================
+
+// Auto-refresh sync cards every 30 seconds when on dashboard
+setInterval(() => {
+    if (typeof currentPage !== 'undefined' && currentPage === 'dashboard') {
+        loadDashboardSyncHistory();
+    }
+}, 30000);
+
+async function loadDashboardSyncHistory() {
+    const container = document.getElementById('sync-history-cards');
+    if (!container) return;
+
+    try {
+        const response = await fetch('/api/sync/history?limit=10');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        const entries = data.entries || [];
+
+        if (entries.length === 0) {
+            container.innerHTML = '<div class="sync-history-empty">No syncs yet</div>';
+            return;
+        }
+
+        container.innerHTML = entries.map((entry, cardIndex) => {
+            const found = entry.tracks_found || 0;
+            const total = entry.total_tracks || 0;
+            const downloaded = entry.tracks_downloaded || 0;
+            const failed = entry.tracks_failed || 0;
+            const pct = total > 0 ? Math.round((found / total) * 100) : 0;
+
+            // Health color
+            let healthClass = 'health-good';
+            if (pct < 50) healthClass = 'health-bad';
+            else if (pct < 80) healthClass = 'health-warn';
+
+            // Source badge
+            const sourceLabels = { spotify: 'Spotify', tidal: 'Tidal', deezer: 'Deezer', youtube: 'YouTube', beatport: 'Beatport', wishlist: 'Wishlist' };
+            const sourceLabel = sourceLabels[entry.source] || entry.source || 'Unknown';
+
+            // Time
+            const timeStr = entry.started_at ? _relativeTime(entry.started_at) : '';
+
+            // Name
+            const name = entry.artist_name
+                ? `${entry.artist_name} — ${entry.album_name || entry.playlist_name}`
+                : entry.playlist_name || 'Unknown';
+
+            return `
+                <div class="sync-history-card ${healthClass}" onclick="openSyncDetailModal(${entry.id})" style="animation-delay: ${cardIndex * 0.05}s">
+                    <button class="sync-card-delete" onclick="event.stopPropagation(); deleteSyncHistoryCard(${entry.id}, this)" title="Remove">&times;</button>
+                    <div class="sync-card-thumb">
+                        ${entry.thumb_url ? `<img src="${entry.thumb_url}" alt="" loading="lazy">` : '<div class="sync-card-thumb-placeholder">&#9835;</div>'}
+                    </div>
+                    <div class="sync-card-info">
+                        <div class="sync-card-name">${typeof _esc === 'function' ? _esc(name) : name}</div>
+                        <div class="sync-card-meta">
+                            <span class="sync-card-source">${sourceLabel}</span>
+                            <span class="sync-card-time">${timeStr}</span>
+                        </div>
+                    </div>
+                    <div class="sync-card-stats">
+                        <div class="sync-card-pct">${pct}%</div>
+                        <div class="sync-card-bar">
+                            <div class="sync-card-bar-fill" style="width: ${pct}%"></div>
+                        </div>
+                        <div class="sync-card-counts">${found}/${total} matched${downloaded > 0 ? ` · ${downloaded} ⬇` : ''}${failed > 0 ? ` · ${failed} ✗` : ''}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+    } catch (e) {
+        console.warn('Failed to load sync history for dashboard:', e);
+    }
+}
+
+function _relativeTime(dateStr) {
+    try {
+        const d = new Date(dateStr);
+        const now = new Date();
+        const diffMs = now - d;
+        const mins = Math.floor(diffMs / 60000);
+        if (mins < 1) return 'just now';
+        if (mins < 60) return `${mins}m ago`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return `${hrs}h ago`;
+        const days = Math.floor(hrs / 24);
+        if (days < 7) return `${days}d ago`;
+        return d.toLocaleDateString();
+    } catch (e) { return ''; }
+}
+
+async function openSyncDetailModal(entryId) {
+    try {
+        showLoadingOverlay('Loading sync details...');
+        const response = await fetch(`/api/sync/history/${entryId}`);
+        const data = await response.json();
+        hideLoadingOverlay();
+
+        if (!data.success || !data.entry) {
+            showToast('Could not load sync details', 'error');
+            return;
+        }
+
+        const entry = data.entry;
+        const trackResults = entry.track_results || [];
+        const name = entry.artist_name
+            ? `${entry.artist_name} — ${entry.album_name || entry.playlist_name}`
+            : entry.playlist_name || 'Unknown';
+
+        // Build modal
+        const overlay = document.createElement('div');
+        overlay.className = 'discog-modal-overlay';
+        overlay.id = 'sync-detail-overlay';
+
+        const found = entry.tracks_found || 0;
+        const total = entry.total_tracks || 0;
+        const downloaded = entry.tracks_downloaded || 0;
+
+        let trackRowsHtml = '';
+        if (trackResults.length > 0) {
+            trackRowsHtml = trackResults.map((t, i) => {
+                const statusIcon = t.status === 'found' ? '✅' : '❌';
+                const statusClass = t.status === 'found' ? 'matched' : 'unmatched';
+                const confPct = Math.round((t.confidence || 0) * 100);
+                const confClass = confPct >= 80 ? 'conf-high' : confPct >= 50 ? 'conf-mid' : 'conf-low';
+                let dlIcon = '';
+                if (t.download_status === 'completed') dlIcon = '✅';
+                else if (t.download_status === 'failed') dlIcon = '❌';
+                else if (t.download_status === 'not_found') dlIcon = '🔇';
+                else if (t.download_status === 'cancelled') dlIcon = '🚫';
+
+                let dlDisplay = dlIcon;
+                if (!dlDisplay && t.download_status === 'wishlist') dlDisplay = '<span class="sync-dl-wishlist">→ Wishlist</span>';
+
+                return `
+                    <tr class="sync-detail-row ${statusClass}">
+                        <td class="sync-detail-num">${i + 1}</td>
+                        <td class="sync-detail-art">
+                            ${t.image_url ? `<img src="${t.image_url}" alt="" loading="lazy">` : '<div class="sync-detail-art-empty"></div>'}
+                        </td>
+                        <td class="sync-detail-track">${_esc(t.name || '')}</td>
+                        <td class="sync-detail-artist">${_esc(t.artist || '')}</td>
+                        <td class="sync-detail-album">${_esc(t.album || '')}</td>
+                        <td class="sync-detail-status">${statusIcon}</td>
+                        <td class="sync-detail-conf"><span class="conf-badge ${confClass}">${confPct}%</span></td>
+                        <td class="sync-detail-dl">${dlDisplay}</td>
+                    </tr>
+                `;
+            }).join('');
+        } else {
+            // Fallback to tracks_json if no track_results (old syncs before data caching)
+            const tracks = entry.tracks || [];
+            const esc = typeof _esc === 'function' ? _esc : s => s;
+            trackRowsHtml = `
+                <tr><td colspan="8" class="sync-detail-notice">
+                    <div class="sync-detail-notice-text">Per-track match data not available for this sync.<br>Re-sync this playlist to see detailed match results.</div>
+                </td></tr>
+            ` + tracks.map((t, i) => {
+                const artists = t.artists || [];
+                const artistName = artists.length > 0 ? (typeof artists[0] === 'string' ? artists[0] : artists[0]?.name || '') : '';
+                const albumName = typeof t.album === 'object' ? (t.album?.name || '') : (t.album || '');
+                return `
+                    <tr class="sync-detail-row no-data">
+                        <td class="sync-detail-num">${i + 1}</td>
+                        <td class="sync-detail-art"></td>
+                        <td class="sync-detail-track">${esc(t.name || '')}</td>
+                        <td class="sync-detail-artist">${esc(artistName)}</td>
+                        <td class="sync-detail-album">${esc(albumName)}</td>
+                        <td class="sync-detail-status" colspan="3"></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // Count stats for filter bar
+        const matchedCount = trackResults.filter(t => t.status === 'found').length;
+        const unmatchedCount = trackResults.filter(t => t.status !== 'found').length;
+        const downloadedCount = trackResults.filter(t => t.download_status === 'completed').length;
+
+        overlay.innerHTML = `
+            <div class="discog-modal">
+                <div class="discog-modal-hero" ${entry.thumb_url ? `style="background-image:url('${entry.thumb_url}')"` : ''}>
+                    <div class="discog-modal-hero-overlay"></div>
+                    <div class="discog-modal-hero-content">
+                        <h2 class="discog-modal-title">Sync Details</h2>
+                        <p class="discog-modal-artist">${_esc(name)}</p>
+                    </div>
+                    <button class="discog-modal-close" onclick="document.getElementById('sync-detail-overlay')?.remove()">&times;</button>
+                </div>
+                <div class="discog-filter-bar">
+                    <div class="discog-filters">
+                        <button class="discog-filter active" data-filter="all" onclick="_syncDetailFilter(this, 'all')">All (${total})</button>
+                        <button class="discog-filter" data-filter="matched" onclick="_syncDetailFilter(this, 'matched')">Matched (${matchedCount})</button>
+                        <button class="discog-filter" data-filter="unmatched" onclick="_syncDetailFilter(this, 'unmatched')">Unmatched (${unmatchedCount})</button>
+                        ${downloadedCount > 0 ? `<button class="discog-filter" data-filter="downloaded" onclick="_syncDetailFilter(this, 'downloaded')">Downloaded (${downloadedCount})</button>` : ''}
+                    </div>
+                </div>
+                <div class="sync-detail-table-wrap">
+                    <table class="sync-detail-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th></th>
+                                <th>Track</th>
+                                <th>Artist</th>
+                                <th>Album</th>
+                                <th>Match</th>
+                                <th>Conf.</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sync-detail-tbody">
+                            ${trackRowsHtml}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="discog-footer">
+                    <div class="discog-footer-info">${found} matched · ${downloaded} downloaded · ${total} total</div>
+                    <div class="discog-footer-actions">
+                        <button class="discog-cancel-btn" onclick="document.getElementById('sync-detail-overlay')?.remove()">Close</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+        requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    } catch (e) {
+        hideLoadingOverlay();
+        showToast('Failed to load sync details', 'error');
+    }
+}
+
+async function deleteSyncHistoryCard(entryId, btnEl) {
+    try {
+        const card = btnEl.closest('.sync-history-card');
+        if (card) {
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.9)';
+        }
+        const resp = await fetch(`/api/sync/history/${entryId}`, { method: 'DELETE' });
+        if (resp.ok) {
+            setTimeout(() => { if (card) card.remove(); }, 200);
+        }
+    } catch (e) {
+        console.warn('Failed to delete sync entry:', e);
+    }
+}
+
+function _syncDetailFilter(btn, filter) {
+    // Update active button
+    btn.closest('.discog-filters').querySelectorAll('.discog-filter').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    // Filter rows
+    document.querySelectorAll('#sync-detail-tbody .sync-detail-row').forEach(row => {
+        if (filter === 'all') {
+            row.style.display = '';
+        } else if (filter === 'matched') {
+            row.style.display = row.classList.contains('matched') ? '' : 'none';
+        } else if (filter === 'unmatched') {
+            row.style.display = row.classList.contains('unmatched') ? '' : 'none';
+        } else if (filter === 'downloaded') {
+            const dlCell = row.querySelector('.sync-detail-dl');
+            row.style.display = dlCell && dlCell.textContent.trim() === '✅' ? '' : 'none';
+        }
+    });
+}

@@ -19315,6 +19315,17 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "📊 Sync History Dashboard with Per-Track Details",
+                "description": "Dashboard shows recent syncs as visual cards with full per-track match data",
+                "features": [
+                    "• Recent Syncs section on dashboard with scrolling cards showing match percentage and health indicators",
+                    "• Click any sync card to see per-track match details — status, confidence score, album art, download/wishlist status",
+                    "• Filter by All, Matched, Unmatched, or Downloaded tracks in the detail modal",
+                    "• Per-track data cached for all sync types — playlist-to-server, download missing tracks, wishlist processing",
+                    "• Auto-refreshes every 30 seconds when viewing dashboard"
+                ]
+            },
+            {
                 "title": "🔧 Fix Japanese Song Searches Producing Gibberish",
                 "description": "CJK text no longer mangled by unidecode in Soulseek search queries",
                 "features": [
@@ -24327,11 +24338,19 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                     artists = td.get('artists', [])
                     first_artist = (artists[0].get('name', artists[0]) if isinstance(artists[0], dict) else str(artists[0])) if artists else ''
                     alb = td.get('album', '')
+                    # Extract image
+                    _img = ''
+                    _alb_obj = td.get('album', {})
+                    if isinstance(_alb_obj, dict):
+                        _alb_imgs = _alb_obj.get('images', [])
+                        if _alb_imgs and isinstance(_alb_imgs, list) and len(_alb_imgs) > 0:
+                            _img = _alb_imgs[0].get('url', '') if isinstance(_alb_imgs[0], dict) else ''
                     track_results.append({
                         'index': res.get('track_index', 0),
                         'name': td.get('name', ''),
                         'artist': first_artist,
                         'album': alb.get('name', '') if isinstance(alb, dict) else str(alb or ''),
+                        'image_url': _img,
                         'duration_ms': td.get('duration_ms', 0),
                         'source_track_id': td.get('id', ''),
                         'status': 'found' if res.get('found') else 'not_found',
@@ -27372,12 +27391,21 @@ def _record_sync_history_completion(batch_id, batch):
             album = track_data.get('album', '')
             album_name = album.get('name', '') if isinstance(album, dict) else str(album or '')
 
+            # Extract image URL
+            image_url = ''
+            album_obj = track_data.get('album', {})
+            if isinstance(album_obj, dict):
+                imgs = album_obj.get('images', [])
+                if imgs and isinstance(imgs, list) and len(imgs) > 0:
+                    image_url = imgs[0].get('url', '') if isinstance(imgs[0], dict) else ''
+
             idx = res.get('track_index', 0)
             entry = {
                 'index': idx,
                 'name': track_data.get('name', ''),
                 'artist': artist_name,
                 'album': album_name,
+                'image_url': image_url,
                 'duration_ms': track_data.get('duration_ms', 0),
                 'source_track_id': track_data.get('id', ''),
                 'status': 'found' if res.get('found') else 'not_found',
@@ -33026,16 +33054,26 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
             else:
                 album_name = str(raw_album)
             
+            # Extract image URL from album data if available
+            _track_image = ''
+            if isinstance(raw_album, dict):
+                _imgs = raw_album.get('images', [])
+                if _imgs and isinstance(_imgs, list) and len(_imgs) > 0:
+                    _track_image = _imgs[0].get('url', '') if isinstance(_imgs[0], dict) else ''
+            if not _track_image:
+                _track_image = t.get('image_url', '')
+
             # Create SpotifyTrack objects with proper default values for missing fields
             track = SpotifyTrack(
-                id=t.get('id', ''),  # Provide default empty string
+                id=t.get('id', ''),
                 name=t.get('name', ''),
                 artists=t.get('artists', []),
                 album=album_name,
                 duration_ms=t.get('duration_ms', 0),
-                popularity=t.get('popularity', 0),  # Default value
+                popularity=t.get('popularity', 0),
                 preview_url=t.get('preview_url'),
-                external_urls=t.get('external_urls')
+                external_urls=t.get('external_urls'),
+                image_url=_track_image or None
             )
             tracks.append(track)
             if i < 3:  # Log first 3 tracks for debugging
@@ -33256,9 +33294,11 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
 
         # Update final state on completion
         # Convert result to JSON-serializable dict (datetime/errors can't be emitted via SocketIO)
+        # Exclude match_details — large, not needed for live status, saved to DB separately
         result_dict = {
             k: (v.isoformat() if hasattr(v, 'isoformat') else v)
             for k, v in result.__dict__.items()
+            if k != 'match_details'
         }
         with sync_lock:
             sync_states[playlist_id] = {
@@ -33268,17 +33308,36 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
             }
         print(f"🏁 Sync finished for {playlist_id} - state updated")
 
-        # Record sync history completion
+        # Record sync history completion with per-track data
         try:
             matched = getattr(result, 'matched_tracks', 0)
             failed = getattr(result, 'failed_tracks', 0)
             synced = getattr(result, 'synced_tracks', 0)
             db = MusicDatabase()
+            target_batch_id = sync_batch_id
             if _is_resync and _resync_entry_id:
-                # Re-sync: update the original entry's timestamp and stats (moves it to top)
                 db.refresh_sync_history_entry(_resync_entry_id, matched, synced, failed)
+                # For re-sync, get the batch_id from the original entry
+                try:
+                    entry = db.get_sync_history_entry(_resync_entry_id)
+                    if entry:
+                        target_batch_id = entry.get('batch_id', sync_batch_id)
+                except Exception:
+                    pass
             else:
                 db.update_sync_history_completion(sync_batch_id, matched, synced, failed)
+
+            # Save per-track match details from sync service
+            match_details = getattr(result, 'match_details', None)
+            if match_details:
+                try:
+                    track_results_json = json.dumps(match_details, default=str)
+                    saved = db.update_sync_history_track_results(target_batch_id, track_results_json)
+                    print(f"📝 [Sync History] Saved {len(match_details)} track results for batch {target_batch_id} (saved={saved})")
+                except Exception as json_err:
+                    print(f"⚠️ [Sync History] Failed to serialize track results: {json_err}")
+            else:
+                print(f"⚠️ [Sync History] No match_details on SyncResult for batch {target_batch_id}")
         except Exception as e:
             logger.warning(f"Failed to record sync history completion: {e}")
 
