@@ -21614,12 +21614,15 @@ def start_wishlist_missing_downloads():
                     track_lookup[spotify_track_id] = track
 
             # Iterate in track_ids order (matches frontend display order)
-            # so that enumerate()-based track_index aligns with data-track-index in the modal
+            # Stamp each track with its original position in the track_ids array
+            # so track_index matches the modal row even if cleanup removed some tracks
             filtered_tracks = []
             seen_track_ids = set()
-            for tid in track_ids:
+            for frontend_index, tid in enumerate(track_ids):
                 if tid in track_lookup and tid not in seen_track_ids:
-                    filtered_tracks.append(track_lookup[tid])
+                    track = track_lookup[tid]
+                    track['_original_index'] = frontend_index  # Preserve frontend table position
+                    filtered_tracks.append(track)
                     seen_track_ids.add(tid)
 
             wishlist_tracks = filtered_tracks
