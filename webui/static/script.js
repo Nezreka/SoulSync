@@ -23168,16 +23168,41 @@ async function loadTidalPlaylists() {
 
         console.log(`🎵 Loaded ${tidalPlaylists.length} Tidal playlists`);
 
-        // Auto-mirror Tidal playlists that have tracks
-        tidalPlaylists.forEach(p => {
+        // Auto-mirror Tidal playlists: fetch tracks in background then mirror
+        // Cards render instantly from metadata; tracks load per-playlist without blocking UI
+        for (const p of tidalPlaylists) {
+            // Skip if already have tracks from a previous load
             if (p.tracks && p.tracks.length > 0) {
                 mirrorPlaylist('tidal', p.id, p.name, p.tracks.map(t => ({
                     track_name: t.name || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artists || ''),
                     album_name: typeof t.album === 'string' ? t.album : '', duration_ms: t.duration_ms || 0,
                     source_track_id: t.id || ''
                 })), { owner: p.owner, image_url: p.image_url, description: p.description });
+                continue;
             }
-        });
+            // Fetch tracks on-demand for this playlist
+            try {
+                const fullResp = await fetch(`/api/tidal/playlist/${p.id}`);
+                if (fullResp.ok) {
+                    const fullData = await fullResp.json();
+                    if (fullData.tracks && fullData.tracks.length > 0) {
+                        p.tracks = fullData.tracks;
+                        p.track_count = fullData.tracks.length;
+                        // Update card track count in UI
+                        const countEl = document.querySelector(`#tidal-card-${p.id} .playlist-card-track-count`);
+                        if (countEl) countEl.textContent = `${fullData.tracks.length} tracks`;
+                        // Mirror with full track data
+                        mirrorPlaylist('tidal', p.id, p.name, fullData.tracks.map(t => ({
+                            track_name: t.name || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artists || ''),
+                            album_name: typeof t.album === 'string' ? t.album : '', duration_ms: t.duration_ms || 0,
+                            source_track_id: t.id || ''
+                        })), { owner: p.owner, image_url: p.image_url, description: p.description });
+                    }
+                }
+            } catch (e) {
+                console.warn(`Failed to fetch tracks for Tidal playlist ${p.name}: ${e.message}`);
+            }
+        }
 
         // Load and apply saved discovery states from backend (like YouTube)
         await loadTidalPlaylistStatesFromBackend();
