@@ -44,7 +44,7 @@ _POST_BAN_COOLDOWN = 300  # 5 minutes
 _ESCALATION_WINDOW = 3600   # 1 hour — if re-limited within this, escalate
 _ESCALATION_MAX = 14400     # 4 hours max ban
 _BASE_UNKNOWN_BAN = 1800    # 30 min default when Retry-After header is missing
-_BASE_MAX_RETRIES_BAN = 3600  # 1 hour default when spotipy exhausted all retries
+_BASE_MAX_RETRIES_BAN = 14400  # 4 hours default when spotipy exhausted all retries (severe rate limit)
 
 class SpotifyRateLimitError(Exception):
     """Raised when Spotify API calls are blocked due to active global rate limit ban."""
@@ -192,7 +192,10 @@ def _detect_and_set_rate_limit(exception, endpoint_name="unknown"):
         else:
             # No Retry-After header available
             if "max retries" in error_str.lower():
-                delay = _BASE_MAX_RETRIES_BAN  # 1 hour — retries exhausted
+                # Spotipy exhausted all retries on 429s — this is a severe ban.
+                # Spotify's actual Retry-After is consumed internally by spotipy and not
+                # passed in the exception. Use a long default to avoid re-triggering.
+                delay = _BASE_MAX_RETRIES_BAN  # 4 hours
             else:
                 delay = _BASE_UNKNOWN_BAN  # 30 min
             logger.warning(f"Rate limit detected on {endpoint_name} — no Retry-After header, using {delay}s default")
