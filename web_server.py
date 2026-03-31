@@ -16445,7 +16445,8 @@ def _embed_source_ids(audio_file, metadata: dict):
         if _rc_mbid:
             metadata['musicbrainz_release_id'] = _rc_mbid
             # Also store on album_info so _download_cover_art can use it for cover.jpg
-            album_info['musicbrainz_release_id'] = _rc_mbid
+            if album_info is not None:
+                album_info['musicbrainz_release_id'] = _rc_mbid
 
         # Write release year to file tags if not already present
         if release_year and 'ORIGINALDATE' not in id_tags:
