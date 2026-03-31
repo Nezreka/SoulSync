@@ -43620,9 +43620,10 @@ try:
     from database.music_database import MusicDatabase
     spotify_enrichment_db = MusicDatabase()
     spotify_enrichment_worker = SpotifyWorker(database=spotify_enrichment_db)
-    spotify_enrichment_worker.start()
     if config_manager.get('spotify_enrichment_paused', False):
-        spotify_enrichment_worker.pause()
+        spotify_enrichment_worker.paused = True  # Set BEFORE start() to prevent race condition
+    spotify_enrichment_worker.start()
+    if spotify_enrichment_worker.paused:
         print("✅ Spotify enrichment worker initialized (paused — restored from config)")
     else:
         print("✅ Spotify enrichment worker initialized and started")
@@ -43917,9 +43918,10 @@ try:
     from database.music_database import MusicDatabase
     genius_db = MusicDatabase()
     genius_worker = GeniusWorker(database=genius_db)
-    genius_worker.start()
     if config_manager.get('genius_enrichment_paused', False):
-        genius_worker.pause()
+        genius_worker.paused = True
+    genius_worker.start()
+    if genius_worker.paused:
         print("✅ Genius enrichment worker initialized (paused — restored from config)")
     else:
         print("✅ Genius enrichment worker initialized and started")
