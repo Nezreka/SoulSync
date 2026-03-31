@@ -9192,12 +9192,28 @@ class MusicDatabase:
                     (source, source_playlist_id, profile_id)
                 ).fetchone()['id']
 
+                # Preserve existing extra_data (discovery results) before replacing tracks
+                old_extra_map = {}
+                try:
+                    cursor.execute("""
+                        SELECT source_track_id, extra_data FROM mirrored_playlist_tracks
+                        WHERE playlist_id = ? AND source_track_id IS NOT NULL AND extra_data IS NOT NULL
+                    """, (playlist_id,))
+                    old_extra_map = {row['source_track_id']: row['extra_data'] for row in cursor.fetchall()}
+                except Exception:
+                    pass
+
                 # Replace all tracks
                 cursor.execute("DELETE FROM mirrored_playlist_tracks WHERE playlist_id=?", (playlist_id,))
                 for i, t in enumerate(tracks):
                     extra = t.get('extra_data')
                     if extra and not isinstance(extra, str):
                         extra = json.dumps(extra)
+                    # Restore preserved discovery data if the incoming track doesn't have its own
+                    if not extra:
+                        sid = t.get('source_track_id')
+                        if sid and sid in old_extra_map:
+                            extra = old_extra_map[sid]
                     cursor.execute("""
                         INSERT INTO mirrored_playlist_tracks
                             (playlist_id, position, track_name, artist_name, album_name, duration_ms, image_url, source_track_id, extra_data)
