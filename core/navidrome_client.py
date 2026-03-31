@@ -330,7 +330,7 @@ class NavidromeClient:
             if endpoint in self._WRITE_ENDPOINTS:
                 response = requests.post(url, data=auth_params, timeout=30)
             else:
-                response = requests.get(url, params=auth_params, timeout=10)
+                response = requests.get(url, params=auth_params, timeout=60)
             response.raise_for_status()
 
             data = response.json()
