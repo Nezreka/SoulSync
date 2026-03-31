@@ -24320,6 +24320,27 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
             try:
                 db_sh = MusicDatabase()
                 db_sh.update_sync_history_completion(batch_id, tracks_found=tracks_found, tracks_downloaded=0, tracks_failed=0)
+                # Save per-track results (all found, no downloads)
+                track_results = []
+                for res in analysis_results:
+                    td = res.get('track', {})
+                    artists = td.get('artists', [])
+                    first_artist = (artists[0].get('name', artists[0]) if isinstance(artists[0], dict) else str(artists[0])) if artists else ''
+                    alb = td.get('album', '')
+                    track_results.append({
+                        'index': res.get('track_index', 0),
+                        'name': td.get('name', ''),
+                        'artist': first_artist,
+                        'album': alb.get('name', '') if isinstance(alb, dict) else str(alb or ''),
+                        'duration_ms': td.get('duration_ms', 0),
+                        'source_track_id': td.get('id', ''),
+                        'status': 'found' if res.get('found') else 'not_found',
+                        'confidence': round(res.get('confidence', 0.0), 3),
+                        'matched_track': None,
+                        'download_status': None,
+                    })
+                if track_results:
+                    db_sh.update_sync_history_track_results(batch_id, json.dumps(track_results))
             except Exception:
                 pass
 
@@ -27198,6 +27219,7 @@ def get_sync_history_entry(entry_id):
         entry['tracks'] = json.loads(entry['tracks_json']) if entry.get('tracks_json') else []
         entry['artist_context'] = json.loads(entry['artist_context']) if entry.get('artist_context') else None
         entry['album_context'] = json.loads(entry['album_context']) if entry.get('album_context') else None
+        entry['track_results'] = json.loads(entry['track_results']) if entry.get('track_results') else None
         entry.pop('tracks_json', None)
 
         return jsonify({"success": True, "entry": entry})
@@ -27317,7 +27339,7 @@ def _record_sync_history_start(batch_id, playlist_id, playlist_name, tracks,
         logger.warning(f"Failed to record sync history start: {e}")
 
 def _record_sync_history_completion(batch_id, batch):
-    """Update sync history with completion stats.
+    """Update sync history with completion stats and per-track results.
     NOTE: Called from within tasks_lock context — do NOT acquire tasks_lock here."""
     try:
         analysis_results = batch.get('analysis_results', [])
@@ -27325,13 +27347,53 @@ def _record_sync_history_completion(batch_id, batch):
         queue = batch.get('queue', [])
         completed_count = 0
         failed_count = len(batch.get('permanently_failed_tracks', []))
-        # Already inside tasks_lock — safe to read download_tasks directly
+
+        # Build download status map: track_index → status
+        download_status_map = {}
         for task_id in queue:
-            if task_id in download_tasks and download_tasks[task_id].get('status') == 'completed':
+            task = download_tasks.get(task_id, {})
+            ti = task.get('track_index')
+            if ti is not None:
+                download_status_map[ti] = task.get('status', 'unknown')
+            if task.get('status') == 'completed':
                 completed_count += 1
+
+        # Build per-track results from analysis
+        track_results = []
+        for res in analysis_results:
+            track_data = res.get('track', {})
+            artists = track_data.get('artists', [])
+            if artists:
+                first = artists[0]
+                artist_name = first.get('name', first) if isinstance(first, dict) else str(first)
+            else:
+                artist_name = ''
+
+            album = track_data.get('album', '')
+            album_name = album.get('name', '') if isinstance(album, dict) else str(album or '')
+
+            idx = res.get('track_index', 0)
+            entry = {
+                'index': idx,
+                'name': track_data.get('name', ''),
+                'artist': artist_name,
+                'album': album_name,
+                'duration_ms': track_data.get('duration_ms', 0),
+                'source_track_id': track_data.get('id', ''),
+                'status': 'found' if res.get('found') else 'not_found',
+                'confidence': round(res.get('confidence', 0.0), 3),
+                'matched_track': None,
+                'download_status': download_status_map.get(idx),
+            }
+            track_results.append(entry)
 
         db = MusicDatabase()
         db.update_sync_history_completion(batch_id, tracks_found, completed_count, failed_count)
+
+        # Save per-track results
+        if track_results:
+            db.update_sync_history_track_results(batch_id, json.dumps(track_results))
+
     except Exception as e:
         logger.warning(f"Failed to record sync history completion: {e}")
 
