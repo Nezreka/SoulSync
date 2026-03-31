@@ -16444,6 +16444,8 @@ def _embed_source_ids(audio_file, metadata: dict):
         # Store release MBID in metadata for downstream use (e.g. Cover Art Archive)
         if _rc_mbid:
             metadata['musicbrainz_release_id'] = _rc_mbid
+            # Also store on album_info so _download_cover_art can use it for cover.jpg
+            album_info['musicbrainz_release_id'] = _rc_mbid
 
         # Write release year to file tags if not already present
         if release_year and 'ORIGINALDATE' not in id_tags:
@@ -16981,7 +16983,9 @@ def _embed_source_ids(audio_file, metadata: dict):
         print(f"⚠️ Error embedding source IDs (non-fatal): {e}")
 
 def _download_cover_art(album_info: dict, target_dir: str):
-    """Downloads cover.jpg into the specified directory."""
+    """Downloads cover.jpg into the specified directory.
+    Tries Cover Art Archive first (high-res) if MusicBrainz release ID is available
+    (set by _enhance_file_metadata during post-processing), falls back to source URL."""
     if not config_manager.get('metadata_enhancement.cover_art_download', True):
         return
     try:
@@ -16989,17 +16993,39 @@ def _download_cover_art(album_info: dict, target_dir: str):
         if os.path.exists(cover_path):
             return
 
-        art_url = album_info.get('album_image_url')
-        if not art_url:
-            print("📷 No cover art URL available for download.")
+        image_data = None
+
+        # Try Cover Art Archive first (often 1200x1200+, original quality)
+        # The MBID is stored in album_info by _enhance_file_metadata before this is called
+        release_mbid = album_info.get('musicbrainz_release_id')
+        if release_mbid:
+            try:
+                caa_url = f"https://coverartarchive.org/release/{release_mbid}/front"
+                req = urllib.request.Request(caa_url, headers={'Accept': 'image/*'})
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    image_data = response.read()
+                if image_data and len(image_data) > 1000:
+                    print(f"🎨 Cover art from Cover Art Archive ({len(image_data) // 1024}KB)")
+                else:
+                    image_data = None
+            except Exception:
+                image_data = None
+
+        # Fallback to Spotify/iTunes/Deezer URL (typically 640x640)
+        if not image_data:
+            art_url = album_info.get('album_image_url')
+            if not art_url:
+                print("📷 No cover art URL available for download.")
+                return
+            with urllib.request.urlopen(art_url, timeout=10) as response:
+                image_data = response.read()
+
+        if not image_data:
             return
 
-        with urllib.request.urlopen(art_url, timeout=10) as response:
-            image_data = response.read()
-        
         with open(cover_path, 'wb') as f:
             f.write(image_data)
-        
+
         print(f"✅ Cover art downloaded to: {cover_path}")
     except Exception as e:
         print(f"❌ Error downloading cover.jpg: {e}")
