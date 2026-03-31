@@ -4094,14 +4094,24 @@ def get_status():
             _status_cache_timestamps['media_server'] = current_time
         # else: use cached value
 
-        # Test Soulseek - with caching like other services
+        # Test Soulseek - only if it's the active source or in the hybrid order
         if current_time - _status_cache_timestamps['soulseek'] > STATUS_CACHE_TTL:
-            soulseek_start = time.time()
-            try:
-                soulseek_status = run_async(soulseek_client.check_connection()) if soulseek_client else False
-            except Exception:
+            download_mode = config_manager.get('download_source.mode', 'hybrid')
+            hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
+            soulseek_relevant = (download_mode == 'soulseek' or
+                                (download_mode == 'hybrid' and 'soulseek' in hybrid_order))
+
+            if soulseek_relevant and soulseek_client:
+                soulseek_start = time.time()
+                try:
+                    soulseek_status = run_async(soulseek_client.check_connection())
+                except Exception:
+                    soulseek_status = False
+                soulseek_response_time = (time.time() - soulseek_start) * 1000
+            else:
                 soulseek_status = False
-            soulseek_response_time = (time.time() - soulseek_start) * 1000
+                soulseek_response_time = 0
+
             _status_cache['soulseek'] = {
                 'connected': soulseek_status,
                 'response_time': round(soulseek_response_time, 1)
