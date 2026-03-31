@@ -32122,7 +32122,7 @@ def _run_youtube_discovery_worker(url_hash):
                 print(f"⚠️ Error writing discovery results to DB: {wb_err}")
 
         playlist_name = playlist['name']
-        source_label = 'Spotify' if use_spotify else 'iTunes'
+        source_label = discovery_source.upper()
         add_activity_item("✅", f"YouTube Discovery Complete ({source_label})", f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
 
         print(f"✅ YouTube discovery complete ({discovery_source}): {state['spotify_matches']}/{len(tracks)} tracks matched")
@@ -32399,7 +32399,7 @@ def _run_listenbrainz_discovery_worker(state_key):
         state['discovery_progress'] = 100
 
         playlist_name = playlist['name']
-        source_label = 'Spotify' if use_spotify else 'iTunes'
+        source_label = discovery_source.upper()
         add_activity_item("✅", f"ListenBrainz Discovery Complete ({source_label})", f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
 
         print(f"✅ ListenBrainz discovery complete ({discovery_source}): {state['spotify_matches']}/{len(tracks)} tracks matched")
