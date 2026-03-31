@@ -2830,6 +2830,9 @@ async function loadPageData(pageId) {
                 }
                 // Already initialized — DOM content persists, no reload needed
                 break;
+            case 'playlist-explorer':
+                initExplorer();
+                break;
             case 'settings':
                 initializeSettings();
                 await loadSettingsData();
@@ -63463,3 +63466,972 @@ window.updateEnhanceSelectedCount = updateEnhanceSelectedCount;
 window.submitEnhanceQuality = submitEnhanceQuality;
 
 // ===== END ENHANCE QUALITY MODAL =====
+
+// ==================================================================================
+// PLAYLIST EXPLORER — Visual Discovery Tree
+// ==================================================================================
+
+const _explorer = {
+    initialized: false,
+    mode: 'albums',
+    artists: [],
+    selectedAlbums: new Set(),
+    expandedArtists: new Set(),
+    building: false,
+    playlistId: null,
+    meta: null,
+    _resizeTimer: null,
+};
+
+function initExplorer() {
+    if (_explorer.initialized) return;
+    _explorer.initialized = true;
+    _explorer._playlists = [];
+
+    fetch('/api/mirrored-playlists')
+        .then(r => r.json())
+        .then(data => {
+            const playlists = Array.isArray(data) ? data : (data.playlists || []);
+            _explorer._playlists = playlists;
+
+            if (playlists.length === 0) {
+                const scroll = document.getElementById('explorer-picker-scroll');
+                if (scroll) scroll.innerHTML = '<div class="explorer-picker-empty">No mirrored playlists found. Sync a playlist first.</div>';
+                return;
+            }
+
+            // Group by source
+            const groups = {};
+            playlists.forEach(p => {
+                const src = (p.source || 'other').toLowerCase();
+                if (!groups[src]) groups[src] = [];
+                groups[src].push(p);
+            });
+
+            // Render source tabs
+            const tabsEl = document.getElementById('explorer-picker-tabs');
+            if (tabsEl) {
+                const sourceNames = { spotify: 'Spotify', tidal: 'Tidal', deezer: 'Deezer', youtube: 'YouTube', beatport: 'Beatport', file: 'File', other: 'Other' };
+                const sources = Object.keys(groups);
+                if (sources.length <= 1) {
+                    // Only one source — no tabs needed
+                    tabsEl.style.display = 'none';
+                } else {
+                    tabsEl.innerHTML = sources.map((src, i) => {
+                        const label = sourceNames[src] || src.charAt(0).toUpperCase() + src.slice(1);
+                        const count = groups[src].length;
+                        return `<button class="explorer-picker-tab ${i === 0 ? 'active' : ''}" data-source="${src}" onclick="explorerSwitchPickerTab('${src}')">${label} <span class="explorer-picker-tab-count">${count}</span></button>`;
+                    }).join('');
+                }
+
+                // Show first source
+                explorerRenderPickerCards(sources[0]);
+            }
+        })
+        .catch(() => {});
+}
+
+function explorerSwitchPickerTab(source) {
+    document.querySelectorAll('.explorer-picker-tab').forEach(t => t.classList.toggle('active', t.dataset.source === source));
+    explorerRenderPickerCards(source);
+}
+
+function explorerRenderPickerCards(source) {
+    const scroll = document.getElementById('explorer-picker-scroll');
+    if (!scroll) return;
+
+    const filtered = _explorer._playlists.filter(p => (p.source || 'other').toLowerCase() === source);
+    scroll.innerHTML = filtered.map(p => {
+        const img = p.image_url || '';
+        const total = p.total_count || p.track_count || 0;
+        const discovered = p.discovered_count || 0;
+        const pct = total > 0 ? Math.round((discovered / total) * 100) : 0;
+        const isReady = pct >= 50;
+        const isActive = _explorer.playlistId === p.id;
+        return `
+            <div class="explorer-picker-card ${isActive ? 'active' : ''} ${!isReady ? 'not-ready' : ''}"
+                 data-id="${p.id}"
+                 onclick="${isReady ? `explorerSelectPlaylist(${p.id}, this)` : `explorerRedirectToDiscover(${p.id})`}">
+                <div class="explorer-picker-card-art">
+                    ${img ? `<img src="${img}" alt="" loading="lazy">` : '<div class="explorer-picker-card-art-placeholder">&#9835;</div>'}
+                </div>
+                <div class="explorer-picker-card-info">
+                    <div class="explorer-picker-card-name">${p.name || 'Untitled'}</div>
+                    <div class="explorer-picker-card-meta">${total} tracks &middot; ${isReady ? `${pct}% discovered` : `<span class="explorer-picker-not-ready">${pct}% — needs discovery</span>`}</div>
+                </div>
+                ${isReady ? '' : '<div class="explorer-picker-card-lock" title="Less than 50% discovered — click to go discover">&#128274;</div>'}
+            </div>
+        `;
+    }).join('');
+}
+
+function explorerSelectPlaylist(id, el) {
+    _explorer.playlistId = id;
+    document.querySelectorAll('.explorer-picker-card').forEach(c => c.classList.remove('active'));
+    if (el) el.classList.add('active');
+}
+
+function explorerRedirectToDiscover(playlistId) {
+    showToast('This playlist needs more tracks discovered before exploring. Redirecting to Sync...', 'info');
+    navigateToPage('sync');
+    // Switch to mirrored tab after page loads
+    setTimeout(() => {
+        const mirroredBtn = document.querySelector('.sync-tab-button[data-tab="mirrored"]');
+        if (mirroredBtn) mirroredBtn.click();
+    }, 200);
+}
+
+function explorerSetMode(mode) {
+    _explorer.mode = mode;
+    document.querySelectorAll('.explorer-mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+}
+
+async function explorerBuildTree() {
+    const playlistId = _explorer.playlistId;
+    if (!playlistId) {
+        showToast('Select a playlist first', 'error');
+        return;
+    }
+    if (_explorer.building) return;
+
+    _explorer.building = true;
+    _explorer.artists = [];
+    _explorer.selectedAlbums.clear();
+    _explorer.expandedArtists.clear();
+    _explorer.playlistId = playlistId;
+
+    const tree = document.getElementById('explorer-tree');
+    const svg = document.getElementById('explorer-svg');
+    const progress = document.getElementById('explorer-progress');
+    const actionBar = document.getElementById('explorer-action-bar');
+    const empty = document.getElementById('explorer-empty');
+    const buildBtn = document.getElementById('explorer-build-btn');
+
+    if (empty) empty.style.display = 'none';
+    if (actionBar) actionBar.style.display = 'none';
+    if (progress) progress.style.display = 'flex';
+    if (buildBtn) { buildBtn.disabled = true; buildBtn.textContent = 'Building...'; }
+    // Clear tree but preserve the SVG element (it lives inside the tree)
+    tree.innerHTML = '<svg class="explorer-svg" id="explorer-svg"></svg>';
+    _explorer._zoom = 1;
+    tree.style.transform = '';
+
+    try {
+        const response = await fetch('/api/playlist-explorer/build-tree', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ playlist_id: parseInt(playlistId), mode: _explorer.mode })
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Failed to build tree');
+        }
+
+        // Stream NDJSON
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let artistCount = 0;
+        let totalArtists = 0;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const data = JSON.parse(line);
+
+                    if (data.type === 'meta') {
+                        _explorer.meta = data;
+                        totalArtists = data.total_artists;
+                        _explorerRenderRoot(data);
+                    } else if (data.type === 'artist') {
+                        artistCount++;
+                        _explorer.artists.push(data);
+                        _explorerRenderArtistNode(data, artistCount);
+
+                        // Lines drawn after streaming completes (not during — flex reflow drifts positions)
+
+                        // Update progress
+                        const pct = Math.round((artistCount / totalArtists) * 100);
+                        const fill = document.getElementById('explorer-progress-fill');
+                        const text = document.getElementById('explorer-progress-text');
+                        if (fill) fill.style.width = pct + '%';
+                        if (text) text.textContent = `Discovering artists... ${artistCount} of ${totalArtists}`;
+                    } else if (data.type === 'complete') {
+                        // Done
+                    }
+                } catch (e) {
+                    console.warn('Explorer: failed to parse NDJSON line', e);
+                }
+            }
+        }
+
+        // Tree built — show action bar, hide progress
+        if (actionBar) actionBar.style.display = 'flex';
+        if (progress) progress.style.display = 'none';
+        _explorerUpdateCount();
+
+        // Draw all connections now that the tree is stable
+        setTimeout(() => _explorerRedrawAllConnections(true), 100);
+
+    } catch (err) {
+        showToast('Explorer: ' + err.message, 'error');
+        if (empty) { empty.style.display = 'flex'; }
+        if (progress) progress.style.display = 'none';
+    } finally {
+        _explorer.building = false;
+        if (buildBtn) { buildBtn.disabled = false; buildBtn.textContent = 'Explore'; }
+    }
+}
+
+function _explorerRenderRoot(meta) {
+    const tree = document.getElementById('explorer-tree');
+    const rootHtml = `
+        <div class="explorer-tier explorer-tier-root">
+            <div class="explorer-node explorer-node-root" id="explorer-root">
+                <div class="explorer-node-glow"></div>
+                ${meta.playlist_image
+                    ? `<img class="explorer-node-img" src="${meta.playlist_image}" alt="">`
+                    : '<div class="explorer-node-img-placeholder">&#9835;</div>'
+                }
+                <div class="explorer-node-label">
+                    <div class="explorer-node-label-sub">SOURCE</div>
+                    <div class="explorer-node-label-main">${meta.playlist_name}</div>
+                    <div class="explorer-node-label-meta">${meta.total_tracks} tracks &middot; ${meta.total_artists} artists</div>
+                </div>
+            </div>
+        </div>
+        <div class="explorer-artist-tiers" id="explorer-artist-tiers"></div>
+    `;
+    tree.insertAdjacentHTML('afterbegin', rootHtml);
+    _explorer._artistRowSizes = []; // Track row capacities: [2, 3, 4, ...]
+    _explorer._artistCount = 0;
+    _explorer._currentRowIndex = 0;
+}
+
+function _explorerGetOrCreateRow() {
+    const container = document.getElementById('explorer-artist-tiers');
+    if (!container) return null;
+
+    // Determine row sizes: 2, 3, 4, 5... (tree shape)
+    const rowCapacity = _explorer._currentRowIndex + 2;
+    const existingRows = container.querySelectorAll('.explorer-tier-artists');
+    let currentRow = existingRows[existingRows.length - 1];
+
+    if (!currentRow || currentRow.children.length >= (_explorer._currentRowIndex + 2)) {
+        // Need a new row
+        _explorer._currentRowIndex = existingRows.length;
+        const newRow = document.createElement('div');
+        newRow.className = 'explorer-tier explorer-tier-artists';
+        container.appendChild(newRow);
+        return newRow;
+    }
+    return currentRow;
+}
+
+function _explorerRenderArtistNode(artist, index) {
+    const row = _explorerGetOrCreateRow();
+    if (!row) return;
+
+    _explorer._artistCount++;
+    const albumCount = artist.albums ? artist.albums.length : 0;
+    const safeKey = (artist.name || '').replace(/[^a-zA-Z0-9]/g, '_');
+    const hasError = !!artist.error;
+
+    const html = `
+        <div class="explorer-branch" id="explorer-branch-${safeKey}" style="--enter-delay: ${(index % 5) * 0.1}s">
+            <div class="explorer-node explorer-node-artist ${hasError ? 'error' : ''}"
+                 id="explorer-node-${safeKey}" data-key="${safeKey}"
+                 onclick="${hasError || albumCount === 0 ? '' : `explorerToggleArtist('${safeKey}')`}">
+                ${artist.image_url
+                    ? `<img class="explorer-node-img" src="${artist.image_url}" alt="" loading="lazy">`
+                    : ''
+                }
+                <div class="explorer-node-label">
+                    <div class="explorer-node-label-main">${artist.name || 'Unknown'}</div>
+                    <div class="explorer-node-label-meta">${hasError ? 'Not found' : albumCount + ' album' + (albumCount !== 1 ? 's' : '')}</div>
+                </div>
+                ${!hasError && albumCount > 0 ? '<div class="explorer-node-expand-hint">&#9662;</div>' : ''}
+                ${hasError ? '<div class="explorer-node-error-ring"></div>' : ''}
+            </div>
+            <div class="explorer-children" id="explorer-children-${safeKey}"></div>
+        </div>
+    `;
+    row.insertAdjacentHTML('beforeend', html);
+}
+
+function explorerToggleArtist(key) {
+    const children = document.getElementById(`explorer-children-${key}`);
+    const node = document.getElementById(`explorer-node-${key}`);
+    if (!children || !node) return;
+
+    const isExpanded = _explorer.expandedArtists.has(key);
+    if (isExpanded) {
+        _explorer.expandedArtists.delete(key);
+        children.innerHTML = '';
+        node.classList.remove('expanded');
+    } else {
+        _explorer.expandedArtists.add(key);
+        node.classList.add('expanded');
+
+        const artist = _explorer.artists.find(a => (a.name || '').replace(/[^a-zA-Z0-9]/g, '_') === key);
+        if (artist && artist.albums) {
+            const albumsHtml = artist.albums.map((album, i) => {
+                const id = album.spotify_id || `${key}_${i}`;
+                const selected = _explorer.selectedAlbums.has(id);
+                const owned = album.owned;
+                const inPlaylist = album.in_playlist;
+
+                const typeLabel = album.album_type === 'single' ? 'Single' : album.album_type === 'ep' ? 'EP' : 'Album';
+                return `
+                    <div class="explorer-branch" style="--enter-delay: ${i * 0.06}s">
+                        <div class="explorer-node explorer-node-album ${selected ? 'selected' : ''} ${owned ? 'owned' : ''} ${inPlaylist ? 'in-playlist' : ''}"
+                             data-id="${id}" data-key="${id}"
+                             onclick="explorerToggleAlbum('${id}'); event.stopPropagation();"
+                             title="${(album.title || '').replace(/"/g, '&quot;')}\n${album.year || ''} · ${typeLabel} · ${album.track_count || '?'} tracks${owned ? '\n✓ Already in library' : ''}${inPlaylist ? '\n♫ Track from this playlist' : ''}\nClick to select · Double-click for tracklist">
+                            ${album.image_url
+                                ? `<img class="explorer-node-img" src="${album.image_url}" alt="" loading="lazy">`
+                                : ''
+                            }
+                            <div class="explorer-node-label">
+                                <div class="explorer-node-label-main">${album.title || 'Unknown'}</div>
+                                <div class="explorer-node-label-meta">${album.year || ''} &middot; ${album.track_count || '?'} tracks</div>
+                            </div>
+                            <div class="explorer-node-select ${selected ? 'active' : ''}">
+                                <svg viewBox="0 0 20 20"><polyline points="4 10 8 14 16 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </div>
+                            ${owned ? '<div class="explorer-node-badge-float owned">Owned</div>' : ''}
+                            ${inPlaylist ? '<div class="explorer-node-badge-float playlist">♫</div>' : ''}
+                        </div>
+                        <div class="explorer-children" id="explorer-tracks-${id}"></div>
+                    </div>
+                `;
+            }).join('');
+            children.innerHTML = albumsHtml;
+        }
+    }
+
+    // Redraw SVG after DOM settles
+    requestAnimationFrame(() => setTimeout(() => _explorerRedrawAllConnections(), 50));
+}
+
+async function explorerExpandAlbumTracks(spotifyAlbumId, nodeKey) {
+    if (!spotifyAlbumId) return;
+    const tracksContainer = document.getElementById(`explorer-tracks-${nodeKey}`);
+    if (!tracksContainer) return;
+
+    // Toggle: if already has content, collapse
+    if (tracksContainer.innerHTML) {
+        tracksContainer.innerHTML = '';
+        requestAnimationFrame(() => setTimeout(() => _explorerRedrawAllConnections(), 50));
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/playlist-explorer/album-tracks/${spotifyAlbumId}`);
+        const data = await response.json();
+        if (!data.success || !data.tracks) return;
+
+        const tracksHtml = data.tracks.map((t, i) => `
+            <div class="explorer-branch" style="--enter-delay: ${i * 0.03}s">
+                <div class="explorer-node explorer-node-track">
+                    <div class="explorer-node-label">
+                        <div class="explorer-node-label-main">${t.track_number}. ${t.name}</div>
+                        <div class="explorer-node-label-meta">${_formatDuration(t.duration_ms)}</div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+        tracksContainer.innerHTML = tracksHtml;
+        requestAnimationFrame(() => setTimeout(() => _explorerRedrawAllConnections(), 50));
+    } catch (e) {
+        console.error('Failed to load album tracks:', e);
+    }
+}
+
+function _formatDuration(ms) {
+    if (!ms) return '';
+    const m = Math.floor(ms / 60000);
+    const s = Math.floor((ms % 60000) / 1000);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// Track double-click vs single-click on album nodes
+let _explorerClickTimer = null;
+let _explorerLastClickId = null;
+
+function explorerToggleAlbum(id) {
+    // Double-click detection: expand tracks
+    if (_explorerLastClickId === id && _explorerClickTimer) {
+        clearTimeout(_explorerClickTimer);
+        _explorerClickTimer = null;
+        _explorerLastClickId = null;
+        // Double-click — expand tracks
+        const node = document.querySelector(`.explorer-node-album[data-id="${id}"]`);
+        const spotifyId = id.includes('_') ? '' : id; // Only real IDs, not fallback keys
+        explorerExpandAlbumTracks(spotifyId, id);
+        return;
+    }
+
+    _explorerLastClickId = id;
+    _explorerClickTimer = setTimeout(() => {
+        _explorerClickTimer = null;
+        _explorerLastClickId = null;
+
+        // Single click — toggle selection
+        if (_explorer.selectedAlbums.has(id)) {
+            _explorer.selectedAlbums.delete(id);
+        } else {
+            _explorer.selectedAlbums.add(id);
+        }
+
+        const node = document.querySelector(`.explorer-node-album[data-id="${id}"]`);
+        if (node) {
+            const isSelected = _explorer.selectedAlbums.has(id);
+            node.classList.toggle('selected', isSelected);
+            const check = node.querySelector('.explorer-node-select');
+            if (check) check.classList.toggle('active', isSelected);
+        }
+
+        _explorerUpdateCount();
+    }, 250);
+
+    _explorerUpdateCount();
+}
+
+function explorerSelectAll() {
+    _explorer.artists.forEach(a => {
+        (a.albums || []).forEach(album => {
+            if (album.spotify_id && !album.owned) _explorer.selectedAlbums.add(album.spotify_id);
+        });
+    });
+    _explorerRefreshAllCards();
+    _explorerUpdateCount();
+}
+
+function explorerDeselectAll() {
+    _explorer.selectedAlbums.clear();
+    _explorerRefreshAllCards();
+    _explorerUpdateCount();
+}
+
+function _explorerRefreshAllCards() {
+    document.querySelectorAll('.explorer-node-album').forEach(node => {
+        const id = node.dataset.id;
+        const selected = _explorer.selectedAlbums.has(id);
+        node.classList.toggle('selected', selected);
+        const check = node.querySelector('.explorer-node-select');
+        if (check) check.classList.toggle('active', selected);
+    });
+}
+
+function _explorerUpdateCount() {
+    const el = document.getElementById('explorer-selection-count');
+    const count = _explorer.selectedAlbums.size;
+    if (el) el.textContent = `${count} album${count !== 1 ? 's' : ''} selected`;
+    _explorerRefreshArtistIndicators();
+}
+
+function _explorerRefreshArtistIndicators() {
+    // For each artist, check if any of their albums are selected — add visual indicator
+    _explorer.artists.forEach(artist => {
+        const key = (artist.name || '').replace(/[^a-zA-Z0-9]/g, '_');
+        const node = document.getElementById(`explorer-node-${key}`);
+        if (!node) return;
+        const hasSelected = (artist.albums || []).some(a => a.spotify_id && _explorer.selectedAlbums.has(a.spotify_id));
+        node.classList.toggle('has-selection', hasSelected);
+    });
+}
+
+function explorerAddToWishlist() {
+    if (_explorer.selectedAlbums.size === 0) {
+        showToast('No albums selected', 'error');
+        return;
+    }
+
+    // Group selected albums by artist with full metadata
+    const artistSections = [];
+    for (const artist of _explorer.artists) {
+        const artistId = artist.artist_id || artist.spotify_id;
+        if (!artist.albums) continue;
+        const selected = artist.albums.filter(a => a.spotify_id && _explorer.selectedAlbums.has(a.spotify_id));
+        if (selected.length === 0) continue;
+        artistSections.push({ artistId, name: artist.name, image: artist.image_url, albums: selected });
+    }
+
+    if (artistSections.length === 0) { showToast('No valid albums selected', 'error'); return; }
+
+    // Build confirmation modal (mirrors discog-modal pattern)
+    const overlay = document.createElement('div');
+    overlay.className = 'discog-modal-overlay';
+    overlay.id = 'explorer-wishlist-overlay';
+
+    const totalAlbums = artistSections.reduce((s, a) => s + a.albums.length, 0);
+    const totalTracks = artistSections.reduce((s, a) => s + a.albums.reduce((t, al) => t + (al.track_count || 0), 0), 0);
+
+    let cardsHtml = '';
+    artistSections.forEach(section => {
+        cardsHtml += `<div class="discog-section-header">${_esc(section.name)}</div>`;
+        section.albums.forEach((album, i) => {
+            const year = album.year || '';
+            const typeLabel = album.album_type === 'single' ? 'Single' : album.album_type === 'ep' ? 'EP' : 'Album';
+            cardsHtml += `
+                <label class="discog-card ${album.owned ? 'owned' : ''}" data-type="${album.album_type || 'album'}" data-artist-id="${section.artistId}" style="animation-delay:${i * 0.03}s">
+                    <input type="checkbox" class="discog-card-cb" data-album-id="${album.spotify_id}" data-tracks="${album.track_count || 0}" ${!album.owned ? 'checked' : ''} onchange="_explorerWishlistUpdateCount()">
+                    <div class="discog-card-art">
+                        ${album.image_url ? `<img src="${album.image_url}" alt="" loading="lazy">` : '<div class="discog-card-art-placeholder">&#9835;</div>'}
+                        ${album.owned ? '<span class="discog-card-status">&#10003;</span>' : ''}
+                    </div>
+                    <div class="discog-card-info">
+                        <div class="discog-card-title">${_esc(album.title || 'Unknown')}</div>
+                        <div class="discog-card-meta">${year}${year ? ' · ' : ''}${typeLabel} · ${album.track_count || '?'} tracks</div>
+                    </div>
+                    <div class="discog-card-check"></div>
+                </label>
+            `;
+        });
+    });
+
+    overlay.innerHTML = `
+        <div class="discog-modal">
+            <div class="discog-modal-hero" style="background-image:url('${artistSections[0]?.image || ''}')">
+                <div class="discog-modal-hero-overlay"></div>
+                <div class="discog-modal-hero-content">
+                    <h2 class="discog-modal-title">Add to Wishlist</h2>
+                    <p class="discog-modal-artist">${artistSections.length} artist${artistSections.length !== 1 ? 's' : ''} · ${totalAlbums} releases</p>
+                </div>
+                <button class="discog-modal-close" onclick="document.getElementById('explorer-wishlist-overlay')?.remove()">&times;</button>
+            </div>
+            <div class="discog-filter-bar">
+                <div class="discog-filters">
+                    <button class="discog-filter active" data-type="album" onclick="_explorerWishlistToggleFilter(this)">Albums</button>
+                    <button class="discog-filter active" data-type="ep" onclick="_explorerWishlistToggleFilter(this)">EPs</button>
+                    <button class="discog-filter active" data-type="single" onclick="_explorerWishlistToggleFilter(this)">Singles</button>
+                </div>
+                <div class="discog-select-actions">
+                    <button class="discog-select-btn" onclick="document.querySelectorAll('#explorer-wishlist-overlay .discog-card-cb').forEach(c=>{c.checked=true}); _explorerWishlistUpdateCount()">Select All</button>
+                    <button class="discog-select-btn" onclick="document.querySelectorAll('#explorer-wishlist-overlay .discog-card-cb').forEach(c=>{c.checked=false}); _explorerWishlistUpdateCount()">Deselect</button>
+                </div>
+            </div>
+            <div class="discog-grid" id="explorer-wishlist-grid">${cardsHtml}</div>
+            <div class="discog-progress" id="explorer-wishlist-progress" style="display:none;"></div>
+            <div class="discog-footer" id="explorer-wishlist-footer">
+                <div class="discog-footer-info" id="explorer-wishlist-info"></div>
+                <div class="discog-footer-actions">
+                    <button class="discog-cancel-btn" onclick="document.getElementById('explorer-wishlist-overlay')?.remove()">Cancel</button>
+                    <button class="discog-submit-btn" id="explorer-wishlist-submit">
+                        <span class="discog-submit-icon">&#11015;</span>
+                        <span id="explorer-wishlist-submit-text">Add to Wishlist</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+    _explorerWishlistUpdateCount();
+
+    document.getElementById('explorer-wishlist-submit')?.addEventListener('click', () => _explorerWishlistSubmit(artistSections));
+}
+
+function _explorerWishlistToggleFilter(btn) {
+    btn.classList.toggle('active');
+    const type = btn.dataset.type;
+    // Scoped to explorer wishlist modal only
+    document.querySelectorAll(`#explorer-wishlist-overlay .discog-card[data-type="${type}"]`).forEach(card => {
+        card.style.display = btn.classList.contains('active') ? '' : 'none';
+    });
+    _explorerWishlistUpdateCount();
+}
+
+function _explorerWishlistUpdateCount() {
+    const checked = document.querySelectorAll('#explorer-wishlist-overlay .discog-card-cb:checked');
+    let releases = 0, tracks = 0;
+    checked.forEach(cb => {
+        if (cb.closest('.discog-card').style.display !== 'none') {
+            releases++;
+            tracks += parseInt(cb.dataset.tracks) || 0;
+        }
+    });
+    const info = document.getElementById('explorer-wishlist-info');
+    const btn = document.getElementById('explorer-wishlist-submit-text');
+    if (info) info.textContent = `${releases} release${releases !== 1 ? 's' : ''} · ${tracks} tracks`;
+    if (btn) btn.textContent = releases > 0 ? `Add ${releases} to Wishlist` : 'Select releases';
+    const submitBtn = document.getElementById('explorer-wishlist-submit');
+    if (submitBtn) submitBtn.disabled = releases === 0;
+}
+
+async function _explorerWishlistSubmit(artistSections) {
+    const grid = document.getElementById('explorer-wishlist-grid');
+    const progress = document.getElementById('explorer-wishlist-progress');
+    const filterBar = document.querySelector('#explorer-wishlist-overlay .discog-filter-bar');
+    const submitBtn = document.getElementById('explorer-wishlist-submit');
+
+    // Collect checked albums grouped by artist
+    const byArtist = {};
+    document.querySelectorAll('#explorer-wishlist-overlay .discog-card-cb:checked').forEach(cb => {
+        if (cb.closest('.discog-card').style.display === 'none') return;
+        const card = cb.closest('.discog-card');
+        const artistId = card.dataset.artistId;
+        const albumId = cb.dataset.albumId;
+        const title = card.querySelector('.discog-card-title')?.textContent || '';
+        const img = card.querySelector('.discog-card-art img')?.src || '';
+        if (!byArtist[artistId]) byArtist[artistId] = { albums: [], name: '' };
+        byArtist[artistId].albums.push({ id: albumId, title, img, tracks: parseInt(cb.dataset.tracks) || 0 });
+    });
+
+    // Fill in artist names
+    artistSections.forEach(s => { if (byArtist[s.artistId]) byArtist[s.artistId].name = s.name; });
+
+    // Switch to progress view
+    if (grid) grid.style.display = 'none';
+    if (filterBar) filterBar.style.display = 'none';
+    if (submitBtn) submitBtn.style.display = 'none';
+    if (progress) {
+        progress.style.display = '';
+        progress.innerHTML = '';
+        for (const [artistId, data] of Object.entries(byArtist)) {
+            data.albums.forEach(album => {
+                const item = document.createElement('div');
+                item.className = 'discog-progress-item active';
+                item.id = `explorer-prog-${album.id}`;
+                item.innerHTML = `
+                    <div class="discog-prog-art">${album.img ? `<img src="${album.img}">` : '&#9835;'}</div>
+                    <div class="discog-prog-info">
+                        <div class="discog-prog-title">${_esc(album.title)}</div>
+                        <div class="discog-prog-status">Waiting...</div>
+                    </div>
+                    <div class="discog-prog-icon"><div class="discog-spinner"></div></div>
+                `;
+                progress.appendChild(item);
+            });
+        }
+    }
+
+    const info = document.getElementById('explorer-wishlist-info');
+    if (info) info.textContent = 'Processing...';
+
+    let totalAdded = 0;
+
+    for (const [artistId, data] of Object.entries(byArtist)) {
+        // Sort by track count descending (deluxe editions first) BEFORE extracting IDs
+        data.albums.sort((a, b) => b.tracks - a.tracks);
+        const albumIds = data.albums.map(a => a.id);
+
+        try {
+            const response = await fetch(`/api/artist/${artistId}/download-discography`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ album_ids: albumIds, artist_name: data.name })
+            });
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const result = JSON.parse(line);
+                        if (result.status === 'complete') continue; // Summary line, skip
+                        const item = document.getElementById(`explorer-prog-${result.album_id}`);
+                        if (item) {
+                            const statusEl = item.querySelector('.discog-prog-status');
+                            const iconEl = item.querySelector('.discog-prog-icon');
+                            if (result.status === 'done') {
+                                const added = result.tracks_added || 0;
+                                const skipped = result.tracks_skipped || 0;
+                                totalAdded += added;
+                                if (statusEl) statusEl.textContent = `Added ${added} track${added !== 1 ? 's' : ''}${skipped > 0 ? `, ${skipped} skipped` : ''}`;
+                                if (iconEl) iconEl.innerHTML = '<span style="color:#4CAF50">&#10003;</span>';
+                                item.classList.remove('active');
+                                item.classList.add('done');
+                            } else if (result.status === 'error') {
+                                if (statusEl) statusEl.textContent = result.message || 'Error';
+                                if (iconEl) iconEl.innerHTML = '<span style="color:#ff4757">&#10007;</span>';
+                                item.classList.remove('active');
+                                item.classList.add('error');
+                            }
+                        }
+                    } catch (e) {}
+                }
+            }
+        } catch (e) {
+            console.error(`Explorer wishlist: failed for ${data.name}:`, e);
+        }
+    }
+
+    if (info) info.textContent = `Done — ${totalAdded} tracks added to wishlist`;
+    // Change cancel button label to "Close"
+    const cancelBtn = document.querySelector('#explorer-wishlist-overlay .discog-cancel-btn');
+    if (cancelBtn) cancelBtn.textContent = 'Close';
+    showToast(`Added ${totalAdded} tracks to wishlist`, 'success');
+
+    // Mark albums as added on the tree
+    _explorer.selectedAlbums.forEach(id => {
+        const node = document.querySelector(`.explorer-node-album[data-id="${id}"]`);
+        if (node) { node.classList.add('added'); node.classList.remove('selected'); }
+    });
+    _explorer.selectedAlbums.clear();
+    _explorerUpdateCount();
+    _explorerRefreshArtistIndicators();
+}
+
+function _explorerEnsureDefs() {
+    const svg = document.getElementById('explorer-svg');
+    if (!svg || svg.querySelector('defs')) return;
+    // Read accent color from CSS custom property
+    const accentRgb = getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb').trim() || '100,200,255';
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    defs.innerHTML = `
+        <linearGradient id="explorer-grad-root" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="rgba(${accentRgb}, 0.25)"/>
+            <stop offset="100%" stop-color="rgba(${accentRgb}, 0.06)"/>
+        </linearGradient>
+        <linearGradient id="explorer-grad-album" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="rgba(${accentRgb}, 0.15)"/>
+            <stop offset="100%" stop-color="rgba(${accentRgb}, 0.04)"/>
+        </linearGradient>
+    `;
+    svg.appendChild(defs);
+}
+
+function _explorerDrawConnectionToArtist(artistIndex) {
+    // Incremental: draw ONLY this artist's connection. Don't clear existing.
+    // Flex reflow within the current row may shift siblings, but the visual drift
+    // is minor and gets corrected by the final redraw after streaming completes.
+    const svg = document.getElementById('explorer-svg');
+    const root = document.getElementById('explorer-root');
+    if (!svg || !root) return;
+
+    _explorerEnsureDefs();
+    _explorerSizeSvg();
+
+    const artistNodes = document.querySelectorAll('.explorer-node-artist');
+    const artistNode = artistNodes[artistIndex];
+    if (!artistNode) return;
+
+    const rc = _explorerGetPos(root);
+    const ac = _explorerGetPos(artistNode);
+    _explorerDrawCurve(svg, rc.cx, rc.bottom, ac.cx, ac.top, 'root', true);
+}
+
+function _explorerRedrawAllConnections(animate = false) {
+    const svg = document.getElementById('explorer-svg');
+    const root = document.getElementById('explorer-root');
+    if (!svg || !root) return;
+
+    _explorerEnsureDefs();
+    _explorerSizeSvg();
+
+    // Clear existing lines but keep defs
+    svg.querySelectorAll('path').forEach(p => p.remove());
+
+    const rc = _explorerGetPos(root);
+
+    document.querySelectorAll('.explorer-node-artist').forEach(artistNode => {
+        const ac = _explorerGetPos(artistNode);
+        _explorerDrawCurve(svg, rc.cx, rc.bottom, ac.cx, ac.top, 'root', animate);
+
+        if (artistNode.classList.contains('expanded')) {
+            const branch = artistNode.closest('.explorer-branch');
+            if (!branch) return;
+            branch.querySelectorAll(':scope > .explorer-children > .explorer-branch > .explorer-node-album').forEach(albumNode => {
+                const alc = _explorerGetPos(albumNode);
+                _explorerDrawCurve(svg, ac.cx, ac.bottom, alc.cx, alc.top, 'album', animate);
+
+                const albumBranch = albumNode.closest('.explorer-branch');
+                if (albumBranch) {
+                    albumBranch.querySelectorAll(':scope > .explorer-children > .explorer-branch > .explorer-node-track').forEach(trackNode => {
+                        const tc = _explorerGetPos(trackNode);
+                        _explorerDrawCurve(svg, alc.cx, alc.bottom, tc.cx, tc.top, 'track', animate);
+                    });
+                }
+            });
+        }
+    });
+}
+
+function _explorerSizeSvg() {
+    const svg = document.getElementById('explorer-svg');
+    const tree = document.getElementById('explorer-tree');
+    if (!svg || !tree) return;
+    // SVG is inside the tree. Use scrollWidth/scrollHeight which are unscaled.
+    // Add padding to ensure lines near edges aren't clipped.
+    const w = Math.max(tree.scrollWidth, tree.offsetWidth) + 40;
+    const h = Math.max(tree.scrollHeight, tree.offsetHeight) + 40;
+    svg.setAttribute('width', w);
+    svg.setAttribute('height', h);
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+}
+
+function _explorerGetPos(el) {
+    // SVG is inside the tree — positions are relative to tree, unscaled
+    const tree = document.getElementById('explorer-tree');
+    if (!tree) return { cx: 0, top: 0, bottom: 0 };
+    const tRect = tree.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    const scale = _explorer._zoom || 1;
+    // getBoundingClientRect returns scaled coords; divide by scale to get unscaled tree-space coords
+    return {
+        cx: (r.left + r.width / 2 - tRect.left) / scale,
+        top: (r.top - tRect.top) / scale,
+        bottom: (r.bottom - tRect.top) / scale,
+    };
+}
+
+function _explorerDrawCurve(svg, x1, y1, x2, y2, type, animate) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const midY = y1 + (y2 - y1) * 0.45;
+    path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`);
+
+    if (type === 'root') {
+        path.setAttribute('stroke', 'url(#explorer-grad-root)');
+        path.setAttribute('stroke-width', '1.5');
+    } else if (type === 'album') {
+        path.setAttribute('stroke', 'url(#explorer-grad-album)');
+        path.setAttribute('stroke-width', '1');
+    } else {
+        path.setAttribute('stroke', 'rgba(255,255,255,0.05)');
+        path.setAttribute('stroke-width', '0.8');
+    }
+    path.setAttribute('fill', 'none');
+
+    svg.appendChild(path);
+
+    if (animate) {
+        const len = path.getTotalLength();
+        path.setAttribute('class', 'explorer-line explorer-line-animated');
+        path.style.strokeDasharray = len;
+        path.style.strokeDashoffset = len;
+    } else {
+        path.setAttribute('class', 'explorer-line');
+    }
+}
+
+// ── Zoom & Pan ──
+_explorer._zoom = 1;
+_explorer._panX = 0;
+_explorer._panY = 0;
+_explorer._isPanning = false;
+_explorer._panStartX = 0;
+_explorer._panStartY = 0;
+_explorer._panStartScrollX = 0;
+_explorer._panStartScrollY = 0;
+
+function _explorerApplyTransform() {
+    const tree = document.getElementById('explorer-tree');
+    if (tree) {
+        tree.style.transform = `scale(${_explorer._zoom})`;
+        tree.style.transformOrigin = 'top center';
+    }
+    _explorerSizeSvg();
+    requestAnimationFrame(() => _explorerRedrawAllConnections());
+}
+
+function explorerZoom(delta) {
+    _explorer._zoom = Math.max(0.2, Math.min(3, _explorer._zoom + delta));
+    _explorerApplyTransform();
+}
+
+function explorerFitToView() {
+    const viewport = document.getElementById('explorer-viewport');
+    const tree = document.getElementById('explorer-tree');
+    if (!viewport || !tree) return;
+
+    // Reset zoom to measure natural size
+    _explorer._zoom = 1;
+    tree.style.transform = 'scale(1)';
+
+    requestAnimationFrame(() => {
+        const treeW = tree.scrollWidth;
+        const treeH = tree.scrollHeight;
+        const vpW = viewport.clientWidth - 40;
+        const vpH = viewport.clientHeight - 40;
+
+        if (treeW > 0 && treeH > 0) {
+            _explorer._zoom = Math.min(vpW / treeW, vpH / treeH, 1.5);
+            _explorer._zoom = Math.max(0.2, Math.min(3, _explorer._zoom));
+        }
+
+        _explorerApplyTransform();
+        viewport.scrollTop = 0;
+        viewport.scrollLeft = Math.max(0, (tree.scrollWidth * _explorer._zoom - vpW) / 2);
+    });
+}
+
+// Scroll wheel zoom (no modifier needed inside viewport)
+document.addEventListener('wheel', (e) => {
+    const viewport = document.getElementById('explorer-viewport');
+    if (!viewport || !viewport.contains(e.target)) return;
+    // Check if we're on the explorer page
+    const page = document.getElementById('playlist-explorer-page');
+    if (!page || !page.classList.contains('active')) return;
+
+    e.preventDefault();
+    const step = e.deltaY > 0 ? -0.08 : 0.08;
+    explorerZoom(step);
+}, { passive: false });
+
+// Middle-click / right-click drag to pan
+document.addEventListener('mousedown', (e) => {
+    const viewport = document.getElementById('explorer-viewport');
+    if (!viewport || !viewport.contains(e.target)) return;
+    // Middle click (button 1) or right click (button 2)
+    if (e.button !== 1 && e.button !== 2) return;
+
+    e.preventDefault();
+    _explorer._isPanning = true;
+    _explorer._panStartX = e.clientX;
+    _explorer._panStartY = e.clientY;
+    _explorer._panStartScrollX = viewport.scrollLeft;
+    _explorer._panStartScrollY = viewport.scrollTop;
+    viewport.style.cursor = 'grabbing';
+});
+
+document.addEventListener('mousemove', (e) => {
+    if (!_explorer._isPanning) return;
+    const viewport = document.getElementById('explorer-viewport');
+    if (!viewport) return;
+    const dx = e.clientX - _explorer._panStartX;
+    const dy = e.clientY - _explorer._panStartY;
+    viewport.scrollLeft = _explorer._panStartScrollX - dx;
+    viewport.scrollTop = _explorer._panStartScrollY - dy;
+});
+
+document.addEventListener('mouseup', (e) => {
+    if (!_explorer._isPanning) return;
+    _explorer._isPanning = false;
+    const viewport = document.getElementById('explorer-viewport');
+    if (viewport) viewport.style.cursor = '';
+});
+
+// Suppress context menu on right-click inside viewport (for panning)
+document.addEventListener('contextmenu', (e) => {
+    const viewport = document.getElementById('explorer-viewport');
+    if (viewport && viewport.contains(e.target)) {
+        e.preventDefault();
+    }
+});
+
+// Debounced redraw on resize
+window.addEventListener('resize', () => {
+    if (_explorer.artists.length === 0) return;
+    clearTimeout(_explorer._resizeTimer);
+    _explorer._resizeTimer = setTimeout(() => _explorerRedrawAllConnections(), 150);
+});

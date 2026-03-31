@@ -186,6 +186,10 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="currentColor" opacity="0.2" stroke="currentColor"/></svg></span>
                     <span class="nav-text">Discover</span>
                 </button>
+                <button class="nav-button" data-page="playlist-explorer">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="12" x2="5" y2="18"/><line x1="12" y1="12" x2="19" y2="18"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="12" x2="12" y2="18"/><circle cx="12" cy="19" r="2"/></svg></span>
+                    <span class="nav-text">Explorer</span>
+                </button>
                 <button class="nav-button" data-page="artists">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
                     <span class="nav-text">Artists</span>
@@ -3544,6 +3548,87 @@
 
                         <!-- Genre Tab Contents (will be populated dynamically) -->
                         <div id="genre-tab-contents"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Playlist Explorer Page -->
+            <div class="page" id="playlist-explorer-page">
+                <div class="explorer-container">
+                    <!-- Header (compact) -->
+                    <div class="dashboard-header" style="margin-bottom: 12px;">
+                        <div class="header-text">
+                            <h2 class="header-title"><img src="/static/explorer.png" class="page-header-icon" alt=""><span>Playlist Explorer</span></h2>
+                        </div>
+                    </div>
+                    <!-- Playlist picker + controls inline -->
+                    <div class="explorer-playlist-picker" id="explorer-playlist-picker">
+                        <div class="explorer-picker-top">
+                            <div class="explorer-picker-tabs" id="explorer-picker-tabs"></div>
+                            <div class="explorer-controls">
+                                <div class="explorer-mode-toggle">
+                                    <button class="explorer-mode-btn active" data-mode="albums"
+                                        onclick="explorerSetMode('albums')">Albums</button>
+                                    <button class="explorer-mode-btn" data-mode="discographies"
+                                        onclick="explorerSetMode('discographies')">Discographies</button>
+                                </div>
+                                <button class="explorer-build-btn" id="explorer-build-btn"
+                                    onclick="explorerBuildTree()">Explore</button>
+                            </div>
+                        </div>
+                        <div class="explorer-picker-scroll" id="explorer-picker-scroll">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+
+                    <!-- Action bar (sticky, appears after tree built) -->
+                    <div class="explorer-action-bar" id="explorer-action-bar" style="display: none;">
+                        <span class="explorer-selection-count" id="explorer-selection-count">0 albums selected</span>
+                        <div class="explorer-action-buttons">
+                            <button class="explorer-action-btn" onclick="explorerSelectAll()">Select All</button>
+                            <button class="explorer-action-btn" onclick="explorerDeselectAll()">Deselect</button>
+                            <button class="explorer-action-btn primary" onclick="explorerAddToWishlist()">
+                                Add to Wishlist</button>
+                        </div>
+                        <span class="explorer-nav-hint">Scroll to zoom &middot; Right-drag to pan &middot; Double-click album for tracks</span>
+                    </div>
+
+                    <!-- Tree viewport -->
+                    <div class="explorer-viewport" id="explorer-viewport">
+                        <div class="explorer-zoom-controls">
+                            <button class="explorer-zoom-btn" onclick="explorerZoom(0.15)" title="Zoom in">+</button>
+                            <button class="explorer-zoom-btn" onclick="explorerZoom(-0.15)" title="Zoom out">&minus;</button>
+                            <button class="explorer-zoom-btn" onclick="explorerFitToView()" title="Fit to view">&#11036;</button>
+                            <button class="explorer-zoom-btn" onclick="_explorer._zoom=1; explorerZoom(0)" title="Reset zoom">1:1</button>
+                        </div>
+                        <div class="explorer-tree" id="explorer-tree">
+                            <svg class="explorer-svg" id="explorer-svg"></svg>
+                            <!-- Empty state -->
+                            <div class="explorer-empty" id="explorer-empty">
+                                <div class="explorer-empty-icon">
+                                    <svg viewBox="0 0 80 80" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <circle cx="40" cy="12" r="8"/>
+                                        <line x1="40" y1="20" x2="40" y2="35"/>
+                                        <line x1="40" y1="35" x2="18" y2="55"/>
+                                        <line x1="40" y1="35" x2="62" y2="55"/>
+                                        <circle cx="18" cy="60" r="6"/>
+                                        <circle cx="40" cy="60" r="6"/>
+                                        <circle cx="62" cy="60" r="6"/>
+                                        <line x1="40" y1="35" x2="40" y2="54"/>
+                                    </svg>
+                                </div>
+                                <p class="explorer-empty-title">Select a playlist to explore</p>
+                                <p class="explorer-empty-desc">Choose a mirrored playlist and mode above, then click Explore to build the discovery tree</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Building progress -->
+                    <div class="explorer-progress" id="explorer-progress" style="display: none;">
+                        <div class="explorer-progress-bar">
+                            <div class="explorer-progress-fill" id="explorer-progress-fill"></div>
+                        </div>
+                        <span class="explorer-progress-text" id="explorer-progress-text">Building tree...</span>
                     </div>
                 </div>
             </div>
