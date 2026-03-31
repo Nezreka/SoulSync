@@ -647,7 +647,14 @@ class TidalClient:
                     tracks=[],  # Empty — fetched on-demand via get_playlist()
                 )
                 # Store track count from metadata (no API call needed)
-                new_playlist.track_count = attributes.get('numberOfTracks', 0)
+                # V2 API may use different field names depending on version
+                new_playlist.track_count = (
+                    attributes.get('numberOfTracks') or
+                    attributes.get('numberOfItems') or
+                    attributes.get('totalNumberOfItems') or
+                    attributes.get('nrOfTracks') or
+                    0
+                )
                 if image_url:
                     new_playlist.image_url = image_url
 
