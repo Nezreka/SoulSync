@@ -12782,7 +12782,7 @@ def library_delete_track(track_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/library/artist/<int:artist_id>/sync', methods=['POST'])
+@app.route('/api/library/artist/<artist_id>/sync', methods=['POST'])
 def sync_artist_library(artist_id):
     """Validate an artist's library entries — remove stale tracks/albums, recount."""
     try:
@@ -12790,17 +12790,39 @@ def sync_artist_library(artist_id):
         with database._get_connection() as conn:
             cursor = conn.cursor()
 
+            # Resolve artist_id: could be a DB integer ID or a source artist ID (Spotify/iTunes/Deezer)
+            db_artist_id = None
+            try:
+                candidate = int(artist_id)
+                # Verify this DB ID actually exists
+                cursor.execute("SELECT id FROM artists WHERE id = ?", (candidate,))
+                if cursor.fetchone():
+                    db_artist_id = candidate
+            except (ValueError, TypeError):
+                pass
+            # If not found as DB ID, look up by source artist ID
+            if not db_artist_id:
+                for col in ('spotify_artist_id', 'itunes_artist_id', 'deezer_artist_id'):
+                    cursor.execute(f"SELECT id FROM artists WHERE {col} = ?", (artist_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        db_artist_id = row['id']
+                        break
+
+            if not db_artist_id:
+                return jsonify({"success": False, "error": "Artist not found"}), 404
+
             # Get all tracks for this artist
             cursor.execute("""
                 SELECT t.id, t.file_path, t.title, t.album_id
                 FROM tracks t WHERE t.artist_id = ?
-            """, (artist_id,))
+            """, (db_artist_id,))
             tracks = cursor.fetchall()
 
             # Get artist name for logging
-            cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,))
+            cursor.execute("SELECT name FROM artists WHERE id = ?", (db_artist_id,))
             artist_row = cursor.fetchone()
-            artist_name = artist_row['name'] if artist_row else f'ID {artist_id}'
+            artist_name = artist_row['name'] if artist_row else f'ID {db_artist_id}'
 
             stale_tracks = []
             valid_tracks = 0
@@ -12827,7 +12849,7 @@ def sync_artist_library(artist_id):
             cursor.execute("""
                 DELETE FROM albums WHERE artist_id = ?
                 AND id NOT IN (SELECT DISTINCT album_id FROM tracks)
-            """, (artist_id,))
+            """, (db_artist_id,))
             empty_albums_removed = cursor.rowcount
 
             # Update track_count on remaining albums
@@ -12835,7 +12857,7 @@ def sync_artist_library(artist_id):
                 UPDATE albums SET track_count = (
                     SELECT COUNT(*) FROM tracks WHERE tracks.album_id = albums.id
                 ) WHERE artist_id = ?
-            """, (artist_id,))
+            """, (db_artist_id,))
 
             conn.commit()
 
