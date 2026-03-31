@@ -619,33 +619,41 @@ class TidalClient:
             playlists = []
 
             # Step 3: Process the playlists from the main 'data' array.
+            # Only extract metadata — tracks are fetched on-demand when the user
+            # selects a playlist to sync/mirror, not during the listing step.
             for playlist_data in data.get('data', []):
                 attributes = playlist_data.get('attributes', {})
                 playlist_id = playlist_data.get('id')
 
-                # Create playlist with basic metadata first
+                # Extract image URL from relationships if available
+                image_url = None
+                try:
+                    relationships = playlist_data.get('relationships', {})
+                    image_rel = relationships.get('image', {}).get('data', {})
+                    if image_rel:
+                        # Image URL may be in included resources or constructed from ID
+                        image_id = image_rel.get('id', '')
+                        if image_id:
+                            image_url = f"https://resources.tidal.com/images/{image_id.replace('-', '/')}/640x640.jpg"
+                except Exception:
+                    pass
+
                 new_playlist = Playlist(
                     id=str(playlist_id),
                     name=attributes.get('name', 'Unknown Playlist'),
                     description=attributes.get('description', ''),
                     external_urls={'tidal': f"https://listen.tidal.com/playlist/{playlist_id}"},
-                    public=attributes.get('accessType') == 'PUBLIC'
+                    public=attributes.get('accessType') == 'PUBLIC',
+                    tracks=[],  # Empty — fetched on-demand via get_playlist()
                 )
-
-                # Step 4: Fetch ALL tracks for this playlist using the paginated get_playlist() method
-                # This ensures we get all tracks, not just the first ~20
-                logger.info(f"Fetching full track list for playlist: {new_playlist.name} ({playlist_id})")
-                full_playlist = self.get_playlist(playlist_id)
-
-                if full_playlist and full_playlist.tracks:
-                    new_playlist.tracks = full_playlist.tracks
-                    logger.info(f"Added {len(full_playlist.tracks)} tracks to playlist {new_playlist.name}")
-                else:
-                    logger.warning(f"Could not fetch tracks for playlist {playlist_id}, it will have 0 tracks")
+                # Store track count from metadata (no API call needed)
+                new_playlist.track_count = attributes.get('numberOfTracks', 0)
+                if image_url:
+                    new_playlist.image_url = image_url
 
                 playlists.append(new_playlist)
-            
-            logger.info(f"Successfully retrieved {len(playlists)} playlists with the V2 filter method.")
+
+            logger.info(f"Successfully retrieved {len(playlists)} playlists (metadata only) with the V2 filter method.")
             return playlists
 
         except Exception as e:
