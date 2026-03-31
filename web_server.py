@@ -19247,6 +19247,15 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔧 Fix Japanese Song Searches Producing Gibberish",
+                "description": "CJK text no longer mangled by unidecode in Soulseek search queries",
+                "features": [
+                    "• Japanese kanji, hiragana, katakana, and Korean hangul preserved in search queries",
+                    "• unidecode was converting Japanese to Chinese pinyin (e.g. 命の灯火 → 'tvanimedei')",
+                    "• Soulseek users typically share files with original CJK characters in filenames"
+                ]
+            },
+            {
                 "title": "🔧 Fix Partial Name Matching False Positives (#225)",
                 "description": "Track ownership check no longer falsely matches prefix/suffix variations",
                 "features": [
