@@ -19838,12 +19838,15 @@ async function loadSyncHistory() {
             tabsContainer.innerHTML = tabsHtml;
         }
 
-        if (!data.entries || data.entries.length === 0) {
+        // Filter to only show playlist syncs — not album downloads, wishlist, or redownloads
+        const syncEntries = (data.entries || []).filter(e => e.sync_type === 'playlist' || !e.sync_type);
+
+        if (syncEntries.length === 0) {
             list.innerHTML = '<div class="sync-history-empty">No sync history yet. Completed syncs will appear here.</div>';
             return;
         }
 
-        list.innerHTML = data.entries.map(renderSyncHistoryEntry).join('');
+        list.innerHTML = syncEntries.map(renderSyncHistoryEntry).join('');
         renderSyncHistoryPagination(data.total, page, limit);
     } catch (err) {
         console.error('Error loading sync history:', err);
@@ -66142,7 +66145,8 @@ async function loadDashboardSyncHistory() {
         if (!response.ok) return;
 
         const data = await response.json();
-        const entries = data.entries || [];
+        // Filter to only show playlist syncs — not album downloads or wishlist processing
+        const entries = (data.entries || []).filter(e => e.sync_type === 'playlist' || !e.sync_type);
 
         if (entries.length === 0) {
             container.innerHTML = '<div class="sync-history-empty">No syncs yet</div>';
