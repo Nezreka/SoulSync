@@ -42191,6 +42191,16 @@ function _buildTrackRow(track, album, admin) {
         }
         tr.appendChild(tagTd);
 
+        // Source info button (admin only)
+        const srcTd = document.createElement('td');
+        srcTd.className = 'col-source-info';
+        const srcBtn = document.createElement('button');
+        srcBtn.className = 'enhanced-source-info-btn';
+        srcBtn.innerHTML = 'ℹ';
+        srcBtn.title = 'View download source info';
+        srcTd.appendChild(srcBtn);
+        tr.appendChild(srcTd);
+
         // Redownload button (admin only)
         const rdTd = document.createElement('td');
         rdTd.className = 'col-redownload';
@@ -42360,6 +42370,13 @@ function _attachTableDelegation(table, album) {
             return;
         }
 
+        // Source info button (admin)
+        if (target.closest('.enhanced-source-info-btn')) {
+            e.stopPropagation();
+            showTrackSourceInfo(track, target.closest('.enhanced-source-info-btn'));
+            return;
+        }
+
         // Redownload button (admin)
         if (target.closest('.enhanced-redownload-btn')) {
             e.stopPropagation();
@@ -42423,6 +42440,7 @@ function _showMobileTrackActions(track, album) {
         actions.push({ icon: '✎', label: 'Write Tags', action: () => showTagPreview(track.id) });
     }
     if (admin) {
+        actions.push({ icon: 'ℹ', label: 'Source Info', action: () => showTrackSourceInfo(track, null) });
         actions.push({ icon: '↻', label: 'Redownload Track', action: () => showTrackRedownloadModal(track, album) });
         actions.push({ icon: '✕', label: 'Delete Track', cls: 'popover-delete', action: () => deleteLibraryTrack(track.id, album.id) });
     }
@@ -42585,8 +42603,7 @@ async function deleteLibraryTrack(trackId, albumId) {
     if (!choice) return;
 
     const params = new URLSearchParams();
-    if (choice === 'delete_file' || choice === 'delete_and_blacklist') params.set('delete_file', 'true');
-    if (choice === 'delete_and_blacklist') params.set('blacklist', 'true');
+    if (choice === 'delete_file') params.set('delete_file', 'true');
 
     try {
         const response = await fetch(`/api/library/track/${trackId}?${params}`, { method: 'DELETE' });
@@ -42643,13 +42660,7 @@ function _showSmartDeleteDialog() {
                             <div class="smart-delete-option-desc">Remove from library and delete the audio file from disk.</div>
                         </div>
                     </button>
-                    <button class="smart-delete-option destructive" data-choice="delete_and_blacklist">
-                        <div class="smart-delete-option-icon">⛔</div>
-                        <div class="smart-delete-option-info">
-                            <div class="smart-delete-option-title">Delete & Blacklist</div>
-                            <div class="smart-delete-option-desc">Delete file and blacklist the source so it won't be downloaded again.</div>
-                        </div>
-                    </button>
+                    <!-- Blacklisting is done from Source Info (ℹ) where real download source data is available -->
                 </div>
             </div>
         `;
@@ -42666,6 +42677,158 @@ function _showSmartDeleteDialog() {
         document.body.appendChild(overlay);
     });
 }
+
+// ==================================================================================
+// TRACK SOURCE INFO — View download provenance and blacklist sources
+// ==================================================================================
+
+async function showTrackSourceInfo(track, anchorEl) {
+    // Remove existing popover
+    const existing = document.getElementById('source-info-popover');
+    if (existing) existing.remove();
+
+    const popover = document.createElement('div');
+    popover.id = 'source-info-popover';
+    popover.className = 'source-info-popover';
+    popover.innerHTML = '<div class="source-info-loading"><div class="server-search-spinner"></div>Loading source info...</div>';
+
+    document.body.appendChild(popover);
+
+    // Position near the button or center on mobile
+    if (anchorEl) {
+        const rect = anchorEl.getBoundingClientRect();
+        const popW = 360;
+        let left = rect.left - popW - 8;
+        if (left < 10) left = rect.right + 8;
+        let top = rect.top - 20;
+        if (top + 300 > window.innerHeight) top = window.innerHeight - 310;
+        popover.style.left = `${left}px`;
+        popover.style.top = `${Math.max(10, top)}px`;
+    } else {
+        popover.style.left = '50%';
+        popover.style.top = '50%';
+        popover.style.transform = 'translate(-50%, -50%)';
+    }
+
+    requestAnimationFrame(() => popover.classList.add('visible'));
+
+    // Close on outside click
+    const closeHandler = e => {
+        if (!popover.contains(e.target) && e.target !== anchorEl) {
+            popover.remove();
+            document.removeEventListener('click', closeHandler);
+        }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 100);
+
+    // Escape to close
+    const escH = e => { if (e.key === 'Escape') { popover.remove(); document.removeEventListener('keydown', escH); document.removeEventListener('click', closeHandler); } };
+    document.addEventListener('keydown', escH);
+
+    try {
+        const res = await fetch(`/api/library/track/${track.id}/source-info`);
+        const data = await res.json();
+
+        if (!data.success || !data.downloads || data.downloads.length === 0) {
+            popover.innerHTML = `
+                <div class="source-info-header">
+                    <span class="source-info-title">Source Info</span>
+                    <button class="source-info-close" onclick="document.getElementById('source-info-popover')?.remove()">&times;</button>
+                </div>
+                <div class="source-info-empty">No download source data available for this track. Source tracking starts with new downloads.</div>
+            `;
+            return;
+        }
+
+        const serviceIcons = { soulseek: '🔍', youtube: '▶️', tidal: '🌊', qobuz: '🎵', hifi: '🎧', deezer: '💜' };
+        const serviceLabels = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer: 'Deezer' };
+
+        const dl = data.downloads[0]; // Most recent download
+        const icon = serviceIcons[dl.source_service] || '📦';
+        const label = serviceLabels[dl.source_service] || dl.source_service;
+        const displayFile = dl.source_filename ? dl.source_filename.replace(/\\/g, '/').split('/').pop() : 'Unknown';
+        const sizeStr = dl.source_size ? `${(dl.source_size / 1048576).toFixed(1)} MB` : '';
+        const dateStr = dl.created_at ? timeAgo(dl.created_at) : '';
+
+        popover.innerHTML = `
+            <div class="source-info-header">
+                <span class="source-info-title">Source Info</span>
+                <button class="source-info-close" onclick="document.getElementById('source-info-popover')?.remove()">&times;</button>
+            </div>
+            <div class="source-info-body">
+                <div class="source-info-row">
+                    <span class="source-info-label">Service</span>
+                    <span class="source-info-value">${icon} ${label}</span>
+                </div>
+                ${dl.source_service === 'soulseek' && dl.source_username ? `<div class="source-info-row">
+                    <span class="source-info-label">User</span>
+                    <span class="source-info-value source-info-mono">${_esc(dl.source_username)}</span>
+                </div>` : ''}
+                <div class="source-info-row">
+                    <span class="source-info-label">Original File</span>
+                    <span class="source-info-value source-info-mono source-info-ellipsis" title="${_esc(dl.source_filename || '')}">${_esc(displayFile)}</span>
+                </div>
+                ${sizeStr ? `<div class="source-info-row">
+                    <span class="source-info-label">Size</span>
+                    <span class="source-info-value">${sizeStr}</span>
+                </div>` : ''}
+                ${dl.audio_quality ? `<div class="source-info-row">
+                    <span class="source-info-label">Quality</span>
+                    <span class="source-info-value">${_esc(dl.audio_quality)}</span>
+                </div>` : ''}
+                ${dateStr ? `<div class="source-info-row">
+                    <span class="source-info-label">Downloaded</span>
+                    <span class="source-info-value">${dateStr}</span>
+                </div>` : ''}
+                ${dl.status !== 'completed' ? `<div class="source-info-row">
+                    <span class="source-info-label">Status</span>
+                    <span class="source-info-value" style="color:#ef5350">${dl.status}</span>
+                </div>` : ''}
+            </div>
+            ${dl.source_username && dl.source_filename ? `
+            <div class="source-info-actions">
+                <button class="source-info-blacklist-btn" id="source-info-blacklist-btn">⛔ Blacklist This Source</button>
+            </div>` : ''}
+            ${data.downloads.length > 1 ? `<div class="source-info-history">${data.downloads.length} download records for this track</div>` : ''}
+        `;
+
+        // Blacklist button handler
+        const blBtn = document.getElementById('source-info-blacklist-btn');
+        if (blBtn) {
+            blBtn.addEventListener('click', async () => {
+                if (!await showConfirmDialog({ title: 'Blacklist Source', message: `Blacklist "${displayFile}" from ${dl.source_service === 'soulseek' ? dl.source_username : label}? This source will be skipped in future downloads.`, confirmText: 'Blacklist', destructive: true })) return;
+
+                try {
+                    const db_res = await fetch('/api/library/blacklist', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            track_title: dl.track_title || track.title,
+                            track_artist: dl.track_artist || '',
+                            blocked_filename: dl.source_filename,
+                            blocked_username: dl.source_username,
+                            reason: 'user_rejected'
+                        })
+                    });
+                    const result = await db_res.json();
+                    if (result.success) {
+                        showToast('Source blacklisted', 'success');
+                        blBtn.disabled = true;
+                        blBtn.textContent = '⛔ Blacklisted';
+                    } else {
+                        showToast(result.error || 'Failed to blacklist', 'error');
+                    }
+                } catch (e) {
+                    showToast('Error: ' + e.message, 'error');
+                }
+            });
+        }
+
+    } catch (e) {
+        popover.innerHTML = `<div class="source-info-empty">Error loading source info: ${_esc(e.message)}</div>`;
+    }
+}
+
 
 // ==================================================================================
 // TRACK REDOWNLOAD MODAL — Multi-step: metadata selection → source selection → download

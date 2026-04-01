@@ -1134,6 +1134,28 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_blacklist_user_file ON download_blacklist (blocked_username, blocked_filename)")
 
+            # Track download provenance — where each library track came from
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS track_downloads (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    track_id TEXT,
+                    file_path TEXT,
+                    source_service TEXT NOT NULL,
+                    source_username TEXT,
+                    source_filename TEXT,
+                    source_size INTEGER,
+                    audio_quality TEXT,
+                    track_title TEXT,
+                    track_artist TEXT,
+                    track_album TEXT,
+                    status TEXT DEFAULT 'completed',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_track_id ON track_downloads (track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_file_path ON track_downloads (file_path)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_source ON track_downloads (source_username, source_filename)")
+
             logger.info("Discovery tables created successfully")
 
         except Exception as e:
@@ -8507,6 +8529,69 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error removing from blacklist: {e}")
             return False
+
+    # ==================== Track Download Provenance Methods ====================
+
+    def record_track_download(self, file_path: str, source_service: str, source_username: str,
+                               source_filename: str, source_size: int = 0, audio_quality: str = '',
+                               track_title: str = '', track_artist: str = '', track_album: str = '',
+                               status: str = 'completed', track_id: str = None) -> Optional[int]:
+        """Record a download with full source provenance. Returns the record ID."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Try to link to existing library track by file path if track_id not given
+            if not track_id and file_path:
+                cursor.execute("SELECT id FROM tracks WHERE file_path = ? LIMIT 1", (file_path,))
+                row = cursor.fetchone()
+                if row:
+                    track_id = str(row[0])
+
+            cursor.execute("""
+                INSERT INTO track_downloads
+                (track_id, file_path, source_service, source_username, source_filename,
+                 source_size, audio_quality, track_title, track_artist, track_album, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (track_id, file_path, source_service, source_username, source_filename,
+                  source_size, audio_quality, track_title, track_artist, track_album, status))
+            conn.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error recording track download: {e}")
+            return None
+
+    def get_track_downloads(self, track_id: str) -> list:
+        """Get all download records for a library track."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM track_downloads
+                WHERE track_id = ?
+                ORDER BY created_at DESC
+            """, (str(track_id),))
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting track downloads: {e}")
+            return []
+
+    def get_download_by_file_path(self, file_path: str) -> Optional[dict]:
+        """Find the most recent download record for a file path."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM track_downloads
+                WHERE file_path = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (file_path,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting download by file path: {e}")
+            return None
 
     # ==================== Discovery Pool Methods ====================
 
