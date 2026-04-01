@@ -52223,35 +52223,108 @@ tr.tag-diff-same {
 .redownload-result-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
 .redownload-result-dur { font-size: 10px; color: rgba(255,255,255,0.2); flex-shrink: 0; min-width: 30px; text-align: right; }
 
-/* Step 2 — Download candidates */
-.redownload-candidates-wrap { max-height: 450px; overflow-y: auto; }
-.redownload-candidates-wrap::-webkit-scrollbar { width: 4px; }
-.redownload-candidates-wrap::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
-
-.redownload-candidate {
-    display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 12px;
-    cursor: pointer; transition: all 0.15s; margin-bottom: 3px; border: 1px solid transparent;
+/* Step 2 — Download source columns */
+.rdl-src-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 12px;
 }
-.redownload-candidate:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.06); }
-.redownload-candidate:has(input:checked) { background: rgba(var(--accent-rgb), 0.06); border-color: rgba(var(--accent-rgb), 0.15); }
-.redownload-candidate input[type="radio"] { accent-color: var(--accent); flex-shrink: 0; width: 16px; height: 16px; }
-.redownload-candidate.blacklisted { opacity: 0.35; cursor: not-allowed; }
 
-.redownload-candidate-info { flex: 1; min-width: 0; }
-.redownload-candidate-name { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.redownload-candidate-meta { font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 2px; }
+.rdl-src-col {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
 
-.redownload-candidate-details { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-.redownload-fmt { font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; background: rgba(var(--accent-rgb),0.12); color: var(--accent); }
-.redownload-bitrate { font-size: 9px; color: rgba(255,255,255,0.25); }
-.redownload-size { font-size: 9px; color: rgba(255,255,255,0.2); }
+.rdl-src-col-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.6);
+}
+.rdl-src-col-icon { font-size: 16px; }
+.rdl-src-col-label { flex: 1; }
+.rdl-src-col-count {
+    font-size: 10px; padding: 2px 8px; border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.35);
+}
 
-.redownload-candidate-conf { font-size: 10px; font-weight: 700; flex-shrink: 0; padding: 2px 6px; border-radius: 4px; }
-.redownload-candidate-conf.high { background: rgba(76,175,80,0.12); color: #4caf50; }
-.redownload-candidate-conf.medium { background: rgba(255,183,77,0.12); color: #ffb74d; }
-.redownload-candidate-conf.low { background: rgba(239,83,80,0.12); color: #ef5350; }
+.rdl-src-col-body {
+    max-height: 400px; overflow-y: auto; padding: 6px;
+}
+.rdl-src-col-body::-webkit-scrollbar { width: 3px; }
+.rdl-src-col-body::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 2px; }
 
-.redownload-blacklisted { font-size: 9px; color: #ef5350; font-weight: 600; flex-shrink: 0; }
+/* Individual result item */
+.rdl-src-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 12px; border-radius: 12px; cursor: pointer;
+    transition: all 0.15s; margin-bottom: 4px;
+    border: 1px solid transparent;
+}
+.rdl-src-item:hover { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.06); }
+.rdl-src-item:has(input:checked) { background: rgba(var(--accent-rgb), 0.06); border-color: rgba(var(--accent-rgb), 0.15); }
+.rdl-src-item.recommended { border-color: rgba(var(--accent-rgb), 0.1); }
+.rdl-src-item.blacklisted { opacity: 0.3; cursor: not-allowed; }
+
+.rdl-src-item input[type="radio"] { accent-color: var(--accent); flex-shrink: 0; width: 16px; height: 16px; margin-top: 4px; }
+.rdl-src-radio-placeholder { width: 16px; height: 16px; flex-shrink: 0; }
+
+.rdl-src-item-body { flex: 1; min-width: 0; }
+
+.rdl-src-item-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.rdl-src-item-name {
+    font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.9);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;
+}
+.rdl-src-recommended {
+    font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 2px 6px; border-radius: 4px;
+    background: rgba(var(--accent-rgb), 0.15); color: var(--accent);
+    white-space: nowrap; flex-shrink: 0;
+}
+
+.rdl-src-item-details {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px;
+}
+.rdl-src-fmt {
+    font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px;
+    background: rgba(var(--accent-rgb), 0.12); color: var(--accent); letter-spacing: 0.02em;
+}
+.rdl-src-detail {
+    font-size: 10px; color: rgba(255, 255, 255, 0.3);
+}
+.rdl-src-user {
+    color: rgba(255, 255, 255, 0.45); font-weight: 600;
+}
+
+/* Confidence bar */
+.rdl-src-conf-bar {
+    height: 3px; background: rgba(255, 255, 255, 0.06); border-radius: 2px; overflow: hidden;
+}
+.rdl-src-conf-fill {
+    height: 100%; border-radius: 2px; transition: width 0.3s ease;
+}
+.rdl-src-conf-fill.high { background: #4caf50; }
+.rdl-src-conf-fill.medium { background: #ffb74d; }
+.rdl-src-conf-fill.low { background: #ef5350; }
+
+.rdl-src-conf-pct {
+    font-size: 11px; font-weight: 700; flex-shrink: 0; min-width: 34px; text-align: right; margin-top: 2px;
+}
+.rdl-src-conf-pct.high { color: #4caf50; }
+.rdl-src-conf-pct.medium { color: #ffb74d; }
+.rdl-src-conf-pct.low { color: #ef5350; }
+
+.rdl-src-bl { font-size: 9px; color: #ef5350; font-weight: 600; margin-top: 2px; }
+
+.rdl-src-col-empty {
+    padding: 24px 16px; text-align: center;
+    font-size: 12px; color: rgba(255, 255, 255, 0.2);
+}
 
 .redownload-delete-old {
     display: flex; align-items: center; gap: 8px; padding: 12px 0 4px;
