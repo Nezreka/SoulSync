@@ -52326,9 +52326,19 @@ tr.tag-diff-same {
     font-size: 12px; color: rgba(255, 255, 255, 0.2);
 }
 
+/* Sticky footer — always visible at bottom of modal */
+.redownload-sticky-footer {
+    padding: 16px 32px 24px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(16, 16, 24, 0.95);
+    backdrop-filter: blur(20px);
+    flex-shrink: 0;
+    border-radius: 0 0 24px 24px;
+}
+
 .redownload-delete-old {
-    display: flex; align-items: center; gap: 8px; padding: 12px 0 4px;
-    font-size: 11px; color: rgba(255,255,255,0.4); cursor: pointer;
+    display: flex; align-items: center; gap: 8px; padding: 0 0 12px;
+    font-size: 12px; color: rgba(255,255,255,0.4); cursor: pointer;
 }
 .redownload-delete-old input { accent-color: var(--accent); }
 
@@ -52341,7 +52351,7 @@ tr.tag-diff-same {
 .redownload-progress-status { font-size: 11px; color: rgba(255,255,255,0.3); margin-top: 12px; }
 
 /* Action buttons */
-.redownload-actions { display: flex; justify-content: flex-end; gap: 12px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.05); margin-top: 12px; }
+.redownload-actions { display: flex; justify-content: flex-end; gap: 12px; }
 .redownload-btn {
     padding: 12px 28px; border-radius: 12px; font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s; border: none;
 }
