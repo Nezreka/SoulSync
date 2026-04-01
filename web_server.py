@@ -14706,16 +14706,21 @@ def _clean_track_title(track_title: str, artist_name: str) -> str:
 
 def _extract_track_number_from_filename(filename: str, title: str = None) -> int:
     """Extract track number from filename, returns 1 if not found.
-    Only matches numbers followed by a separator (dash, dot, space-dash) to avoid
-    picking up numbers that are part of artist/track names (e.g. '50 Cent')."""
+    Requires a separator after digits to avoid matching artist names like '50 Cent'."""
     import re
     import os
-    basename = os.path.splitext(os.path.basename(filename))[0]
-    # Match patterns like: "01 - Song", "01. Song", "01-Song", "1 Song"
-    match = re.match(r'^(\d{1,3})\s*[\-\.)\]]\s*', basename.strip())
+    basename = os.path.splitext(os.path.basename(filename))[0].strip()
+    # Match: "01 - Song", "01. Song", "01-Song", "1.Song", "(01) Song", "[01] Song"
+    match = re.match(r'^\(?(\d{1,3})\)?\s*[\-\.)\]]\s*', basename)
     if match:
         num = int(match.group(1))
         if 1 <= num <= 999:
+            return num
+    # Match: "1-03 Song" (disc-track format)
+    match = re.match(r'^\d[\-\.](\d{1,2})\s*[\-\.]\s*', basename)
+    if match:
+        num = int(match.group(1))
+        if 1 <= num <= 99:
             return num
     return 1
 
