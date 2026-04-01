@@ -40955,34 +40955,56 @@ async function openDiscographyModal() {
     let discography = artistsPageState.artistDiscography;
     let completionCache = artistsPageState.cache.completionData;
 
-    // Fallback to Library page state if Artists page has no data
-    if (!artist || !discography) {
-        const libId = artistDetailPageState.currentArtistId;
-        const libName = artistDetailPageState.currentArtistName;
-        if (libId && libName) {
-            artist = { id: libId, name: libName, image_url: document.getElementById('artist-detail-image')?.src || '' };
-            discography = artistsPageState.artistDiscography;
+    // Fallback to Library page state if Artists page has no data for THIS artist
+    const libId = artistDetailPageState.currentArtistId;
+    const libName = artistDetailPageState.currentArtistName;
+    const isLibraryPage = libId && libName;
+    const artistsPageMatchesLibrary = artist && isLibraryPage && artist.name?.toLowerCase() === libName?.toLowerCase();
 
-            // If discography not loaded, fetch it on-demand
-            if (!discography) {
-                try {
-                    showToast('Loading discography...', 'info');
-                    const res = await fetch(`/api/artist/${libId}/discography?artist_name=${encodeURIComponent(libName)}`);
-                    const data = await res.json();
-                    if (data && (data.albums || data.eps || data.singles)) {
-                        discography = data;
-                        artistsPageState.artistDiscography = data;
-                        artistsPageState.selectedArtist = artist;
-                    }
-                } catch (e) {
-                    console.error('Failed to load discography:', e);
+    if (isLibraryPage && (!artist || !discography || !artistsPageMatchesLibrary)) {
+        // On library page — don't trust stale artistsPageState from a previous Artists page search
+        artist = { id: libId, name: libName, image_url: document.getElementById('artist-detail-image')?.src || '' };
+        discography = null;
+
+        let metadataArtistId = null;
+        try {
+            showToast('Loading discography...', 'info');
+
+            // Fetch the artist's metadata IDs from the DB (enhanced view may not be loaded)
+            let lookupId = libId;
+            try {
+                const idRes = await fetch(`/api/library/artist/${libId}/enhanced`);
+                const idData = await idRes.json();
+                if (idData.success && idData.artist) {
+                    const a = idData.artist;
+                    metadataArtistId = a.spotify_artist_id || a.itunes_artist_id || a.deezer_id || null;
+                    lookupId = metadataArtistId || libId;
+                }
+            } catch (e) {
+                console.debug('[Discography] Could not fetch artist IDs, using DB id');
+            }
+
+            const res = await fetch(`/api/artist/${encodeURIComponent(lookupId)}/discography?artist_name=${encodeURIComponent(libName)}`);
+            const data = await res.json();
+
+            if (!data.error) {
+                discography = { albums: data.albums || [], singles: data.singles || [] };
+                if (discography.albums.length > 0 || discography.singles.length > 0) {
+                    artistsPageState.artistDiscography = discography;
+                    // Use metadata source ID for the modal (needed for download API calls)
+                    if (metadataArtistId) artist.id = metadataArtistId;
+                    artistsPageState.selectedArtist = artist;
+                } else {
+                    discography = null;
                 }
             }
+        } catch (e) {
+            console.error('Failed to load discography:', e);
         }
     }
 
     if (!artist || !discography) {
-        showToast('No discography data available. Artist may not be on Spotify/iTunes.', 'error');
+        showToast('No discography found. Try searching this artist on the Artists page instead.', 'error');
         return;
     }
 
