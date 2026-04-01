@@ -1119,6 +1119,21 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_cache_lookup ON sync_match_cache (spotify_track_id, server_source)")
 
+            # Download blacklist — tracks users have rejected as wrong matches
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS download_blacklist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    track_title TEXT,
+                    track_artist TEXT,
+                    blocked_filename TEXT,
+                    blocked_username TEXT,
+                    reason TEXT DEFAULT 'user_rejected',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(blocked_username, blocked_filename)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_blacklist_user_file ON download_blacklist (blocked_username, blocked_filename)")
+
             logger.info("Discovery tables created successfully")
 
         except Exception as e:
@@ -8432,6 +8447,66 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error invalidating sync match cache: {e}")
             return 0
+
+    # ==================== Download Blacklist Methods ====================
+
+    def add_to_blacklist(self, track_title: str, track_artist: str, blocked_filename: str, blocked_username: str, reason: str = 'user_rejected') -> bool:
+        """Add a download source to the blacklist so it won't be used again."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR IGNORE INTO download_blacklist
+                (track_title, track_artist, blocked_filename, blocked_username, reason)
+                VALUES (?, ?, ?, ?, ?)
+            """, (track_title, track_artist, blocked_filename, blocked_username, reason))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error adding to blacklist: {e}")
+            return False
+
+    def is_blacklisted(self, username: str, filename: str) -> bool:
+        """Check if a download source is blacklisted."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 1 FROM download_blacklist
+                WHERE blocked_username = ? AND blocked_filename = ?
+                LIMIT 1
+            """, (username, filename))
+            return cursor.fetchone() is not None
+        except Exception:
+            return False
+
+    def get_blacklist(self, limit: int = 100, offset: int = 0) -> list:
+        """Get blacklist entries."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, track_title, track_artist, blocked_filename, blocked_username, reason, created_at
+                FROM download_blacklist
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            """, (limit, offset))
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting blacklist: {e}")
+            return []
+
+    def remove_from_blacklist(self, blacklist_id: int) -> bool:
+        """Remove an entry from the blacklist."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM download_blacklist WHERE id = ?", (blacklist_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing from blacklist: {e}")
+            return False
 
     # ==================== Discovery Pool Methods ====================
 
