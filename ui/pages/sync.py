@@ -289,6 +289,7 @@ def clean_youtube_artist(artist_string):
     
     # Remove common YouTube channel suffixes
     channel_suffixes = [
+        r'\s*-\s*Topic\s*$',       # YouTube auto-generated "Topic" channels
         r'\s*VEVO\s*$',
         r'\s*Music\s*$',
         r'\s*Official\s*$',

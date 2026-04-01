@@ -508,6 +508,9 @@ class YouTubeClient:
         # Fallback: use uploader/channel as artist
         if not artist:
             artist = entry.get('uploader', entry.get('channel', 'Unknown Artist'))
+            # Strip YouTube auto-generated "- Topic" suffix from channel names
+            if artist and re.search(r'\s*-\s*Topic\s*$', artist, re.IGNORECASE):
+                artist = re.sub(r'\s*-\s*Topic\s*$', '', artist, flags=re.IGNORECASE).strip()
 
         # Extract file size (estimate from format)
         file_size = 0
