@@ -2666,18 +2666,6 @@
                         <span class="watchlist-icon">👁️</span>
                         <span class="watchlist-text">Add to Watchlist</span>
                     </button>
-
-                    <button class="library-artist-enhance-btn hidden" id="library-artist-enhance-btn"
-                        onclick="openEnhanceQualityModal()">
-                        <span class="enhance-icon">⚡</span>
-                        <span class="enhance-text">Enhance Quality</span>
-                    </button>
-
-                    <button class="library-artist-radio-btn" id="library-artist-radio-btn"
-                        onclick="playArtistRadio()">
-                        <span class="radio-icon">📻</span>
-                        <span class="radio-text">Artist Radio</span>
-                    </button>
                 </div>
 
                 <!-- Artist Hero Section -->
@@ -2694,6 +2682,18 @@
                             <div class="artist-hero-identity">
                                 <h1 class="artist-name" id="artist-detail-name">Artist Name</h1>
                                 <div class="artist-hero-badges" id="artist-hero-badges"></div>
+                            </div>
+                            <div class="artist-hero-actions">
+                                <button class="library-artist-radio-btn" id="library-artist-radio-btn"
+                                    onclick="playArtistRadio()">
+                                    <span class="radio-icon">📻</span>
+                                    <span class="radio-text">Artist Radio</span>
+                                </button>
+                                <button class="library-artist-enhance-btn hidden" id="library-artist-enhance-btn"
+                                    onclick="openEnhanceQualityModal()">
+                                    <span class="enhance-icon">⚡</span>
+                                    <span class="enhance-text">Enhance Quality</span>
+                                </button>
                             </div>
                             <div class="artist-genres-container" id="artist-genres"></div>
                             <div class="artist-hero-bio" id="artist-hero-bio" style="display:none;"></div>

@@ -22073,7 +22073,15 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     flex-wrap: wrap;
     gap: 6px;
     align-items: center;
-    margin-bottom: 14px;
+    margin-bottom: 10px;
+}
+
+.artist-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
 }
 .artist-hero-badge {
     width: 36px;
