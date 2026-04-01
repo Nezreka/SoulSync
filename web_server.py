@@ -1674,6 +1674,53 @@ def _record_library_history_download(context):
     except Exception:
         pass  # Non-critical, never block download flow
 
+
+def _record_download_provenance(context):
+    """Record download source provenance for track lineage tracking. Non-blocking."""
+    try:
+        # Extract source info
+        search_result = context.get('original_search_result') or context.get('search_result') or {}
+        username = search_result.get('username', context.get('_download_username', ''))
+        filename = search_result.get('filename', '')
+
+        # Determine source service from username
+        service_map = {'youtube': 'youtube', 'tidal': 'tidal', 'qobuz': 'qobuz', 'hifi': 'hifi', 'deezer_dl': 'deezer'}
+        source_service = service_map.get(username, 'soulseek')
+
+        # Track metadata
+        ti = context.get('track_info') or context.get('search_result') or {}
+        artist_name = ''
+        artists = ti.get('artists', [])
+        if artists:
+            a = artists[0]
+            artist_name = a.get('name', str(a)) if isinstance(a, dict) else str(a)
+        if not artist_name:
+            artist_name = ti.get('artist', '')
+
+        album_raw = ti.get('album', '')
+        album_name = album_raw.get('name', '') if isinstance(album_raw, dict) else str(album_raw or '')
+        title = ti.get('name', ti.get('title', ''))
+
+        file_path = context.get('_final_processed_path', context.get('_final_path', ''))
+        quality = context.get('_audio_quality', '')
+        size = search_result.get('size', 0)
+
+        db = get_database()
+        db.record_track_download(
+            file_path=file_path,
+            source_service=source_service,
+            source_username=username,
+            source_filename=filename,
+            source_size=size or 0,
+            audio_quality=quality,
+            track_title=title,
+            track_artist=artist_name,
+            track_album=album_name,
+        )
+    except Exception:
+        pass  # Non-critical, never block download flow
+
+
 # --- Register Public REST API Blueprint (v1) ---
 try:
     from api import create_api_blueprint, limiter
@@ -12854,6 +12901,79 @@ def library_delete_track(track_id):
 
 
 # ==================================================================================
+# DOWNLOAD BLACKLIST API
+# ==================================================================================
+
+@app.route('/api/library/blacklist', methods=['GET'])
+def get_blacklist():
+    """Get all blacklisted download sources."""
+    try:
+        database = get_database()
+        entries = database.get_blacklist(limit=200)
+        return jsonify({"success": True, "entries": entries})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/blacklist', methods=['POST'])
+def add_to_blacklist():
+    """Add a download source to the blacklist."""
+    try:
+        data = request.get_json()
+        database = get_database()
+        result = database.add_to_blacklist(
+            track_title=data.get('track_title', ''),
+            track_artist=data.get('track_artist', ''),
+            blocked_filename=data.get('blocked_filename', ''),
+            blocked_username=data.get('blocked_username', ''),
+            reason=data.get('reason', 'user_rejected'),
+        )
+        return jsonify({"success": result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/blacklist/<int:blacklist_id>', methods=['DELETE'])
+def remove_from_blacklist(blacklist_id):
+    """Remove an entry from the blacklist."""
+    try:
+        database = get_database()
+        result = database.remove_from_blacklist(blacklist_id)
+        return jsonify({"success": result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ==================================================================================
+# TRACK SOURCE INFO & PROVENANCE
+# ==================================================================================
+
+@app.route('/api/library/track/<int:track_id>/source-info', methods=['GET'])
+def get_track_source_info(track_id):
+    """Get download provenance info for a library track."""
+    try:
+        database = get_database()
+        downloads = database.get_track_downloads(str(track_id))
+
+        if not downloads:
+            # Try matching by file path as fallback
+            conn = database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT file_path FROM tracks WHERE id = ?", (track_id,))
+            row = cursor.fetchone()
+            conn.close()
+            if row and row['file_path']:
+                dl = database.get_download_by_file_path(row['file_path'])
+                if dl:
+                    downloads = [dl]
+
+        return jsonify({"success": True, "downloads": downloads})
+    except Exception as e:
+        logger.error(f"Error getting track source info: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ==================================================================================
 # TRACK REDOWNLOAD — Search metadata, search download sources, start redownload
 # ==================================================================================
 
@@ -18544,6 +18664,7 @@ def _post_process_matched_download(context_key, context, file_path):
             context['_final_path'] = str(destination)
             _emit_track_downloaded(context)
             _record_library_history_download(context)
+            _record_download_provenance(context)
             return
         # --- END SIMPLE DOWNLOAD HANDLING ---
 
@@ -18634,6 +18755,7 @@ def _post_process_matched_download(context_key, context, file_path):
 
             _emit_track_downloaded(context)
             _record_library_history_download(context)
+            _record_download_provenance(context)
 
             # Mark as stream processed so the verification worker doesn't search
             # for the file by its original Soulseek name (which no longer exists after rename)
@@ -18984,6 +19106,7 @@ def _post_process_matched_download(context_key, context, file_path):
 
         _emit_track_downloaded(context)
         _record_library_history_download(context)
+        _record_download_provenance(context)
 
         # RETAG DATA CAPTURE: Record completed album/single downloads for retag tool
         try:
