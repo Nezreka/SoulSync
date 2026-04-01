@@ -47023,8 +47023,25 @@ def _emit_wishlist_count_loop():
 
 # --- Phase 3: Enrichment sidebar worker emitters ---
 
+def _has_active_downloads():
+    """Check if any download batches are currently active."""
+    try:
+        with tasks_lock:
+            for batch_data in download_batches.values():
+                if batch_data.get('phase') not in ('complete', 'error', 'cancelled', None):
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+# Track whether we auto-paused workers so we only resume ones we paused (not user-paused ones)
+_download_auto_paused = set()
+
+
 def _emit_enrichment_status_loop():
-    """Background thread that pushes all enrichment worker statuses every 2 seconds."""
+    """Background thread that pushes all enrichment worker statuses every 2 seconds.
+    Also auto-pauses rate-limited enrichment workers during active downloads."""
     workers = {
         'musicbrainz': lambda: mb_worker,
         'audiodb': lambda: audiodb_worker,
@@ -47040,8 +47057,35 @@ def _emit_enrichment_status_loop():
         'listening-stats': lambda: listening_stats_worker,
         'repair': lambda: repair_worker,
     }
+
+    # Workers to auto-pause during downloads (rate-limit sensitive services)
+    yield_workers = {
+        'spotify-enrichment': lambda: spotify_enrichment_worker,
+        'lastfm-enrichment': lambda: lastfm_worker,
+        'genius-enrichment': lambda: genius_worker,
+    }
+
     while True:
         socketio.sleep(2)
+
+        # Auto-pause/resume rate-limited workers during downloads
+        try:
+            downloading = _has_active_downloads()
+            for name, get_w in yield_workers.items():
+                w = get_w()
+                if w is None:
+                    continue
+                if downloading and not w.paused:
+                    w.paused = True
+                    _download_auto_paused.add(name)
+                    logger.debug(f"Auto-paused {name} during active downloads")
+                elif not downloading and name in _download_auto_paused:
+                    w.paused = False
+                    _download_auto_paused.discard(name)
+                    logger.debug(f"Auto-resumed {name} after downloads finished")
+        except Exception as e:
+            logger.debug(f"Error in download-yield check: {e}")
+
         for name, get_worker in workers.items():
             try:
                 worker = get_worker()
