@@ -42837,8 +42837,7 @@ async function showTrackSourceInfo(track, anchorEl) {
 async function showTrackRedownloadModal(track, album) {
     const overlay = document.createElement('div');
     overlay.id = 'redownload-overlay';
-    overlay.className = 'modal-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    overlay.className = 'redownload-overlay';
     overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
 
     const artistName = artistDetailPageState.enhancedData?.artist?.name || '';
@@ -42848,19 +42847,31 @@ async function showTrackRedownloadModal(track, album) {
     overlay.innerHTML = `
         <div class="redownload-modal">
             <div class="redownload-header">
-                <h3>Redownload Track</h3>
+                <div>
+                    <h3>Redownload Track</h3>
+                    <p class="redownload-header-sub">Find the correct version and download from your preferred source</p>
+                </div>
                 <button class="redownload-close" onclick="document.getElementById('redownload-overlay')?.remove()">&times;</button>
             </div>
-            <div class="redownload-current">
-                <div class="redownload-current-title">${_esc(track.title)}</div>
-                <div class="redownload-current-meta">${_esc(artistName)} · ${_esc(album?.title || '')}${fmt ? ` · ${fmt}` : ''}${track.bitrate ? ` · ${track.bitrate}kbps` : ''}</div>
+            <div class="redownload-current" id="redownload-current">
+                <div class="redownload-current-art" id="redownload-current-art">
+                    <div class="redownload-art-empty">🎵</div>
+                </div>
+                <div class="redownload-current-info">
+                    <div class="redownload-current-title">${_esc(track.title)}</div>
+                    <div class="redownload-current-meta">${_esc(artistName)} · ${_esc(album?.title || '')}</div>
+                </div>
+                <div class="redownload-current-badges">
+                    ${fmt ? `<span class="redownload-badge fmt">${fmt}</span>` : ''}
+                    ${track.bitrate ? `<span class="redownload-badge bitrate">${track.bitrate}k</span>` : ''}
+                </div>
             </div>
             <div class="redownload-steps">
-                <div class="redownload-step active" data-step="1">1. Metadata</div>
-                <div class="redownload-step-arrow">→</div>
-                <div class="redownload-step" data-step="2">2. Source</div>
-                <div class="redownload-step-arrow">→</div>
-                <div class="redownload-step" data-step="3">3. Download</div>
+                <div class="redownload-step active" data-step="1"><span class="redownload-step-num">1</span> Choose Metadata</div>
+                <div class="redownload-step-line"></div>
+                <div class="redownload-step" data-step="2"><span class="redownload-step-num">2</span> Choose Source</div>
+                <div class="redownload-step-line"></div>
+                <div class="redownload-step" data-step="3"><span class="redownload-step-num">3</span> Downloading</div>
             </div>
             <div class="redownload-body" id="redownload-body">
                 <div class="redownload-loading">
@@ -42882,6 +42893,13 @@ async function showTrackRedownloadModal(track, album) {
         const res = await fetch(`/api/library/track/${track.id}/redownload/search-metadata`, { method: 'POST' });
         const data = await res.json();
         if (!data.success) throw new Error(data.error);
+
+        // Set album art in header if available
+        const artEl = document.getElementById('redownload-current-art');
+        if (artEl && data.current_track?.thumb_url) {
+            artEl.innerHTML = `<img src="${data.current_track.thumb_url}" alt="">`;
+        }
+
         _renderRedownloadStep1(overlay, track, data);
     } catch (e) {
         document.getElementById('redownload-body').innerHTML = `<div class="redownload-error">Error: ${_esc(e.message)}</div>`;
@@ -42899,55 +42917,58 @@ function _renderRedownloadStep1(overlay, track, data) {
     }
 
     const bestSource = data.best_match?.source || sources[0];
-    let selectedMeta = null;
+    const sourceIcons = { spotify: '🟢', itunes: '🍎', deezer: '🟣', hydrabase: '🔷' };
+    const sourceLabels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', hydrabase: 'Hydrabase' };
 
-    // Build source tabs + results
-    const tabsHtml = sources.map(s => `<button class="redownload-tab${s === bestSource ? ' active' : ''}" data-source="${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</button>`).join('');
-
-    const resultsHtml = sources.map(source => {
+    // Build columns — one per source, side by side
+    const columnsHtml = sources.map(source => {
         const results = data.metadata_results[source] || [];
-        if (results.length === 0) return `<div class="redownload-source-panel" data-source="${source}" style="display:${source === bestSource ? '' : 'none'}"><div class="redownload-empty">No results from ${source}</div></div>`;
+        const icon = sourceIcons[source] || '📋';
+        const label = sourceLabels[source] || source;
 
-        const items = results.map((r, i) => {
-            const pct = Math.round((r.match_score || 0) * 100);
-            const cls = pct >= 90 ? 'high' : pct >= 70 ? 'medium' : 'low';
-            const dur = r.duration_ms ? `${Math.floor(r.duration_ms / 60000)}:${String(Math.floor((r.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '';
-            const checked = (source === bestSource && i === 0) ? 'checked' : '';
-            return `
-                <label class="redownload-result" data-source="${source}" data-index="${i}">
-                    <input type="radio" name="metadata-choice" value="${source}|${i}" ${checked}>
-                    <div class="redownload-result-art">${r.image_url ? `<img src="${r.image_url}" loading="lazy">` : '<div class="redownload-art-empty"></div>'}</div>
-                    <div class="redownload-result-info">
-                        <div class="redownload-result-title">${_esc(r.name)}${r.is_current_match ? ' <span class="redownload-current-badge">current</span>' : ''}</div>
-                        <div class="redownload-result-meta">${_esc(r.artist)} · ${_esc(r.album || '')}</div>
-                    </div>
-                    <div class="redownload-result-score ${cls}">${pct}%</div>
-                    ${dur ? `<div class="redownload-result-dur">${dur}</div>` : ''}
-                </label>`;
-        }).join('');
+        let itemsHtml;
+        if (results.length === 0) {
+            itemsHtml = `<div class="redownload-col-empty">No results</div>`;
+        } else {
+            itemsHtml = results.slice(0, 8).map((r, i) => {
+                const pct = Math.round((r.match_score || 0) * 100);
+                const cls = pct >= 90 ? 'high' : pct >= 70 ? 'medium' : 'low';
+                const dur = r.duration_ms ? `${Math.floor(r.duration_ms / 60000)}:${String(Math.floor((r.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '';
+                const checked = (source === bestSource && i === 0) ? 'checked' : '';
+                return `
+                    <label class="redownload-result" data-source="${source}" data-index="${i}">
+                        <input type="radio" name="metadata-choice" value="${source}|${i}" ${checked}>
+                        <div class="redownload-result-art">${r.image_url ? `<img src="${r.image_url}" loading="lazy">` : '<div class="redownload-art-empty"></div>'}</div>
+                        <div class="redownload-result-info">
+                            <div class="redownload-result-title">${_esc(r.name)}${r.is_current_match ? ' <span class="redownload-current-badge">current</span>' : ''}</div>
+                            <div class="redownload-result-meta">${_esc(r.artist)}${r.album ? ` · ${_esc(r.album)}` : ''}</div>
+                        </div>
+                        <div class="redownload-result-right">
+                            <div class="redownload-result-score ${cls}">${pct}%</div>
+                            ${dur ? `<div class="redownload-result-dur">${dur}</div>` : ''}
+                        </div>
+                    </label>`;
+            }).join('');
+        }
 
-        return `<div class="redownload-source-panel" data-source="${source}" style="display:${source === bestSource ? '' : 'none'}">${items}</div>`;
+        return `
+            <div class="redownload-source-col">
+                <div class="redownload-col-header">
+                    <span class="redownload-col-icon">${icon}</span>
+                    <span class="redownload-col-label">${label}</span>
+                    <span class="redownload-col-count">${results.length}</span>
+                </div>
+                <div class="redownload-col-results">${itemsHtml}</div>
+            </div>`;
     }).join('');
 
     body.innerHTML = `
-        <div class="redownload-tabs">${tabsHtml}</div>
-        <div class="redownload-results-wrap">${resultsHtml}</div>
+        <div class="redownload-columns">${columnsHtml}</div>
         <div class="redownload-actions">
             <button class="redownload-btn secondary" onclick="document.getElementById('redownload-overlay')?.remove()">Cancel</button>
-            <button class="redownload-btn primary" id="redownload-next-btn">Next: Search Sources →</button>
+            <button class="redownload-btn primary" id="redownload-next-btn">Search Download Sources →</button>
         </div>
     `;
-
-    // Tab switching
-    body.querySelectorAll('.redownload-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-            body.querySelectorAll('.redownload-tab').forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            body.querySelectorAll('.redownload-source-panel').forEach(p => p.style.display = 'none');
-            const panel = body.querySelector(`.redownload-source-panel[data-source="${tab.dataset.source}"]`);
-            if (panel) panel.style.display = '';
-        });
-    });
 
     // Next button
     document.getElementById('redownload-next-btn').addEventListener('click', async () => {
