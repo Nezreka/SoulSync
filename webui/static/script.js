@@ -43282,19 +43282,22 @@ if (false) {
 }
 
 function _pollRedownloadProgress(taskId, overlay) {
-    const bar = document.getElementById('redownload-progress-bar');
-    const status = document.getElementById('redownload-progress-status');
     let completed = false;
 
     const poll = setInterval(async () => {
         if (completed) return;
+
+        // Get fresh DOM references every tick (in case DOM was rebuilt)
+        const bar = document.getElementById('redownload-progress-bar');
+        const status = document.getElementById('redownload-progress-status');
+
         try {
             // Poll real download progress from /api/downloads/status
             const dlRes = await fetch('/api/downloads/status');
             const dlData = await dlRes.json();
             const transfers = dlData.transfers || [];
 
-            // Find our transfer — match by checking active non-completed transfers
+            // Find any active transfer
             let bestTransfer = null;
             for (const t of transfers) {
                 const st = (t.state || '').toLowerCase();
@@ -43313,22 +43316,17 @@ function _pollRedownloadProgress(taskId, overlay) {
 
                 if (bar) bar.style.width = `${Math.min(95, pct)}%`;
                 if (status) {
-                    if (total > 0) {
-                        status.textContent = `Downloading... ${Math.round(pct)}% (${transferredMB} / ${totalMB} MB)`;
-                    } else {
-                        status.textContent = `Downloading... ${Math.round(pct)}%`;
-                    }
+                    status.textContent = total > 0
+                        ? `Downloading... ${Math.round(pct)}% (${transferredMB} / ${totalMB} MB)`
+                        : `Downloading... ${Math.round(pct)}%`;
                 }
             } else {
-                // No active Soulseek transfer — might be a streaming source (Tidal/YouTube)
-                // or post-processing phase
-                if (bar && parseFloat(bar.style.width) < 50) {
-                    bar.style.width = '60%';
-                }
+                // No active slskd transfer — streaming source or post-processing
+                if (bar) bar.style.width = '80%';
                 if (status) status.textContent = 'Processing...';
             }
 
-            // Check for completion — look for completed transfers or batch gone
+            // Check for batch completion
             const procRes = await fetch('/api/active-processes');
             const procData = await procRes.json();
             const procs = procData.active_processes || [];
@@ -43354,6 +43352,7 @@ function _pollRedownloadProgress(taskId, overlay) {
     setTimeout(() => {
         if (!completed) {
             clearInterval(poll);
+            const status = document.getElementById('redownload-progress-status');
             if (status) status.textContent = 'Download may still be in progress. Check the dashboard.';
         }
     }, 300000);
